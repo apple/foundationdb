@@ -28,14 +28,14 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-const KeyRef fdbClientInfoTxnSampleRate = LiteralStringRef("config/fdb_client_info/client_txn_sample_rate");
-const KeyRef fdbClientInfoTxnSizeLimit = LiteralStringRef("config/fdb_client_info/client_txn_size_limit");
+const KeyRef fdbClientInfoTxnSampleRate = "config/fdb_client_info/client_txn_sample_rate"_sr;
+const KeyRef fdbClientInfoTxnSizeLimit = "config/fdb_client_info/client_txn_size_limit"_sr;
 
-const KeyRef transactionTagSampleRate = LiteralStringRef("config/transaction_tag_sample_rate");
-const KeyRef transactionTagSampleCost = LiteralStringRef("config/transaction_tag_sample_cost");
+const KeyRef transactionTagSampleRate = "config/transaction_tag_sample_rate"_sr;
+const KeyRef transactionTagSampleCost = "config/transaction_tag_sample_cost"_sr;
 
-const KeyRef samplingFrequency = LiteralStringRef("visibility/sampling/frequency");
-const KeyRef samplingWindow = LiteralStringRef("visibility/sampling/window");
+const KeyRef samplingFrequency = "visibility/sampling/frequency"_sr;
+const KeyRef samplingWindow = "visibility/sampling/window"_sr;
 
 GlobalConfig::GlobalConfig(DatabaseContext* cx) : cx(cx), lastUpdate(0) {}
 
@@ -62,7 +62,7 @@ void GlobalConfig::applyChanges(Transaction& tr,
 
 	// Write version key to trigger update in cluster controller.
 	tr.atomicOp(globalConfigVersionKey,
-	            LiteralStringRef("0123456789\x00\x00\x00\x00"), // versionstamp
+	            "0123456789\x00\x00\x00\x00"_sr, // versionstamp
 	            MutationRef::SetVersionstampedValue);
 }
 

@@ -24,6 +24,7 @@
 #include "flow/Platform.actor.h"
 #include "flow/Platform.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
@@ -63,7 +64,7 @@ public:
 		m_buffer = Standalone<VectorRef<uint8_t>>(old.slice(size, old.size()));
 
 		// Write the old buffer to the underlying file and update the write offset
-		Future<Void> r = holdWhile(old, m_file->write(old.begin(), size, m_writeOffset));
+		Future<Void> r = uncancellable(holdWhile(old, m_file->write(old.begin(), size, m_writeOffset)));
 		m_writeOffset += size;
 
 		return r;
@@ -103,16 +104,15 @@ ACTOR static Future<BackupContainerFileSystem::FilesAndSizesT> listFiles_impl(st
 	// Remove .lnk files from results, they are a side effect of a backup that was *read* during simulation.  See
 	// openFile() above for more info on why they are created.
 	if (g_network->isSimulated())
-		files.erase(
-		    std::remove_if(files.begin(),
-		                   files.end(),
-		                   [](std::string const& f) { return StringRef(f).endsWith(LiteralStringRef(".lnk")); }),
-		    files.end());
+		files.erase(std::remove_if(files.begin(),
+		                           files.end(),
+		                           [](std::string const& f) { return StringRef(f).endsWith(".lnk"_sr); }),
+		            files.end());
 
 	for (const auto& f : files) {
 		// Hide .part or .temp files.
 		StringRef s(f);
-		if (!s.endsWith(LiteralStringRef(".part")) && !s.endsWith(LiteralStringRef(".temp")))
+		if (!s.endsWith(".part"_sr) && !s.endsWith(".temp"_sr))
 			results.push_back({ f.substr(m_path.size() + 1), ::fileSize(f) });
 	}
 
@@ -227,10 +227,10 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 			throw file_not_found();
 		}
 
-		if (g_simulator.getCurrentProcess()->uid == UID()) {
+		if (g_simulator->getCurrentProcess()->uid == UID()) {
 			TraceEvent(SevError, "BackupContainerReadFileOnUnsetProcessID").log();
 		}
-		std::string uniquePath = fullPath + "." + g_simulator.getCurrentProcess()->uid.toString() + ".lnk";
+		std::string uniquePath = fullPath + "." + g_simulator->getCurrentProcess()->uid.toString() + ".lnk";
 		unlink(uniquePath.c_str());
 		ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 		fullPath = uniquePath;
@@ -278,6 +278,10 @@ Future<Reference<IBackupFile>> BackupContainerLocalDirectory::writeFile(const st
 	std::string temp = fullPath + "." + deterministicRandom()->randomUniqueID().toString() + ".temp";
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(temp, flags, 0644);
 	return map(f, [=](Reference<IAsyncFile> f) { return Reference<IBackupFile>(new BackupFile(path, f, fullPath)); });
+}
+
+Future<Void> BackupContainerLocalDirectory::writeEntireFile(const std::string& path, const std::string& contents) {
+	return writeEntireFileFallback(path, contents);
 }
 
 Future<Void> BackupContainerLocalDirectory::deleteFile(const std::string& path) {

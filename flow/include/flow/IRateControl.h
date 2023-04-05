@@ -53,7 +53,13 @@ public:
 		// Replenish budget based on time since last update
 		double ts = now();
 		// returnUnused happens to do exactly what we want here
-		returnUnused((ts - m_last_update) / m_seconds * m_limit);
+		auto unused = double(m_limit) * (ts - m_last_update) / m_seconds;
+		if (unused >= double(std::numeric_limits<int>::max())) {
+			// prevent int overflow
+			m_budget = m_limit;
+		} else {
+			returnUnused(int(unused));
+		}
 		m_last_update = ts;
 		m_budget -= n;
 		// If budget is still >= 0 then it's safe to use the allowance right now.

@@ -29,6 +29,7 @@
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
+#include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
@@ -167,6 +168,9 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
+
+	bool operator==(KeyBackedRangeResult const& other) const { return results == other.results && more == other.more; }
+	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
 };
 
 // Convenient read/write access to a single value of type T stored at key
@@ -306,8 +310,21 @@ public:
 	}
 
 	template <class Transaction>
+	void setVersionstamp(Transaction tr, T const& val, int offset) {
+		tr->atomicOp(
+		    key,
+		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
+		    MutationRef::SetVersionstampedValue);
+	}
+
+	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(key);
+	}
+
+	template <class Transaction>
+	Future<Void> watch(Transaction tr) {
+		return tr->watch(key);
 	}
 
 	Key key;
@@ -416,6 +433,30 @@ public:
 	template <class Transaction>
 	void clear(Transaction tr) {
 		tr->clear(subspace);
+	}
+
+	template <class Transaction>
+	void addReadConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addReadConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addReadConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addReadConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                         subspace.begin.withSuffix(KeyCodec::pack(end)));
+	}
+
+	template <class Transaction>
+	void addWriteConflictKey(Transaction tr, KeyType const& key) {
+		Key k = subspace.begin.withSuffix(KeyCodec::pack(key));
+		tr->addWriteConflictRange(singleKeyRange(k));
+	}
+
+	template <class Transaction>
+	void addWriteConflictRange(Transaction tr, KeyType const& begin, KeyType const& end) {
+		tr->addWriteConflictRange(subspace.begin.withSuffix(KeyCodec::pack(begin)),
+		                          subspace.begin.withSuffix(KeyCodec::pack(end)));
 	}
 
 	KeyRange subspace;
@@ -685,4 +726,14 @@ public:
 	}
 
 	KeyRange subspace;
+};
+
+// all fields are under prefix, the schema is like prefix/"packed key"/"packed key2"
+class KeyBackedStruct {
+public:
+	KeyBackedStruct(StringRef prefix) : prefix(prefix), rootSpace(prefix) {}
+
+protected:
+	Key prefix;
+	Subspace rootSpace;
 };

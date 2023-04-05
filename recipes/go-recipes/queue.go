@@ -30,6 +30,8 @@ import (
 	"github.com/apple/foundationdb/bindings/go/src/fdb/tuple"
 )
 
+const API_VERSION int = 720
+
 type EmptyQueueError struct{}
 
 func (q EmptyQueueError) Error() string {
@@ -108,7 +110,7 @@ func (q *Queue) FirstItem(trtr fdb.Transactor) (interface{}, error) {
 func main() {
 	fmt.Println("Queue Example Program")
 
-	fdb.MustAPIVersion(720)
+	fdb.MustAPIVersion(API_VERSION)
 
 	db := fdb.MustOpenDefault()
 

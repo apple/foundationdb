@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -31,10 +31,11 @@
 #include "fdbserver/workloads/ReadWriteWorkload.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "flow/TDMetric.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SkewedReadWriteWorkload : ReadWriteCommon {
+	static constexpr auto NAME = "SkewedReadWrite";
 	// server based hot traffic setting
 	int skewRound = 0; // skewDuration = ceil(testDuration / skewRound)
 	double hotServerFraction = 0, hotServerShardFraction = 1.0; // set > 0 to issue hot key based on shard map
@@ -49,7 +50,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	int hotServerCount = 0, currentHotRound = -1;
 
 	SkewedReadWriteWorkload(WorkloadContext const& wcx) : ReadWriteCommon(wcx) {
-		descriptionString = getOption(options, LiteralStringRef("description"), LiteralStringRef("SkewedReadWrite"));
+		descriptionString = getOption(options, "description"_sr, "SkewedReadWrite"_sr);
 		hotServerFraction = getOption(options, "hotServerFraction"_sr, 0.2);
 		hotServerShardFraction = getOption(options, "hotServerShardFraction"_sr, 1.0);
 		hotReadWriteServerOverlap = getOption(options, "hotReadWriteServerOverlap"_sr, 0.0);
@@ -59,7 +60,6 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		ASSERT((hotServerReadFrac >= hotServerFraction || hotServerWriteFrac >= hotServerFraction) && skewRound > 0);
 	}
 
-	std::string description() const override { return descriptionString.toString(); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	void debugPrintServerShards() const {
@@ -99,21 +99,26 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	}
 
 	ACTOR static Future<Void> updateServerShards(Database cx, SkewedReadWriteWorkload* self) {
-		state Future<RangeResult> serverList =
-		    runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
-			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-		    });
-		state RangeResult range =
-		    wait(runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<RangeResult> {
-			    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			    return tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
-		    }));
-		wait(success(serverList));
+		state RangeResult serverList;
+		state RangeResult range;
+		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+		loop {
+			// read in transaction to ensure two key ranges are transactionally consistent
+			try {
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				state Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+				wait(store(serverList, serverListF));
+				wait(store(range, rangeF));
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 		// decode server interfaces
 		self->serverInterfaces.clear();
-		for (int i = 0; i < serverList.get().size(); i++) {
-			auto ssi = decodeServerListValue(serverList.get()[i].value);
+		for (int i = 0; i < serverList.size(); i++) {
+			auto ssi = decodeServerListValue(serverList[i].value);
 			self->serverInterfaces.emplace(ssi.id(), ssi);
 		}
 		// clear self->serverShards
@@ -366,7 +371,7 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 	}
 };
 
-WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory("SkewedReadWrite");
+WorkloadFactory<SkewedReadWriteWorkload> SkewedReadWriteWorkloadFactory;
 
 TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
 	WorkloadContext wcx;
@@ -374,7 +379,7 @@ TEST_CASE("/KVWorkload/methods/ParseKeyForIndex") {
 	wcx.clientCount = 1;
 	wcx.sharedRandomNumber = 1;
 
-	auto wk = SkewedReadWriteWorkload(wcx);
+	auto wk = TestWorkloadImpl<SkewedReadWriteWorkload>(wcx);
 	for (int i = 0; i < 1000; ++i) {
 		auto idx = deterministicRandom()->randomInt64(0, wk.nodeCount);
 		Key k = wk.keyForIndex(idx);

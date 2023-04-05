@@ -50,6 +50,7 @@ The latest changes are detailed in :ref:`release-notes`. The documentation has t
    :hidden:
 
    local-dev
+   internal-dev-tools
    why-foundationdb
    technical-overview
    client-design

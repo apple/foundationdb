@@ -231,28 +231,28 @@ void testSnapshotCache() {
 	WriteMap writes(&arena);
 
 	Standalone<VectorRef<KeyValueRef>> keys;
-	keys.push_back_deep(keys.arena(), KeyValueRef(LiteralStringRef("d"), LiteralStringRef("doo")));
-	keys.push_back_deep(keys.arena(), KeyValueRef(LiteralStringRef("e"), LiteralStringRef("eoo")));
-	keys.push_back_deep(keys.arena(), KeyValueRef(LiteralStringRef("e\x00"), LiteralStringRef("zoo")));
-	keys.push_back_deep(keys.arena(), KeyValueRef(LiteralStringRef("f"), LiteralStringRef("foo")));
-	cache.insert(KeyRangeRef(LiteralStringRef("d"), LiteralStringRef("f\x00")), keys);
+	keys.push_back_deep(keys.arena(), KeyValueRef("d"_sr, "doo"_sr));
+	keys.push_back_deep(keys.arena(), KeyValueRef("e"_sr, "eoo"_sr));
+	keys.push_back_deep(keys.arena(), KeyValueRef("e\x00"_sr, "zoo"_sr));
+	keys.push_back_deep(keys.arena(), KeyValueRef("f"_sr, "foo"_sr));
+	cache.insert(KeyRangeRef("d"_sr, "f\x00"_sr), keys);
 
-	cache.insert(KeyRangeRef(LiteralStringRef("g"), LiteralStringRef("h")), Standalone<VectorRef<KeyValueRef>>());
+	cache.insert(KeyRangeRef("g"_sr, "h"_sr), Standalone<VectorRef<KeyValueRef>>());
 
 	Standalone<VectorRef<KeyValueRef>> keys2;
-	keys2.push_back_deep(keys2.arena(), KeyValueRef(LiteralStringRef("k"), LiteralStringRef("koo")));
-	keys2.push_back_deep(keys2.arena(), KeyValueRef(LiteralStringRef("l"), LiteralStringRef("loo")));
-	cache.insert(KeyRangeRef(LiteralStringRef("j"), LiteralStringRef("m")), keys2);
+	keys2.push_back_deep(keys2.arena(), KeyValueRef("k"_sr, "koo"_sr));
+	keys2.push_back_deep(keys2.arena(), KeyValueRef("l"_sr, "loo"_sr));
+	cache.insert(KeyRangeRef("j"_sr, "m"_sr), keys2);
 
-	writes.mutate(LiteralStringRef("c"), MutationRef::SetValue, LiteralStringRef("c--"), true);
-	writes.clear(KeyRangeRef(LiteralStringRef("c\x00"), LiteralStringRef("e")), true);
-	writes.mutate(LiteralStringRef("c\x00"), MutationRef::SetValue, LiteralStringRef("c00--"), true);
+	writes.mutate("c"_sr, MutationRef::SetValue, "c--"_sr, true);
+	writes.clear(KeyRangeRef("c\x00"_sr, "e"_sr), true);
+	writes.mutate("c\x00"_sr, MutationRef::SetValue, "c00--"_sr, true);
 	WriteMap::iterator it3(&writes);
-	writes.mutate(LiteralStringRef("d"), MutationRef::SetValue, LiteralStringRef("d--"), true);
-	writes.mutate(LiteralStringRef("e"), MutationRef::SetValue, LiteralStringRef("e++"), true);
-	writes.mutate(LiteralStringRef("i"), MutationRef::SetValue, LiteralStringRef("i--"), true);
+	writes.mutate("d"_sr, MutationRef::SetValue, "d--"_sr, true);
+	writes.mutate("e"_sr, MutationRef::SetValue, "e++"_sr, true);
+	writes.mutate("i"_sr, MutationRef::SetValue, "i--"_sr, true);
 
-	KeyRange searchKeys = KeyRangeRef(LiteralStringRef("a"), LiteralStringRef("z"));
+	KeyRange searchKeys = KeyRangeRef("a"_sr, "z"_sr);
 
 	RYWIterator it(&cache, &writes);
 	it.skip(searchKeys.begin);
@@ -425,7 +425,7 @@ TEST_CASE("/fdbclient/WriteMap/emptiness") {
 	Arena arena = Arena();
 	WriteMap writes = WriteMap(&arena);
 	ASSERT(writes.empty());
-	writes.mutate(LiteralStringRef("apple"), MutationRef::SetValue, LiteralStringRef("red"), true);
+	writes.mutate("apple"_sr, MutationRef::SetValue, "red"_sr, true);
 	ASSERT(!writes.empty());
 	return Void();
 }
@@ -457,11 +457,11 @@ TEST_CASE("/fdbclient/WriteMap/clear") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("apple"), MutationRef::SetValue, LiteralStringRef("red"), true);
+	writes.mutate("apple"_sr, MutationRef::SetValue, "red"_sr, true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
-	KeyRangeRef range = KeyRangeRef(LiteralStringRef("a"), LiteralStringRef("j"));
+	KeyRangeRef range = KeyRangeRef("a"_sr, "j"_sr);
 	writes.clear(range, true);
 	ASSERT(getWriteMapCount(&writes) == 3);
 
@@ -474,22 +474,19 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00"),
-	              MutationRef::SetVersionstampedKey,
-	              LiteralStringRef("1"),
-	              true);
+	writes.mutate("stamp:XXXXXXXX\x06\x00\x00\x00"_sr, MutationRef::SetVersionstampedKey, "1"_sr, true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
-	writes.mutate(LiteralStringRef("stamp:ZZZZZZZZZZ"), MutationRef::AddValue, LiteralStringRef("2"), true);
+	writes.mutate("stamp:ZZZZZZZZZZ"_sr, MutationRef::AddValue, "2"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 5);
 
 	WriteMap::iterator it(&writes);
 	it.skip(allKeys.begin);
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
+	ASSERT(it.beginKey().compare(""_sr) == 0);
+	ASSERT(it.endKey().compare("stamp:XXXXXXXX\x06\x00\x00\x00"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -498,8 +495,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
+	ASSERT(it.beginKey().compare("stamp:XXXXXXXX\x06\x00\x00\x00"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp:XXXXXXXX\x06\x00\x00\x00\x00"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -509,8 +506,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:XXXXXXXX\x06\x00\x00\x00\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
+	ASSERT(it.beginKey().compare("stamp:XXXXXXXX\x06\x00\x00\x00\x00"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp:ZZZZZZZZZZ"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -519,8 +516,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
+	ASSERT(it.beginKey().compare("stamp:ZZZZZZZZZZ"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp:ZZZZZZZZZZ\x00"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -530,8 +527,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedKey") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp:ZZZZZZZZZZ\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("\xff\xff")) == 0);
+	ASSERT(it.beginKey().compare("stamp:ZZZZZZZZZZ\x00"_sr) == 0);
+	ASSERT(it.endKey().compare("\xff\xff"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -550,22 +547,19 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("stamp"),
-	              MutationRef::SetVersionstampedValue,
-	              LiteralStringRef("XXXXXXXX\x00\x00\x00\x00\x00\x00"),
-	              true);
+	writes.mutate("stamp"_sr, MutationRef::SetVersionstampedValue, "XXXXXXXX\x00\x00\x00\x00\x00\x00"_sr, true);
 	ASSERT(!writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 3);
 
-	writes.mutate(LiteralStringRef("stamp123"), MutationRef::AddValue, LiteralStringRef("1"), true);
+	writes.mutate("stamp123"_sr, MutationRef::AddValue, "1"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 5);
 
 	WriteMap::iterator it(&writes);
 	it.skip(allKeys.begin);
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp")) == 0);
+	ASSERT(it.beginKey().compare(""_sr) == 0);
+	ASSERT(it.endKey().compare("stamp"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -574,8 +568,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp\x00")) == 0);
+	ASSERT(it.beginKey().compare("stamp"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp\x00"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -585,8 +579,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp123")) == 0);
+	ASSERT(it.beginKey().compare("stamp\x00"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp123"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -595,8 +589,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp123")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("stamp123\x00")) == 0);
+	ASSERT(it.beginKey().compare("stamp123"_sr) == 0);
+	ASSERT(it.endKey().compare("stamp123\x00"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(it.is_conflict_range());
 	ASSERT(it.is_operation());
@@ -606,8 +600,8 @@ TEST_CASE("/fdbclient/WriteMap/setVersionstampedValue") {
 	++it;
 
 	ASSERT(it.beginKey() < allKeys.end);
-	ASSERT(it.beginKey().compare(LiteralStringRef("stamp123\x00")) == 0);
-	ASSERT(it.endKey().compare(LiteralStringRef("\xff\xff")) == 0);
+	ASSERT(it.beginKey().compare("stamp123\x00"_sr) == 0);
+	ASSERT(it.endKey().compare("\xff\xff"_sr) == 0);
 	ASSERT(!it.is_cleared_range());
 	ASSERT(!it.is_conflict_range());
 	ASSERT(!it.is_operation());
@@ -626,10 +620,10 @@ TEST_CASE("/fdbclient/WriteMap/addValue") {
 	ASSERT(writes.empty());
 	ASSERT(getWriteMapCount(&writes) == 1);
 
-	writes.mutate(LiteralStringRef("apple123"), MutationRef::SetValue, LiteralStringRef("17"), true);
+	writes.mutate("apple123"_sr, MutationRef::SetValue, "17"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 3);
 
-	writes.mutate(LiteralStringRef("apple123"), MutationRef::AddValue, LiteralStringRef("1"), true);
+	writes.mutate("apple123"_sr, MutationRef::AddValue, "1"_sr, true);
 	ASSERT(getWriteMapCount(&writes) == 3);
 
 	return Void();

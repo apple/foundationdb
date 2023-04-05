@@ -4,7 +4,9 @@ set(FORCE_ALL_COMPONENTS OFF CACHE BOOL "Fails cmake if not all dependencies are
 # jemalloc
 ################################################################################
 
-include(Jemalloc)
+if(USE_JEMALLOC)
+  find_package(jemalloc 5.3.0 REQUIRED)
+endif()
 
 ################################################################################
 # Valgrind
@@ -18,39 +20,16 @@ endif()
 # SSL
 ################################################################################
 
-include(CheckSymbolExists)
-
-set(USE_WOLFSSL OFF CACHE BOOL "Build against WolfSSL instead of OpenSSL")
-set(USE_OPENSSL ON CACHE BOOL "Build against OpenSSL")
-if(USE_WOLFSSL)
-  set(WOLFSSL_USE_STATIC_LIBS TRUE)
-  find_package(WolfSSL)
-  if(WOLFSSL_FOUND)
-    set(CMAKE_REQUIRED_INCLUDES ${WOLFSSL_INCLUDE_DIR})
-    add_compile_options(-DHAVE_OPENSSL)
-    add_compile_options(-DHAVE_WOLFSSL)
-  else()
-    message(STATUS "WolfSSL was not found - Will compile without TLS Support")
-    message(STATUS "You can set WOLFSSL_ROOT_DIR to help cmake find it")
-    message(FATAL_ERROR "Unable to find WolfSSL")
-  endif()
-elseif(USE_OPENSSL)
-  set(OPENSSL_USE_STATIC_LIBS TRUE)
-  if(WIN32)
-    set(OPENSSL_MSVC_STATIC_RT ON)
-  endif()
-  find_package(OpenSSL)
-  if(OPENSSL_FOUND)
-    set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
-    add_compile_options(-DHAVE_OPENSSL)
-  else()
-    message(STATUS "OpenSSL was not found - Will compile without TLS Support")
-    message(STATUS "You can set OPENSSL_ROOT_DIR to help cmake find it")
-    message(FATAL_ERROR "Unable to find OpenSSL")
-  endif()
-else()
-  message(FATAL_ERROR "Must set USE_WOLFSSL or USE_OPENSSL")
+set(CMAKE_REQUIRED_INCLUDES ${OPENSSL_INCLUDE_DIR})
+# Statically link OpenSSL to FDB, see
+#    https://cmake.org/cmake/help/v3.24/module/FindOpenSSL.html
+# Without the flags, OpenSSL is dynamically linked.
+set(OPENSSL_USE_STATIC_LIBS TRUE)
+if (WIN32)
+  set(OPENSSL_MSVC_STATIC_RT ON)
 endif()
+find_package(OpenSSL REQUIRED)
+add_compile_options(-DHAVE_OPENSSL)
 
 ################################################################################
 # Python Bindings
@@ -137,7 +116,7 @@ endif()
 if(NOT BUILD_GO_BINDING OR NOT BUILD_C_BINDING)
   set(WITH_GO_BINDING OFF)
 else()
-  find_program(GO_EXECUTABLE go)
+  find_program(GO_EXECUTABLE go HINTS /usr/local/go/bin/)
   # building the go binaries is currently not supported on Windows
   if(GO_EXECUTABLE AND NOT WIN32 AND WITH_C_BINDING)
     set(WITH_GO_BINDING ON)
@@ -175,6 +154,9 @@ endif()
 
 set(SSD_ROCKSDB_EXPERIMENTAL ON CACHE BOOL "Build with experimental RocksDB support")
 set(PORTABLE_ROCKSDB ON CACHE BOOL "Compile RocksDB in portable mode") # Set this to OFF to compile RocksDB with `-march=native`
+set(ROCKSDB_SSE42 OFF CACHE BOOL "Compile RocksDB with SSE42 enabled")
+set(ROCKSDB_AVX ${USE_AVX} CACHE BOOL "Compile RocksDB with AVX enabled")
+set(ROCKSDB_AVX2 OFF CACHE BOOL "Compile RocksDB with AVX2 enabled")
 set(WITH_LIBURING OFF CACHE BOOL "Build with liburing enabled") # Set this to ON to include liburing
 # RocksDB is currently enabled by default for GCC but does not build with the latest
 # Clang.

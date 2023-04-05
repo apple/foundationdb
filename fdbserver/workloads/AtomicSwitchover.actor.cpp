@@ -27,25 +27,22 @@
 
 // A workload which test the correctness of backup and restore process
 struct AtomicSwitchoverWorkload : TestWorkload {
+	static constexpr auto NAME = "AtomicSwitchover";
 	double switch1delay, switch2delay, stopDelay;
 	Standalone<VectorRef<KeyRangeRef>> backupRanges;
 	Database extraDB;
 
 	AtomicSwitchoverWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 
-		switch1delay = getOption(options, LiteralStringRef("switch1delay"), 50.0);
-		switch2delay = getOption(options, LiteralStringRef("switch2delay"), 50.0);
-		stopDelay = getOption(options, LiteralStringRef("stopDelay"), 50.0);
+		switch1delay = getOption(options, "switch1delay"_sr, 50.0);
+		switch2delay = getOption(options, "switch2delay"_sr, 50.0);
+		stopDelay = getOption(options, "stopDelay"_sr, 50.0);
 
-		backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
+		addDefaultBackupRanges(backupRanges);
 
-		ASSERT(g_simulator.extraDatabases.size() == 1);
-		auto extraFile =
-		    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-		extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+		ASSERT(g_simulator->extraDatabases.size() == 1);
+		extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 	}
-
-	std::string description() const override { return "AtomicSwitchover"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId != 0)
@@ -193,12 +190,12 @@ struct AtomicSwitchoverWorkload : TestWorkload {
 		TraceEvent("AS_Done").log();
 
 		// SOMEDAY: Remove after backup agents can exist quiescently
-		if (g_simulator.drAgents == ISimulator::BackupAgentType::BackupToDB) {
-			g_simulator.drAgents = ISimulator::BackupAgentType::NoBackupAgents;
+		if (g_simulator->drAgents == ISimulator::BackupAgentType::BackupToDB) {
+			g_simulator->drAgents = ISimulator::BackupAgentType::NoBackupAgents;
 		}
 
 		return Void();
 	}
 };
 
-WorkloadFactory<AtomicSwitchoverWorkload> AtomicSwitchoverWorkloadFactory("AtomicSwitchover");
+WorkloadFactory<AtomicSwitchoverWorkload> AtomicSwitchoverWorkloadFactory;

@@ -148,6 +148,7 @@ inline static T& makeDependent(T& value) {
 	return value;
 }
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -249,6 +250,16 @@ double getProcessorTimeThread();
 
 double getProcessorTimeProcess();
 
+#ifdef __linux__
+namespace linux_os {
+
+// Collects the /sys/fs/cgroup/cpu,cpuacct/cpu.stat information and returns the content
+// For more information about cpu,cpuacct, check manpages for cgroup
+std::map<std::string, int64_t> reportCGroupCpuStat();
+
+} // namespace linux_os
+#endif // __linux__
+
 uint64_t getMemoryUsage();
 
 uint64_t getResidentMemoryUsage();
@@ -328,6 +339,7 @@ void renameFile(std::string const& fromPath, std::string const& toPath);
 void atomicReplace(std::string const& path, std::string const& content, bool textmode = true);
 
 // Read a file into memory
+// This requires the file to be seekable
 std::string readFileBytes(std::string const& filename, int maxSize);
 
 // Read a file into memory supplied by the caller
@@ -678,7 +690,7 @@ inline static void flushOutputStreams() {
 #error Missing symbol export
 #endif
 
-#define crashAndDie() (*(volatile int*)0 = 0)
+#define crashAndDie() std::abort()
 
 #ifdef _WIN32
 #define strcasecmp stricmp
@@ -779,12 +791,12 @@ inline static int clz(uint32_t value) {
 #define clz __builtin_clz
 #endif
 
-// These return thread local counts
-int64_t getNumProfilesDeferred();
+// These return 0 unless run on the network thread
+int64_t getNumProfilesDisabled();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 
-#else
+#else // __cplusplus
 #define EXTERNC
 #endif // __cplusplus
 
@@ -815,6 +827,7 @@ void registerCrashHandlerCallback(void (*f)());
 void registerCrashHandler();
 
 void setupRunLoopProfiler();
+void stopRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()

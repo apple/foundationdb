@@ -45,8 +45,9 @@
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/IKnobCollection.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"
+#include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_writer_template.h"
 
 #include "flow/Platform.h"
@@ -131,11 +132,13 @@ enum {
 	OPT_DELETE_DATA,
 	OPT_MIN_CLEANUP_SECONDS,
 	OPT_USE_PARTITIONED_LOG,
+	OPT_ENCRYPT_FILES,
 
 	// Backup and Restore constants
 	OPT_PROXY,
 	OPT_TAGNAME,
 	OPT_BACKUPKEYS,
+	OPT_BACKUPKEYS_FILE,
 	OPT_WAITFORDONE,
 	OPT_BACKUPKEYS_FILTER,
 	OPT_INCREMENTALONLY,
@@ -148,6 +151,7 @@ enum {
 	// Restore constants
 	OPT_RESTORECONTAINER,
 	OPT_RESTORE_VERSION,
+	OPT_RESTORE_SNAPSHOT_VERSION,
 	OPT_RESTORE_TIMESTAMP,
 	OPT_PREFIX_ADD,
 	OPT_PREFIX_REMOVE,
@@ -155,6 +159,11 @@ enum {
 	OPT_RESTORE_CLUSTERFILE_ORIG,
 	OPT_RESTORE_BEGIN_VERSION,
 	OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY,
+	// The two restore options below allow callers of fdbrestore to divide a normal restore into one which restores just
+	// the system keyspace and another that restores just the user key space. This is unlike the backup command where
+	// all keys (both system and user) will be backed up together
+	OPT_RESTORE_USER_DATA,
+	OPT_RESTORE_SYSTEM_DATA,
 
 	// Shared constants
 	OPT_CLUSTERFILE,
@@ -250,6 +259,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_DRYRUN, "-n", SO_NONE },
 	{ OPT_DRYRUN, "--dryrun", SO_NONE },
@@ -271,6 +281,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_BLOB_CREDENTIALS, "--blob-credentials", SO_REQ_SEP },
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -656,6 +667,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-qrv", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "--query-restore-version", SO_REQ_SEP },
+	{ OPT_RESTORE_SNAPSHOT_VERSION, "--query-restore-snapshot-version", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "-k", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS_FILTER, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -696,9 +708,12 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
 	{ OPT_WAITFORDONE, "--waitfordone", SO_NONE },
+	{ OPT_RESTORE_USER_DATA, "--user-data", SO_NONE },
+	{ OPT_RESTORE_SYSTEM_DATA, "--system-metadata", SO_NONE },
 	{ OPT_RESTORE_VERSION, "--version", SO_REQ_SEP },
 	{ OPT_RESTORE_VERSION, "-v", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -769,6 +784,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
 	{ OPT_TAGNAME, "--tagname", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "-k", SO_REQ_SEP },
+	{ OPT_BACKUPKEYS_FILE, "--keys-file", SO_REQ_SEP },
 	{ OPT_BACKUPKEYS, "--keys", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
@@ -908,12 +924,12 @@ CSimpleOpt::SOption g_rgDBPauseOptions[] = {
 	SO_END_OF_OPTIONS
 };
 
-const KeyRef exeAgent = LiteralStringRef("backup_agent");
-const KeyRef exeBackup = LiteralStringRef("fdbbackup");
-const KeyRef exeRestore = LiteralStringRef("fdbrestore");
-const KeyRef exeFastRestoreTool = LiteralStringRef("fastrestore_tool"); // must be lower case
-const KeyRef exeDatabaseAgent = LiteralStringRef("dr_agent");
-const KeyRef exeDatabaseBackup = LiteralStringRef("fdbdr");
+const KeyRef exeAgent = "backup_agent"_sr;
+const KeyRef exeBackup = "fdbbackup"_sr;
+const KeyRef exeRestore = "fdbrestore"_sr;
+const KeyRef exeFastRestoreTool = "fastrestore_tool"_sr; // must be lower case
+const KeyRef exeDatabaseAgent = "dr_agent"_sr;
+const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
 
@@ -1047,9 +1063,13 @@ static void printBackupUsage(bool devhelp) {
 	       "containing no data at or after a\n"
 	       "                 version approximately NUM_DAYS days worth of versions prior to the latest log version in "
 	       "the backup.\n");
+	printf("  --query-restore-snapshot-version VERSION\n"
+	       "                 For query operations, set the snapshot version, inclusive, used to restore a backup.\n"
+	       "                 Set -1 to use the latest valid snapshot,\n"
+	       "                 Set -3 to use the oldest valid snapshot.\n");
 	printf("  -qrv --query-restore-version VERSION\n"
 	       "                 For query operations, set target version for restoring a backup. Set -1 for maximum\n"
-	       "                 restorable version (default) and -2 for minimum restorable version.\n");
+	       "                 restorable version (default) and -3 for minimum restorable version.\n");
 	printf(
 	    "  --query-restore-timestamp DATETIME\n"
 	    "                 For query operations, instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -1084,6 +1104,8 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup or to filter the backup in query operations.\n"
 	       "                 If not specified, the entire database will be backed up or no filter will be applied.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --partitioned-log-experimental  Starts with new type of backup system using partitioned logs.\n");
 	printf("  -n, --dryrun   For backup start or restore start, performs a trial run with no actual changes made.\n");
 	printf("  --log          Enables trace file logging for the CLI session.\n"
@@ -1107,6 +1129,11 @@ static void printBackupUsage(bool devhelp) {
 	       "and ignore the range files.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for encrypting backup files.\n");
+	printf("  --encrypt-files 0/1"
+	       "                 If passed, this argument will allow the user to override the database encryption state to "
+	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
+	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
+	       "Generally, these two options should not be used together.\n");
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -1155,6 +1182,8 @@ static void printRestoreUsage(bool devhelp) {
 	printf("  -w, --waitfordone\n");
 	printf("                 Wait for the restore to complete before exiting.  Prints progress updates.\n");
 	printf("  -k KEYS        List of key ranges from the backup to restore.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --remove-prefix PREFIX\n");
 	printf("                 Prefix to remove from the restored keys.\n");
 	printf("  --add-prefix PREFIX\n");
@@ -1190,6 +1219,13 @@ static void printRestoreUsage(bool devhelp) {
 	printf("                 The cluster file for the original database from which the backup was created.  The "
 	       "original database\n");
 	printf("                 is only needed to convert a --timestamp argument to a database version.\n");
+	printf("  --user-data\n"
+	       "                  Restore only the user keyspace. This option should NOT be used alongside "
+	       "--system-metadata (below) and CANNOT be used alongside other specified key ranges.\n");
+	printf(
+	    "  --system-metadata\n"
+	    "                 Restore only the relevant system keyspace. This option "
+	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
 #ifdef _WIN32
@@ -1274,6 +1310,8 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("  -e ERRORLIMIT  The maximum number of errors printed by status (default is 10).\n");
 	printf("  -k KEYS        List of key ranges to backup.\n"
 	       "                 If not specified, the entire database will be backed up.\n");
+	printf("  --keys-file FILE\n"
+	       "                 Same as -k option, except keys are specified in the input file.\n");
 	printf("  --cleanup      Abort will attempt to stop mutation logging on the source cluster.\n");
 	printf("  --dstonly      Abort will not make any changes on the source cluster.\n");
 	printf(TLS_HELP);
@@ -1354,7 +1392,7 @@ ProgramExe getProgramType(std::string programExe) {
 	}
 #endif
 	// For debugging convenience, remove .debug suffix if present.
-	if (StringRef(programExe).endsWith(LiteralStringRef(".debug")))
+	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
 
 	// Check if backup agent
@@ -1474,6 +1512,7 @@ DBType getDBType(std::string dbType) {
 }
 
 ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr,
+                                         IPAddress localIP,
                                          std::string name,
                                          std::string id,
                                          ProgramExe exe,
@@ -1509,6 +1548,9 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 	o.create("main_thread_cpu_seconds") = getProcessorTimeThread();
 	o.create("process_cpu_seconds") = getProcessorTimeProcess();
 	o.create("configured_workers") = CLIENT_KNOBS->BACKUP_TASKS_PER_AGENT;
+	o.create("processID") = ::getpid();
+	o.create("locality") = tr->getDatabase()->clientLocality.toJSON<json_spirit::mObject>();
+	o.create("networkAddress") = localIP.toString();
 
 	if (exe == ProgramExe::AGENT) {
 		static S3BlobStoreEndpoint::Stats last_stats;
@@ -1754,6 +1796,21 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(statusUpdateDest));
 	state Future<Void> pollRateUpdater;
 
+	// In order to report a useful networkAddress to the cluster's layer status JSON object, determine which local
+	// network interface IP will be used to talk to the cluster.  This is a blocking call, so it is only done once,
+	// and in a retry loop because if we can't connect to the cluster we can't do any work anyway.
+	state IPAddress localIP;
+
+	loop {
+		try {
+			localIP = statusUpdateDest->getConnectionRecord()->getConnectionString().determineLocalSourceIP();
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "AgentCouldNotDetermineLocalIP").error(e);
+			wait(delay(1.0));
+		}
+	}
+
 	// Register the existence of this layer in the meta key space
 	loop {
 		try {
@@ -1776,7 +1833,7 @@ ACTOR Future<Void> statusUpdateActor(Database statusUpdateDest,
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 					state Future<std::string> futureStatusDoc =
-					    getLayerStatus(tr, name, id, exe, taskDest, Snapshot::True);
+					    getLayerStatus(tr, localIP, name, id, exe, taskDest, Snapshot::True);
 					wait(cleanupStatus(tr, rootKey, name, id));
 					std::string statusdoc = wait(futureStatusDoc);
 					tr->set(instanceKey, statusdoc);
@@ -1859,11 +1916,7 @@ ACTOR Future<Void> submitDBBackup(Database src,
                                   std::string tagName) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.submitBackup(
 		    dest, KeyRef(tagName), backupRanges, StopWhenDone::False, StringRef(), StringRef(), LockDB::True));
@@ -1909,6 +1962,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 int initialSnapshotIntervalSeconds,
                                 int snapshotIntervalSeconds,
                                 Standalone<VectorRef<KeyRangeRef>> backupRanges,
+                                bool encryptionEnabled,
                                 std::string tagName,
                                 bool dryRun,
                                 WaitForComplete waitForCompletion,
@@ -1917,11 +1971,7 @@ ACTOR Future<Void> submitBackup(Database db,
                                 IncrementalBackupOnly incrementalBackupOnly) {
 	try {
 		state FileBackupAgent backupAgent;
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		if (dryRun) {
 			state KeyBackedTag tag = makeBackupTag(tagName);
@@ -1968,6 +2018,7 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              snapshotIntervalSeconds,
 			                              tagName,
 			                              backupRanges,
+			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
 			                              incrementalBackupOnly));
@@ -2021,11 +2072,7 @@ ACTOR Future<Void> switchDBBackup(Database src,
                                   ForceAction forceAction) {
 	try {
 		state DatabaseBackupAgent backupAgent(src);
-
-		// Backup everything, if no ranges were specified
-		if (backupRanges.size() == 0) {
-			backupRanges.push_back_deep(backupRanges.arena(), normalKeys);
-		}
+		ASSERT(!backupRanges.empty());
 
 		wait(backupAgent.atomicSwitchover(dest, KeyRef(tagName), backupRanges, StringRef(), StringRef(), forceAction));
 		printf("The DR on tag `%s' was successfully switched.\n", printable(StringRef(tagName)).c_str());
@@ -2292,9 +2339,7 @@ ACTOR Future<Void> runRestore(Database db,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
                               Optional<std::string> encryptionKeyFile) {
-	if (ranges.empty()) {
-		ranges.push_back_deep(ranges.arena(), normalKeys);
-	}
+	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
 		fprintf(stderr, "Restore target version and target timestamp cannot both be specified\n");
@@ -2365,6 +2410,7 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   KeyRef(addPrefix),
 			                                                   KeyRef(removePrefix),
 			                                                   LockDB::True,
+			                                                   UnlockDB::True,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
@@ -2452,8 +2498,8 @@ ACTOR Future<Void> runFastRestoreTool(Database db,
 			                                       dbVersion,
 			                                       LockDB::True,
 			                                       randomUID,
-			                                       LiteralStringRef(""),
-			                                       LiteralStringRef("")));
+			                                       ""_sr,
+			                                       ""_sr));
 			// TODO: Support addPrefix and removePrefix
 			if (waitForDone) {
 				// Wait for parallel restore to finish and unlock DB after that
@@ -2587,7 +2633,9 @@ ACTOR Future<Void> expireBackupData(const char* name,
 						lastProgress = p;
 					}
 				}
-				when(wait(expire)) { break; }
+				when(wait(expire)) {
+					break;
+				}
 			}
 		}
 
@@ -2630,7 +2678,9 @@ ACTOR Future<Void> deleteBackupContainer(const char* name,
 
 		loop {
 			choose {
-				when(wait(done)) { break; }
+				when(wait(done)) {
+					break;
+				}
 				when(wait(delay(5))) {
 					if (numDeleted != lastUpdate) {
 						printf("\r%d...", numDeleted);
@@ -2680,6 +2730,24 @@ static void reportBackupQueryError(UID operationId, JsonBuilderObject& result, s
 	TraceEvent("BackupQueryFailure").detail("OperationId", operationId).detail("Reason", errorMessage);
 }
 
+std::pair<Version, Version> getMaxMinRestorableVersions(const BackupDescription& desc, bool mayOnlyApplyMutationLog) {
+	Version maxRestorableVersion = invalidVersion;
+	Version minRestorableVersion = invalidVersion;
+	if (desc.maxRestorableVersion.present()) {
+		maxRestorableVersion = desc.maxRestorableVersion.get();
+	} else if (mayOnlyApplyMutationLog && desc.contiguousLogEnd.present()) {
+		maxRestorableVersion = desc.contiguousLogEnd.get();
+	}
+
+	if (desc.minRestorableVersion.present()) {
+		minRestorableVersion = desc.minRestorableVersion.get();
+	} else if (mayOnlyApplyMutationLog && desc.minLogBegin.present()) {
+		minRestorableVersion = desc.minLogBegin.get();
+	}
+
+	return std::make_pair(maxRestorableVersion, minRestorableVersion);
+}
+
 // If restoreVersion is invalidVersion or latestVersion, use the maximum or minimum restorable version respectively for
 // selected key ranges. If restoreTimestamp is specified, any specified restoreVersion will be overriden to the version
 // resolved to that timestamp.
@@ -2688,9 +2756,11 @@ ACTOR Future<Void> queryBackup(const char* name,
                                Optional<std::string> proxy,
                                Standalone<VectorRef<KeyRangeRef>> keyRangesFilter,
                                Version restoreVersion,
+                               Version snapshotVersion,
                                std::string originalClusterFile,
                                std::string restoreTimestamp,
-                               Verbose verbose) {
+                               Verbose verbose,
+                               Optional<Database> cx) {
 	state UID operationId = deterministicRandom()->randomUniqueID();
 	state JsonBuilderObject result;
 	state std::string errorMessage;
@@ -2702,6 +2772,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 	    .detail("DestinationContainer", destinationContainer)
 	    .detail("KeyRangesFilter", printable(keyRangesFilter))
 	    .detail("SpecifiedRestoreVersion", restoreVersion)
+	    .detail("SpecifiedSnapshotVersion", snapshotVersion)
 	    .detail("RestoreTimestamp", restoreTimestamp)
 	    .detail("BackupClusterFile", originalClusterFile);
 
@@ -2731,36 +2802,93 @@ ACTOR Future<Void> queryBackup(const char* name,
 		restoreVersion = v;
 	}
 
+	state int64_t totalRangeFilesSize = 0;
+	state int64_t totalLogFilesSize = 0;
+	state JsonBuilderArray rangeFilesJson;
+	state JsonBuilderArray logFilesJson;
 	try {
 		state Reference<IBackupContainer> bc = openBackupContainer(name, destinationContainer, proxy, {});
+		BackupDescription desc = wait(bc->describeBackup());
+		// Use continuous log end version for the maximum restorable version for the key ranges when a restorable
+		// version doesn't exist.
+		auto [maxRestorableVersion, minRestorableVersion] = getMaxMinRestorableVersions(desc, !keyRangesFilter.empty());
 		if (restoreVersion == invalidVersion) {
-			BackupDescription desc = wait(bc->describeBackup());
-			if (desc.maxRestorableVersion.present()) {
-				restoreVersion = desc.maxRestorableVersion.get();
-				// Use continuous log end version for the maximum restorable version for the key ranges.
-			} else if (keyRangesFilter.size() && desc.contiguousLogEnd.present()) {
-				restoreVersion = desc.contiguousLogEnd.get();
-			} else {
-				reportBackupQueryError(
-				    operationId,
-				    result,
-				    errorMessage = format("the backup for the specified key ranges is not restorable to any version"));
-			}
+			restoreVersion = maxRestorableVersion;
 		}
-
-		if (restoreVersion < 0 && restoreVersion != latestVersion) {
+		if (restoreVersion == earliestVersion) {
+			restoreVersion = minRestorableVersion;
+		}
+		if (snapshotVersion == earliestVersion) {
+			snapshotVersion = minRestorableVersion;
+		}
+		TraceEvent("BackupQueryResolveRestoreVersion")
+		    .detail("RestoreVersion", restoreVersion)
+		    .detail("SnapshotVersion", snapshotVersion);
+		if (restoreVersion < 0) {
 			reportBackupQueryError(operationId,
 			                       result,
 			                       errorMessage =
 			                           format("the specified restorable version %lld is not valid", restoreVersion));
 			return Void();
 		}
-		Optional<RestorableFileSet> fileSet = wait(bc->getRestoreSet(restoreVersion, keyRangesFilter));
+
+		state Optional<RestorableFileSet> fileSet;
+		if (snapshotVersion != invalidVersion) {
+			// When a snapshot version is specified, we will first get a restore set using the latest snapshot file to
+			// restore to the snapshot version. After snapshot version, we will only use mutation logs to restore.
+			wait(store(fileSet, bc->getRestoreSet(snapshotVersion, keyRangesFilter)));
+			if (fileSet.present()) {
+				result["snapshot_version"] = fileSet.get().targetVersion;
+				for (const auto& rangeFile : fileSet.get().ranges) {
+					JsonBuilderObject object;
+					object["file_name"] = rangeFile.fileName;
+					object["file_size"] = rangeFile.fileSize;
+					object["version"] = rangeFile.version;
+					object["key_range"] = fileSet.get().keyRanges.count(rangeFile.fileName) == 0
+					                          ? "none"
+					                          : fileSet.get().keyRanges.at(rangeFile.fileName).toString();
+					rangeFilesJson.push_back(object);
+					totalRangeFilesSize += rangeFile.fileSize;
+				}
+				for (const auto& log : fileSet.get().logs) {
+					JsonBuilderObject object;
+					object["file_name"] = log.fileName;
+					object["file_size"] = log.fileSize;
+					object["begin_version"] = log.beginVersion;
+					object["end_version"] = log.endVersion;
+					logFilesJson.push_back(object);
+					totalLogFilesSize += log.fileSize;
+				}
+
+				snapshotVersion = fileSet.get().targetVersion;
+
+				TraceEvent("BackupQueryReceivedRestorableFilesSetFromSnapshot")
+				    .detail("SnapshotVersion", snapshotVersion)
+				    .detail("DestinationContainer", destinationContainer)
+				    .detail("KeyRangesFilter", printable(keyRangesFilter))
+				    .detail("ActualRestoreVersion", fileSet.get().targetVersion)
+				    .detail("NumRangeFiles", fileSet.get().ranges.size())
+				    .detail("NumLogFiles", fileSet.get().logs.size())
+				    .detail("RangeFilesBytes", totalRangeFilesSize)
+				    .detail("LogFilesBytes", totalLogFilesSize);
+			} else {
+				reportBackupQueryError(
+				    operationId,
+				    result,
+				    format("no restorable files set found for specified key ranges from snapshotVersion %lld",
+				           snapshotVersion));
+				return Void();
+			}
+
+			// We only need to know all the mutation logs from `snapshotVersion` to `restoreVersion`.
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter, /*logOnly=*/true, snapshotVersion)));
+		} else {
+			// When a snapshot version is not specified, we use the latest snapshot to restore to the `restoreVersion`.
+			wait(store(fileSet, bc->getRestoreSet(restoreVersion, keyRangesFilter)));
+		}
+
 		if (fileSet.present()) {
-			int64_t totalRangeFilesSize = 0, totalLogFilesSize = 0;
 			result["restore_version"] = fileSet.get().targetVersion;
-			JsonBuilderArray rangeFilesJson;
-			JsonBuilderArray logFilesJson;
 			for (const auto& rangeFile : fileSet.get().ranges) {
 				JsonBuilderObject object;
 				object["file_name"] = rangeFile.fileName;
@@ -2782,14 +2910,6 @@ ACTOR Future<Void> queryBackup(const char* name,
 				totalLogFilesSize += log.fileSize;
 			}
 
-			result["total_range_files_size"] = totalRangeFilesSize;
-			result["total_log_files_size"] = totalLogFilesSize;
-
-			if (verbose) {
-				result["ranges"] = rangeFilesJson;
-				result["logs"] = logFilesJson;
-			}
-
 			TraceEvent("BackupQueryReceivedRestorableFilesSet")
 			    .detail("DestinationContainer", destinationContainer)
 			    .detail("KeyRangesFilter", printable(keyRangesFilter))
@@ -2798,7 +2918,7 @@ ACTOR Future<Void> queryBackup(const char* name,
 			    .detail("NumLogFiles", fileSet.get().logs.size())
 			    .detail("RangeFilesBytes", totalRangeFilesSize)
 			    .detail("LogFilesBytes", totalLogFilesSize);
-		} else {
+		} else if (snapshotVersion == invalidVersion) {
 			reportBackupQueryError(operationId, result, "no restorable files set found for specified key ranges");
 			return Void();
 		}
@@ -2806,6 +2926,14 @@ ACTOR Future<Void> queryBackup(const char* name,
 	} catch (Error& e) {
 		reportBackupQueryError(operationId, result, e.what());
 		return Void();
+	}
+
+	result["total_range_files_size"] = totalRangeFilesSize;
+	result["total_log_files_size"] = totalLogFilesSize;
+
+	if (verbose) {
+		result["ranges"] = rangeFilesJson;
+		result["logs"] = logFilesJson;
 	}
 
 	printf("%s\n", result.getJson().c_str());
@@ -3035,7 +3163,7 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 
 static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRef>>& keyRanges) {
 	bool err = false, partial = false;
-	int tokenArray = 0;
+	[[maybe_unused]] int tokenArray = 0;
 
 	auto parsed = parseLine(optionValue, err, partial);
 
@@ -3092,7 +3220,7 @@ static void addKeyRange(std::string optionValue, Standalone<VectorRef<KeyRangeRe
 Version parseVersion(const char* str) {
 	StringRef s((const uint8_t*)str, strlen(str));
 
-	if (s.endsWith(LiteralStringRef("days")) || s.endsWith(LiteralStringRef("d"))) {
+	if (s.endsWith("days"_sr) || s.endsWith("d"_sr)) {
 		float days;
 		if (sscanf(str, "%f", &days) != 1) {
 			fprintf(stderr, "Could not parse version: %s\n", str);
@@ -3370,6 +3498,7 @@ int main(int argc, char* argv[]) {
 		int maxErrors = 20;
 		Version beginVersion = invalidVersion;
 		Version restoreVersion = invalidVersion;
+		Version snapshotVersion = invalidVersion;
 		std::string restoreTimestamp;
 		WaitForComplete waitForDone{ false };
 		StopWhenDone stopWhenDone{ true };
@@ -3381,6 +3510,10 @@ int main(int argc, char* argv[]) {
 		bool trace = false;
 		bool quietDisplay = false;
 		bool dryRun = false;
+		bool restoreSystemKeys = false;
+		bool restoreUserKeys = false;
+		bool encryptionEnabled = true;
+		bool encryptSnapshotFilesPresent = false;
 		std::string traceDir = "";
 		std::string traceFormat = "";
 		std::string traceLogGroup;
@@ -3554,6 +3687,25 @@ int main(int argc, char* argv[]) {
 			case OPT_BASEURL:
 				baseUrl = args->OptionArg();
 				break;
+			case OPT_ENCRYPT_FILES: {
+				const char* a = args->OptionArg();
+				int encryptFiles;
+				if (!sscanf(a, "%d", &encryptFiles)) {
+					fprintf(stderr, "ERROR: Could not parse encrypt-files `%s'\n", a);
+					return FDB_EXIT_ERROR;
+				}
+				if (encryptFiles != 0 && encryptFiles != 1) {
+					fprintf(stderr, "ERROR: encrypt-files must be either 0 or 1\n");
+					return FDB_EXIT_ERROR;
+				}
+				encryptSnapshotFilesPresent = true;
+				if (encryptFiles == 0) {
+					encryptionEnabled = false;
+				} else {
+					encryptionEnabled = true;
+				}
+				break;
+			}
 			case OPT_RESTORE_CLUSTERFILE_DEST:
 				restoreClusterFileDest = args->OptionArg();
 				break;
@@ -3592,6 +3744,15 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				break;
+			case OPT_BACKUPKEYS_FILE:
+				try {
+					std::string line = readFileBytes(args->OptionArg(), 64 * 1024 * 1024);
+					addKeyRange(line, backupKeys);
+				} catch (Error&) {
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				break;
 			case OPT_BACKUPKEYS_FILTER:
 				try {
 					addKeyRange(args->OptionArg(), backupKeysFilter);
@@ -3611,7 +3772,7 @@ int main(int argc, char* argv[]) {
 			case OPT_DESTCONTAINER:
 				destinationContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(destinationContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(destinationContainer).startsWith("/"_sr))
 					destinationContainer = std::string("file://") + destinationContainer;
 				modifyOptions.destURL = destinationContainer;
 				break;
@@ -3657,7 +3818,7 @@ int main(int argc, char* argv[]) {
 			case OPT_RESTORECONTAINER:
 				restoreContainer = args->OptionArg();
 				// If the url starts with '/' then prepend "file://" for backwards compatibility
-				if (StringRef(restoreContainer).startsWith(LiteralStringRef("/")))
+				if (StringRef(restoreContainer).startsWith("/"_sr))
 					restoreContainer = std::string("file://") + restoreContainer;
 				break;
 			case OPT_DESCRIBE_DEEP:
@@ -3701,6 +3862,25 @@ int main(int argc, char* argv[]) {
 					return FDB_EXIT_ERROR;
 				}
 				restoreVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_SNAPSHOT_VERSION: {
+				const char* a = args->OptionArg();
+				long long ver = 0;
+				if (!sscanf(a, "%lld", &ver)) {
+					fprintf(stderr, "ERROR: Could not parse database version `%s'\n", a);
+					printHelpTeaser(argv[0]);
+					return FDB_EXIT_ERROR;
+				}
+				snapshotVersion = ver;
+				break;
+			}
+			case OPT_RESTORE_USER_DATA: {
+				restoreUserKeys = true;
+				break;
+			}
+			case OPT_RESTORE_SYSTEM_DATA: {
+				restoreSystemKeys = true;
 				break;
 			}
 			case OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY: {
@@ -3779,6 +3959,10 @@ int main(int argc, char* argv[]) {
 			}
 		}
 
+		if (encryptionKeyFile.present() && encryptSnapshotFilesPresent) {
+			fprintf(stderr, "WARNING: Use of --encrypt-files and --encryption-key-file together is discouraged\n");
+		}
+
 		// Process the extra arguments
 		for (int argLoop = 0; argLoop < args->FileCount(); argLoop++) {
 			switch (programExe) {
@@ -3848,6 +4032,11 @@ int main(int argc, char* argv[]) {
 			default:
 				return FDB_EXIT_ERROR;
 			}
+		}
+
+		if (restoreSystemKeys && restoreUserKeys) {
+			fprintf(stderr, "ERROR: Please only specify one of --user-data or --system-metadata, not both\n");
+			return FDB_EXIT_ERROR;
 		}
 
 		if (trace) {
@@ -3920,7 +4109,7 @@ int main(int argc, char* argv[]) {
 		// a cluster so they should use this instead.
 		auto initTraceFile = [&]() {
 			if (trace)
-				openTraceFile(NetworkAddress(), traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
+				openTraceFile({}, traceRollSize, traceMaxLogsSize, traceDir, "trace", traceLogGroup);
 		};
 
 		auto initCluster = [&](bool quiet = false) {
@@ -3948,6 +4137,32 @@ int main(int argc, char* argv[]) {
 			return result.present();
 		};
 
+		// The fastrestore tool does not yet support multiple ranges and is incompatible with tenants
+		// or other features that back up data in the system keys
+		if (!restoreSystemKeys && !restoreUserKeys && backupKeys.empty() &&
+		    programExe != ProgramExe::FASTRESTORE_TOOL) {
+			addDefaultBackupRanges(backupKeys);
+		}
+
+		if ((restoreSystemKeys || restoreUserKeys) && programExe == ProgramExe::FASTRESTORE_TOOL) {
+			fprintf(stderr, "ERROR: Options: --user-data and --system-metadata are not supported with fastrestore\n");
+			return FDB_EXIT_ERROR;
+		}
+
+		if ((restoreUserKeys || restoreSystemKeys) && !backupKeys.empty()) {
+			fprintf(stderr,
+			        "ERROR: Cannot specify additional ranges when using --user-data or --system-metadata "
+			        "options\n");
+			return FDB_EXIT_ERROR;
+		}
+		if (restoreUserKeys) {
+			backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+		} else if (restoreSystemKeys) {
+			for (const auto& r : getSystemBackupRanges()) {
+				backupKeys.push_back_deep(backupKeys.arena(), r);
+			}
+		}
+
 		switch (programExe) {
 		case ProgramExe::AGENT:
 			if (!initCluster())
@@ -3967,6 +4182,7 @@ int main(int argc, char* argv[]) {
 				                           initialSnapshotIntervalSeconds,
 				                           snapshotIntervalSeconds,
 				                           backupKeys,
+				                           encryptionEnabled,
 				                           tagName,
 				                           dryRun,
 				                           waitForDone,
@@ -4085,9 +4301,11 @@ int main(int argc, char* argv[]) {
 				                          proxy,
 				                          backupKeysFilter,
 				                          restoreVersion,
+				                          snapshotVersion,
 				                          restoreClusterFileOrig,
 				                          restoreTimestamp,
-				                          Verbose{ !quietDisplay }));
+				                          Verbose{ !quietDisplay },
+				                          db));
 				break;
 
 			case BackupType::DUMP:
@@ -4326,19 +4544,19 @@ int main(int argc, char* argv[]) {
 				char* demangled = abi::__cxa_demangle(i->first, NULL, NULL, NULL);
 				if (demangled) {
 					s = demangled;
-					if (StringRef(s).startsWith(LiteralStringRef("(anonymous namespace)::")))
-						s = s.substr(LiteralStringRef("(anonymous namespace)::").size());
+					if (StringRef(s).startsWith("(anonymous namespace)::"_sr))
+						s = s.substr("(anonymous namespace)::"_sr.size());
 					free(demangled);
 				} else
 					s = i->first;
 #else
 				s = i->first;
-				if (StringRef(s).startsWith(LiteralStringRef("class `anonymous namespace'::")))
-					s = s.substr(LiteralStringRef("class `anonymous namespace'::").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("class ")))
-					s = s.substr(LiteralStringRef("class ").size());
-				else if (StringRef(s).startsWith(LiteralStringRef("struct ")))
-					s = s.substr(LiteralStringRef("struct ").size());
+				if (StringRef(s).startsWith("class `anonymous namespace'::"_sr))
+					s = s.substr("class `anonymous namespace'::"_sr.size());
+				else if (StringRef(s).startsWith("class "_sr))
+					s = s.substr("class "_sr.size());
+				else if (StringRef(s).startsWith("struct "_sr))
+					s = s.substr("struct "_sr.size());
 #endif
 
 				typeNames.emplace_back(s, i->first);

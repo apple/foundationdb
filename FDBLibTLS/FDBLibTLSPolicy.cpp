@@ -22,9 +22,6 @@
 #include "FDBLibTLS/FDBLibTLSSession.h"
 #include "flow/Trace.h"
 
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/bio.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -34,6 +31,7 @@
 #include <algorithm>
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 

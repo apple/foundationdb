@@ -25,10 +25,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.Function;
 
 import com.apple.foundationdb.async.AsyncIterable;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
+import com.apple.foundationdb.tuple.Tuple;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -50,8 +53,8 @@ class RangeQueryTest {
 		}
 	};
 
-	private static FDBDatabase makeFakeDatabase(List<Map.Entry<byte[], byte[]>> data) {
-		return new FDBDatabase(1, EXECUTOR) {
+	private static Database makeFakeDatabase(List<Map.Entry<byte[], byte[]>> data) {
+		return new Database() {
 			// the choice of 3 is arbitrary, just trying to make sure it's unique(ish) in case we
 			// need to test that uniqueness later.
 			private long txnCounter = 3;
@@ -71,6 +74,126 @@ class RangeQueryTest {
 			@Override
 			public void close() {
 				// no-op
+			}
+
+			@Override
+			public Executor getExecutor() {
+				throw new UnsupportedOperationException("Unimplemented method 'getExecutor'");
+			}
+
+			@Override
+			public Tenant openTenant(Tuple tenantName) {
+				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
+			}
+
+			@Override
+			public Tenant openTenant(byte[] tenantName, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
+			}
+
+			@Override
+			public Tenant openTenant(Tuple tenantName, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
+			}
+
+			@Override
+			public Tenant openTenant(byte[] tenantName, Executor e, EventKeeper eventKeeper) {
+				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
+			}
+
+			@Override
+			public Tenant openTenant(Tuple tenantName, Executor e, EventKeeper eventKeeper) {
+				throw new UnsupportedOperationException("Unimplemented method 'openTenant'");
+			}
+
+			@Override
+			public Transaction createTransaction(Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'createTransaction'");
+			}
+
+			@Override
+			public Transaction createTransaction(Executor e, EventKeeper eventKeeper) {
+				throw new UnsupportedOperationException("Unimplemented method 'createTransaction'");
+			}
+
+			@Override
+			public DatabaseOptions options() {
+				throw new UnsupportedOperationException("Unimplemented method 'options'");
+			}
+
+			@Override
+			public double getMainThreadBusyness() {
+				throw new UnsupportedOperationException("Unimplemented method 'getMainThreadBusyness'");
+			}
+
+			@Override
+			public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion,
+					boolean force, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'purgeBlobGranules'");
+			}
+
+			@Override
+			public CompletableFuture<Void> waitPurgeGranulesComplete(byte[] purgeKey, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'waitPurgeGranulesComplete'");
+			}
+
+			@Override
+			public CompletableFuture<Boolean> blobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'blobbifyRange'");
+			}
+
+			@Override
+			public CompletableFuture<Boolean> blobbifyRangeBlocking(byte[] beginKey, byte[] endKey, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'blobbifyRangeBlocking'");
+			}
+
+			@Override
+			public CompletableFuture<Boolean> unblobbifyRange(byte[] beginKey, byte[] endKey, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'unblobbifyRange'");
+			}
+
+			@Override
+			public CompletableFuture<KeyRangeArrayResult> listBlobbifiedRanges(byte[] beginKey, byte[] endKey,
+					int rangeLimit, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'listBlobbifiedRanges'");
+			}
+
+			@Override
+			public CompletableFuture<Long> verifyBlobRange(byte[] beginKey, byte[] endKey, long version, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'verifyBlobRange'");
+			}
+
+			@Override
+			public CompletableFuture<Boolean> flushBlobRange(byte[] beginKey, byte[] endKey, boolean compact,
+					long version, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'flushBlobRange'");
+			}
+
+			@Override
+			public <T> T read(Function<? super ReadTransaction, T> retryable, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'read'");
+			}
+
+			@Override
+			public <T> CompletableFuture<T> readAsync(
+					Function<? super ReadTransaction, ? extends CompletableFuture<T>> retryable, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'readAsync'");
+			}
+
+			@Override
+			public <T> T run(Function<? super Transaction, T> retryable, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'run'");
+			}
+
+			@Override
+			public <T> CompletableFuture<T> runAsync(
+					Function<? super Transaction, ? extends CompletableFuture<T>> retryable, Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'runAsync'");
+			}
+
+			@Override
+			public CompletableFuture<byte[]> getClientStatus(Executor e) {
+				throw new UnsupportedOperationException("Unimplemented method 'getClientStatus'");
 			}
 		};
 	}

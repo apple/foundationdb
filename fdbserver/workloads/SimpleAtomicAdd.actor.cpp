@@ -26,6 +26,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct SimpleAtomicAddWorkload : TestWorkload {
+	static constexpr auto NAME = "SimpleAtomicAdd";
+
 	int addValue;
 	int iterations;
 	bool initialize;
@@ -35,15 +37,13 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	std::vector<Future<Void>> clients;
 
 	SimpleAtomicAddWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		addValue = getOption(options, LiteralStringRef("addValue"), 1);
-		iterations = getOption(options, LiteralStringRef("iterations"), 100);
-		initialize = getOption(options, LiteralStringRef("initialize"), false);
-		initialValue = getOption(options, LiteralStringRef("initialValue"), 0);
-		sumKey = getOption(options, LiteralStringRef("sumKey"), LiteralStringRef("sumKey"));
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		addValue = getOption(options, "addValue"_sr, 1);
+		iterations = getOption(options, "iterations"_sr, 100);
+		initialize = getOption(options, "initialize"_sr, false);
+		initialValue = getOption(options, "initialValue"_sr, 0);
+		sumKey = getOption(options, "sumKey"_sr, "sumKey"_sr);
 	}
-
-	std::string description() const override { return "SimpleAtomicAdd"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -134,4 +134,4 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SimpleAtomicAddWorkload> SimpleAtomicAddWorkloadFactory("SimpleAtomicAdd");
+WorkloadFactory<SimpleAtomicAddWorkload> SimpleAtomicAddWorkloadFactory;

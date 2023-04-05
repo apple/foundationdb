@@ -32,10 +32,10 @@ public:
     explicit SKRExampleImpl(KeyRangeRef kr): SpecialKeyRangeReadImpl(kr) {
         // Our implementation is quite simple here, the key-value pairs are formatted as:
         // \xff\xff/example/<country_name> : <capital_city_name>
-        CountryToCapitalCity[LiteralStringRef("USA")] = LiteralStringRef("Washington, D.C.");
-        CountryToCapitalCity[LiteralStringRef("UK")] = LiteralStringRef("London");
-        CountryToCapitalCity[LiteralStringRef("Japan")] = LiteralStringRef("Tokyo");
-        CountryToCapitalCity[LiteralStringRef("China")] = LiteralStringRef("Beijing");
+        CountryToCapitalCity["USA"_sr] = "Washington, D.C."_sr;
+        CountryToCapitalCity["UK"_sr] = "London"_sr;
+        CountryToCapitalCity["Japan"_sr] = "Tokyo"_sr;
+        CountryToCapitalCity["China"_sr] = "Beijing"_sr;
     }
     // Implement the getRange interface
     Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
@@ -58,7 +58,7 @@ private:
 };
 // Instantiate the function object
 // In development, you should have a function object pointer in DatabaseContext(DatabaseContext.h) and initialize in DatabaseContext's constructor(NativeAPI.actor.cpp)
-const KeyRangeRef exampleRange(LiteralStringRef("\xff\xff/example/"), LiteralStringRef("\xff\xff/example/\xff"));
+const KeyRangeRef exampleRange("\xff\xff/example/"_sr, "\xff\xff/example/\xff"_sr);
 SKRExampleImpl exampleImpl(exampleRange);
 // Assuming the database handler is `cx`, register to special-key-space
 // In development, you should register all function objects in the constructor of DatabaseContext(NativeAPI.actor.cpp)
@@ -67,16 +67,16 @@ cx->specialKeySpace->registerKeyRange(exampleRange, &exampleImpl);
 state ReadYourWritesTransaction tr(cx);
 // get
 Optional<Value> res1 = wait(tr.get("\xff\xff/example/Japan"));
-ASSERT(res1.present() && res.getValue() == LiteralStringRef("Tokyo"));
+ASSERT(res1.present() && res.getValue() == "Tokyo"_sr);
 // getRange
 // Note: for getRange(key1, key2), both key1 and key2 should prefixed with \xff\xff
 // something like getRange("normal_key", "\xff\xff/...") is not supported yet
-RangeResult res2 = wait(tr.getRange(LiteralStringRef("\xff\xff/example/U"), LiteralStringRef("\xff\xff/example/U\xff")));
+RangeResult res2 = wait(tr.getRange("\xff\xff/example/U"_sr, "\xff\xff/example/U\xff"_sr));
 // res2 should contain USA and UK
 ASSERT(
     res2.size() == 2 &&
-    res2[0].value == LiteralStringRef("London") &&
-    res2[1].value == LiteralStringRef("Washington, D.C.")
+    res2[0].value == "London"_sr &&
+    res2[1].value == "Washington, D.C."_sr
 );
 ```
 

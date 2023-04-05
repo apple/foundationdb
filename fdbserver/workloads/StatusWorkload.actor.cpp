@@ -28,6 +28,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct StatusWorkload : TestWorkload {
+	static constexpr auto NAME = "Status";
+
 	double testDuration, requestsPerSecond;
 	bool enableLatencyBands;
 
@@ -39,11 +41,10 @@ struct StatusWorkload : TestWorkload {
 	StatusWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), requests("Status requests issued"), replies("Status replies received"),
 	    errors("Status Errors"), totalSize("Status reply size sum") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		requestsPerSecond = getOption(options, LiteralStringRef("requestsPerSecond"), 0.5);
-		enableLatencyBands =
-		    getOption(options, LiteralStringRef("enableLatencyBands"), deterministicRandom()->random01() < 0.5);
-		auto statusSchemaStr = getOption(options, LiteralStringRef("schema"), JSONSchemas::statusSchema);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		requestsPerSecond = getOption(options, "requestsPerSecond"_sr, 0.5);
+		enableLatencyBands = getOption(options, "enableLatencyBands"_sr, deterministicRandom()->random01() < 0.5);
+		auto statusSchemaStr = getOption(options, "schema"_sr, JSONSchemas::statusSchema);
 		if (statusSchemaStr.size()) {
 			json_spirit::mValue schema = readJSONStrictly(statusSchemaStr.toString());
 			parsedSchema = schema.get_obj();
@@ -53,7 +54,6 @@ struct StatusWorkload : TestWorkload {
 		}
 	}
 
-	std::string description() const override { return "StatusWorkload"; }
 	Future<Void> setup(Database const& cx) override {
 		if (enableLatencyBands) {
 			latencyBandActor = configureLatencyBands(this, cx);
@@ -204,7 +204,7 @@ struct StatusWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StatusWorkload> StatusWorkloadFactory("Status");
+WorkloadFactory<StatusWorkload> StatusWorkloadFactory;
 
 TEST_CASE("/fdbserver/status/schema/basic") {
 	json_spirit::mValue schema =

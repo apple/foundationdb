@@ -1,0 +1,28 @@
+[[test]]
+title = 'Test tampering the cluster file with TLS'
+multiThreaded = true
+buggify = true
+tamperClusterFile = true
+minFdbThreads = 2
+maxFdbThreads = 4
+minDatabases = 2
+maxDatabases = 4
+minClientThreads = 2
+maxClientThreads = 4
+minClients = 2
+maxClients = 4
+
+[[server]]
+tls_enabled = true
+max_num_processes = 1
+
+[[test.workload]]
+name = 'ApiCorrectness'
+minKeyLength = 1
+maxKeyLength = 64
+minValueLength = 1
+maxValueLength = 1000
+maxKeysPerTransaction = 50
+initialSize = 100
+numRandomOperations = 100
+readExistingKeysRatio = 0.9

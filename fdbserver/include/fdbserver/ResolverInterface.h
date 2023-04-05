@@ -29,6 +29,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/fdbrpc.h"
+#include "fdbrpc/TimedRequest.h"
 
 struct ResolverInterface {
 	constexpr static FileIdentifier file_identifier = 1755944;
@@ -68,18 +69,25 @@ struct ResolverInterface {
 
 struct StateTransactionRef {
 	constexpr static FileIdentifier file_identifier = 6150271;
-	StateTransactionRef() {}
-	StateTransactionRef(const bool committed, VectorRef<MutationRef> const& mutations)
-	  : committed(committed), mutations(mutations) {}
-	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
-	  : committed(toCopy.committed), mutations(p, toCopy.mutations) {}
 	bool committed;
 	VectorRef<MutationRef> mutations;
-	size_t expectedSize() const { return mutations.expectedSize(); }
+	// The tenants associated with this transaction. This field only existing when tenant mode is required. Because the
+	// applyMetadataEffect need to know whether the tenant access is valid to decide whether to apply metadata
+	Optional<VectorRef<int64_t>> tenantIds;
+
+	StateTransactionRef() {}
+	StateTransactionRef(const bool committed,
+	                    VectorRef<MutationRef> const& mutations,
+	                    Optional<VectorRef<int64_t>> tenantIds)
+	  : committed(committed), mutations(mutations), tenantIds(tenantIds) {}
+	StateTransactionRef(Arena& p, const StateTransactionRef& toCopy)
+	  : committed(toCopy.committed), mutations(p, toCopy.mutations), tenantIds(p, toCopy.tenantIds) {}
+
+	size_t expectedSize() const { return mutations.expectedSize() + tenantIds.expectedSize(); }
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		serializer(ar, committed, mutations);
+		serializer(ar, committed, mutations, tenantIds);
 	}
 };
 
@@ -114,7 +122,7 @@ struct ResolveTransactionBatchReply {
 	}
 };
 
-struct ResolveTransactionBatchRequest {
+struct ResolveTransactionBatchRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 16462858;
 	Arena arena;
 

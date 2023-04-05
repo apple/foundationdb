@@ -34,6 +34,8 @@
  */
 
 struct SidebandSingleWorkload : TestWorkload {
+	static constexpr auto NAME = "SidebandSingle";
+
 	double testDuration, operationsPerSecond;
 	// Pair represents <Key, commitVersion>
 	PromiseStream<std::pair<uint64_t, Version>> interf;
@@ -44,11 +46,10 @@ struct SidebandSingleWorkload : TestWorkload {
 	SidebandSingleWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), messages("Messages"), consistencyErrors("Causal Consistency Errors"),
 	    keysUnexpectedlyPresent("KeysUnexpectedlyPresent") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		operationsPerSecond = getOption(options, LiteralStringRef("operationsPerSecond"), 50.0);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		operationsPerSecond = getOption(options, "operationsPerSecond"_sr, 50.0);
 	}
 
-	std::string description() const override { return "SidebandSingleWorkload"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (clientId != 0)
@@ -94,7 +95,7 @@ struct SidebandSingleWorkload : TestWorkload {
 			// first set, this is the "old" value, always retry
 			loop {
 				try {
-					tr0.set(messageKey, LiteralStringRef("oldbeef"));
+					tr0.set(messageKey, "oldbeef"_sr);
 					wait(tr0.commit());
 					break;
 				} catch (Error& e) {
@@ -104,7 +105,7 @@ struct SidebandSingleWorkload : TestWorkload {
 			// second set, the checker should see this, no retries on unknown result
 			loop {
 				try {
-					tr.set(messageKey, LiteralStringRef("deadbeef"));
+					tr.set(messageKey, "deadbeef"_sr);
 					wait(tr.commit());
 					commitVersion = tr.getCommittedVersion();
 					break;
@@ -128,6 +129,11 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> checker(SidebandSingleWorkload* self, Database cx) {
+		// Required for GRV Cache to work in simulation.
+		// Normally, MVC would set the shared state and it is verified upon setting the
+		// transaction option for GRV Cache.
+		// In simulation, explicitly initialize it when used for tests.
+		cx->initSharedState();
 		loop {
 			// Pair represents <Key, commitVersion>
 			state std::pair<uint64_t, Version> message = waitNext(self->interf.getFuture());
@@ -144,7 +150,7 @@ struct SidebandSingleWorkload : TestWorkload {
 						    .detail("LocalReadVersion",
 						            tr.getReadVersion().get()); // will assert that ReadVersion is set
 						++self->consistencyErrors;
-					} else if (val.get() != LiteralStringRef("deadbeef")) {
+					} else if (val.get() != "deadbeef"_sr) {
 						// If we read something NOT "deadbeef" and there was no commit_unknown_result,
 						// the cache somehow read a stale version of our key
 						if (message.second != invalidVersion) {
@@ -186,4 +192,4 @@ struct SidebandSingleWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<SidebandSingleWorkload> SidebandSingleWorkloadFactory("SidebandSingle");
+WorkloadFactory<SidebandSingleWorkload> SidebandSingleWorkloadFactory;

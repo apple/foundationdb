@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
@@ -90,8 +91,6 @@ class TransactionTagCounterImpl {
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
-	static int64_t costFunction(int64_t bytes) { return bytes / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1; }
-
 public:
 	TransactionTagCounterImpl(UID thisServerID)
 	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
@@ -100,7 +99,7 @@ public:
 	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
 		if (tags.present()) {
 			CODE_PROBE(true, "Tracking transaction tag in counter");
-			double cost = costFunction(bytes);
+			auto const cost = getReadOperationCost(bytes);
 			for (auto& tag : tags.get()) {
 				int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
 				topTags.incrementCount(tag, count, cost);

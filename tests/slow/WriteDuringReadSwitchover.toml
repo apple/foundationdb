@@ -1,6 +1,8 @@
 [configuration]
 StderrSeverity = 30
 extraDatabaseMode = 'Single'
+# required tenant mode is not supported for Disaster Recovery yet
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'WriteDuringReadTest'

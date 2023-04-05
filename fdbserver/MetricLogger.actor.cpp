@@ -19,13 +19,29 @@
  */
 
 #include <cmath>
+#include <cstddef>
+#include <memory>
+#include "msgpack.hpp"
+#include <msgpack/v3/unpack_decl.hpp>
+#include <string>
+#include "fdbrpc/Stats.h"
+#include "flow/Msgpack.h"
 #include "flow/ApiVersion.h"
+#include "flow/IRandom.h"
+#include "flow/Knobs.h"
+#include "flow/OTELMetrics.h"
+#include "flow/SystemMonitor.h"
 #include "flow/UnitTest.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbserver/MetricLogger.actor.h"
+#include "fdbserver/MetricClient.h"
+#include "flow/flow.h"
+#include "flow/network.h"
+#include "flow/IUDPSocket.h"
+#include "flow/IConnection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetricsRule {
@@ -90,12 +106,10 @@ struct MetricsRule {
 
 struct MetricsConfig {
 	MetricsConfig(Key prefix = KeyRef())
-	  : space(prefix), ruleMap(space.get(LiteralStringRef("Rules")).key()),
-	    addressMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("Address")).key()),
-	    nameAndTypeMap(space.get(LiteralStringRef("Enum")).get(LiteralStringRef("NameType")).key()),
-	    ruleChangeKey(space.get(LiteralStringRef("RulesChanged")).key()),
-	    enumsChangeKey(space.get(LiteralStringRef("EnumsChanged")).key()),
-	    fieldChangeKey(space.get(LiteralStringRef("FieldsChanged")).key()) {}
+	  : space(prefix), ruleMap(space.get("Rules"_sr).key()), addressMap(space.get("Enum"_sr).get("Address"_sr).key()),
+	    nameAndTypeMap(space.get("Enum"_sr).get("NameType"_sr).key()),
+	    ruleChangeKey(space.get("RulesChanged"_sr).key()), enumsChangeKey(space.get("EnumsChanged"_sr).key()),
+	    fieldChangeKey(space.get("FieldsChanged"_sr).key()) {}
 
 	Subspace space;
 
@@ -191,7 +205,7 @@ public:
 };
 
 ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricCollection* collection) {
-	state MetricUpdateBatch batch;
+	state MetricBatch batch;
 	state Standalone<MetricKeyRef> mk;
 	ASSERT(collection != nullptr);
 	mk.prefix = StringRef(mk.arena(), config->space.key());
@@ -227,8 +241,8 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 
 		state std::map<int, Future<Void>> results;
 		// Call all of the callbacks, map each index to its resulting future
-		for (int i = 0, iend = batch.callbacks.size(); i < iend; ++i)
-			results[i] = batch.callbacks[i](&mdb, &batch);
+		for (int i = 0, iend = batch.scope.callbacks.size(); i < iend; ++i)
+			results[i] = batch.scope.callbacks[i](&mdb, &batch.scope);
 
 		loop {
 			state std::map<int, Future<Void>>::iterator cb = results.begin();
@@ -251,7 +265,7 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 			// Otherwise, wait to retry
 			wait(cbtr.onError(lastError));
 			for (auto& cb : results)
-				cb.second = batch.callbacks[cb.first](&mdb, &batch);
+				cb.second = batch.scope.callbacks[cb.first](&mdb, &batch.scope);
 		}
 
 		// If there are more rolltimes then next dump is now, otherwise if no metrics are enabled then it is
@@ -269,19 +283,19 @@ ACTOR Future<Void> dumpMetrics(Database cx, MetricsConfig* config, TDMetricColle
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				for (auto& i : batch.inserts) {
+				for (auto& i : batch.scope.inserts) {
 					// fprintf(stderr, "%s: dump insert: %s\n", collection->address.toString().c_str(),
 					// printable(allInsertions[i].key).c_str());
 					tr.set(i.key, i.value());
 				}
 
-				for (auto& a : batch.appends) {
+				for (auto& a : batch.scope.appends) {
 					// fprintf(stderr, "%s: dump append: %s\n", collection->address.toString().c_str(),
 					// printable(allAppends[i].key).c_str());
 					tr.atomicOp(a.key, a.value(), MutationRef::AppendIfFits);
 				}
 
-				for (auto& u : batch.updates) {
+				for (auto& u : batch.scope.updates) {
 					// fprintf(stderr, "%s: dump update: %s\n", collection->address.toString().c_str(),
 					// printable(allUpdates[i].first).c_str());
 					tr.set(u.first, u.second);
@@ -405,6 +419,66 @@ ACTOR Future<Void> runMetrics(Future<Database> fcx, Key prefix) {
 	return Void();
 }
 
+ACTOR Future<Void> startMetricsSimulationServer(MetricsDataModel model) {
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
+	state uint32_t port = 0;
+	switch (model) {
+	case MetricsDataModel::STATSD:
+		port = FLOW_KNOBS->STATSD_UDP_EMISSION_PORT;
+	case MetricsDataModel::OTLP:
+		port = FLOW_KNOBS->OTEL_UDP_EMISSION_PORT;
+	case MetricsDataModel::NONE:
+		port = 0;
+	}
+	TraceEvent(SevInfo, "MetricsUDPServerStarted").detail("Address", "127.0.0.1").detail("Port", port);
+	state NetworkAddress localAddress = NetworkAddress::parse("127.0.0.1:" + std::to_string(port));
+	state Reference<IUDPSocket> serverSocket = wait(INetworkConnections::net()->createUDPSocket(localAddress));
+	serverSocket->bind(localAddress);
+	state Standalone<StringRef> packetString = makeString(IUDPSocket::MAX_PACKET_SIZE);
+	state uint8_t* packet = mutateString(packetString);
+
+	loop {
+		int size = wait(serverSocket->receive(packet, packet + IUDPSocket::MAX_PACKET_SIZE));
+		auto message = packetString.substr(0, size);
+
+		// Let's just focus on statsd for now. For statsd, the message is expected to be seperated by newlines. We need
+		// to break each statsd metric and verify them individually.
+		if (model == MetricsDataModel::STATSD) {
+			std::string statsd_message = message.toString();
+			auto metrics = splitString(statsd_message, "\n");
+			for (const auto& metric : metrics) {
+				ASSERT(verifyStatsdMessage(metric));
+			}
+		} else if (model == MetricsDataModel::OTLP) {
+			msgpack::object_handle result;
+			msgpack::unpack(result, reinterpret_cast<const char*>(packet), size);
+		}
+	}
+}
+
+ACTOR Future<Void> runMetrics() {
+	state MetricCollection* metrics = nullptr;
+	MetricsDataModel model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
+	if (model == MetricsDataModel::NONE) {
+		return Void{};
+	}
+	state UDPMetricClient metricClient;
+	state Future<Void> metricsActor;
+	if (g_network->isSimulated()) {
+		metricsActor = startMetricsSimulationServer(model);
+	}
+	loop {
+		metrics = MetricCollection::getMetricCollection();
+		if (metrics != nullptr) {
+
+			metricClient.send(metrics);
+		}
+		wait(delay(FLOW_KNOBS->METRICS_EMISSION_INTERVAL));
+	}
+}
+
 TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	auto getenv2 = [](const char* s) -> const char* {
 		s = getenv(s);
@@ -419,7 +493,7 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	fprintf(stdout, "Using environment variables METRICS_CONNFILE and METRICS_PREFIX.\n");
 
 	state Database metricsDb = Database::createDatabase(metricsConnFile, ApiVersion::LATEST_VERSION);
-	TDMetricCollection::getTDMetrics()->address = LiteralStringRef("0.0.0.0:0");
+	TDMetricCollection::getTDMetrics()->address = "0.0.0.0:0"_sr;
 	state Future<Void> metrics = runMetrics(metricsDb, KeyRef(metricsPrefix));
 	state int64_t x = 0;
 
@@ -438,9 +512,9 @@ TEST_CASE("/fdbserver/metrics/TraceEvents") {
 	fprintf(stdout, "  d is always present, is a string, and rotates through the values 'one', 'two', and ''.\n");
 	fprintf(stdout, "  Plotting j on the x axis and k on the y axis should look like x=sin(2t), y=sin(3t)\n");
 
-	state Int64MetricHandle intMetric = Int64MetricHandle(LiteralStringRef("DummyInt"));
-	state BoolMetricHandle boolMetric = BoolMetricHandle(LiteralStringRef("DummyBool"));
-	state StringMetricHandle stringMetric = StringMetricHandle(LiteralStringRef("DummyString"));
+	state Int64MetricHandle intMetric = Int64MetricHandle("DummyInt"_sr);
+	state BoolMetricHandle boolMetric = BoolMetricHandle("DummyBool"_sr);
+	state StringMetricHandle stringMetric = StringMetricHandle("DummyString"_sr);
 
 	static const char* dStrings[] = { "one", "two", "" };
 	state const char** d = dStrings;

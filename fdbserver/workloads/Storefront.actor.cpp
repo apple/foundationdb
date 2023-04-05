@@ -31,7 +31,9 @@
 typedef uint64_t orderID;
 
 struct StorefrontWorkload : TestWorkload {
-	double testDuration, transactionsPerSecond, minExpectedTransactionsPerSecond;
+	static constexpr auto NAME = "Storefront";
+
+	double testDuration, transactionsPerSecond;
 	int actorCount, itemCount, maxOrderSize;
 	// bool isFulfilling;
 
@@ -43,18 +45,12 @@ struct StorefrontWorkload : TestWorkload {
 	StorefrontWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"),
 	    spuriousCommitFailures("Spurious Commit Failures"), totalLatency("Total Latency") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 1000.0);
-		actorCount =
-		    getOption(options, LiteralStringRef("actorsPerClient"), std::max((int)(transactionsPerSecond / 100), 1));
-		maxOrderSize = getOption(options, LiteralStringRef("maxOrderSize"), 20);
-		itemCount =
-		    getOption(options, LiteralStringRef("itemCount"), transactionsPerSecond * clientCount * maxOrderSize);
-		minExpectedTransactionsPerSecond =
-		    transactionsPerSecond * getOption(options, LiteralStringRef("expectedRate"), 0.9);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 1000.0);
+		actorCount = getOption(options, "actorsPerClient"_sr, std::max((int)(transactionsPerSecond / 100), 1));
+		maxOrderSize = getOption(options, "maxOrderSize"_sr, 20);
+		itemCount = getOption(options, "itemCount"_sr, transactionsPerSecond * clientCount * maxOrderSize);
 	}
-
-	std::string description() const override { return "StorefrontWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return bulkSetup(cx, this, itemCount, Promise<double>()); }
 
@@ -178,62 +174,6 @@ struct StorefrontWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR Future<std::vector<int>> orderAccumulator(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
-		state std::vector<int> result(self->itemCount);
-		state Transaction tr(cx);
-		state int fetched = 10000;
-		state KeySelectorRef begin = firstGreaterThan(keyRange.begin);
-		state KeySelectorRef end = lastLessThan(keyRange.end);
-		while (fetched == 10000) {
-			RangeResult values = wait(tr.getRange(begin, end, 10000));
-			int orderIdx;
-			for (orderIdx = 0; orderIdx < values.size(); orderIdx++) {
-				std::vector<int> saved;
-				BinaryReader br(values[orderIdx].value, AssumeVersion(g_network->protocolVersion()));
-				br >> saved;
-				for (int c = 0; c < saved.size(); c++)
-					result[saved[c]]++;
-			}
-			fetched = values.size();
-			begin = begin + fetched;
-		}
-		return result;
-	}
-
-	ACTOR Future<bool> tableBalancer(Database cx, StorefrontWorkload* self, KeyRangeRef keyRange) {
-		state std::vector<Future<std::vector<int>>> accumulators;
-		accumulators.push_back(
-		    self->orderAccumulator(cx, self, KeyRangeRef(LiteralStringRef("/orders/f"), LiteralStringRef("/orders0"))));
-		for (int c = 0; c < 15; c++)
-			accumulators.push_back(self->orderAccumulator(
-			    cx, self, KeyRangeRef(Key(format("/orders/%x", c)), Key(format("/orders/%x", c + 1)))));
-
-		Transaction tr(cx);
-		state Future<RangeResult> values =
-		    tr.getRange(KeyRangeRef(self->itemKey(0), self->itemKey(self->itemCount)), self->itemCount + 1);
-
-		wait(waitForAll(accumulators));
-		state std::vector<int> totals(self->itemCount);
-		for (int c = 0; c < accumulators.size(); c++) {
-			std::vector<int> subTotals = accumulators[c].get();
-			for (int i = 0; i < subTotals.size(); i++)
-				totals[i] += subTotals[i];
-		}
-
-		RangeResult inventory = wait(values);
-		for (int c = 0; c < inventory.size(); c++) {
-			if (self->valueToInt(inventory[c].value) != totals[c]) {
-				TraceEvent(SevError, "TestFailure")
-				    .detail("Reason", "OrderTotalMismatch")
-				    .detail("Item", c)
-				    .detail("OrderTotal", totals[c])
-				    .detail("RecordedInventory", self->valueToInt(inventory[c].value));
-				return false;
-			}
-		}
-		return true;
-	}
-
 	ACTOR Future<bool> orderChecker(Database cx, StorefrontWorkload* self, std::vector<orderID> ids) {
 		state Transaction tr(cx);
 		state int idx = 0;
@@ -292,4 +232,4 @@ struct StorefrontWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<StorefrontWorkload> StorefrontWorkloadFactory("Storefront");
+WorkloadFactory<StorefrontWorkload> StorefrontWorkloadFactory;

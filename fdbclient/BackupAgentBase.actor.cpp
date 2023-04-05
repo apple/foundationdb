@@ -22,27 +22,20 @@
 #include <time.h>
 
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobCipher.h"
+#include "fdbclient/CommitProxyInterface.h"
+#include "fdbclient/CommitTransaction.h"
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/Metacluster.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // has to be last include
-
-FDB_DEFINE_BOOLEAN_PARAM(LockDB);
-FDB_DEFINE_BOOLEAN_PARAM(UnlockDB);
-FDB_DEFINE_BOOLEAN_PARAM(StopWhenDone);
-FDB_DEFINE_BOOLEAN_PARAM(Verbose);
-FDB_DEFINE_BOOLEAN_PARAM(WaitForComplete);
-FDB_DEFINE_BOOLEAN_PARAM(ForceAction);
-FDB_DEFINE_BOOLEAN_PARAM(Terminator);
-FDB_DEFINE_BOOLEAN_PARAM(UsePartitionedLog);
-FDB_DEFINE_BOOLEAN_PARAM(InconsistentSnapshotOnly);
-FDB_DEFINE_BOOLEAN_PARAM(ShowErrors);
-FDB_DEFINE_BOOLEAN_PARAM(AbortOldBackup);
-FDB_DEFINE_BOOLEAN_PARAM(DstOnly);
-FDB_DEFINE_BOOLEAN_PARAM(WaitForDestUID);
-FDB_DEFINE_BOOLEAN_PARAM(CheckBackupUID);
-FDB_DEFINE_BOOLEAN_PARAM(DeleteData);
-FDB_DEFINE_BOOLEAN_PARAM(SetValidation);
-FDB_DEFINE_BOOLEAN_PARAM(PartialBackup);
+#include "flow/network.h"
 
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
@@ -243,6 +236,34 @@ Version getLogKeyVersion(Key key) {
 	return bigEndian64(*(int64_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t)));
 }
 
+bool validTenantAccess(std::map<int64_t, TenantName>* tenantMap,
+                       MutationRef m,
+                       bool provisionalProxy,
+                       Version version) {
+	if (isSystemKey(m.param1)) {
+		return true;
+	}
+	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	if (m.isEncrypted()) {
+		tenantId = m.encryptDomainId();
+	} else {
+		tenantId = TenantAPI::extractTenantIdFromMutation(m);
+	}
+	ASSERT(tenantMap != nullptr);
+	if (m.isEncrypted() && isReservedEncryptDomain(tenantId)) {
+		// These are valid encrypt domains so don't check the tenant map
+	} else if (tenantMap->find(tenantId) == tenantMap->end()) {
+		// If a tenant is not found for a given mutation then exclude it from the batch
+		ASSERT(!provisionalProxy);
+		TraceEvent(SevWarnAlways, "MutationLogRestoreTenantNotFound")
+		    .detail("Version", version)
+		    .detail("TenantId", tenantId);
+		CODE_PROBE(true, "mutation log restore tenant not found");
+		return false;
+	}
+	return true;
+}
+
 // Given a key from one of the ranges returned by get_log_ranges,
 // returns(version, part) where version is the database version number of
 // the transaction log data in the value, and part is 0 for the first such
@@ -253,16 +274,38 @@ std::pair<Version, uint32_t> decodeBKMutationLogKey(Key key) {
 	    bigEndian32(*(int32_t*)(key.begin() + backupLogPrefixBytes + sizeof(UID) + sizeof(uint8_t) + sizeof(int64_t))));
 }
 
-void decodeBackupLogValue(Arena& arena,
-                          VectorRef<MutationRef>& result,
-                          int& mutationSize,
-                          StringRef value,
-                          StringRef addPrefix,
-                          StringRef removePrefix,
-                          Version version,
-                          Reference<KeyRangeMap<Version>> key_version) {
+void _addResult(bool* tenantMapChanging,
+                VectorRef<MutationRef>* result,
+                int* mutationSize,
+                Arena* arena,
+                MutationRef logValue,
+                KeyRangeRef tenantMapRange) {
+	*tenantMapChanging = *tenantMapChanging || TenantAPI::tenantMapChanging(logValue, tenantMapRange);
+	result->push_back_deep(*arena, logValue);
+	*mutationSize += logValue.expectedSize();
+}
+
+/*
+ This actor is responsible for taking an original transaction which was added to the backup mutation log (represented
+ by "value" parameter), breaking it up into the individual MutationRefs (that constitute the transaction), decrypting
+ each mutation (if needed) and adding/removing prefixes from the mutations. The final mutations are then added to the
+ "result" vector alongside their encrypted counterparts (which is added to the "encryptedResult" vector)
+*/
+ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
+                                               VectorRef<MutationRef>* result,
+                                               VectorRef<Optional<MutationRef>>* encryptedResult,
+                                               int* mutationSize,
+                                               bool* tenantMapChanging,
+                                               Standalone<StringRef> value,
+                                               Key addPrefix,
+                                               Key removePrefix,
+                                               Version version,
+                                               Reference<KeyRangeMap<Version>> key_version,
+                                               Database cx,
+                                               std::map<int64_t, TenantName>* tenantMap,
+                                               bool provisionalProxy) {
 	try {
-		uint64_t offset(0);
+		state uint64_t offset(0);
 		uint64_t protocolVersion = 0;
 		memcpy(&protocolVersion, value.begin(), sizeof(uint64_t));
 		offset += sizeof(uint64_t);
@@ -274,36 +317,93 @@ void decodeBackupLogValue(Arena& arena,
 			throw incompatible_protocol_version();
 		}
 
-		uint32_t totalBytes = 0;
+		state uint32_t totalBytes = 0;
 		memcpy(&totalBytes, value.begin() + offset, sizeof(uint32_t));
 		offset += sizeof(uint32_t);
-		uint32_t consumed = 0;
+		state uint32_t consumed = 0;
 
 		if (totalBytes + offset > value.size())
 			throw restore_missing_data();
 
-		int originalOffset = offset;
+		state int originalOffset = offset;
+		state DatabaseConfiguration config = wait(getDatabaseConfiguration(cx));
+		state KeyRangeRef tenantMapRange = TenantMetadata::tenantMap().subspace;
 
 		while (consumed < totalBytes) {
 			uint32_t type = 0;
 			memcpy(&type, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			uint32_t len1 = 0;
+			state uint32_t len1 = 0;
 			memcpy(&len1, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
-			uint32_t len2 = 0;
+			state uint32_t len2 = 0;
 			memcpy(&len2, value.begin() + offset, sizeof(uint32_t));
 			offset += sizeof(uint32_t);
 
 			ASSERT(offset + len1 + len2 <= value.size() && isValidMutationType(type));
 
-			MutationRef logValue;
-			Arena tempArena;
+			state MutationRef logValue;
+			state Arena tempArena;
 			logValue.type = type;
 			logValue.param1 = value.substr(offset, len1);
 			offset += len1;
 			logValue.param2 = value.substr(offset, len2);
 			offset += len2;
+			state Optional<MutationRef> encryptedLogValue = Optional<MutationRef>();
+			ASSERT(!config.encryptionAtRestMode.isEncryptionEnabled() || logValue.isEncrypted());
+
+			// Check for valid tenant in required tenant mode. If the tenant does not exist in our tenant map then
+			// we EXCLUDE the mutation (of that respective tenant) during the restore. NOTE: This simply allows a
+			// restore to make progress in the event of tenant deletion, but tenant deletion should be considered
+			// carefully so that we do not run into this case. We do this check here so if encrypted mutations are not
+			// found in the tenant map then we exit early without needing to reach out to the EKP.
+			if (config.tenantMode == TenantMode::REQUIRED &&
+			    config.encryptionAtRestMode.mode != EncryptionAtRestMode::CLUSTER_AWARE &&
+			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
+				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+				continue;
+			}
+
+			// Decrypt mutation ref if encrypted
+			if (logValue.isEncrypted()) {
+				encryptedLogValue = logValue;
+				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
+				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
+				try {
+					if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+						TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(
+						    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+					} else {
+						TextAndHeaderCipherKeys cipherKeys = wait(
+						    getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+					}
+				} catch (Error& e) {
+					// It's possible a tenant was deleted and the encrypt key fetch failed
+					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
+					    .detail("Version", version)
+					    .detail("TenantId", domainId);
+					if (e.code() == error_code_encrypt_keys_fetch_failed) {
+						CODE_PROBE(true, "mutation log restore encrypt keys not found");
+						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+						continue;
+					} else {
+						throw;
+					}
+				}
+			}
+			ASSERT(!logValue.isEncrypted());
+
+			// If the mutation was encrypted using cluster aware encryption then check after decryption
+			if (config.tenantMode == TenantMode::REQUIRED &&
+			    config.encryptionAtRestMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
+			    !validTenantAccess(tenantMap, logValue, provisionalProxy, version)) {
+				consumed += BackupAgentBase::logHeaderSize + len1 + len2;
+				continue;
+			}
+
+			MutationRef originalLogValue = logValue;
 
 			if (logValue.type == MutationRef::ClearRange) {
 				KeyRangeRef range(logValue.param1, logValue.param2);
@@ -311,7 +411,7 @@ void decodeBackupLogValue(Arena& arena,
 				for (auto r : ranges) {
 					if (version > r.value() && r.value() != invalidVersion) {
 						KeyRef minKey = std::min(r.range().end, range.end);
-						if (minKey == (removePrefix == StringRef() ? normalKeys.end : strinc(removePrefix))) {
+						if (minKey == (removePrefix == StringRef() ? allKeys.end : strinc(removePrefix))) {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							if (removePrefix.size()) {
 								logValue.param1 = logValue.param1.removePrefix(removePrefix);
@@ -319,9 +419,8 @@ void decodeBackupLogValue(Arena& arena,
 							if (addPrefix.size()) {
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 							}
-							logValue.param2 = addPrefix == StringRef() ? normalKeys.end : strinc(addPrefix, tempArena);
-							result.push_back_deep(arena, logValue);
-							mutationSize += logValue.expectedSize();
+							logValue.param2 = addPrefix == StringRef() ? allKeys.end : strinc(addPrefix, tempArena);
+							_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
 						} else {
 							logValue.param1 = std::max(r.range().begin, range.begin);
 							logValue.param2 = minKey;
@@ -333,8 +432,12 @@ void decodeBackupLogValue(Arena& arena,
 								logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 								logValue.param2 = logValue.param2.withPrefix(addPrefix, tempArena);
 							}
-							result.push_back_deep(arena, logValue);
-							mutationSize += logValue.expectedSize();
+							_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
+						}
+						if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
+							encryptedResult->push_back_deep(*arena, encryptedLogValue);
+						} else {
+							encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
 						}
 					}
 				}
@@ -348,8 +451,14 @@ void decodeBackupLogValue(Arena& arena,
 					if (addPrefix.size()) {
 						logValue.param1 = logValue.param1.withPrefix(addPrefix, tempArena);
 					}
-					result.push_back_deep(arena, logValue);
-					mutationSize += logValue.expectedSize();
+					_addResult(tenantMapChanging, result, mutationSize, arena, logValue, tenantMapRange);
+					// If we did not remove/add prefixes to the mutation then keep the original encrypted mutation so we
+					// do not have to re-encrypt unnecessarily
+					if (originalLogValue.param1 == logValue.param1 && originalLogValue.param2 == logValue.param2) {
+						encryptedResult->push_back_deep(*arena, encryptedLogValue);
+					} else {
+						encryptedResult->push_back_deep(*arena, Optional<MutationRef>());
+					}
 				}
 			}
 
@@ -374,6 +483,7 @@ void decodeBackupLogValue(Arena& arena,
 		    .detail("Value", value);
 		throw;
 	}
+	return Void();
 }
 
 static double lastErrorTime = 0;
@@ -414,7 +524,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -493,7 +603,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 	loop {
 		try {
 			state GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED,
-			                            (g_network->isSimulated() && !g_simulator.speedUpSimulation)
+			                            (g_network->isSimulated() && !g_simulator->speedUpSimulation)
 			                                ? CLIENT_KNOBS->BACKUP_SIMULATED_LIMIT_BYTES
 			                                : CLIENT_KNOBS->BACKUP_GET_RANGE_LIMIT_BYTES);
 
@@ -592,19 +702,56 @@ Future<Void> readCommitted(Database cx,
 	    cx, results, Void(), lock, range, groupBy, Terminator::True, AccessSystemKeys::True, LockAware::True);
 }
 
-ACTOR Future<int> dumpData(Database cx,
-                           PromiseStream<RCGroup> results,
-                           Reference<FlowLock> lock,
-                           Key uid,
-                           Key addPrefix,
-                           Key removePrefix,
-                           PublicRequestStream<CommitTransactionRequest> commit,
-                           NotifiedVersion* committedVersion,
-                           Optional<Version> endVersion,
-                           Key rangeBegin,
-                           PromiseStream<Future<Void>> addActor,
-                           FlowLock* commitLock,
-                           Reference<KeyRangeMap<Version>> keyVersion) {
+ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
+                                                Key uid,
+                                                Version newBeginVersion,
+                                                Key rangeBegin,
+                                                NotifiedVersion* committedVersion,
+                                                int* totalBytes,
+                                                int* mutationSize,
+                                                PromiseStream<Future<Void>> addActor,
+                                                FlowLock* commitLock,
+                                                PublicRequestStream<CommitTransactionRequest> commit) {
+	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
+	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
+	Key rangeEnd = getApplyKey(newBeginVersion, uid);
+
+	// mutations and encrypted mutations (and their relationship) is described in greater detail in the defenition of
+	// CommitTransactionRef in CommitTransaction.h
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
+	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
+	req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
+	req.transaction.encryptedMutations.push_back_deep(req.arena, Optional<MutationRef>());
+	req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
+
+	// The commit request contains no read conflict ranges, so regardless of what read version we
+	// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
+	// for our transaction to be aborted due to conflicts.
+	req.transaction.read_snapshot = committedVersion->get();
+	req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
+
+	*totalBytes += *mutationSize;
+	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
+	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
+	return Void();
+}
+
+ACTOR Future<int> kvMutationLogToTransactions(Database cx,
+                                              PromiseStream<RCGroup> results,
+                                              Reference<FlowLock> lock,
+                                              Key uid,
+                                              Key addPrefix,
+                                              Key removePrefix,
+                                              PublicRequestStream<CommitTransactionRequest> commit,
+                                              NotifiedVersion* committedVersion,
+                                              Optional<Version> endVersion,
+                                              Key rangeBegin,
+                                              PromiseStream<Future<Void>> addActor,
+                                              FlowLock* commitLock,
+                                              Reference<KeyRangeMap<Version>> keyVersion,
+                                              std::map<int64_t, TenantName>* tenantMap,
+                                              bool provisionalProxy) {
 	state Version lastVersion = invalidVersion;
 	state bool endOfStream = false;
 	state int totalBytes = 0;
@@ -612,25 +759,76 @@ ACTOR Future<int> dumpData(Database cx,
 		state CommitTransactionRequest req;
 		state Version newBeginVersion = invalidVersion;
 		state int mutationSize = 0;
+		state bool tenantMapChanging = false;
 		loop {
 			try {
-				RCGroup group = waitNext(results.getFuture());
+				state RCGroup group = waitNext(results.getFuture());
+				state CommitTransactionRequest curReq;
 				lock->release(group.items.expectedSize());
+				state int curBatchMutationSize = 0;
+				tenantMapChanging = false;
 
 				BinaryWriter bw(Unversioned());
 				for (int i = 0; i < group.items.size(); ++i) {
 					bw.serializeBytes(group.items[i].value);
 				}
-				decodeBackupLogValue(req.arena,
-				                     req.transaction.mutations,
-				                     mutationSize,
-				                     bw.toValue(),
-				                     addPrefix,
-				                     removePrefix,
-				                     group.groupKey,
-				                     keyVersion);
+				// Parse a single transaction from the backup mutation log
+				Standalone<StringRef> value = bw.toValue();
+				wait(decodeBackupLogValue(&curReq.arena,
+				                          &curReq.transaction.mutations,
+				                          &curReq.transaction.encryptedMutations,
+				                          &curBatchMutationSize,
+				                          &tenantMapChanging,
+				                          value,
+				                          addPrefix,
+				                          removePrefix,
+				                          group.groupKey,
+				                          keyVersion,
+				                          cx,
+				                          tenantMap,
+				                          provisionalProxy));
+
+				// A single call to decodeBackupLogValue (above) will only parse mutations from a single transaction,
+				// however in the code below we batch the results across several calls to decodeBackupLogValue and send
+				// it in one big CommitTransactionRequest (so one CTR contains mutations from multiple transactions).
+				// Generally, this would be fine since the mutations in the log are ordered (and thus so are the results
+				// after calling decodeBackupLogValue). However in the CommitProxy we do not allow mutations which
+				// change the tenant map to appear alongside regular normalKey mutations in a single
+				// CommitTransactionRequest. Thus the code below will immediately send any mutations accumulated thus
+				// far if the latest call to decodeBackupLogValue contained a transaction which changed the tenant map
+				// (before processing the mutations which caused the tenant map to change).
+				if (tenantMapChanging && req.transaction.mutations.size()) {
+					// If the tenantMap is changing send the previous CommitTransactionRequest to the CommitProxy
+					TraceEvent("MutationLogRestoreTenantMapChanging").detail("BeginVersion", newBeginVersion);
+					CODE_PROBE(true, "mutation log tenant map changing");
+					wait(sendCommitTransactionRequest(req,
+					                                  uid,
+					                                  newBeginVersion,
+					                                  rangeBegin,
+					                                  committedVersion,
+					                                  &totalBytes,
+					                                  &mutationSize,
+					                                  addActor,
+					                                  commitLock,
+					                                  commit));
+					req = CommitTransactionRequest();
+					mutationSize = 0;
+				}
+
+				state int i;
+				for (i = 0; i < curReq.transaction.mutations.size(); i++) {
+					req.transaction.mutations.push_back_deep(req.arena, curReq.transaction.mutations[i]);
+					req.transaction.encryptedMutations.push_back_deep(req.arena,
+					                                                  curReq.transaction.encryptedMutations[i]);
+				}
+				mutationSize += curBatchMutationSize;
 				newBeginVersion = group.groupKey + 1;
-				if (mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
+
+				// At this point if the tenant map changed we would have already sent any normalKey mutations
+				// accumulated thus far, so all thats left to do is to send all the mutations in the the offending
+				// transaction that changed the tenant map. This is necessary so that we don't batch these tenant map
+				// mutations with future normalKey mutations (which will result in the same problem discussed above).
+				if (tenantMapChanging || mutationSize >= CLIENT_KNOBS->BACKUP_LOG_WRITE_BATCH_MAX_SIZE) {
 					break;
 				}
 			} catch (Error& e) {
@@ -646,26 +844,16 @@ ACTOR Future<int> dumpData(Database cx,
 				throw;
 			}
 		}
-
-		Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
-		Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
-		Key rangeEnd = getApplyKey(newBeginVersion, uid);
-
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::SetValue, applyBegin, versionKey));
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(applyBegin));
-		req.transaction.mutations.push_back_deep(req.arena, MutationRef(MutationRef::ClearRange, rangeBegin, rangeEnd));
-		req.transaction.write_conflict_ranges.push_back_deep(req.arena, singleKeyRange(rangeBegin));
-
-		// The commit request contains no read conflict ranges, so regardless of what read version we
-		// choose, it's impossible for us to get a transaction_too_old error back, and it's impossible
-		// for our transaction to be aborted due to conflicts.
-		req.transaction.read_snapshot = committedVersion->get();
-		req.flags = req.flags | CommitTransactionRequest::FLAG_IS_LOCK_AWARE;
-
-		totalBytes += mutationSize;
-		wait(commitLock->take(TaskPriority::DefaultYield, mutationSize));
-		addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), mutationSize));
-
+		wait(sendCommitTransactionRequest(req,
+		                                  uid,
+		                                  newBeginVersion,
+		                                  rangeBegin,
+		                                  committedVersion,
+		                                  &totalBytes,
+		                                  &mutationSize,
+		                                  addActor,
+		                                  commitLock,
+		                                  commit));
 		if (endOfStream) {
 			return totalBytes;
 		}
@@ -727,7 +915,9 @@ ACTOR Future<Void> applyMutations(Database cx,
                                   Version* endVersion,
                                   PublicRequestStream<CommitTransactionRequest> commit,
                                   NotifiedVersion* committedVersion,
-                                  Reference<KeyRangeMap<Version>> keyVersion) {
+                                  Reference<KeyRangeMap<Version>> keyVersion,
+                                  std::map<int64_t, TenantName>* tenantMap,
+                                  bool provisionalProxy) {
 	state FlowLock commitLock(CLIENT_KNOBS->BACKUP_LOCK_BYTES);
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> error = actorCollection(addActor.getFuture());
@@ -764,19 +954,22 @@ ACTOR Future<Void> applyMutations(Database cx,
 
 			maxBytes = std::max<int>(maxBytes * CLIENT_KNOBS->APPLY_MAX_DECAY_RATE, CLIENT_KNOBS->APPLY_MIN_LOCK_BYTES);
 			for (idx = 0; idx < ranges.size(); ++idx) {
-				int bytes = wait(dumpData(cx,
-				                          results[idx],
-				                          locks[idx],
-				                          uid,
-				                          addPrefix,
-				                          removePrefix,
-				                          commit,
-				                          committedVersion,
-				                          idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
-				                          ranges[idx].begin,
-				                          addActor,
-				                          &commitLock,
-				                          keyVersion));
+				int bytes =
+				    wait(kvMutationLogToTransactions(cx,
+				                                     results[idx],
+				                                     locks[idx],
+				                                     uid,
+				                                     addPrefix,
+				                                     removePrefix,
+				                                     commit,
+				                                     committedVersion,
+				                                     idx == ranges.size() - 1 ? newEndVersion : Optional<Version>(),
+				                                     ranges[idx].begin,
+				                                     addActor,
+				                                     &commitLock,
+				                                     keyVersion,
+				                                     tenantMap,
+				                                     provisionalProxy));
 				maxBytes = std::max<int>(CLIENT_KNOBS->APPLY_MAX_INCREASE_FACTOR * bytes, maxBytes);
 				if (error.isError())
 					throw error.getError();
@@ -968,10 +1161,9 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 					                                                       .get(BackupAgentBase::keySourceStates)
 					                                                       .get(currLogUid)
 					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey =
-					    tr->get(Subspace(currLogUid.withPrefix(LiteralStringRef("uid->config/"))
-					                         .withPrefix(fileBackupPrefixRange.begin))
-					                .pack(LiteralStringRef("stateEnum")));
+					state Future<Optional<Value>> foundBackupKey = tr->get(
+					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
+					        .pack("stateEnum"_sr));
 					wait(success(foundDRKey) && success(foundBackupKey));
 
 					if (foundDRKey.get().present() && foundBackupKey.get().present()) {
@@ -1165,3 +1357,38 @@ Standalone<StringRef> BackupAgentBase::getCurrentTime() {
 }
 
 std::string const BackupAgentBase::defaultTagName = "default";
+
+void addDefaultBackupRanges(Standalone<VectorRef<KeyRangeRef>>& backupKeys) {
+	backupKeys.push_back_deep(backupKeys.arena(), normalKeys);
+
+	for (auto& r : getSystemBackupRanges()) {
+		backupKeys.push_back_deep(backupKeys.arena(), r);
+	}
+}
+
+VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
+	static Standalone<VectorRef<KeyRangeRef>> systemBackupRanges;
+	if (systemBackupRanges.empty()) {
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
+		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+	}
+
+	return systemBackupRanges;
+}
+
+KeyRangeMap<bool> const& systemBackupMutationMask() {
+	static KeyRangeMap<bool> mask;
+	if (mask.size() == 1) {
+		for (auto r : getSystemBackupRanges()) {
+			mask.insert(r, true);
+		}
+	}
+
+	return mask;
+}
+
+KeyRangeRef const& getDefaultBackupSharedRange() {
+	static KeyRangeRef defaultSharedRange(""_sr, ""_sr);
+	return defaultSharedRange;
+}

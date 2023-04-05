@@ -18,18 +18,23 @@
  * limitations under the License.
  */
 
+#include "flow/Error.h"
+#include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
+#include <cctype>
+#include <cstddef>
+#include <string>
 
-const StringRef BaseEventMetric::metricType = LiteralStringRef("Event");
+const StringRef BaseEventMetric::metricType = "Event"_sr;
 template <>
-const StringRef Int64Metric::metricType = LiteralStringRef("Int64");
+const StringRef Int64Metric::metricType = "Int64"_sr;
 template <>
-const StringRef DoubleMetric::metricType = LiteralStringRef("Double");
+const StringRef DoubleMetric::metricType = "Double"_sr;
 template <>
-const StringRef BoolMetric::metricType = LiteralStringRef("Bool");
+const StringRef BoolMetric::metricType = "Bool"_sr;
 template <>
-const StringRef StringMetric::metricType = LiteralStringRef("String");
+const StringRef StringMetric::metricType = "String"_sr;
 
 std::string reduceFilename(std::string const& filename) {
 	std::string r = filename;
@@ -60,29 +65,29 @@ std::string reduceFilename(std::string const& filename) {
 }
 
 void MetricKeyRef::writeField(BinaryWriter& wr) const {
-	wr.serializeBytes(LiteralStringRef("\x01"));
+	wr.serializeBytes("\x01"_sr);
 	wr.serializeBytes(fieldName);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldType);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 }
 
 void MetricKeyRef::writeMetricName(BinaryWriter& wr) const {
-	wr.serializeBytes(LiteralStringRef("\x01"));
+	wr.serializeBytes("\x01"_sr);
 	wr.serializeBytes(name.name);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.type);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(address);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.id);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 }
 
 const Standalone<StringRef> MetricKeyRef::packLatestKey() const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
-	wr.serializeBytes(LiteralStringRef("\x01TDMetricsLastValue\x00"));
+	wr.serializeBytes("\x01TDMetricsLastValue\x00"_sr);
 	writeMetricName(wr);
 	return wr.toValue();
 }
@@ -91,9 +96,9 @@ const Standalone<StringRef> MetricKeyRef::packDataKey(int64_t time) const {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
 	if (isField())
-		wr.serializeBytes(LiteralStringRef("\x01TDFieldData\x00"));
+		wr.serializeBytes("\x01TDFieldData\x00"_sr);
 	else
-		wr.serializeBytes(LiteralStringRef("\x01TDMetricData\x00"));
+		wr.serializeBytes("\x01TDMetricData\x00"_sr);
 	writeMetricName(wr);
 	if (isField())
 		writeField(wr);
@@ -107,15 +112,15 @@ const Standalone<StringRef> MetricKeyRef::packFieldRegKey() const {
 	ASSERT(isField());
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(prefix);
-	wr.serializeBytes(LiteralStringRef("\x01TDFields\x00\x01"));
+	wr.serializeBytes("\x01TDFields\x00\x01"_sr);
 	wr.serializeBytes(name.name);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(name.type);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldName);
-	wr.serializeBytes(LiteralStringRef("\x00\x01"));
+	wr.serializeBytes("\x00\x01"_sr);
 	wr.serializeBytes(fieldType);
-	wr.serializeBytes(LiteralStringRef("\x00"));
+	wr.serializeBytes("\x00"_sr);
 	return wr.toValue();
 }
 
@@ -134,7 +139,7 @@ bool TDMetricCollection::canLog(int level) const {
 void TDMetricCollection::checkRoll(uint64_t t, int64_t usedBytes) {
 	currentTimeBytes += usedBytes;
 	if (currentTimeBytes > 1e6) {
-		CODE_PROBE(true, "metrics were rolled");
+		CODE_PROBE(true, "metrics were rolled", probe::decoration::rare);
 		currentTimeBytes = 0;
 		rollTimes.push_back(t);
 		for (auto& it : metricMap)
@@ -193,12 +198,12 @@ uint64_t DynamicEventMetric::log(uint64_t explicitTime) {
 	return t;
 }
 
-void DynamicEventMetric::flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricUpdateBatch& batch) {
+void DynamicEventMetric::flushData(MetricKeyRef const& mk, uint64_t rollTime, MetricBatch& batch) {
 	time.flushField(mk, rollTime, batch);
 	for (auto& [name, field] : fields)
 		field->flushField(mk, rollTime, batch);
 	if (!latestRecorded) {
-		batch.updates.emplace_back(mk.packLatestKey(), StringRef());
+		batch.scope.updates.emplace_back(mk.packLatestKey(), StringRef());
 		latestRecorded = true;
 	}
 }
@@ -228,4 +233,173 @@ std::string MetricData::toString() const {
 	              appendStart,
 	              rollTime,
 	              writer.getLength());
+}
+
+std::string createStatsdMessage(const std::string& name, StatsDMetric type, const std::string& val) {
+	return createStatsdMessage(name, type, val, {});
+}
+
+std::string createStatsdMessage(const std::string& name,
+                                StatsDMetric type,
+                                const std::string& val,
+                                const std::vector<std::pair<std::string, std::string>>& tags) {
+	ASSERT(!name.empty());
+	std::string msg = name + ":" + val;
+	switch (type) {
+	case StatsDMetric::GAUGE:
+		msg += "|g";
+		break;
+
+	case StatsDMetric::COUNTER:
+		msg += "|c";
+		break;
+	}
+
+	if (!tags.empty()) {
+		msg += "|";
+		for (size_t i = 0; i < tags.size(); i++) {
+			msg = msg + "#" + tags[i].first + ":" + tags[i].second;
+			// If we know there is another tag coming, we should add a comma in the message
+			if (i != tags.size() - 1) {
+				msg += ",";
+			}
+		}
+	}
+
+	return msg;
+}
+
+MetricsDataModel knobToMetricModel(const std::string& knob) {
+	if (knob == "statsd") {
+		return MetricsDataModel::STATSD;
+	} else if (knob == "otel") {
+		return MetricsDataModel::OTLP;
+	} else if (knob == "none") {
+		return MetricsDataModel::NONE;
+	}
+	ASSERT(false);
+	return MetricsDataModel::NONE;
+}
+
+std::vector<std::string> splitString(const std::string& str, const std::string& delimit) {
+	std::vector<std::string> splitted;
+	size_t pos = 0;
+	std::string s = str;
+
+	while ((pos = s.find(delimit)) != std::string::npos) {
+		splitted.push_back(s.substr(0, pos));
+		s.erase(0, pos + delimit.length());
+	}
+	splitted.push_back(s);
+	return splitted;
+}
+
+/*
+    Returns true if num is exactly a string representation of a number
+    Ex: "123", "123.65" both return true
+    "124.532.13", "t4fr", "102g" all return false
+*/
+bool isNumber(const std::string& num) {
+	if (num.empty()) {
+		return false;
+	}
+
+	size_t start = 0;
+	// We could have a negative number, if the first character isn't a digit
+	// but it's a "-", then we start from position 1. Otherwise it's not a valid number
+	if (!std::isdigit(num[0])) {
+		if (num[0] == '-') {
+			start = 1;
+		} else {
+			return false;
+		}
+	}
+
+	// Iterate through the string and make sure every char is a digit and there is only one occurence of "."
+	int dot_count = 0;
+	for (size_t i = start; i < num.size(); i++) {
+		if (!std::isdigit(num[i])) {
+			if (num[i] == '.') {
+				if (dot_count > 0) {
+					return false;
+				}
+				++dot_count;
+			} else {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+/*
+    Returns true if msg is a valid statsd string. Valid statsd strings are of the form
+    <name>:<value>|<type>|#<tag1-key>:<tag1-value>,<tag2-k/v>
+
+    Where name consists of only upper or lowercase letters (no symbols),
+    value is numeric (postive or negative, integer or decimal),
+    type is one of "g", "c",
+
+*/
+bool verifyStatsdMessage(const std::string& msg) {
+	auto tokens = splitString(msg, "|");
+	std::vector<std::string> statsdTypes{ "c", "g" };
+
+	// We can't have more than three "|" in our string based on above format
+	if (tokens.size() > 3) {
+		return false;
+	}
+
+	// First check if <name>:<value> is valid, this should be in tokens[0]
+	auto nameVal = splitString(tokens[0], ":");
+	if (nameVal.size() != 2) {
+		return false;
+	}
+	// nameVal[1] should be a numeric value
+	if (!isNumber(nameVal[1])) {
+		return false;
+	}
+
+	// The 2nd token should always represent a valid statsd type
+	if (std::find(statsdTypes.begin(), statsdTypes.end(), tokens[1]) == statsdTypes.end()) {
+		return false;
+	}
+
+	// It is optional to have tags but the tags section must be non-empty and begin
+	// with a "#"
+	if (tokens.size() > 2) {
+		if (tokens[2].empty()) {
+			return false;
+		}
+		if (tokens[2][0] != '#') {
+			return false;
+		}
+	}
+	return true;
+}
+
+void createOtelGauge(UID id, const std::string& name, double value) {
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	if (metrics != nullptr) {
+		NetworkAddress addr = g_network->getLocalAddress();
+		std::string ip_str = addr.ip.toString();
+		std::string port_str = std::to_string(addr.port);
+		if (metrics->gaugeMap.find(id) != metrics->gaugeMap.end()) {
+			metrics->gaugeMap[id].points.emplace_back(value);
+		} else {
+			metrics->gaugeMap[id] = OTEL::OTELGauge(name, value);
+		}
+		metrics->gaugeMap[id].points.back().addAttribute("ip", ip_str);
+		metrics->gaugeMap[id].points.back().addAttribute("port", port_str);
+	}
+}
+
+void createOtelGauge(UID id, const std::string& name, double value, const std::vector<OTEL::Attribute>& attrs) {
+	MetricCollection* metrics = MetricCollection::getMetricCollection();
+	createOtelGauge(id, name, value);
+	if (metrics != nullptr) {
+		for (const auto& attr : attrs) {
+			metrics->gaugeMap[id].points.back().addAttribute(attr.key, attr.value);
+		}
+	}
 }

@@ -26,9 +26,13 @@
 #include <random>
 #include <limits>
 
+#include <boost/unordered_set.hpp>
+
 #include "flow/flow.h"
 #include "flow/Histogram.h"
+#include "flow/ChaosMetrics.h"
 #include "flow/ProtocolVersion.h"
+#include "flow/WipedString.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
@@ -37,6 +41,7 @@
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
 #include "fdbrpc/TokenSign.h"
+#include "fdbrpc/SimulatorKillType.h"
 
 enum ClogMode { ClogDefault, ClogAll, ClogSend, ClogReceive };
 
@@ -45,19 +50,19 @@ struct ValidationData {
 	std::unordered_set<std::string> allDestroyedChangeFeedIDs;
 };
 
+namespace simulator {
+struct ProcessInfo;
+struct MachineInfo;
+} // namespace simulator
+
+constexpr double DISABLE_CONNECTION_FAILURE_FOREVER = 1e6;
+
 class ISimulator : public INetwork {
+
 public:
-	// Order matters!
-	enum KillType {
-		KillInstantly,
-		InjectFaults,
-		FailDisk,
-		RebootAndDelete,
-		RebootProcessAndDelete,
-		Reboot,
-		RebootProcess,
-		None
-	};
+	using KillType = simulator::KillType;
+	using ProcessInfo = simulator::ProcessInfo;
+	using MachineInfo = simulator::MachineInfo;
 
 	// Order matters! all modes >= 2 are fault injection modes
 	enum TSSMode { Disabled, EnabledNormal, EnabledAddDelay, EnabledDropMutations };
@@ -83,188 +88,6 @@ public:
 		}
 	};
 
-	// Subclasses may subclass ProcessInfo as well
-	struct MachineInfo;
-
-	struct ProcessInfo : NonCopyable {
-		std::string name;
-		std::string coordinationFolder;
-		std::string dataFolder;
-		MachineInfo* machine;
-		NetworkAddressList addresses;
-		NetworkAddress address;
-		LocalityData locality;
-		ProcessClass startingClass;
-		TDMetricCollection tdmetrics;
-		ChaosMetrics chaosMetrics;
-		HistogramRegistry histograms;
-		std::map<NetworkAddress, Reference<IListener>> listenerMap;
-		std::map<NetworkAddress, Reference<IUDPSocket>> boundUDPSockets;
-		bool failed;
-		bool excluded;
-		bool cleared;
-		bool rebooting;
-		std::vector<flowGlobalType> globals;
-
-		INetworkConnections* network;
-
-		uint64_t fault_injection_r;
-		double fault_injection_p1, fault_injection_p2;
-		bool failedDisk;
-
-		UID uid;
-
-		ProtocolVersion protocolVersion;
-		bool excludeFromRestarts = false;
-
-		std::vector<ProcessInfo*> childs;
-
-		ProcessInfo(const char* name,
-		            LocalityData locality,
-		            ProcessClass startingClass,
-		            NetworkAddressList addresses,
-		            INetworkConnections* net,
-		            const char* dataFolder,
-		            const char* coordinationFolder)
-		  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
-		    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
-		    failed(false), excluded(false), cleared(false), rebooting(false), network(net), fault_injection_r(0),
-		    fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
-			uid = deterministicRandom()->randomUniqueID();
-		}
-
-		Future<KillType> onShutdown() { return shutdownSignal.getFuture(); }
-
-		bool isSpawnedKVProcess() const {
-			// SOMEDAY: use a separate bool may be better?
-			return name == "remote flow process";
-		}
-		bool isReliable() const {
-			return !failed && fault_injection_p1 == 0 && fault_injection_p2 == 0 && !failedDisk &&
-			       (!machine || (machine->machineProcess->fault_injection_p1 == 0 &&
-			                     machine->machineProcess->fault_injection_p2 == 0));
-		}
-		bool isAvailable() const { return !isExcluded() && isReliable(); }
-		bool isExcluded() const { return excluded; }
-		bool isCleared() const { return cleared; }
-		std::string getReliableInfo() const {
-			std::stringstream ss;
-			ss << "failed:" << failed << " fault_injection_p1:" << fault_injection_p1
-			   << " fault_injection_p2:" << fault_injection_p2;
-			return ss.str();
-		}
-		std::vector<ProcessInfo*> const& getChilds() const { return childs; }
-
-		// Return true if the class type is suitable for stateful roles, such as tLog and StorageServer.
-		bool isAvailableClass() const {
-			switch (startingClass._class) {
-			case ProcessClass::UnsetClass:
-				return true;
-			case ProcessClass::StorageClass:
-				return true;
-			case ProcessClass::TransactionClass:
-				return true;
-			case ProcessClass::ResolutionClass:
-				return false;
-			case ProcessClass::CommitProxyClass:
-				return false;
-			case ProcessClass::GrvProxyClass:
-				return false;
-			case ProcessClass::MasterClass:
-				return false;
-			case ProcessClass::TesterClass:
-				return false;
-			case ProcessClass::StatelessClass:
-				return false;
-			case ProcessClass::LogClass:
-				return true;
-			case ProcessClass::LogRouterClass:
-				return false;
-			case ProcessClass::ClusterControllerClass:
-				return false;
-			case ProcessClass::DataDistributorClass:
-				return false;
-			case ProcessClass::RatekeeperClass:
-				return false;
-			case ProcessClass::BlobManagerClass:
-				return false;
-			case ProcessClass::StorageCacheClass:
-				return false;
-			case ProcessClass::BackupClass:
-				return false;
-			case ProcessClass::EncryptKeyProxyClass:
-				return false;
-			default:
-				return false;
-			}
-		}
-
-		Reference<IListener> getListener(const NetworkAddress& addr) const {
-			auto listener = listenerMap.find(addr);
-			ASSERT(listener != listenerMap.end());
-			return listener->second;
-		}
-
-		inline flowGlobalType global(int id) const { return (globals.size() > id) ? globals[id] : nullptr; };
-		inline void setGlobal(size_t id, flowGlobalType v) {
-			globals.resize(std::max(globals.size(), id + 1));
-			globals[id] = v;
-		};
-
-		std::string toString() const {
-			return format(
-			    "name: %s address: %s zone: %s datahall: %s class: %s excluded: %d cleared: %d",
-			    name.c_str(),
-			    formatIpPort(addresses.address.ip, addresses.address.port).c_str(),
-			    (locality.zoneId().present() ? locality.zoneId().get().printable().c_str() : "[unset]"),
-			    (locality.dataHallId().present() ? locality.dataHallId().get().printable().c_str() : "[unset]"),
-			    startingClass.toString().c_str(),
-			    excluded,
-			    cleared);
-		}
-
-		// Members not for external use
-		Promise<KillType> shutdownSignal;
-	};
-
-	// A set of data associated with a simulated machine
-	struct MachineInfo {
-		ProcessInfo* machineProcess;
-		std::vector<ProcessInfo*> processes;
-
-		// A map from filename to file handle for all open files on a machine
-		std::map<std::string, UnsafeWeakFutureReference<IAsyncFile>> openFiles;
-
-		std::set<std::string> deletingOrClosingFiles;
-		std::set<std::string> closingFiles;
-		Optional<Standalone<StringRef>> machineId;
-
-		const uint16_t remotePortStart;
-		std::vector<uint16_t> usedRemotePorts;
-
-		MachineInfo() : machineProcess(nullptr), remotePortStart(1000) {}
-
-		short getRandomPort() {
-			for (uint16_t i = remotePortStart; i < 60000; i++) {
-				if (std::find(usedRemotePorts.begin(), usedRemotePorts.end(), i) == usedRemotePorts.end()) {
-					TraceEvent(SevDebug, "RandomPortOpened").detail("PortNum", i);
-					usedRemotePorts.push_back(i);
-					return i;
-				}
-			}
-			UNREACHABLE();
-		}
-
-		void removeRemotePort(uint16_t port) {
-			if (port < remotePortStart)
-				return;
-			auto pos = std::find(usedRemotePorts.begin(), usedRemotePorts.end(), port);
-			if (pos != usedRemotePorts.end()) {
-				usedRemotePorts.erase(pos);
-			}
-		}
-	};
-
 	ProcessInfo* getProcess(Endpoint const& endpoint) { return getProcessByAddress(endpoint.getPrimaryAddress()); }
 	ProcessInfo* getCurrentProcess() { return currentProcess; }
 	ProcessInfo const* getCurrentProcess() const { return currentProcess; }
@@ -282,7 +105,8 @@ public:
 	                                ProcessClass startingClass,
 	                                const char* dataFolder,
 	                                const char* coordinationFolder,
-	                                ProtocolVersion protocol) = 0;
+	                                ProtocolVersion protocol,
+	                                bool drProcess) = 0;
 	virtual void killProcess(ProcessInfo* machine, KillType) = 0;
 	virtual void rebootProcess(Optional<Standalone<StringRef>> zoneId, bool allProcesses) = 0;
 	virtual void rebootProcess(ProcessInfo* process, KillType kt) = 0;
@@ -303,12 +127,14 @@ public:
 	                          KillType kt,
 	                          bool forceKill = false,
 	                          KillType* ktFinal = nullptr) = 0;
+	virtual bool killAll(KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
 	                              KillType* newKillType) const = 0;
 	virtual bool isAvailable() const = 0;
+	virtual std::vector<AddressExclusion> getAllAddressesInDCToExclude(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual bool datacenterDead(Optional<Standalone<StringRef>> dcId) const = 0;
 	virtual void displayWorkers() const;
 	ProtocolVersion protocolVersion() const override = 0;
@@ -389,6 +215,13 @@ public:
 		return clearedAddresses.find(address) != clearedAddresses.end();
 	}
 
+	void switchCluster(NetworkAddress const& address) { switchedCluster[address] = !switchedCluster[address]; }
+	bool hasSwitchedCluster(NetworkAddress const& address) const {
+		return switchedCluster.find(address) != switchedCluster.end() ? switchedCluster.at(address) : false;
+	}
+	void toggleGlobalSwitchCluster() { globalSwitchedCluster = !globalSwitchedCluster; }
+	bool globalHasSwitchedCluster() const { return globalSwitchedCluster; }
+
 	void excludeAddress(NetworkAddress const& address) {
 		excludedAddresses[address]++;
 		TraceEvent("ExcludeAddress").detail("Address", address).detail("Value", excludedAddresses[address]);
@@ -438,6 +271,7 @@ public:
 
 	virtual void clogInterface(const IPAddress& ip, double seconds, ClogMode mode = ClogDefault) = 0;
 	virtual void clogPair(const IPAddress& from, const IPAddress& to, double seconds) = 0;
+	virtual void unclogPair(const IPAddress& from, const IPAddress& to) = 0;
 	virtual std::vector<ProcessInfo*> getAllProcesses() const = 0;
 	virtual ProcessInfo* getProcessByAddress(NetworkAddress const& address) = 0;
 	virtual MachineInfo* getMachineByNetworkAddress(NetworkAddress const& address) = 0;
@@ -450,7 +284,13 @@ public:
 	int physicalDatacenters;
 	int processesPerMachine;
 	int listenersPerProcess;
+
+	// We won't kill machines in this set, but we might reboot
+	// them.  This is a conservative mechanism to prevent the
+	// simulator from killing off important processes and rendering
+	// the cluster unrecoverable, e.g. a quorum of coordinators.
 	std::set<NetworkAddress> protectedAddresses;
+
 	std::map<NetworkAddress, ProcessInfo*> currentlyRebootingProcesses;
 	std::vector<std::string> extraDatabases;
 	Reference<IReplicationPolicy> storagePolicy;
@@ -459,6 +299,7 @@ public:
 	Optional<Standalone<StringRef>> primaryDcId;
 	Reference<IReplicationPolicy> remoteTLogPolicy;
 	int32_t usableRegions;
+	bool quiesced = false;
 	std::string disablePrimary;
 	std::string disableRemote;
 	std::string originalRegions;
@@ -475,6 +316,7 @@ public:
 	TSSMode tssMode;
 	std::map<NetworkAddress, bool> corruptWorkerMap;
 	ConfigDBType configDBType;
+	bool blobGranulesEnabled;
 
 	// Used by workloads that perform reconfigurations
 	int testerCount;
@@ -484,8 +326,11 @@ public:
 	double lastConnectionFailure;
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
+	double connectionFailureEnableTime; // Last time connection failure is enabled.
+	bool disableTLogRecoveryFinish;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool willRestart = false;
 	bool restarted = false;
 	ValidationData validationData;
 
@@ -495,30 +340,35 @@ public:
 	bool allowStorageMigrationTypeChange = false;
 	double injectTargetedSSRestartTime = std::numeric_limits<double>::max();
 	double injectSSDelayTime = std::numeric_limits<double>::max();
+	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
+	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
-	flowGlobalType global(int id) const final { return getCurrentProcess()->global(id); };
-	void setGlobal(size_t id, flowGlobalType v) final { getCurrentProcess()->setGlobal(id, v); };
+	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
 
-	void disableFor(const std::string& desc, double time) { disabledMap[desc] = time; }
+	// Valdiate at-rest encryption guarantees. If enabled, tests should inject a known 'marker' in Key and/or Values
+	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
+	// 'plaintext marker' is present.
+	Optional<std::string> dataAtRestPlaintextMarker;
 
-	double checkDisabled(const std::string& desc) const {
-		auto iter = disabledMap.find(desc);
-		if (iter != disabledMap.end()) {
-			return iter->second;
-		}
-		return 0;
-	}
+	// A collection of custom shard boundaries (begin, end, replication factor) that will be removed once this feature
+	// is integrated with a way to set these boundaries in the database
+	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
+
+	flowGlobalType global(int id) const final;
+	void setGlobal(size_t id, flowGlobalType v) final;
+
+	void disableFor(const std::string& desc, double time);
+
+	double checkDisabled(const std::string& desc) const;
+
+	// generate authz token for use in simulation environment
+	WipedString makeToken(int64_t tenantId, uint64_t ttlSecondsFromNow);
 
 	static thread_local ProcessInfo* currentProcess;
 
-	bool checkInjectedCorruption() {
-		auto iter = corruptWorkerMap.find(currentProcess->address);
-		if (iter != corruptWorkerMap.end())
-			return iter->second;
-		return false;
-	}
+	bool checkInjectedCorruption();
 
 	ISimulator();
 	virtual ~ISimulator();
@@ -530,14 +380,14 @@ private:
 	std::set<Optional<Standalone<StringRef>>> swapsDisabled;
 	std::map<NetworkAddress, int> excludedAddresses;
 	std::map<NetworkAddress, int> clearedAddresses;
+	std::map<NetworkAddress, bool> switchedCluster;
+	bool globalSwitchedCluster = false;
 	std::map<NetworkAddress, std::map<std::string, int>> roleAddresses;
 	std::map<std::string, double> disabledMap;
 	bool allSwapsDisabled;
 };
 
-// Quickly make existing code work that expects g_simulator to be of class type (not a pointer)
-extern ISimulator* g_pSimulator;
-#define g_simulator (*g_pSimulator)
+extern ISimulator* g_simulator;
 
 void startNewSimulator(bool printSimTime);
 
@@ -552,6 +402,12 @@ struct DiskParameters : ReferenceCounted<DiskParameters> {
 
 // Simulates delays for performing operations on disk
 extern Future<Void> waitUntilDiskReady(Reference<DiskParameters> parameters, int64_t size, bool sync = false);
+
+// Enables connection failures, i.e., clogging, in simulation
+void enableConnectionFailures(std::string const& context);
+
+// Disables connection failures, i.e., clogging, in simulation
+void disableConnectionFailures(std::string const& context);
 
 class Sim2FileSystem : public IAsyncFileSystem {
 public:

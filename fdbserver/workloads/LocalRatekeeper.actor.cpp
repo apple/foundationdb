@@ -45,18 +45,17 @@ ACTOR Future<StorageServerInterface> getRandomStorage(Database cx) {
 }
 
 struct LocalRatekeeperWorkload : TestWorkload {
+	static constexpr auto NAME = "LocalRatekeeper";
 
 	double startAfter = 0.0;
 	double blockWritesFor;
 	bool testFailed = false;
 
 	LocalRatekeeperWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		startAfter = getOption(options, LiteralStringRef("startAfter"), startAfter);
-		blockWritesFor = getOption(options,
-		                           LiteralStringRef("blockWritesFor"),
-		                           double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
+		startAfter = getOption(options, "startAfter"_sr, startAfter);
+		blockWritesFor = getOption(
+		    options, "blockWritesFor"_sr, double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_HARD_MAX) / double(1e6));
 	}
-	std::string description() const override { return "LocalRatekeeperWorkload"; }
 
 	ACTOR static Future<Void> testStorage(LocalRatekeeperWorkload* self, Database cx, StorageServerInterface ssi) {
 		state Transaction tr(cx);
@@ -99,7 +98,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 				GetValueRequest req;
 				req.version = readVersion;
 				// we don't care about the value
-				req.key = LiteralStringRef("/lkfs");
+				req.key = "/lkfs"_sr;
 				requests.emplace_back(brokenPromiseToNever(ssi.getValue.getReply(req)));
 			}
 			wait(waitForAllReady(requests));
@@ -128,7 +127,7 @@ struct LocalRatekeeperWorkload : TestWorkload {
 	ACTOR static Future<Void> _start(LocalRatekeeperWorkload* self, Database cx) {
 		wait(delay(self->startAfter));
 		state StorageServerInterface ssi = wait(getRandomStorage(cx));
-		g_simulator.disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
+		g_simulator->disableFor(format("%s/updateStorage", ssi.id().toString().c_str()), now() + self->blockWritesFor);
 		state Future<Void> done = delay(self->blockWritesFor);
 		// not much will happen until the storage goes over the soft limit
 		wait(delay(double(SERVER_KNOBS->STORAGE_DURABILITY_LAG_SOFT_MAX / 1e6)));
@@ -149,4 +148,4 @@ struct LocalRatekeeperWorkload : TestWorkload {
 
 } // namespace
 
-WorkloadFactory<LocalRatekeeperWorkload> LocalRatekeeperWorkloadFactory("LocalRatekeeper");
+WorkloadFactory<LocalRatekeeperWorkload> LocalRatekeeperWorkloadFactory;

@@ -54,7 +54,7 @@ def write_coverage_chunk(tr, path: Tuple[str, ...], metadata: Tuple[str, ...],
         initialized = v.present()
     for cov, covered in coverage:
         if not initialized or covered:
-            tr.add(cov_dir.pack((cov.file, cov.line, cov.comment)), struct.pack('<I', 1 if covered else 0))
+            tr.add(cov_dir.pack((cov.file, cov.line, cov.comment, cov.rare)), struct.pack('<I', 1 if covered else 0))
     return initialized
 
 
@@ -80,9 +80,9 @@ def _read_coverage(tr, cov_path: Tuple[str, ...]) -> OrderedDict[Coverage, int]:
     res = collections.OrderedDict()
     cov_dir = fdb.directory.create_or_open(tr, cov_path)
     for k, v in tr[cov_dir.range()]:
-        file, line, comment = cov_dir.unpack(k)
+        file, line, comment, rare = cov_dir.unpack(k)
         count = struct.unpack('<I', v)[0]
-        res[Coverage(file, line, comment)] = count
+        res[Coverage(file, line, comment, rare)] = count
     return res
 
 

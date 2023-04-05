@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -27,21 +26,20 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WatchesSameKeyWorkload : TestWorkload {
+	static constexpr auto NAME = "WatchesSameKeyCorrectness";
 	int numWatches;
 	std::vector<Future<Void>> cases;
 
 	WatchesSameKeyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		numWatches = getOption(options, LiteralStringRef("numWatches"), 3);
+		numWatches = getOption(options, "numWatches"_sr, 3);
 	}
 
-	std::string description() const override { return "WatchesSameKeyCorrectness"; }
-
 	Future<Void> setup(Database const& cx) override {
-		cases.push_back(case1(cx, LiteralStringRef("foo1"), this));
-		cases.push_back(case2(cx, LiteralStringRef("foo2"), this));
-		cases.push_back(case3(cx, LiteralStringRef("foo3"), this));
-		cases.push_back(case4(cx, LiteralStringRef("foo4"), this));
-		cases.push_back(case5(cx, LiteralStringRef("foo5"), this));
+		cases.push_back(case1(cx, "foo1"_sr, this));
+		cases.push_back(case2(cx, "foo2"_sr, this));
+		cases.push_back(case3(cx, "foo3"_sr, this));
+		cases.push_back(case4(cx, "foo4"_sr, this));
+		cases.push_back(case5(cx, "foo5"_sr, this));
 		return Void();
 	}
 
@@ -154,9 +152,10 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		 * */
 		state ReadYourWritesTransaction tr(cx);
 		state ReadYourWritesTransaction tr2(cx);
+		state Value val;
 		loop {
 			try {
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				val = deterministicRandom()->randomUniqueID().toString();
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());
@@ -185,7 +184,7 @@ struct WatchesSameKeyWorkload : TestWorkload {
 		loop {
 			try {
 				// watch1 and watch2 are set on the same k/v pair
-				state Value val = deterministicRandom()->randomUniqueID().toString();
+				state Value val(deterministicRandom()->randomUniqueID().toString());
 				tr2.set(key, val);
 				state Future<Void> watch1 = tr2.watch(key);
 				wait(tr2.commit());
@@ -240,4 +239,4 @@ struct WatchesSameKeyWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory("WatchesSameKeyCorrectness");
+WorkloadFactory<WatchesSameKeyWorkload> WatchesSameKeyWorkloadFactory;

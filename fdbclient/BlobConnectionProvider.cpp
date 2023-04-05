@@ -33,6 +33,12 @@ public:
 
 	SingleBlobConnectionProvider(std::string url) { conn = BackupContainerFileSystem::openContainerFS(url, {}, {}); }
 
+	bool needsRefresh() const { return false; }
+
+	bool isExpired() const { return false; }
+
+	void update(Standalone<BlobMetadataDetailsRef> newBlobMetadata) { ASSERT(false); }
+
 private:
 	Reference<BackupContainerFileSystem> conn;
 };
@@ -44,17 +50,41 @@ struct PartitionedBlobConnectionProvider : BlobConnectionProvider {
 		return std::pair(conn, metadata.partitions[writePartition].toString() + newFileName);
 	}
 
-	Reference<BackupContainerFileSystem> getForRead(std::string filePath) { return conn; }
+	Reference<BackupContainerFileSystem> getForRead(std::string filePath) {
+		CODE_PROBE(isExpired(), "partitioned blob connection using expired blob metadata for read!");
+		return conn;
+	}
 
-	PartitionedBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) : metadata(metadata) {
-		ASSERT(metadata.base.present());
-		ASSERT(metadata.partitions.size() >= 2);
-		conn = BackupContainerFileSystem::openContainerFS(metadata.base.get().toString(), {}, {});
-		for (auto& it : metadata.partitions) {
+	void updateMetadata(const Standalone<BlobMetadataDetailsRef>& newMetadata, bool checkPrevious) {
+		ASSERT(newMetadata.base.present());
+		ASSERT(newMetadata.partitions.size() >= 2);
+		for (auto& it : newMetadata.partitions) {
 			// these should be suffixes, not whole blob urls
 			ASSERT(it.toString().find("://") == std::string::npos);
 		}
+		if (checkPrevious) {
+			if (newMetadata.expireAt <= metadata.expireAt) {
+				return;
+			}
+			// FIXME: validate only the credentials changed and the location is the same
+			ASSERT(newMetadata.partitions.size() == metadata.partitions.size());
+			for (int i = 0; i < newMetadata.partitions.size(); i++) {
+				ASSERT(newMetadata.partitions[i] == metadata.partitions[i]);
+			}
+		}
+		metadata = newMetadata;
+		conn = BackupContainerFileSystem::openContainerFS(metadata.base.get().toString(), {}, {});
 	}
+
+	PartitionedBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
+		updateMetadata(metadata, false);
+	}
+
+	bool needsRefresh() const { return now() >= metadata.refreshAt; }
+
+	bool isExpired() const { return now() >= metadata.expireAt; }
+
+	void update(Standalone<BlobMetadataDetailsRef> newBlobMetadata) { updateMetadata(newBlobMetadata, true); }
 
 private:
 	Standalone<BlobMetadataDetailsRef> metadata;
@@ -72,6 +102,7 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 	}
 
 	Reference<BackupContainerFileSystem> getForRead(std::string filePath) {
+		CODE_PROBE(isExpired(), "storage location blob connection using expired blob metadata for read!");
 		size_t slash = filePath.find("/");
 		ASSERT(slash != std::string::npos);
 		int partition = stoi(filePath.substr(0, slash));
@@ -80,9 +111,18 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 		return partitions[partition];
 	}
 
-	StorageLocationBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
-		ASSERT(!metadata.base.present());
-		ASSERT(metadata.partitions.size() >= 2);
+	void updateMetadata(const Standalone<BlobMetadataDetailsRef>& newMetadata, bool checkPrevious) {
+		ASSERT(!newMetadata.base.present());
+		ASSERT(newMetadata.partitions.size() >= 2);
+		if (checkPrevious) {
+			// FIXME: validate only the credentials changed and the locations are the same
+			ASSERT(newMetadata.partitions.size() == partitions.size());
+			if (newMetadata.expireAt <= metadata.expireAt) {
+				return;
+			}
+		}
+		metadata = newMetadata;
+		partitions.clear();
 		for (auto& it : metadata.partitions) {
 			// these should be whole blob urls
 			ASSERT(it.toString().find("://") != std::string::npos);
@@ -90,7 +130,18 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 		}
 	}
 
+	StorageLocationBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
+		updateMetadata(metadata, false);
+	}
+
+	bool needsRefresh() const { return now() >= metadata.refreshAt; }
+
+	bool isExpired() const { return now() >= metadata.expireAt; }
+
+	void update(Standalone<BlobMetadataDetailsRef> newBlobMetadata) { updateMetadata(newBlobMetadata, true); }
+
 private:
+	Standalone<BlobMetadataDetailsRef> metadata;
 	std::vector<Reference<BackupContainerFileSystem>> partitions;
 };
 

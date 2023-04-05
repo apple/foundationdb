@@ -26,6 +26,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskDurabilityWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "DiskDurability";
 	struct FileBlock {
 		FileBlock(int blockNum) : blockNum(blockNum), lastData(0), lock(new FlowLock(1)) {}
 		~FileBlock() {}
@@ -87,19 +88,17 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	double syncInterval;
 
 	DiskDurabilityWorkload(WorkloadContext const& wcx) : AsyncFileWorkload(wcx) {
-		writers = getOption(options, LiteralStringRef("writers"), 1);
-		filePages = getOption(options, LiteralStringRef("filePages"), 1000000);
+		writers = getOption(options, "writers"_sr, 1);
+		filePages = getOption(options, "filePages"_sr, 1000000);
 		fileSize = filePages * _PAGE_SIZE;
 		unbufferedIO = true;
 		uncachedIO = true;
 		fillRandom = false;
-		pagesPerWrite = getOption(options, LiteralStringRef("pagesPerWrite"), 1);
-		syncInterval = (double)(getOption(options, LiteralStringRef("syncIntervalMs"), 2000)) / 1000;
+		pagesPerWrite = getOption(options, "pagesPerWrite"_sr, 1);
+		syncInterval = (double)(getOption(options, "syncIntervalMs"_sr, 2000)) / 1000;
 	}
 
 	~DiskDurabilityWorkload() override {}
-
-	std::string description() const override { return "DiskDurability"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -184,4 +183,4 @@ struct DiskDurabilityWorkload : public AsyncFileWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<DiskDurabilityWorkload> DiskDurabilityWorkloadFactory("DiskDurability");
+WorkloadFactory<DiskDurabilityWorkload> DiskDurabilityWorkloadFactory;

@@ -80,15 +80,15 @@ struct ThrottlingWorkload : KVWorkload {
 	TokenBucket tokenBucket;
 	bool correctSpecialKeys = true;
 
-	static constexpr const char* NAME = "Throttling";
+	static constexpr auto NAME = "Throttling";
 
 	ThrottlingWorkload(WorkloadContext const& wcx) : KVWorkload(wcx), transactionsCommitted(0) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		actorsPerClient = getOption(options, LiteralStringRef("actorsPerClient"), 10);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 10);
-		readsPerTransaction = getOption(options, LiteralStringRef("readsPerTransaction"), 10);
-		throttlingMultiplier = getOption(options, LiteralStringRef("throttlingMultiplier"), 0.5);
-		int maxBurst = getOption(options, LiteralStringRef("maxBurst"), 1000);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		actorsPerClient = getOption(options, "actorsPerClient"_sr, 10);
+		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 10);
+		readsPerTransaction = getOption(options, "readsPerTransaction"_sr, 10);
+		throttlingMultiplier = getOption(options, "throttlingMultiplier"_sr, 0.5);
+		int maxBurst = getOption(options, "maxBurst"_sr, 1000);
 		tokenBucket.maxBurst = maxBurst;
 	}
 
@@ -131,13 +131,13 @@ struct ThrottlingWorkload : KVWorkload {
 		state json_spirit::mValue logSchema = readJSONStrictly(JSONSchemas::logHealthSchema.toString()).get_obj();
 		loop {
 			try {
-				RangeResult result = wait(
-				    tr.getRange(prefixRange(LiteralStringRef("\xff\xff/metrics/health/")), CLIENT_KNOBS->TOO_MANY));
+				RangeResult result =
+				    wait(tr.getRange(prefixRange("\xff\xff/metrics/health/"_sr), CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!result.more);
 				for (const auto& [k, v] : result) {
-					ASSERT(k.startsWith(LiteralStringRef("\xff\xff/metrics/health/")));
+					ASSERT(k.startsWith("\xff\xff/metrics/health/"_sr));
 					auto valueObj = readJSONStrictly(v.toString()).get_obj();
-					if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/")) == LiteralStringRef("aggregate")) {
+					if (k.removePrefix("\xff\xff/metrics/health/"_sr) == "aggregate"_sr) {
 						CODE_PROBE(true, "Test aggregate health metrics schema");
 						std::string errorStr;
 						if (!schemaMatch(aggregateSchema, valueObj, errorStr, SevError, true)) {
@@ -148,10 +148,9 @@ struct ThrottlingWorkload : KVWorkload {
 						}
 						auto tpsLimit = valueObj.at("tps_limit").get_real();
 						self->tokenBucket.transactionRate = tpsLimit * self->throttlingMultiplier / self->clientCount;
-					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
-					               .startsWith(LiteralStringRef("storage/"))) {
+					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("storage/"_sr)) {
 						CODE_PROBE(true, "Test storage health metrics schema");
-						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/storage/"))
+						UID::fromString(k.removePrefix("\xff\xff/metrics/health/storage/"_sr)
 						                    .toString()); // Will throw if it's not a valid uid
 						std::string errorStr;
 						if (!schemaMatch(storageSchema, valueObj, errorStr, SevError, true)) {
@@ -160,10 +159,9 @@ struct ThrottlingWorkload : KVWorkload {
 							    .detail("JSON", json_spirit::write_string(json_spirit::mValue(v.toString())));
 							self->correctSpecialKeys = false;
 						}
-					} else if (k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/"))
-					               .startsWith(LiteralStringRef("log/"))) {
+					} else if (k.removePrefix("\xff\xff/metrics/health/"_sr).startsWith("log/"_sr)) {
 						CODE_PROBE(true, "Test log health metrics schema");
-						UID::fromString(k.removePrefix(LiteralStringRef("\xff\xff/metrics/health/log/"))
+						UID::fromString(k.removePrefix("\xff\xff/metrics/health/log/"_sr)
 						                    .toString()); // Will throw if it's not a valid uid
 						std::string errorStr;
 						if (!schemaMatch(logSchema, valueObj, errorStr, SevError, true)) {
@@ -195,7 +193,6 @@ struct ThrottlingWorkload : KVWorkload {
 		return Void();
 	}
 
-	std::string description() const override { return ThrottlingWorkload::NAME; }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 	Future<bool> check(Database const& cx) override { return correctSpecialKeys; }
 
@@ -204,4 +201,4 @@ struct ThrottlingWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ThrottlingWorkload> ThrottlingWorkloadFactory(ThrottlingWorkload::NAME);
+WorkloadFactory<ThrottlingWorkload> ThrottlingWorkloadFactory;

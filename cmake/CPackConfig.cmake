@@ -1,4 +1,3 @@
-# RPM specifics
 if(CPACK_GENERATOR MATCHES "RPM")
   set(CPACK_PACKAGING_INSTALL_PREFIX "/")
   set(CPACK_COMPONENTS_ALL clients-el7 server-el7 clients-versioned server-versioned)

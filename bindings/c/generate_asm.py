@@ -31,8 +31,8 @@ func_re = re.compile(
     "^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
 
 with open(source, 'r') as srcfile:
-    for l in srcfile:
-        m = func_re.match(l)
+    for line in srcfile:
+        m = func_re.match(line)
         if m:
             func, ver = m.groups()
             if func not in functions:
@@ -59,7 +59,7 @@ def write_windows_asm(asmfile, functions):
 
 
 def write_unix_asm(asmfile, functions, prefix):
-    if cpu != "aarch64" and cpu!= "ppc64le":
+    if cpu != "aarch64" and cpu != "ppc64le":
         asmfile.write(".intel_syntax noprefix\n")
 
     i = 0
@@ -132,7 +132,7 @@ def write_unix_asm(asmfile, functions, prefix):
             asmfile.write("\tstd 31, -8(1)\n")
             asmfile.write("\tstd     0,16(1)\n")
             asmfile.write("\tstdu    1,-192(1)\n")
-            #asmfile.write("\tstd 2,24(1)\n")
+            # asmfile.write("\tstd 2,24(1)\n")
             asmfile.write("\taddis 11,2,.LC%d@toc@ha\n" % (i))
             asmfile.write("\tld 11,.LC%d@toc@l(11)\n" % (i))
             asmfile.write("\tld 12,0(11)\n")

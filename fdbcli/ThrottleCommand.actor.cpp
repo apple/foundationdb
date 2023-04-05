@@ -163,11 +163,11 @@ ACTOR Future<bool> throttleCommandActor(Reference<IDatabase> db, std::vector<Str
 			}
 		}
 		if (tokens.size() == 7) {
-			if (tokens[6] == LiteralStringRef("default")) {
+			if (tokens[6] == "default"_sr) {
 				priority = TransactionPriority::DEFAULT;
-			} else if (tokens[6] == LiteralStringRef("immediate")) {
+			} else if (tokens[6] == "immediate"_sr) {
 				priority = TransactionPriority::IMMEDIATE;
-			} else if (tokens[6] == LiteralStringRef("batch")) {
+			} else if (tokens[6] == "batch"_sr) {
 				priority = TransactionPriority::BATCH;
 			} else {
 				fprintf(stderr,

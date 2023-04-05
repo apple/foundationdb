@@ -88,7 +88,7 @@ public:
 			sendError(broken_promise());
 	}
 
-	Future<T> getFuture() { // Call only on the originating thread!
+	Future<T> getFuture() const { // Call only on the originating thread!
 		return promise.getFuture();
 	}
 
@@ -107,7 +107,7 @@ public:
 		                        g_network->isOnMainThread() ? incrementPriorityIfEven(g_network->getCurrentTask())
 		                                                    : TaskPriority::DefaultOnMainThread);
 	}
-	bool isValid() { return promise.isValid(); }
+	bool isValid() const { return promise.isValid(); }
 
 private:
 	Promise<T> promise;

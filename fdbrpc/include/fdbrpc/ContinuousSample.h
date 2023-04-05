@@ -32,11 +32,24 @@ template <class T>
 class ContinuousSample {
 public:
 	explicit ContinuousSample(int sampleSize)
-	  : sampleSize(sampleSize), populationSize(0), sorted(true), _min(T()), _max(T()) {}
+	  : sampleSize(sampleSize), populationSize(0), sorted(true), _min(T()), _max(T()), _sum(T()) {}
+
+	void swap(ContinuousSample<T>& other) {
+		std::swap(samples, other.samples);
+		std::swap(_min, other._min);
+		std::swap(_max, other._max);
+		std::swap(_sum, other._sum);
+		std::swap(populationSize, other.populationSize);
+		std::swap(sorted, other.sorted);
+		std::swap(sampleSize, other.sampleSize);
+	}
 
 	ContinuousSample<T>& addSample(T sample) {
 		if (!populationSize)
-			_min = _max = sample;
+			_sum = _min = _max = sample;
+		else {
+			_sum += sample;
+		}
 		populationSize++;
 		sorted = false;
 
@@ -50,6 +63,10 @@ public:
 		_min = std::min(_min, sample);
 		return *this;
 	}
+
+	std::vector<T> getSamples() const { return samples; }
+
+	double sum() const { return _sum; }
 
 	double mean() const {
 		if (!samples.size())
@@ -78,7 +95,7 @@ public:
 		samples.clear();
 		populationSize = 0;
 		sorted = true;
-		_min = _max = 0; // Doesn't work for all T
+		_min = _max = _sum = 0; // Doesn't work for all T
 	}
 
 	uint64_t getPopulationSize() const { return populationSize; }
@@ -88,7 +105,7 @@ private:
 	uint64_t populationSize;
 	bool sorted;
 	std::vector<T> samples;
-	T _min, _max;
+	T _min, _max, _sum;
 
 	void sort() {
 		if (!sorted && samples.size() > 1)

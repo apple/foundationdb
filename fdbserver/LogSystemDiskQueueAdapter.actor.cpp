@@ -43,7 +43,9 @@ public:
 			if (!self->cursor->hasMessage()) {
 				loop {
 					choose {
-						when(wait(self->cursor->getMore())) { break; }
+						when(wait(self->cursor->getMore())) {
+							break;
+						}
 						when(wait(self->localityChanged)) {
 							self->cursor = self->logSystem->peekTxs(
 							    UID(),

@@ -70,6 +70,7 @@ public:
 		throw client_invalid_operation();
 	}
 	Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) override { throw client_invalid_operation(); }
+	void addGranuleMaterializeStats(const GranuleMaterializeStats& stats) override { throw client_invalid_operation(); }
 	void addReadConflictRange(KeyRangeRef const& keys) override { throw client_invalid_operation(); }
 	void makeSelfConflicting() override { throw client_invalid_operation(); }
 	void atomicOp(KeyRef const& key, ValueRef const& operand, uint32_t operationType) override {
@@ -81,4 +82,12 @@ public:
 
 	// Implemented:
 	void getWriteConflicts(KeyRangeMap<bool>* result) override{};
+
+	void debugTrace(BaseTraceEvent&& event) override {
+		event.detail("CommitResult", "Deferred logging unsupported").log();
+	};
+
+	virtual void debugPrint(std::string const& message) override {
+		fmt::print("[Deferred logging unsupported] {}\n", message);
+	}
 };

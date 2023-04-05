@@ -152,7 +152,7 @@ VectorRef<CertSpecRef> makeCertChainSpec(Arena& arena, unsigned length, ESide si
 
 // For empty (default) rootAuthority, the last item in specs is used to generate rootAuthority
 // Otherwise, rootAuthority is deep-copied to first element of returned chain
-CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, CertAndKeyRef rootAuthority);
+CertChainRef makeCertChain(Arena& arena, VectorRef<CertSpecRef> specs, Optional<CertAndKeyRef> rootAuthority);
 
 // Make stub cert chain of given length inc. root authority
 // Note: side does not imply anything different other than the choice of common names

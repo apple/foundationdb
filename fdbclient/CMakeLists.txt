@@ -64,7 +64,7 @@ endif()
 
 
 if(WITH_AWS_BACKUP)
-  add_compile_definitions(BUILD_AWS_BACKUP)
+  add_compile_definitions(WITH_AWS_BACKUP)
   include(awssdk)
 endif()
 
@@ -133,7 +133,7 @@ if(BUILD_AZURE_BACKUP)
   target_link_libraries(fdbclient_sampling PRIVATE curl azure-storage-lite)
 endif()
 
-if(BUILD_AWS_BACKUP)
+if(WITH_AWS_BACKUP)
   target_link_libraries(fdbclient PUBLIC awssdk_target)
   target_link_libraries(fdbclient_sampling PUBLIC awssdk_target)
 endif()

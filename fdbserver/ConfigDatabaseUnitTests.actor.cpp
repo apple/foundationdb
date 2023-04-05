@@ -114,7 +114,7 @@ public:
 	                         Standalone<VectorRef<VersionedConfigMutationRef>> mutations,
 	                         Standalone<VectorRef<VersionedConfigCommitAnnotationRef>> annotations) {
 		return cfi.rollforward.getReply(
-		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations });
+		    ConfigFollowerRollforwardRequest{ rollback, lastKnownCommitted, target, mutations, annotations, false });
 	}
 
 	void restartNode() {
@@ -232,7 +232,7 @@ class LocalConfigEnvironment {
 	Future<Void> addMutation(Optional<KeyRef> configClass, KeyRef knobName, Optional<KnobValueRef> value) {
 		Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations;
 		appendVersionedMutation(versionedMutations, ++lastWrittenVersion, configClass, knobName, value);
-		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion);
+		return readFrom.getMutableLocalConfiguration().addChanges(versionedMutations, lastWrittenVersion, 0);
 	}
 
 public:
@@ -269,8 +269,8 @@ class BroadcasterToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -305,11 +305,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -347,7 +344,7 @@ class TransactionEnvironment {
 		state Key configKey = encodeConfigKey(configClass, knobName);
 		state Optional<Value> value = wait(tr->get(configKey));
 		if (expected.present()) {
-			ASSERT_EQ(BinaryReader::fromStringRef<int64_t>(value.get(), Unversioned()), expected.get());
+			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {
 			ASSERT(!value.present());
 		}
@@ -441,8 +438,8 @@ class TransactionToLocalConfigEnvironment {
 		wait(self->readFrom.setup());
 		self->cbi = makeReference<AsyncVar<ConfigBroadcastInterface>>();
 		self->readFrom.connectToBroadcaster(self->cbi);
-		self->broadcastServer = self->broadcaster.registerNode(
-		    WorkerInterface(), 0, configClassSet, self->workerFailure.getFuture(), self->cbi->get());
+		self->broadcastServer =
+		    self->broadcaster.registerNode(self->cbi->get(), 0, configClassSet, self->workerFailure.getFuture(), true);
 		return Void();
 	}
 
@@ -461,11 +458,8 @@ public:
 		broadcastServer.cancel();
 		cbi->set(ConfigBroadcastInterface{});
 		readFrom.connectToBroadcaster(cbi);
-		broadcastServer = broadcaster.registerNode(WorkerInterface(),
-		                                           readFrom.lastSeenVersion(),
-		                                           readFrom.configClassSet(),
-		                                           workerFailure.getFuture(),
-		                                           cbi->get());
+		broadcastServer = broadcaster.registerNode(
+		    cbi->get(), readFrom.lastSeenVersion(), readFrom.configClassSet(), workerFailure.getFuture(), true);
 	}
 
 	Future<Void> restartLocalConfig(std::string const& newConfigPath) {
@@ -679,7 +673,9 @@ Future<Void> testIgnore(UnitTestParameters params) {
 	wait(set(env, "class-B"_sr, "test_long"_sr, int64_t{ 1 }));
 	choose {
 		when(wait(delay(5))) {}
-		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) { ASSERT(false); }
+		when(wait(check(env, &TestKnobs::TEST_LONG, Optional<int64_t>{ 1 }))) {
+			ASSERT(false);
+		}
 	}
 	return Void();
 }

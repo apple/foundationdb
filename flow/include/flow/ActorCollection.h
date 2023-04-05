@@ -67,7 +67,7 @@ class ActorCollection : NonCopyable {
 	Future<Void> m_out;
 
 public:
-	explicit ActorCollection(bool returnWhenEmptied) {
+	explicit ActorCollection(bool returnWhenEmptied = false) {
 		m_out = actorCollection(m_add.getFuture(), nullptr, nullptr, nullptr, nullptr, returnWhenEmptied);
 	}
 

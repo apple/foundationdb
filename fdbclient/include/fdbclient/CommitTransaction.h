@@ -24,8 +24,13 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/GetEncryptCipherKeys.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Tracing.h"
+#include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
+
+#include <unordered_set>
 
 // The versioned message has wire format : -1, version, messages
 static const int32_t VERSION_HEADER = -1;
@@ -87,7 +92,7 @@ struct MutationRef {
 	uint8_t type;
 	StringRef param1, param2;
 
-	MutationRef() {}
+	MutationRef() : type(MAX_ATOMIC_OP) {}
 	MutationRef(Type t, StringRef a, StringRef b) : type(t), param1(a), param2(b) {}
 	MutationRef(Arena& to, Type t, StringRef a, StringRef b) : type(t), param1(to, a), param2(to, b) {}
 	MutationRef(Arena& to, const MutationRef& from)
@@ -113,6 +118,7 @@ struct MutationRef {
 	}
 
 	bool isAtomicOp() const { return (ATOMIC_MASK & (1 << type)) != 0; }
+	bool isValid() const { return type < MAX_ATOMIC_OP; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -139,30 +145,114 @@ struct MutationRef {
 		return reinterpret_cast<const BlobCipherEncryptHeader*>(param1.begin());
 	}
 
-	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
-	                    const EncryptCipherDomainId& domainId,
+	const BlobCipherEncryptHeaderRef configurableEncryptionHeader() const {
+		ASSERT(isEncrypted());
+		return BlobCipherEncryptHeaderRef::fromStringRef(param1);
+	}
+
+	EncryptCipherDomainId encryptDomainId() const {
+		ASSERT(isEncrypted());
+		return CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION ? configurableEncryptionHeader().getDomainId()
+		                                                    : encryptionHeader()->cipherTextDetails.encryptDomainId;
+	}
+
+	void updateEncryptCipherDetails(std::unordered_set<BlobCipherDetails>& cipherDetails) {
+		ASSERT(isEncrypted());
+
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+			EncryptHeaderCipherDetails details = header.getCipherDetails();
+			ASSERT(details.textCipherDetails.isValid());
+			cipherDetails.insert(details.textCipherDetails);
+			if (details.headerCipherDetails.present()) {
+				ASSERT(details.headerCipherDetails.get().isValid());
+				cipherDetails.insert(details.headerCipherDetails.get());
+			}
+		} else {
+			const BlobCipherEncryptHeader* header = encryptionHeader();
+			cipherDetails.insert(header->cipherTextDetails);
+			if (header->cipherHeaderDetails.isValid()) {
+				cipherDetails.insert(header->cipherHeaderDetails);
+			}
+		}
+	}
+
+	MutationRef encrypt(TextAndHeaderCipherKeys cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType) const {
-		ASSERT_NE(domainId, ENCRYPT_INVALID_DOMAIN_ID);
-		auto textCipherItr = cipherKeys.find(domainId);
-		auto headerCipherItr = cipherKeys.find(ENCRYPT_HEADER_DOMAIN_ID);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		bw << *this;
-		EncryptBlobCipherAes265Ctr cipher(textCipherItr->second,
-		                                  headerCipherItr->second,
-		                                  iv,
-		                                  AES_256_IV_LENGTH,
-		                                  ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
-		                                  usageType);
-		BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
-		StringRef headerRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
-		StringRef payload =
-		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		return MutationRef(Encrypted, headerRef, payload);
+
+		EncryptBlobCipherAes265Ctr cipher(
+		    cipherKeys.cipherTextKey,
+		    cipherKeys.cipherHeaderKey,
+		    iv,
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    usageType);
+
+		StringRef serializedHeader;
+		StringRef payload;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef header;
+			payload = cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena);
+			Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
+			arena.dependsOn(headerStr.arena());
+			serializedHeader = headerStr;
+		} else {
+			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
+			serializedHeader = StringRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
+			payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
+		}
+		return MutationRef(Encrypted, serializedHeader, payload);
+	}
+
+	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
+	                    const EncryptCipherDomainId& domainId,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType) const {
+		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
+		auto getCipherKey = [&](const EncryptCipherDomainId& domainId) {
+			auto iter = cipherKeys.find(domainId);
+			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+			return iter->second;
+		};
+		Reference<BlobCipherKey> textCipherKey = getCipherKey(domainId);
+		Reference<BlobCipherKey> headerCipherKey;
+		if (FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED) {
+			headerCipherKey = getCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+		}
+		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
+		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
+		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
+		bw << *this;
+
+		EncryptBlobCipherAes265Ctr cipher(
+		    textCipherKey,
+		    headerCipherKey,
+		    iv,
+		    AES_256_IV_LENGTH,
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
+		    usageType);
+
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			BlobCipherEncryptHeaderRef header;
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena);
+			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
+			arena.dependsOn(serializedHeader.arena());
+			return MutationRef(Encrypted, serializedHeader, payload);
+		} else {
+			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
+			StringRef serializedHeader =
+			    StringRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
+			StringRef payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
+			return MutationRef(Encrypted, serializedHeader, payload);
+		}
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -171,17 +261,22 @@ struct MutationRef {
 		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
-	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
+	MutationRef decrypt(TextAndHeaderCipherKeys cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr) const {
-		const BlobCipherEncryptHeader* header = encryptionHeader();
-		auto textCipherItr = cipherKeys.find(header->cipherTextDetails);
-		auto headerCipherItr = cipherKeys.find(header->cipherHeaderDetails);
-		ASSERT(textCipherItr != cipherKeys.end() && textCipherItr->second.isValid());
-		ASSERT(headerCipherItr != cipherKeys.end() && headerCipherItr->second.isValid());
-		DecryptBlobCipherAes256Ctr cipher(textCipherItr->second, headerCipherItr->second, header->iv, usageType);
-		StringRef plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		StringRef plaintext;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena);
+		} else {
+			const BlobCipherEncryptHeader* header = encryptionHeader();
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
+		}
 		if (buf != nullptr) {
 			*buf = plaintext;
 		}
@@ -189,6 +284,44 @@ struct MutationRef {
 		MutationRef mutation;
 		reader >> mutation;
 		return mutation;
+	}
+
+	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    StringRef* buf = nullptr) const {
+		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
+		return decrypt(textAndHeaderKeys, arena, usageType, buf);
+	}
+
+	TextAndHeaderCipherKeys getCipherKeys(
+	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) const {
+		auto getCipherKey = [&](const BlobCipherDetails& details) -> Reference<BlobCipherKey> {
+			if (!details.isValid()) {
+				return {};
+			}
+			auto iter = cipherKeys.find(details);
+			ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+			return iter->second;
+		};
+		TextAndHeaderCipherKeys textAndHeaderKeys;
+		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+			EncryptHeaderCipherDetails cipherDetails = header.getCipherDetails();
+			ASSERT(cipherDetails.textCipherDetails.isValid());
+			textAndHeaderKeys.cipherTextKey = getCipherKey(cipherDetails.textCipherDetails);
+			if (cipherDetails.headerCipherDetails.present()) {
+				ASSERT(cipherDetails.headerCipherDetails.get().isValid());
+				textAndHeaderKeys.cipherHeaderKey = getCipherKey(cipherDetails.headerCipherDetails.get());
+			} else {
+				ASSERT(!FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
+			}
+		} else {
+			const BlobCipherEncryptHeader* header = encryptionHeader();
+			textAndHeaderKeys.cipherHeaderKey = getCipherKey(header->cipherHeaderDetails);
+			textAndHeaderKeys.cipherTextKey = getCipherKey(header->cipherTextDetails);
+		}
+		return textAndHeaderKeys;
 	}
 
 	// These masks define which mutation types have particular properties (they are used to implement
@@ -253,10 +386,20 @@ struct CommitTransactionRef {
 	VectorRef<KeyRangeRef> read_conflict_ranges;
 	VectorRef<KeyRangeRef> write_conflict_ranges;
 	VectorRef<MutationRef> mutations; // metadata mutations
+	// encryptedMutations should be a 1-1 corespondence with mutations field above. That is either
+	// encryptedMutations.size() == 0 or encryptedMutations.size() == mutations.size() and encryptedMutations[i] =
+	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
+	// usual commit path. It is currently only used during backup mutation log restores.
+	VectorRef<Optional<MutationRef>> encryptedMutations;
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present
 	Optional<SpanContext> spanContext;
+
+	// set by Commit Proxy
+	// The tenants associated with this transaction. This field only existing
+	// when tenant mode is required and this transaction has metadata mutations
+	Optional<VectorRef<int64_t>> tenantIds;
 
 	template <class Ar>
 	force_inline void serialize(Ar& ar) {
@@ -268,14 +411,27 @@ struct CommitTransactionRef {
 			           read_snapshot,
 			           report_conflicting_keys,
 			           lock_aware,
-			           spanContext);
+			           spanContext,
+			           tenantIds);
 		} else {
 			serializer(ar, read_conflict_ranges, write_conflict_ranges, mutations, read_snapshot);
 			if (ar.protocolVersion().hasReportConflictingKeys()) {
 				serializer(ar, report_conflicting_keys);
 			}
 			if (ar.protocolVersion().hasResolverPrivateMutations()) {
-				serializer(ar, lock_aware, spanContext);
+				serializer(ar, lock_aware);
+				if (!ar.protocolVersion().hasOTELSpanContext()) {
+					Optional<UID> context;
+					serializer(ar, context);
+					if (context.present()) {
+						SpanContext res;
+						res.traceID = context.get();
+						spanContext = res;
+					}
+				}
+			}
+			if (ar.protocolVersion().hasOTELSpanContext()) {
+				serializer(ar, spanContext);
 			}
 		}
 	}
@@ -322,6 +478,56 @@ struct MutationsAndVersionRef {
 	void serialize(Ar& ar) {
 		serializer(ar, mutations, version, knownCommittedVersion);
 	}
+};
+
+struct MutationRefAndCipherKeys {
+	MutationRef mutation;
+	TextAndHeaderCipherKeys cipherKeys;
+};
+
+struct EncryptedMutationsAndVersionRef {
+	VectorRef<MutationRef> mutations;
+	Optional<VectorRef<MutationRef>> encrypted;
+	std::vector<TextAndHeaderCipherKeys> cipherKeys;
+	Version version = invalidVersion;
+	Version knownCommittedVersion = invalidVersion;
+
+	EncryptedMutationsAndVersionRef() {}
+	explicit EncryptedMutationsAndVersionRef(Version version, Version knownCommittedVersion)
+	  : version(version), knownCommittedVersion(knownCommittedVersion) {}
+	EncryptedMutationsAndVersionRef(VectorRef<MutationRef> mutations,
+	                                VectorRef<MutationRef> encrypted,
+	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
+	                                Version version,
+	                                Version knownCommittedVersion)
+	  : mutations(mutations), encrypted(encrypted), cipherKeys(cipherKeys), version(version),
+	    knownCommittedVersion(knownCommittedVersion) {}
+	EncryptedMutationsAndVersionRef(Arena& to,
+	                                VectorRef<MutationRef> mutations,
+	                                Optional<VectorRef<MutationRef>> encrypt,
+	                                const std::vector<TextAndHeaderCipherKeys>& cipherKeys,
+	                                Version version,
+	                                Version knownCommittedVersion)
+	  : mutations(to, mutations), cipherKeys(cipherKeys), version(version),
+	    knownCommittedVersion(knownCommittedVersion) {
+		if (encrypt.present()) {
+			encrypted = VectorRef<MutationRef>(to, encrypt.get());
+		}
+	}
+	EncryptedMutationsAndVersionRef(Arena& to, const EncryptedMutationsAndVersionRef& from)
+	  : mutations(to, from.mutations), cipherKeys(from.cipherKeys), version(from.version),
+	    knownCommittedVersion(from.knownCommittedVersion) {
+		if (from.encrypted.present()) {
+			encrypted = VectorRef<MutationRef>(to, from.encrypted.get());
+		}
+	}
+	int expectedSize() const { return mutations.expectedSize(); }
+
+	struct OrderByVersion {
+		bool operator()(EncryptedMutationsAndVersionRef const& a, EncryptedMutationsAndVersionRef const& b) const {
+			return a.version < b.version;
+		}
+	};
 };
 
 #endif

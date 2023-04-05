@@ -115,6 +115,7 @@ public class JNIUtil {
 	 * @param libName the name of the library to attempt to export. This name should be
 	 *  undecorated with file extensions and, in the case of *nix, "lib" prefixes.
 	 * @return the exported temporary file
+	 * @throws IOException because {@link File}
 	 */
 	public static File exportLibrary(String libName) throws IOException {
 		OS os = getRunningOS();
@@ -143,7 +144,7 @@ public class JNIUtil {
 	 * @param name an optional descriptive name to include in the temporary file's path
 	 *
 	 * @return the absolute path to the exported file
-	 * @throws IOException
+	 * @throws IOException because {@link File}
 	 */
 	private static File exportResource(String path, String name) throws IOException {
 		InputStream resource = JNIUtil.class.getResourceAsStream(path);

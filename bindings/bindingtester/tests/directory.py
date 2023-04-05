@@ -114,7 +114,7 @@ class DirectoryTest(Test):
             instructions.push_args(layer)
             instructions.push_args(*test_util.with_length(path))
             instructions.append('DIRECTORY_OPEN')
-            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False, is_partition=(layer==b'partition'))))
+            self.dir_list.append(self.root.add_child(path, DirectoryStateTreeNode(True, True, has_known_prefix=False, is_partition=(layer == b'partition'))))
             # print('%d. Selected %s, dir=%s, dir_id=%s, has_known_prefix=%s, dir_list_len=%d' \
             #       % (len(instructions), 'DIRECTORY_OPEN', repr(self.dir_index), self.dir_list[-1].dir_id, False, len(self.dir_list)-1))
 
@@ -163,8 +163,8 @@ class DirectoryTest(Test):
 
             elif root_op == 'DIRECTORY_CREATE_LAYER':
                 indices = []
-                
-                prefixes = [generate_prefix(require_unique=args.concurrency==1, is_partition=True) for i in range(2)]
+
+                prefixes = [generate_prefix(require_unique=args.concurrency == 1, is_partition=True) for i in range(2)]
                 for i in range(2):
                     instructions.push_args(prefixes[i])
                     instructions.push_args(*test_util.with_length(generate_path()))
@@ -184,9 +184,9 @@ class DirectoryTest(Test):
                     test_util.blocking_commit(instructions)
 
                 path = generate_path()
-                # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit, 
+                # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit,
                 # so we disallow them in comparison tests
-                op_args = test_util.with_length(path) + (self.generate_layer(allow_partition=args.concurrency>1),)
+                op_args = test_util.with_length(path) + (self.generate_layer(allow_partition=args.concurrency > 1),)
                 directory_util.push_instruction_and_record_prefix(instructions, op, op_args, path, len(self.dir_list), self.random, self.prefix_log)
 
                 if not op.endswith('_DATABASE') and args.concurrency == 1:
@@ -196,14 +196,14 @@ class DirectoryTest(Test):
                 if child_entry is None:
                     child_entry = DirectoryStateTreeNode(True, True)
 
-                child_entry.state.has_known_prefix = False  
+                child_entry.state.has_known_prefix = False
                 self.dir_list.append(dir_entry.add_child(path, child_entry))
 
             elif root_op == 'DIRECTORY_CREATE':
                 layer = self.generate_layer()
                 is_partition = layer == b'partition'
 
-                prefix = generate_prefix(require_unique=is_partition and args.concurrency==1, is_partition=is_partition, min_length=0)
+                prefix = generate_prefix(require_unique=is_partition and args.concurrency == 1, is_partition=is_partition, min_length=0)
 
                 # Because allocated prefixes are non-deterministic, we cannot have overlapping
                 # transactions that allocate/remove these prefixes in a comparison test
@@ -409,7 +409,7 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
         if require_unique:
             min_length = max(min_length, 16)
 
-        length = random.randint(min_length, min_length+5)
+        length = random.randint(min_length, min_length + 5)
         if length == 0:
             return b''
 
@@ -419,6 +419,6 @@ def generate_prefix(require_unique=False, is_partition=False, min_length=1):
         else:
             return bytes([random.randrange(ord('\x02'), ord('\x14')) for i in range(0, length)])
     else:
-        prefix = fixed_prefix 
+        prefix = fixed_prefix
         generated = prefix[0:random.randrange(min_length, len(prefix))]
         return generated

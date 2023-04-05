@@ -108,8 +108,8 @@ Future<Void> setDDIgnoreRebalanceOff(Reference<IDatabase> db, uint8_t DDIgnoreOp
 
 namespace fdb_cli {
 
-const KeyRef ddModeSpecialKey = LiteralStringRef("\xff\xff/management/data_distribution/mode");
-const KeyRef ddIgnoreRebalanceSpecialKey = LiteralStringRef("\xff\xff/management/data_distribution/rebalance_ignored");
+const KeyRef ddModeSpecialKey = "\xff\xff/management/data_distribution/mode"_sr;
+const KeyRef ddIgnoreRebalanceSpecialKey = "\xff\xff/management/data_distribution/rebalance_ignored"_sr;
 constexpr auto usage =
     "Usage: datadistribution <on|off|disable <ssfailure|rebalance|rebalance_disk|rebalance_read>|enable "
     "<ssfailure|rebalance|rebalance_disk|rebalance_read>>\n";
@@ -127,7 +127,7 @@ ACTOR Future<bool> dataDistributionCommandActor(Reference<IDatabase> db, std::ve
 			printf("Data distribution is turned off.\n");
 		} else if (tokencmp(tokens[1], "disable")) {
 			if (tokencmp(tokens[2], "ssfailure")) {
-				wait(success((setHealthyZone(db, LiteralStringRef("IgnoreSSFailures"), 0))));
+				wait(success((setHealthyZone(db, "IgnoreSSFailures"_sr, 0))));
 				printf("Data distribution is disabled for storage server failures.\n");
 			} else if (tokencmp(tokens[2], "rebalance")) {
 				wait(setDDIgnoreRebalanceOn(db, DDIgnore::REBALANCE_DISK | DDIgnore::REBALANCE_READ));

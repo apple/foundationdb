@@ -72,16 +72,17 @@ struct ConfigBroadcastSnapshotRequest {
 	static constexpr FileIdentifier file_identifier = 10911925;
 	Version version{ 0 };
 	std::map<ConfigKey, KnobValue> snapshot;
+	double restartDelay{ 0.0 };
 	ReplyPromise<ConfigBroadcastSnapshotReply> reply;
 
 	ConfigBroadcastSnapshotRequest() = default;
 	template <class Snapshot>
-	explicit ConfigBroadcastSnapshotRequest(Version version, Snapshot&& snapshot)
-	  : version(version), snapshot(std::forward<Snapshot>(snapshot)) {}
+	explicit ConfigBroadcastSnapshotRequest(Version version, Snapshot&& snapshot, double restartDelay)
+	  : version(version), snapshot(std::forward<Snapshot>(snapshot)), restartDelay(restartDelay) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, snapshot, reply);
+		serializer(ar, version, snapshot, restartDelay, reply);
 	}
 };
 
@@ -98,31 +99,35 @@ struct ConfigBroadcastChangesReply {
 
 struct ConfigBroadcastChangesRequest {
 	static constexpr FileIdentifier file_identifier = 601281;
-	Version mostRecentVersion;
+	Version mostRecentVersion{ 0 };
 	Standalone<VectorRef<VersionedConfigMutationRef>> changes;
+	double restartDelay{ 0.0 };
 	ReplyPromise<ConfigBroadcastChangesReply> reply;
 
 	ConfigBroadcastChangesRequest() = default;
 	explicit ConfigBroadcastChangesRequest(Version mostRecentVersion,
-	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes)
-	  : mostRecentVersion(mostRecentVersion), changes(changes) {}
+	                                       Standalone<VectorRef<VersionedConfigMutationRef>> const& changes,
+	                                       double restartDelay)
+	  : mostRecentVersion(mostRecentVersion), changes(changes), restartDelay(restartDelay) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, mostRecentVersion, changes, reply);
+		serializer(ar, mostRecentVersion, changes, restartDelay, reply);
 	}
 };
 
 struct ConfigBroadcastRegisteredReply {
 	static constexpr FileIdentifier file_identifier = 12041047;
-	bool registered;
+	bool registered{ false };
+	Version lastSeenVersion{ 0 };
 
 	ConfigBroadcastRegisteredReply() = default;
-	explicit ConfigBroadcastRegisteredReply(bool registered) : registered(registered) {}
+	explicit ConfigBroadcastRegisteredReply(bool registered, Version lastSeenVersion)
+	  : registered(registered), lastSeenVersion(lastSeenVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, registered);
+		serializer(ar, registered, lastSeenVersion);
 	}
 };
 
@@ -151,13 +156,23 @@ struct ConfigBroadcastReadyReply {
 
 struct ConfigBroadcastReadyRequest {
 	static constexpr FileIdentifier file_identifier = 7402862;
+	CoordinatorsHash coordinatorsHash{ 0 };
+	std::map<ConfigKey, KnobValue> snapshot;
+	Version snapshotVersion{ 0 };
+	Version liveVersion{ 0 };
 	ReplyPromise<ConfigBroadcastReadyReply> reply;
 
 	ConfigBroadcastReadyRequest() = default;
+	ConfigBroadcastReadyRequest(CoordinatorsHash coordinatorsHash,
+	                            std::map<ConfigKey, KnobValue> const& snapshot,
+	                            Version snapshotVersion,
+	                            Version liveVersion)
+	  : coordinatorsHash(coordinatorsHash), snapshot(snapshot), snapshotVersion(snapshotVersion),
+	    liveVersion(liveVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reply);
+		serializer(ar, coordinatorsHash, snapshot, snapshotVersion, liveVersion, reply);
 	}
 };
 
@@ -180,6 +195,7 @@ public:
 	bool operator==(ConfigBroadcastInterface const& rhs) const { return (_id == rhs._id); }
 	bool operator!=(ConfigBroadcastInterface const& rhs) const { return !(*this == rhs); }
 	UID id() const { return _id; }
+	NetworkAddress address() const { return snapshot.getEndpoint().getPrimaryAddress(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

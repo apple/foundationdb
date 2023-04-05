@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -28,6 +27,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LowLatencyWorkload : TestWorkload {
+	static constexpr auto NAME = "LowLatency";
+
 	double testDuration;
 	double maxGRVLatency;
 	double maxCommitLatency;
@@ -39,15 +40,15 @@ struct LowLatencyWorkload : TestWorkload {
 
 	LowLatencyWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), operations("Operations"), retries("Retries"), ok(true) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600.0);
-		maxGRVLatency = getOption(options, LiteralStringRef("maxGRVLatency"), 20.0);
-		maxCommitLatency = getOption(options, LiteralStringRef("maxCommitLatency"), 30.0);
-		checkDelay = getOption(options, LiteralStringRef("checkDelay"), 1.0);
-		testWrites = getOption(options, LiteralStringRef("testWrites"), true);
-		testKey = getOption(options, LiteralStringRef("testKey"), LiteralStringRef("testKey"));
+		testDuration = getOption(options, "testDuration"_sr, 600.0);
+		maxGRVLatency = getOption(options, "maxGRVLatency"_sr, 20.0);
+		maxCommitLatency = getOption(options, "maxCommitLatency"_sr, 30.0);
+		checkDelay = getOption(options, "checkDelay"_sr, 1.0);
+		testWrites = getOption(options, "testWrites"_sr, true);
+		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
 
-	std::string description() const override { return "LowLatency"; }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
@@ -81,7 +82,7 @@ struct LowLatencyWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 						if (doCommit) {
-							tr.set(self->testKey, LiteralStringRef(""));
+							tr.set(self->testKey, ""_sr);
 							wait(tr.commit());
 						} else {
 							wait(success(tr.getReadVersion()));
@@ -120,4 +121,4 @@ struct LowLatencyWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory("LowLatency");
+WorkloadFactory<LowLatencyWorkload> LowLatencyWorkloadFactory;

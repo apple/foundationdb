@@ -22,9 +22,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/IKeyValueStore.h"
-#include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/QuietDatabase.h"
+#include "fdbserver/ServerCheckpoint.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
@@ -44,6 +44,8 @@ std::string printValue(const ErrorOr<Optional<Value>>& value) {
 } // namespace
 
 struct PhysicalShardMoveWorkLoad : TestWorkload {
+	static constexpr auto NAME = "PhysicalShardMove";
+
 	FlowLock startMoveKeysParallelismLock;
 	FlowLock finishMoveKeysParallelismLock;
 	FlowLock cleanUpDataMoveParallelismLock;
@@ -59,8 +61,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		pass = false;
 	}
 
-	std::string description() const override { return "PhysicalShardMove"; }
-
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
 	Future<Void> start(Database const& cx) override {
@@ -70,10 +70,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		return _start(this, cx);
 	}
 
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert("RandomMoveKeys");
+		out.insert("Attrition");
+	}
+
 	ACTOR Future<Void> _start(PhysicalShardMoveWorkLoad* self, Database cx) {
 		int ignore = wait(setDDMode(cx, 0));
+		state std::vector<UID> teamA;
 		state std::map<Key, Value> kvs({ { "TestKeyA"_sr, "TestValueA"_sr },
+		                                 { "TestKeyAB"_sr, "TestValueAB"_sr },
+		                                 { "TestKeyAD"_sr, "TestValueAD"_sr },
 		                                 { "TestKeyB"_sr, "TestValueB"_sr },
+		                                 { "TestKeyBA"_sr, "TestValueBA"_sr },
 		                                 { "TestKeyC"_sr, "TestValueC"_sr },
 		                                 { "TestKeyD"_sr, "TestValueD"_sr },
 		                                 { "TestKeyE"_sr, "TestValueE"_sr },
@@ -86,13 +95,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
-		std::vector<UID> teamA = wait(self->moveShard(self,
-		                                              cx,
-		                                              deterministicRandom()->randomUniqueID(),
-		                                              KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
-		                                              teamSize,
-		                                              includes,
-		                                              excludes));
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           deterministicRandom()->randomUniqueID(),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
 		excludes.insert(teamA.begin(), teamA.end());
 
 		state uint64_t sh0 = deterministicRandom()->randomUInt64();
@@ -100,13 +110,49 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state uint64_t sh2 = deterministicRandom()->randomUInt64();
 
 		// Move range [TestKeyA, TestKeyB) to sh0.
-		state std::vector<UID> teamA = wait(self->moveShard(self,
+		wait(store(teamA,
+		           self->moveShard(self,
+		                           cx,
+		                           UID(sh0, deterministicRandom()->randomUInt64()),
+		                           KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                           teamSize,
+		                           includes,
+		                           excludes)));
+		TraceEvent(SevDebug, "TestMovedRange").detail("Range", KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+
+		state std::vector<KeyRange> checkpointRanges;
+		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
+
+		// Move range [TestKeyD, TestKeyF) to sh0;
+		includes.insert(teamA.begin(), teamA.end());
+		state std::vector<UID> teamE = wait(self->moveShard(self,
 		                                                    cx,
 		                                                    UID(sh0, deterministicRandom()->randomUInt64()),
-		                                                    KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                                                    KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr),
 		                                                    teamSize,
 		                                                    includes,
 		                                                    excludes));
+		ASSERT(std::equal(teamA.begin(), teamA.end(), teamE.begin()));
+
+		state int teamIdx = 0;
+		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
+			TraceEvent("TestGettingServerShards", teamA[teamIdx])
+			    .detail("Range", KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr));
+			std::vector<StorageServerShard> shards =
+			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr)));
+			ASSERT(shards.size() == 1);
+			ASSERT(shards[0].desiredId == sh0);
+			ASSERT(shards[0].id == sh0);
+			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
+		}
+
+		checkpointRanges.clear();
+		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False, &kvs));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
@@ -119,7 +165,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                                                    excludes));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamB.begin()));
 
-		state int teamIdx = 0;
+		teamIdx = 0;
 		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
 			std::vector<StorageServerShard> shards =
 			    wait(self->getStorageServerShards(cx, teamA[teamIdx], KeyRangeRef("TestKeyA"_sr, "TestKeyC"_sr)));
@@ -128,6 +174,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			ASSERT(shards[1].desiredId == sh1);
 			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
 		}
+
+		checkpointRanges.clear();
+		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		checkpointRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
+		std::vector<KeyRange> restoreRanges;
+		restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		restoreRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
+		wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True, &kvs));
 
 		state std::vector<UID> teamC = wait(self->moveShard(self,
 		                                                    cx,
@@ -151,15 +205,157 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
 		TraceEvent("TestValueVerified").log();
 
-		int ignore = wait(setDDMode(cx, 1));
+		{
+			int _ = wait(setDDMode(cx, 1));
+			(void)_;
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> checkpointRestore(PhysicalShardMoveWorkLoad* self,
+	                                     Database cx,
+	                                     std::vector<KeyRange> checkpointRanges,
+	                                     std::vector<KeyRange> restoreRanges,
+	                                     CheckpointAsKeyValues asKeyValues,
+	                                     std::map<Key, Value>* kvs) {
+
+		// Create checkpoint.
+		TraceEvent(SevDebug, "TestCreatingCheckpoint").detail("Ranges", describe(checkpointRanges));
+		state Transaction tr(cx);
+		state CheckpointFormat format = DataMoveRocksCF;
+		state UID dataMoveId = deterministicRandom()->randomUniqueID();
+		state Version version;
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				wait(createCheckpoint(&tr, checkpointRanges, format, dataMoveId));
+				wait(tr.commit());
+				version = tr.getCommittedVersion();
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		// Fetch checkpoint meta data.
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
+		loop {
+			records.clear();
+			try {
+				wait(store(records,
+				           getCheckpointMetaData(cx, restoreRanges, version, format, Optional<UID>(dataMoveId))));
+				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
+				    .detail("Range", describe(checkpointRanges))
+				    .detail("Version", version);
+
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestFetchCheckpointMetadataError")
+				    .errorUnsuppressed(e)
+				    .detail("Range", describe(checkpointRanges))
+				    .detail("Version", version);
+
+				// The checkpoint was just created, we don't expect this error.
+				ASSERT(e.code() != error_code_checkpoint_not_found);
+			}
+		}
+
+		// Fetch checkpoint.
+		state std::string checkpointDir = abspath("fetchedCheckpoints" + deterministicRandom()->randomAlphaNumeric(6));
+		platform::eraseDirectoryRecursive(checkpointDir);
+		ASSERT(platform::createDirectory(checkpointDir));
+		state std::vector<Future<CheckpointMetaData>> checkpointFutures;
+		state std::vector<CheckpointMetaData> fetchedCheckpoints;
+		loop {
+			checkpointFutures.clear();
+			try {
+				for (int i = 0; i < records.size(); ++i) {
+					TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
+					state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+					platform::eraseDirectoryRecursive(currentDir);
+					ASSERT(platform::createDirectory(currentDir));
+					if (asKeyValues) {
+						checkpointFutures.push_back(
+						    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
+					} else {
+						checkpointFutures.push_back(fetchCheckpoint(cx, records[i].second, currentDir));
+					}
+				}
+				wait(store(fetchedCheckpoints, getAll(checkpointFutures)));
+				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestFetchCheckpointError").errorUnsuppressed(e);
+			}
+		}
+
+		// Restore KVS.
+		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
+		state std::string shardId = "restored-shard";
+		state IKeyValueStore* kvStore = keyValueStoreShardedRocksDB(
+		    rocksDBTestDir, deterministicRandom()->randomUniqueID(), KeyValueStoreType::SSD_SHARDED_ROCKSDB);
+		wait(kvStore->init());
+		try {
+			wait(kvStore->restore(shardId, restoreRanges, fetchedCheckpoints));
+		} catch (Error& e) {
+			TraceEvent(SevError, "TestRestoreCheckpointError")
+			    .errorUnsuppressed(e)
+			    .detail("Checkpoint", describe(fetchedCheckpoints));
+		}
+
+		TraceEvent(SevDebug, "TestCheckpointRestored").detail("Checkpoint", describe(fetchedCheckpoints));
+
+		// Validate the restored kv-store.
+		RangeResult kvRange = wait(kvStore->readRange(normalKeys));
+		ASSERT(!kvRange.more);
+		std::unordered_map<Key, Value> kvsKvs;
+		for (int i = 0; i < kvRange.size(); ++i) {
+			kvsKvs[kvRange[i].key] = kvRange[i].value;
+		}
+
+		auto containsKey = [](std::vector<KeyRange> ranges, KeyRef key) {
+			for (const auto& range : ranges) {
+				if (range.contains(key)) {
+					return true;
+				}
+			}
+			return false;
+		};
+
+		int count = 0;
+		for (const auto& [key, value] : *kvs) {
+			if (containsKey(restoreRanges, key)) {
+				TraceEvent(SevDebug, "TestExpectKeyValueMatch").detail("Key", key).detail("Value", value);
+				auto it = kvsKvs.find(key);
+				ASSERT(it != kvsKvs.end() && it->second == value);
+				++count;
+			}
+		}
+
+		ASSERT(kvsKvs.size() == count);
+
+		TraceEvent(SevDebug, "TestCheckpointVerified").detail("Checkpoint", describe(fetchedCheckpoints));
+
+		Future<Void> close = kvStore->onClosed();
+		kvStore->dispose();
+		wait(close);
+		platform::eraseDirectoryRecursive(rocksDBTestDir);
+		platform::eraseDirectoryRecursive(checkpointDir);
+
+		TraceEvent(SevDebug, "TestRocksDBClosed").detail("Checkpoint", describe(fetchedCheckpoints));
+
 		return Void();
 	}
 
 	ACTOR Future<Version> populateData(PhysicalShardMoveWorkLoad* self, Database cx, std::map<Key, Value>* kvs) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr->debugTransaction(debugID);
 				for (const auto& [key, value] : *kvs) {
@@ -186,8 +382,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	                                KeyRange range,
 	                                std::map<Key, Value>* kvs) {
 		state Transaction tr(cx);
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr.debugTransaction(debugID);
 				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
@@ -213,11 +410,13 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	                                 Key key,
 	                                 ErrorOr<Optional<Value>> expectedValue) {
 		state Transaction tr(cx);
+		state Version readVersion;
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		loop {
 			try {
-				state Version readVersion = wait(tr.getReadVersion());
+				Version _readVersion = wait(tr.getReadVersion());
+				readVersion = _readVersion;
 				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
@@ -242,8 +441,9 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		// state Transaction tr(cx);
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		state Version version;
+		state UID debugID;
 		loop {
-			state UID debugID = deterministicRandom()->randomUniqueID();
+			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr->debugTransaction(debugID);
@@ -295,7 +495,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		state std::vector<UID> dests(includes.begin(), includes.end());
 		state UID owner = deterministicRandom()->randomUniqueID();
-		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
 
 		state Transaction tr(cx);
@@ -321,24 +520,25 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					                     dataMoveId,
 					                     moveKeysLock,
 					                     &self->cleanUpDataMoveParallelismLock,
-					                     dataMove.range,
+					                     dataMove.ranges.front(),
 					                     &ddEnabledState));
 					TraceEvent("TestCancelDataMoveEnd").detail("DataMove", dataMove.toString());
 				}
 
 				TraceEvent("TestMoveShardStartMoveKeys").detail("DataMove", dataMoveId);
 				wait(moveKeys(cx,
-				              dataMoveId,
-				              keys,
-				              dests,
-				              dests,
-				              moveKeysLock,
-				              Promise<Void>(),
-				              &self->startMoveKeysParallelismLock,
-				              &self->finishMoveKeysParallelismLock,
-				              false,
-				              deterministicRandom()->randomUniqueID(), // for logging only
-				              &ddEnabledState));
+				              MoveKeysParams(dataMoveId,
+				                             std::vector<KeyRange>{ keys },
+				                             dests,
+				                             dests,
+				                             moveKeysLock,
+				                             Promise<Void>(),
+				                             &self->startMoveKeysParallelismLock,
+				                             &self->finishMoveKeysParallelismLock,
+				                             false,
+				                             deterministicRandom()->randomUniqueID(), // for logging only
+				                             &ddEnabledState,
+				                             CancelConflictingDataMoves::False)));
 				break;
 			} catch (Error& e) {
 				if (e.code() == error_code_movekeys_conflict) {
@@ -376,4 +576,4 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory("PhysicalShardMove");
+WorkloadFactory<PhysicalShardMoveWorkLoad> PhysicalShardMoveWorkLoadFactory;

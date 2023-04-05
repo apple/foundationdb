@@ -193,9 +193,9 @@ public:
 	int insert(const std::vector<std::pair<T, Metric>>& data, bool replaceExisting = true);
 
 	// Increase the metric for the given item by the given amount.  Inserts data into the set if it
-	//   doesn't exist. Returns the new sum.
+	//   doesn't exist. Returns the pair of new sum and inserted iterator.
 	template <class T_, class Metric_>
-	Metric addMetric(T_&& data, Metric_&& metric);
+	std::pair<Metric, iterator> addMetric(T_&& data, Metric_&& metric);
 
 	// Remove the data item, if any, which is equal to key
 	template <class Key>
@@ -820,15 +820,16 @@ typename IndexedSet<T, Metric>::template Impl<isConst>::IteratorT IndexedSet<T, 
 
 template <class T, class Metric>
 template <class T_, class Metric_>
-Metric IndexedSet<T, Metric>::addMetric(T_&& data, Metric_&& metric) {
+std::pair<Metric, typename IndexedSet<T, Metric>::iterator> IndexedSet<T, Metric>::addMetric(T_&& data,
+                                                                                             Metric_&& metric) {
 	auto i = find(data);
 	if (i == end()) {
-		insert(std::forward<T_>(data), std::forward<Metric_>(metric));
-		return metric;
+		auto it = insert(std::forward<T_>(data), std::forward<Metric_>(metric));
+		return { metric, it };
 	} else {
 		Metric m = metric + getMetric(i);
-		insert(std::forward<T_>(data), m);
-		return m;
+		auto it = insert(std::forward<T_>(data), m);
+		return { m, it };
 	}
 }
 

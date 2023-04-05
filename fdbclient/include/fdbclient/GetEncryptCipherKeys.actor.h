@@ -18,6 +18,8 @@
  * limitations under the License.
  */
 #pragma once
+#include "flow/EncryptUtils.h"
+#include "flow/genericactors.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_ACTOR_G_H
 #include "fdbclient/GetEncryptCipherKeys.actor.g.h"
@@ -26,10 +28,13 @@
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/Knobs.h"
 #include "fdbrpc/Stats.h"
+#include "fdbrpc/TenantInfo.h"
 #include "flow/Knobs.h"
 #include "flow/IRandom.h"
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -37,7 +42,7 @@
 
 template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
-	return db->get().encryptKeyProxy.template map<UID>([](EncryptKeyProxyInterface proxy) { return proxy.id(); });
+	return db->get().encryptKeyProxy.map(&EncryptKeyProxyInterface::id);
 }
 
 ACTOR template <class T>
@@ -51,7 +56,7 @@ Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 			break;
 		}
 	}
-	TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyChanged")
+	TraceEvent("GetEncryptCipherKeysEncryptKeyProxyChanged")
 	    .detail("PreviousProxyId", previousProxyId.orDefault(UID()))
 	    .detail("CurrentProxyId", currentProxyId.orDefault(UID()));
 	return Void();
@@ -59,23 +64,24 @@ Future<Void> onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 
 ACTOR template <class T>
 Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                                           EKPGetLatestBaseCipherKeysRequest request) {
+                                                                           EKPGetLatestBaseCipherKeysRequest request,
+                                                                           BlobCipherMetrics::UsageType usageType) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetLatestEncryptCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetLatestEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
 		return Never();
 	}
 	request.reply.reset();
 	try {
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_RequestFailed").error(reply.error.get());
+			TraceEvent(SevWarn, "GetLatestEncryptCipherKeysRequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
 		}
 		return reply;
 	} catch (Error& e) {
-		TraceEvent("GetLatestEncryptCipherKeys_CaughtError").error(e);
+		TraceEvent("GetLatestEncryptCipherKeysCaughtError").error(e);
 		if (e.code() == error_code_broken_promise) {
 			// Wait for onEncryptKeyProxyChange.
 			return Never();
@@ -90,38 +96,37 @@ Future<EKPGetLatestBaseCipherKeysReply> getUncachedLatestEncryptCipherKeys(Refer
 ACTOR template <class T>
 Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getLatestEncryptCipherKeys(
     Reference<AsyncVar<T> const> db,
-    std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains,
+    std::unordered_set<EncryptCipherDomainId> domainIds,
     BlobCipherMetrics::UsageType usageType) {
 	state Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	state std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys;
 	state EKPGetLatestBaseCipherKeysRequest request;
 
 	if (!db.isValid()) {
-		TraceEvent(SevError, "GetLatestEncryptCipherKeys_ServerDBInfoNotAvailable");
+		TraceEvent(SevError, "GetLatestEncryptCipherKeysServerDBInfoNotAvailable");
 		throw encrypt_ops_error();
 	}
 
 	// Collect cached cipher keys.
-	for (auto& domain : domains) {
-		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domain.first /*domainId*/);
+	for (auto& domainId : domainIds) {
+		Reference<BlobCipherKey> cachedCipherKey = cipherKeyCache->getLatestCipherKey(domainId);
 		if (cachedCipherKey.isValid()) {
-			cipherKeys[domain.first] = cachedCipherKey;
+			cipherKeys[domainId] = cachedCipherKey;
 		} else {
-			request.encryptDomainInfos.emplace_back(
-			    domain.first /*domainId*/, domain.second /*domainName*/, request.arena);
+			request.encryptDomainIds.emplace_back(domainId);
 		}
 	}
-	if (request.encryptDomainInfos.empty()) {
+	if (request.encryptDomainIds.empty()) {
 		return cipherKeys;
 	}
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
 	loop choose {
-		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request))) {
+		when(EKPGetLatestBaseCipherKeysReply reply = wait(getUncachedLatestEncryptCipherKeys(db, request, usageType))) {
 			// Insert base cipher keys into cache and construct result.
 			for (const EKPBaseCipherDetails& details : reply.baseCipherDetails) {
 				EncryptCipherDomainId domainId = details.encryptDomainId;
-				if (domains.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
+				if (domainIds.count(domainId) > 0 && cipherKeys.count(domainId) == 0) {
 					Reference<BlobCipherKey> cipherKey = cipherKeyCache->insertCipherKey(domainId,
 					                                                                     details.baseCipherId,
 					                                                                     details.baseCipherKey.begin(),
@@ -133,9 +138,9 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 				}
 			}
 			// Check for any missing cipher keys.
-			for (auto& domain : request.encryptDomainInfos) {
-				if (cipherKeys.count(domain.domainId) == 0) {
-					TraceEvent(SevWarn, "GetLatestEncryptCipherKeys_KeyMissing").detail("DomainId", domain.domainId);
+			for (auto domainId : request.encryptDomainIds) {
+				if (cipherKeys.count(domainId) == 0) {
+					TraceEvent(SevWarn, "GetLatestEncryptCipherKeysKeyMissing").detail("DomainId", domainId);
 					throw encrypt_key_not_found();
 				}
 			}
@@ -150,25 +155,52 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> getL
 	return cipherKeys;
 }
 
+// Get latest cipher key for given a encryption domain. It tries to get the cipher key from the local cache.
+// In case of cache miss, it fetches the cipher key from EncryptKeyProxy and put the result in the local cache
+// before return.
+ACTOR template <class T>
+Future<Reference<BlobCipherKey>> getLatestEncryptCipherKey(Reference<AsyncVar<T> const> db,
+                                                           EncryptCipherDomainId domainId,
+                                                           BlobCipherMetrics::UsageType usageType) {
+	std::unordered_set<EncryptCipherDomainId> domainIds{ domainId };
+	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKey =
+	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
+
+	return cipherKey.at(domainId);
+}
+
 ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
-                                                                    EKPGetBaseCipherKeysByIdsRequest request) {
+                                                                    EKPGetBaseCipherKeysByIdsRequest request,
+                                                                    BlobCipherMetrics::UsageType usageType) {
 	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetEncryptCipherKeys_EncryptKeyProxyNotPresent");
+		TraceEvent("GetEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
 		return Never();
 	}
 	request.reply.reset();
 	try {
 		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
-			TraceEvent(SevWarn, "GetEncryptCipherKeys_RequestFailed").error(reply.error.get());
+			TraceEvent(SevWarn, "GetEncryptCipherKeysRequestFailed").error(reply.error.get());
 			throw encrypt_keys_fetch_failed();
+		}
+		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
+			std::unordered_set<int64_t> tenantIdsToDrop =
+			    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
+			if (!tenantIdsToDrop.count(TenantInfo::INVALID_TENANT)) {
+				for (auto& baseCipherInfo : request.baseCipherInfos) {
+					if (tenantIdsToDrop.count(baseCipherInfo.domainId)) {
+						TraceEvent("GetEncryptCipherKeysSimulatedError").detail("DomainId", baseCipherInfo.domainId);
+						throw encrypt_keys_fetch_failed();
+					}
+				}
+			}
 		}
 		return reply;
 	} catch (Error& e) {
-		TraceEvent("GetEncryptCipherKeys_CaughtError").error(e);
+		TraceEvent("GetEncryptCipherKeysCaughtError").error(e);
 		if (e.code() == error_code_broken_promise) {
 			// Wait for onEncryptKeyProxyChange.
 			return Never();
@@ -193,7 +225,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 	state EKPGetBaseCipherKeysByIdsRequest request;
 
 	if (!db.isValid()) {
-		TraceEvent(SevError, "GetEncryptCipherKeys_ServerDBInfoNotAvailable");
+		TraceEvent(SevError, "GetEncryptCipherKeysServerDBInfoNotAvailable");
 		throw encrypt_ops_error();
 	}
 
@@ -211,13 +243,12 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 		return cipherKeys;
 	}
 	for (const BaseCipherIndex& id : uncachedBaseCipherIds) {
-		request.baseCipherInfos.emplace_back(
-		    id.first /*domainId*/, id.second /*baseCipherId*/, StringRef() /*domainName*/, request.arena);
+		request.baseCipherInfos.emplace_back(id.first /*domainId*/, id.second /*baseCipherId*/);
 	}
 	// Fetch any uncached cipher keys.
 	state double startTime = now();
 	loop choose {
-		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request))) {
+		when(EKPGetBaseCipherKeysByIdsReply reply = wait(getUncachedEncryptCipherKeys(db, request, usageType))) {
 			std::unordered_map<BaseCipherIndex, EKPBaseCipherDetails, boost::hash<BaseCipherIndex>> baseCipherKeys;
 			for (const EKPBaseCipherDetails& baseDetails : reply.baseCipherDetails) {
 				BaseCipherIndex baseIdx = std::make_pair(baseDetails.encryptDomainId, baseDetails.baseCipherId);
@@ -231,7 +262,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> getEncry
 				BaseCipherIndex baseIdx = std::make_pair(details.encryptDomainId, details.baseCipherId);
 				const auto& itr = baseCipherKeys.find(baseIdx);
 				if (itr == baseCipherKeys.end()) {
-					TraceEvent(SevError, "GetEncryptCipherKeys_KeyMissing")
+					TraceEvent(SevError, "GetEncryptCipherKeysKeyMissing")
 					    .detail("DomainId", details.encryptDomainId)
 					    .detail("BaseCipherId", details.baseCipherId);
 					throw encrypt_key_not_found();
@@ -265,13 +296,11 @@ struct TextAndHeaderCipherKeys {
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<AsyncVar<T> const> db,
                                                                     EncryptCipherDomainId domainId,
-                                                                    EncryptCipherDomainNameRef domainName,
                                                                     BlobCipherMetrics::UsageType usageType) {
-	std::unordered_map<EncryptCipherDomainId, EncryptCipherDomainNameRef> domains;
-	domains[domainId] = domainName;
-	domains[ENCRYPT_HEADER_DOMAIN_ID] = FDB_DEFAULT_ENCRYPT_DOMAIN_NAME;
+	// TODO: Do not fetch header cipher key if authentication is diabled.
+	std::unordered_set<EncryptCipherDomainId> domainIds = { domainId, ENCRYPT_HEADER_DOMAIN_ID };
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> cipherKeys =
-	    wait(getLatestEncryptCipherKeys(db, domains, usageType));
+	    wait(getLatestEncryptCipherKeys(db, domainIds, usageType));
 	ASSERT(cipherKeys.count(domainId) > 0);
 	ASSERT(cipherKeys.count(ENCRYPT_HEADER_DOMAIN_ID) > 0);
 	TextAndHeaderCipherKeys result{ cipherKeys.at(domainId), cipherKeys.at(ENCRYPT_HEADER_DOMAIN_ID) };
@@ -283,23 +312,78 @@ Future<TextAndHeaderCipherKeys> getLatestEncryptCipherKeysForDomain(Reference<As
 template <class T>
 Future<TextAndHeaderCipherKeys> getLatestSystemEncryptCipherKeys(const Reference<AsyncVar<T> const>& db,
                                                                  BlobCipherMetrics::UsageType usageType) {
-	return getLatestEncryptCipherKeysForDomain(
-	    db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, FDB_DEFAULT_ENCRYPT_DOMAIN_NAME, usageType);
+	return getLatestEncryptCipherKeysForDomain(db, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, usageType);
 }
 
 ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                      BlobCipherEncryptHeader header,
                                                      BlobCipherMetrics::UsageType usageType) {
-	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails, header.cipherHeaderDetails };
+	state bool authenticatedEncryption = header.flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
+
+	ASSERT(header.cipherTextDetails.isValid());
+	ASSERT(!authenticatedEncryption || header.cipherHeaderDetails.isValid());
+
+	std::unordered_set<BlobCipherDetails> cipherDetails{ header.cipherTextDetails };
+	if (authenticatedEncryption) {
+		cipherDetails.insert(header.cipherHeaderDetails);
+	}
+
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
 	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
-	ASSERT(cipherKeys.count(header.cipherTextDetails) > 0);
-	ASSERT(cipherKeys.count(header.cipherHeaderDetails) > 0);
-	TextAndHeaderCipherKeys result{ cipherKeys.at(header.cipherTextDetails),
-		                            cipherKeys.at(header.cipherHeaderDetails) };
-	ASSERT(result.cipherTextKey.isValid());
-	ASSERT(result.cipherHeaderKey.isValid());
+
+	TextAndHeaderCipherKeys result;
+	auto setCipherKey = [&](const BlobCipherDetails& details, TextAndHeaderCipherKeys& result) {
+		ASSERT(details.isValid());
+		auto iter = cipherKeys.find(details);
+		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+		isEncryptHeaderDomain(details.encryptDomainId) ? result.cipherHeaderKey = iter->second
+		                                               : result.cipherTextKey = iter->second;
+	};
+	setCipherKey(header.cipherTextDetails, result);
+	if (authenticatedEncryption) {
+		setCipherKey(header.cipherHeaderDetails, result);
+	}
+	ASSERT(result.cipherTextKey.isValid() && (!authenticatedEncryption || result.cipherHeaderKey.isValid()));
+
+	return result;
+}
+
+ACTOR template <class T>
+Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
+                                                     BlobCipherEncryptHeaderRef header,
+                                                     BlobCipherMetrics::UsageType usageType) {
+	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
+
+	state bool authenticatedEncryption = header.getAuthTokenMode() != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
+	state EncryptHeaderCipherDetails details = header.getCipherDetails();
+
+	ASSERT(details.textCipherDetails.isValid());
+	ASSERT(!authenticatedEncryption ||
+	       (details.headerCipherDetails.present() && details.headerCipherDetails.get().isValid()));
+
+	std::unordered_set<BlobCipherDetails> cipherDetails{ details.textCipherDetails };
+	if (authenticatedEncryption) {
+		cipherDetails.insert(details.headerCipherDetails.get());
+	}
+
+	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys =
+	    wait(getEncryptCipherKeys(db, cipherDetails, usageType));
+	TextAndHeaderCipherKeys result;
+
+	auto setCipherKey = [&](const BlobCipherDetails& details, TextAndHeaderCipherKeys& result) {
+		ASSERT(details.isValid());
+		auto iter = cipherKeys.find(details);
+		ASSERT(iter != cipherKeys.end() && iter->second.isValid());
+		isEncryptHeaderDomain(details.encryptDomainId) ? result.cipherHeaderKey = iter->second
+		                                               : result.cipherTextKey = iter->second;
+	};
+	setCipherKey(details.textCipherDetails, result);
+	if (authenticatedEncryption) {
+		setCipherKey(details.headerCipherDetails.get(), result);
+	}
+	ASSERT(result.cipherTextKey.isValid() && (!authenticatedEncryption || result.cipherHeaderKey.isValid()));
+
 	return result;
 }
 

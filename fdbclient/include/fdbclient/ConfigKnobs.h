@@ -25,6 +25,8 @@
 
 #include "fdbclient/FDBTypes.h"
 
+typedef uint64_t CoordinatorsHash;
+
 /*
  * KnobValueRefs are stored in the configuration database, and in local configuration files. They are created from
  * ParsedKnobValue objects, so it is assumed that the value type is correct for the corresponding knob name

@@ -26,6 +26,7 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/StorageServerInterface.h"
+#include "fdbrpc/TimedRequest.h"
 #include <iterator>
 
 struct TLogInterface {
@@ -51,6 +52,7 @@ struct TLogInterface {
 	RequestStream<struct TLogDisablePopRequest> disablePopRequest;
 	RequestStream<struct TLogEnablePopRequest> enablePopRequest;
 	RequestStream<struct TLogSnapRequest> snapRequest;
+	RequestStream<struct TrackTLogRecoveryRequest> trackRecovery;
 
 	TLogInterface() {}
 	explicit TLogInterface(const LocalityData& locality)
@@ -84,6 +86,7 @@ struct TLogInterface {
 		streams.push_back(enablePopRequest.getReceiver());
 		streams.push_back(snapRequest.getReceiver());
 		streams.push_back(peekStreamMessages.getReceiver(TaskPriority::TLogPeek));
+		streams.push_back(trackRecovery.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 
@@ -112,6 +115,8 @@ struct TLogInterface {
 			snapRequest = RequestStream<struct TLogSnapRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(10));
 			peekStreamMessages =
 			    RequestStream<struct TLogPeekStreamRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(11));
+			trackRecovery =
+			    RequestStream<struct TrackTLogRecoveryRequest>(peekMessages.getEndpoint().getAdjustedEndpoint(12));
 		}
 	}
 };
@@ -294,7 +299,7 @@ struct TLogCommitReply {
 	}
 };
 
-struct TLogCommitRequest {
+struct TLogCommitRequest : TimedRequest {
 	constexpr static FileIdentifier file_identifier = 4022206;
 	SpanContext spanContext;
 	Arena arena;
@@ -404,6 +409,38 @@ struct TLogSnapRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply, snapPayload, snapUID, role, arena);
+	}
+};
+
+struct TrackTLogRecoveryReply {
+	constexpr static FileIdentifier file_identifier = 5736775;
+
+	// This is the current oldest generation start version this TLog has. This generation is currently being recovered.
+	Version oldestUnrecoveredStartVersion;
+
+	TrackTLogRecoveryReply() = default;
+	explicit TrackTLogRecoveryReply(Version oldestUnrecoveredStartVersion)
+	  : oldestUnrecoveredStartVersion(oldestUnrecoveredStartVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, oldestUnrecoveredStartVersion);
+	}
+};
+
+struct TrackTLogRecoveryRequest {
+	constexpr static FileIdentifier file_identifier = 6876454;
+
+	// Reply when the TLog's oldest generation start version is higher than this version.
+	Version oldestGenStartVersion;
+	ReplyPromise<TrackTLogRecoveryReply> reply;
+
+	TrackTLogRecoveryRequest() {}
+	TrackTLogRecoveryRequest(Version oldestGenStartVersion) : oldestGenStartVersion(oldestGenStartVersion) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, oldestGenStartVersion, reply);
 	}
 };
 

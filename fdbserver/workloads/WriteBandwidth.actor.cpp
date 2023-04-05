@@ -20,7 +20,7 @@
 
 #include <boost/lexical_cast.hpp>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -29,26 +29,27 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteBandwidthWorkload : KVWorkload {
+	static constexpr auto NAME = "WriteBandwidth";
+
 	int keysPerTransaction;
 	double testDuration, warmingDelay, loadTime, maxInsertRate;
 	std::string valueString;
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> commitLatencies, GRVLatencies;
+	DDSketch<double> commitLatencies, GRVLatencies;
 
 	WriteBandwidthWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(2000),
-	    GRVLatencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		keysPerTransaction = getOption(options, LiteralStringRef("keysPerTransaction"), 100);
+	  : KVWorkload(wcx), loadTime(0.0), transactions("Transactions"), retries("Retries"), commitLatencies(),
+	    GRVLatencies() {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		keysPerTransaction = getOption(options, "keysPerTransaction"_sr, 100);
 		valueString = std::string(maxValueBytes, '.');
 
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
+		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 	}
 
-	std::string description() const override { return "WriteBandwidth"; }
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
@@ -139,4 +140,4 @@ struct WriteBandwidthWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<WriteBandwidthWorkload> WriteBandwidthWorkloadFactory("WriteBandwidth");
+WorkloadFactory<WriteBandwidthWorkload> WriteBandwidthWorkloadFactory;

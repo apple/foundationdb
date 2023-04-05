@@ -25,22 +25,20 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/RunTransaction.actor.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 struct SuspendProcessesWorkload : TestWorkload {
+	static constexpr auto NAME = "SuspendProcesses";
 	std::vector<std::string> prefixSuspendProcesses;
 	double suspendTimeDuration;
 	double waitTimeDuration;
 
 	SuspendProcessesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		prefixSuspendProcesses =
-		    getOption(options, LiteralStringRef("prefixesSuspendProcesses"), std::vector<std::string>());
-		waitTimeDuration = getOption(options, LiteralStringRef("waitTimeDuration"), 0);
-		suspendTimeDuration = getOption(options, LiteralStringRef("suspendTimeDuration"), 0);
+		prefixSuspendProcesses = getOption(options, "prefixesSuspendProcesses"_sr, std::vector<std::string>());
+		waitTimeDuration = getOption(options, "waitTimeDuration"_sr, 0);
+		suspendTimeDuration = getOption(options, "suspendTimeDuration"_sr, 0);
 	}
-
-	std::string description() const override { return "SuspendProcesses"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -51,16 +49,14 @@ struct SuspendProcessesWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult kvs = wait(tr.getRange(KeyRangeRef(LiteralStringRef("\xff\xff/worker_interfaces/"),
-				                                               LiteralStringRef("\xff\xff/worker_interfaces0")),
-				                                   CLIENT_KNOBS->TOO_MANY));
+				RangeResult kvs =
+				    wait(tr.getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
+				                     CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				std::vector<Standalone<StringRef>> suspendProcessInterfaces;
 				for (auto it : kvs) {
-					auto ip_port =
-					    (it.key.endsWith(LiteralStringRef(":tls")) ? it.key.removeSuffix(LiteralStringRef(":tls"))
-					                                               : it.key)
-					        .removePrefix(LiteralStringRef("\xff\xff/worker_interfaces/"));
+					auto ip_port = (it.key.endsWith(":tls"_sr) ? it.key.removeSuffix(":tls"_sr) : it.key)
+					                   .removePrefix("\xff\xff/worker_interfaces/"_sr);
 					for (auto& killProcess : self->prefixSuspendProcesses) {
 						if (boost::starts_with(ip_port.toString().c_str(), killProcess.c_str())) {
 							suspendProcessInterfaces.push_back(it.value);
@@ -90,4 +86,4 @@ struct SuspendProcessesWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<SuspendProcessesWorkload> SuspendProcessesWorkloadFactory("SuspendProcesses");
+WorkloadFactory<SuspendProcessesWorkload> SuspendProcessesWorkloadFactory;

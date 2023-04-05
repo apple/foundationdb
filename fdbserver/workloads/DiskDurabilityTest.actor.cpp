@@ -26,19 +26,19 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DiskDurabilityTest : TestWorkload {
+	static constexpr auto NAME = "DiskDurabilityTest";
 	bool enabled;
 	std::string filename;
 	KeyRange range, metrics;
 
 	DiskDurabilityTest(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		filename = getOption(options, LiteralStringRef("filename"), LiteralStringRef("durability_test.bin")).toString();
-		auto prefix = getOption(options, LiteralStringRef("prefix"), LiteralStringRef("/DiskDurabilityTest/"));
-		range = prefixRange(LiteralStringRef("S").withPrefix(prefix));
+		filename = getOption(options, "filename"_sr, "durability_test.bin"_sr).toString();
+		auto prefix = getOption(options, "prefix"_sr, "/DiskDurabilityTest/"_sr);
+		range = prefixRange("S"_sr.withPrefix(prefix));
 		metrics = prefixRange(prefix);
 	}
 
-	std::string description() const override { return "DiskDurabilityTest"; }
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled)
@@ -142,10 +142,10 @@ struct DiskDurabilityTest : TestWorkload {
 						tr.clear(self->encodeKey(targetPages[i]));
 
 					if (!first) {
-						Optional<Value> v = wait(tr.get(LiteralStringRef("syncs").withPrefix(self->metrics.begin)));
+						Optional<Value> v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
 						int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
 						count++;
-						tr.set(LiteralStringRef("syncs").withPrefix(self->metrics.begin), self->encodeValue(count));
+						tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));
 					}
 
 					wait(tr.commit());
@@ -184,4 +184,4 @@ struct DiskDurabilityTest : TestWorkload {
 		}
 	}
 };
-WorkloadFactory<DiskDurabilityTest> DiskDurabilityTestFactory("DiskDurabilityTest");
+WorkloadFactory<DiskDurabilityTest> DiskDurabilityTestFactory;

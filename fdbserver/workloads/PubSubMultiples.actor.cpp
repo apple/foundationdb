@@ -25,6 +25,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct PubSubMultiplesWorkload : TestWorkload {
+	static constexpr auto NAME = "PubSubMultiples";
+
 	double testDuration, messagesPerSecond;
 	int actorCount, inboxesPerActor;
 
@@ -32,13 +34,12 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	PerfIntCounter messages;
 
 	PubSubMultiplesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), messages("Messages") {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		messagesPerSecond = getOption(options, LiteralStringRef("messagesPerSecond"), 500.0) / clientCount;
-		actorCount = getOption(options, LiteralStringRef("actorsPerClient"), 20);
-		inboxesPerActor = getOption(options, LiteralStringRef("inboxesPerActor"), 20);
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		messagesPerSecond = getOption(options, "messagesPerSecond"_sr, 500.0) / clientCount;
+		actorCount = getOption(options, "actorsPerClient"_sr, 20);
+		inboxesPerActor = getOption(options, "inboxesPerActor"_sr, 20);
 	}
 
-	std::string description() const override { return "PubSubMultiplesWorkload"; }
 	Future<Void> setup(Database const& cx) override { return createNodes(this, cx); }
 	Future<Void> start(Database const& cx) override {
 		Future<Void> _ = startTests(this, cx);
@@ -114,4 +115,4 @@ struct PubSubMultiplesWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<PubSubMultiplesWorkload> PubSubMultiplesWorkloadFactory("PubSubMultiples");
+WorkloadFactory<PubSubMultiplesWorkload> PubSubMultiplesWorkloadFactory;

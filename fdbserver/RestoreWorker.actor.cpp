@@ -39,6 +39,7 @@
 #include "flow/ActorCollection.h"
 #include "fdbserver/RestoreWorker.actor.h"
 #include "fdbserver/RestoreController.actor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -366,13 +367,13 @@ ACTOR Future<Void> _restoreWorker(Database cx, LocalityData locality) {
 	// Protect restore worker from being killed in simulation;
 	// Future: Remove the protection once restore can tolerate failure
 	if (g_network->isSimulated()) {
-		auto addresses = g_simulator.getProcessByAddress(myWorkerInterf.address())->addresses;
+		auto addresses = g_simulator->getProcessByAddress(myWorkerInterf.address())->addresses;
 
-		g_simulator.protectedAddresses.insert(addresses.address);
+		g_simulator->protectedAddresses.insert(addresses.address);
 		if (addresses.secondaryAddress.present()) {
-			g_simulator.protectedAddresses.insert(addresses.secondaryAddress.get());
+			g_simulator->protectedAddresses.insert(addresses.secondaryAddress.get());
 		}
-		ISimulator::ProcessInfo* p = g_simulator.getProcessByAddress(myWorkerInterf.address());
+		ISimulator::ProcessInfo* p = g_simulator->getProcessByAddress(myWorkerInterf.address());
 		TraceEvent("ProtectRestoreWorker")
 		    .detail("Address", addresses.toString())
 		    .detail("IsReliable", p->isReliable())

@@ -34,9 +34,24 @@ private:
 		OP_READ_NO_MATERIALIZE,
 		OP_READ_FILE_LOAD_ERROR,
 		OP_READ_TOO_OLD,
-		OP_CANCEL_RANGES,
-		OP_LAST = OP_CANCEL_RANGES
+		OP_PURGE_UNALIGNED,
+		OP_BLOBBIFY_UNALIGNED,
+		OP_UNBLOBBIFY_UNALIGNED,
+		OP_CANCEL_GET_GRANULES,
+		OP_CANCEL_GET_RANGES,
+		OP_CANCEL_VERIFY,
+		OP_CANCEL_SUMMARIZE,
+		OP_CANCEL_BLOBBIFY,
+		OP_CANCEL_UNBLOBBIFY,
+		OP_CANCEL_PURGE,
+		OP_CANCEL_FLUSH,
+		OP_FLUSH_TOO_OLD,
+		OP_LAST = OP_FLUSH_TOO_OLD
 	};
+
+	void setup(TTaskFct cont) override { setupBlobGranules(cont); }
+
+	// could add summarize too old and verify too old as ops if desired but those are lower value
 
 	// Allow reads at the start to get blob_granule_transaction_too_old if BG data isn't initialized yet
 	// FIXME: should still guarantee a read succeeds eventually somehow
@@ -74,9 +89,6 @@ private:
 				    error(fmt::format("Operation succeeded in error test!"));
 			    }
 			    ASSERT(err.code() != error_code_success);
-			    if (err.code() != error_code_blob_granule_transaction_too_old) {
-				    seenReadSuccess = true;
-			    }
 			    if (err.code() != expectedError) {
 				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
@@ -86,6 +98,9 @@ private:
 					    ctx->onError(err);
 				    }
 			    } else {
+				    if (err.code() != error_code_blob_granule_transaction_too_old) {
+					    seenReadSuccess = true;
+				    }
 				    ctx->done();
 			    }
 		    },
@@ -107,18 +122,155 @@ private:
 		doErrorOp(cont, "", true, 1, error_code_blob_granule_transaction_too_old);
 	}
 
-	void randomCancelGetRangesOp(TTaskFct cont) {
-		fdb::Key begin = randomKeyName();
-		fdb::Key end = randomKeyName();
-		if (begin > end) {
-			std::swap(begin, end);
-		}
+	void randomPurgeUnalignedOp(TTaskFct cont) {
+		// blobbify/unblobbify need to be aligned to blob range boundaries, so this should always fail
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [this, keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().purgeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, false).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [this, ctx, f]() {
+				        info(fmt::format("unaligned purge got {}", f.error().code()));
+				        ASSERT(f.error().code() == error_code_unsupported_operation);
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomBlobbifyUnalignedOp(bool blobbify, TTaskFct cont) {
+		// blobbify/unblobbify need to be aligned to blob range boundaries, so this should always return false
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		auto success = std::make_shared<bool>(false);
+		execOperation(
+		    [keyRange, blobbify, success](auto ctx) {
+			    fdb::Future f = blobbify ? ctx->db().blobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType()
+			                             : ctx->db().unblobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [ctx, f, success]() {
+				        *success = f.get<fdb::future_var::Bool>();
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, cont, success]() {
+			    ASSERT(!(*success));
+			    schedule(cont);
+		    });
+	}
+
+	void randomCancelGetGranulesOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
 		execTransaction(
-		    [begin, end](auto ctx) {
-			    fdb::Future f = ctx->tx().getBlobGranuleRanges(begin, end, 1000).eraseType();
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->tx().getBlobGranuleRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
 			    ctx->done();
 		    },
 		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelGetRangesOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().listBlobbifiedRanges(keyRange.beginKey, keyRange.endKey, 1000).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelVerifyOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [keyRange](auto ctx) {
+			    fdb::Future f =
+			        ctx->db().verifyBlobRange(keyRange.beginKey, keyRange.endKey, -2 /* latest version*/).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelSummarizeOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execTransaction(
+		    [keyRange](auto ctx) {
+			    fdb::Future f =
+			        ctx->tx().summarizeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, 1000).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelBlobbifyOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [keyRange](auto ctx) {
+			    fdb::Future f;
+			    if (Random::get().randomBool(0.5)) {
+				    f = ctx->db().blobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
+			    } else {
+				    f = ctx->db().blobbifyRangeBlocking(keyRange.beginKey, keyRange.endKey).eraseType();
+			    }
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelUnblobbifyOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().unblobbifyRange(keyRange.beginKey, keyRange.endKey).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelPurgeOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		execOperation(
+		    [keyRange](auto ctx) {
+			    fdb::Future f = ctx->db().purgeBlobGranules(keyRange.beginKey, keyRange.endKey, -2, false).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomCancelFlushOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+		execOperation(
+		    [keyRange, compact](auto ctx) {
+			    fdb::Future f = ctx->db().flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, -2).eraseType();
+			    ctx->done();
+		    },
+		    [this, cont]() { schedule(cont); });
+	}
+
+	void randomFlushTooOldOp(TTaskFct cont) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		fdb::native::fdb_bool_t compact = Random::get().randomBool(0.5);
+
+		auto success = std::make_shared<bool>(false);
+		execOperation(
+		    [keyRange, compact, success](auto ctx) {
+			    // version of 1 should be too old
+			    fdb::Future f = ctx->db().flushBlobRange(keyRange.beginKey, keyRange.endKey, compact, 1).eraseType();
+			    ctx->continueAfter(
+			        f,
+			        [ctx, f, success]() {
+				        *success = f.get<fdb::future_var::Bool>();
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, cont, success]() {
+			    ASSERT(!(*success));
+			    schedule(cont);
+		    });
 	}
 
 	void randomOperation(TTaskFct cont) override {
@@ -133,8 +285,42 @@ private:
 		case OP_READ_TOO_OLD:
 			randomOpReadTooOld(cont);
 			break;
-		case OP_CANCEL_RANGES:
+		case OP_PURGE_UNALIGNED:
+			// gets the correct error but it doesn't propagate properly in the test
+			// randomPurgeUnalignedOp(cont);
+			break;
+		case OP_BLOBBIFY_UNALIGNED:
+			randomBlobbifyUnalignedOp(true, cont);
+			break;
+		case OP_UNBLOBBIFY_UNALIGNED:
+			randomBlobbifyUnalignedOp(false, cont);
+			break;
+		case OP_CANCEL_GET_GRANULES:
+			randomCancelGetGranulesOp(cont);
+			break;
+		case OP_CANCEL_GET_RANGES:
 			randomCancelGetRangesOp(cont);
+			break;
+		case OP_CANCEL_VERIFY:
+			randomCancelVerifyOp(cont);
+			break;
+		case OP_CANCEL_SUMMARIZE:
+			randomCancelSummarizeOp(cont);
+			break;
+		case OP_CANCEL_BLOBBIFY:
+			randomCancelBlobbifyOp(cont);
+			break;
+		case OP_CANCEL_UNBLOBBIFY:
+			randomCancelUnblobbifyOp(cont);
+			break;
+		case OP_CANCEL_PURGE:
+			randomCancelPurgeOp(cont);
+			break;
+		case OP_CANCEL_FLUSH:
+			randomCancelPurgeOp(cont);
+			break;
+		case OP_FLUSH_TOO_OLD:
+			randomCancelPurgeOp(cont);
 			break;
 		}
 	}

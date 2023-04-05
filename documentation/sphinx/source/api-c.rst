@@ -222,7 +222,7 @@ The FoundationDB client library performs most tasks on a singleton thread (which
 Future
 ======
 
-Most functions in the FoundationDB API are asynchronous, meaning that they may return to the caller before actually delivering their result. These functions always return :type:`FDBFuture*`. An :type:`FDBFuture` object represents a result value or error to be delivered at some future time. You can wait for a Future to be "ready" -- to have a value or error delivered -- by setting a callback function, or by blocking a thread, or by polling. Once a Future is ready, you can extract either an error code or a value of the appropriate type (the documentation for the original function will tell you which :func:`fdb_future_get_*()` function you should call).
+Most functions in the FoundationDB API are asynchronous, meaning that they may return to the caller before actually delivering their result. These functions always return ``FDBFuture*``. An :type:`FDBFuture` object represents a result value or error to be delivered at some future time. You can wait for a Future to be "ready" -- to have a value or error delivered -- by setting a callback function, or by blocking a thread, or by polling. Once a Future is ready, you can extract either an error code or a value of the appropriate type (the documentation for the original function will tell you which ``fdb_future_get_()`` function you should call).
 
 To use the API in a synchronous way, you would typically do something like this for each asynchronous call::
 
@@ -282,7 +282,7 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. type:: FDBCallback
 
-   A pointer to a function which takes :type:`FDBFuture*` and ``void*`` and returns ``void``.
+   A pointer to a function which takes ``FDBFuture*`` and ``void*`` and returns ``void``.
 
 .. function:: void fdb_future_release_memory(FDBFuture* future)
 
@@ -298,13 +298,19 @@ See :ref:`developer-guide-programming-with-futures` for further (language-indepe
 
 .. function:: fdb_error_t fdb_future_get_int64(FDBFuture* future, int64_t* out)
 
-   Extracts a 64-bit integer from an :type:`FDBFuture*` into a caller-provided variable of type ``int64_t``. |future-warning|
+   Extracts a 64-bit integer from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``int64_t``. |future-warning|
+
+   |future-get-return1| |future-get-return2|.
+
+.. function:: fdb_error_t fdb_future_get_double(FDBFuture* future, double* out)
+
+   Extracts a double from a pointer to :type:`FDBFuture` into a caller-provided variable of type ``double``. |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
 .. function:: fdb_error_t fdb_future_get_key_array( FDBFuture* f, FDBKey const** out_key_array, int* out_count)
 
-   Extracts an array of :type:`FDBKey` from an :type:`FDBFuture*` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
+   Extracts an array of :type:`FDBKey` from an ``FDBFuture*`` into a caller-provided variable of type ``FDBKey*``. The size of the array will also be extracted and passed back by a caller-provided variable of type ``int`` |future-warning|
 
    |future-get-return1| |future-get-return2|.
 
@@ -498,6 +504,57 @@ An |database-blurb1| Modifications to a database are performed via transactions.
 
    Returns a value where 0 indicates that the client is idle and 1 (or larger) indicates that the client is saturated. By default, this value is updated every second.
 
+.. function:: FDBFuture* fdb_database_get_client_status(FDBDatabase* db)
+
+   Returns a JSON string containing database client-side status information. At the top level the report describes the status of the 
+   Multi-Version Client database - its initialization state, the protocol version, the available client versions. The report schema is:
+
+   .. code-block::
+
+      {  "Healthy": <overall health status, true or false>,
+         "InitializationState": <initializing|initialization_failed|created|incompatible|closed>,
+         "InitializationError": <initialization error code, present if initialization failed>,
+         "ProtocolVersion" : <determined protocol version of the cluster, present if determined>,
+         "ConnectionRecord" : <connection file name or connection string>,
+         "DatabaseStatus" : <Native Database status report, present if successfully retrieved>,
+         "ErrorRetrievingDatabaseStatus" : <error code of retrieving status of the Native Database, present if failed>,
+         "AvailableClients" : [
+            { "ProtocolVersion" : <protocol version of the client>,
+               "ReleaseVersion" : <release version of the client>,
+               "ThreadIndex" : <the index of the client thread serving this database>
+            },  ...
+         ]
+      }
+
+   The status of the actual version-specific database is embedded within the ``DatabaseStatus`` attribute. It lists the addresses of various FDB 
+   server roles the client is aware of and their connection status. The schema of the ``DatabaseStatus`` object is:
+   
+   .. code-block::
+
+      {  "Healthy" : <overall health status: true or false>,
+         "ClusterID" : <UUID>,
+         "Coordinators" : [ <address>, ...  ],
+         "CurrentCoordinator" : <address>
+         "GrvProxies" : [ <address>, ...  ],
+         "CommitProxies" : [ <address>, ... ],
+         "StorageServers" : [ { "Address" : <address>, "SSID" : <Storage Server ID> }, ... ],
+         "Connections" : [
+         { "Address" : <address>,
+            "Status" : <failed|connected|connecting|disconnected>,
+            "Compatible" : <is protocol version compatible with the client>,
+            "ConnectFailedCount" : <number of failed connection attempts>,
+            "LastConnectTime" : <elapsed time in seconds since the last connection attempt>,
+            "PingCount" : <total ping count>,
+            "PingTimeoutCount" : <number of ping timeouts>,
+            "BytesSampleTime" : <elapsed time of the reported the bytes received and sent values>,
+            "BytesReceived" : <bytes received>,
+            "BytesSent" : <bytes sent>,
+            "ProtocolVersion" : <protocol version of the server, missing if unknown>
+         },
+         ...
+         ]
+      }
+
 Tenant
 ======
 
@@ -547,13 +604,13 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: void fdb_transaction_set_read_version(FDBTransaction* transaction, int64_t version)
 
-   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_transaction_too_old; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of :func:`fdb_transaction_get_*()` have been called on this transaction already, the result is undefined.
+   Sets the snapshot read version used by a transaction. This is not needed in simple cases. If the given version is too old, subsequent reads will fail with error_code_transaction_too_old; if it is too new, subsequent reads may be delayed indefinitely and/or fail with error_code_future_version. If any of ``fdb_transaction_get_*()`` have been called on this transaction already, the result is undefined.
 
 .. function:: FDBFuture* fdb_transaction_get_read_version(FDBTransaction* transaction)
 
    |future-return0| the transaction snapshot read version. |future-return1| call :func:`fdb_future_get_int64()` to extract the version into an int64_t that you provide, |future-return2|
 
-   The transaction obtains a snapshot read version automatically at the time of the first call to :func:`fdb_transaction_get_*()` (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.
+   The transaction obtains a snapshot read version automatically at the time of the first call to ``fdb_transaction_get_*()`` (including this one) and (unless causal consistency has been deliberately compromised by transaction options) is guaranteed to represent all transactions which were reported committed before that call.
 
 .. function:: FDBFuture* fdb_transaction_get(FDBTransaction* transaction, uint8_t const* key_name, int key_name_length, fdb_bool_t snapshot)
 
@@ -829,7 +886,7 @@ Applications must provide error handling and an appropriate retry loop around th
 
    |future-returnvoid|
 
-   Callers will usually want to retry a transaction if the commit or a prior :func:`fdb_transaction_get_*()` returns a retryable error (see :func:`fdb_transaction_on_error()`).
+   Callers will usually want to retry a transaction if the commit or a prior ``fdb_transaction_get_*()`` returns a retryable error (see :func:`fdb_transaction_on_error()`).
 
    |commit-unknown-result-blurb|
 
@@ -842,6 +899,14 @@ Applications must provide error handling and an appropriate retry loop around th
    Note that database versions are not necessarily unique to a given transaction and so cannot be used to determine in what order two transactions completed. The only use for this function is to manually enforce causal consistency when calling :func:`fdb_transaction_set_read_version()` on another subsequent transaction.
 
    Most applications will not call this function.
+
+.. function:: FDBFuture* fdb_transaction_get_tag_throttled_duration(FDBTransaction* transaction)
+
+  |future-return0| the time (in seconds) that the transaction was throttled by the tag throttler in the returned future. |future-return1| call :func:`fdb_future_get_double()` to extract the duration, |future-return2|
+
+.. function:: FDBFuture* fdb_transaction_get_total_cost(FDBTransaction* transaction)
+
+  |future-return0| the cost of the transaction so far (in bytes) in the returned future, as computed by the tag throttler, and used for tag throttling if throughput quotas are specified. |future-return1| call :func:`fdb_future_get_int64()` to extract the cost, |future-return2|
 
 .. function:: FDBFuture* fdb_transaction_get_approximate_size(FDBTransaction* transaction)
 
@@ -878,9 +943,9 @@ Applications must provide error handling and an appropriate retry loop around th
 
 .. function:: FDBFuture* fdb_transaction_on_error(FDBTransaction* transaction, fdb_error_t error)
 
-   Implements the recommended retry and backoff behavior for a transaction. This function knows which of the error codes generated by other :func:`fdb_transaction_*()` functions represent temporary error conditions and which represent application errors that should be handled by the application. It also implements an exponential backoff strategy to avoid swamping the database cluster with excessive retries when there is a high level of conflict between transactions.
+   Implements the recommended retry and backoff behavior for a transaction. This function knows which of the error codes generated by other ``fdb_transaction_*()`` functions represent temporary error conditions and which represent application errors that should be handled by the application. It also implements an exponential backoff strategy to avoid swamping the database cluster with excessive retries when there is a high level of conflict between transactions.
 
-   On receiving any type of error from an :func:`fdb_transaction_*()` function, the application should:
+   On receiving any type of error from an ``fdb_transaction_*()`` function, the application should:
 
    1. Call :func:`fdb_transaction_on_error()` with the returned :type:`fdb_error_t` code.
 
@@ -963,15 +1028,15 @@ Key selectors
 
 In the FoundationDB C API, key selectors are not represented by a structure of any kind, but are instead expressed as sequential parameters to |get-key-func| and |get-range-func|. For convenience, the most common key selectors are available as C macros that expand to the appropriate parameters.
 
-.. function:: FDB_KEYSEL_LAST_LESS_THAN(key_name, key_name_length)
+.. type:: FDB_KEYSEL_LAST_LESS_THAN(key_name, key_name_length)
 
-.. function:: FDB_KEYSEL_LAST_LESS_OR_EQUAL(key_name, key_name_length)
+.. type:: FDB_KEYSEL_LAST_LESS_OR_EQUAL(key_name, key_name_length)
 
-.. function:: FDB_KEYSEL_FIRST_GREATER_THAN(key_name, key_name_length)
+.. type:: FDB_KEYSEL_FIRST_GREATER_THAN(key_name, key_name_length)
 
-.. function:: FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key_name, key_name_length)
+.. type:: FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(key_name, key_name_length)
 
-To use one of these macros, simply replace the four parameters in the function with one of :func:`FDB_KEYSEL_*`::
+To use one of these macros, simply replace the four parameters in the function with one of ``FDB_KEYSEL_*``::
 
     future = fdb_transaction_get_key(transaction, "key", 3, 0, 2, 0);
 

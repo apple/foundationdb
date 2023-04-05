@@ -74,14 +74,17 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			int64_t logicalSize;
 			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
+			    decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
+			BlobFileIndex idx(
+			    version, filename.toString(), offset, length, fullFileLength, logicalSize, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -131,7 +134,7 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 		ASSERT(values[0].value != values[1].value);
 		return ForcedPurgeState::SomePurged;
 	} else {
-		return values[0].value == LiteralStringRef("1") ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
+		return values[0].value == "1"_sr ? ForcedPurgeState::AllPurged : ForcedPurgeState::NonePurged;
 	}
 }
 
@@ -155,7 +158,7 @@ void GranuleFiles::getFiles(Version beginVersion,
                             int64_t& deltaBytesCounter,
                             bool summarize) const {
 	BlobFileIndex dummyIndex; // for searching
-
+	ASSERT(!snapshotFiles.empty());
 	// if beginVersion == 0 or we can collapse, find the latest snapshot <= readVersion
 	auto snapshotF = snapshotFiles.end();
 	if (beginVersion == 0 || canCollapse) {
@@ -209,6 +212,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                       snapshotF->offset,
 		                       snapshotF->length,
 		                       snapshotF->fullFileLength,
+		                       snapshotF->version,
 		                       summarize ? Optional<BlobGranuleCipherKeysMeta>() : snapshotF->cipherKeysMeta);
 		lastIncluded = chunk.snapshotVersion;
 	} else {
@@ -221,6 +225,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   summarize ? Optional<BlobGranuleCipherKeysMeta>() : deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		ASSERT(lastIncluded < deltaF->version);
@@ -235,6 +240,7 @@ void GranuleFiles::getFiles(Version beginVersion,
 		                                   deltaF->offset,
 		                                   deltaF->length,
 		                                   deltaF->fullFileLength,
+		                                   deltaF->version,
 		                                   deltaF->cipherKeysMeta);
 		deltaBytesCounter += deltaF->length;
 		lastIncluded = deltaF->version;
@@ -247,7 +253,7 @@ static std::string makeTestFileName(Version v) {
 }
 
 static BlobFileIndex makeTestFile(Version v, int64_t len) {
-	return BlobFileIndex(v, makeTestFileName(v), 0, len, len);
+	return BlobFileIndex(v, makeTestFileName(v), 0, len, len, len);
 }
 
 static void checkFile(int expectedVersion, const BlobFilePointerRef& actualFile) {
@@ -451,57 +457,101 @@ TEST_CASE("/blobgranule/server/common/granulesummary") {
 }
 
 // FIXME: if credentials can expire, refresh periodically
-ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<TenantMapEntry> tenantMapEntries) {
+ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<BlobMetadataDomainId> tenantsToLoad) {
 	ASSERT(SERVER_KNOBS->BG_METADATA_SOURCE == "tenant");
-	ASSERT(!tenantMapEntries.empty());
-	state std::vector<BlobMetadataDomainId> domainIds;
-	for (auto& entry : tenantMapEntries) {
-		domainIds.push_back(entry.id);
+	ASSERT(!tenantsToLoad.empty());
+	state EKPGetLatestBlobMetadataRequest req;
+	state double retrySleep = 0.1;
+	for (const auto tenantId : tenantsToLoad) {
+		req.domainIds.emplace_back(tenantId);
 	}
 
 	// FIXME: if one tenant gets an error, don't kill whole process
-	// TODO: add latency metrics
+	state double startTime = now();
 	loop {
-		Future<EKPGetLatestBlobMetadataReply> requestFuture;
-		if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
-			EKPGetLatestBlobMetadataRequest req;
-			req.domainIds = domainIds;
-			requestFuture =
-			    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
-		} else {
-			requestFuture = Never();
-		}
-		choose {
-			when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
-				ASSERT(rep.blobMetadataDetails.size() == domainIds.size());
-				// not guaranteed to be in same order in the request as the response
-				for (auto& metadata : rep.blobMetadataDetails) {
-					auto info = self->tenantInfoById.find(metadata.domainId);
-					if (info == self->tenantInfoById.end()) {
-						continue;
-					}
-					auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
-					ASSERT(dataEntry.begin() == info->second.prefix);
-					dataEntry.cvalue()->setBStore(BlobConnectionProvider::newBlobConnectionProvider(metadata));
-				}
-				return Void();
+		try {
+			Future<EKPGetLatestBlobMetadataReply> requestFuture;
+			if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+				req.reply.reset();
+				requestFuture =
+				    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+			} else {
+				requestFuture = Never();
 			}
-			when(wait(self->dbInfo->onChange())) {}
+			choose {
+				when(EKPGetLatestBlobMetadataReply rep = wait(requestFuture)) {
+					ASSERT(rep.blobMetadataDetails.size() <= req.domainIds.size());
+					// not guaranteed to be in same order in the request as the response
+					for (auto& metadata : rep.blobMetadataDetails) {
+						auto info = self->tenantInfoById.find(metadata.domainId);
+						if (info == self->tenantInfoById.end()) {
+							continue;
+						}
+						auto dataEntry = self->tenantData.rangeContaining(info->second.prefix);
+						ASSERT(dataEntry.begin() == info->second.prefix);
+						dataEntry.cvalue()->updateBStore(metadata);
+					}
+					double elapsed = now() - startTime;
+					BlobCipherMetrics::getInstance()->getBlobMetadataLatency.addMeasurement(elapsed);
+
+					if (rep.blobMetadataDetails.size() == req.domainIds.size()) {
+						return Void();
+					}
+
+					// if not all tenants included in response, or on error, retry with missing ones
+					std::unordered_set<BlobMetadataDomainId> missingIds;
+					for (auto& id : req.domainIds) {
+						missingIds.insert(id);
+					}
+					for (auto& metadata : rep.blobMetadataDetails) {
+						missingIds.erase(metadata.domainId);
+					}
+					ASSERT(missingIds.size() > 0);
+
+					TraceEvent(SevWarn, "BlobMetadataFetchMissingTenants")
+					    .suppressFor(30.0)
+					    .detail("Count", missingIds.size());
+					CODE_PROBE(true, "blob metadata fetch missing tenants");
+
+					req.domainIds.clear();
+					for (auto& id : missingIds) {
+						req.domainIds.push_back(id);
+					}
+				}
+				when(wait(self->dbInfo->onChange())) {
+					// reset retry sleep
+					retrySleep = 0.1;
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			CODE_PROBE(true, "blob metadata fetch error");
+			TraceEvent(SevWarn, "BlobMetadataFetchError").errorUnsuppressed(e).suppressFor(30.0);
 		}
+		wait(delay(retrySleep));
+		retrySleep = std::min(10.0, retrySleep * 1.5);
 	}
 }
 
+Future<Void> loadBlobMetadataForTenant(BGTenantMap* self, BlobMetadataDomainId domainId) {
+	std::vector<BlobMetadataDomainId> toLoad;
+	toLoad.push_back(domainId);
+	return loadBlobMetadataForTenants(self, toLoad);
+}
+
 // list of tenants that may or may not already exist
-void BGTenantMap::addTenants(std::vector<std::pair<TenantName, TenantMapEntry>> tenants) {
-	std::vector<TenantMapEntry> tenantsToLoad;
+void BGTenantMap::addTenants(std::vector<std::pair<int64_t, TenantMapEntry>> tenants) {
+	std::vector<BlobMetadataDomainId> tenantsToLoad;
 	for (auto entry : tenants) {
-		if (tenantInfoById.insert({ entry.second.id, entry.second }).second) {
-			auto r = makeReference<GranuleTenantData>(entry.first, entry.second);
+		if (tenantInfoById.insert({ entry.first, entry.second }).second) {
+			auto r = makeReference<GranuleTenantData>(entry.second);
 			tenantData.insert(KeyRangeRef(entry.second.prefix, entry.second.prefix.withSuffix(normalKeys.end)), r);
 			if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
 				r->bstoreLoaded.send(Void());
 			} else {
-				tenantsToLoad.push_back(entry.second);
+				tenantsToLoad.push_back(entry.second.id);
 			}
 		}
 	}
@@ -525,11 +575,40 @@ Optional<TenantMapEntry> BGTenantMap::getTenantById(int64_t id) {
 	}
 }
 
-// TODO: handle case where tenant isn't loaded yet
-Reference<GranuleTenantData> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
-	auto tenant = tenantData.rangeContaining(keyRange.begin);
-	ASSERT(tenant.begin() <= keyRange.begin);
-	ASSERT(tenant.end() >= keyRange.end);
+// FIXME: batch requests for refresh?
+// FIXME: don't double fetch if multiple accesses to refreshing/expired metadata
+// FIXME: log warning if after refresh, data is still expired!
+ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* self, KeyRange keyRange) {
+	state int loopCount = 0;
+	loop {
+		loopCount++;
+		auto tenant = self->tenantData.rangeContaining(keyRange.begin);
+		ASSERT(tenant.begin() <= keyRange.begin);
+		ASSERT(tenant.end() >= keyRange.end);
 
-	return tenant.cvalue();
+		if (!tenant.cvalue().isValid() || !tenant.cvalue()->bstore.isValid()) {
+			return tenant.cvalue();
+		} else if (tenant.cvalue()->bstore->isExpired()) {
+			CODE_PROBE(true, "re-fetching expired blob metadata");
+			// fetch again
+			Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id);
+			wait(reload);
+			if (loopCount > 1) {
+				TraceEvent(SevWarn, "BlobMetadataStillExpired").suppressFor(5.0).detail("LoopCount", loopCount);
+				wait(delay(0.001));
+			}
+		} else {
+			// handle refresh in background if tenant needs refres
+			if (tenant.cvalue()->bstore->needsRefresh()) {
+				Future<Void> reload = loadBlobMetadataForTenant(self, tenant.cvalue()->entry.id);
+				self->addActor.send(reload);
+			}
+			return tenant.cvalue();
+		}
+	}
+}
+
+// TODO: handle case where tenant isn't loaded yet
+Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
+	return getDataForGranuleActor(this, keyRange);
 }

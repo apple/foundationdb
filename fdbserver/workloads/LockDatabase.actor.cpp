@@ -26,18 +26,18 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LockDatabaseWorkload : TestWorkload {
+	static constexpr auto NAME = "LockDatabase";
+
 	double lockAfter, unlockAfter;
 	bool ok;
 	bool onlyCheckLocked;
 
 	LockDatabaseWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ok(true) {
-		lockAfter = getOption(options, LiteralStringRef("lockAfter"), 0.0);
-		unlockAfter = getOption(options, LiteralStringRef("unlockAfter"), 10.0);
-		onlyCheckLocked = getOption(options, LiteralStringRef("onlyCheckLocked"), false);
+		lockAfter = getOption(options, "lockAfter"_sr, 0.0);
+		unlockAfter = getOption(options, "unlockAfter"_sr, 10.0);
+		onlyCheckLocked = getOption(options, "onlyCheckLocked"_sr, false);
 		ASSERT(unlockAfter > lockAfter);
 	}
-
-	std::string description() const override { return "LockDatabase"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -132,4 +132,4 @@ struct LockDatabaseWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<LockDatabaseWorkload> LockDatabaseWorkloadFactory("LockDatabase");
+WorkloadFactory<LockDatabaseWorkload> LockDatabaseWorkloadFactory;

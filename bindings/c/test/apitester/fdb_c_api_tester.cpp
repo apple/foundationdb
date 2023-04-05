@@ -43,7 +43,6 @@ enum TesterOptionId {
 	OPT_TRACE_DIR,
 	OPT_LOGGROUP,
 	OPT_TRACE_FORMAT,
-	OPT_KNOB,
 	OPT_EXTERNAL_CLIENT_LIBRARY,
 	OPT_EXTERNAL_CLIENT_DIRECTORY,
 	OPT_FUTURE_VERSION_CLIENT_LIBRARY,
@@ -59,6 +58,7 @@ enum TesterOptionId {
 	OPT_TLS_CERT_FILE,
 	OPT_TLS_KEY_FILE,
 	OPT_TLS_CA_FILE,
+    OPT_RETAIN_CLIENT_LIB_COPIES,
 	OPT_SWIFT_TEST_FILTER,
 };
 
@@ -71,7 +71,6 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_HELP, "-h", SO_NONE },
 	  { OPT_HELP, "--help", SO_NONE },
 	  { OPT_TRACE_FORMAT, "--trace-format", SO_REQ_SEP },
-	  { OPT_KNOB, "--knob-", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_LIBRARY, "--external-client-library", SO_REQ_SEP },
 	  { OPT_EXTERNAL_CLIENT_DIRECTORY, "--external-client-dir", SO_REQ_SEP },
 	  { OPT_FUTURE_VERSION_CLIENT_LIBRARY, "--future-version-client-library", SO_REQ_SEP },
@@ -88,6 +87,7 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TLS_CERT_FILE, "--tls-cert-file", SO_REQ_SEP },
 	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
 	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
+	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -107,8 +107,6 @@ void printProgramUsage(const char* execName) {
 	       "  --trace-format FORMAT\n"
 	       "                 Select the format of the log files. xml (the default) and json\n"
 	       "                 are supported. Has no effect unless --log is specified.\n"
-	       "  --knob-KNOBNAME KNOBVALUE\n"
-	       "                 Changes a knob option. KNOBNAME should be lowercase.\n"
 	       "  --external-client-library FILE\n"
 	       "                 Path to the external client library.\n"
 	       "  --external-client-dir DIR\n"
@@ -139,21 +137,10 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to file containing client's TLS private key\n"
 	       "  --tls-ca-file FILE\n"
 	       "                 Path to file containing TLS CA certificate\n"
+	       "  --retain-client-lib-copies\n"
+	       "                 Retain temporary external client library copies\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
-}
-
-// Extracts the key for command line arguments that are specified with a prefix (e.g. --knob-).
-// This function converts any hyphens in the extracted key to underscores.
-bool extractPrefixedArgument(std::string prefix, const std::string& arg, std::string& res) {
-	if (arg.size() <= prefix.size() || arg.find(prefix) != 0 ||
-	    (arg[prefix.size()] != '-' && arg[prefix.size()] != '_')) {
-		return false;
-	}
-
-	res = arg.substr(prefix.size() + 1);
-	std::transform(res.begin(), res.end(), res.begin(), [](int c) { return c == '-' ? '_' : c; });
-	return true;
 }
 
 bool validateTraceFormat(std::string_view format) {
@@ -194,15 +181,6 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 		}
 		options.traceFormat = args.OptionArg();
 		break;
-	case OPT_KNOB: {
-		std::string knobName;
-		if (!extractPrefixedArgument("--knob", args.OptionSyntax(), knobName)) {
-			fmt::print(stderr, "ERROR: unable to parse knob option '{}'\n", args.OptionSyntax());
-			return false;
-		}
-		options.knobs.emplace_back(knobName, args.OptionArg());
-		break;
-	}
 	case OPT_EXTERNAL_CLIENT_LIBRARY:
 		options.externalClientLibrary = args.OptionArg();
 		break;
@@ -250,6 +228,9 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_TLS_CA_FILE:
 		options.tlsCaFile.assign(args.OptionArg());
 		break;
+	case OPT_RETAIN_CLIENT_LIB_COPIES:
+		options.retainClientLibCopies = true;
+		break;
 	}
 	return true;
 }
@@ -278,15 +259,15 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 	return true;
 }
 
-void fdb_check(fdb::Error e) {
-	if (e) {
-		fmt::print(stderr, "Unexpected FDB error: {}({})\n", e.code(), e.what());
+void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expectedError = error_code_success) {
+	if (e.code()) {
+		fmt::print(stderr, "{}, Error: {}({})\n", msg, e.code(), e.what());
 		std::abort();
 	}
 }
 
 void applyNetworkOptions(TesterOptions& options) {
-	if (!options.tmpDir.empty() && options.apiVersion >= 720) {
+	if (!options.tmpDir.empty() && options.apiVersion >= FDB_API_VERSION_CLIENT_TMP_DIR) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_TMP_DIR, options.tmpDir);
 	}
 	if (!options.externalClientLibrary.empty()) {
@@ -321,15 +302,18 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_CLIENT_BUGGIFY_ENABLE);
 	}
 
+	if (options.testSpec.disableClientBypass && options.apiVersion >= FDB_API_VERSION_DISABLE_CLIENT_BYPASS) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_CLIENT_BYPASS);
+	}
+
+	if (options.testSpec.runLoopProfiler) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_ENABLE_RUN_LOOP_PROFILING);
+	}
+
 	if (options.trace) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_LOG_GROUP, options.logGroup);
-	}
-
-	for (auto knob : options.knobs) {
-		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
-		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
 	}
 
 	if (!options.tlsCertFile.empty()) {
@@ -343,6 +327,16 @@ void applyNetworkOptions(TesterOptions& options) {
 	if (!options.tlsCaFile.empty()) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TLS_CA_PATH, options.tlsCaFile);
 	}
+
+	if (options.retainClientLibCopies) {
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_RETAIN_CLIENT_LIBRARY_COPIES);
+	}
+
+	for (auto knob : options.testSpec.knobs) {
+		fmt::print(stderr, "Setting knob {}={}\n", knob.first.c_str(), knob.second.c_str());
+		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
+		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
+	}
 }
 
 void randomizeOptions(TesterOptions& options) {
@@ -351,6 +345,12 @@ void randomizeOptions(TesterOptions& options) {
 	options.numClientThreads = random.randomInt(options.testSpec.minClientThreads, options.testSpec.maxClientThreads);
 	options.numDatabases = random.randomInt(options.testSpec.minDatabases, options.testSpec.maxDatabases);
 	options.numClients = random.randomInt(options.testSpec.minClients, options.testSpec.maxClients);
+
+	// Choose a random number of tenants. If a test is configured to allow 0 tenants, then use 0 tenants half the time.
+	if (options.testSpec.maxTenants >= options.testSpec.minTenants &&
+	    (options.testSpec.minTenants > 0 || random.randomBool(0.5))) {
+		options.numTenants = random.randomInt(options.testSpec.minTenants, options.testSpec.maxTenants);
+	}
 }
 
 bool runWorkloads(TesterOptions& options) {
@@ -364,6 +364,7 @@ bool runWorkloads(TesterOptions& options) {
 		txExecOptions.transactionRetryLimit = options.transactionRetryLimit;
 		txExecOptions.tmpDir = options.tmpDir.empty() ? std::string("/tmp") : options.tmpDir;
 		txExecOptions.tamperClusterFile = options.testSpec.tamperClusterFile;
+		txExecOptions.numTenants = options.numTenants;
 
 		std::vector<std::shared_ptr<IWorkload>> workloads;
 		workloads.reserve(options.testSpec.workloads.size() * options.numClients);
@@ -375,6 +376,7 @@ bool runWorkloads(TesterOptions& options) {
 				config.options = workloadSpec.options;
 				config.clientId = i;
 				config.numClients = options.numClients;
+				config.numTenants = options.numTenants;
 				config.apiVersion = options.apiVersion;
 				std::shared_ptr<IWorkload> workload = IWorkloadFactory::create(workloadSpec.name, config);
 				if (!workload) {
@@ -416,7 +418,7 @@ bool runWorkloads(TesterOptions& options) {
 		}
 		workloadMgr.run();
 		return !workloadMgr.failed();
-	} catch (const std::runtime_error& err) {
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		return false;
 	}
@@ -440,15 +442,17 @@ int main(int argc, char** argv) {
 		applyNetworkOptions(options);
 		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::network::run };
+		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
 		if (!runWorkloads(options)) {
 			retCode = 1;
 		}
 
-		fdb_check(fdb::network::stop());
+		fprintf(stderr, "Stopping FDB network thread\n");
+		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
-	} catch (const std::runtime_error& err) {
+		fprintf(stderr, "FDB network thread successfully stopped\n");
+	} catch (const std::exception& err) {
 		fmt::print(stderr, "ERROR: {}\n", err.what());
 		retCode = 1;
 	}

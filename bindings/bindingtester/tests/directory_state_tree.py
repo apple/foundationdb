@@ -1,5 +1,6 @@
 import sys
 
+
 class TreeNodeState:
     def __init__(self, node, dir_id, is_directory, is_subspace, has_known_prefix, root, is_partition):
         self.dir_id = dir_id
@@ -9,9 +10,10 @@ class TreeNodeState:
         self.root = root
         self.is_partition = is_partition
 
-        self.parents = { node }
+        self.parents = {node}
         self.children = {}
         self.deleted = False
+
 
 # Represents an element of the directory hierarchy. As a result of various operations (e.g. moves) that
 # may or may not have succeeded, a node can represent multiple possible states.
@@ -25,7 +27,7 @@ class DirectoryStateTreeNode:
     default_directory = None
 
     # Used for debugging
-    dir_id = 0  
+    dir_id = 0
 
     @classmethod
     def reset(cls):
@@ -62,7 +64,7 @@ class DirectoryStateTreeNode:
         if default is not None:
             default_child = default.state.children.get(subpath[0])
 
-        self_child = self.state.children.get(subpath[0]) 
+        self_child = self.state.children.get(subpath[0])
 
         if self_child is None:
             if default_child is None:
@@ -143,12 +145,14 @@ class DirectoryStateTreeNode:
         child = self.get_descendent(path)
         if child:
             child._delete_impl()
-    
+
+
 def validate_dir(dir, root):
     if dir.state.is_directory:
         assert dir.state.root == root
     else:
         assert dir.state.root == dir
+
 
 def run_test():
     all_entries = []
@@ -249,11 +253,11 @@ def run_test():
     # Test moving an entry
     assert not entry.state.has_known_prefix
     assert not entry.state.is_subspace
-    assert list(entry.state.children.keys()) == ['1']    
+    assert list(entry.state.children.keys()) == ['1']
 
     for e in all_entries:
         validate_dir(e, root)
 
+
 if __name__ == '__main__':
     sys.exit(run_test())
-

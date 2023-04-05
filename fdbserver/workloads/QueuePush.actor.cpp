@@ -19,7 +19,7 @@
  */
 #include <vector>
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
@@ -28,6 +28,8 @@
 const int keyBytes = 16;
 
 struct QueuePushWorkload : TestWorkload {
+	static constexpr auto NAME = "QueuePush";
+
 	int actorCount, valueBytes;
 	double testDuration;
 	bool forward;
@@ -36,23 +38,22 @@ struct QueuePushWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter transactions, retries;
-	ContinuousSample<double> commitLatencies, GRVLatencies;
+	DDSketch<double> commitLatencies, GRVLatencies;
 
 	QueuePushWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(2000), GRVLatencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		actorCount = getOption(options, LiteralStringRef("actorCount"), 50);
+	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), commitLatencies(), GRVLatencies() {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		actorCount = getOption(options, "actorCount"_sr, 50);
 
-		valueBytes = getOption(options, LiteralStringRef("valueBytes"), 96);
+		valueBytes = getOption(options, "valueBytes"_sr, 96);
 		valueString = std::string(valueBytes, 'x');
 
-		forward = getOption(options, LiteralStringRef("forward"), true);
+		forward = getOption(options, "forward"_sr, true);
 
-		endingKey = LiteralStringRef("9999999900000001");
-		startingKey = LiteralStringRef("0000000000000001");
+		endingKey = "9999999900000001"_sr;
+		startingKey = "0000000000000001"_sr;
 	}
 
-	std::string description() const override { return "QueuePush"; }
 	Future<Void> start(Database const& cx) override { return _start(cx, this); }
 
 	Future<bool> check(Database const& cx) override { return true; }
@@ -149,4 +150,4 @@ struct QueuePushWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<QueuePushWorkload> QueuePushWorkloadFactory("QueuePush");
+WorkloadFactory<QueuePushWorkload> QueuePushWorkloadFactory;

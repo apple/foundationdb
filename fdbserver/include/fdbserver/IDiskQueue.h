@@ -26,7 +26,7 @@
 #include "fdbserver/IKeyValueStore.h"
 #include "flow/BooleanParam.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(CheckHashes);
+FDB_BOOLEAN_PARAM(CheckHashes);
 
 class IDiskQueue : public IClosable {
 public:

@@ -4,6 +4,8 @@ simBackupAgents=BackupToFile
 ;timeout is in seconds
 timeout=360000
 runSetup=true
+; tenants are not supported with parallel restore
+allowDefaultTenant=false
 
     testName=ApiCorrectness
     numKeys=5000

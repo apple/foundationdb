@@ -37,7 +37,7 @@ struct ClientVersionRef {
 	ClientVersionRef(StringRef clientVersion, StringRef sourceVersion, StringRef protocolVersion)
 	  : clientVersion(clientVersion), sourceVersion(sourceVersion), protocolVersion(protocolVersion) {}
 	ClientVersionRef(StringRef versionString) {
-		std::vector<StringRef> parts = versionString.splitAny(LiteralStringRef(","));
+		std::vector<StringRef> parts = versionString.splitAny(","_sr);
 		if (parts.size() != 3) {
 			initUnknown();
 			return;
@@ -48,9 +48,9 @@ struct ClientVersionRef {
 	}
 
 	void initUnknown() {
-		clientVersion = LiteralStringRef("Unknown");
-		sourceVersion = LiteralStringRef("Unknown");
-		protocolVersion = LiteralStringRef("Unknown");
+		clientVersion = "Unknown"_sr;
+		sourceVersion = "Unknown"_sr;
+		protocolVersion = "Unknown"_sr;
 	}
 
 	template <class Ar>

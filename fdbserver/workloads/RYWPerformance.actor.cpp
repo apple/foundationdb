@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -26,14 +25,14 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct RYWPerformanceWorkload : TestWorkload {
+	static constexpr auto NAME = "RYWPerformance";
+
 	int keyBytes, nodes, ranges;
 	RYWPerformanceWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		nodes = getOption(options, LiteralStringRef("nodes"), 10000);
-		ranges = getOption(options, LiteralStringRef("ranges"), 10);
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
+		nodes = getOption(options, "nodes"_sr, 10000);
+		ranges = getOption(options, "ranges"_sr, 10);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
 	}
-
-	std::string description() const override { return "RYWPerformance"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0)
@@ -47,7 +46,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		loop {
 			try {
 				for (int i = 0; i < self->nodes; i++)
-					tr.set(self->keyForIndex(i), LiteralStringRef("bar"));
+					tr.set(self->keyForIndex(i), "bar"_sr);
 
 				wait(tr.commit());
 				break;
@@ -69,7 +68,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 		state int i;
 		if (type == 0) {
 			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 1) {
 			std::vector<Future<Optional<Value>>> gets;
@@ -84,7 +83,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 			}
 			wait(waitForAll(gets));
 			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 3) {
 			std::vector<Future<Optional<Value>>> gets;
@@ -93,19 +92,19 @@ struct RYWPerformanceWorkload : TestWorkload {
 			}
 			wait(waitForAll(gets));
 			for (i = 1; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 4) {
 			wait(success(tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes)));
 		} else if (type == 5) {
 			wait(success(tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes)));
 			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 6) {
 			wait(success(tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes)));
 			for (i = 0; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 7) {
 			wait(success(tr->getRange(KeyRangeRef(self->keyForIndex(0), self->keyForIndex(self->nodes)), self->nodes)));
@@ -130,7 +129,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 			}
 			wait(waitForAll(gets));
 			for (i = 0; i < self->nodes; i++) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 11) {
 			std::vector<Future<RangeResult>> gets;
@@ -139,7 +138,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 			}
 			wait(waitForAll(gets));
 			for (i = 0; i < self->nodes; i += 2) {
-				tr->set(self->keyForIndex(i), LiteralStringRef("foo"));
+				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 12) {
 			std::vector<Future<RangeResult>> gets;
@@ -312,4 +311,4 @@ struct RYWPerformanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<RYWPerformanceWorkload> RYWPerformanceWorkloadFactory("RYWPerformance");
+WorkloadFactory<RYWPerformanceWorkload> RYWPerformanceWorkloadFactory;

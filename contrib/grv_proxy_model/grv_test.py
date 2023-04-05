@@ -42,6 +42,7 @@ parser.add_argument('--no-graph', action='store_true', default=False, help='Disa
 
 args = parser.parse_args()
 
+
 def print_choices_list(context=None):
     if context == 'workload' or context is None:
         print('Workloads:')
@@ -70,6 +71,7 @@ def print_choices_list(context=None):
                     name = name[0:-len('Limiter')]
                 print('  %s' % name)
 
+
 if args.workload is None or args.ratekeeper is None:
     print('ERROR: A workload (-w/--workload) and ratekeeper model (-r/--ratekeeper) must be specified.\n')
     print_choices_list()
@@ -79,16 +81,18 @@ if args.list:
     print_choices_list()
     sys.exit(0)
 
+
 def validate_class_type(var, name, superclass):
     cls = getattr(var, name, None)
     return cls is not None and inspect.isclass(cls) and issubclass(cls, superclass)
 
-if not args.ratekeeper in ratekeeper_model.predefined_ratekeeper:
+
+if args.ratekeeper not in ratekeeper_model.predefined_ratekeeper:
     print('Invalid ratekeeper model `%s\'' % args.ratekeeper)
     print_choices_list('ratekeeper')
     sys.exit(1)
 
-if not args.workload in workload_model.predefined_workloads:
+if args.workload not in workload_model.predefined_workloads:
     print('Invalid workload model `%s\'' % args.workload)
     print_choices_list('workload')
     sys.exit(1)
@@ -120,11 +124,11 @@ for priority in workload.priorities():
     still_queued = sum([r.count for r in proxy.request_queue if r.priority == priority])
 
     if len(latencies) > 0:
-        print('\n%s: %d requests in %d seconds (rate=%f). %d still queued.' % (priority, total_started, proxy.time, float(total_started)/proxy.time, still_queued))
-        print('  Median latency: %f' % latencies[len(latencies)//2])
-        print('  90%% latency: %f' % latencies[int(0.9*len(latencies))])
-        print('  99%% latency: %f' % latencies[int(0.99*len(latencies))])
-        print('  99.9%% latency: %f' % latencies[int(0.999*len(latencies))])
+        print('\n%s: %d requests in %d seconds (rate=%f). %d still queued.' % (priority, total_started, proxy.time, float(total_started) / proxy.time, still_queued))
+        print('  Median latency: %f' % latencies[len(latencies) // 2])
+        print('  90%% latency: %f' % latencies[int(0.9 * len(latencies))])
+        print('  99%% latency: %f' % latencies[int(0.99 * len(latencies))])
+        print('  99.9%% latency: %f' % latencies[int(0.999 * len(latencies))])
         print('  Max latency: %f' % latencies[-1])
 
 print('')

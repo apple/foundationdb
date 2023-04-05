@@ -23,53 +23,52 @@
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/QuietDatabase.h"
-#include "fdbserver/Status.h"
+#include "fdbserver/Status.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct DiskFailureInjectionWorkload : TestWorkload {
+struct DiskFailureInjectionWorkload : FailureInjectionWorkload {
+	static constexpr auto NAME = "DiskFailureInjection";
 	bool enabled;
-	double testDuration;
-	double startDelay;
-	bool throttleDisk;
-	int workersToThrottle;
-	double stallInterval;
-	double stallPeriod;
-	double throttlePeriod;
-	bool corruptFile;
-	int workersToCorrupt;
-	double percentBitFlips;
-	double periodicBroadcastInterval;
+	double testDuration = 60.0;
+	double startDelay = 0.0;
+	bool throttleDisk = false;
+	int workersToThrottle = 3;
+	double stallInterval = 0.0;
+	double stallPeriod = 60.0;
+	double throttlePeriod = 60.0;
+	bool corruptFile = false;
+	int workersToCorrupt = 1;
+	double percentBitFlips = 10;
+	double periodicBroadcastInterval = 5.0;
 	std::vector<NetworkAddress> chosenWorkers;
-	std::vector<Future<Void>> clients;
 	// Verification Mode: We run the workload indefinitely in this mode.
 	// The idea is to keep going until we get a non-zero chaosMetric to ensure
 	// that we haven't lost the chaos event. testDuration is ignored in this mode
-	bool verificationMode;
+	bool verificationMode = false;
 
-	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	DiskFailureInjectionWorkload(WorkloadContext const& wcx, NoOptions) : FailureInjectionWorkload(wcx) {}
+
+	DiskFailureInjectionWorkload(WorkloadContext const& wcx) : FailureInjectionWorkload(wcx) {
 		enabled = !clientId; // only do this on the "first" client
-		startDelay = getOption(options, LiteralStringRef("startDelay"), 0.0);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		verificationMode = getOption(options, LiteralStringRef("verificationMode"), false);
-		throttleDisk = getOption(options, LiteralStringRef("throttleDisk"), false);
-		workersToThrottle = getOption(options, LiteralStringRef("workersToThrottle"), 3);
-		stallInterval = getOption(options, LiteralStringRef("stallInterval"), 0.0);
-		stallPeriod = getOption(options, LiteralStringRef("stallPeriod"), 60.0);
-		throttlePeriod = getOption(options, LiteralStringRef("throttlePeriod"), 60.0);
-		corruptFile = getOption(options, LiteralStringRef("corruptFile"), false);
-		workersToCorrupt = getOption(options, LiteralStringRef("workersToCorrupt"), 1);
-		percentBitFlips = getOption(options, LiteralStringRef("percentBitFlips"), 10.0);
-		periodicBroadcastInterval = getOption(options, LiteralStringRef("periodicBroadcastInterval"), 5.0);
+		startDelay = getOption(options, "startDelay"_sr, startDelay);
+		testDuration = getOption(options, "testDuration"_sr, testDuration);
+		verificationMode = getOption(options, "verificationMode"_sr, verificationMode);
+		throttleDisk = getOption(options, "throttleDisk"_sr, throttleDisk);
+		workersToThrottle = getOption(options, "workersToThrottle"_sr, workersToThrottle);
+		stallInterval = getOption(options, "stallInterval"_sr, stallInterval);
+		stallPeriod = getOption(options, "stallPeriod"_sr, stallPeriod);
+		throttlePeriod = getOption(options, "throttlePeriod"_sr, throttlePeriod);
+		corruptFile = getOption(options, "corruptFile"_sr, corruptFile);
+		workersToCorrupt = getOption(options, "workersToCorrupt"_sr, workersToCorrupt);
+		percentBitFlips = getOption(options, "percentBitFlips"_sr, percentBitFlips);
+		periodicBroadcastInterval = getOption(options, "periodicBroadcastInterval"_sr, periodicBroadcastInterval);
 	}
 
-	std::string description() const override {
-		if (&g_simulator == g_network)
-			return "DiskFailureInjection";
-		else
-			return "NoSimDiskFailureInjection";
-	}
+	// TODO: Currently this workload doesn't play well with MachineAttrition.
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+
+	void initFailureInjectionMode(DeterministicRandom& random) override { enabled = clientId == 0; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -78,23 +77,20 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 	// 2. Starting the actor that injects failures on chosen storage servers
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			clients.push_back(timeout(diskFailureInjectionClient<WorkerInterface>(cx, this), testDuration, Void()));
-			// In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
-			// a non-zero chaosMetric was found.
+			auto result = diskFailureInjectionClient<WorkerInterface>(cx, this);
+			//  In verification mode, we want to wait until periodicEventBroadcast actor returns which indicates that
+			//  a non-zero chaosMetric was found.
 			if (verificationMode) {
-				clients.push_back(periodicEventBroadcast(this));
-			} else
+				return (periodicEventBroadcast(this) && delay(testDuration)) || result;
+			} else {
 				// Else we honor the testDuration
-				clients.push_back(timeout(periodicEventBroadcast(this), testDuration, Void()));
-			return waitForAll(clients);
+				return timeout(periodicEventBroadcast(this) && result, testDuration, Void());
+			}
 		} else
 			return Void();
 	}
 
-	Future<bool> check(Database const& cx) override {
-		clients.clear();
-		return true;
-	}
+	Future<bool> check(Database const& cx) override { return true; }
 
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
@@ -162,6 +158,7 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			} catch (Error& e) {
 				// If we failed to get a complete list of storage servers, we can't inject failure events
 				// But don't throw the error in that case
+				TraceEvent("ChaosCouldNotGetStorages").error(e);
 				continue;
 			}
 			auto machine = deterministicRandom()->randomChoice(machines);
@@ -177,8 +174,8 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 			if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
 				self->injectDiskDelays(machine, self->stallInterval, self->stallPeriod, self->throttlePeriod);
 			if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
-				if (&g_simulator == g_network)
-					g_simulator.corruptWorkerMap[machine.address()] = true;
+				if (g_simulator == g_network)
+					g_simulator->corruptWorkerMap[machine.address()] = true;
 				self->injectBitFlips(machine, self->percentBitFlips);
 			}
 		}
@@ -194,14 +191,23 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		for (auto worker : workers) {
 			workersMap[worker.interf.address()] = worker.interf;
 		}
+		TraceEvent("ResendChaos")
+		    .detail("ChosenWorkersSize", self->chosenWorkers.size())
+		    .detail("FoundWorkers", workersMap.size())
+		    .detail(
+		        "ResendToNumber",
+		        std::count_if(self->chosenWorkers.begin(),
+		                      self->chosenWorkers.end(),
+		                      [&map = std::as_const(workersMap)](auto const& addr) { return map.count(addr) > 0; }));
 		for (auto& workerAddress : self->chosenWorkers) {
 			auto itr = workersMap.find(workerAddress);
 			if (itr != workersMap.end()) {
-				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle))
+				if (self->throttleDisk && (throttledWorkers++ < self->workersToThrottle)) {
 					self->injectDiskDelays(itr->second, self->stallInterval, self->stallPeriod, self->throttlePeriod);
+				}
 				if (self->corruptFile && (corruptedWorkers++ < self->workersToCorrupt)) {
-					if (&g_simulator == g_network)
-						g_simulator.corruptWorkerMap[workerAddress] = true;
+					if (g_simulator == g_network)
+						g_simulator->corruptWorkerMap[workerAddress] = true;
 					self->injectBitFlips(itr->second, self->percentBitFlips);
 				}
 			}
@@ -274,4 +280,5 @@ struct DiskFailureInjectionWorkload : TestWorkload {
 		}
 	}
 };
-WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory("DiskFailureInjection");
+WorkloadFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFactory;
+FailureInjectorFactory<DiskFailureInjectionWorkload> DiskFailureInjectionWorkloadFailureInjectionFactory;

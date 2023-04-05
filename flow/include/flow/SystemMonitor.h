@@ -30,7 +30,9 @@ struct SystemMonitorMachineState {
 	Optional<Standalone<StringRef>> dcId;
 	Optional<Standalone<StringRef>> zoneId;
 	Optional<Standalone<StringRef>> machineId;
+	Optional<Standalone<StringRef>> datahallId;
 	Optional<IPAddress> ip;
+	Optional<std::string> fdbVersion;
 
 	double monitorStartTime;
 
@@ -40,8 +42,11 @@ struct SystemMonitorMachineState {
 	                          Optional<Standalone<StringRef>> const& dcId,
 	                          Optional<Standalone<StringRef>> const& zoneId,
 	                          Optional<Standalone<StringRef>> const& machineId,
-	                          IPAddress const& ip)
-	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), ip(ip), monitorStartTime(0) {}
+	                          Optional<Standalone<StringRef>> const& datahallId,
+	                          IPAddress const& ip,
+	                          std::string const& fdbVersion)
+	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), datahallId(datahallId), ip(ip),
+	    monitorStartTime(0), fdbVersion(fdbVersion) {}
 };
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);
@@ -92,53 +97,46 @@ struct NetworkData {
 	double countReactTime;
 
 	void init() {
-		bytesSent = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.BytesSent"));
-		countPacketsReceived = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountPacketsReceived"));
-		countPacketsGenerated = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountPacketsGenerated"));
-		bytesReceived = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.BytesReceived"));
-		countWriteProbes = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountWriteProbes"));
-		countReadProbes = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountReadProbes"));
-		countReads = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountReads"));
-		countWouldBlock = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountWouldBlock"));
-		countWrites = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountWrites"));
-		countRunLoop = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountRunLoop"));
-		countCantSleep = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountCantSleep"));
-		countWontSleep = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountWontSleep"));
-		countTimers = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTimers"));
-		countTasks = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTasks"));
-		countYields = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYields"));
-		countYieldBigStack = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYieldBigStack"));
-		countYieldCalls = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYieldCalls"));
-		countASIOEvents = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountASIOEvents"));
-		countYieldCallsTrue = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountYieldCallsTrue"));
-		countRunLoopProfilingSignals =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountRunLoopProfilingSignals"));
-		countConnEstablished = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnEstablished"));
-		countConnClosedWithError = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithError"));
-		countConnClosedWithoutError =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountConnClosedWithoutError"));
-		countTLSPolicyFailures = Int64Metric::getValueOrDefault(LiteralStringRef("Net2.CountTLSPolicyFailures"));
-		countLaunchTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountLaunchTime"));
-		countReactTime = DoubleMetric::getValueOrDefault(LiteralStringRef("Net2.CountReactTime"));
-		countFileLogicalWrites = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountLogicalWrites"));
-		countFileLogicalReads = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountLogicalReads"));
-		countAIOSubmit = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountAIOSubmit"));
-		countAIOCollect = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountAIOCollect"));
-		countFileCacheWrites = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheWrites"));
-		countFileCacheReads = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReads"));
-		countFileCacheWritesBlocked =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheWritesBlocked"));
-		countFileCacheReadsBlocked =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReadsBlocked"));
-		countFileCachePageReadsMerged =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMerged"));
-		countFileCacheFinds = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheFinds"));
-		countFileCacheReadBytes = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCacheReadBytes"));
-		countFilePageCacheHits = Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsHit"));
-		countFilePageCacheMisses =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("AsyncFile.CountCachePageReadsMissed"));
-		countFilePageCacheEvictions =
-		    Int64Metric::getValueOrDefault(LiteralStringRef("EvictablePageCache.CacheEvictions"));
+		bytesSent = Int64Metric::getValueOrDefault("Net2.BytesSent"_sr);
+		countPacketsReceived = Int64Metric::getValueOrDefault("Net2.CountPacketsReceived"_sr);
+		countPacketsGenerated = Int64Metric::getValueOrDefault("Net2.CountPacketsGenerated"_sr);
+		bytesReceived = Int64Metric::getValueOrDefault("Net2.BytesReceived"_sr);
+		countWriteProbes = Int64Metric::getValueOrDefault("Net2.CountWriteProbes"_sr);
+		countReadProbes = Int64Metric::getValueOrDefault("Net2.CountReadProbes"_sr);
+		countReads = Int64Metric::getValueOrDefault("Net2.CountReads"_sr);
+		countWouldBlock = Int64Metric::getValueOrDefault("Net2.CountWouldBlock"_sr);
+		countWrites = Int64Metric::getValueOrDefault("Net2.CountWrites"_sr);
+		countRunLoop = Int64Metric::getValueOrDefault("Net2.CountRunLoop"_sr);
+		countCantSleep = Int64Metric::getValueOrDefault("Net2.CountCantSleep"_sr);
+		countWontSleep = Int64Metric::getValueOrDefault("Net2.CountWontSleep"_sr);
+		countTimers = Int64Metric::getValueOrDefault("Net2.CountTimers"_sr);
+		countTasks = Int64Metric::getValueOrDefault("Net2.CountTasks"_sr);
+		countYields = Int64Metric::getValueOrDefault("Net2.CountYields"_sr);
+		countYieldBigStack = Int64Metric::getValueOrDefault("Net2.CountYieldBigStack"_sr);
+		countYieldCalls = Int64Metric::getValueOrDefault("Net2.CountYieldCalls"_sr);
+		countASIOEvents = Int64Metric::getValueOrDefault("Net2.CountASIOEvents"_sr);
+		countYieldCallsTrue = Int64Metric::getValueOrDefault("Net2.CountYieldCallsTrue"_sr);
+		countRunLoopProfilingSignals = Int64Metric::getValueOrDefault("Net2.CountRunLoopProfilingSignals"_sr);
+		countConnEstablished = Int64Metric::getValueOrDefault("Net2.CountConnEstablished"_sr);
+		countConnClosedWithError = Int64Metric::getValueOrDefault("Net2.CountConnClosedWithError"_sr);
+		countConnClosedWithoutError = Int64Metric::getValueOrDefault("Net2.CountConnClosedWithoutError"_sr);
+		countTLSPolicyFailures = Int64Metric::getValueOrDefault("Net2.CountTLSPolicyFailures"_sr);
+		countLaunchTime = DoubleMetric::getValueOrDefault("Net2.CountLaunchTime"_sr);
+		countReactTime = DoubleMetric::getValueOrDefault("Net2.CountReactTime"_sr);
+		countFileLogicalWrites = Int64Metric::getValueOrDefault("AsyncFile.CountLogicalWrites"_sr);
+		countFileLogicalReads = Int64Metric::getValueOrDefault("AsyncFile.CountLogicalReads"_sr);
+		countAIOSubmit = Int64Metric::getValueOrDefault("AsyncFile.CountAIOSubmit"_sr);
+		countAIOCollect = Int64Metric::getValueOrDefault("AsyncFile.CountAIOCollect"_sr);
+		countFileCacheWrites = Int64Metric::getValueOrDefault("AsyncFile.CountCacheWrites"_sr);
+		countFileCacheReads = Int64Metric::getValueOrDefault("AsyncFile.CountCacheReads"_sr);
+		countFileCacheWritesBlocked = Int64Metric::getValueOrDefault("AsyncFile.CountCacheWritesBlocked"_sr);
+		countFileCacheReadsBlocked = Int64Metric::getValueOrDefault("AsyncFile.CountCacheReadsBlocked"_sr);
+		countFileCachePageReadsMerged = Int64Metric::getValueOrDefault("AsyncFile.CountCachePageReadsMerged"_sr);
+		countFileCacheFinds = Int64Metric::getValueOrDefault("AsyncFile.CountCacheFinds"_sr);
+		countFileCacheReadBytes = Int64Metric::getValueOrDefault("AsyncFile.CountCacheReadBytes"_sr);
+		countFilePageCacheHits = Int64Metric::getValueOrDefault("AsyncFile.CountCachePageReadsHit"_sr);
+		countFilePageCacheMisses = Int64Metric::getValueOrDefault("AsyncFile.CountCachePageReadsMissed"_sr);
+		countFilePageCacheEvictions = Int64Metric::getValueOrDefault("EvictablePageCache.CacheEvictions"_sr);
 	}
 };
 

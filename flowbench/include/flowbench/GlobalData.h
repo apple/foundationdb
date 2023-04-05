@@ -28,4 +28,32 @@
 KeyValueRef getKV(size_t keySize, size_t valueSize);
 KeyRef getKey(size_t keySize);
 
+// Pre-generate a vector of T using a lambda then return them
+// via next() one by one with wrap-around
+template <typename T>
+struct InputGenerator {
+	InputGenerator() {}
+
+	template <typename Fn>
+	InputGenerator(int n, Fn genFunc) {
+		ASSERT(n > 0);
+		data.reserve(n);
+		for (int i = 0; i < n; ++i) {
+			data.push_back(genFunc());
+		}
+		lastIndex = -1;
+	}
+
+	const T& next() {
+		if (++lastIndex == data.size()) {
+			lastIndex = 0;
+		}
+
+		return data[lastIndex];
+	}
+
+	std::vector<T> data;
+	int lastIndex;
+};
+
 #endif

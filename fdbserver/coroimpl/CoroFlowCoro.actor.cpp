@@ -23,6 +23,7 @@
 #include "Coro.h"
 #include "flow/TDMetric.actor.h"
 #include "fdbrpc/simulator.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // Old libcoroutine based implementation. Used on Windows until CI has
@@ -73,7 +74,7 @@ protected:
 		blocked = Promise<Void>();
 		double before = now();
 		CoroThreadPool::waitFor(blocked.getFuture());
-		if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting)
+		if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting)
 			TraceEvent("CoroUnblocked").detail("After", now() - before);
 	}
 
@@ -265,7 +266,7 @@ ACTOR void coroSwitcher(Future<Void> what, TaskPriority taskID, Coro* coro) {
 	try {
 		// state double t = now();
 		wait(what);
-		// if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
+		// if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting && now()!=t)
 		//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", taskID).detail("Elapsed", now()-t).backtrace("Flow");
 	} catch (Error&) {
 	}
@@ -280,7 +281,7 @@ void CoroThreadPool::waitFor(Future<Void> what) {
 	// double t = now();
 	coroSwitcher(what, g_network->getCurrentTask(), current_coro);
 	Coro_switchTo_(swapCoro(main_coro), main_coro);
-	// if (g_network->isSimulated() && g_simulator.getCurrentProcess()->rebooting && now()!=t)
+	// if (g_network->isSimulated() && g_simulator->getCurrentProcess()->rebooting && now()!=t)
 	//	TraceEvent("NonzeroWaitDuringReboot").detail("TaskID", currentTaskID).detail("Elapsed",
 	// now()-t).backtrace("Coro");
 	ASSERT(what.isReady());

@@ -24,9 +24,6 @@
 #include "flow/FastRef.h"
 #include "flow/flow.h"
 
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
@@ -104,8 +101,5 @@ class HmacSha256StreamCipher final : NonCopyable, public ReferenceCounted<HmacSh
 
 public:
 	HmacSha256StreamCipher();
-	StringRef digest(unsigned char const* data, int len, Arena&);
 	StringRef finish(Arena&);
 };
-
-void applyHmacKeyDerivationFunc(StreamCipherKey* cipherKey, HmacSha256StreamCipher* hmacGenerator, Arena& arena);

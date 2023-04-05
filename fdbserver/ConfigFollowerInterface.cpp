@@ -29,6 +29,7 @@ void ConfigFollowerInterface::setupWellKnownEndpoints() {
 	compact.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_COMPACT, TaskPriority::Coordination);
 	rollforward.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD, TaskPriority::Coordination);
 	getCommittedVersion.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION, TaskPriority::Coordination);
+	lock.makeWellKnownEndpoint(WLTOKEN_CONFIGFOLLOWER_LOCK, TaskPriority::Coordination);
 }
 
 ConfigFollowerInterface::ConfigFollowerInterface() : _id(deterministicRandom()->randomUniqueID()) {}
@@ -39,7 +40,8 @@ ConfigFollowerInterface::ConfigFollowerInterface(NetworkAddress const& remote)
     getChanges(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCHANGES)),
     compact(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_COMPACT)),
     rollforward(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_ROLLFORWARD)),
-    getCommittedVersion(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)) {}
+    getCommittedVersion(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_GETCOMMITTEDVERSION)),
+    lock(Endpoint::wellKnown({ remote }, WLTOKEN_CONFIGFOLLOWER_LOCK)) {}
 
 ConfigFollowerInterface::ConfigFollowerInterface(Hostname const& remote)
   : _id(deterministicRandom()->randomUniqueID()), hostname(remote) {}

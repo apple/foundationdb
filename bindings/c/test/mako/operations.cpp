@@ -187,7 +187,6 @@ const std::array<Operation, MAX_OP> opTable{
 	        } },
 	      { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& key, ByteString&, ByteString&) {
-	            tx.reset(); // assuming commit from step 0 worked.
 	            tx.clear(key); // key should forward unchanged from step 0
 	            return Future();
 	        } } },
@@ -222,7 +221,6 @@ const std::array<Operation, MAX_OP> opTable{
 	        } },
 	      { StepKind::IMM,
 	        [](Transaction& tx, Arguments const& args, ByteString& begin, ByteString& end, ByteString&) {
-	            tx.reset();
 	            tx.clearRange(begin, end);
 	            return Future();
 	        } } },

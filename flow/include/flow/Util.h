@@ -20,9 +20,48 @@
 
 #ifndef _FLOW_UTIL_H_
 #define _FLOW_UTIL_H_
+
 #pragma once
 
 #include <algorithm>
+#include <functional>
+#include <iosfwd>
+
+// Read key/value pairs from stream. The stream is constituted by lines of text.
+// Each line contains a pair of key/value, separated by space/tab. e.g.
+//
+// Key1   Value1      tailing characters
+// Key2   Value2      tailing characters
+//
+// The tailing characters will be ignored.
+//
+// K and V should have
+//
+//   std::istream& operator>>(std::istream&, K&);
+//
+// implemented.
+template <typename K, typename V>
+void keyValueReader(std::istream& stream, std::function<bool(const K&, const V&)> consumer) {
+	std::stringstream lineParser;
+	std::string line;
+	K key;
+	V value;
+	while (std::getline(stream, line)) {
+		lineParser.clear();
+		lineParser.str(std::move(line));
+		try {
+			lineParser >> key >> value;
+		} catch (std::ios_base::failure&) {
+			continue;
+		}
+		if (lineParser.fail() || lineParser.bad()) {
+			continue;
+		}
+		if (!consumer(key, value)) {
+			break;
+		}
+	}
+}
 
 template <typename C>
 void swapAndPop(C* container, int index) {

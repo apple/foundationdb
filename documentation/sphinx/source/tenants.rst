@@ -2,6 +2,8 @@
 Tenants
 #######
 
+.. _multi-tenancy:
+
 .. warning :: Tenants are currently experimental and are not recommended for use in production.
 
 FoundationDB provides a feature called tenants that allow you to configure one or more named transaction domains in your cluster. A transaction domain is a key-space in which a transaction is allowed to operate, and no tenant operations are allowed to use keys outside the tenant key-space. Tenants can be useful for managing separate, unrelated use-cases and preventing them from interfering with each other. They can also be helpful for defining safe boundaries when moving a subset of data between clusters.

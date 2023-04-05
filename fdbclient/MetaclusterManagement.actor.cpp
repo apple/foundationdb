@@ -27,13 +27,25 @@
 
 namespace MetaclusterAPI {
 
+std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters) {
+	ClusterUsage tenantGroupCapacity;
+	ClusterUsage tenantGroupsAllocated;
+	for (auto cluster : clusters) {
+		tenantGroupCapacity.numTenantGroups +=
+		    std::max(cluster.second.entry.capacity.numTenantGroups, cluster.second.entry.allocated.numTenantGroups);
+		tenantGroupsAllocated.numTenantGroups += cluster.second.entry.allocated.numTenantGroups;
+	}
+	return { tenantGroupCapacity, tenantGroupsAllocated };
+}
+
 ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connectionString) {
 	if (g_network->isSimulated()) {
 		Reference<IClusterConnectionRecord> clusterFile =
 		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-		Database nativeDb = Database::createDatabase(clusterFile, -1);
+		Database nativeDb = Database::createDatabase(clusterFile, ApiVersion::LATEST_VERSION);
 		Reference<IDatabase> threadSafeDb =
 		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(nativeDb)));
+		MultiVersionApi::api->selectApiVersion(ApiVersion::LATEST_VERSION);
 		return MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeDb);
 	} else {
 		return MultiVersionApi::api->createDatabaseFromConnectionString(connectionString.toString().c_str());
@@ -59,8 +71,8 @@ KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
 KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
 
-TenantMetadataSpecification& ManagementClusterMetadata::tenantMetadata() {
-	static TenantMetadataSpecification instance(""_sr);
+TenantMetadataSpecification<MetaclusterTenantTypes>& ManagementClusterMetadata::tenantMetadata() {
+	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
 	return instance;
 }
 

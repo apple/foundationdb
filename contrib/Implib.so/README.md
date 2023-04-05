@@ -46,27 +46,17 @@ where `TARGET` can be any of
   * aarch64-linux-gnu, aarch64-none-linux-android
   * e2k-linux-gnu
 
-Script generates two files: `libxyz.so.tramp.S` and `libxyz.so.init.c` which need to be linked to your application (instead of `-lxyz`):
+Script generates two files: `libxyz.so.tramp.S` and `libxyz.so.init.cpp` which need to be linked to your application (instead of `-lxyz`):
 
 ```
-$ gcc myfile1.c myfile2.c ... libxyz.so.tramp.S libxyz.so.init.c ... -ldl
+$ gcc myfile1.c myfile2.c ... libxyz.so.tramp.S libxyz.so.init.cpp ... -ldl
 ```
 
 Note that you need to link against libdl.so. On ARM in case your app is compiled to Thumb code (which e.g. Ubuntu's `arm-linux-gnueabihf-gcc` does by default) you'll also need to add `-mthumb-interwork`.
 
 Application can then freely call functions from `libxyz.so` _without linking to it_. Library will be loaded (via `dlopen`) on first call to any of its functions. If you want to forcedly resolve all symbols (e.g. if you want to avoid delays further on) you can call `void libxyz_init_all()`.
 
-Above command would perform a _lazy load_ i.e. load library on first call to one of it's symbols. If you want to load it at startup, run
-
-```
-$ implib-gen.py --no-lazy-load libxyz.so
-```
-
-If you don't want `dlopen` to be called automatically and prefer to load library yourself at program startup, run script as
-
-```
-$ implib-gen.py --no-dlopen libxys.so
-```
+Above command would perform a _lazy load_ i.e. load library on first call to one of it's symbols. 
 
 If you do want to load library via `dlopen` but would prefer to call it yourself (e.g. with custom parameters or with modified library name), run script as
 
@@ -99,10 +89,6 @@ $ implib-gen.py --dlopen-callback=mycallback libxyz.so
 ```
 
 (callback must have signature `void *(*)(const char *lib_name)` and return handle of loaded library).
-
-Finally to force library load and resolution of all symbols, call
-
-    void _LIBNAME_tramp_resolve_all(void);
 
 # Wrapping vtables
 
@@ -141,7 +127,7 @@ void *mycallback(const char *lib_name) {
 }
 
 $ implib-gen.py --dlopen-callback=mycallback --symbol-list=mysymbols.txt libxyz.so
-$ ... # Link your app with libxyz.tramp.S, libxyz.init.c and mycallback.c
+$ ... # Link your app with libxyz.tramp.S, libxyz.init.cpp and mycallback.c
 ```
 
 Similar approach can be used if you want to provide a common interface for several libraries with partially intersecting interfaces (see [this example](tests/multilib/run.sh) for more details).
@@ -156,7 +142,7 @@ To achieve this you can generate a wrapper with _renamed_ symbols which call to 
 $ cat mycallback.c
 ... Same as before ...
 $ implib-gen.py --dlopen-callback=mycallback --symbol_prefix=MYPREFIX_ libxyz.so
-$ ... # Link your app with libxyz.tramp.S, libxyz.init.c and mycallback.c
+$ ... # Link your app with libxyz.tramp.S, libxyz.init.cpp and mycallback.c
 ```
 
 # Linker wrapper

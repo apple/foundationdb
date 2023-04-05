@@ -31,6 +31,8 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct WriteDuringReadWorkload : TestWorkload {
+	static constexpr auto NAME = "WriteDuringRead";
+
 	double testDuration, slowModeStart;
 	int numOps;
 	bool rarelyCommit, adjacentKeys;
@@ -58,15 +60,14 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 	WriteDuringReadWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), transactions("Transactions"), retries("Retries"), success(true) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 60.0);
-		slowModeStart = getOption(options, LiteralStringRef("slowModeStart"), 1000.0);
-		numOps = getOption(options, LiteralStringRef("numOps"), 21);
-		rarelyCommit = getOption(options, LiteralStringRef("rarelyCommit"), false);
-		maximumTotalData = getOption(options, LiteralStringRef("maximumTotalData"), 3e6);
-		maximumDataWritten =
-		    getOption(options, LiteralStringRef("maximumDataWritten"), std::numeric_limits<int64_t>::max());
-		minNode = getOption(options, LiteralStringRef("minNode"), 0);
-		useSystemKeys = getOption(options, LiteralStringRef("useSystemKeys"), deterministicRandom()->random01() < 0.5);
+		testDuration = getOption(options, "testDuration"_sr, 60.0);
+		slowModeStart = getOption(options, "slowModeStart"_sr, 1000.0);
+		numOps = getOption(options, "numOps"_sr, 21);
+		rarelyCommit = getOption(options, "rarelyCommit"_sr, false);
+		maximumTotalData = getOption(options, "maximumTotalData"_sr, 3e6);
+		maximumDataWritten = getOption(options, "maximumDataWritten"_sr, std::numeric_limits<int64_t>::max());
+		minNode = getOption(options, "minNode"_sr, 0);
+		useSystemKeys = getOption(options, "useSystemKeys"_sr, deterministicRandom()->random01() < 0.5);
 		adjacentKeys = deterministicRandom()->random01() < 0.5;
 		initialKeyDensity = deterministicRandom()->random01(); // This fraction of keys are present before the first
 		                                                       // transaction (and after an unknown result)
@@ -89,12 +90,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 		CODE_PROBE(adjacentKeys && (nodes + minNode) > CLIENT_KNOBS->KEY_SIZE_LIMIT,
 		           "WriteDuringReadWorkload testing large keys");
 
-		useExtraDB = !g_simulator.extraDatabases.empty();
+		useExtraDB = g_network->isSimulated() && !g_simulator->extraDatabases.empty();
 		if (useExtraDB) {
-			ASSERT(g_simulator.extraDatabases.size() == 1);
-			auto extraFile =
-			    makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(g_simulator.extraDatabases[0]));
-			extraDB = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+			ASSERT(g_simulator->extraDatabases.size() == 1);
+			extraDB = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], wcx.defaultTenant);
 			useSystemKeys = false;
 		}
 
@@ -105,7 +104,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 		}
 
 		maxClearSize = 1 << deterministicRandom()->randomInt(0, 20);
-		conflictRange = KeyRangeRef(LiteralStringRef("\xfe"), LiteralStringRef("\xfe\x00"));
+		conflictRange = KeyRangeRef("\xfe"_sr, "\xfe\x00"_sr);
 		if (clientId == 0)
 			TraceEvent("RYWConfiguration")
 			    .detail("Nodes", nodes)
@@ -115,8 +114,6 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    .detail("ValueSizeMax", valueSizeRange.second)
 			    .detail("MaxClearSize", maxClearSize);
 	}
-
-	std::string description() const override { return "WriteDuringRead"; }
 
 	ACTOR Future<Void> setupImpl(WriteDuringReadWorkload* self, Database cx) {
 		// If we are operating in the default tenant but enable raw access, we should only write keys
@@ -568,8 +565,12 @@ struct WriteDuringReadWorkload : TestWorkload {
 			self->finished.trigger();
 			self->dataWritten += txnSize;
 
-			if (readYourWritesDisabled)
-				tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+			// It's not legal to set readYourWritesDisabled after performing
+			// reads on a transaction, even if all those reads have completed
+			// and there are none in-flight.
+			// if (readYourWritesDisabled)
+			// 	tr->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
+
 			if (snapshotRYWDisabled)
 				tr->setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 			if (readAheadDisabled)
@@ -683,7 +684,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 
 			loop {
 				wait(delay(now() - startTime > self->slowModeStart ||
-				                   (g_network->isSimulated() && g_simulator.speedUpSimulation)
+				                   (g_network->isSimulated() && g_simulator->speedUpSimulation)
 				               ? 1.0
 				               : 0.1));
 				try {
@@ -1104,4 +1105,4 @@ struct WriteDuringReadWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory("WriteDuringRead");
+WorkloadFactory<WriteDuringReadWorkload> WriteDuringReadWorkloadFactory;

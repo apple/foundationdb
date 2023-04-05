@@ -28,10 +28,11 @@ import com.apple.foundationdb.KeyValue;
 import com.apple.foundationdb.TransactionContext;
 
 public class IterableTest {
+
 	public static void main(String[] args) throws InterruptedException {
 		final int reps = 1000;
 		try {
-			FDB fdb = FDB.selectAPIVersion(720);
+			FDB fdb = FDB.selectAPIVersion(TestApiVersion.CURRENT);
 			try(Database db = fdb.open()) {
 				runTests(reps, db);
 			}

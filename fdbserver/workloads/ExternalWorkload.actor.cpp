@@ -107,7 +107,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	FDBWorkloadFactory* (*workloadFactory)(FDBLogger*);
 	std::shared_ptr<FDBWorkload> workloadImpl;
 
-	constexpr static const char* NAME = "External";
+	constexpr static auto NAME = "External";
 
 	static std::string getDefaultLibraryPath() {
 		auto self = exePath();
@@ -128,9 +128,9 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 
 	explicit ExternalWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		libraryName = ::getOption(options, LiteralStringRef("libraryName"), LiteralStringRef("")).toString();
-		libraryPath = ::getOption(options, LiteralStringRef("libraryPath"), Value(getDefaultLibraryPath())).toString();
-		auto wName = ::getOption(options, LiteralStringRef("workloadName"), LiteralStringRef(""));
+		libraryName = ::getOption(options, "libraryName"_sr, ""_sr).toString();
+		libraryPath = ::getOption(options, "libraryPath"_sr, Value(getDefaultLibraryPath())).toString();
+		auto wName = ::getOption(options, "workloadName"_sr, ""_sr);
 		auto fullPath = joinPath(libraryPath, toLibName(libraryName));
 		TraceEvent("ExternalWorkloadLoad")
 		    .detail("LibraryName", libraryName)
@@ -163,8 +163,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		}
 	}
 
-	std::string description() const override { return NAME; }
-
 	ACTOR Future<Void> assertTrue(StringRef stage, Future<bool> f) {
 		bool res = wait(f);
 		if (!res) {
@@ -185,7 +183,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		keepAlive(f, database);
 		workloadImpl->setup(reinterpret_cast<FDBDatabase*>(database.getPtr()),
 		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
-		return assertTrue(LiteralStringRef("setup"), f);
+		return assertTrue("setup"_sr, f);
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -200,7 +198,7 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		keepAlive(f, database);
 		workloadImpl->start(reinterpret_cast<FDBDatabase*>(database.getPtr()),
 		                    GenericPromise<bool>(new FDBPromiseImpl(promise)));
-		return assertTrue(LiteralStringRef("start"), f);
+		return assertTrue("start"_sr, f);
 	}
 	Future<bool> check(Database const& cx) override {
 		if (!success) {
@@ -242,14 +240,14 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 	}
 	uint64_t getProcessID() const override {
 		if (g_network->isSimulated()) {
-			return reinterpret_cast<uint64_t>(g_simulator.getCurrentProcess());
+			return reinterpret_cast<uint64_t>(g_simulator->getCurrentProcess());
 		} else {
 			return 0ul;
 		}
 	}
 	void setProcessID(uint64_t processID) override {
 		if (g_network->isSimulated()) {
-			g_simulator.currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
+			g_simulator->currentProcess = reinterpret_cast<ISimulator::ProcessInfo*>(processID);
 		}
 	}
 	double now() const override { return g_network->now(); }
@@ -278,4 +276,4 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 };
 } // namespace
 
-WorkloadFactory<ExternalWorkload> CycleWorkloadFactory(ExternalWorkload::NAME);
+WorkloadFactory<ExternalWorkload> CycleWorkloadFactory;

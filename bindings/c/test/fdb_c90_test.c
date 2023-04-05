@@ -4,6 +4,6 @@
 int main(int argc, char* argv[]) {
 	(void)argc;
 	(void)argv;
-	fdb_select_api_version(720);
+	fdb_select_api_version(FDB_API_VERSION);
 	return 0;
 }

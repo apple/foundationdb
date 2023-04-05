@@ -1,6 +1,5 @@
-# Disable buggify for parallel restore
-#[configuration]
-#buggify=on
+[configuration]
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'BackupAndParallelRestoreWithAtomicOp'

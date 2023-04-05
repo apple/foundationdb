@@ -1,13 +1,12 @@
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-allowDisablingTenants = false
-# FIXME: re-enable rocks at some point
-storageEngineExcludeTypes = [4, 5]
+tenantModes = ['optional', 'required']
+encryptModes = ['domain_aware', 'cluster_aware']
 
 [[knobs]]
 bg_metadata_source = "tenant"
-enable_encryption = true
+enable_configurable_encryption = true
 
 [[test]]
 testTitle = 'BlobGranuleCorrectness'

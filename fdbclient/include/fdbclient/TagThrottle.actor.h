@@ -40,8 +40,8 @@
 typedef StringRef TransactionTagRef;
 typedef Standalone<TransactionTagRef> TransactionTag;
 
-FDB_DECLARE_BOOLEAN_PARAM(ContainsRecommended);
-FDB_DECLARE_BOOLEAN_PARAM(Capitalize);
+FDB_BOOLEAN_PARAM(ContainsRecommended);
+FDB_BOOLEAN_PARAM(Capitalize);
 
 class TagSet {
 public:
@@ -254,38 +254,34 @@ namespace ThrottleApi {
 // or using IClientAPI like IDatabase, ITransaction
 
 ACTOR template <class Tr>
-Future<bool> getValidAutoEnabled(Reference<Tr> tr) {
-	state bool result;
-	loop {
-		// hold the returned standalone object's memory
-		state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
-		Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
-		if (!value.present()) {
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		} else if (value.get() == LiteralStringRef("1")) {
-			result = true;
-		} else if (value.get() == LiteralStringRef("0")) {
-			result = false;
-		} else {
-			TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
-			tr->reset();
-			wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
-			continue;
-		}
-		return result;
-	};
+Future<Optional<bool>> getValidAutoEnabled(Reference<Tr> tr) {
+	// hold the returned standalone object's memory
+	state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
+	Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+	if (!value.present()) {
+		return {};
+	} else if (value.get() == "1"_sr) {
+		return true;
+	} else if (value.get() == "0"_sr) {
+		return false;
+	} else {
+		TraceEvent(SevWarnAlways, "InvalidAutoTagThrottlingValue").detail("Value", value.get());
+		return {};
+	}
 }
 
 ACTOR template <class DB>
 Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int limit) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			bool enableAuto = wait(getValidAutoEnabled(tr));
-			if (enableAuto) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<bool> enableAuto = wait(getValidAutoEnabled(tr));
+			if (!enableAuto.present()) {
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
+			} else if (enableAuto.get()) {
 				return std::vector<TagThrottleInfo>();
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f =
@@ -307,15 +303,19 @@ ACTOR template <class DB>
 Future<std::vector<TagThrottleInfo>>
 getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecommended = ContainsRecommended::False) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
-	state bool reportAuto = containsRecommended;
+	state Optional<bool> reportAuto;
 	loop {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			if (!containsRecommended) {
-				wait(store(reportAuto, getValidAutoEnabled(tr)));
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			wait(store(reportAuto, getValidAutoEnabled(tr)));
+			if (!reportAuto.present()) {
+				tr->reset();
+				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
+				continue;
 			}
 			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
-			    reportAuto ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix), limit);
+			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
+			    limit);
 			RangeResult throttles = wait(safeThreadFutureToFuture(f));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
@@ -331,8 +331,7 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 
 template <class Tr>
 void signalThrottleChange(Reference<Tr> tr) {
-	tr->atomicOp(
-	    tagThrottleSignalKey, LiteralStringRef("XXXXXXXXXX\x00\x00\x00\x00"), MutationRef::SetVersionstampedValue);
+	tr->atomicOp(tagThrottleSignalKey, "XXXXXXXXXX\x00\x00\x00\x00"_sr, MutationRef::SetVersionstampedValue);
 }
 
 ACTOR template <class Tr>
@@ -583,9 +582,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
 			    tr->get(tagThrottleAutoEnabledKey);
 			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
-			if (!value.present() || (enabled && value.get() != LiteralStringRef("1")) ||
-			    (!enabled && value.get() != LiteralStringRef("0"))) {
-				tr->set(tagThrottleAutoEnabledKey, LiteralStringRef(enabled ? "1" : "0"));
+			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
+				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);
 
 				wait(safeThreadFutureToFuture(tr->commit()));
@@ -599,10 +597,8 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 
 class TagQuotaValue {
 public:
-	double reservedReadQuota{ 0.0 };
-	double totalReadQuota{ 0.0 };
-	double reservedWriteQuota{ 0.0 };
-	double totalWriteQuota{ 0.0 };
+	int64_t reservedQuota{ 0 };
+	int64_t totalQuota{ 0 };
 	bool isValid() const;
 	Value toValue() const;
 	static TagQuotaValue fromValue(ValueRef);
@@ -611,17 +607,10 @@ public:
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
-void setTagQuota(Reference<Tr> tr,
-                 TransactionTagRef tag,
-                 double reservedReadQuota,
-                 double totalReadQuota,
-                 double reservedWriteQuota,
-                 double totalWriteQuota) {
+void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
 	TagQuotaValue tagQuotaValue;
-	tagQuotaValue.reservedReadQuota = reservedReadQuota;
-	tagQuotaValue.totalReadQuota = totalReadQuota;
-	tagQuotaValue.reservedWriteQuota = reservedWriteQuota;
-	tagQuotaValue.totalWriteQuota = totalWriteQuota;
+	tagQuotaValue.reservedQuota = reservedQuota;
+	tagQuotaValue.totalQuota = totalQuota;
 	if (!tagQuotaValue.isValid()) {
 		throw invalid_throttle_quota_value();
 	}

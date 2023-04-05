@@ -30,7 +30,7 @@
 #include "flow/Arena.h"
 #include "flow/Knobs.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(IsTest);
+FDB_BOOLEAN_PARAM(IsTest);
 
 /*
  * Each worker maintains a LocalConfiguration object used to update its knob collection.
@@ -64,7 +64,8 @@ public:
 
 public: // Testing
 	Future<Void> addChanges(Standalone<VectorRef<VersionedConfigMutationRef>> versionedMutations,
-	                        Version mostRecentVersion);
+	                        Version mostRecentVersion,
+	                        double restartDelay);
 	void close();
 	Future<Void> onClosed();
 };

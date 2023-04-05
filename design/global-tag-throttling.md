@@ -3,44 +3,48 @@
 When the `GLOBAL_TAG_THROTTLING` knob is enabled, the ratekeeper will use the [transaction tagging feature](https://apple.github.io/foundationdb/transaction-tagging.html) to throttle tags according to the global tag throttling algorithm. This page describes the implementation of this algorithm.
 
 ### Tag Quotas
-The global tag throttler bases throttling decisions on "quotas" provided by clients through the tag quota API. Each tag quota has four different components:
+The global tag throttler bases throttling decisions on "quotas" provided by clients through the tag quota API. Each tag quota has two components:
 
-* Reserved read quota
-* Reserved write quota
-* Total read quota
-* Total write quota
+* Reserved quota
+* Total quota
 
-The global tag throttler can not throttle tags to a throughput below the reserved quotas, and it cannot allow throughput to exceed the total quotas.
+The global tag throttler cannot throttle tags to a throughput below the reserved quota, and it cannot allow throughput to exceed the total quota.
 
 ### Cost
-The units for these quotas are computed as follows. The "cost" of a read operation is computed as:
+Internally, the units for these quotas are bytes. The cost of an operation is rounded up to the nearest page size. The cost of a read operation is computed as:
 
 ```
-readCost = bytesRead / SERVER_KNOBS->READ_COST_BYTE_FACTOR + 1;
+readCost = ceiling(bytesRead / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 ```
 
-The "cost" of a write operation is computed as:
+The cost of a write operation is computed as:
 
 ```
-writeCost = bytesWritten / CLIENT_KNOBS->WRITE_COST_BYTE_FACTOR + 1;
+writeCost = CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * ceiling(bytesWritten / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 ```
 
 Here `bytesWritten` includes cleared bytes. The size of range clears is estimated at commit time.
 
 ### Tuple Layer
-Tag quotas are stored inside of the system keyspace (with prefix `\xff/tagQuota/`). They are stored using the tuple layer, in a tuple of form: `(reservedReadQuota, totalReadQuota, reservedWriteQuota, totalWriteQuota)`. There is currently no custom code in the bindings for manipulating these system keys. However, in any language for which bindings are available, it is possible to use the tuple layer to manipulate tag quotas.
+Tag quotas are stored inside of the system keyspace (with prefix `\xff/tagQuota/`). They are stored using the tuple layer, in a tuple of form: `(reservedQuota, totalQuota)`. There is currently no custom code in the bindings for manipulating these system keys. However, in any language for which bindings are available, it is possible to use the tuple layer to manipulate tag quotas.
 
 ### fdbcli
-The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota of a particular tag, run the following command:
+The easiest way for an external client to interact with tag quotas is through `fdbcli`. To get the quota (in bytes/second) of a particular tag, run the following command:
 
 ```
-fdbcli> get <tag> [reserved|total] [read|write]
+fdbcli> quota get <tag> [reserved_throughput|total_throughput]
 ```
 
 To set the quota through `fdbcli`, run:
 
 ```
-fdbcli> set <tag> [reserved|total] [read|write] <value>
+fdbcli> quota set <tag> [reserved_throughput|total_throughput] <bytes_per_second>
+```
+
+To clear a both reserved and total throughput quotas for a tag, run:
+
+```
+fdbcli> quota clear <tag>
 ```
 
 ### Limit Calculation
@@ -112,12 +116,12 @@ If an individual zone is unhealthy, it may cause the throttling ratio for storag
 ### Client Rate Calculation
 The smoothed per-client rate for each tag is tracked within `GlobalTagThrottlerImpl::PerTagStatistics`. Once a target rate has been computed, this is passed to `GlobalTagThrotterImpl::PerTagStatistics::updateAndGetPerClientRate` which adjusts the per-client rate. The per-client rate is meant to limit the busiest clients, so that at equilibrium, the per-client rate will remain constant and the sum of throughput from all clients will match the target rate.
 
-## Testing
-The `GlobalTagThrottling.toml` test provides a simple end-to-end test using the global tag throttler. Quotas are set using the internal tag quota API in the `GlobalTagThrottling` workload. This is run in parallel with the `ReadWrite` workload, which tags transactions. The number of `transaction_tag_throttled` errors is reported, along with the throughput, which should be roughly predictable based on the quota parameters chosen. 
+## Simulation Testing
+The `ThroughputQuota.toml` test provides a simple end-to-end test using the global tag throttler. Quotas are set using the internal tag quota API in the `ThroughputQuota` workload. This is run with the `Cycle` workload, which randomly tags transactions. 
 
 In addition to this end-to-end test, there is a suite of unit tests with the `/GlobalTagThrottler/` prefix. These tests run in a mock environment, with mock storage servers providing simulated storage queue statistics and tag busyness reports. Mock clients simulate workload on these mock storage servers, and get throttling feedback directly from a global tag throttler which is monitoring the mock storage servers.
 
-In each test, the `GlobalTagThrottlerTesting::monitor` function is used to periodically check whether or not a desired equilibrium state has been reached. If the desired state is reached and maintained for a sufficient period of time, the test passes. If the unit test is unable to reach this desired equilibrium state before a timeout, the test will fail. Commonly, the desired state is for the global tag throttler to report a client rate sufficiently close to the desired rate specified as an input to the `GlobalTagThrottlerTesting::rateIsNear` function.
+In each unit test, the `GlobalTagThrottlerTesting::monitor` function is used to periodically check whether or not a desired equilibrium state has been reached. If the desired state is reached and maintained for a sufficient period of time, the test passes. If the unit test is unable to reach this desired equilibrium state before a timeout, the test will fail. Commonly, the desired state is for the global tag throttler to report a client rate sufficiently close to the desired rate specified as an input to the `GlobalTagThrottlerTesting::rateIsNear` function.
 
 ## Visibility
 

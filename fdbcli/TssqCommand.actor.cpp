@@ -89,7 +89,7 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			}
 
 			if (enable) {
-				tr->set(tssQuarantineKeyFor(tssId), LiteralStringRef(""));
+				tr->set(tssQuarantineKeyFor(tssId), ""_sr);
 				// remove server from TSS mapping when quarantine is enabled
 				tssMapDB.erase(tr, ssi.tssPairID.get());
 			} else {
@@ -112,19 +112,19 @@ namespace fdb_cli {
 
 ACTOR Future<bool> tssqCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() == 2) {
-		if (tokens[1] != LiteralStringRef("list")) {
+		if (tokens[1] != "list"_sr) {
 			printUsage(tokens[0]);
 			return false;
 		} else {
 			wait(tssQuarantineList(db));
 		}
 	} else if (tokens.size() == 3) {
-		if ((tokens[1] != LiteralStringRef("start") && tokens[1] != LiteralStringRef("stop")) ||
-		    (tokens[2].size() != 32) || !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
+		if ((tokens[1] != "start"_sr && tokens[1] != "stop"_sr) || (tokens[2].size() != 32) ||
+		    !std::all_of(tokens[2].begin(), tokens[2].end(), &isxdigit)) {
 			printUsage(tokens[0]);
 			return false;
 		} else {
-			bool enable = tokens[1] == LiteralStringRef("start");
+			bool enable = tokens[1] == "start"_sr;
 			UID tssId = UID::fromString(tokens[2].toString());
 			bool success = wait(tssQuarantine(db, enable, tssId));
 			return success;

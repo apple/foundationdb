@@ -142,6 +142,8 @@ Here is a complete list of valid parameters:
 
  *multipart_min_part_size* (or *minps*) - Min part size for multipart uploads.
 
+ *enable_read_cache* (or *erc*) - Whether to enable read block cache.
+
  *read_block_size* (or *rbs*) - Block size in bytes to be used for reads.
 
  *read_ahead_blocks* (or *rab*) - Number of blocks to read ahead of requested offset.
@@ -523,6 +525,12 @@ The ``start`` command will start a new restore on the specified (or default) tag
 
 ``--inconsistent-snapshot-only``
   Ignore mutation log files during the restore to speedup the process. Because only range files are restored, this option gives an inconsistent snapshot in most cases and is not recommended to use.
+
+``--user-data``
+  Restore only the user keyspace. This option should NOT be used alongside --system-metadata (below) and CANNOT be used alongside other specified key ranges.
+
+``--system-metadata``
+  Restore only the relevant system keyspace. This option should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.
 
 .. program:: fdbrestore abort
 

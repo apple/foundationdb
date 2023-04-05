@@ -26,7 +26,6 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-constexpr int SAMPLE_SIZE = 10000;
 // workload description:
 // This workload aims to test whether we can throttling some bad clients that doing penetrating write on write hot-spot
 // range. There are several good clientActor just randomly do read and write ops in transaction. Also, some bad
@@ -41,8 +40,8 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	int badActorTrNum = 0, badActorRetries = 0, badActorTooOldRetries = 0, badActorCommitFailedRetries = 0;
 	int goodActorThrottleRetries = 0, badActorThrottleRetries = 0;
 	double badActorTotalLatency = 0.0, goodActorTotalLatency = 0.0;
-	ContinuousSample<double> badActorReadLatency, goodActorReadLatency;
-	ContinuousSample<double> badActorCommitLatency, goodActorCommitLatency;
+	DDSketch<double> badActorReadLatency, goodActorReadLatency;
+	DDSketch<double> badActorCommitLatency, goodActorCommitLatency;
 	// Test configuration
 	// KVWorkload::actorCount
 	int goodActorPerClient, badActorPerClient;
@@ -59,30 +58,30 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	bool fastSuccess = false;
 	int rangeEachBadActor = 0;
 	std::set<std::string> throttledTags;
-	static constexpr const char* NAME = "WriteTagThrottling";
+	static constexpr auto NAME = "WriteTagThrottling";
 	static constexpr int MIN_TAGS_PER_TRANSACTION = 1;
 	static constexpr int MIN_TRANSACTION_TAG_LENGTH = 2;
 
 	WriteTagThrottlingWorkload(WorkloadContext const& wcx)
-	  : KVWorkload(wcx), badActorReadLatency(SAMPLE_SIZE), goodActorReadLatency(SAMPLE_SIZE),
-	    badActorCommitLatency(SAMPLE_SIZE), goodActorCommitLatency(SAMPLE_SIZE) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 120.0);
-		badOpRate = getOption(options, LiteralStringRef("badOpRate"), 0.9);
-		numWritePerTr = getOption(options, LiteralStringRef("numWritePerTr"), 1);
-		numReadPerTr = getOption(options, LiteralStringRef("numReadPerTr"), 1);
-		numClearPerTr = getOption(options, LiteralStringRef("numClearPerTr"), 1);
-		hotRangeRate = getOption(options, LiteralStringRef("hotRangeRate"), 0.1);
-		populateData = getOption(options, LiteralStringRef("populateData"), true);
+	  : KVWorkload(wcx), badActorReadLatency(), goodActorReadLatency(), badActorCommitLatency(),
+	    goodActorCommitLatency() {
+		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		badOpRate = getOption(options, "badOpRate"_sr, 0.9);
+		numWritePerTr = getOption(options, "numWritePerTr"_sr, 1);
+		numReadPerTr = getOption(options, "numReadPerTr"_sr, 1);
+		numClearPerTr = getOption(options, "numClearPerTr"_sr, 1);
+		hotRangeRate = getOption(options, "hotRangeRate"_sr, 0.1);
+		populateData = getOption(options, "populateData"_sr, true);
 
-		writeThrottle = getOption(options, LiteralStringRef("writeThrottle"), false);
-		badActorPerClient = getOption(options, LiteralStringRef("badActorPerClient"), 1);
-		goodActorPerClient = getOption(options, LiteralStringRef("goodActorPerClient"), 1);
+		writeThrottle = getOption(options, "writeThrottle"_sr, false);
+		badActorPerClient = getOption(options, "badActorPerClient"_sr, 1);
+		goodActorPerClient = getOption(options, "goodActorPerClient"_sr, 1);
 		actorCount = goodActorPerClient + badActorPerClient;
 
 		keyCount = getOption(options,
-		                     LiteralStringRef("keyCount"),
+		                     "keyCount"_sr,
 		                     std::max(3000, clientCount * actorCount * 3)); // enough keys to avoid too many conflicts
-		trInterval = actorCount * 1.0 / getOption(options, LiteralStringRef("trPerSecond"), 1000);
+		trInterval = actorCount * 1.0 / getOption(options, "trPerSecond"_sr, 1000);
 		if (badActorPerClient > 0) {
 			rangeEachBadActor = keyCount / (clientCount * badActorPerClient);
 		}
@@ -90,8 +89,6 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 		badTag = TransactionTag(std::string("bT"));
 		goodTag = TransactionTag(std::string("gT"));
 	}
-
-	std::string description() const override { return WriteTagThrottlingWorkload::NAME; }
 
 	ACTOR static Future<Void> _setup(Database cx, WriteTagThrottlingWorkload* self) {
 		ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION >= MIN_TAGS_PER_TRANSACTION &&
@@ -324,4 +321,4 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<WriteTagThrottlingWorkload> WriteTagThrottlingWorkloadFactory(WriteTagThrottlingWorkload::NAME);
+WorkloadFactory<WriteTagThrottlingWorkload> WriteTagThrottlingWorkloadFactory;

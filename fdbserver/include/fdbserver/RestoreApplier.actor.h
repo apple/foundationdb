@@ -185,7 +185,7 @@ struct StagingKey {
 	}
 
 	// Does the key has at least 1 set or clear mutation to get the base value
-	bool hasBaseValue() {
+	bool hasBaseValue() const {
 		if (version.version > 0) {
 			ASSERT(type == MutationRef::SetValue || type == MutationRef::ClearRange);
 		}
@@ -193,12 +193,12 @@ struct StagingKey {
 	}
 
 	// Has all pendingMutations been pre-applied to the val?
-	bool hasPrecomputed() {
+	bool hasPrecomputed() const {
 		ASSERT(pendingMutations.empty() || pendingMutations.rbegin()->first >= pendingMutations.begin()->first);
 		return pendingMutations.empty() || version >= pendingMutations.rbegin()->first;
 	}
 
-	int totalSize() { return MutationRef::OVERHEAD_BYTES + key.size() + val.size(); }
+	int totalSize() const { return MutationRef::OVERHEAD_BYTES + key.size() + val.size(); }
 };
 
 // The range mutation received on applier.
@@ -231,7 +231,7 @@ public:
 
 	void operator=(int newState) override { vbState = newState; }
 
-	int get() override { return vbState; }
+	int get() const override { return vbState; }
 };
 
 struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
@@ -284,11 +284,11 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 	  : vbState(ApplierVersionBatchState::NOT_INIT), receiveMutationReqs(0), receivedBytes(0), appliedBytes(0),
 	    targetWriteRateMB(SERVER_KNOBS->FASTRESTORE_WRITE_BW_MB / SERVER_KNOBS->FASTRESTORE_NUM_APPLIERS),
 	    totalBytesToWrite(-1), applyingDataBytes(0), counters(this, nodeID, batchIndex) {
-		pollMetrics = traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
-		                            nodeID,
-		                            SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
-		                            &counters.cc,
-		                            nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
+		pollMetrics =
+		    counters.cc.traceCounters(format("FastRestoreApplierMetrics%d", batchIndex),
+		                              nodeID,
+		                              SERVER_KNOBS->FASTRESTORE_ROLE_LOGGING_DELAY,
+		                              nodeID.toString() + "/RestoreApplierMetrics/" + std::to_string(batchIndex));
 		TraceEvent("FastRestoreApplierMetricsCreated").detail("Node", nodeID);
 	}
 	~ApplierBatchData() {
@@ -324,7 +324,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		dbApplier = Optional<Future<Void>>();
 	}
 
-	void sanityCheckMutationOps() {
+	void sanityCheckMutationOps() const {
 		if (kvOps.empty())
 			return;
 
@@ -332,7 +332,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		ASSERT_WE_THINK(allOpsAreKnown());
 	}
 
-	bool isKVOpsSorted() {
+	bool isKVOpsSorted() const {
 		auto prev = kvOps.begin();
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			if (prev->first > it->first) {
@@ -343,7 +343,7 @@ struct ApplierBatchData : public ReferenceCounted<ApplierBatchData> {
 		return true;
 	}
 
-	bool allOpsAreKnown() {
+	bool allOpsAreKnown() const {
 		for (auto it = kvOps.begin(); it != kvOps.end(); ++it) {
 			for (auto m = it->second.begin(); m != it->second.end(); ++m) {
 				if (m->type == MutationRef::SetValue || m->type == MutationRef::ClearRange ||
@@ -371,7 +371,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		nodeIndex = assignedIndex;
 
 		// Q: Why do we need to initMetric?
-		// version.initMetric(LiteralStringRef("RestoreApplier.Version"), cc.id);
+		// version.initMetric("RestoreApplier.Version"_sr, cc.id);
 
 		role = RestoreRole::Applier;
 	}
@@ -380,8 +380,8 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 
 	// getVersionBatchState may be called periodically to dump version batch state,
 	// even when no version batch has been started.
-	int getVersionBatchState(int batchIndex) final {
-		std::map<int, Reference<ApplierBatchData>>::iterator item = batch.find(batchIndex);
+	int getVersionBatchState(int batchIndex) const final {
+		auto item = batch.find(batchIndex);
 		if (item == batch.end()) { // Batch has not been initialized when we blindly profile the state
 			return ApplierVersionBatchState::INVALID;
 		} else {
@@ -404,7 +404,7 @@ struct RestoreApplierData : RestoreRoleData, public ReferenceCounted<RestoreAppl
 		finishedBatch = NotifiedVersion(0);
 	}
 
-	std::string describeNode() override {
+	std::string describeNode() const override {
 		std::stringstream ss;
 		ss << "NodeID:" << nodeID.toString() << " nodeIndex:" << nodeIndex;
 		return ss.str();

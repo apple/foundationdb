@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#include "fdbservice/ServiceBase.h"
-#include "fdbservice/ThreadPool.h"
+#include "ServiceBase.h"
+#include "ThreadPool.h"
 
 #include <iostream>
 #include <fstream>

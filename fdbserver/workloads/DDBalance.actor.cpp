@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/ContinuousSample.h"
+#include "fdbrpc/DDSketch.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct DDBalanceWorkload : TestWorkload {
+	static constexpr auto NAME = "DDBalance";
 	int actorsPerClient, nodesPerActor, moversPerClient, currentbin, binCount, writesPerTransaction,
 	    keySpaceDriftFactor;
 	double testDuration, warmingDelay, transactionsPerSecond;
@@ -32,28 +33,26 @@ struct DDBalanceWorkload : TestWorkload {
 
 	std::vector<Future<Void>> clients;
 	PerfIntCounter bin_shifts, operations, retries;
-	ContinuousSample<double> latencies;
+	DDSketch<double> latencies;
 
 	DDBalanceWorkload(WorkloadContext const& wcx)
-	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies(2000) {
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 10.0);
-		binCount = getOption(options, LiteralStringRef("binCount"), 1000);
-		writesPerTransaction = getOption(options, LiteralStringRef("writesPerTransaction"), 1);
-		keySpaceDriftFactor = getOption(options, LiteralStringRef("keySpaceDriftFactor"), 1);
-		moversPerClient = std::max(getOption(options, LiteralStringRef("moversPerClient"), 10), 1);
-		actorsPerClient = std::max(getOption(options, LiteralStringRef("actorsPerClient"), 100), 1);
-		int nodes = getOption(options, LiteralStringRef("nodes"), 10000);
-		discardEdgeMeasurements = getOption(options, LiteralStringRef("discardEdgeMeasurements"), true);
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
+	  : TestWorkload(wcx), bin_shifts("Bin_Shifts"), operations("Operations"), retries("Retries"), latencies() {
+		testDuration = getOption(options, "testDuration"_sr, 10.0);
+		binCount = getOption(options, "binCount"_sr, 1000);
+		writesPerTransaction = getOption(options, "writesPerTransaction"_sr, 1);
+		keySpaceDriftFactor = getOption(options, "keySpaceDriftFactor"_sr, 1);
+		moversPerClient = std::max(getOption(options, "moversPerClient"_sr, 10), 1);
+		actorsPerClient = std::max(getOption(options, "actorsPerClient"_sr, 100), 1);
+		int nodes = getOption(options, "nodes"_sr, 10000);
+		discardEdgeMeasurements = getOption(options, "discardEdgeMeasurements"_sr, true);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
 		transactionsPerSecond =
-		    getOption(options, LiteralStringRef("transactionsPerSecond"), 5000.0) / (clientCount * moversPerClient);
+		    getOption(options, "transactionsPerSecond"_sr, 5000.0) / (clientCount * moversPerClient);
 
 		nodesPerActor = nodes / (actorsPerClient * clientCount);
 
 		currentbin = deterministicRandom()->randomInt(0, binCount);
 	}
-
-	std::string description() const override { return "DDBalance"; }
 
 	Future<Void> setup(Database const& cx) override { return ddbalanceSetup(cx, this); }
 
@@ -259,4 +258,4 @@ struct DDBalanceWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory("DDBalance");
+WorkloadFactory<DDBalanceWorkload> DDBalanceWorkloadFactory;

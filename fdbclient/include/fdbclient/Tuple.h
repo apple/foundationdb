@@ -25,12 +25,20 @@
 
 #include "flow/flow.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Versionstamp.h"
+#include "fdbclient/TupleVersionstamp.h"
 
 struct Tuple {
 	struct UnicodeStr {
 		StringRef str;
 		explicit UnicodeStr(StringRef str) : str(str) {}
+	};
+
+	struct UserTypeStr {
+		uint8_t code;
+		Standalone<StringRef> str;
+		UserTypeStr(uint8_t code, StringRef str) : code(code), str(str) {}
+
+		bool operator==(const UserTypeStr& other) const { return (code == other.code && str == other.str); }
 	};
 
 	Tuple() {}
@@ -40,6 +48,8 @@ struct Tuple {
 	// Note that strings can't be incomplete because they are parsed such that the end of the packed
 	// byte string is considered the end of the string in lieu of a specific end.
 	static Tuple unpack(StringRef const& str, bool exclude_incomplete = false);
+	static std::string tupleToString(Tuple const& tuple);
+	static Tuple unpackUserType(StringRef const& str, bool exclude_incomplete = false);
 
 	Tuple& append(Tuple const& tuple);
 
@@ -54,7 +64,8 @@ struct Tuple {
 	Tuple& append(double);
 	Tuple& append(std::nullptr_t);
 	Tuple& appendNull();
-	Tuple& append(Versionstamp const&);
+	Tuple& append(TupleVersionstamp const&);
+	Tuple& append(UserTypeStr const&);
 
 	Standalone<StringRef> pack() const {
 		return Standalone<StringRef>(StringRef(data.begin(), data.size()), data.arena());
@@ -65,24 +76,29 @@ struct Tuple {
 		return append(t);
 	}
 
-	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, BOOL, FLOAT, DOUBLE, VERSIONSTAMP };
+	enum ElementType { NULL_TYPE, INT, BYTES, UTF8, BOOL, FLOAT, DOUBLE, VERSIONSTAMP, USER_TYPE };
+
+	bool isUserType(uint8_t code) const;
 
 	// this is number of elements, not length of data
 	size_t size() const { return offsets.size(); }
 	void reserve(size_t cap) { offsets.reserve(cap); }
 	void clear() {
-		data.clear();
+		// Make a new Standalone to use different memory so that
+		// previously returned objects from pack() are valid.
+		data = Standalone<VectorRef<uint8_t>>();
 		offsets.clear();
 	}
 	// Return a Tuple encoded raw string.
 	StringRef subTupleRawString(size_t index) const;
 	ElementType getType(size_t index) const;
 	Standalone<StringRef> getString(size_t index) const;
-	Versionstamp getVersionstamp(size_t index) const;
+	TupleVersionstamp getVersionstamp(size_t index) const;
 	int64_t getInt(size_t index, bool allow_incomplete = false) const;
 	bool getBool(size_t index) const;
 	float getFloat(size_t index) const;
 	double getDouble(size_t index) const;
+	Tuple::UserTypeStr getUserType(size_t index) const;
 
 	KeyRange range(Tuple const& tuple = Tuple()) const;
 
@@ -105,7 +121,7 @@ struct Tuple {
 	}
 
 private:
-	Tuple(const StringRef& data, bool exclude_incomplete = false);
+	Tuple(const StringRef& data, bool exclude_incomplete = false, bool exclude_user_type = false);
 	Standalone<VectorRef<uint8_t>> data;
 	std::vector<size_t> offsets;
 };

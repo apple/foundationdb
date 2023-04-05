@@ -33,6 +33,9 @@
 #define C_VERSION_MINOR 0
 #endif
 
+const char* kDate = __DATE__;
+const char* kTime = __TIME__;
+
 // FDB info.
 const std::string kGitHash = "@CURRENT_GIT_VERSION_WNL@";
 const std::string kFdbVersion = "@FDB_VERSION@";
@@ -43,7 +46,7 @@ const std::string kArch = "@CMAKE_SYSTEM@";
 const std::string kCompiler = "@CMAKE_CXX_COMPILER_ID@";
 
 // Library versions.
-const std::string kBoostVersion = "@Boost_LIB_VERSION@";
+const std::string kBoostVersion = BOOST_LIB_VERSION;
 
 // Build info and flags.
 const std::string kCMakeVersion = "@CMAKE_VERSION@";
@@ -60,6 +63,9 @@ constexpr int kCppStandard = __cplusplus;
 std::string jsonBuildInformation() {
 	json_spirit::mValue json;	
 	JSONDoc doc(json);
+
+	doc.create("build_date") = kDate;
+	doc.create("build_time") = kTime;
 
 	doc.create("git_hash") = kGitHash;
 	doc.create("fdb_version") = kFdbVersion;

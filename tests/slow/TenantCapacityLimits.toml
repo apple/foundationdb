@@ -1,0 +1,14 @@
+[configuration]
+allowDefaultTenant = false
+tenantModes = ['optional', 'required']
+allowCreatingTenants = false
+extraDatabaseMode = 'Single'
+
+[[test]]
+testTitle = 'TenantCapacityLimitTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'TenantCapacityLimits'

@@ -12,13 +12,13 @@ maxClientThreads = 4
 minClients = 2
 maxClients = 4
 
-    [[test.workload]]
-    name = 'ApiCorrectness'
-    minKeyLength = 1
-    maxKeyLength = 64
-    minValueLength = 1
-    maxValueLength = 1000
-    maxKeysPerTransaction = 50
-    initialSize = 100
-    numRandomOperations = 100
-    readExistingKeysRatio = 0.9
+[[test.workload]]
+name = 'ApiCorrectness'
+minKeyLength = 1
+maxKeyLength = 64
+minValueLength = 1
+maxValueLength = 1000
+maxKeysPerTransaction = 50
+initialSize = 100
+numRandomOperations = 100
+readExistingKeysRatio = 0.9

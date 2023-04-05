@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
 		applyNetworkOptions(options);
 		fdb::network::setup();
 
-		std::thread network_thread{ &fdb::network::run };
+		std::thread network_thread{ [] { fdb_check(fdb::network::run(), "FDB network thread failed"); } };
 
 		// Try calling some basic functionality that is available
 		// in all recent API versions

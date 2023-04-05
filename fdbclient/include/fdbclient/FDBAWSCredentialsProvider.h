@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#if (!defined FDB_AWS_CREDENTIALS_PROVIDER_H) && (defined BUILD_AWS_BACKUP)
+#if (!defined FDB_AWS_CREDENTIALS_PROVIDER_H) && (defined WITH_AWS_BACKUP)
 #define FDB_AWS_CREDENTIALS_PROVIDER_H
 #pragma once
 
-#ifdef BUILD_AWS_BACKUP
+#ifdef WITH_AWS_BACKUP
 
 #include "aws/core/Aws.h"
 #include "aws/core/auth/AWSCredentialsProviderChain.h"

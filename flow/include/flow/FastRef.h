@@ -24,7 +24,7 @@
 
 #include <atomic>
 #include <cstdint>
-#include <utility>
+#include "flow/Traceable.h"
 
 #include "swift_support.h"
 
@@ -181,6 +181,13 @@ public:
 
 private:
 	P* ptr;
+};
+
+template <class T>
+struct Traceable<Reference<T>> : std::bool_constant<Traceable<T>::value> {
+	static std::string toString(const Reference<T>& value) {
+		return value ? Traceable<T>::toString(*value) : "[not set]";
+	}
 };
 
 template <class P, class... Args>

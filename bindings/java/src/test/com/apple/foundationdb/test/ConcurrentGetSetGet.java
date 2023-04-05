@@ -48,7 +48,7 @@ public class ConcurrentGetSetGet {
 	}
 
 	public static void main(String[] args) {
-		try(Database database = FDB.selectAPIVersion(720).open()) {
+		try(Database database = FDB.selectAPIVersion(TestApiVersion.CURRENT).open()) {
 			new ConcurrentGetSetGet().apply(database);
 		}
 	}

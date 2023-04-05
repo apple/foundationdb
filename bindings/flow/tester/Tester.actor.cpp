@@ -470,12 +470,12 @@ ACTOR Future<Standalone<StringRef>> waitForVoid(Future<Void> f) {
 	try {
 		wait(f);
 		Tuple t;
-		t.append(LiteralStringRef("RESULT_NOT_PRESENT"));
+		t.append("RESULT_NOT_PRESENT"_sr);
 		return t.pack();
 	} catch (Error& e) {
 		// printf("FDBError1:%d\n", e.code());
 		Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", e.code()));
 		// pack above as error string into another tuple
 		Tuple ret;
@@ -493,7 +493,7 @@ ACTOR Future<Standalone<StringRef>> waitForValue(Future<FDBStandalone<KeyRef>> f
 	} catch (Error& e) {
 		// printf("FDBError2:%d\n", e.code());
 		Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", e.code()));
 		// pack above as error string into another tuple
 		Tuple ret;
@@ -509,7 +509,7 @@ ACTOR Future<Standalone<StringRef>> waitForValue(Future<Optional<FDBStandalone<V
 		if (value.present())
 			str = value.get();
 		else
-			str = LiteralStringRef("RESULT_NOT_PRESENT");
+			str = "RESULT_NOT_PRESENT"_sr;
 
 		Tuple t;
 		t.append(str);
@@ -517,7 +517,7 @@ ACTOR Future<Standalone<StringRef>> waitForValue(Future<Optional<FDBStandalone<V
 	} catch (Error& e) {
 		// printf("FDBError3:%d\n", e.code());
 		Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", e.code()));
 		// pack above as error string into another tuple
 		Tuple ret;
@@ -543,7 +543,7 @@ ACTOR Future<Standalone<StringRef>> getKey(Future<FDBStandalone<KeyRef>> f, Stan
 	} catch (Error& e) {
 		// printf("FDBError4:%d\n", e.code());
 		Tuple t;
-		t.append(LiteralStringRef("ERROR"));
+		t.append("ERROR"_sr);
 		t.append(format("%d", e.code()));
 		// pack above as error string into another tuple
 		Tuple ret;
@@ -670,7 +670,7 @@ struct GetEstimatedRangeSize : InstructionFunc {
 		state Standalone<StringRef> endKey = Tuple::unpack(s2).getString(0);
 		Future<int64_t> fsize = instruction->tr->getEstimatedRangeSizeBytes(KeyRangeRef(beginKey, endKey));
 		int64_t size = wait(fsize);
-		data->stack.pushTuple(LiteralStringRef("GOT_ESTIMATED_RANGE_SIZE"));
+		data->stack.pushTuple("GOT_ESTIMATED_RANGE_SIZE"_sr);
 
 		return Void();
 	}
@@ -698,7 +698,7 @@ struct GetRangeSplitPoints : InstructionFunc {
 		Future<FDBStandalone<VectorRef<KeyRef>>> fsplitPoints =
 		    instruction->tr->getRangeSplitPoints(KeyRangeRef(beginKey, endKey), chunkSize);
 		FDBStandalone<VectorRef<KeyRef>> splitPoints = wait(fsplitPoints);
-		data->stack.pushTuple(LiteralStringRef("GOT_RANGE_SPLIT_POINTS"));
+		data->stack.pushTuple("GOT_RANGE_SPLIT_POINTS"_sr);
 
 		return Void();
 	}
@@ -743,7 +743,7 @@ struct GetReadVersionFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		Version v = wait(instruction->tr->getReadVersion());
 		data->lastVersion = v;
-		data->stack.pushTuple(LiteralStringRef("GOT_READ_VERSION"));
+		data->stack.pushTuple("GOT_READ_VERSION"_sr);
 		return Void();
 	}
 };
@@ -767,7 +767,7 @@ struct GetCommittedVersionFunc : InstructionFunc {
 
 	static Future<Void> call(Reference<FlowTesterData> const& data, Reference<InstructionData> const& instruction) {
 		data->lastVersion = instruction->tr->getCommittedVersion();
-		data->stack.pushTuple(LiteralStringRef("GOT_COMMITTED_VERSION"));
+		data->stack.pushTuple("GOT_COMMITTED_VERSION"_sr);
 		return Void();
 	}
 };
@@ -781,7 +781,7 @@ struct GetApproximateSizeFunc : InstructionFunc {
 	ACTOR static Future<Void> call(Reference<FlowTesterData> data, Reference<InstructionData> instruction) {
 		int64_t _ = wait(instruction->tr->getApproximateSize());
 		(void)_; // disable unused variable warning
-		data->stack.pushTuple(LiteralStringRef("GOT_APPROXIMATE_SIZE"));
+		data->stack.pushTuple("GOT_APPROXIMATE_SIZE"_sr);
 		return Void();
 	}
 };
@@ -1485,7 +1485,7 @@ struct ReadConflictKeyFunc : InstructionFunc {
 		// printf("=========READ_CONFLICT_KEY:%s\n", printable(key).c_str());
 		instruction->tr->addReadConflictKey(key);
 
-		data->stack.pushTuple(LiteralStringRef("SET_CONFLICT_KEY"));
+		data->stack.pushTuple("SET_CONFLICT_KEY"_sr);
 		return Void();
 	}
 };
@@ -1506,7 +1506,7 @@ struct WriteConflictKeyFunc : InstructionFunc {
 		// printf("=========WRITE_CONFLICT_KEY:%s\n", printable(key).c_str());
 		instruction->tr->addWriteConflictKey(key);
 
-		data->stack.pushTuple(LiteralStringRef("SET_CONFLICT_KEY"));
+		data->stack.pushTuple("SET_CONFLICT_KEY"_sr);
 		return Void();
 	}
 };
@@ -1529,7 +1529,7 @@ struct ReadConflictRangeFunc : InstructionFunc {
 
 		// printf("=========READ_CONFLICT_RANGE:%s:%s\n", printable(begin).c_str(), printable(end).c_str());
 		instruction->tr->addReadConflictRange(KeyRange(KeyRangeRef(begin, end)));
-		data->stack.pushTuple(LiteralStringRef("SET_CONFLICT_RANGE"));
+		data->stack.pushTuple("SET_CONFLICT_RANGE"_sr);
 		return Void();
 	}
 };
@@ -1553,7 +1553,7 @@ struct WriteConflictRangeFunc : InstructionFunc {
 		// printf("=========WRITE_CONFLICT_RANGE:%s:%s\n", printable(begin).c_str(), printable(end).c_str());
 		instruction->tr->addWriteConflictRange(KeyRange(KeyRangeRef(begin, end)));
 
-		data->stack.pushTuple(LiteralStringRef("SET_CONFLICT_RANGE"));
+		data->stack.pushTuple("SET_CONFLICT_RANGE"_sr);
 		return Void();
 	}
 };
@@ -1643,10 +1643,8 @@ struct UnitTestsFunc : InstructionFunc {
 		                            Optional<StringRef>(StringRef((const uint8_t*)&locationCacheSize, 8)));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MAX_WATCHES,
 		                            Optional<StringRef>(StringRef((const uint8_t*)&maxWatches, 8)));
-		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_DATACENTER_ID,
-		                            Optional<StringRef>(LiteralStringRef("dc_id")));
-		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MACHINE_ID,
-		                            Optional<StringRef>(LiteralStringRef("machine_id")));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_DATACENTER_ID, Optional<StringRef>("dc_id"_sr));
+		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_MACHINE_ID, Optional<StringRef>("machine_id"_sr));
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_ENABLE);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_SNAPSHOT_RYW_DISABLE);
 		data->db->setDatabaseOption(FDBDatabaseOption::FDB_DB_OPTION_TRANSACTION_LOGGING_MAX_FIELD_LENGTH,
@@ -1685,13 +1683,13 @@ struct UnitTestsFunc : InstructionFunc {
 		              Optional<StringRef>(StringRef((const uint8_t*)&maxRetryDelay, 8)));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_USED_DURING_COMMIT_PROTECTION_DISABLE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_TRANSACTION_LOGGING_ENABLE,
-		              Optional<StringRef>(LiteralStringRef("my_transaction")));
+		              Optional<StringRef>("my_transaction"_sr));
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_READ_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_LOCK_AWARE);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_INCLUDE_PORT_IN_ADDRESS);
 		tr->setOption(FDBTransactionOption::FDB_TR_OPTION_REPORT_CONFLICTING_KEYS);
 
-		Optional<FDBStandalone<ValueRef>> _ = wait(tr->get(LiteralStringRef("\xff")));
+		Optional<FDBStandalone<ValueRef>> _ = wait(tr->get("\xff"_sr));
 		tr->cancel();
 
 		return Void();
@@ -1724,13 +1722,13 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 		Tuple opTuple = Tuple::unpack(data->instructions[idx].value);
 		state Standalone<StringRef> op = opTuple.getString(0);
 
-		state bool isDatabase = op.endsWith(LiteralStringRef("_DATABASE"));
-		state bool isSnapshot = op.endsWith(LiteralStringRef("_SNAPSHOT"));
-		state bool isDirectory = op.startsWith(LiteralStringRef("DIRECTORY_"));
+		state bool isDatabase = op.endsWith("_DATABASE"_sr);
+		state bool isSnapshot = op.endsWith("_SNAPSHOT"_sr);
+		state bool isDirectory = op.startsWith("DIRECTORY_"_sr);
 
 		try {
 			if (LOG_INSTRUCTIONS) {
-				if (op != LiteralStringRef("SWAP") && op != LiteralStringRef("PUSH")) {
+				if (op != "SWAP"_sr && op != "PUSH"_sr) {
 					printf("%zu. %s\n", idx, tupleToString(opTuple).c_str());
 					fflush(stdout);
 				}
@@ -1773,7 +1771,7 @@ ACTOR static Future<Void> doInstructions(Reference<FlowTesterData> data) {
 				if (opsThatCreateDirectories.count(op.toString())) {
 					data->directoryData.directoryList.push_back(DirectoryOrSubspace());
 				}
-				data->stack.pushTuple(LiteralStringRef("DIRECTORY_ERROR"));
+				data->stack.pushTuple("DIRECTORY_ERROR"_sr);
 			} else {
 				data->stack.pushError(e.code());
 			}
@@ -1873,7 +1871,7 @@ ACTOR void _test_versionstamp() {
 	try {
 		g_network = newNet2(TLSConfig());
 
-		API* fdb = FDB::API::selectAPIVersion(720);
+		API* fdb = FDB::API::selectAPIVersion(FDB_API_VERSION);
 
 		fdb->setupNetwork();
 		startThread(networkThread, fdb);
@@ -1883,15 +1881,14 @@ ACTOR void _test_versionstamp() {
 
 		state Future<FDBStandalone<StringRef>> ftrVersion = tr->getVersionstamp();
 
-		tr->atomicOp(LiteralStringRef("foo"),
-		             LiteralStringRef("blahblahbl\x00\x00\x00\x00"),
-		             FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		tr->atomicOp(
+		    "foo"_sr, "blahblahbl\x00\x00\x00\x00"_sr, FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 
 		wait(tr->commit()); // should use retry loop
 
 		tr->reset();
 
-		Optional<FDBStandalone<StringRef>> optionalDbVersion = wait(tr->get(LiteralStringRef("foo")));
+		Optional<FDBStandalone<StringRef>> optionalDbVersion = wait(tr->get("foo"_sr));
 		state FDBStandalone<StringRef> dbVersion = optionalDbVersion.get();
 		FDBStandalone<StringRef> trVersion = wait(ftrVersion);
 

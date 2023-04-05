@@ -27,8 +27,6 @@
 #include "fdbclient/FDBTypes.h"
 #include "flow/Trace.h"
 
-#include "fdbclient/BackupContainer.h"
-
 /* BackupContainerFileSystem implements a backup container which stores files in a nested folder structure.
  * Inheritors must only defined methods for writing, reading, deleting, sizing, and listing files.
  *
@@ -98,6 +96,9 @@ public:
 	// Open a file for write by fileName
 	virtual Future<Reference<IBackupFile>> writeFile(const std::string& fileName) = 0;
 
+	// write entire file
+	virtual Future<Void> writeEntireFile(const std::string& fileName, const std::string& contents) = 0;
+
 	// Delete a file
 	virtual Future<Void> deleteFile(const std::string& fileName) = 0;
 
@@ -123,7 +124,8 @@ public:
 
 	Future<Void> writeKeyspaceSnapshotFile(const std::vector<std::string>& fileNames,
 	                                       const std::vector<std::pair<Key, Key>>& beginEndKeys,
-	                                       int64_t totalBytes) final;
+	                                       int64_t totalBytes,
+	                                       IncludeKeyRangeMap IncludeKeyRangeMap) final;
 
 	// List log files, unsorted, which contain data at any version >= beginVersion and <= targetVersion.
 	// "partitioned" flag indicates if new partitioned mutation logs or old logs should be listed.
@@ -152,7 +154,7 @@ public:
 	                        ExpireProgress* progress,
 	                        Version restorableBeginVersion) final;
 
-	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file) final;
+	Future<KeyRange> getSnapshotFileKeyRange(const RangeFile& file, Database cx) final;
 
 	Future<Optional<RestorableFileSet>> getRestoreSet(Version targetVersion,
 	                                                  VectorRef<KeyRangeRef> keyRangesFilter,
@@ -164,6 +166,8 @@ protected:
 	bool usesEncryption() const;
 	void setEncryptionKey(Optional<std::string> const& encryptionKeyFileName);
 	Future<Void> encryptionSetupComplete() const;
+
+	Future<Void> writeEntireFileFallback(const std::string& fileName, const std::string& fileContents);
 
 private:
 	struct VersionProperty {

@@ -29,12 +29,12 @@
 
 static const std::array<MutationRef, 5> mutations = {
 	MutationRef(MutationRef::Type::ClearRange, normalKeys.begin, normalKeys.end),
-	MutationRef(MutationRef::Type::ClearRange, LiteralStringRef("a"), LiteralStringRef("b")),
-	MutationRef(MutationRef::Type::ClearRange, LiteralStringRef("aaaaaaaaaa"), LiteralStringRef("bbbbbbbbbb")),
+	MutationRef(MutationRef::Type::ClearRange, "a"_sr, "b"_sr),
+	MutationRef(MutationRef::Type::ClearRange, "aaaaaaaaaa"_sr, "bbbbbbbbbb"_sr),
 	MutationRef(MutationRef::Type::ClearRange, normalKeys.begin, systemKeys.end),
 	MutationRef(MutationRef::Type::ClearRange,
-	            LiteralStringRef("a").withPrefix(systemKeys.begin),
-	            LiteralStringRef("b").withPrefix(systemKeys.begin)),
+	            "a"_sr.withPrefix(systemKeys.begin),
+	            "b"_sr.withPrefix(systemKeys.begin)),
 };
 
 static void bench_check_metadata1(benchmark::State& state) {

@@ -18,24 +18,37 @@
  * limitations under the License.
  */
 
+#include "fdbclient/FDBTypes.h"
+#include "fdbclient/ManagementAPI.actor.h"
+#include "fdbclient/TenantManagement.actor.h"
+#include "fdbrpc/simulator.h"
+#include "fdbrpc/TenantInfo.h"
 #include "fdbserver/QuietDatabase.h"
 
 #include "fdbserver/MutationTracking.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/ApiWorkload.h"
 #include "fdbserver/workloads/MemoryKeyValueStore.h"
+#include "flow/IRandom.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/genericactors.actor.h"
+
+// Valdiate at-rest encryption guarantees. If enabled, test injects a known 'marker' in Key and/or Values
+// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) can scanned to find if
+// 'plaintext marker' is present.
+const std::string ENCRYPTION_AT_REST_MARKER_STRING = "Expecto..Patronum...";
 
 // An enum of API operation types used in the random test
 enum OperationType { SET, GET, GET_RANGE, GET_RANGE_SELECTOR, GET_KEY, CLEAR, CLEAR_RANGE, UNINITIALIZED };
 
 // A workload that executes the NativeAPIs functions and verifies that their outcomes are correct
 struct ApiCorrectnessWorkload : ApiWorkload {
+	static constexpr auto NAME = "ApiCorrectness";
 
 private:
 // Enable to track the activity on a particular key
 #if CENABLED(0, NOT_IN_CLEAN)
-#define targetKey LiteralStringRef( ??? )
+#define targetKey "???"_sr
 
 	void debugKey(KeyRef key, std::string context) {
 		if (key == targetKey)
@@ -97,23 +110,31 @@ public:
 	// Maximum time to reset DB to the original state
 	double resetDBTimeout;
 
+	// Validate data at-rest encryption guarantees
+	int validateEncryptionAtRest;
+
 	ApiCorrectnessWorkload(WorkloadContext const& wcx)
 	  : ApiWorkload(wcx), numRandomOperations("Num Random Operations") {
-		numGets = getOption(options, LiteralStringRef("numGets"), 1000);
-		numGetRanges = getOption(options, LiteralStringRef("numGetRanges"), 100);
-		numGetRangeSelectors = getOption(options, LiteralStringRef("numGetRangeSelectors"), 100);
-		numGetKeys = getOption(options, LiteralStringRef("numGetKeys"), 100);
-		numClears = getOption(options, LiteralStringRef("numClears"), 100);
-		numClearRanges = getOption(options, LiteralStringRef("numClearRanges"), 100);
-		minSizeAfterClear = getOption(options, LiteralStringRef("minSizeAfterClear"), (int)(0.1 * numKeys));
+		numGets = getOption(options, "numGets"_sr, 1000);
+		numGetRanges = getOption(options, "numGetRanges"_sr, 100);
+		numGetRangeSelectors = getOption(options, "numGetRangeSelectors"_sr, 100);
+		numGetKeys = getOption(options, "numGetKeys"_sr, 100);
+		numClears = getOption(options, "numClears"_sr, 100);
+		numClearRanges = getOption(options, "numClearRanges"_sr, 100);
+		minSizeAfterClear = getOption(options, "minSizeAfterClear"_sr, (int)(0.1 * numKeys));
 
-		maxRandomTestKeys = getOption(options, LiteralStringRef("maxRandomTestKeys"), numKeys);
-		randomTestDuration = getOption(options, LiteralStringRef("randomTestDuration"), 60.0);
+		maxRandomTestKeys = getOption(options, "maxRandomTestKeys"_sr, numKeys);
+		randomTestDuration = getOption(options, "randomTestDuration"_sr, 60.0);
 
-		int maxTransactionBytes = getOption(options, LiteralStringRef("maxTransactionBytes"), 500000);
+		int maxTransactionBytes = getOption(options, "maxTransactionBytes"_sr, 500000);
 		maxKeysPerTransaction = std::max(1, maxTransactionBytes / (maxValueLength + maxLongKeyLength));
 
-		resetDBTimeout = getOption(options, LiteralStringRef("resetDBTimeout"), 1800.0);
+		validateEncryptionAtRest =
+		    g_network->isSimulated()
+		        ? getOption(options, "validateEncryptionAtRest"_sr, deterministicRandom()->coinflip() ? 1 : 0)
+		        : 0;
+
+		resetDBTimeout = getOption(options, "resetDBTimeout"_sr, 1800.0);
 
 		if (maxTransactionBytes > 500000) {
 			TraceEvent("RemapEventSeverity")
@@ -137,13 +158,20 @@ public:
 
 	~ApiCorrectnessWorkload() override {}
 
-	std::string description() const override { return "ApiCorrectness"; }
-
 	void getMetrics(std::vector<PerfMetric>& m) override {
 		m.emplace_back("Number of Random Operations Performed", numRandomOperations.getValue(), Averaged::False);
 	}
 
 	ACTOR Future<Void> performSetup(Database cx, ApiCorrectnessWorkload* self) {
+		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+		if (g_network->isSimulated() && dbConfig.encryptionAtRestMode.isEncryptionEnabled() &&
+		    self->validateEncryptionAtRest) {
+			TraceEvent("EncryptionAtRestPlainTextMarkerCheckEnabled")
+			    .detail("EncryptionMode", dbConfig.encryptionAtRestMode.toString())
+			    .detail("DataAtRestMarker", ENCRYPTION_AT_REST_MARKER_STRING);
+			g_simulator->dataAtRestPlaintextMarker = ENCRYPTION_AT_REST_MARKER_STRING;
+		}
+
 		// Choose a random transaction type (NativeAPI, ReadYourWrites, ThreadSafe, MultiVersion)
 		std::vector<TransactionType> types;
 		types.push_back(NATIVE);
@@ -435,7 +463,7 @@ public:
 	// Gets a single range of values from the database and memory stores and compares them, returning true if the
 	// results were the same
 	ACTOR Future<bool> runGetRange(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse = deterministicRandom()->coinflip();
+		state Reverse reverse(deterministicRandom()->coinflip());
 
 		// Generate a random range
 		Key key = self->selectRandomKey(data, 0.5);
@@ -481,7 +509,7 @@ public:
 	// Gets a single range of values using key selectors from the database and memory store and compares them, returning
 	// true if the results were the same
 	ACTOR Future<bool> runGetRangeSelector(VectorRef<KeyValueRef> data, ApiCorrectnessWorkload* self) {
-		state Reverse reverse = deterministicRandom()->coinflip();
+		state Reverse reverse(deterministicRandom()->coinflip());
 
 		KeySelector selectors[2];
 		Key keys[2];
@@ -502,7 +530,7 @@ public:
 
 				if (keys[i].startsWith(StringRef(self->clientPrefix)) ||
 				    (keys[i].size() == 0 && self->clientPrefixInt == 0) ||
-				    (keys[i].startsWith(LiteralStringRef("\xff")) && self->clientPrefixInt == self->clientCount - 1)) {
+				    (keys[i].startsWith("\xff"_sr) && self->clientPrefixInt == self->clientCount - 1)) {
 					break;
 				}
 
@@ -553,7 +581,7 @@ public:
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {
 						// Don't include results in the 0xFF key-space
-						if (!range[i].key.startsWith(LiteralStringRef("\xff")))
+						if (!range[i].key.startsWith("\xff"_sr))
 							dbResults.push_back_deep(dbResults.arena(), range[i]);
 					}
 					if (reverse && dbResults.size() < storeResults.size()) {
@@ -765,4 +793,4 @@ public:
 	}
 };
 
-WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory("ApiCorrectness");
+WorkloadFactory<ApiCorrectnessWorkload> ApiCorrectnessWorkloadFactory;

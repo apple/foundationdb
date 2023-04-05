@@ -49,15 +49,15 @@ struct VersionedMessage {
 	Arena decryptArena; // Arena used for decrypt buffer.
 	size_t bytes; // arena's size when inserted, which can grow afterwards
 
-	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a)
-	  : version(v), message(m), tags(t), arena(a), bytes(a.getSize()) {}
+	VersionedMessage(LogMessageVersion v, StringRef m, const VectorRef<Tag>& t, const Arena& a, size_t n)
+	  : version(v), message(m), tags(t), arena(a), bytes(n) {}
 	Version getVersion() const { return version.version; }
 	uint32_t getSubVersion() const { return version.sub; }
 
-	// Returns true if the message is a mutation that should be backuped, i.e.,
-	// either key is not in system key space or is not a metadataVersionKey.
-	bool isBackupMessage(MutationRef* m,
-	                     const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
+	// Returns true if the message is a mutation that could be backed up (normal keys, system key backup ranges, or the
+	// metadata version key)
+	bool isCandidateBackupMessage(MutationRef* m,
+	                              const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys) {
 		for (Tag tag : tags) {
 			if (tag.locality == tagLocalitySpecial || tag.locality == tagLocalityTxs) {
 				return false; // skip Txs mutations
@@ -82,7 +82,21 @@ struct VersionedMessage {
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
 			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
 		}
-		return normalKeys.contains(m->param1) || m->param1 == metadataVersionKey;
+
+		// Return true if the mutation intersects any legal backup ranges
+		if (normalKeys.contains(m->param1) || m->param1 == metadataVersionKey) {
+			return true;
+		} else if (m->type != MutationRef::Type::ClearRange) {
+			return systemBackupMutationMask().rangeContaining(m->param1).value();
+		} else {
+			for (auto& r : systemBackupMutationMask().intersectingRanges(KeyRangeRef(m->param1, m->param2))) {
+				if (r->value()) {
+					return true;
+				}
+			}
+
+			return false;
+		}
 	}
 
 	void collectCipherDetailIfEncrypted(std::unordered_set<BlobCipherDetails>& cipherDetails) {
@@ -91,9 +105,7 @@ struct VersionedMessage {
 			ArenaReader reader(arena, message, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 			MutationRef m;
 			reader >> m;
-			const BlobCipherEncryptHeader* header = m.encryptionHeader();
-			cipherDetails.insert(header->cipherTextDetails);
-			cipherDetails.insert(header->cipherHeaderDetails);
+			m.updateEncryptCipherDetails(cipherDetails);
 		}
 	}
 };
@@ -276,8 +288,8 @@ struct BackupData {
 		specialCounter(cc, "MsgQ", [this]() { return this->messages.size(); });
 		specialCounter(cc, "BufferedBytes", [this]() { return this->lock->activePermits(); });
 		specialCounter(cc, "AvailableBytes", [this]() { return this->lock->available(); });
-		logger = traceCounters(
-		    "BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, &cc, "BackupWorkerMetrics");
+		logger =
+		    cc.traceCounters("BackupWorkerMetrics", myId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "BackupWorkerMetrics");
 	}
 
 	bool pullFinished() const { return endVersion.present() && pulledVersion.get() > endVersion.get(); }
@@ -789,7 +801,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 	for (idx = 0; idx < numMsg; idx++) {
 		auto& message = self->messages[idx];
 		MutationRef m;
-		if (!message.isBackupMessage(&m, cipherKeys))
+		if (!message.isCandidateBackupMessage(&m, cipherKeys))
 			continue;
 
 		DEBUG_MUTATION("addMutation", message.version.version, m)
@@ -948,10 +960,13 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		}
 
 		loop choose {
-			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) { break; }
+			when(wait(r ? r->getMore(TaskPriority::TLogCommit) : Never())) {
+				break;
+			}
 			when(wait(logSystemChange)) {
 				if (self->logSystem.get()) {
-					r = self->logSystem.get()->peekLogRouter(self->myId, tagAt, self->tag);
+					r = self->logSystem.get()->peekLogRouter(
+					    self->myId, tagAt, self->tag, SERVER_KNOBS->LOG_ROUTER_PEEK_FROM_SATELLITES_PREFERRED);
 				} else {
 					r = Reference<ILogSystem::IPeekCursor>();
 				}
@@ -963,15 +978,17 @@ ACTOR Future<Void> pullAsyncData(BackupData* self) {
 		// Note we aggressively peek (uncommitted) messages, but only committed
 		// messages/mutations will be flushed to disk/blob in uploadData().
 		while (r->hasMessage()) {
+			state size_t takeBytes = 0;
 			if (!prev.sameArena(r->arena())) {
 				TraceEvent(SevDebugMemory, "BackupWorkerMemory", self->myId)
 				    .detail("Take", r->arena().getSize())
 				    .detail("Current", self->lock->activePermits());
 
-				wait(self->lock->take(TaskPriority::DefaultYield, r->arena().getSize()));
+				takeBytes = r->arena().getSize(); // more bytes can be allocated after the wait.
+				wait(self->lock->take(TaskPriority::DefaultYield, takeBytes));
 				prev = r->arena();
 			}
-			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena());
+			self->messages.emplace_back(r->version(), r->getMessage(), r->getTags(), r->arena(), takeBytes);
 			r->nextMessage();
 		}
 
@@ -1018,7 +1035,9 @@ ACTOR Future<Void> monitorBackupKeyOrPullData(BackupData* self, bool keyPresent)
 			state Future<Version> committedVersion = self->getMinKnownCommittedVersion();
 
 			loop choose {
-				when(wait(success(present))) { break; }
+				when(wait(success(present))) {
+					break;
+				}
 				when(wait(success(committedVersion) || delay(SERVER_KNOBS->BACKUP_NOOP_POP_DELAY, self->cx->taskID))) {
 					if (committedVersion.isReady()) {
 						self->popVersion =
@@ -1069,7 +1088,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			Optional<Value> value = wait(tr->get(backupPausedKey));
-			bool paused = value.present() && value.get() == LiteralStringRef("1");
+			bool paused = value.present() && value.get() == "1"_sr;
 			if (self->paused.get() != paused) {
 				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();
 				self->paused.set(paused);

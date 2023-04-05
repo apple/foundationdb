@@ -45,6 +45,8 @@ enum {
 };
 enum { OP_COUNT, OP_RANGE };
 struct MakoWorkload : TestWorkload {
+	static constexpr auto NAME = "Mako";
+
 	uint64_t rowCount, seqNumLen, sampleSize, actorCountPerClient, keyBytes, maxValueBytes, minValueBytes, csSize,
 	    csCount, csPartitionSize, csStepSizeInPartition;
 	double testDuration, loadTime, warmingDelay, maxInsertRate, transactionsPerSecond, allowedLatency,
@@ -61,7 +63,7 @@ struct MakoWorkload : TestWorkload {
 	// used for periodically tracing
 	std::vector<PerfMetric> periodicMetrics;
 	// store latency of each operation with sampling
-	std::vector<ContinuousSample<double>> opLatencies;
+	std::vector<DDSketch<double>> opLatencies;
 	// key used to store checkSum for given key range
 	std::vector<Key> csKeys;
 	// key prefix of for all generated keys
@@ -76,39 +78,39 @@ struct MakoWorkload : TestWorkload {
 	    commits("Commits"), totalOps("Operations") {
 		// init parameters from test file
 		// Number of rows populated
-		rowCount = getOption(options, LiteralStringRef("rows"), (uint64_t)10000);
+		rowCount = getOption(options, "rows"_sr, (uint64_t)10000);
 		// Test duration in seconds
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 30.0);
-		warmingDelay = getOption(options, LiteralStringRef("warmingDelay"), 0.0);
-		maxInsertRate = getOption(options, LiteralStringRef("maxInsertRate"), 1e12);
+		testDuration = getOption(options, "testDuration"_sr, 30.0);
+		warmingDelay = getOption(options, "warmingDelay"_sr, 0.0);
+		maxInsertRate = getOption(options, "maxInsertRate"_sr, 1e12);
 		// Flag to control whether to populate data into database
-		populateData = getOption(options, LiteralStringRef("populateData"), true);
+		populateData = getOption(options, "populateData"_sr, true);
 		// Flag to control whether to run benchmark
-		runBenchmark = getOption(options, LiteralStringRef("runBenchmark"), true);
+		runBenchmark = getOption(options, "runBenchmark"_sr, true);
 		// Flag to control whether to clean data in the database
-		preserveData = getOption(options, LiteralStringRef("preserveData"), true);
+		preserveData = getOption(options, "preserveData"_sr, true);
 		// If true, force commit for read-only transactions
-		commitGet = getOption(options, LiteralStringRef("commitGet"), false);
+		commitGet = getOption(options, "commitGet"_sr, false);
 		// If true, log latency for set, clear and clearrange
-		latencyForLocalOperation = getOption(options, LiteralStringRef("latencyForLocalOperation"), false);
+		latencyForLocalOperation = getOption(options, "latencyForLocalOperation"_sr, false);
 		// Target total transaction-per-second (TPS) of all clients
-		transactionsPerSecond = getOption(options, LiteralStringRef("transactionsPerSecond"), 100000.0) / clientCount;
-		actorCountPerClient = getOption(options, LiteralStringRef("actorCountPerClient"), 16);
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 100000.0) / clientCount;
+		actorCountPerClient = getOption(options, "actorCountPerClient"_sr, 16);
 		// Sampling rate (1 sample / <sampleSize> ops) for latency stats
-		sampleSize = getOption(options, LiteralStringRef("sampleSize"), rowCount / 100);
+		sampleSize = getOption(options, "sampleSize"_sr, rowCount / 100);
 		// If true, record latency metrics per periodicLoggingInterval; For details, see tracePeriodically()
-		enableLogging = getOption(options, LiteralStringRef("enableLogging"), false);
-		periodicLoggingInterval = getOption(options, LiteralStringRef("periodicLoggingInterval"), 5.0);
+		enableLogging = getOption(options, "enableLogging"_sr, false);
+		periodicLoggingInterval = getOption(options, "periodicLoggingInterval"_sr, 5.0);
 		// All the generated keys will start with the specified prefix
-		keyPrefix = getOption(options, LiteralStringRef("keyPrefix"), LiteralStringRef("mako")).toString();
+		keyPrefix = getOption(options, "keyPrefix"_sr, "mako"_sr).toString();
 		KEYPREFIXLEN = keyPrefix.size();
 		// If true, the workload will picking up keys which are zipfian distributed
-		zipf = getOption(options, LiteralStringRef("zipf"), false);
-		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
+		zipf = getOption(options, "zipf"_sr, false);
+		zipfConstant = getOption(options, "zipfConstant"_sr, 0.99);
 		// Specified length of keys and length range of values
-		keyBytes = std::max(getOption(options, LiteralStringRef("keyBytes"), 16), 16);
-		maxValueBytes = getOption(options, LiteralStringRef("valueBytes"), 16);
-		minValueBytes = getOption(options, LiteralStringRef("minValueBytes"), maxValueBytes);
+		keyBytes = std::max(getOption(options, "keyBytes"_sr, 16), 16);
+		maxValueBytes = getOption(options, "valueBytes"_sr, 16);
+		minValueBytes = getOption(options, "minValueBytes"_sr, maxValueBytes);
 		ASSERT(minValueBytes <= maxValueBytes);
 		// The inserted key is formatted as: fixed prefix('mako') + sequential number + padding('x')
 		// assume we want to insert 10000 rows with keyBytes set to 16,
@@ -135,13 +137,12 @@ struct MakoWorkload : TestWorkload {
 		// scr – SET & CLEAR RANGE
 		// grv – GetReadVersion()
 		// Every transaction is committed unless it contains only GET / GET RANGE operations.
-		operationsSpec =
-		    getOption(options, LiteralStringRef("operations"), LiteralStringRef("g100")).contents().toString();
+		operationsSpec = getOption(options, "operations"_sr, "g100"_sr).contents().toString();
 		//  parse the sequence and extract operations to be executed
 		parseOperationsSpec();
 		for (int i = 0; i < MAX_OP; ++i) {
 			// initilize per-operation latency record
-			opLatencies.push_back(ContinuousSample<double>(rowCount / sampleSize));
+			opLatencies.push_back(DDSketch<double>());
 			// initialize per-operation counter
 			opCounters.push_back(PerfIntCounter(opNames[i]));
 		}
@@ -149,11 +150,11 @@ struct MakoWorkload : TestWorkload {
 			zipfian_generator3(0, (int)rowCount - 1, zipfConstant);
 		}
 		// Added for checksum verification
-		csSize = getOption(options, LiteralStringRef("csSize"), rowCount / 100);
+		csSize = getOption(options, "csSize"_sr, rowCount / 100);
 		ASSERT(csSize <= rowCount);
-		csCount = getOption(options, LiteralStringRef("csCount"), 0);
+		csCount = getOption(options, "csCount"_sr, 0);
 		checksumVerification = (csCount != 0);
-		doChecksumVerificationOnly = getOption(options, LiteralStringRef("doChecksumVerificationOnly"), false);
+		doChecksumVerificationOnly = getOption(options, "doChecksumVerificationOnly"_sr, false);
 		if (doChecksumVerificationOnly)
 			ASSERT(checksumVerification); // csCount should be non-zero when you do checksum verification only
 		if (csCount) {
@@ -164,12 +165,6 @@ struct MakoWorkload : TestWorkload {
 				csKeys.emplace_back(format((keyPrefix + "_crc32c_%u_%u").c_str(), i, rowCount));
 			}
 		}
-	}
-
-	std::string description() const override {
-		// Mako is a simple workload to measure the performance of FDB.
-		// The primary purpose of this benchmark is to generate consistent performance results
-		return "Mako";
 	}
 
 	Future<Void> setup(Database const& cx) override {
@@ -663,7 +658,7 @@ struct MakoWorkload : TestWorkload {
 		return Void();
 	}
 	ACTOR template <class T>
-	static Future<Void> logLatency(Future<T> f, ContinuousSample<double>* opLatencies) {
+	static Future<Void> logLatency(Future<T> f, DDSketch<double>* opLatencies) {
 		state double opBegin = timer();
 		wait(success(f));
 		opLatencies->addSample(timer() - opBegin);
@@ -886,4 +881,4 @@ struct MakoWorkload : TestWorkload {
 	}
 };
 
-WorkloadFactory<MakoWorkload> MakoloadFactory("Mako");
+WorkloadFactory<MakoWorkload> MakoloadFactory;

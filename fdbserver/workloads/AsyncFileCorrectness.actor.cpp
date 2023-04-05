@@ -44,6 +44,7 @@ struct OperationInfo {
 };
 
 struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
+	static constexpr auto NAME = "AsyncFileCorrectness";
 	// Maximum number of bytes operated on by a file operation
 	int maxOperationSize;
 
@@ -75,9 +76,9 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 
 	AsyncFileCorrectnessWorkload(WorkloadContext const& wcx)
 	  : AsyncFileWorkload(wcx), memoryFile(nullptr), success(true), numOperations("Num Operations") {
-		maxOperationSize = getOption(options, LiteralStringRef("maxOperationSize"), 4096);
-		numSimultaneousOperations = getOption(options, LiteralStringRef("numSimultaneousOperations"), 10);
-		targetFileSize = getOption(options, LiteralStringRef("targetFileSize"), (uint64_t)163840);
+		maxOperationSize = getOption(options, "maxOperationSize"_sr, 4096);
+		numSimultaneousOperations = getOption(options, "numSimultaneousOperations"_sr, 10);
+		targetFileSize = getOption(options, "targetFileSize"_sr, (uint64_t)163840);
 
 		if (unbufferedIO)
 			maxOperationSize = std::max(_PAGE_SIZE, maxOperationSize);
@@ -94,8 +95,6 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 
 	~AsyncFileCorrectnessWorkload() override {}
-
-	std::string description() const override { return "AsyncFileCorrectness"; }
 
 	Future<Void> setup(Database const& cx) override {
 		if (enabled)
@@ -436,4 +435,4 @@ struct AsyncFileCorrectnessWorkload : public AsyncFileWorkload {
 	}
 };
 
-WorkloadFactory<AsyncFileCorrectnessWorkload> AsyncFileCorrectnessWorkloadFactory("AsyncFileCorrectness");
+WorkloadFactory<AsyncFileCorrectnessWorkload> AsyncFileCorrectnessWorkloadFactory;

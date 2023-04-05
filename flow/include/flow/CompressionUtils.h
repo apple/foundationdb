@@ -24,11 +24,11 @@
 
 #include "flow/Arena.h"
 
+#include <unordered_set>
+
 enum class CompressionFilter {
 	NONE,
-#ifdef ZLIB_LIB_SUPPORTED
-	GZIP,
-#endif
+	ZSTD,
 	LAST // Always the last member
 };
 
@@ -37,16 +37,15 @@ struct CompressionUtils {
 	static StringRef compress(const CompressionFilter filter, const StringRef& data, int level, Arena& arena);
 	static StringRef decompress(const CompressionFilter filter, const StringRef& data, Arena& arena);
 
+	static int getDefaultCompressionLevel(CompressionFilter filter);
+	static CompressionFilter getRandomFilter();
+
 	static CompressionFilter fromFilterString(const std::string& filter) {
 		if (filter == "NONE") {
 			return CompressionFilter::NONE;
-		}
-#ifdef ZLIB_LIB_SUPPORTED
-		else if (filter == "GZIP") {
-			return CompressionFilter::GZIP;
-		}
-#endif
-		else {
+		} else if (filter == "ZSTD") {
+			return CompressionFilter::ZSTD;
+		} else {
 			throw not_implemented();
 		}
 	}
@@ -54,16 +53,20 @@ struct CompressionUtils {
 	static std::string toString(const CompressionFilter filter) {
 		if (filter == CompressionFilter::NONE) {
 			return "NONE";
-		}
-#ifdef ZLIB_LIB_SUPPORTED
-		else if (filter == CompressionFilter::GZIP) {
-			return "GZP";
-		}
-#endif
-		else {
+		} else if (filter == CompressionFilter::ZSTD) {
+			return "ZSTD";
+		} else {
 			throw not_implemented();
 		}
 	}
+
+	static void checkFilterSupported(const CompressionFilter filter) {
+		if (CompressionUtils::supportedFilters.find(filter) == CompressionUtils::supportedFilters.end()) {
+			throw not_implemented();
+		}
+	}
+
+	static std::unordered_set<CompressionFilter> supportedFilters;
 };
 
 #endif // FLOW_COMPRRESSION_UTILS_H

@@ -160,6 +160,7 @@ private:
 		execTransaction(
 		    // 1. Set the key to val1
 		    [key, val1](auto ctx) {
+			    ctx->makeSelfConflicting();
 			    ctx->tx().set(key, val1);
 			    ctx->commit();
 		    },
@@ -169,6 +170,7 @@ private:
 			        // retries of commit_unknown_result would cause the operation to be applied multiple times, see
 			        // https://github.com/apple/foundationdb/issues/1321.
 			        [key, opType, val1, val2](auto ctx) {
+				        ctx->makeSelfConflicting();
 				        auto f = ctx->tx().get(key, false);
 				        ctx->continueAfter(f, [ctx, f, opType, key, val1, val2]() {
 					        auto outputVal = f.get();
@@ -222,6 +224,7 @@ private:
 		execTransaction(
 		    // 1. Perform SetVersionstampedKey operation.
 		    [key, val, versionstamp_f](auto ctx) {
+			    ctx->makeSelfConflicting();
 			    ctx->tx().atomicOp(key, val, FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
 			    *versionstamp_f = ctx->tx().getVersionstamp();
 			    ctx->commit();
@@ -258,6 +261,7 @@ private:
 		execTransaction(
 		    // 1. Perform SetVersionstampedValue operation.
 		    [key, val, versionstamp_f](auto ctx) {
+			    ctx->makeSelfConflicting();
 			    ctx->tx().atomicOp(key, val, FDBMutationType::FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
 			    *versionstamp_f = ctx->tx().getVersionstamp();
 			    ctx->commit();
@@ -295,6 +299,7 @@ private:
 		execTransaction(
 		    // 1. Set the key to initial value
 		    [key, val](auto ctx) {
+			    ctx->makeSelfConflicting();
 			    ctx->tx().set(key, val);
 			    ctx->commit();
 		    },
@@ -302,6 +307,7 @@ private:
 			    execTransaction(
 			        // 2. Perform CompareAndClear operation.
 			        [key, val](auto ctx) {
+				        ctx->makeSelfConflicting();
 				        ctx->tx().atomicOp(key, val, FDBMutationType::FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
 				        ctx->commit();
 			        },

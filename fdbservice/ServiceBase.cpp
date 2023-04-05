@@ -17,7 +17,7 @@
 \***************************************************************************/
 
 #pragma region Includes
-#include "fdbservice/ServiceBase.h"
+#include "ServiceBase.h"
 #include <assert.h>
 #include <strsafe.h>
 #pragma endregion

@@ -24,11 +24,10 @@
 
 // Regression tests for 2 commit related bugs
 struct CommitBugWorkload : TestWorkload {
+	static constexpr auto NAME = "CommitBug";
 	bool success;
 
 	CommitBugWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) { success = true; }
-
-	std::string description() const override { return "CommitBugWorkload"; }
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
 
@@ -36,8 +35,8 @@ struct CommitBugWorkload : TestWorkload {
 
 	ACTOR Future<Void> bug1(Database cx, CommitBugWorkload* self) {
 		state Key key = StringRef(format("B1Key%d", self->clientId));
-		state Value val1 = LiteralStringRef("Value1");
-		state Value val2 = LiteralStringRef("Value2");
+		state Value val1 = "Value1"_sr;
+		state Value val2 = "Value2"_sr;
 
 		loop {
 			state Transaction tr(cx);
@@ -157,4 +156,4 @@ struct CommitBugWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<CommitBugWorkload> CommitBugWorkloadFactory("CommitBug");
+WorkloadFactory<CommitBugWorkload> CommitBugWorkloadFactory;

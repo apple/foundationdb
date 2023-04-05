@@ -93,6 +93,8 @@ public:
 		return previousWrite;
 	}
 
+	ServerCoordinators getCoordinators() const { return coordinators; }
+
 	Future<Void> move(ClusterConnectionString const& nc) { return cstate.move(nc); }
 
 private:
@@ -130,7 +132,7 @@ private:
 
 		try {
 			wait(self->cstate.setExclusive(
-			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withDBCoreState()))));
+			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
 		} catch (Error& e) {
 			CODE_PROBE(true, "Master displaced during writeMasterState");
 			throw;
@@ -245,6 +247,7 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 
 	Future<Void> logger;
 
+	Reference<EventCacheHolder> metaclusterEventHolder;
 	Reference<EventCacheHolder> swVersionCheckedEventHolder;
 	Reference<EventCacheHolder> recoveredConfigEventHolder;
 	Reference<EventCacheHolder> clusterRecoveryStateEventHolder;
@@ -269,12 +272,13 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 	    masterInterface(masterInterface), masterLifetime(masterLifetimeToken), clusterController(clusterController),
 	    cstate(coordinators, addActor, dbgid), dbInfo(dbInfo), registrationCount(0), addActor(addActor),
 	    recruitmentStalled(makeReference<AsyncVar<bool>>(false)), forceRecovery(forceRecovery), neverCreated(false),
-	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid), cc("Master", dbgid.toString()),
-	    changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
+	    safeLocality(tagLocalityInvalid), primaryLocality(tagLocalityInvalid),
+	    cc("ClusterRecoveryData", dbgid.toString()), changeCoordinatorsRequests("ChangeCoordinatorsRequests", cc),
 	    getCommitVersionRequests("GetCommitVersionRequests", cc),
 	    backupWorkerDoneRequests("BackupWorkerDoneRequests", cc),
 	    getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
 	    reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
+	    metaclusterEventHolder(makeReference<EventCacheHolder>("MetaclusterMetadata")),
 	    swVersionCheckedEventHolder(makeReference<EventCacheHolder>("SWVersionCompatibilityChecked")),
 	    recoveredConfigEventHolder(makeReference<EventCacheHolder>("RecoveredConfig")) {
 		clusterRecoveryStateEventHolder = makeReference<EventCacheHolder>(
@@ -285,11 +289,10 @@ struct ClusterRecoveryData : NonCopyable, ReferenceCounted<ClusterRecoveryData> 
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_DURATION_EVENT_NAME));
 		clusterRecoveryAvailableEventHolder = makeReference<EventCacheHolder>(
 		    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_AVAILABLE_EVENT_NAME));
-		logger = traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
-		                       dbgid,
-		                       SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
-		                       &cc,
-		                       getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
+		logger = cc.traceCounters(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME),
+		                          dbgid,
+		                          SERVER_KNOBS->WORKER_LOGGING_INTERVAL,
+		                          getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_METRICS_EVENT_NAME));
 		if (forceRecovery && !controllerData->clusterControllerDcId.present()) {
 			TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
 			forceRecovery = false;

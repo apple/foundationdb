@@ -251,16 +251,16 @@ namespace actorcompiler
             lines = 0;
 
             writer.WriteLine(memberIndentStr + "template<> struct Descriptor<struct {0}> {{", descr.name);
-            writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return LiteralStringRef(\"{0}\"); }}", descr.name);
+            writer.WriteLine(memberIndentStr + "\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", descr.name);
             writer.WriteLine(memberIndentStr + "\ttypedef {0} type;", descr.name);
             lines += 3;
 
             foreach (var dec in descr.body)
             {
                 writer.WriteLine(memberIndentStr + "\tstruct {0}Descriptor {{", dec.name);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef name() {{ return LiteralStringRef(\"{0}\"); }}", dec.name);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef typeName() {{ return LiteralStringRef(\"{0}\"); }}", dec.type);
-                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef comment() {{ return LiteralStringRef(\"{0}\"); }}", dec.comment);
+                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef name() {{ return \"{0}\"_sr; }}", dec.name);
+                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef typeName() {{ return \"{0}\"_sr; }}", dec.type);
+                writer.WriteLine(memberIndentStr + "\t\tstatic StringRef comment() {{ return \"{0}\"_sr; }}", dec.comment);
                 writer.WriteLine(memberIndentStr + "\t\ttypedef {0} type;", dec.type);
                 writer.WriteLine(memberIndentStr + "\t\tstatic inline type get({0}& from);", descr.name);
                 writer.WriteLine(memberIndentStr + "\t};");
@@ -1302,7 +1302,7 @@ namespace actorcompiler
             constructor.WriteLine("this->lineage.setActorName(\"{0}\");", actor.name);
             constructor.WriteLine("LineageScope _(&this->lineage);");
             constructor.WriteLine("#endif");
-            // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = LiteralStringRef(\"{0}\");", actor.name);
+            // constructor.WriteLine("getCurrentLineage()->modify(&StackLineage::actorName) = \"{0}\"_sr;", actor.name);
             constructor.WriteLine("this->{0};", body.call());
             ProbeExit(constructor, actor.name);
             WriteFunction(writer, constructor, constructor.BodyText);
