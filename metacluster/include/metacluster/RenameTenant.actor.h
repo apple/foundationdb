@@ -169,7 +169,15 @@ struct RenameTenantImpl {
 
 			metadata::management::tenantMetadata().tenantNameIndex.erase(tr, self->oldName);
 
-			// Remove the tenant from the cluster -> tenant index
+			// Update the tenant in the tenant group -> tenant index
+			if (updatedEntry.tenantGroup.present()) {
+				metadata::management::tenantMetadata().tenantGroupTenantIndex.erase(
+				    tr, Tuple::makeTuple(updatedEntry.tenantGroup.get(), self->oldName, self->tenantId));
+				metadata::management::tenantMetadata().tenantGroupTenantIndex.insert(
+				    tr, Tuple::makeTuple(updatedEntry.tenantGroup.get(), self->newName, self->tenantId));
+			}
+
+			// Update the tenant in the cluster -> tenant index
 			metadata::management::clusterTenantIndex().erase(
 			    tr, Tuple::makeTuple(updatedEntry.assignedCluster, self->oldName, self->tenantId));
 			metadata::management::clusterTenantIndex().erase(
