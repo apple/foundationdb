@@ -245,7 +245,6 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 		proxyItr->second.latestRequestNum.set(req.requestNum);
 	}
 
->>>>>>> 1d6908d3b
 	return Void();
 }
 
