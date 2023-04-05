@@ -50,8 +50,6 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/DataDistributorInterface.h"
 #include "fdbserver/DBCoreState.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/LeaderElection.h"
 #include "fdbserver/LogSystem.h"
@@ -74,6 +72,9 @@
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
+
+#include "metacluster/MetaclusterMetrics.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* self) {
@@ -522,7 +523,9 @@ void checkBetterSingletons(ClusterControllerData* self) {
 
 	WorkerDetails newEKPWorker;
 	EncryptionAtRestMode encryptMode = self->db.config.encryptionAtRestMode;
-	if (encryptMode.isEncryptionEnabled()) {
+	const bool enableKmsCommunication =
+	    encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION;
+	if (enableKmsCommunication) {
 		newEKPWorker = findNewProcessForSingleton(self, ProcessClass::EncryptKeyProxy, id_used);
 	}
 
@@ -541,7 +544,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	ProcessClass::Fitness bestFitnessForEKP;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (enableKmsCommunication) {
 		bestFitnessForEKP = findBestFitnessForSingleton(self, newEKPWorker, ProcessClass::EncryptKeyProxy);
 	}
 
@@ -576,7 +579,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	bool ekpHealthy = true;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (enableKmsCommunication) {
 		ekpHealthy = isHealthySingleton<EncryptKeyProxySingleton>(
 		    self, newEKPWorker, ekpSingleton, bestFitnessForEKP, self->recruitingEncryptKeyProxyID);
 	}
@@ -607,7 +610,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	Optional<Standalone<StringRef>> currEKPProcessId, newEKPProcessId;
-	if (encryptMode.isEncryptionEnabled()) {
+	if (enableKmsCommunication) {
 		currEKPProcessId = ekpSingleton.getInterface().locality.processId();
 		newEKPProcessId = newEKPWorker.interf.locality.processId();
 	}
@@ -623,7 +626,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		}
 	}
 
-	if (encryptMode.isEncryptionEnabled()) {
+	if (enableKmsCommunication) {
 		currPids.emplace_back(currEKPProcessId);
 		newPids.emplace_back(newEKPProcessId);
 	}
@@ -642,7 +645,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 	}
 
 	// if the knob is disabled, the EKP coloc counts should have no affect on the coloc counts check below
-	if (!encryptMode.isEncryptionEnabled()) {
+	if (!enableKmsCommunication) {
 		ASSERT(currColocMap[currEKPProcessId] == 0);
 		ASSERT(newColocMap[newEKPProcessId] == 0);
 	}
@@ -664,7 +667,7 @@ void checkBetterSingletons(ClusterControllerData* self) {
 		} else if (self->db.blobGranulesEnabled.get() && self->db.blobRestoreEnabled.get() &&
 		           newColocMap[newMGProcessId] < currColocMap[currMGProcessId]) {
 			mgSingleton.recruit(*self);
-		} else if (encryptMode.isEncryptionEnabled() && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
+		} else if (enableKmsCommunication && newColocMap[newEKPProcessId] < currColocMap[currEKPProcessId]) {
 			ekpSingleton.recruit(*self);
 		} else if (newColocMap[newCSProcessId] < currColocMap[currCSProcessId]) {
 			csSingleton.recruit(*self);
@@ -2243,7 +2246,7 @@ ACTOR Future<Void> monitorConsistencyScan(ClusterControllerData* self) {
 	}
 }
 
-ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
+ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionAtRestMode encryptMode) {
 	// If master fails at the same time, give it a chance to clear master PID.
 	wait(delay(0.0));
 
@@ -2275,6 +2278,7 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 			                                                                       id_used);
 
 			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
+			req.encryptMode = encryptMode;
 			state WorkerDetails worker = ekpWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::EncryptKeyProxy)) {
 				worker = self->id_worker[self->masterProcessId.get()].details;
@@ -2320,7 +2324,8 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self) {
 
 ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 	state EncryptionAtRestMode encryptMode = wait(self->encryptionAtRestMode.getFuture());
-	if (!encryptMode.isEncryptionEnabled()) {
+	if (!encryptMode.isEncryptionEnabled() && !SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION) {
+		TraceEvent("EKPNotConfigured");
 		return Void();
 	}
 	state SingletonRecruitThrottler recruitThrottler;
@@ -2340,7 +2345,7 @@ ACTOR Future<Void> monitorEncryptKeyProxy(ClusterControllerData* self) {
 				}
 			}
 		} else {
-			wait(startEncryptKeyProxy(self));
+			wait(startEncryptKeyProxy(self, encryptMode));
 		}
 	}
 }
@@ -2804,42 +2809,13 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 		choose {
 			when(wait(self->db.serverInfo->onChange())) {}
 			when(wait(updaterDelay)) {
-				state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
-				loop {
-					try {
-						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						state std::map<ClusterName, DataClusterMetadata> clusters;
-						state int64_t tenantCount;
-						wait(store(clusters,
-						           MetaclusterAPI::listClustersTransaction(
-						               tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
-						     store(tenantCount,
-						           MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().tenantCount.getD(
-						               tr, Snapshot::False, 0)));
-						state std::pair<ClusterUsage, ClusterUsage> capacityNumbers =
-						    MetaclusterAPI::metaclusterCapacity(clusters);
-
-						MetaclusterMetrics metrics;
-						metrics.numTenants = tenantCount;
-						metrics.numDataClusters = clusters.size();
-						metrics.tenantGroupCapacity = capacityNumbers.first.numTenantGroups;
-						metrics.tenantGroupsAllocated = capacityNumbers.second.numTenantGroups;
-						self->db.metaclusterMetrics = metrics;
-						TraceEvent("MetaclusterCapacity")
-						    .detail("TotalTenants", self->db.metaclusterMetrics.numTenants)
-						    .detail("DataClusters", self->db.metaclusterMetrics.numDataClusters)
-						    .detail("TenantGroupCapacity", self->db.metaclusterMetrics.tenantGroupCapacity)
-						    .detail("TenantGroupsAllocated", self->db.metaclusterMetrics.tenantGroupsAllocated);
-						break;
-					} catch (Error& e) {
-						TraceEvent("MetaclusterUpdaterError").error(e);
-						// Cluster can change types during/before a metacluster transaction
-						// and throw an error due to timing issues.
-						// In such cases, go back to choose loop instead of retrying
-						if (e.code() == error_code_invalid_metacluster_operation) {
-							break;
-						}
-						wait(tr->onError(e));
+				try {
+					wait(store(self->db.metaclusterMetrics,
+					           metacluster::MetaclusterMetrics::getMetaclusterMetrics(self->cx)));
+				} catch (Error& e) {
+					// Ignore errors about the cluster changing type
+					if (e.code() != error_code_invalid_metacluster_operation) {
+						throw;
 					}
 				}
 			}

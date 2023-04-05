@@ -1,9 +1,9 @@
 /*
- * MetaclusterManagement.actor.cpp
+ * MetaclusterUtil.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,11 +21,14 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ThreadSafeTransaction.h"
+
+#include "metacluster/MetaclusterUtil.actor.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
-namespace MetaclusterAPI {
+namespace metacluster::util {
 
 std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters) {
 	ClusterUsage tenantGroupCapacity;
@@ -52,28 +55,4 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	}
 }
 
-KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())>&
-ManagementClusterMetadata::dataClusters() {
-	static KeyBackedObjectMap<ClusterName, DataClusterEntry, decltype(IncludeVersion())> instance(
-	    "metacluster/dataCluster/metadata/"_sr, IncludeVersion());
-	return instance;
-}
-
-KeyBackedMap<ClusterName,
-             ClusterConnectionString,
-             TupleCodec<ClusterName>,
-             ManagementClusterMetadata::ConnectionStringCodec>
-    ManagementClusterMetadata::dataClusterConnectionRecords("metacluster/dataCluster/connectionString/"_sr);
-
-KeyBackedSet<Tuple> ManagementClusterMetadata::clusterCapacityIndex("metacluster/clusterCapacityIndex/"_sr);
-KeyBackedMap<ClusterName, int64_t, TupleCodec<ClusterName>, BinaryCodec<int64_t>>
-    ManagementClusterMetadata::clusterTenantCount("metacluster/clusterTenantCount/"_sr);
-KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantIndex("metacluster/dataCluster/tenantMap/"_sr);
-KeyBackedSet<Tuple> ManagementClusterMetadata::clusterTenantGroupIndex("metacluster/dataCluster/tenantGroupMap/"_sr);
-
-TenantMetadataSpecification<MetaclusterTenantTypes>& ManagementClusterMetadata::tenantMetadata() {
-	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
-	return instance;
-}
-
-}; // namespace MetaclusterAPI
+}; // namespace metacluster::util
