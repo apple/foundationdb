@@ -364,28 +364,28 @@ else()
       add_compile_options($<${is_cxx_compile}:-Wno-unknown-attributes>)
     endif()
     add_compile_options(
-      -Wall
-      -Wextra
-      -Wredundant-move
-      -Wpessimizing-move
-      -Woverloaded-virtual
-      -Wshift-sign-overflow
+      $<${is_cxx_compile}:-Wall>
+      $<${is_cxx_compile}:-Wextra>
+      $<${is_cxx_compile}:-Wredundant-move>
+      $<${is_cxx_compile}:-Wpessimizing-move>
+      $<${is_cxx_compile}:-Woverloaded-virtual>
+      $<${is_cxx_compile}:-Wshift-sign-overflow>
       # Here's the current set of warnings we need to explicitly disable to compile warning-free with clang 11
-      -Wno-sign-compare
-      -Wno-undefined-var-template
-      -Wno-unknown-warning-option
-      -Wno-unused-parameter
-      -Wno-constant-logical-operand
+      $<${is_cxx_compile}:-Wno-sign-compare>
+      $<${is_cxx_compile}:-Wno-undefined-var-template>
+      $<${is_cxx_compile}:-Wno-unknown-warning-option>
+      $<${is_cxx_compile}:-Wno-unused-parameter>
+      $<${is_cxx_compile}:-Wno-constant-logical-operand>
       # These need to be disabled for FDB's RocksDB storage server implementation
-      -Wno-deprecated-copy
-      -Wno-delete-non-abstract-non-virtual-dtor
-      -Wno-range-loop-construct
-      -Wno-reorder-ctor
+      $<${is_cxx_compile}:-Wno-deprecated-copy>
+      $<${is_cxx_compile}:-Wno-delete-non-abstract-non-virtual-dtor>
+      $<${is_cxx_compile}:-Wno-range-loop-construct>
+      $<${is_cxx_compile}:-Wno-reorder-ctor>
       # Needed for clang 13 (todo: Update above logic so that it figures out when to pass in -static-libstdc++ and when it will be ignored)
       # When you remove this, you might need to move it back to the USE_CCACHE stanza.  It was (only) there before I moved it here.
-      -Wno-unused-command-line-argument
+      $<${is_cxx_compile}:-Wno-unused-command-line-argument>
       # Disable C++ 20 warning for ambiguous operator.
-      -Wno-ambiguous-reversed-operator
+      $<${is_cxx_compile}:-Wno-ambiguous-reversed-operator>
       )
     # These need to be disabled for FDB's RocksDB storage server implementation
     add_compile_options(
