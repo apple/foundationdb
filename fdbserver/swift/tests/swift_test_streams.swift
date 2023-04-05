@@ -41,7 +41,7 @@ struct StreamTests: SimpleSwiftTestSuite {
         }
 
         TestCase("PromiseStream: as Swift AsyncSequence") {
-            let ps = PromiseStreamCInt()
+            var ps = PromiseStreamCInt()
             let fs: FutureStreamCInt = ps.getFuture()
 
             Task { [ps] in
@@ -197,7 +197,8 @@ struct StreamTests: SimpleSwiftTestSuite {
             // Spawn 2 tasks, one for consuming each of the streams.
             // These tasks will keep looping on the future streams "forever" - until the tasks are cancelled.
             let t1 = Task { [ps1] in
-                let fs: FutureStreamCInt = ps1.getFuture()
+                var ps1_var = ps1
+                let fs: FutureStreamCInt = ps1_var.getFuture()
                 for try await t in fs {
                     pprint("send Task to cook: \(t) (from ps1)")
                     Task {
@@ -209,7 +210,8 @@ struct StreamTests: SimpleSwiftTestSuite {
                 }
             }
             let t2 = Task { [ps2] in
-                let fs: FutureStreamCInt = ps2.getFuture()
+                var ps2_var = ps2
+                let fs: FutureStreamCInt = ps2_var.getFuture()
                 for try await t in fs {
                     pprint("send Task to cook: \(t) (from ps2)")
                     Task {
