@@ -68,33 +68,6 @@ static_assert(sizeof(limitReasonDesc) / sizeof(limitReasonDesc[0]) == limitReaso
 
 class RatekeeperImpl {
 public:
-	ACTOR static Future<Void> configurationMonitor(Ratekeeper* self) {
-		loop {
-			state ReadYourWritesTransaction tr(self->db);
-
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
-					ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
-
-					self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);
-
-					state Future<Void> watchFuture =
-					    tr.watch(moveKeysLockOwnerKey) || tr.watch(excludedServersVersionKey) ||
-					    tr.watch(failedServersVersionKey) || tr.watch(excludedLocalityVersionKey) ||
-					    tr.watch(failedLocalityVersionKey);
-					wait(tr.commit());
-					wait(watchFuture);
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
-		}
-	}
-
 	ACTOR static Future<bool> checkAnyBlobRanges(Database db) {
 		state Transaction tr(db);
 		loop {
@@ -122,7 +95,7 @@ public:
 		state double lastLoggedTime = 0;
 
 		loop {
-			while (!self->configuration.blobGranulesEnabled) {
+			while (!self->configurationMonitor->areBlobGranulesEnabled()) {
 				// FIXME: clear blob worker state if granules were previously enabled?
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			}
@@ -216,7 +189,7 @@ public:
 
 		TraceEvent("RatekeeperStarting", rkInterf.id());
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
-		self.addActor.send(self.configurationMonitor());
+		self.addActor.send(self.configurationMonitor->run());
 
 		self.addActor.send(self.metricsTracker->run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
@@ -267,7 +240,7 @@ public:
 					}
 					self.actualTpsHistory.push_back(actualTps);
 
-					if (self.configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
+					if (self.configurationMonitor->areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 						Version maxVersion = 0;
 						int64_t totalReleased = 0;
 						int64_t batchReleased = 0;
@@ -411,10 +384,6 @@ public:
 	}
 }; // class RatekeeperImpl
 
-Future<Void> Ratekeeper::configurationMonitor() {
-	return RatekeeperImpl::configurationMonitor(this);
-}
-
 Future<Void> Ratekeeper::monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	return RatekeeperImpl::monitorBlobWorkers(this, dbInfo);
 }
@@ -455,6 +424,7 @@ Ratekeeper::Ratekeeper(UID id,
 	}
 	metricsTracker =
 	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
+	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db);
 }
 
 void Ratekeeper::updateRate(RatekeeperLimits* limits) {
@@ -633,7 +603,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	     ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit;
 	     ++ss) {
 		if (ignoredMachines.size() <
-		    std::min(configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
+		    std::min(configurationMonitor->getStorageTeamSize() - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredMachines.insert(ss->second->locality.zoneId());
 			continue;
 		}
@@ -655,7 +625,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	std::set<Optional<Standalone<StringRef>>> ignoredDurabilityLagMachines;
 	for (auto ss = storageDurabilityLagReverseIndex.begin(); ss != storageDurabilityLagReverseIndex.end(); ++ss) {
 		if (ignoredDurabilityLagMachines.size() <
-		    std::min(configuration.storageTeamSize - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
+		    std::min(configurationMonitor->getStorageTeamSize() - 1, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND)) {
 			ignoredDurabilityLagMachines.insert(ss->second->locality.zoneId());
 			continue;
 		}
@@ -700,7 +670,7 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		break;
 	}
 
-	if (configuration.blobGranulesEnabled && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
+	if (configurationMonitor->areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
 		if (!blobWorkerVersionHistory.empty()) {

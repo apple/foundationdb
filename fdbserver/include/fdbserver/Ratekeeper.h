@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -110,11 +111,11 @@ class Ratekeeper {
 	Database db;
 
 	std::unique_ptr<IRKMetricsTracker> metricsTracker;
+	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
 
 	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
 	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
 	HealthMetrics healthMetrics;
-	DatabaseConfiguration configuration;
 	PromiseStream<Future<Void>> addActor;
 
 	Int64MetricHandle actualTpsMetric;
@@ -152,7 +153,6 @@ class Ratekeeper {
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
-	Future<Void> configurationMonitor();
 	void updateRate(RatekeeperLimits* limits);
 
 	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
