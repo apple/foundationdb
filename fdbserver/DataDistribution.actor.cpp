@@ -614,9 +614,7 @@ public:
 	Future<Void> resumeRelocations() {
 		ASSERT(shardsAffectedByTeamFailure); // has to be allocated
 		Future<Void> shardsReady = resumeFromShards(Reference<DataDistributor>::addRef(this), g_network->isSimulated());
-		Future<Void> cleanTombstone = removeDataMoveTombstone(Reference<DataDistributor>::addRef(this));
-		std::vector<Future<Void>> toWaitList{ shardsReady, cleanTombstone };
-		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), waitForAll(toWaitList));
+		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 
 	Future<Void> pollMoveKeysLock() { return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get()); }
@@ -727,7 +725,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			wait(self->resumeRelocations());
+			Future<Void> resumeRelocationReady = self->resumeRelocations();
+			Future<Void> cleanTombstoneReady = self->removeDataMoveTombstone(self);
+			std::vector<Future<Void>> toWaitList{ resumeRelocationReady, cleanTombstoneReady };
+			wait(waitForAll(toWaitList));
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
 			Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team
