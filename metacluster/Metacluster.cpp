@@ -18,25 +18,13 @@
  * limitations under the License.
  */
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "metacluster/MetaclusterMetadata.h"
+#include "metacluster/MetaclusterTypes.h"
+
 #include "libb64/decode.h"
 #include "libb64/encode.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(ApplyManagementClusterUpdates);
-FDB_DEFINE_BOOLEAN_PARAM(RemoveMissingTenants);
-FDB_DEFINE_BOOLEAN_PARAM(AssignClusterAutomatically);
-FDB_DEFINE_BOOLEAN_PARAM(GroupAlreadyExists);
-FDB_DEFINE_BOOLEAN_PARAM(IsRestoring);
-FDB_DEFINE_BOOLEAN_PARAM(RunOnDisconnectedCluster);
-FDB_DEFINE_BOOLEAN_PARAM(RunOnMismatchedCluster);
-FDB_DEFINE_BOOLEAN_PARAM(RestoreDryRun);
-FDB_DEFINE_BOOLEAN_PARAM(ForceJoin);
-FDB_DEFINE_BOOLEAN_PARAM(ForceReuseTenantIdPrefix);
-FDB_DEFINE_BOOLEAN_PARAM(ForceRemove);
-FDB_DEFINE_BOOLEAN_PARAM(IgnoreCapacityLimit);
-
-namespace MetaclusterAPI {
+namespace metacluster {
 
 std::string tenantStateToString(TenantState tenantState) {
 	switch (tenantState) {
@@ -74,20 +62,6 @@ TenantState stringToTenantState(std::string stateStr) {
 	}
 
 	throw invalid_option();
-}
-} // namespace MetaclusterAPI
-
-std::string clusterTypeToString(const ClusterType& clusterType) {
-	switch (clusterType) {
-	case ClusterType::STANDALONE:
-		return "standalone";
-	case ClusterType::METACLUSTER_MANAGEMENT:
-		return "metacluster_management";
-	case ClusterType::METACLUSTER_DATA:
-		return "metacluster_data";
-	default:
-		return "unknown";
-	}
 }
 
 std::string DataClusterEntry::clusterStateToString(DataClusterState clusterState) {
@@ -137,13 +111,13 @@ json_spirit::mObject ClusterUsage::toJson() const {
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry() {}
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     MetaclusterAPI::TenantState tenantState)
+                                                     metacluster::TenantState tenantState)
   : tenantName(tenantName), tenantState(tenantState) {
 	setId(id);
 }
 MetaclusterTenantMapEntry::MetaclusterTenantMapEntry(int64_t id,
                                                      TenantName tenantName,
-                                                     MetaclusterAPI::TenantState tenantState,
+                                                     metacluster::TenantState tenantState,
                                                      Optional<TenantGroupName> tenantGroup)
   : tenantName(tenantName), tenantState(tenantState), tenantGroup(tenantGroup) {
 	setId(id);
@@ -190,7 +164,7 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 	tenantEntry["name"] = binaryToJson(tenantName);
 	tenantEntry["prefix"] = binaryToJson(prefix);
 
-	tenantEntry["tenant_state"] = MetaclusterAPI::tenantStateToString(tenantState);
+	tenantEntry["tenant_state"] = metacluster::tenantStateToString(tenantState);
 	tenantEntry["assigned_cluster"] = binaryToJson(assignedCluster);
 
 	if (tenantGroup.present()) {
@@ -202,10 +176,10 @@ std::string MetaclusterTenantMapEntry::toJson() const {
 		tenantEntry["lock_id"] = tenantLockId.get().toString();
 	}
 
-	if (tenantState == MetaclusterAPI::TenantState::RENAMING) {
+	if (tenantState == metacluster::TenantState::RENAMING) {
 		ASSERT(renameDestination.present());
 		tenantEntry["rename_destination"] = binaryToJson(renameDestination.get());
-	} else if (tenantState == MetaclusterAPI::TenantState::ERROR) {
+	} else if (tenantState == metacluster::TenantState::ERROR) {
 		tenantEntry["error"] = error;
 	}
 
@@ -258,19 +232,4 @@ bool MetaclusterTenantGroupEntry::operator!=(MetaclusterTenantGroupEntry const& 
 	return !(*this == other);
 }
 
-KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
-MetaclusterMetadata::metaclusterRegistration() {
-	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
-	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
-	return instance;
-}
-
-KeyBackedSet<UID>& MetaclusterMetadata::registrationTombstones() {
-	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
-	return instance;
-}
-
-KeyBackedMap<ClusterName, UID>& MetaclusterMetadata::activeRestoreIds() {
-	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
-	return instance;
-}
+} // namespace metacluster

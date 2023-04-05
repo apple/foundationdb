@@ -291,7 +291,6 @@ struct BlobManagerStats {
 	Counter granulesFullyPurged;
 	Counter granulesPartiallyPurged;
 	Counter filesPurged;
-	Counter manifestSizeInBytes;
 	Future<Void> logger;
 	int64_t activeMerges;
 	int64_t blockedAssignments;
@@ -299,6 +298,8 @@ struct BlobManagerStats {
 	Version lastFlushVersion;
 	Version lastMLogTruncationVersion;
 	int64_t lastManifestSeqNo;
+	int64_t lastManifestDumpTs;
+	int64_t manifestSizeInBytes;
 
 	// Current stats maintained for a given blob worker process
 	explicit BlobManagerStats(UID id,
@@ -313,8 +314,8 @@ struct BlobManagerStats {
 	    ccBytesChecked("CCBytesChecked", cc), ccMismatches("CCMismatches", cc), ccTimeouts("CCTimeouts", cc),
 	    ccErrors("CCErrors", cc), purgesProcessed("PurgesProcessed", cc),
 	    granulesFullyPurged("GranulesFullyPurged", cc), granulesPartiallyPurged("GranulesPartiallyPurged", cc),
-	    filesPurged("FilesPurged", cc), manifestSizeInBytes("ManifestSizeInBytes", cc), activeMerges(0),
-	    blockedAssignments(0), lastFlushVersion(0), lastMLogTruncationVersion(0), lastManifestSeqNo(0) {
+	    filesPurged("FilesPurged", cc), activeMerges(0), blockedAssignments(0), lastFlushVersion(0),
+	    lastMLogTruncationVersion(0), lastManifestSeqNo(0), lastManifestDumpTs(0), manifestSizeInBytes(0) {
 		specialCounter(cc, "WorkerCount", [workers]() { return workers->size(); });
 		specialCounter(cc, "Epoch", [epoch]() { return epoch; });
 		specialCounter(cc, "ActiveMerges", [this]() { return this->activeMerges; });
@@ -324,6 +325,8 @@ struct BlobManagerStats {
 		specialCounter(cc, "LastFlushVersion", [this]() { return this->lastFlushVersion; });
 		specialCounter(cc, "LastMLogTruncationVersion", [this]() { return this->lastMLogTruncationVersion; });
 		specialCounter(cc, "LastManifestSeqNo", [this]() { return this->lastManifestSeqNo; });
+		specialCounter(cc, "LastManifestDumpTs", [this]() { return this->lastManifestDumpTs; });
+		specialCounter(cc, "ManifestSizeInBytes", [this]() { return this->manifestSizeInBytes; });
 		logger = cc.traceCounters("BlobManagerMetrics", id, interval, "BlobManagerMetrics");
 	}
 };
@@ -3181,12 +3184,12 @@ ACTOR Future<Void> checkBlobWorkerList(Reference<BlobManagerData> bmData, Promis
 			// Get list of last known blob workers
 			// note: the list will include every blob worker that the old manager knew about,
 			// but it might also contain blob workers that died while the new manager was being recruited
-			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+			state std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 
 			// We could get the affinity list transactionally with the blob workers, however it is simpilier from an API
 			// perspective to get the affinities after the blob worker list, which ensures we will have the affinity for
 			// every worker returned.
-			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db));
+			std::vector<std::pair<UID, UID>> blobWorkerAffinities = wait(getBlobWorkerAffinity(bmData->db, true));
 			bmData->workerAffinities.clear();
 			for (auto& it : blobWorkerAffinities) {
 				bmData->workerAffinities[it.second] = it.first;
@@ -4145,7 +4148,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 }
 
 ACTOR Future<Void> haltBlobGranules(Reference<BlobManagerData> bmData) {
-	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db));
+	std::vector<BlobWorkerInterface> blobWorkers = wait(getBlobWorkers(bmData->db, true));
 	std::vector<Future<Void>> deregisterBlobWorkers;
 	for (auto& worker : blobWorkers) {
 		bmData->addActor.send(haltBlobWorker(bmData, worker));
@@ -5562,7 +5565,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 				    wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
 				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 				bmData->stats.manifestSizeInBytes += bytes;
-
+				bmData->stats.lastManifestDumpTs = now();
 				bmData->manifestDumperSeqNo++;
 			} else {
 				TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);

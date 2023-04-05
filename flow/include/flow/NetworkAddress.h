@@ -25,7 +25,7 @@
 #include "flow/Trace.h"
 #include "flow/IPAddress.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(NetworkAddressFromHostname);
+FDB_BOOLEAN_PARAM(NetworkAddressFromHostname);
 
 struct NetworkAddress {
 	constexpr static FileIdentifier file_identifier = 14155727;

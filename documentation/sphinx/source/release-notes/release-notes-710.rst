@@ -2,6 +2,22 @@
 Release Notes
 #############
 
+7.1.31
+======
+* Same as 7.1.30 release with AVX enabled.
+
+7.1.30
+======
+* Released with AVX disabled.
+* Fixed storage server finishedQueries metric when using getMappedRange. `(PR #9785) <https://github.com/apple/foundationdb/pull/9785>`_
+* Fixed unnecessary transaction system recovery when excluding the servers that are already excluded/failed. `(PR #9809) <https://github.com/apple/foundationdb/pull/9809>`_ and `(PR #9878) <https://github.com/apple/foundationdb/pull/9878>`_
+* Fixed the exclusion of stateless processes by skipping the free capacity check. `(PR #9789) <https://github.com/apple/foundationdb/pull/9789>`_ and `(PR #9769) <https://github.com/apple/foundationdb/pull/9769>`_
+* Fixed an issue where the new worker cannot get ServerDBInfo update. `(PR #9778) <https://github.com/apple/foundationdb/pull/9778>`_
+* Added RocksDB bloom filter knobs. `(PR #9770) <https://github.com/apple/foundationdb/pull/9770>`_
+* Upgraded RocksDB to version 7.10.2. `(PR #9829) <https://github.com/apple/foundationdb/pull/9829>`_
+* Fixed an issue where ExclusionSafetyCheckRequest could be blocked forever. `(PR #9871) <https://github.com/apple/foundationdb/pull/9871>`_
+* Fixed fdbserver not able to join the cluster if the majority of coordinators in its connection string have failed. `(PR #9883) <https://github.com/apple/foundationdb/pull/9883>`_
+
 7.1.29
 ======
 * Same as 7.1.28 release with AVX enabled.

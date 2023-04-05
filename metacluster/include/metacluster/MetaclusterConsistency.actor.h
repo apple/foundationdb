@@ -23,23 +23,26 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTERCONSISTENCY_ACTOR_G_H)
+#define WORKLOADS_METACLUSTERCONSISTENCY_ACTOR_G_H
+#include "metacluster/MetaclusterConsistency.actor.g.h"
+#elif !defined(WORKLOADS_METACLUSTERCONSISTENCY_ACTOR_H)
+#define WORKLOADS_METACLUSTERCONSISTENCY_ACTOR_H
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/BooleanParam.h"
-#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H)
-#define WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_G_H
-#include "fdbserver/workloads/MetaclusterConsistency.actor.g.h"
-#elif !defined(WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_H)
-#define WORKLOADS_METACLUSTER_CONSISTENCY_ACTOR_H
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
-#include "fdbserver/workloads/MetaclusterData.actor.h"
-#include "fdbserver/workloads/TenantConsistency.actor.h"
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterData.actor.h"
+#include "metacluster/MetaclusterUtil.actor.h"
+#include "metacluster/TenantConsistency.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
+namespace metacluster::util {
+FDB_BOOLEAN_PARAM(AllowPartialMetaclusterOperations);
 
 template <class DB>
 class MetaclusterConsistencyCheck {
@@ -179,7 +182,7 @@ private:
 	ACTOR static Future<Void> validateDataCluster(MetaclusterConsistencyCheck* self,
 	                                              ClusterName clusterName,
 	                                              DataClusterMetadata clusterMetadata) {
-		state Reference<IDatabase> dataDb = wait(MetaclusterAPI::openDatabase(clusterMetadata.connectionString));
+		state Reference<IDatabase> dataDb = wait(openDatabase(clusterMetadata.connectionString));
 		state TenantConsistencyCheck<IDatabase, StandardTenantTypes> tenantConsistencyCheck(
 		    dataDb, &TenantMetadata::instance());
 		wait(tenantConsistencyCheck.run());
@@ -220,9 +223,9 @@ private:
 				ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
 				MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
 				if (!data.tenantData.tenantMap.count(tenantId)) {
-					ASSERT(metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::REMOVING ||
-					       metaclusterEntry.tenantState == MetaclusterAPI::TenantState::ERROR);
+					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
+					       metaclusterEntry.tenantState == TenantState::REMOVING ||
+					       metaclusterEntry.tenantState == TenantState::ERROR);
 				} else if (metaclusterEntry.tenantGroup.present()) {
 					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
 				}
@@ -237,13 +240,13 @@ private:
 			ASSERT_EQ(entry.id, metaclusterEntry.id);
 
 			if (!self->allowPartialMetaclusterOperations) {
-				ASSERT_EQ(metaclusterEntry.tenantState, MetaclusterAPI::TenantState::READY);
+				ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
 				ASSERT(entry.tenantName == metaclusterEntry.tenantName);
 			} else if (entry.tenantName != metaclusterEntry.tenantName) {
 				ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
 			}
-			if (metaclusterEntry.tenantState != MetaclusterAPI::TenantState::UPDATING_CONFIGURATION &&
-			    metaclusterEntry.tenantState != MetaclusterAPI::TenantState::REMOVING) {
+			if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
+			    metaclusterEntry.tenantState != TenantState::REMOVING) {
 				ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
 			} else {
 				ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
@@ -286,7 +289,7 @@ private:
 
 	ACTOR static Future<Void> run(MetaclusterConsistencyCheck* self) {
 		state TenantConsistencyCheck<DB, MetaclusterTenantTypes> managementTenantConsistencyCheck(
-		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
+		    self->managementDb, &metadata::management::tenantMetadata());
 
 		wait(managementTenantConsistencyCheck.run() && self->metaclusterData.load() && checkManagementSystemKeys(self));
 
@@ -311,6 +314,7 @@ public:
 
 	Future<Void> run() { return run(this); }
 };
+} // namespace metacluster::util
 
 #include "flow/unactorcompiler.h"
 

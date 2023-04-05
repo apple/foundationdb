@@ -50,6 +50,11 @@ struct ValidateStorage : TestWorkload {
 	const bool enabled;
 	bool pass;
 
+	// We disable failure injection because there is an irrelevant issue:
+	// Remote tLog is failed to rejoin to CC
+	// Once this issue is fixed, we should be able to enable the failure injection
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
+
 	void validationFailed(ErrorOr<Optional<Value>> expectedValue, ErrorOr<Optional<Value>> actualValue) {
 		TraceEvent(SevError, "TestFailed")
 		    .detail("ExpectedValue", printValue(expectedValue))
@@ -81,6 +86,11 @@ struct ValidateStorage : TestWorkload {
 		Version _ = wait(self->populateData(self, cx, &kvs));
 
 		TraceEvent("TestValueWritten");
+
+		if (g_network->isSimulated()) {
+			// NOTE: the value will be reset after consistency check
+			disableConnectionFailures("AuditStorage");
+		}
 
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValueVerified");

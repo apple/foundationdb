@@ -3749,7 +3749,14 @@ extern std::atomic<int64_t> net2RunLoopIterations;
 extern std::atomic<int64_t> net2RunLoopSleeps;
 extern void initProfiling();
 
+namespace {
+
 std::atomic<double> checkThreadTime;
+std::mutex loopProfilerThreadMutex;
+std::optional<pthread_t> loopProfilerThread;
+std::atomic<bool> loopProfilerStopRequested = false;
+
+} // namespace
 #endif
 
 // True if this thread is the thread being profiled. Not to be used from the signal handler.
@@ -3759,7 +3766,7 @@ thread_local bool profileThread = false;
 // to see if we are on the profiled thread. Can be used in the signal handler.
 volatile int64_t profileThreadId = -1;
 
-void (*chainedSignalHandler)(int) = nullptr;
+struct sigaction chainedAction;
 volatile bool profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
 
@@ -3793,8 +3800,9 @@ int64_t getNumProfilesCaptured() {
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (chainedSignalHandler) {
-		chainedSignalHandler(sig);
+	if (chainedAction.sa_handler != SIG_DFL && chainedAction.sa_handler != SIG_IGN &&
+	    chainedAction.sa_handler != nullptr) {
+		chainedAction.sa_handler(sig);
 	}
 
 	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
@@ -3868,7 +3876,7 @@ void* checkThread(void* arg) {
 	double slowTaskLogInterval = minSlowTaskLogInterval;
 	double saturatedLogInterval = minSaturationLogInterval;
 
-	while (true) {
+	while (!loopProfilerStopRequested) {
 		threadSleep(FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		int64_t currentRunLoopIterations = net2RunLoopIterations.load();
@@ -3989,6 +3997,8 @@ std::string getExecPath() {
 void setupRunLoopProfiler() {
 #ifdef __linux__
 	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		chainedAction.sa_handler = SIG_DFL;
+
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		profileThread = true;
@@ -4002,31 +4012,40 @@ void setupRunLoopProfiler() {
 
 		initProfiling();
 
-		struct sigaction oldAction;
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		if (sigaction(SIGPROF, &action, &oldAction)) {
+		if (sigaction(SIGPROF, &action, &chainedAction)) {
 			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
 			    .detail("Reason", "Error configuring signal handler")
 			    .GetLastError();
 			return;
 		}
 
-		if (oldAction.sa_handler != SIG_DFL && oldAction.sa_handler != SIG_IGN && oldAction.sa_handler != NULL) {
-			chainedSignalHandler = oldAction.sa_handler;
-		} else {
-			chainedSignalHandler = nullptr;
-		}
-
 		// Start a thread which will use signals to log stacks on long events
 		pthread_t* mainThread = (pthread_t*)malloc(sizeof(pthread_t));
 		*mainThread = pthread_self();
-		startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+		{
+			std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+			if (!loopProfilerStopRequested) {
+				loopProfilerThread = startThread(&checkThread, (void*)mainThread, 0, "fdb-loopprofile");
+			}
+		}
 	}
 #else
 	// No slow task profiling for other platforms!
+#endif
+}
+
+void stopRunLoopProfiler() {
+#ifdef __linux__
+	std::unique_lock<std::mutex> lock(loopProfilerThreadMutex);
+	loopProfilerStopRequested.store(true);
+	if (loopProfilerThread) {
+		pthread_join(loopProfilerThread.value(), NULL);
+		loopProfilerThread = {};
+	}
 #endif
 }
 
