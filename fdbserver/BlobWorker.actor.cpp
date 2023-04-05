@@ -22,7 +22,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
