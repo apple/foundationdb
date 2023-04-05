@@ -1402,6 +1402,32 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		g_simulator->processesPerMachine = processesPerMachine;
 
 		uniquify(dcIds);
+		if (!BUGGIFY && dcIds.size() == 2 && dcIds[0] != "" && dcIds[1] != "") {
+			StatusObject primaryObj;
+			StatusObject primaryDcObj;
+			primaryDcObj["id"] = dcIds[0];
+			primaryDcObj["priority"] = 2;
+			StatusArray primaryDcArr;
+			primaryDcArr.push_back(primaryDcObj);
+
+			StatusObject remoteObj;
+			StatusObject remoteDcObj;
+			remoteDcObj["id"] = dcIds[1];
+			remoteDcObj["priority"] = 1;
+			StatusArray remoteDcArr;
+			remoteDcArr.push_back(remoteDcObj);
+
+			primaryObj["datacenters"] = primaryDcArr;
+			remoteObj["datacenters"] = remoteDcArr;
+
+			StatusArray regionArr;
+			regionArr.push_back(primaryObj);
+			regionArr.push_back(remoteObj);
+
+			*pStartingConfiguration =
+			    "single usable_regions=2 regions=" +
+			    json_spirit::write_string(json_spirit::mValue(regionArr), json_spirit::Output_options::none);
+		}
 
 		g_simulator->restarted = true;
 
@@ -1532,14 +1558,12 @@ void SimulationConfig::setSpecificConfig(const TestConfig& testConfig) {
 // Sets generateFearless and number of dataCenters based on testConfig details
 // The number of datacenters may be overwritten in setRegions
 void SimulationConfig::setDatacenters(const TestConfig& testConfig) {
-	/*
 	generateFearless =
 	    testConfig.simpleConfig ? false : (testConfig.minimumRegions > 1 || deterministicRandom()->random01() < 0.5);
 	if (testConfig.generateFearless.present()) {
-	    // overwrite whatever decision we made before
-	    generateFearless = testConfig.generateFearless.get();
-	}*/
-	generateFearless = false;
+		// overwrite whatever decision we made before
+		generateFearless = testConfig.generateFearless.get();
+	}
 	datacenters =
 	    testConfig.simpleConfig
 	        ? 1
