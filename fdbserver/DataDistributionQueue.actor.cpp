@@ -386,6 +386,14 @@ void launchDest(RelocateData& relocation,
 	}
 }
 
+void unlaunchDest(const RelocateData& relocation, std::map<UID, Busyness>& destBusymap) {
+	ASSERT(!relocation.completeDests.empty());
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
+
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
@@ -1388,6 +1396,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			} else {
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				// Update destination busyness map to allow further movement to them.
+				unlaunchDest(rd, self->destBusymap);
 				rd.completeDests.clear();
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
