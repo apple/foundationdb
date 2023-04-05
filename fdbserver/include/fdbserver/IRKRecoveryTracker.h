@@ -12,8 +12,8 @@ class IRKRecoveryTracker {
 public:
 	virtual ~IRKRecoveryTracker() = default;
 
-	// Returns the duration of the recovery happening
-	// at the specified version.
+	// Returns the sum of the durations of all recoveries since the
+	// the specified version (including the last recovery before the specified version).
 	virtual double getRecoveryDuration(Version) const = 0;
 
 	// Cleanup the oldest recoveries so that only
@@ -35,17 +35,26 @@ public:
 
 class RKRecoveryTracker : public IRKRecoveryTracker {
 	friend class RKRecoveryTrackerImpl;
-	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+
+	// Listens to updates on whether or not the cluster is in recovery
+	Reference<IAsyncListener<bool>> inRecovery;
 
 	// Maps recovery versions to recovery start and end times
 	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 
+	// Maximum version seen from a GRV proxy
+	// (or 0 if no version has yet been received).
 	Version maxVersion;
+
+	// Version of the current ongoing recovery
 	Version recoveryVersion;
+
+	// Tracks whether the cluster was in recovery the last
+	// time inRecovery was read
 	bool recovering;
 
 public:
-	explicit RKRecoveryTracker(Reference<AsyncVar<ServerDBInfo> const>);
+	explicit RKRecoveryTracker(Reference<IAsyncListener<bool>>);
 	~RKRecoveryTracker();
 	double getRecoveryDuration(Version) const override;
 	void cleanupOldRecoveries() override;

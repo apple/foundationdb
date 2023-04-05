@@ -10,10 +10,10 @@ class RKRecoveryTrackerImpl {
 public:
 	ACTOR static Future<Void> run(RKRecoveryTracker* self) {
 		loop {
-			wait(self->dbInfo->onChange());
+			wait(self->inRecovery->onChange());
 
 			// Entering recovery
-			if (!self->recovering && self->dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			if (!self->recovering && self->inRecovery->get()) {
 				self->recovering = true;
 				self->recoveryVersion = self->maxVersion;
 				if (self->recoveryVersion == 0) {
@@ -31,7 +31,7 @@ public:
 			}
 
 			// Exiting recovery
-			if (self->recovering && self->dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
+			if (self->recovering && !self->inRecovery->get()) {
 				self->recovering = false;
 				self->version_recovery[self->recoveryVersion].second = now();
 			}
@@ -39,8 +39,9 @@ public:
 	}
 }; // class RKRecoveryTrackerImpl
 
-RKRecoveryTracker::RKRecoveryTracker(Reference<AsyncVar<ServerDBInfo> const> dbInfo) : dbInfo(dbInfo), maxVersion(0) {
-	recovering = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
+RKRecoveryTracker::RKRecoveryTracker(Reference<IAsyncListener<bool>> inRecovery)
+  : inRecovery(inRecovery), maxVersion(0) {
+	recovering = inRecovery->get();
 	recoveryVersion = std::numeric_limits<Version>::max();
 	if (recovering) {
 		version_recovery[recoveryVersion] = std::make_pair(now(), Optional<double>());
