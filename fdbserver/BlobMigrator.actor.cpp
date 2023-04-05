@@ -385,6 +385,12 @@ private:
 				    .detail("MinLogVersion", minLogVersion)
 				    .detail("MaxLogVersion", maxLogVersion)
 				    .detail("TargetVersion", targetVersion);
+				dprint("Granule {} version {} is out of the log range {} - {}. restore target version {}\n",
+				       granule.granuleID.toString(),
+				       granule.version,
+				       minLogVersion,
+				       maxLogVersion,
+				       targetVersion);
 				throw blob_restore_corrupted_logs();
 			}
 			// no need to apply mutation logs if granule is already on that version

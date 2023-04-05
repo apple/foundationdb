@@ -271,6 +271,7 @@ public:
 	FutureStream<RelocateShard> input;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
 	PromiseStream<GetTopKMetricsRequest> getTopKMetrics;
+	PromiseStream<Future<Void>> addBackgroundCleanUpDataMoveActor;
 
 	double lastInterval;
 	int suppressIntervals;
