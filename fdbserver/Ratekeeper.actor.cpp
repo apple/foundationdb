@@ -261,8 +261,6 @@ public:
 					                              self.actualTpsMetric,
 					                              self.unblockedAssignmentTime);
 
-					// self.updateRate(&self.batchLimits);
-
 					self.rateServer->updateLastLimited(self.batchRateUpdater->getTpsLimit());
 					self.rateServer->cleanupExpiredGrvProxies();
 					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
