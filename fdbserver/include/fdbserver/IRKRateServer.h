@@ -6,7 +6,6 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/RatekeeperInterface.h"
 
 struct RatekeeperLimits {
@@ -59,12 +58,12 @@ public:
 	virtual double getSmoothBatchReleasedTransactionRate() const = 0;
 	virtual std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const = 0;
 	virtual void cleanupExpiredGrvProxies() = 0;
+	virtual void updateLastLimited(double batchTpsLimit) = 0;
 	virtual Future<Void> run(HealthMetrics const&,
 	                         RatekeeperLimits const& normalLimits,
 	                         RatekeeperLimits const& batchLimits,
 	                         class ITagThrottler&,
-	                         IRKRecoveryTracker&,
-	                         bool const& lastLimited) = 0;
+	                         class IRKRecoveryTracker&) = 0;
 };
 
 class RKRateServer : public IRKRateServer {
@@ -73,6 +72,7 @@ class RKRateServer : public IRKRateServer {
 	Smoother smoothReleasedTransactions;
 	Smoother smoothBatchReleasedTransactions;
 	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
+	bool lastLimited;
 
 public:
 	explicit RKRateServer(FutureStream<GetRateInfoRequest>);
@@ -81,10 +81,10 @@ public:
 	double getSmoothBatchReleasedTransactionRate() const override;
 	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const override;
 	void cleanupExpiredGrvProxies() override;
+	void updateLastLimited(double batchTpsLimit) override;
 	Future<Void> run(HealthMetrics const&,
 	                 RatekeeperLimits const& normalLimits,
 	                 RatekeeperLimits const& batchLimits,
 	                 class ITagThrottler&,
-	                 IRKRecoveryTracker&,
-	                 bool const& lastLimited) override;
+	                 class IRKRecoveryTracker&) override;
 };

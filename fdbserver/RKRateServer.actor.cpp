@@ -13,8 +13,7 @@ public:
 	                              RatekeeperLimits const* normalLimits,
 	                              RatekeeperLimits const* batchLimits,
 	                              ITagThrottler* tagThrottler,
-	                              IRKRecoveryTracker* recoveryTracker,
-	                              bool const* lastLimited) {
+	                              IRKRecoveryTracker* recoveryTracker) {
 		loop {
 			GetRateInfoRequest req = waitNext(self->getRateInfo);
 			GetRateInfoReply reply;
@@ -64,7 +63,7 @@ public:
 
 			reply.healthMetrics.update(*healthMetrics, true, req.detailed);
 			reply.healthMetrics.tpsLimit = normalLimits->tpsLimit;
-			reply.healthMetrics.batchLimited = lastLimited;
+			reply.healthMetrics.batchLimited = self->lastLimited;
 
 			req.reply.send(reply);
 		}
@@ -99,12 +98,14 @@ void RKRateServer::cleanupExpiredGrvProxies() {
 	}
 }
 
+void RKRateServer::updateLastLimited(double batchTpsLimit) {
+	lastLimited = getSmoothReleasedTransactionRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * batchTpsLimit;
+}
+
 Future<Void> RKRateServer::run(HealthMetrics const& healthMetrics,
                                RatekeeperLimits const& normalLimits,
                                RatekeeperLimits const& batchLimits,
                                ITagThrottler& tagThrottler,
-                               IRKRecoveryTracker& recoveryTracker,
-                               bool const& lastLimited) {
-	return RKRateServerImpl::run(
-	    this, &healthMetrics, &normalLimits, &batchLimits, &tagThrottler, &recoveryTracker, &lastLimited);
+                               IRKRecoveryTracker& recoveryTracker) {
+	return RKRateServerImpl::run(this, &healthMetrics, &normalLimits, &batchLimits, &tagThrottler, &recoveryTracker);
 }

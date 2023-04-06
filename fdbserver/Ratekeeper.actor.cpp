@@ -186,7 +186,6 @@ public:
 		    rkInterf.id(), openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True), dbInfo, rkInterf);
 		state Future<Void> timeout = Void();
 		state Future<Void> collection = actorCollection(self.addActor.getFuture());
-		state bool lastLimited = false;
 
 		TraceEvent("RatekeeperStarting", rkInterf.id());
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
@@ -195,12 +194,8 @@ public:
 		self.addActor.send(self.metricsTracker->run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
-		self.addActor.send(self.rateServer->run(self.healthMetrics,
-		                                        self.normalLimits,
-		                                        self.batchLimits,
-		                                        *self.tagThrottler,
-		                                        *self.recoveryTracker,
-		                                        lastLimited));
+		self.addActor.send(self.rateServer->run(
+		    self.healthMetrics, self.normalLimits, self.batchLimits, *self.tagThrottler, *self.recoveryTracker));
 
 		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
@@ -246,8 +241,7 @@ public:
 					self.updateRate(&self.normalLimits);
 					self.updateRate(&self.batchLimits);
 
-					lastLimited = self.rateServer->getSmoothReleasedTransactionRate() >
-					              SERVER_KNOBS->LAST_LIMITED_RATIO * self.batchLimits.tpsLimit;
+					self.rateServer->updateLastLimited(self.batchLimits.tpsLimit);
 					self.rateServer->cleanupExpiredGrvProxies();
 					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
 				}
