@@ -2542,6 +2542,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 	state KeyRange range;
 	TraceEvent(SevDebug, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
+	state Error lastError;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
@@ -2576,6 +2577,13 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					range = dataMove.ranges.front();
 					ASSERT(!range.empty());
 				} else {
+					if (lastError.code() == error_code_commit_unknown_result) {
+						// It means the commit was succeed last time
+						// For this case, safely do nothing
+						TraceEvent(SevDebug, "CleanUpDataMoveHaveDoneExit", dataMoveId)
+						    .detail("DataMoveID", dataMoveId);
+						return Void();
+					}
 					// If a normal cleanup sees nothing, triggers background cleanup
 					dataMove = DataMoveMetaData(dataMoveId);
 					dataMove.setPhase(DataMoveMetaData::Deleting);
@@ -2679,10 +2687,10 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					break;
 				}
 			} catch (Error& e) {
-				state Error err = e;
+				lastError = e;
 				wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
-				    .error(err)
+				    .error(lastError)
 				    .detail("DataMoveRange", range.toString());
 			}
 		}
@@ -2708,8 +2716,8 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
 		if (e.code() == error_code_retry_clean_up_datamove_tombstone_added) {
-			ASSERT(addCleanUpDataMoveActor.present());
 			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
+			ASSERT_WE_THINK(addCleanUpDataMoveActor.present());
 			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
 			                                                             dataMoveId,
 			                                                             lock,
