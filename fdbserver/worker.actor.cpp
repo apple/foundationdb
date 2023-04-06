@@ -1047,13 +1047,11 @@ bool addressIsRemoteLogRouter(const NetworkAddress& address, Reference<AsyncVar<
 	const auto& dbi = dbInfo->get();
 
 	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-		if (logSet.isLocal || logSet.locality == tagLocalitySatellite) {
-			continue;
-		}
-
-		for (const auto& logRouter : logSet.logRouters) {
-			if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
-				return true;
+		if (!logSet.isLocal) {
+			for (const auto& logRouter : logSet.logRouters) {
+				if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+					return true;
+				}
 			}
 		}
 	}
@@ -1076,6 +1074,7 @@ TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
 	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface<TLogInterface>());
 	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
 
+	// Create a local log router, and it shouldn't be considered as remote log router.
 	TLogInterface localLogRouter(testLocal);
 	localLogRouter.initEndpoints();
 	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(localLogRouter));
