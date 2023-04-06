@@ -437,7 +437,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> removeDataMoveTombstone(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
 		state UID currentID;
 		try {
 			state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
@@ -445,11 +445,11 @@ public:
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 					for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
 						currentID = dataMoveID;
 						tr.clear(dataMoveKeyFor(currentID));
+						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
 					}
 					wait(tr.commit());
 					break;
@@ -458,10 +458,14 @@ public:
 				}
 			}
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			TraceEvent(SevWarn, "RemoveDataMoveTombstoneError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("CurrentDataMoveID", currentID);
-			throw e;
+			// DD needs not restart when removing tombstone gets failed unless this actor gets cancelled
+			// So, do not throw error
 		}
 		return Void();
 	}
@@ -604,6 +608,10 @@ public:
 				wait(yield(TaskPriority::DataDistribution));
 			}
 		}
+
+		// Trigger background cleanup for datamove tombstones
+		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
+
 		return Void();
 	}
 
@@ -725,10 +733,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
 			self->physicalShardCollection = makeReference<PhysicalShardCollection>(self->txnProcessor);
-			Future<Void> resumeRelocationReady = self->resumeRelocations();
-			Future<Void> cleanTombstoneReady = self->removeDataMoveTombstone(self);
-			std::vector<Future<Void>> toWaitList{ resumeRelocationReady, cleanTombstoneReady };
-			wait(waitForAll(toWaitList));
+			wait(self->resumeRelocations());
 
 			std::vector<TeamCollectionInterface> tcis; // primary and remote region interface
 			Reference<AsyncVar<bool>> anyZeroHealthyTeams; // true if primary or remote has zero healthy team

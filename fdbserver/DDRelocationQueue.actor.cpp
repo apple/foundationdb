@@ -1111,8 +1111,13 @@ void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDE
 	}
 
 	DDQueue::DDDataMove dataMove(dataMoveId);
-	dataMove.cancel =
-	    cleanUpDataMove(this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
+	dataMove.cancel = cleanUpDataMove(this->cx,
+	                                  dataMoveId,
+	                                  this->lock,
+	                                  &this->cleanUpDataMoveParallelismLock,
+	                                  range,
+	                                  ddEnabledState,
+	                                  this->addBackgroundCleanUpDataMoveActor);
 	this->dataMoves.insert(range, dataMove);
 	TraceEvent(SevInfo, "DDEnqueuedCancelledDataMove", this->distributorId)
 	    .detail("DataMoveID", dataMoveId)
