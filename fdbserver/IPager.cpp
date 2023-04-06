@@ -19,6 +19,7 @@
  */
 #include "fdbserver/IPager.h"
 
+#include "fdbclient/BlobCipher.h"
 #include "flow/IRandom.h"
 #include "flow/UnitTest.h"
 #include <limits>
@@ -33,13 +34,14 @@ TEST_CASE("/fdbserver/IPager/ArenaPage/PageContentChecksum") {
 		deterministicRandom()->randomBytes(page->mutateData(), page->dataSize());
 		PhysicalPageID pageID = deterministicRandom()->randomUInt32();
 		if (encodingType == AESEncryption || encodingType == AESEncryptionWithAuth) {
-			uint8_t cipherKeyBytes[AES_256_KEY_LENGTH];
-			deterministicRandom()->randomBytes(cipherKeyBytes, AES_256_KEY_LENGTH);
+			const int cipherBytesLen = deterministicRandom()->randomInt(4, (4 * AES_256_KEY_LENGTH) + 1);
+			uint8_t cipherKeyBytes[cipherBytesLen];
+			deterministicRandom()->randomBytes(cipherKeyBytes, cipherBytesLen);
 			Reference<BlobCipherKey> cipherKey =
 			    makeReference<BlobCipherKey>(0 /*domainId*/,
 			                                 1 /*baseCipherId*/,
-			                                 cipherKeyBytes,
-			                                 AES_256_KEY_LENGTH,
+			                                 &cipherKeyBytes[0],
+			                                 cipherBytesLen,
 			                                 std::numeric_limits<int64_t>::max() /*refreshAt*/,
 			                                 std::numeric_limits<int64_t>::max() /*expireAt*/
 			    );

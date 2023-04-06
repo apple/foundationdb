@@ -1,0 +1,27 @@
+[configuration]
+generateFearless = true
+processesPerMachine = 1
+machineCount = 20
+minimumRegions = 2
+coordinators = 1
+remoteConfig = 'remote_double'
+
+[[knobs]]
+max_write_transaction_life_versions = 5000000
+
+[[test]]
+testTitle = 'GcGenerations'
+
+    [[test.knobs]]
+    dbinfo_send_amount = 50
+
+    [[test.workload]]
+    testName = 'Cycle'
+    nodeCount = 3000
+    transactionsPerSecond = 250.0
+    testDuration = 300.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'GcGenerations'
+    testDuration = 1000.0

@@ -25,13 +25,15 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
@@ -92,8 +94,9 @@ ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<S
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> metaclusterTenantGroups =
-				    wait(MetaclusterAPI::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
+				std::vector<std::pair<TenantGroupName, metacluster::MetaclusterTenantGroupEntry>>
+				    metaclusterTenantGroups =
+				        wait(metacluster::listTenantGroupsTransaction(tr, beginTenantGroup, endTenantGroup, limit));
 				tenantGroupListOutput(metaclusterTenantGroups, tokens.size());
 			} else {
 				std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
@@ -108,7 +111,7 @@ ACTOR Future<bool> tenantGroupListCommand(Reference<IDatabase> db, std::vector<S
 	}
 }
 
-void tenantGroupGetOutput(MetaclusterTenantGroupEntry entry, bool useJson) {
+void tenantGroupGetOutput(metacluster::MetaclusterTenantGroupEntry entry, bool useJson) {
 	if (useJson) {
 		json_spirit::mObject resultObj;
 		resultObj["tenant_group"] = entry.toJson();
@@ -148,8 +151,8 @@ ACTOR Future<bool> tenantGroupGetCommand(Reference<IDatabase> db, std::vector<St
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				state Optional<MetaclusterTenantGroupEntry> mEntry =
-				    wait(MetaclusterAPI::tryGetTenantGroupTransaction(tr, tokens[2]));
+				state Optional<metacluster::MetaclusterTenantGroupEntry> mEntry =
+				    wait(metacluster::tryGetTenantGroupTransaction(tr, tokens[2]));
 				if (!mEntry.present()) {
 					throw tenant_not_found();
 				}

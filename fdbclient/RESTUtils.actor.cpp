@@ -143,7 +143,8 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
 
 	// No valid connection exists, create a new one
-	state Reference<IConnection> conn = wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second));
+	state Reference<IConnection> conn =
+	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
 	wait(conn->connectHandshake());
 
 	TraceEvent("RESTTUilCreateNewConn")

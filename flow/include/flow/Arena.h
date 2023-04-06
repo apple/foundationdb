@@ -93,7 +93,7 @@ protected:
 	NonCopyable& operator=(const NonCopyable&) = delete;
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(FastInaccurateEstimate);
+FDB_BOOLEAN_PARAM(FastInaccurateEstimate);
 
 // Tag struct to indicate that the block containing allocated memory needs to be zero-ed out after use
 struct WipeAfterUse {};
@@ -162,7 +162,7 @@ struct ArenaBlockRef {
 	uint32_t nextBlockOffset;
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(IsSecureMem);
+FDB_BOOLEAN_PARAM(IsSecureMem);
 
 struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	enum {
