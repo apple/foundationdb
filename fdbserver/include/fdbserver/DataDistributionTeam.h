@@ -61,13 +61,13 @@ struct IDataDistributionTeam {
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(WantNewServers);
-FDB_DECLARE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerDiskUtil);
-FDB_DECLARE_BOOLEAN_PARAM(TeamMustHaveShards);
-FDB_DECLARE_BOOLEAN_PARAM(ForReadBalance);
-FDB_DECLARE_BOOLEAN_PARAM(PreferLowerReadUtil);
-FDB_DECLARE_BOOLEAN_PARAM(FindTeamByServers);
+FDB_BOOLEAN_PARAM(WantNewServers);
+FDB_BOOLEAN_PARAM(WantTrueBest);
+FDB_BOOLEAN_PARAM(PreferLowerDiskUtil);
+FDB_BOOLEAN_PARAM(TeamMustHaveShards);
+FDB_BOOLEAN_PARAM(ForReadBalance);
+FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
+FDB_BOOLEAN_PARAM(FindTeamByServers);
 
 class TeamSelect {
 public:

@@ -211,6 +211,10 @@ inline std::string describe(const int item) {
 	return format("%d", item);
 }
 
+inline std::string describe(const Version item) {
+	return format("%ld", item);
+}
+
 // Allows describeList to work on a vector of std::string
 std::string describe(const std::string& s);
 
@@ -1642,7 +1646,7 @@ struct StorageWiggleValue {
 
 enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
-FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+FDB_BOOLEAN_PARAM(CacheResult);
 
 // store options for storage engine read
 // ReadType describes the usage and priority of the read

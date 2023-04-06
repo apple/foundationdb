@@ -27,10 +27,6 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(AssignEmptyRange);
-FDB_DEFINE_BOOLEAN_PARAM(UnassignShard);
-FDB_DEFINE_BOOLEAN_PARAM(EnablePhysicalShardMove);
-
 const KeyRef systemKeysPrefix = "\xff"_sr;
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
 const KeyRangeRef systemKeys(systemKeysPrefix, "\xff\xff"_sr);

@@ -326,6 +326,7 @@ public:
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
 	double connectionFailureEnableTime; // Last time connection failure is enabled.
+	bool disableTLogRecoveryFinish;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
 	bool willRestart = false;

@@ -25,12 +25,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
 
-FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
-FDB_DEFINE_BOOLEAN_PARAM(IsInitialTeam);
-FDB_DEFINE_BOOLEAN_PARAM(IsRedundantTeam);
-FDB_DEFINE_BOOLEAN_PARAM(IsBadTeam);
-FDB_DEFINE_BOOLEAN_PARAM(WaitWiggle);
-
 namespace {
 
 // Helper function for STL containers, with flow-friendly error handling
@@ -42,14 +36,6 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 }
 
 } // namespace
-
-FDB_DEFINE_BOOLEAN_PARAM(WantNewServers);
-FDB_DEFINE_BOOLEAN_PARAM(WantTrueBest);
-FDB_DEFINE_BOOLEAN_PARAM(PreferLowerDiskUtil);
-FDB_DEFINE_BOOLEAN_PARAM(TeamMustHaveShards);
-FDB_DEFINE_BOOLEAN_PARAM(ForReadBalance);
-FDB_DEFINE_BOOLEAN_PARAM(PreferLowerReadUtil);
-FDB_DEFINE_BOOLEAN_PARAM(FindTeamByServers);
 
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {

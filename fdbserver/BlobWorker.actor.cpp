@@ -22,7 +22,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -39,9 +39,10 @@
 
 #include "fdbserver/BlobWorker.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -332,14 +333,16 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	std::unordered_set<EncryptCipherDomainId> domainIds;
 	domainIds.emplace(domainId);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+	        bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(domainId);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
 	TextAndHeaderCipherKeys systemCipherKeys =
-	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(bwData->dbInfo,
+	                                                                              BlobCipherMetrics::BLOB_GRANULE));
 	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
@@ -366,7 +369,8 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+	        bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 

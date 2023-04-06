@@ -35,10 +35,10 @@
 class FutureBucket;
 class TaskFuture;
 
-FDB_DECLARE_BOOLEAN_PARAM(AccessSystemKeys);
-FDB_DECLARE_BOOLEAN_PARAM(PriorityBatch);
-FDB_DECLARE_BOOLEAN_PARAM(VerifyTask);
-FDB_DECLARE_BOOLEAN_PARAM(UpdateParams);
+FDB_BOOLEAN_PARAM(AccessSystemKeys);
+FDB_BOOLEAN_PARAM(PriorityBatch);
+FDB_BOOLEAN_PARAM(VerifyTask);
+FDB_BOOLEAN_PARAM(UpdateParams);
 
 // A Task is a set of key=value parameters that constitute a unit of work for a TaskFunc to perform.
 // The parameter keys are specific to the TaskFunc that the Task is for, except for a set of reserved

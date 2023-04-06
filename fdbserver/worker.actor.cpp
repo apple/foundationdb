@@ -27,6 +27,7 @@
 #include "flow/ApiVersion.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
+#include "fdbclient/GetEncryptCipherKeys_impl.actor.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/ProcessInterface.h"
 #include "fdbclient/StorageServerInterface.h"
@@ -114,6 +115,7 @@ template struct NetNotifiedQueue<InitializeGrvProxyRequest, false>;
 
 template class RequestStream<GetServerDBInfoRequest, false>;
 template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+template class GetEncryptCipherKeys<ServerDBInfo>;
 
 namespace {
 RoleLineageCollector roleLineageCollector;
@@ -2499,8 +2501,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltEncryptKeyProxy);
+					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
+					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
+					DUMPTOKEN(recruited.getLatestBlobMetadata);
 
-					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo);
+					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
 					    errors,
 					    Role::ENCRYPT_KEY_PROXY,
