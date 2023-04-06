@@ -238,7 +238,6 @@ public:
 
 					self.normalRateUpdater->update(*self.metricsTracker,
 					                               *self.rateServer,
-					                               self.addActor,
 					                               *self.tagThrottler,
 					                               *self.configurationMonitor,
 					                               *self.recoveryTracker,
@@ -249,7 +248,6 @@ public:
 					                               self.unblockedAssignmentTime);
 					self.batchRateUpdater->update(*self.metricsTracker,
 					                              *self.rateServer,
-					                              self.addActor,
 					                              *self.tagThrottler,
 					                              *self.configurationMonitor,
 					                              *self.recoveryTracker,
@@ -258,6 +256,7 @@ public:
 					                              self.blobWorkerVersionHistory,
 					                              self.blobWorkerTime,
 					                              self.unblockedAssignmentTime);
+					self.tryUpdateAutoTagThrottling();
 
 					self.rateServer->updateLastLimited(self.batchRateUpdater->getTpsLimit());
 					self.rateServer->cleanupExpiredGrvProxies();
@@ -325,6 +324,14 @@ Ratekeeper::Ratekeeper(UID id,
 	                             SERVER_KNOBS->TARGET_BW_LAG_BATCH);
 	normalRateUpdater = std::make_unique<RKRateUpdater>(id, normalLimits);
 	batchRateUpdater = std::make_unique<RKRateUpdater>(id, batchLimits);
+}
+
+void Ratekeeper::tryUpdateAutoTagThrottling() {
+	auto const& storageQueueInfo = metricsTracker->getStorageQueueInfo();
+	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
+		auto const& ss = i->value;
+		addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
+	}
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {

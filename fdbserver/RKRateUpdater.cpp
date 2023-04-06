@@ -12,8 +12,7 @@ RKRateUpdater::~RKRateUpdater() = default;
 
 void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKRateServer const& rateServer,
-                           PromiseStream<Future<Void>> addActor,
-                           ITagThrottler& tagThrottler,
+                           ITagThrottler const& tagThrottler,
                            IRKConfigurationMonitor const& configurationMonitor,
                            IRKRecoveryTracker const& recoveryTracker,
                            Deque<double> const& actualTpsHistory,
@@ -104,10 +103,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
-
-		if (limits.priority == TransactionPriority::DEFAULT) {
-			addActor.send(tagThrottler.tryUpdateAutoThrottling(ss));
-		}
 
 		double inputRate = ss.getSmoothInputBytesRate();
 		// inputRate = std::max( inputRate, actualTps / SERVER_KNOBS->MAX_TRANSACTIONS_PER_BYTE );

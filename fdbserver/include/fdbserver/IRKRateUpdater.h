@@ -27,8 +27,7 @@ public:
 	virtual double getTpsLimit() const = 0;
 	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
-	                    PromiseStream<Future<Void>> addActor,
-	                    class ITagThrottler&,
+	                    class ITagThrottler const&,
 	                    class IRKConfigurationMonitor const&,
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
@@ -54,8 +53,7 @@ public:
 
 	void update(class IRKMetricsTracker const&,
 	            class IRKRateServer const&,
-	            PromiseStream<Future<Void>> addActor,
-	            class ITagThrottler&,
+	            class ITagThrottler const&,
 	            class IRKConfigurationMonitor const&,
 	            class IRKRecoveryTracker const&,
 	            Deque<double> const& actualTpsHistory,
