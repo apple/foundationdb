@@ -48,6 +48,10 @@ class RKRateUpdater : public IRKRateUpdater {
 	// with some special handling of edge cases.
 	static double getActualTps(IRKRateServer const&, IRKMetricsTracker const&);
 
+	// Returns sum of storage bytes across all tlogs and storage servers
+	// in the cluster.
+	static int64_t getTotalDiskUsageBytes(IRKMetricsTracker const&);
+
 public:
 	explicit RKRateUpdater(UID ratekeeperId, RatekeeperLimits const&);
 

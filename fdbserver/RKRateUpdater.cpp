@@ -591,17 +591,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		limits.tpsLimit = std::max(limits.tpsLimit, 100.0);
 	}
 
-	int64_t totalDiskUsageBytes = 0;
-	for (auto& t : metricsTracker.getTlogQueueInfo()) {
-		if (t.value.valid) {
-			totalDiskUsageBytes += t.value.lastReply.storageBytes.used;
-		}
-	}
-	for (auto& s : metricsTracker.getStorageQueueInfo()) {
-		if (s.value.valid) {
-			totalDiskUsageBytes += s.value.lastReply.storageBytes.used;
-		}
-	}
+	int64_t totalDiskUsageBytes = getTotalDiskUsageBytes(metricsTracker);
 
 	if (metricsTracker.ssListFetchTimedOut()) {
 		limits.tpsLimit = 0.0;
@@ -662,13 +652,28 @@ double RKRateUpdater::getTpsLimit() const {
 	return limits.tpsLimit;
 }
 
-double RKRateUpdater::getActualTps(IRKRateServer const& rateServer, IRKMetricsTracker const&) {
+double RKRateUpdater::getActualTps(IRKRateServer const& rateServer, IRKMetricsTracker const& metricsTracker) {
 	double result = rateServer.getSmoothReleasedTransactionRate();
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
 	// up from this value
 	result = std::max(std::max(1.0, result),
 	                  metricsTracker.getSmoothTotalDurableBytesRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 
+	return result;
+}
+
+int64_t RKRateUpdater::getTotalDiskUsageBytes(IRKMetricsTracker const& metricsTracker) {
+	int64_t result = 0;
+	for (auto& t : metricsTracker.getTlogQueueInfo()) {
+		if (t.value.valid) {
+			result += t.value.lastReply.storageBytes.used;
+		}
+	}
+	for (auto& s : metricsTracker.getStorageQueueInfo()) {
+		if (s.value.valid) {
+			result += s.value.lastReply.storageBytes.used;
+		}
+	}
 	return result;
 }
 
