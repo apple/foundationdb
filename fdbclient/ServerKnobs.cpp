@@ -935,6 +935,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PEER_DEGRADATION_CONNECTION_FAILURE_COUNT,               5 );
 	init( WORKER_HEALTH_REPORT_RECENT_DESTROYED_PEER,           true );
 	init( STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT,                 false ); if ( randomize && BUGGIFY ) STORAGE_SERVER_REBOOT_ON_IO_TIMEOUT = true;
+	init( STORAGE_DISK_CLEANUP_MAX_RETRIES,                       10 );
+	init( STORAGE_DISK_CLEANUP_RETRY_INTERVAL,  isSimulated ? 2 : 30 );
 
 	// Test harness
 	init( WORKER_POLL_DELAY,                                     1.0 );
