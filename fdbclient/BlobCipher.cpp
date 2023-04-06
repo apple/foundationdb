@@ -461,7 +461,7 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 
 	Reference<BlobCipherKey> latest = getCipherByBaseCipherId(latestBaseCipherKeyId.get(), latestRandomSalt.get());
 	if (!latest.isValid()) {
-		// Cipher alraedy 'expired'
+		// Cipher already 'expired'
 		return Reference<BlobCipherKey>();
 	}
 
@@ -480,11 +480,6 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh;
 		latestBaseCipherKeyId.reset();
 		latestRandomSalt.reset();
-		// Leave key cache unless it has 'expired'; keyLookups using 'baseCipherId' are still valid
-		if (latest->isExpired()) {
-			keyIdCache.erase(getCacheKey(latest->getBaseCipherId(), latest->getSalt()));
-			++BlobCipherMetrics::getInstance()->cipherKeyCacheExpired;
-		}
 		return Reference<BlobCipherKey>();
 	}
 	return latest;
@@ -620,7 +615,6 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
 	auto result = keyIdCache.emplace(cacheKey, cipherKey);
 	ASSERT(result.second);
-	TraceEvent("InsertDone1").detail("R", result.second);
 
 	(*sizeStat)++;
 	return cipherKey;
