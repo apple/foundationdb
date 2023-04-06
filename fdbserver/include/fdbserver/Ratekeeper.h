@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRateUpdater.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKRateServer.h"
@@ -72,15 +73,12 @@ class Ratekeeper {
 	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
 	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
 	std::unique_ptr<IRKRateServer> rateServer;
+	std::unique_ptr<IRateUpdater> rateUpdater;
+	std::unique_ptr<class ITagThrottler> tagThrottler;
 
-	HealthMetrics healthMetrics;
 	PromiseStream<Future<Void>> addActor;
 
 	Int64MetricHandle actualTpsMetric;
-
-	double lastWarning;
-
-	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	RatekeeperLimits normalLimits;
 	RatekeeperLimits batchLimits;

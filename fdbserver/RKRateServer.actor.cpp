@@ -3,13 +3,14 @@
  */
 
 #include "fdbserver/IRKRateServer.h"
+#include "fdbserver/IRateUpdater.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 
 class RKRateServerImpl {
 public:
 	ACTOR static Future<Void> run(RKRateServer* self,
-	                              HealthMetrics const* healthMetrics,
+	                              IRateUpdater const* rateUpdater,
 	                              RatekeeperLimits const* normalLimits,
 	                              RatekeeperLimits const* batchLimits,
 	                              ITagThrottler* tagThrottler,
@@ -61,7 +62,7 @@ public:
 				CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 			}
 
-			reply.healthMetrics.update(*healthMetrics, true, req.detailed);
+			reply.healthMetrics.update(rateUpdater->getHealthMetrics(), true, req.detailed);
 			reply.healthMetrics.tpsLimit = normalLimits->tpsLimit;
 			reply.healthMetrics.batchLimited = self->lastLimited;
 
@@ -102,10 +103,10 @@ void RKRateServer::updateLastLimited(double batchTpsLimit) {
 	lastLimited = getSmoothReleasedTransactionRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * batchTpsLimit;
 }
 
-Future<Void> RKRateServer::run(HealthMetrics const& healthMetrics,
+Future<Void> RKRateServer::run(IRateUpdater const& rateUpdater,
                                RatekeeperLimits const& normalLimits,
                                RatekeeperLimits const& batchLimits,
                                ITagThrottler& tagThrottler,
                                IRKRecoveryTracker& recoveryTracker) {
-	return RKRateServerImpl::run(this, &healthMetrics, &normalLimits, &batchLimits, &tagThrottler, &recoveryTracker);
+	return RKRateServerImpl::run(this, &rateUpdater, &normalLimits, &batchLimits, &tagThrottler, &recoveryTracker);
 }

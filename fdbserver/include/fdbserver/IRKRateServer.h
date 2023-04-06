@@ -6,40 +6,8 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/RatekeeperLimits.h"
 #include "fdbserver/RatekeeperInterface.h"
-
-struct RatekeeperLimits {
-	double tpsLimit;
-	Int64MetricHandle tpsLimitMetric;
-	Int64MetricHandle reasonMetric;
-
-	int64_t storageTargetBytes;
-	int64_t storageSpringBytes;
-	int64_t logTargetBytes;
-	int64_t logSpringBytes;
-	double maxVersionDifference;
-
-	int64_t durabilityLagTargetVersions;
-	int64_t lastDurabilityLag;
-	double durabilityLagLimit;
-
-	double bwLagTarget;
-
-	TransactionPriority priority;
-	std::string context;
-
-	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
-
-	RatekeeperLimits(TransactionPriority priority,
-	                 std::string context,
-	                 int64_t storageTargetBytes,
-	                 int64_t storageSpringBytes,
-	                 int64_t logTargetBytes,
-	                 int64_t logSpringBytes,
-	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions,
-	                 double bwLagTarget);
-};
 
 struct RKGrvProxyInfo {
 	int64_t totalTransactions{ 0 };
@@ -83,7 +51,7 @@ public:
 	//
 	// Also updates the recovery tracker by reporting the versions received
 	// from GRV proxies.
-	virtual Future<Void> run(HealthMetrics const&,
+	virtual Future<Void> run(class IRateUpdater const&,
 	                         RatekeeperLimits const& normalLimits,
 	                         RatekeeperLimits const& batchLimits,
 	                         class ITagThrottler&,
@@ -106,7 +74,7 @@ public:
 	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const override;
 	void cleanupExpiredGrvProxies() override;
 	void updateLastLimited(double batchTpsLimit) override;
-	Future<Void> run(HealthMetrics const&,
+	Future<Void> run(class IRateUpdater const&,
 	                 RatekeeperLimits const& normalLimits,
 	                 RatekeeperLimits const& batchLimits,
 	                 class ITagThrottler&,
