@@ -19,12 +19,14 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   ninja-build \
   pigz \
   python3 \
+  python3-sphinx \
   python3-venv \
   rpm
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  libssl-dev \
-  liblz4-dev
+  libjemalloc-dev \
+  liblz4-dev \
+  libssl-dev
 
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
   libmono-system-data-datasetextensions4.0-cil \

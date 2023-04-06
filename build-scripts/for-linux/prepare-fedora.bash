@@ -12,11 +12,14 @@ sudo dnf install -y \
   java-1.8.0-openjdk-devel \
   mono-core \
   ninja-build \
+  python3-sphinx \
+  python3-sphinx-bootstrap-theme \
   rpm-build
 
 sudo dnf install -y \
   boost-static \
   bzip2-static \
+  jemalloc-devel \
   libatomic \
   libstdc++-static \
   libzstd-static \
