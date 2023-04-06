@@ -55,17 +55,6 @@
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
-	struct VersionInfo {
-		int64_t totalTransactions;
-		int64_t batchTransactions;
-		double created;
-
-		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
-		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
-
-		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
-	};
-
 	UID id;
 	Database db;
 
@@ -84,7 +73,6 @@ class Ratekeeper {
 	Deque<double> actualTpsHistory;
 	double blobWorkerTime;
 	double unblockedAssignmentTime;
-	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
 
