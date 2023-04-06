@@ -24,8 +24,8 @@ class IRKRateUpdater {
 public:
 	virtual ~IRKRateUpdater() = default;
 	virtual HealthMetrics const& getHealthMetrics() const = 0;
-	virtual void update(RatekeeperLimits&,
-	                    class IRKMetricsTracker const&,
+	virtual double getTpsLimit() const = 0;
+	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
 	                    PromiseStream<Future<Void>> addActor,
 	                    class ITagThrottler&,
@@ -40,18 +40,20 @@ public:
 };
 
 class RKRateUpdater : public IRKRateUpdater {
+	RatekeeperLimits limits;
 	HealthMetrics healthMetrics;
 	std::map<Version, RKVersionInfo> version_transactions;
 	double lastWarning;
 	UID ratekeeperId;
 
 public:
-	explicit RKRateUpdater(UID ratekeeperId);
+	explicit RKRateUpdater(UID ratekeeperId, RatekeeperLimits const&);
 
 	~RKRateUpdater();
 
-	void update(RatekeeperLimits&,
-	            class IRKMetricsTracker const&,
+	double getTpsLimit() const override;
+
+	void update(class IRKMetricsTracker const&,
 	            class IRKRateServer const&,
 	            PromiseStream<Future<Void>> addActor,
 	            class ITagThrottler&,

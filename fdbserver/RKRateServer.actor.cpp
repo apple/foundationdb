@@ -10,9 +10,8 @@
 class RKRateServerImpl {
 public:
 	ACTOR static Future<Void> run(RKRateServer* self,
-	                              IRKRateUpdater const* rateUpdater,
-	                              RatekeeperLimits const* normalLimits,
-	                              RatekeeperLimits const* batchLimits,
+	                              IRKRateUpdater const* normalRateUpdater,
+	                              IRKRateUpdater const* batchRateUpdater,
 	                              ITagThrottler* tagThrottler,
 	                              IRKRecoveryTracker* recoveryTracker) {
 		loop {
@@ -40,8 +39,8 @@ public:
 
 			p.lastUpdateTime = now();
 
-			reply.transactionRate = normalLimits->tpsLimit / self->grvProxyInfo.size();
-			reply.batchTransactionRate = batchLimits->tpsLimit / self->grvProxyInfo.size();
+			reply.transactionRate = normalRateUpdater->getTpsLimit() / self->grvProxyInfo.size();
+			reply.batchTransactionRate = batchRateUpdater->getTpsLimit() / self->grvProxyInfo.size();
 			reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
 			if (p.lastThrottledTagChangeId != tagThrottler->getThrottledTagChangeId() ||
@@ -62,8 +61,8 @@ public:
 				CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 			}
 
-			reply.healthMetrics.update(rateUpdater->getHealthMetrics(), true, req.detailed);
-			reply.healthMetrics.tpsLimit = normalLimits->tpsLimit;
+			reply.healthMetrics.update(normalRateUpdater->getHealthMetrics(), true, req.detailed);
+			reply.healthMetrics.tpsLimit = normalRateUpdater->getTpsLimit();
 			reply.healthMetrics.batchLimited = self->lastLimited;
 
 			req.reply.send(reply);
@@ -103,10 +102,9 @@ void RKRateServer::updateLastLimited(double batchTpsLimit) {
 	lastLimited = getSmoothReleasedTransactionRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * batchTpsLimit;
 }
 
-Future<Void> RKRateServer::run(IRKRateUpdater const& rateUpdater,
-                               RatekeeperLimits const& normalLimits,
-                               RatekeeperLimits const& batchLimits,
+Future<Void> RKRateServer::run(IRKRateUpdater const& normalRateUpdater,
+                               IRKRateUpdater const& batchRateUpdater,
                                ITagThrottler& tagThrottler,
                                IRKRecoveryTracker& recoveryTracker) {
-	return RKRateServerImpl::run(this, &rateUpdater, &normalLimits, &batchLimits, &tagThrottler, &recoveryTracker);
+	return RKRateServerImpl::run(this, &normalRateUpdater, &batchRateUpdater, &tagThrottler, &recoveryTracker);
 }

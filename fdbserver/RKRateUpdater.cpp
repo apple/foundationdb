@@ -5,12 +5,12 @@
 #include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/TagThrottler.h"
 
-RKRateUpdater::RKRateUpdater(UID ratekeeperId) : lastWarning(0), ratekeeperId(ratekeeperId) {}
+RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
+  : limits(limits), lastWarning(0), ratekeeperId(ratekeeperId) {}
 
 RKRateUpdater::~RKRateUpdater() = default;
 
-void RKRateUpdater::update(RatekeeperLimits& limits,
-                           IRKMetricsTracker const& metricsTracker,
+void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKRateServer const& rateServer,
                            PromiseStream<Future<Void>> addActor,
                            ITagThrottler& tagThrottler,
@@ -668,6 +668,10 @@ void RKRateUpdater::update(RatekeeperLimits& limits,
 
 HealthMetrics const& RKRateUpdater::getHealthMetrics() const {
 	return healthMetrics;
+}
+
+double RKRateUpdater::getTpsLimit() const {
+	return limits.tpsLimit;
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,

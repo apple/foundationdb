@@ -73,15 +73,13 @@ class Ratekeeper {
 	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
 	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
 	std::unique_ptr<IRKRateServer> rateServer;
-	std::unique_ptr<IRKRateUpdater> rateUpdater;
+	std::unique_ptr<IRKRateUpdater> normalRateUpdater;
+	std::unique_ptr<IRKRateUpdater> batchRateUpdater;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	PromiseStream<Future<Void>> addActor;
 
 	Int64MetricHandle actualTpsMetric;
-
-	RatekeeperLimits normalLimits;
-	RatekeeperLimits batchLimits;
 
 	Deque<double> actualTpsHistory;
 	double blobWorkerTime;
