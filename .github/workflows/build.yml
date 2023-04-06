@@ -92,6 +92,9 @@ jobs:
   test_deploy:
     needs: [calc_ver, build]
     runs-on: ubuntu-latest
+    env:
+      RPM_IMAGE: oraclelinux:9
+      DEB_IMAGE: debian:11
 
     steps:
       - name: Checkout
@@ -111,7 +114,7 @@ jobs:
 
       - name: Run tests
         shell: bash
-        run: ${{github.workspace}}/build-scripts/for-linux/test-deploy.bash ${{ needs.calc_ver.outputs.full_ver }} ${{github.workspace}}/bld/linux/packages
+        run: ${{github.workspace}}/build-scripts/for-linux/test-deploy.bash ${{ needs.calc_ver.outputs.full_ver }} ${{github.workspace}}/bld/linux/packages $RPM_IMAGE $DEB_IMAGE
 
   release:
     needs: [calc_ver, build]

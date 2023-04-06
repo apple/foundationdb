@@ -33,7 +33,7 @@ jobs:
           - run_on: ubuntu-latest
             for: linux
             prepare: debian-based
-            base_image: ubuntu:18.04
+            base_image: ubuntu:20.04
             image_name: foundationdb-build
 
     env:
