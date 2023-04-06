@@ -44,6 +44,10 @@ class RKRateUpdater : public IRKRateUpdater {
 	double lastWarning;
 	UID ratekeeperId;
 
+	// Returns the actual rate at which transactions being released,
+	// with some special handling of edge cases.
+	static double getActualTps(IRKRateServer const&, IRKMetricsTracker const&);
+
 public:
 	explicit RKRateUpdater(UID ratekeeperId, RatekeeperLimits const&);
 

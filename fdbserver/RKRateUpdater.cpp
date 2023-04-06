@@ -21,12 +21,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            double& blobWorkerTime,
                            double& unblockedAssignmentTime) {
 	// double controlFactor = ;  // dt / eFoldingTime
-
-	double actualTps = rateServer.getSmoothReleasedTransactionRate();
-	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
-	// up from this value
-	actualTps = std::max(std::max(1.0, actualTps),
-	                     metricsTracker.getSmoothTotalDurableBytesRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+	double actualTps = getActualTps(rateServer, metricsTracker);
 
 	limits.tpsLimit = std::numeric_limits<double>::infinity();
 	UID reasonID = UID();
@@ -665,6 +660,16 @@ HealthMetrics const& RKRateUpdater::getHealthMetrics() const {
 
 double RKRateUpdater::getTpsLimit() const {
 	return limits.tpsLimit;
+}
+
+double RKRateUpdater::getActualTps(IRKRateServer const& rateServer, IRKMetricsTracker const&) {
+	double result = rateServer.getSmoothReleasedTransactionRate();
+	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
+	// up from this value
+	result = std::max(std::max(1.0, result),
+	                  metricsTracker.getSmoothTotalDurableBytesRate() / CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
+
+	return result;
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
