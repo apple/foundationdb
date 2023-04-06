@@ -68,8 +68,6 @@ class Ratekeeper {
 
 	PromiseStream<Future<Void>> addActor;
 
-	Int64MetricHandle actualTpsMetric;
-
 	Deque<double> actualTpsHistory;
 	double blobWorkerTime;
 	double unblockedAssignmentTime;
@@ -78,8 +76,6 @@ class Ratekeeper {
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
-	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
-	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
 	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
