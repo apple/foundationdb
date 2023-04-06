@@ -2177,6 +2177,8 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 
 		ASSERT(localItr == self->createdTenantGroups.end());
+		wait(waitForAll(checkTenantGroups));
+
 		return Void();
 	}
 
