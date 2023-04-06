@@ -2,26 +2,26 @@
  * RateUpdater.cpp
  */
 
-#include "fdbserver/IRateUpdater.h"
+#include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/TagThrottler.h"
 
-RateUpdater::RateUpdater(UID ratekeeperId) : lastWarning(0), ratekeeperId(ratekeeperId) {}
+RKRateUpdater::RKRateUpdater(UID ratekeeperId) : lastWarning(0), ratekeeperId(ratekeeperId) {}
 
-RateUpdater::~RateUpdater() = default;
+RKRateUpdater::~RKRateUpdater() = default;
 
-void RateUpdater::update(RatekeeperLimits& limits,
-                         IRKMetricsTracker const& metricsTracker,
-                         IRKRateServer const& rateServer,
-                         PromiseStream<Future<Void>> addActor,
-                         ITagThrottler& tagThrottler,
-                         IRKConfigurationMonitor const& configurationMonitor,
-                         IRKRecoveryTracker const& recoveryTracker,
-                         Deque<double>& actualTpsHistory,
-                         bool anyBlobRanges,
-                         Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-                         double& blobWorkerTime,
-                         Int64MetricHandle& actualTpsMetric,
-                         double& unblockedAssignmentTime) {
+void RKRateUpdater::update(RatekeeperLimits& limits,
+                           IRKMetricsTracker const& metricsTracker,
+                           IRKRateServer const& rateServer,
+                           PromiseStream<Future<Void>> addActor,
+                           ITagThrottler& tagThrottler,
+                           IRKConfigurationMonitor const& configurationMonitor,
+                           IRKRecoveryTracker const& recoveryTracker,
+                           Deque<double>& actualTpsHistory,
+                           bool anyBlobRanges,
+                           Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
+                           double& blobWorkerTime,
+                           Int64MetricHandle& actualTpsMetric,
+                           double& unblockedAssignmentTime) {
 	// double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = rateServer.getSmoothReleasedTransactionRate();
@@ -666,7 +666,7 @@ void RateUpdater::update(RatekeeperLimits& limits,
 	}
 }
 
-HealthMetrics const& RateUpdater::getHealthMetrics() const {
+HealthMetrics const& RKRateUpdater::getHealthMetrics() const {
 	return healthMetrics;
 }
 

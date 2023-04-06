@@ -51,7 +51,7 @@ public:
 	//
 	// Also updates the recovery tracker by reporting the versions received
 	// from GRV proxies.
-	virtual Future<Void> run(class IRateUpdater const&,
+	virtual Future<Void> run(class IRKRateUpdater const&,
 	                         RatekeeperLimits const& normalLimits,
 	                         RatekeeperLimits const& batchLimits,
 	                         class ITagThrottler&,
@@ -74,7 +74,7 @@ public:
 	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const override;
 	void cleanupExpiredGrvProxies() override;
 	void updateLastLimited(double batchTpsLimit) override;
-	Future<Void> run(class IRateUpdater const&,
+	Future<Void> run(class IRKRateUpdater const&,
 	                 RatekeeperLimits const& normalLimits,
 	                 RatekeeperLimits const& batchLimits,
 	                 class ITagThrottler&,

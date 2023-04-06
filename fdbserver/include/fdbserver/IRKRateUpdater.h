@@ -1,5 +1,5 @@
 /**
- * IRateUpdater.h
+ * IRKRateUpdater.h
  */
 
 #pragma once
@@ -20,9 +20,9 @@ struct RKVersionInfo {
 	RKVersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
 };
 
-class IRateUpdater {
+class IRKRateUpdater {
 public:
-	virtual ~IRateUpdater() = default;
+	virtual ~IRKRateUpdater() = default;
 	virtual HealthMetrics const& getHealthMetrics() const = 0;
 	virtual void update(RatekeeperLimits&,
 	                    class IRKMetricsTracker const&,
@@ -39,16 +39,16 @@ public:
 	                    double& unblockedAssignmentTime) = 0;
 };
 
-class RateUpdater : public IRateUpdater {
+class RKRateUpdater : public IRKRateUpdater {
 	HealthMetrics healthMetrics;
 	std::map<Version, RKVersionInfo> version_transactions;
 	double lastWarning;
 	UID ratekeeperId;
 
 public:
-	explicit RateUpdater(UID ratekeeperId);
+	explicit RKRateUpdater(UID ratekeeperId);
 
-	~RateUpdater();
+	~RKRateUpdater();
 
 	void update(RatekeeperLimits&,
 	            class IRKMetricsTracker const&,

@@ -28,10 +28,10 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/IRateUpdater.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKRateServer.h"
+#include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
@@ -73,7 +73,7 @@ class Ratekeeper {
 	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
 	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
 	std::unique_ptr<IRKRateServer> rateServer;
-	std::unique_ptr<IRateUpdater> rateUpdater;
+	std::unique_ptr<IRKRateUpdater> rateUpdater;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	PromiseStream<Future<Void>> addActor;

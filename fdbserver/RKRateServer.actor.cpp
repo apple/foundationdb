@@ -3,14 +3,14 @@
  */
 
 #include "fdbserver/IRKRateServer.h"
-#include "fdbserver/IRateUpdater.h"
+#include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 
 class RKRateServerImpl {
 public:
 	ACTOR static Future<Void> run(RKRateServer* self,
-	                              IRateUpdater const* rateUpdater,
+	                              IRKRateUpdater const* rateUpdater,
 	                              RatekeeperLimits const* normalLimits,
 	                              RatekeeperLimits const* batchLimits,
 	                              ITagThrottler* tagThrottler,
@@ -103,7 +103,7 @@ void RKRateServer::updateLastLimited(double batchTpsLimit) {
 	lastLimited = getSmoothReleasedTransactionRate() > SERVER_KNOBS->LAST_LIMITED_RATIO * batchTpsLimit;
 }
 
-Future<Void> RKRateServer::run(IRateUpdater const& rateUpdater,
+Future<Void> RKRateServer::run(IRKRateUpdater const& rateUpdater,
                                RatekeeperLimits const& normalLimits,
                                RatekeeperLimits const& batchLimits,
                                ITagThrottler& tagThrottler,

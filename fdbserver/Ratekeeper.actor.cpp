@@ -329,7 +329,7 @@ Ratekeeper::Ratekeeper(UID id,
 	recoveryTracker = std::make_unique<RKRecoveryTracker>(IAsyncListener<bool>::create(
 	    dbInfo, [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; }));
 	rateServer = std::make_unique<RKRateServer>(rkInterf.getRateInfo.getFuture());
-	rateUpdater = std::make_unique<RateUpdater>(id);
+	rateUpdater = std::make_unique<RKRateUpdater>(id);
 }
 
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
