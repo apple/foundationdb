@@ -6,6 +6,7 @@
 
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "flow/flow.h"
 
 // Responsible for monitoring the throttling-relevant
@@ -15,6 +16,7 @@ public:
 	virtual ~IRKConfigurationMonitor() = default;
 	virtual bool areBlobGranulesEnabled() const = 0;
 	virtual int getStorageTeamSize() const = 0;
+	virtual Optional<Key> getRemoteDC() const = 0;
 
 	// Run actors to periodically refresh throttling-relevant statistics
 	// Returned Future should never be ready, but can be used to propagate errors
@@ -24,12 +26,15 @@ public:
 class RKConfigurationMonitor : public IRKConfigurationMonitor {
 	friend class RKConfigurationMonitorImpl;
 	Database db;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Optional<Key> remoteDC;
 	DatabaseConfiguration configuration;
 
 public:
-	explicit RKConfigurationMonitor(Database db);
+	RKConfigurationMonitor(Database, Reference<AsyncVar<ServerDBInfo> const>);
 	~RKConfigurationMonitor();
 	bool areBlobGranulesEnabled() const override;
 	int getStorageTeamSize() const override;
+	Optional<Key> getRemoteDC() const override;
 	Future<Void> run() override;
 };

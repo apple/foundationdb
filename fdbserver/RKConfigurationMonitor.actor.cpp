@@ -8,7 +8,14 @@
 
 class RKConfigurationMonitorImpl {
 public:
-	ACTOR static Future<Void> run(RKConfigurationMonitor* self) {
+	ACTOR static Future<Void> monitorDBInfo(RKConfigurationMonitor* self) {
+		loop {
+			wait(self->dbInfo->onChange());
+			self->remoteDC = self->dbInfo->get().logSystemConfig.getRemoteDcId();
+		}
+	}
+
+	ACTOR static Future<Void> monitorDB(RKConfigurationMonitor* self) {
 		loop {
 			state ReadYourWritesTransaction tr(self->db);
 
@@ -36,7 +43,10 @@ public:
 	}
 }; // class RKConfigurationMonitorImpl
 
-RKConfigurationMonitor::RKConfigurationMonitor(Database db) : db(db) {}
+RKConfigurationMonitor::RKConfigurationMonitor(Database db, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+  : db(db), dbInfo(dbInfo) {
+	remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
+}
 
 RKConfigurationMonitor::~RKConfigurationMonitor() = default;
 
@@ -48,6 +58,10 @@ int RKConfigurationMonitor::getStorageTeamSize() const {
 	return configuration.storageTeamSize;
 }
 
+Optional<Key> RKConfigurationMonitor::getRemoteDC() const {
+	return remoteDC;
+}
+
 Future<Void> RKConfigurationMonitor::run() {
-	return RKConfigurationMonitorImpl::run(this);
+	return RKConfigurationMonitorImpl::monitorDB(this) && RKConfigurationMonitorImpl::monitorDBInfo(this);
 }

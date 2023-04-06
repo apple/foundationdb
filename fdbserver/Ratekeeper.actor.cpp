@@ -221,8 +221,6 @@ public:
 		            ((((double)SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) / SERVER_KNOBS->VERSIONS_PER_SECOND) +
 		             2.0));
 
-		self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
-
 		try {
 			loop choose {
 				when(wait(timeout)) {
@@ -249,9 +247,6 @@ public:
 					req.reply.send(Void());
 					TraceEvent("RatekeeperHalted", rkInterf.id()).detail("ReqID", req.requesterID);
 					break;
-				}
-				when(wait(dbInfo->onChange())) {
-					self.remoteDC = dbInfo->get().logSystemConfig.getRemoteDcId();
 				}
 				when(wait(collection)) {
 					ASSERT(false);
@@ -304,7 +299,7 @@ Ratekeeper::Ratekeeper(UID id,
 	}
 	metricsTracker =
 	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
-	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db);
+	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db, dbInfo);
 	recoveryTracker = std::make_unique<RKRecoveryTracker>(IAsyncListener<bool>::create(
 	    dbInfo, [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; }));
 	rateServer = std::make_unique<RKRateServer>(rkInterf.getRateInfo.getFuture());
@@ -345,7 +340,9 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 	auto const& storageQueueInfo = metricsTracker->getStorageQueueInfo();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		if (!ss.valid || !ss.acceptingRequests || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+		if (!ss.valid || !ss.acceptingRequests ||
+		    (configurationMonitor->getRemoteDC().present() &&
+		     ss.locality.dcId() == configurationMonitor->getRemoteDC()))
 			continue;
 		++sscount;
 
@@ -726,7 +723,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		Version minLimitingSSVer = std::numeric_limits<Version>::max();
 		for (const auto& it : metricsTracker->getStorageQueueInfo()) {
 			auto& ss = it.value;
-			if (!ss.valid || (remoteDC.present() && ss.locality.dcId() == remoteDC))
+			if (!ss.valid || (configurationMonitor->getRemoteDC().present() &&
+			                  ss.locality.dcId() == configurationMonitor->getRemoteDC()))
 				continue;
 
 			minSSVer = std::min(minSSVer, ss.lastReply.version);

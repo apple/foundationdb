@@ -91,7 +91,6 @@ class Ratekeeper {
 	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
-	Optional<Key> remoteDC;
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
