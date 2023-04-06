@@ -134,7 +134,7 @@ ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, A
 	return auditStates;
 }
 
-ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditState) {
+ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState) {
 	state Transaction tr(cx);
 
 	loop {
@@ -152,37 +152,99 @@ ACTOR Future<Void> persistAuditStateMap(Database cx, AuditStorageState auditStat
 	return Void();
 }
 
-ACTOR Future<std::vector<AuditStorageState>> getAuditStateForRange(Database cx,
-                                                                   AuditType type,
-                                                                   UID id,
-                                                                   KeyRange range) {
+ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
+                                                                  AuditType type,
+                                                                  UID auditId,
+                                                                  KeyRange range) {
 	state RangeResult auditStates;
 	state Transaction tr(cx);
 
 	loop {
 		try {
 			RangeResult res_ = wait(krmGetRanges(&tr,
-			                                     auditRangePrefixFor(type, id),
+			                                     auditRangePrefixFor(type, auditId),
 			                                     range,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			auditStates = res_;
+			ASSERT_WE_THINK(!res_.more);
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "GetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", id);
+			TraceEvent(SevDebug, "GetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
 			wait(tr.onError(e));
 		}
 	}
 
+	// For a range of state that have value read from auditRangePrefixFor
+	// add the state with the same range to res (these states are persisted by auditServers)
+	// For a range of state that does not have value read from auditRangePrefixFor
+	// add an default (Invalid phase) state with the same range to res (DD will start audit for these ranges)
 	std::vector<AuditStorageState> res;
 	for (int i = 0; i < auditStates.size() - 1; ++i) {
 		KeyRange currentRange = KeyRangeRef(auditStates[i].key, auditStates[i + 1].key);
-		AuditStorageState auditState;
+		AuditStorageState auditState(auditId, currentRange, type);
 		if (!auditStates[i].value.empty()) {
-			AuditStorageState auditState = decodeAuditStorageState(auditStates[i].value);
+			AuditStorageState auditState_ = decodeAuditStorageState(auditStates[i].value);
+			auditState.setPhase(auditState_.getPhase());
+			auditState.error = auditState_.error;
 		}
-		auditState.range = currentRange;
 		res.push_back(auditState);
+	}
+
+	return res;
+}
+
+ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			wait(krmSetRange(&tr,
+			                 auditServerPrefixFor(auditState.getType(), auditState.id),
+			                 singleKeyRange(KeyRef(auditState.auditServerId.toString())),
+			                 auditStorageStateValue(auditState)));
+			break;
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
+ACTOR Future<AuditStorageState> getAuditStateByServer(Database cx, AuditType type, UID auditId, UID auditServerId) {
+	state RangeResult auditStates;
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			RangeResult res_ = wait(krmGetRanges(&tr,
+			                                     auditServerPrefixFor(type, auditId),
+			                                     singleKeyRange(KeyRef(auditServerId.toString())),
+			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+			auditStates = res_;
+			ASSERT_WE_THINK(!res_.more);
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "GetAuditStateForRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditServerId", auditServerId);
+			wait(tr.onError(e));
+		}
+	}
+
+	ASSERT_WE_THINK(auditStates.size() <= 2);
+	AuditStorageState res(auditId, auditServerId, type);
+	for (int i = 0; i < auditStates.size() - 1; ++i) {
+		if (!auditStates[i].value.empty()) {
+			AuditStorageState auditState_ = decodeAuditStorageState(auditStates[i].value);
+			ASSERT(auditState_.auditServerId.isValid());
+			ASSERT_WE_THINK(auditState_.auditServerId == auditServerId);
+			res.setPhase(auditState_.getPhase());
+			res.error = auditState_.error;
+		}
 	}
 
 	return res;

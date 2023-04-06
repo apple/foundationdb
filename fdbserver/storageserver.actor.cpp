@@ -4812,7 +4812,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				range = KeyRangeRef(keyAfter(lastKey), range.end);
 				auditState.range = KeyRangeRef(originBegin, range.begin);
 				auditState.setPhase(AuditPhase::Complete);
-				wait(persistAuditStateMap(data->cx, auditState));
+				wait(persistAuditStateByRange(data->cx, auditState));
 			}
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "ValidateRangeAgainstServerFailed", data->thisServerID)
@@ -4831,7 +4831,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
 		auditState.setPhase(AuditPhase::Error);
-		wait(persistAuditStateMap(data->cx, auditState));
+		wait(persistAuditStateByRange(data->cx, auditState));
 		throw audit_storage_error();
 	}
 
@@ -5137,7 +5137,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			return Void();
 		}
 
-		state AuditStorageState res(req.id, allKeys.withPrefix(serverKeysPrefixFor(data->thisServerID)), req.getType());
+		state AuditStorageState res(req.id, data->thisServerID, req.getType());
 		state std::vector<std::string> errors;
 
 		state Version VersionBeforeWait = data->version.get();
@@ -5250,7 +5250,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		// Return result
 		if (!errors.empty()) {
 			res.setPhase(AuditPhase::Error);
-			wait(persistAuditStateMap(data->cx, res));
+			wait(persistAuditStateByServer(data->cx, res));
 			req.reply.sendError(audit_storage_error());
 		} else {
 			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
@@ -5258,7 +5258,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			    .detail("Version", toReadVersion)
 			    .detail("AuditServer", data->thisServerID);
 			res.setPhase(AuditPhase::Complete);
-			wait(persistAuditStateMap(data->cx, res));
+			wait(persistAuditStateByServer(data->cx, res));
 			req.reply.send(res);
 		}
 
@@ -5404,7 +5404,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			    .detail("Version", version)
 			    .detail("AuditServer", data->thisServerID.first());
 			res.setPhase(AuditPhase::Error);
-			wait(persistAuditStateMap(data->cx, res));
 			req.reply.sendError(audit_storage_error());
 		} else {
 			TraceEvent(SevInfo, "AuditStorageShardLocMetadataComplete", data->thisServerID)
@@ -5414,7 +5413,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			    .detail("TotalShardsCount", totalShardsCount)
 			    .detail("ShardsOfAnonymousPhysicalShardCount", shardsInAnonymousPhysicalShardCount);
 			res.setPhase(AuditPhase::Complete);
-			wait(persistAuditStateMap(data->cx, res));
 			req.reply.send(res);
 		}
 

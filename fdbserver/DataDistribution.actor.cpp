@@ -70,13 +70,14 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 
 struct DDAudit {
 	DDAudit(UID id, KeyRange range, AuditType type)
-	  : coreState(id, range, type), actors(true), foundError(false), retryCount(0) {}
+	  : coreState(id, range, type), actors(true), foundError(false), anyChildAuditFailed(false), retryCount(0) {}
 
 	AuditStorageState coreState;
 	ActorCollection actors;
 	Future<Void> auditActor;
 	bool foundError;
 	int retryCount;
+	bool anyChildAuditFailed;
 
 	void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	Future<Void> getAuditRunActor() { return auditActor; }
@@ -621,14 +622,14 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
-ACTOR Future<Void> loadAndDispatchAuditMetadata(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
-ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
-ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
-                                             std::shared_ptr<DDAudit> audit,
-                                             KeyRange range);
-ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
-                                         std::shared_ptr<DDAudit> audit,
-                                         KeyRange range);
+ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> scheduleAuditPerServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
+                                            std::shared_ptr<DDAudit> audit,
+                                            KeyRange range);
+ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
+                                        std::shared_ptr<DDAudit> audit,
+                                        KeyRange range);
 ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           std::shared_ptr<DDAudit> audit,
                                           StorageServerInterface ssi,
@@ -1499,6 +1500,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
+		} else if (audit->anyChildAuditFailed) {
+			audit->anyChildAuditFailed = false;
+			throw audit_storage_failed(); // retry
 		} else {
 			audit->coreState.setPhase(AuditPhase::Complete);
 		}
@@ -1739,10 +1743,10 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 	    .detail("AuditType", audit->coreState.getType());
 	if (audit->coreState.getType() == AuditType::ValidateLocationMetadata ||
 	    audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-		audit->actors.add(loadAndDispatchAuditMetadata(self, audit));
+		audit->actors.add(partitionAuditJobByServer(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateHA ||
 	           audit->coreState.getType() == AuditType::ValidateReplica) {
-		audit->actors.add(loadAndDispatchAuditRange(self, audit, range));
+		audit->actors.add(partitionAuditJobByRange(self, audit, range));
 	} else {
 		UNREACHABLE();
 	}
@@ -1750,29 +1754,18 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Manage the progress of metadata audit
-ACTOR Future<Void> loadAndDispatchAuditMetadata(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
-	ASSERT(audit->coreState.getType() == AuditType::ValidateLocationMetadata ||
-	       audit->coreState.getType() == AuditType::ValidateStorageServerShard);
-	TraceEvent(SevInfo, "DDLoadAndDispatchAuditMetadataBegin", self->ddId)
-	    .detail("AuditID", audit->coreState.id)
-	    .detail("AuditType", audit->coreState.getType());
-	audit->actors.add(scheduleAuditForMetadata(self, audit));
-	wait(delay(0.1));
-	return Void();
-}
-
 // Decide which SS to do the audit
-ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
-	TraceEvent(SevInfo, "DDScheduleAuditForMetadataBegin", self->ddId)
+ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
+	TraceEvent(SevInfo, "DDPartitionAuditJobByServerBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType());
+	state StorageServerInterface targetServer;
 	try {
 		state ServerWorkerInfos serverWorkers = wait(self->txnProcessor->getServerListAndProcessClasses());
 		if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 			// Randomly pick a storage server to compare KeyServers and ServerKeys
 			const int idx = deterministicRandom()->randomInt(0, serverWorkers.servers.size());
-			StorageServerInterface targetServer = serverWorkers.servers[idx].first;
+			targetServer = serverWorkers.servers[idx].first;
 			AuditStorageRequest req(
 			    audit->coreState.id, systemKeys, audit->coreState.getType()); // use systemKeys to represent this goal
 			audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
@@ -1781,16 +1774,27 @@ ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std
 			// Pick every storage server to compare local shard and global assignment
 			state int i = 0;
 			for (; i < serverWorkers.servers.size(); ++i) {
-				StorageServerInterface targetServer = serverWorkers.servers[i].first;
+				targetServer = serverWorkers.servers[i].first;
 				// Currently, Tss server may not follow the auit consistency rule
 				// Thus, skip if the server is tss
 				if (targetServer.isTss()) {
 					continue;
 				}
-				AuditStorageRequest req(audit->coreState.id,
-				                        specialKeys,
-				                        audit->coreState.getType()); // use specialKeys to represent this goal
-				audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
+				AuditStorageState auditState = wait(getAuditStateByServer(self->txnProcessor->context(),
+				                                                          audit->coreState.getType(),
+				                                                          audit->coreState.id,
+				                                                          targetServer.uniqueID));
+				const AuditPhase phase = auditState.getPhase();
+				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+				if (phase == AuditPhase::Complete) {
+					continue;
+				} else if (phase == AuditPhase::Error) {
+					audit->foundError = true;
+				} else {
+					ASSERT(phase == AuditPhase::Invalid);
+					AuditStorageRequest req(audit->coreState.id, audit->coreState.getType());
+					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
+				}
 				wait(delay(0.1));
 			}
 		} else {
@@ -1798,7 +1802,7 @@ ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std
 		}
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "DDScheduleAuditForMetadataError", self->ddId)
+		TraceEvent(SevWarn, "DDPartitionAuditJobByServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", audit->coreState.getType());
@@ -1809,12 +1813,12 @@ ACTOR Future<Void> scheduleAuditForMetadata(Reference<DataDistributor> self, std
 }
 
 // Manage the progress of range-based audit
-ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
-                                             std::shared_ptr<DDAudit> audit,
-                                             KeyRange range) {
+ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
+                                            std::shared_ptr<DDAudit> audit,
+                                            KeyRange range) {
 	ASSERT(audit->coreState.getType() == AuditType::ValidateHA ||
 	       audit->coreState.getType() == AuditType::ValidateReplica);
-	TraceEvent(SevInfo, "DDLoadAndDispatchAuditRangeBegin", self->ddId)
+	TraceEvent(SevInfo, "DDPartitionAuditJobByRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
 	    .detail("AuditType", audit->coreState.getType());
@@ -1822,10 +1826,16 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 	state KeyRange currentRange = range;
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
-		std::vector<AuditStorageState> auditStates = wait(getAuditStateForRange(
+		std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(
 		    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, currentRange));
 		ASSERT(!auditStates.empty());
 		begin = auditStates.back().range.end;
+		TraceEvent(SevInfo, "DDPartitionAuditJobByRangeDispatch", self->ddId)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("CurrentRange", currentRange)
+		    .detail("AuditType", audit->coreState.getType())
+		    .detail("NextBegin", begin)
+		    .detail("RangeEnd", range.end);
 		for (const auto& auditState : auditStates) {
 			const AuditPhase phase = auditState.getPhase();
 			ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
@@ -1835,7 +1845,7 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 				audit->foundError = true;
 			} else {
 				ASSERT(phase == AuditPhase::Invalid);
-				audit->actors.add(scheduleAuditForRange(self, audit, auditState.range));
+				audit->actors.add(scheduleAuditOnRange(self, audit, auditState.range));
 			}
 		}
 		wait(delay(0.1));
@@ -1844,10 +1854,10 @@ ACTOR Future<Void> loadAndDispatchAuditRange(Reference<DataDistributor> self,
 }
 
 // Decide which SS to do the audit based on the ownership of range
-ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
-                                         std::shared_ptr<DDAudit> audit,
-                                         KeyRange range) {
-	TraceEvent(SevInfo, "DDScheduleAuditForRangeBegin", self->ddId)
+ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
+                                        std::shared_ptr<DDAudit> audit,
+                                        KeyRange range) {
+	TraceEvent(SevInfo, "DDScheduleAuditOnRangeBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
 	    .detail("AuditType", audit->coreState.getType());
@@ -1870,7 +1880,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 					StorageServerInterface& targetServer = it->second[idx];
 					++it;
 					if (it == rangeLocations[i].servers.end()) {
-						TraceEvent(SevWarn, "DDScheduleAuditForRangeEnd", self->ddId)
+						TraceEvent(SevWarn, "DDScheduleAuditOnRangeEnd", self->ddId)
 						    .detail("Reason", "No remote DC, ignore")
 						    .detail("AuditID", audit->coreState.id)
 						    .detail("Range", range)
@@ -1886,7 +1896,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
 					auto it = rangeLocations[i].servers.begin(); // always compare primary DC
 					if (it->second.size() == 1) {
-						TraceEvent(SevWarn, "DDScheduleAuditForRangeEnd", self->ddId)
+						TraceEvent(SevWarn, "DDScheduleAuditOnRangeEnd", self->ddId)
 						    .detail("Reason", "Single replica, ignore")
 						    .detail("AuditID", audit->coreState.id)
 						    .detail("Range", range)
@@ -1910,7 +1920,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 				wait(delay(0.1));
 			}
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "DDScheduleAuditForRangeError", self->ddId)
+			TraceEvent(SevWarn, "DDScheduleAuditPerOnError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("Range", range)
@@ -1919,7 +1929,7 @@ ACTOR Future<Void> scheduleAuditForRange(Reference<DataDistributor> self,
 		}
 	}
 
-	TraceEvent(SevDebug, "DDScheduleAuditForRangeEnd", self->ddId)
+	TraceEvent(SevDebug, "DDScheduleAuditPerRangeEnd", self->ddId)
 	    .detail("Reason", "End")
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
@@ -1965,7 +1975,11 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
 		} else {
-			throw audit_storage_failed();
+			// throw audit_storage_failed();
+			// Since doAuditOnStorageServers is stateful
+			// Any doAuditOnStorageServer failure should not stop other doAuditOnStorageServers
+			// We want to retry when other doAuditOnStorageServers complete
+			audit->anyChildAuditFailed = true;
 		}
 	}
 	return Void();

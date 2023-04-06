@@ -289,6 +289,8 @@ const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
 const KeyRef auditPrefix = auditKeys.begin;
 const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
 const KeyRef auditRangePrefix = auditRanges.begin;
+const KeyRangeRef auditServers = KeyRangeRef("\xff/auditServers/"_sr, "\xff/auditServers0"_sr);
+const KeyRef auditServerPrefix = auditServers.begin;
 
 const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
@@ -307,18 +309,19 @@ const KeyRange auditKeyRange(const AuditType type) {
 	return prefixRange(wr.toValue());
 }
 
-const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
+const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditRangePrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
 	wr << auditId;
 	wr.serializeBytes("/"_sr);
-	wr.serializeBytes(key);
 	return wr.toValue();
 }
 
-const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
+const Key auditServerPrefixFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(auditPrefix);
+	wr.serializeBytes(auditServerPrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
 	wr << auditId;
