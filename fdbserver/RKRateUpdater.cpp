@@ -20,12 +20,10 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            bool anyBlobRanges,
                            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
                            double& blobWorkerTime,
-                           Int64MetricHandle& actualTpsMetric,
                            double& unblockedAssignmentTime) {
 	// double controlFactor = ;  // dt / eFoldingTime
 
 	double actualTps = rateServer.getSmoothReleasedTransactionRate();
-	actualTpsMetric = (int64_t)actualTps;
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back
 	// up from this value
 	actualTps = std::max(std::max(1.0, actualTps),

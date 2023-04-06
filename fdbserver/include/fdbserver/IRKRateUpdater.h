@@ -35,7 +35,6 @@ public:
 	                    bool anyBlobRanges,
 	                    Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
 	                    double& blobWorkerTime,
-	                    Int64MetricHandle& actualTpsMetric,
 	                    double& unblockedAssignmentTime) = 0;
 };
 
@@ -63,7 +62,6 @@ public:
 	            bool anyBlobRanges,
 	            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
 	            double& blobWorkerTime,
-	            Int64MetricHandle& actualTpsMetric,
 	            double& unblockedAssignmentTime) override;
 
 	HealthMetrics const& getHealthMetrics() const override;

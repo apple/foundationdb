@@ -246,7 +246,6 @@ public:
 					                               self.anyBlobRanges,
 					                               self.blobWorkerVersionHistory,
 					                               self.blobWorkerTime,
-					                               self.actualTpsMetric,
 					                               self.unblockedAssignmentTime);
 					self.batchRateUpdater->update(*self.metricsTracker,
 					                              *self.rateServer,
@@ -258,7 +257,6 @@ public:
 					                              self.anyBlobRanges,
 					                              self.blobWorkerVersionHistory,
 					                              self.blobWorkerTime,
-					                              self.actualTpsMetric,
 					                              self.unblockedAssignmentTime);
 
 					self.rateServer->updateLastLimited(self.batchRateUpdater->getTpsLimit());
@@ -294,8 +292,7 @@ Ratekeeper::Ratekeeper(UID id,
                        Database db,
                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                        RatekeeperInterface rkInterf)
-  : id(id), db(db), actualTpsMetric("Ratekeeper.ActualTPS"_sr), blobWorkerTime(now()), unblockedAssignmentTime(now()),
-    anyBlobRanges(false) {
+  : id(id), db(db), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
