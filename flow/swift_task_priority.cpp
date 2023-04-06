@@ -24,7 +24,7 @@
 #include "flow/TLSConfig.actor.h"
 
 // FIXME: surely there must be some more automatic way to maintain the mappings with Swift/C++ interop.
-int64_t swift_priority_to_net2(swift::JobPriority p) {
+TaskPriority swift_priority_to_net2(swift::JobPriority p) {
 	// printf("[c++][%s:%d](%s) converting a priority (priority: %zu)\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
 
 	TaskPriority fp = TaskPriority::Zero;
@@ -265,7 +265,8 @@ int64_t swift_priority_to_net2(swift::JobPriority p) {
 		abort();
 	}
 	}
-	return static_cast<std::underlying_type<TaskPriority>::type>(fp);
+	// return static_cast<std::underlying_type<TaskPriority>::type>(fp);
+	return fp;
 }
 
 

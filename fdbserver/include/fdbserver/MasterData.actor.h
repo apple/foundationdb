@@ -82,14 +82,8 @@ class MasterDataActor;
 #endif
 
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
-struct SWIFT_CXX_REF_MASTERDATA MasterData :
-  // TODO: show the macro that we do attrs; compare this to objc
-  // a way to make it relatable:
-  //   - was nicer match than the rust and rewrite the world
-  //   - big success with objc with "your own pace" of adding swift
-  //     -> this is similar to that
-  NonCopyable, ReferenceCounted<MasterData> {
-    UID dbgid;
+struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<MasterData> {
+	UID dbgid;
 
     Version lastEpochEnd, // The last version in the old epoch not (to be) rolled back in this recovery
         recoveryTransactionVersion; // The first version in this epoch

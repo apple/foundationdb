@@ -998,21 +998,16 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
 	}
-	void _swiftEnqueue(void* _swiftJob) override {
+	void _swiftEnqueue(void* _job) override {
 		ASSERT(getCurrentProcess());
-		swift::Job* swiftJob = (swift::Job*)_swiftJob;
+		swift::Job* job = (swift::Job*)_job;
+		TaskPriority priority = swift_priority_to_net2(job->getPriority());
+		ASSERT(priority >= TaskPriority::Min && priority <= TaskPriority::Max);
 
 		ISimulator::ProcessInfo* machine = currentProcess;
 
-		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
-
-		// mutex.enter();
-		// auto taskTime = time + 0.01;
-		// auto task = Sim2::Task(taskTime, taskID, taskCount++, machine, swiftJob);
-		// tasks.push(task);
-		auto swiftTask = new PromiseTask(machine, swiftJob);
-		taskQueue.addReady(taskID, swiftTask);
-		// mutex.leave();
+		auto t = new PromiseTask(machine, job);
+		taskQueue.addReady(priority, t);
 	}
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
@@ -2419,7 +2414,7 @@ public:
     	swift::Job* _Nullable swiftJob = nullptr;
 
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine), swiftJob(nullptr) {}
-		explicit PromiseTask(ProcessInfo* machine, swift:Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
+		explicit PromiseTask(ProcessInfo* machine, swift::Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
 		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
 	};
 
@@ -2432,7 +2427,7 @@ public:
 				if (t.swiftJob) {
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
-					t.action.send(Void());
+					t.promise.send(Void());
 				}
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {

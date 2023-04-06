@@ -259,15 +259,18 @@ public:
 
 	NetworkMetrics::PriorityStats* lastPriorityStats;
 
-	ReadyQueue<OrderedTask> ready;
-	ThreadSafeQueue<OrderedTask> threadReady; // "thread-safe ready", they get flushed into the ready queue
-
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
+		swift::Job* _Nullable swiftJob = nullptr;
 		PromiseTask() {}
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
+		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
 		void operator()() {
+			if (auto job = swiftJob) {
+				fprintf(stderr, "[%s:%d](%s) apply\n", __FILE_NAME__, __LINE__, __FUNCTION__);
+				swift_job_run(job, ExecutorRef::generic());
+			}
 			promise.send(Void());
 			delete this;
 		}
@@ -1777,9 +1780,11 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	return delay(seconds, taskId);
 }
 
-void Net2::_swiftEnqueue(void* task) {
-	N2::OrderedTask* orderedTask = (OrderedTask*)task;
-	this->ready.push(*orderedTask);
+void Net2::_swiftEnqueue(void* _job) {
+	swift::Job* job = (swift::Job*)_job;
+	TaskPriority priority = swift_priority_to_net2(job->getPriority());
+	PromiseTask* t = new PromiseTask(job);
+	taskQueue.addReady(priority, t);
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {

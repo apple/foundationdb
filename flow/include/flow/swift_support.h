@@ -23,6 +23,7 @@
 
 #pragma once
 #include "flow/swift/ABI/Task.h"
+#include "flow/TaskPriority.h"
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
@@ -71,7 +72,7 @@
 // ==== ----------------------------------------------------------------------------------------------------------------
 
 /// Convert a Swift JobPriority value to a numeric value of Flow/TaskPriority.
-int64_t swift_priority_to_net2(swift::JobPriority p);
+TaskPriority swift_priority_to_net2(swift::JobPriority p);
 
 // ==== ----------------------------------------------------------------------------------------------------------------
 
