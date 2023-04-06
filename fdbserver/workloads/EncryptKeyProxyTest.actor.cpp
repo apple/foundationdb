@@ -209,7 +209,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		// Ensure EncryptKeyProxy role is recruited (a singleton role)
 		self->numDomains = self->maxDomainId - self->minDomainId;
 
-		while (!self->dbInfo->get().encryptKeyProxy.present()) {
+		while (!self->dbInfo->get().client.encryptKeyProxy.present()) {
 			wait(self->dbInfo->onChange());
 		}
 
