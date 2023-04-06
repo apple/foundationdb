@@ -1573,15 +1573,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		// Check EncryptKeyProxy
-		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.encryptKeyProxy.present() &&
-		    (!nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address()) ||
-		     nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()].processClass.machineClassFitness(
+		if (config.encryptionAtRestMode.isEncryptionEnabled() && db.client.encryptKeyProxy.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.client.encryptKeyProxy.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()].processClass.machineClassFitness(
 		         ProcessClass::EncryptKeyProxy) > fitnessLowerBound)) {
 			TraceEvent("ConsistencyCheck_EncryptKeyProxyNotBest")
 			    .detail("BestEncryptKeyProxyFitness", fitnessLowerBound)
 			    .detail("ExistingEncryptKeyProxyFitness",
-			            nonExcludedWorkerProcessMap.count(db.encryptKeyProxy.get().address())
-			                ? nonExcludedWorkerProcessMap[db.encryptKeyProxy.get().address()]
+			            nonExcludedWorkerProcessMap.count(db.client.encryptKeyProxy.get().address())
+			                ? nonExcludedWorkerProcessMap[db.client.encryptKeyProxy.get().address()]
 			                      .processClass.machineClassFitness(ProcessClass::EncryptKeyProxy)
 			                : -1);
 			return false;
