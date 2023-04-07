@@ -36,6 +36,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/ShardsAffectedByTeamFailure.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include <boost/heap/policies.hpp>
 #include <boost/heap/skew_heap.hpp>
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -485,7 +486,8 @@ struct DDShardInfo {
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution()
-	  : dataMoveMap(std::make_shared<DataMove>()), customReplication(makeReference<KeyRangeMap<int>>(-1)) {}
+	  : dataMoveMap(std::make_shared<DataMove>()),
+	    userRangeConfig(std::make_shared<DDConfiguration::RangeConfigMapSnapshot>()) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -498,7 +500,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
-	Reference<KeyRangeMap<int>> customReplication;
+	std::shared_ptr<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 
 // Holds the permitted size and IO Bounds for a shard

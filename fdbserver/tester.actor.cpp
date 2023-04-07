@@ -46,6 +46,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -1931,6 +1932,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             Optional<TenantName> defaultTenant,
                             Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
                             bool restartingTest) {
+	state DDConfiguration::RangeConfigMap rangeConfig(DDConfiguration().userRangeConfig());
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -2059,10 +2061,28 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
 		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
-			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x03", "\xff\x04", 3));
-			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x04", "\xff\x05", 3));
-			TraceEvent("SettingCustomReplicas");
-			MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
+			state DDRangeConfig triple;
+			triple.replicationFactor = 3;
+
+			state ReadYourWritesTransaction tr(cx);
+			loop {
+				try {
+					TraceEvent("SettingCustomReplicas").log();
+					// Map logic should work with or without allKeys endpoints initialized
+					if (deterministicRandom()->coinflip()) {
+						wait(rangeConfig.updateRange(&tr, allKeys.begin, allKeys.end, DDRangeConfig()));
+					}
+
+					wait(rangeConfig.updateRange(&tr, "\xff\x03"_sr, "\xff\x04"_sr, triple));
+					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, triple));
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+			// TODO:  DD should check DDConfiguration().trigger.watch() for changes
+			wait(success(takeMoveKeysLock(cx, UID())));
 		}
 	}
 

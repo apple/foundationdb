@@ -43,6 +43,11 @@ typedef int64_t Generation;
 typedef UID SpanID;
 typedef uint64_t CoordinatorsHash;
 
+// invalidKey is intentionally far beyond the system space.  It is meant to be used as a safe initial value for a key
+// before it is set to something meaningful to avoid mistakes where a default constructed key is written to instead of
+// the intended target.
+static const KeyRef invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
+
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,

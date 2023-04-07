@@ -22,6 +22,7 @@
 #define FLOW_OPTIONAL_H
 
 #include <optional>
+#include <fmt/format.h>
 
 #include "flow/FileIdentifier.h"
 #include "flow/Error.h"
@@ -251,12 +252,31 @@ public:
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
+	const T* operator->() const { return &get(); }
+	T* operator->() { return &get(); }
+	const T& operator*() const& { return get(); }
+	T& operator*() & { return get(); }
+	T&& operator*() && { return get(); }
+
 	void reset() { impl.reset(); }
 	size_t hash() const { return hashFunc(impl); }
 
 private:
 	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
+};
+
+template <typename T>
+struct fmt::formatter<Optional<T>> : fmt::formatter<T> {
+
+	template <typename FormatContext>
+	auto format(const Optional<T>& opt, FormatContext& ctx) {
+		if (opt.present()) {
+			fmt::formatter<T>::format(opt.get(), ctx);
+			return ctx.out();
+		}
+		return fmt::format_to(ctx.out(), "<np>");
+	}
 };
 
 #endif // FLOW_OPTIONAL_H

@@ -311,7 +311,7 @@ protected:
 
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
-	Reference<KeyRangeMap<int>> customReplication;
+	std::shared_ptr<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 	CoalescedKeyRangeMap<bool> underReplication;
 
 	// A mechanism to tell actors that reference a DDTeamCollection object through a direct
