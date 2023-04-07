@@ -242,6 +242,8 @@ class DDTxnProcessorImpl {
 
 		state Transaction tr(cx);
 
+		wait(store(*result->userRangeConfig, DDConfiguration().userRangeConfigSnapshot(cx)));
+
 		state std::map<UID, Optional<Key>> server_dc;
 		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
@@ -259,12 +261,6 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
-			result->customReplication->insert(allKeys, -1);
-			if (g_network->isSimulated() && ddLargeTeamEnabled()) {
-				for (auto& it : g_simulator->customReplicas) {
-					result->customReplication->insert(KeyRangeRef(std::get<0>(it), std::get<1>(it)), std::get<2>(it));
-				}
-			}
 			try {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);

@@ -239,8 +239,8 @@ public:
 
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
-				for (auto& it : self->customReplication->intersectingRanges(req.keys.get())) {
-					customReplicas = std::max(customReplicas, it.value());
+				for (auto it : self->userRangeConfig->intersectingRanges(req.keys->begin, req.keys->end)) {
+					customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
@@ -512,7 +512,7 @@ public:
 	                               Reference<InitialDataDistribution> initTeams,
 	                               const DDEnabledState* ddEnabledState) {
 
-		self->customReplication = initTeams->customReplication;
+		self->userRangeConfig = initTeams->userRangeConfig;
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
@@ -3663,8 +3663,8 @@ void DDTeamCollection::fixUnderReplication() {
 			}
 
 			int customReplicas = configuration.storageTeamSize;
-			for (auto& c : customReplication->intersectingRanges(r.range())) {
-				customReplicas = std::max(customReplicas, c.value());
+			for (auto it : userRangeConfig->intersectingRanges(r.range().begin, r.range().end)) {
+				customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 			}
 
 			int currentSize = 0;

@@ -108,7 +108,7 @@ public:
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
-	Reference<KeyRangeMap<int>> customReplication;
+	std::shared_ptr<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 
 	DataDistributionTracker() = default;
 

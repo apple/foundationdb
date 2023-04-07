@@ -22,6 +22,7 @@
 
 #include <utility>
 #include <vector>
+#include <ranges>
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
@@ -226,7 +227,7 @@ public:
 template <typename T, typename Codec = TupleCodec<T>>
 class KeyBackedProperty {
 public:
-	KeyBackedProperty(KeyRef key, Optional<WatchableTrigger> trigger = {}, Codec codec = {})
+	KeyBackedProperty(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {}, Codec codec = {})
 	  : key(key), trigger(trigger), codec(codec) {}
 
 	template <class Transaction>
@@ -358,7 +359,7 @@ class KeyBackedBinaryValue : public KeyBackedProperty<T, BinaryCodec<T>> {
 	typedef KeyBackedProperty<T, BinaryCodec<T>> Base;
 
 public:
-	KeyBackedBinaryValue(KeyRef key, Optional<WatchableTrigger> trigger = {}) : Base(key, trigger) {}
+	KeyBackedBinaryValue(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {}) : Base(key, trigger) {}
 
 	template <class Transaction>
 	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
@@ -386,6 +387,12 @@ struct TypedKVPair {
 	ValueType value;
 };
 
+template <typename KeyType>
+struct TypedRange {
+	KeyType begin;
+	KeyType end;
+};
+
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
 template <typename _KeyType,
@@ -394,7 +401,7 @@ template <typename _KeyType,
           typename ValueCodec = TupleCodec<_ValueType>>
 class KeyBackedMap {
 public:
-	KeyBackedMap(KeyRef prefix, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
+	KeyBackedMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
 	  : subspace(prefixRange(prefix)), trigger(trigger), valueCodec(valueCodec) {}
 
 	typedef _KeyType KeyType;
@@ -547,18 +554,19 @@ public:
 template <typename _KeyType, typename _ValueType, typename VersionOptions, typename KeyCodec = TupleCodec<_KeyType>>
 class KeyBackedObjectMap
   : public KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectCodec<_ValueType, VersionOptions>> {
-	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ObjectCodec<_ValueType, VersionOptions>> Base;
-	typedef ObjectCodec<_ValueType, VersionOptions> ObjectCodec;
+	typedef ObjectCodec<_ValueType, VersionOptions> ValueCodec;
+	typedef KeyBackedMap<_KeyType, _ValueType, KeyCodec, ValueCodec> Base;
 
 public:
 	KeyBackedObjectMap(KeyRef key, VersionOptions vo, Optional<WatchableTrigger> trigger = {})
-	  : Base(key, trigger, ObjectCodec(vo)) {}
+	  : Base(key, trigger, ValueCodec(vo)) {}
 };
 
 template <typename _ValueType, typename Codec = TupleCodec<_ValueType>>
 class KeyBackedSet {
 public:
-	KeyBackedSet(KeyRef key, Optional<WatchableTrigger> trigger = {}) : subspace(prefixRange(key)), trigger(trigger) {}
+	KeyBackedSet(KeyRef key = invalidKey, Optional<WatchableTrigger> trigger = {})
+	  : subspace(prefixRange(key)), trigger(trigger) {}
 
 	typedef _ValueType ValueType;
 	typedef KeyBackedRangeResult<ValueType> RangeResultType;
@@ -640,6 +648,62 @@ public:
 	Key packKey(ValueType const& value) const { return subspace.begin.withSuffix(Codec::pack(value)); }
 };
 
+// A local in-memory representation of a KeyBackedRangeMap snapshot
+// It is invalid to look up a range in this map which not within the range of
+// [first key of map, last key of map)
+template <typename KeyType, typename ValueType>
+struct KeyRangeMapSnapshot {
+	typedef std::map<KeyType, ValueType> Map;
+
+	// Iterator for ranges in the map.  Ranges are represented by a key, its value, and the next key in the map.
+	struct RangeIter {
+		typename Map::const_iterator impl;
+
+		using iterator_category = std::bidirectional_iterator_tag;
+		using value_type = RangeIter;
+		using pointer = RangeIter*;
+		using reference = RangeIter&;
+
+		TypedRange<const KeyType&> range() const { return { impl->first, std::next(impl)->first }; }
+		const ValueType& value() const { return impl->second; }
+
+		const RangeIter& operator*() const { return *this; }
+		const RangeIter* operator->() const { return this; }
+
+		RangeIter operator++(int) { return { impl++ }; }
+		RangeIter operator--(int) { return { impl-- }; }
+		RangeIter & operator++() { ++impl; return *this; }
+		RangeIter & operator--() { --impl; return *this; }
+
+		bool operator==(const RangeIter &rhs) const { return impl == rhs.impl; }
+		bool operator!=(const RangeIter &rhs) const { return impl == rhs.impl; }
+	};
+
+	// Range-for compatible object representing a list of contiguous ranges.
+	struct Ranges {
+		RangeIter iBegin, iEnd;
+		RangeIter begin() const { return iBegin; }
+		RangeIter end() const { return iEnd; }
+	};
+
+	RangeIter rangeContaining(const KeyType& begin) const {
+		ASSERT(map.size() >= 2);
+		auto i = map.upper_bound(begin);
+		ASSERT(i != map.begin());
+		ASSERT(i != map.end());
+		return { --i };
+	}
+
+	// Get a set of Ranges which cover [begin, end)
+	Ranges intersectingRanges(const KeyType& begin, const KeyType& end) const {
+		return { rangeContaining(begin), { map.lower_bound(end) } };
+	}
+
+	Ranges ranges() const { return { { map.begin() }, { std::prev(map.end()) } }; }
+
+	Map map;
+};
+
 // KeyBackedKeyRangeMap is similar to KeyRangeMap but without a Metric
 // It is assumed that any range not covered by the map is set to a default ValueType()
 // The ValueType must have
@@ -657,15 +721,25 @@ class KeyBackedRangeMap {
 public:
 	typedef KeyBackedMap<KeyType, ValueType, KeyCodec, ValueCodec> Map;
 	typedef KeyBackedRangeResult<typename Map::KVType> RangeMapResult;
+	typedef KeyRangeMapSnapshot<KeyType, ValueType> LocalSnapshot;
 
-	KeyBackedRangeMap(KeyRef prefix, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
+	KeyBackedRangeMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
 	  : kvMap(prefix, trigger, valueCodec) {}
 
-	// Get ranges to fully describe the given range.
-	// Result will be that returned by a range read from lastLessOrEqual(begin) to lastLessOrEqual(end)
+	// Get ranges for a given key range.
+	// The ranges returned will start at a key < end.
+	//
+	// If includeBeforeBegin is true, the ranges returned will fully cover the given range.  This means the first key of
+	// result could be < begin if begin does not exist as a boundary.
+	//
+	// If includeBeforeBegin is false, the ranges returned will be those which start at a key >= begin
 	template <class Transaction>
-	Future<RangeMapResult> getRanges(Transaction* tr, KeyType const& begin, KeyType const& end) const {
-		KeySelector rangeBegin = lastLessOrEqual(kvMap.packKey(begin));
+	Future<RangeMapResult> getRanges(Transaction tr,
+	                                 KeyType const& begin,
+	                                 KeyType const& end,
+	                                 bool includeBeforeBegin = true) const {
+		KeySelector rangeBegin =
+		    includeBeforeBegin ? lastLessOrEqual(kvMap.packKey(begin)) : firstGreaterOrEqual(kvMap.packKey(begin));
 		KeySelector rangeEnd = lastLessOrEqual(kvMap.packKey(end));
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
@@ -674,13 +748,14 @@ public:
 		return holdWhile(
 		    getRangeFuture,
 		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
-				RangeMapResult result;
-				result.results.reserve(rawkvs.size());
+			    RangeMapResult result;
+			    result.results.reserve(rawkvs.size());
 			    for (auto const& kv : rawkvs) {
-					result.results.emplace_back(kvMap.unpackKV(kv));
+				    result.results.emplace_back(kvMap.unpackKV(kv));
 			    }
-				return result;
-			}));
+			    result.more = rawkvs.more;
+			    return result;
+		    }));
 	}
 
 	// Get the Value for the range that key is in
@@ -695,12 +770,12 @@ public:
 		return holdWhile(
 		    getRangeFuture,
 		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
-				ASSERT(rawkvs.size() <= 1);
-				if(rawkvs.empty()) {
-					return ValueType();
-				}
-				return kvMap.unpackValue(rawkvs.back().value);
-			}));
+			    ASSERT(rawkvs.size() <= 1);
+			    if (rawkvs.empty()) {
+				    return ValueType();
+			    }
+			    return kvMap.unpackValue(rawkvs.back().value);
+		    }));
 	}
 
 	// Update the range from begin to end by applying valueUpdate to it
@@ -708,50 +783,50 @@ public:
 	template <class Transaction>
 	Future<Void> updateRange(Transaction* tr, KeyType const& begin, KeyType const& end, ValueType const& valueUpdate) {
 		return map(getRanges(tr, begin, end), [=, kvMap = kvMap](RangeMapResult const& range) mutable {
-				// TODO:  Handle partial ranges.
-				ASSERT(!range.more);
+			// TODO:  Handle partial ranges.
+			ASSERT(!range.more);
 
-				// A deque here makes the following logic easier, though it's not very efficient.
-				std::deque<typename Map::KVType> kvs(range.results.begin(), range.results.end());
+			// A deque here makes the following logic easier, though it's not very efficient.
+			std::deque<typename Map::KVType> kvs(range.results.begin(), range.results.end());
 
-			    // First, handle modification at the begin boundary.
-			    // If there are no records, or no records <= begin, then set begin to valueUpdate
-			    if (kvs.empty() || kvs.front().key > begin) {
-				    kvMap.set(tr, begin, valueUpdate);
-			    } else {
-				    // Otherwise, the first record represents the range that begin is currently in.
-				    // This record may be begin or before it, either way the action is to set begin
-				    // to the first record's value updated with valueUpdate
-				    kvMap.set(tr, begin, kvs.front().value.update(valueUpdate));
-				    // The first record has consumed
-				    kvs.pop_front();
-			    }
+			// First, handle modification at the begin boundary.
+			// If there are no records, or no records <= begin, then set begin to valueUpdate
+			if (kvs.empty() || kvs.front().key > begin) {
+				kvMap.set(tr, begin, valueUpdate);
+			} else {
+				// Otherwise, the first record represents the range that begin is currently in.
+				// This record may be begin or before it, either way the action is to set begin
+				// to the first record's value updated with valueUpdate
+				kvMap.set(tr, begin, kvs.front().value.update(valueUpdate));
+				// The first record has consumed
+				kvs.pop_front();
+			}
 
-			    // Next, handle modification at the end boundary
-			    // If there are no records, then set end to the default value to clear the effects of begin as of the
-			    // end boundary.
-			    if (kvs.empty()) {
-				    kvMap.set(tr, end, ValueType());
-			    } else if (kvs.back().key < end) {
-				    // If the last key is less than end, then end is not yet a boundary in the range map so we must
-				    // create it.  It will be set to the value of the range it resides in, which begins with the last
-				    // item in kvs. Note that it is very important to do this *before* modifying all the middle
-				    // boundaries of the range so that the changes we are making here terminate at end.
-				    kvMap.set(tr, end, kvs.back().value);
-			    } else {
-				    // Otherwise end is in kvs, which effectively ends the range we are modifying so just pop it from
-				    // kvs so that it is not modified in the loop below.
-				    ASSERT(kvs.back().key == end);
-				    kvs.pop_back();
-			    }
+			// Next, handle modification at the end boundary
+			// If there are no records, then set end to the default value to clear the effects of begin as of the
+			// end boundary.
+			if (kvs.empty()) {
+				kvMap.set(tr, end, ValueType());
+			} else if (kvs.back().key < end) {
+				// If the last key is less than end, then end is not yet a boundary in the range map so we must
+				// create it.  It will be set to the value of the range it resides in, which begins with the last
+				// item in kvs. Note that it is very important to do this *before* modifying all the middle
+				// boundaries of the range so that the changes we are making here terminate at end.
+				kvMap.set(tr, end, kvs.back().value);
+			} else {
+				// Otherwise end is in kvs, which effectively ends the range we are modifying so just pop it from
+				// kvs so that it is not modified in the loop below.
+				ASSERT(kvs.back().key == end);
+				kvs.pop_back();
+			}
 
-			    // Last, update all of the range boundaries in the middle which are left in the kvs queue
-			    for (auto const& kv : kvs) {
-				    kvMap.set(tr, kv.key, kv.value.update(valueUpdate));
-			    }
+			// Last, update all of the range boundaries in the middle which are left in the kvs queue
+			for (auto const& kv : kvs) {
+				kvMap.set(tr, kv.key, kv.value.update(valueUpdate));
+			}
 
-			    return Void();
-		    });
+			return Void();
+		});
 	}
 
 private:

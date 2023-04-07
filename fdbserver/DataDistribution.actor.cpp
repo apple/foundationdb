@@ -490,11 +490,12 @@ public:
 		}
 
 		state std::vector<Key> customBoundaries;
-		for (auto& it : self->initData->customReplication->ranges()) {
-			customBoundaries.push_back(it->range().begin);
-			TraceEvent(SevDebug, "DDInitCustomReplicas", self->ddId)
-			    .detail("Range", it->range())
-			    .detail("Replication", it->value());
+		for (auto it : self->initData->userRangeConfig->ranges()) {
+			auto range = it->range();
+			customBoundaries.push_back(range.begin);
+			TraceEvent(SevDebug, "DDInitCustomRangeConfig", self->ddId)
+			    .detail("Range", KeyRangeRef(range.begin, range.end))
+			    .detail("Config", it->value());
 		}
 
 		state int shard = 0;
@@ -525,9 +526,11 @@ public:
 				auto& keys = ranges[r];
 				self->shardsAffectedByTeamFailure->defineShard(keys);
 
-				auto customRange = self->initData->customReplication->rangeContaining(keys.begin);
-				int customReplicas = std::max(self->configuration.storageTeamSize, customRange.value());
-				ASSERT_WE_THINK(customRange.range().contains(keys));
+				auto it = self->initData->userRangeConfig->rangeContaining(keys.begin);
+				auto range = it->range();
+				int customReplicas =
+				    std::max(self->configuration.storageTeamSize, it->value().replicationFactor.orDefault(0));
+				ASSERT_WE_THINK(KeyRangeRef(range.begin, range.end).contains(keys));
 
 				bool unhealthy = iShard.primarySrc.size() != customReplicas;
 				if (!unhealthy && self->configuration.usableRegions > 1) {
