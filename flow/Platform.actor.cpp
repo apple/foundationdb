@@ -3766,7 +3766,9 @@ thread_local bool profileThread = false;
 // to see if we are on the profiled thread. Can be used in the signal handler.
 volatile int64_t profileThreadId = -1;
 
+#ifdef __linux__
 struct sigaction chainedAction;
+#endif
 volatile bool profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
 
