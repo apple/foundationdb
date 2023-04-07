@@ -160,7 +160,6 @@ def cleanup_after_test(management_cluster_file, data_cluster_names):
 
 def create_tenant(
     management_cluster_file,
-    data_cluster_files,
     tenant,
     tenant_group=None,
     assigned_cluster=None,
@@ -174,7 +173,7 @@ def create_tenant(
     return output, err
 
 
-def setup_tenants(management_cluster_file, data_cluster_files, tenant_creation_args):
+def setup_tenants(management_cluster_file, tenant_creation_args):
     for tenant_arg in tenant_creation_args:
         assert len(tenant_arg["name"]) > 0
         tenant = tenant_arg["name"]
@@ -182,18 +181,17 @@ def setup_tenants(management_cluster_file, data_cluster_files, tenant_creation_a
         assigned_cluster = tenant_arg.get("assigned_cluster", None)
         output, err = create_tenant(
             management_cluster_file,
-            data_cluster_files,
             tenant,
             tenant_group,
             assigned_cluster,
         )
         expected_output = "The tenant `{}' has been created".format(tenant)
         assert output == expected_output
+        assert len(err) == 0
 
 
 def configure_tenant(
     management_cluster_file,
-    data_cluster_files,
     tenant,
     tenant_group=None,
     assigned_cluster=None,
@@ -210,7 +208,6 @@ def configure_tenant(
 
 def list_tenants(
     management_cluster_file,
-    data_cluster_files,
     tenant_name_begin=None,
     tenant_name_end=None,
 ):
@@ -225,7 +222,6 @@ def list_tenants(
 
 def get_tenant_names(
     management_cluster_file,
-    data_cluster_files,
     tenant_name_begin=None,
     tenant_name_end=None,
 ):
@@ -247,7 +243,7 @@ def get_tenant_names(
     return res
 
 
-def rename_tenant(management_cluster_file, data_cluster_files, old_name, new_name):
+def rename_tenant(management_cluster_file, old_name, new_name):
     command = "tenant rename {old_name} {new_name}".format(
         old_name=old_name, new_name=new_name
     )
@@ -255,39 +251,28 @@ def rename_tenant(management_cluster_file, data_cluster_files, old_name, new_nam
     return output, err
 
 
-def get_tenant(management_cluster_file, data_cluster_files, name):
+def get_tenant(management_cluster_file, name):
     command = "tenant get {}".format(name)
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
 
-def delete_tenant(management_cluster_file, data_cluster_files, name):
+def delete_tenant(management_cluster_file, name):
     command = "tenant delete {}".format(name)
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
 
-def delete_tenant_by_id(management_cluster_file, data_cluster_files, id):
+def delete_tenant_by_id(management_cluster_file, id):
     command = "tenant deleteId {}".format(id)
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
 
-def clear_database_and_tenants(management_cluster_file, data_cluster_files):
-    all_tenants = get_tenant_names(management_cluster_file, data_cluster_files)
-    for cf in data_cluster_files:
-        subcmd1 = "writemode on"
-        subcmd2 = "clearrange " '"" \\xff'
-        run_fdbcli_command(cf, subcmd1, subcmd2)
+def clear_all_tenants(management_cluster_file):
+    all_tenants = get_tenant_names(management_cluster_file)
     for tenant in all_tenants:
-        delete_tenant(management_cluster_file, data_cluster_files, tenant)
-    subcmd1 = "writemode on"
-    subcmd2 = "option on SPECIAL_KEY_SPACE_ENABLE_WRITES"
-    subcmd3 = "clearrange " '"" \\xff'
-    subcmd4 = (
-        "clearrange \\xff\\xff/management/tenant/map/ \\xff\\xff/management/tenant/map0"
-    )
-    run_fdbcli_command(management_cluster_file, subcmd1, subcmd2, subcmd3, subcmd4)
+        delete_tenant(management_cluster_file, tenant)
 
 
 def put_kv_with_tenant(
@@ -377,26 +362,20 @@ def list_tenants_test(logger, cluster_files):
         {"name": "tenant11"},
         {"name": "tenant2", "assigned_cluster": "data1"},
     ]
-    setup_tenants(cluster_files[0], cluster_files[1:], tenants)
-    all_tenants = get_tenant_names(cluster_files[0], cluster_files[1:])
+    setup_tenants(cluster_files[0], tenants)
+    all_tenants = get_tenant_names(cluster_files[0])
     assert all_tenants == [tenant.get("name") for tenant in tenants]
-    tenants1 = get_tenant_names(cluster_files[0], cluster_files[1:], "a", "b")
+    tenants1 = get_tenant_names(cluster_files[0], "a", "b")
     assert [] == tenants1
-    tenants2 = get_tenant_names(cluster_files[0], cluster_files[1:], "a", "tenant10")
+    tenants2 = get_tenant_names(cluster_files[0], "a", "tenant10")
     assert [] == tenants2
-    tenants3 = get_tenant_names(
-        cluster_files[0], cluster_files[1:], "tenant1", "tenant2"
-    )
+    tenants3 = get_tenant_names(cluster_files[0], "tenant1", "tenant2")
     assert ["tenant10", "tenant11"] == tenants3
-    tenants4 = get_tenant_names(
-        cluster_files[0], cluster_files[1:], "tenant10", "tenant11"
-    )
+    tenants4 = get_tenant_names(cluster_files[0], "tenant10", "tenant11")
     assert ["tenant10"] == tenants4
-    tenants5 = get_tenant_names(
-        cluster_files[0], cluster_files[1:], "tenant10", "tenant10"
-    )
+    tenants5 = get_tenant_names(cluster_files[0], "tenant10", "tenant10")
     assert [] == tenants5
-    clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    clear_all_tenants(cluster_files[0])
 
 
 @enable_logging()
@@ -406,8 +385,8 @@ def delete_tenants_test(logger, cluster_files):
         {"name": "tenant11"},
         {"name": "tenant2", "assigned_cluster": "data2"},
     ]
-    setup_tenants(cluster_files[0], cluster_files[1:], tenants)
-    all_tenants = get_tenant_names(cluster_files[0], cluster_files[1:])
+    setup_tenants(cluster_files[0], tenants)
+    all_tenants = get_tenant_names(cluster_files[0])
     assert all_tenants == [tenant.get("name") for tenant in tenants]
 
     rc, out, _ = put_kv_with_tenant(
@@ -421,9 +400,9 @@ def delete_tenants_test(logger, cluster_files):
     assert value == None
 
     # Cannot delete non-empty tenant with data
-    out, err = delete_tenant(cluster_files[0], cluster_files[1:], "tenant10")
+    out, err = delete_tenant(cluster_files[0], "tenant10")
     assert err == "ERROR: Cannot delete a non-empty tenant (2133)"
-    all_tenants = get_tenant_names(cluster_files[0], cluster_files[1:])
+    all_tenants = get_tenant_names(cluster_files[0])
     assert all_tenants == [tenant.get("name") for tenant in tenants]
 
     rc, out, err = clear_kv_range_with_tenant(
@@ -431,20 +410,20 @@ def delete_tenants_test(logger, cluster_files):
     )
     assert rc == 0
 
-    delete_tenant(cluster_files[0], cluster_files[1:], "tenant10")
-    all_tenants1 = get_tenant_names(cluster_files[0], cluster_files[1:])
+    delete_tenant(cluster_files[0], "tenant10")
+    all_tenants1 = get_tenant_names(cluster_files[0])
     assert all_tenants1 == ["tenant11", "tenant2"]
-    delete_tenant(cluster_files[0], cluster_files[1:], "tenant11")
-    all_tenants2 = get_tenant_names(cluster_files[0], cluster_files[1:])
+    delete_tenant(cluster_files[0], "tenant11")
+    all_tenants2 = get_tenant_names(cluster_files[0])
     assert all_tenants2 == ["tenant2"]
-    delete_tenant(cluster_files[0], cluster_files[1:], "tenant2")
-    all_tenants3 = get_tenant_names(cluster_files[0], cluster_files[1:])
+    delete_tenant(cluster_files[0], "tenant2")
+    all_tenants3 = get_tenant_names(cluster_files[0])
     assert all_tenants3 == []
-    out, err = delete_tenant(cluster_files[0], cluster_files[1:], "dontcare")
+    out, err = delete_tenant(cluster_files[0], "dontcare")
     assert err == "ERROR: Tenant does not exist (2131)"
-    all_tenants4 = get_tenant_names(cluster_files[0], cluster_files[1:])
+    all_tenants4 = get_tenant_names(cluster_files[0])
     assert all_tenants4 == []
-    clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    clear_all_tenants(cluster_files[0])
 
 
 @enable_logging()
@@ -454,59 +433,50 @@ def configure_tenant_group_test(logger, cluster_files):
         {"name": "tenant2"},
         {"name": "tenant3", "assigned_cluster": "data2"},
     ]
-    setup_tenants(cluster_files[0], cluster_files[1:], tenants)
-    all_tenants = get_tenant_names(cluster_files[0], cluster_files[1:])
+    setup_tenants(cluster_files[0], tenants)
+    all_tenants = get_tenant_names(cluster_files[0])
     assert all_tenants == [tenant.get("name") for tenant in tenants]
 
-    out, err = configure_tenant(
-        cluster_files[0], cluster_files[1:], "tenant2", tenant_group="group0"
-    )
+    out, err = configure_tenant(cluster_files[0], "tenant2", tenant_group="group0")
     assert out == "The configuration for tenant `tenant2' has been updated"
     assert len(err) == 0
 
     # tenant group cannot span multiple data clusters
-    out, err = configure_tenant(
-        cluster_files[0], cluster_files[1:], "tenant3", tenant_group="group0"
-    )
+    out, err = configure_tenant(cluster_files[0], "tenant3", tenant_group="group0")
     assert len(out) == 0
     assert err == "ERROR: Tenant configuration is invalid (2140)"
 
-    out, err = configure_tenant(
-        cluster_files[0], cluster_files[1:], "tenant1", tenant_group="group1"
-    )
+    out, err = configure_tenant(cluster_files[0], "tenant1", tenant_group="group1")
     assert out == "The configuration for tenant `tenant1' has been updated"
     assert len(err) == 0
 
-    out, err = configure_tenant(
-        cluster_files[0], cluster_files[1:], "tenant100", tenant_group="group0"
-    )
+    out, err = configure_tenant(cluster_files[0], "tenant100", tenant_group="group0")
     assert len(out) == 0
     assert err == "ERROR: Tenant does not exist (2131)"
 
-    clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    clear_all_tenants(cluster_files[0])
 
 
 @enable_logging()
 def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
     tenants = [{"name": "tenant1"}, {"name": "tenant2"}]
     logger.debug("Tenants to create: {}".format(tenants))
-    setup_tenants(cluster_files[0], cluster_files[1:], tenants)
-    output, err = list_tenants(cluster_files[0], cluster_files[1:])
+    setup_tenants(cluster_files[0], tenants)
+    output, err = list_tenants(cluster_files[0])
     assert "1. tenant1\n  2. tenant2" == output
-    names = get_tenant_names(cluster_files[0], cluster_files[1:])
+    names = get_tenant_names(cluster_files[0])
     assert ["tenant1", "tenant2"] == names
     # Once we reach here, the tenants have been created successfully
     logger.debug("Tenants created: {}".format(tenants))
     for tenant in tenants:
         out, err = configure_tenant(
             cluster_files[0],
-            cluster_files[1:],
             tenant["name"],
             assigned_cluster="cluster",
         )
         assert err == "ERROR: Tenant configuration is invalid (2140)"
     logger.debug("Tenants configured")
-    clear_database_and_tenants(cluster_files[0], cluster_files[1:])
+    clear_all_tenants(cluster_files[0])
     logger.debug("Tenants cleared")
 
 
