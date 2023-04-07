@@ -1903,7 +1903,7 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 		uint8_t rawCipher[baseCipher->len];
 		memcpy(rawCipher, baseCipher->key.get(), baseCipher->len);
 		// modify cipherKey by flipping a bit
-		const int idx = deterministicRandom()->randomInt(0, baseCipher->len + 1);
+		const int idx = deterministicRandom()->randomInt(0, baseCipher->len);
 		rawCipher[idx]++;
 		cipherKeyCache->insertCipherKey(baseCipher->domainId,
 		                                baseCipher->keyId,
