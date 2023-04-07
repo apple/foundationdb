@@ -56,6 +56,8 @@ class RKRateUpdater : public IRKRateUpdater {
 	// a particular rate calculation should be verbose
 	static bool shouldBeVerbose();
 
+	void updateHealthMetricsStorageStats(IRKMetricsTracker const&);
+
 public:
 	explicit RKRateUpdater(UID ratekeeperId, RatekeeperLimits const&);
 

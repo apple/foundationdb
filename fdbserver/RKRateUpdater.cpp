@@ -41,6 +41,8 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 
 	bool verbose = shouldBeVerbose();
 
+	updateHealthMetricsStorageStats(metricsTracker);
+
 	// Look at each storage server's write queue and local rate, compute and store the desired rate
 	// ratio
 	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
@@ -88,12 +90,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
-
-		auto& ssMetrics = healthMetrics.storageStats[ss.id];
-		ssMetrics.storageQueue = storageQueue;
-		ssMetrics.storageDurabilityLag = storageDurabilityLag;
-		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
-		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
@@ -678,6 +674,18 @@ int64_t RKRateUpdater::getTotalDiskUsageBytes(IRKMetricsTracker const& metricsTr
 bool RKRateUpdater::shouldBeVerbose() {
 	return SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
 	       (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
+}
+
+void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& metricsTracker) {
+	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
+	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
+		auto const& ss = i->value;
+		auto& ssMetrics = healthMetrics.storageStats[ss.id];
+		ssMetrics.storageQueue = ss.getStorageQueueBytes();
+		ssMetrics.storageDurabilityLag = ss.getDurabilityLag();
+		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
+		ssMetrics.diskUsage = ss.lastReply.diskUsage;
+	}
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
