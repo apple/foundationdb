@@ -471,10 +471,10 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	loop {
 		try {
 			Future<EKPGetLatestBlobMetadataReply> requestFuture;
-			if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+			if (self->dbInfo.isValid() && self->dbInfo->get().client.encryptKeyProxy.present()) {
 				req.reply.reset();
-				requestFuture =
-				    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+				requestFuture = brokenPromiseToNever(
+				    self->dbInfo->get().client.encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
 			} else {
 				requestFuture = Never();
 			}

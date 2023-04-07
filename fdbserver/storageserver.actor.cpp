@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -395,6 +395,10 @@ struct StorageServerDisk {
 	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+		return storage->replaceRange(range, data);
+	}
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
@@ -1954,8 +1958,9 @@ ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, 
 		when(wait(data->version.whenAtLeast(version))) {
 			// FIXME: A bunch of these can block with or without the following delay 0.
 			// wait( delay(0) );  // don't do a whole bunch of these at once
-			if (version < data->oldestVersion.get())
+			if (version < data->oldestVersion.get()) {
 				throw transaction_too_old(); // just in case
+			}
 			return version;
 		}
 		when(wait(delay(SERVER_KNOBS->FUTURE_VERSION_DELAY))) {
@@ -3057,7 +3062,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -5566,6 +5572,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	}
 
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	++data->counters.finishedQueries;
 	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -7568,7 +7575,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				hold = tryGetRange(results, &tr, keys);
 			}
 
-			state Key nfk = keys.begin;
+			state Key blockBegin = keys.begin;
 
 			try {
 				loop {
@@ -7603,20 +7610,19 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
-					state int sinceYield = 0;
+					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+					state Key blockEnd =
+					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+					wait(data->storage.replaceRange(blockRange, blockData));
+
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
-						data->storage.writeKeyValue(*kvItr);
 						data->byteSampleApplySet(*kvItr, invalidVersion);
-						if (++sinceYield > 1000) {
-							wait(yield());
-							sinceYield = 0;
-						}
 					}
-
 					ASSERT(this_block.readThrough.present() || this_block.size());
-					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
-					                                       : keyAfter(this_block.end()[-1].key);
+					blockBegin = this_block.readThrough.present() ? this_block.readThrough.get()
+					                                              : keyAfter(this_block.end()[-1].key);
 					this_block = RangeResult();
 
 					data->fetchKeysBytesBudget -= expectedBlockSize;
@@ -7631,7 +7637,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					throw;
 				}
 				lastError = e;
-				if (nfk == keys.begin) {
+				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0)
@@ -7655,7 +7661,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
 				}
-				if (nfk < keys.end) {
+				if (blockBegin < keys.end) {
 					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
@@ -7663,18 +7669,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// fetchKeys.
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
-						rightShard.range = KeyRangeRef(nfk, keys.end);
-						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard);
+						rightShard.range = KeyRangeRef(blockBegin, keys.end);
+						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
 						leftShard->populateShard(rightShard);
 						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
-						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
+						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(blockBegin, keys.end)));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
+					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
@@ -9322,7 +9328,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -10354,7 +10361,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
-	storage->clear(keys, &data->metrics);
+	storage->clear(keys);
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
@@ -10371,7 +10378,7 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 		*kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
-		storage->clear(KeyRangeRef(mutation.param1, mutation.param2), &data->metrics);
+		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
 		++(*kvClearRanges);
 		if (KeyRangeRef(mutation.param1, mutation.param2).singleKeyRange()) {
 			++(*kvClearSingleKey);
@@ -10412,7 +10419,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			storage->set(KeyValueRef(m.param1, m.param2));
 			*kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
-			storage->clear(KeyRangeRef(m.param1, m.param2), &data->metrics);
+			storage->clear(KeyRangeRef(m.param1, m.param2));
 			++(*kvClearRanges);
 			if (KeyRangeRef(m.param1, m.param2).singleKeyRange()) {
 				++(*kvClearSingleKey);
@@ -10796,7 +10803,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				++data->counters.kvSystemClearRanges;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
-				storage->clear(clearRange, &data->metrics);
+				storage->clear(clearRange);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}
@@ -12032,12 +12039,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}
@@ -12136,12 +12143,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}

@@ -32,6 +32,7 @@
 #include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
+#include "flow/ThreadHelper.actor.h"
 
 // TupleCodec is a utility struct to convert a type to and from a value using Tuple encoding.
 // It is used by the template classes below like KeyBackedProperty and KeyBackedMap to convert

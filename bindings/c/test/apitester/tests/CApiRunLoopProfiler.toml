@@ -1,0 +1,27 @@
+[[test]]
+title = 'Test run loop profiler'
+multiThreaded = true
+buggify = true
+runLoopProfiler = true
+minFdbThreads = 8
+maxFdbThreads = 8
+minDatabases = 8
+maxDatabases = 8
+minClientThreads = 16
+maxClientThreads = 16
+minClients = 32
+maxClients = 32
+
+    [[test.workload]]
+    name = 'ApiCorrectness'
+    minKeyLength = 1
+	maxKeyLength = 64
+	minValueLength = 1
+	maxValueLength = 1000
+	maxKeysPerTransaction = 50
+	initialSize = 100
+	numRandomOperations = 100
+	readExistingKeysRatio = 0.9
+
+[[knobs]]
+run_loop_profiling_interval=0.001

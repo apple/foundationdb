@@ -625,6 +625,7 @@ struct InitializeTLogRequest {
 	int logRouterTags;
 	int txsTags;
 	Version recoveryTransactionVersion;
+	std::vector<Version> oldGenerationStartVersions;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -650,7 +651,8 @@ struct InitializeTLogRequest {
 		           logVersion,
 		           spillType,
 		           txsTags,
-		           recoveryTransactionVersion);
+		           recoveryTransactionVersion,
+		           oldGenerationStartVersions);
 	}
 };
 
@@ -903,13 +905,14 @@ struct InitializeEncryptKeyProxyRequest {
 	UID reqId;
 	UID interfaceId;
 	ReplyPromise<EncryptKeyProxyInterface> reply;
+	EncryptionAtRestMode encryptMode;
 
 	InitializeEncryptKeyProxyRequest() {}
 	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply);
+		serializer(ar, reqId, interfaceId, reply, encryptMode);
 	}
 };
 
@@ -1193,7 +1196,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               Promise<Void> recovered,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                               IKeyValueStore* persistentData);
-ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
+                                         Reference<AsyncVar<ServerDBInfo>> db,
+                                         EncryptionAtRestMode encryptMode);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,

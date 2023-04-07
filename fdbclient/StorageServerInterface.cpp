@@ -48,7 +48,7 @@ void TSS_traceMismatch(TraceEvent& event,
                        const GetValueRequest& req,
                        const GetValueReply& src,
                        const GetValueReply& tss) {
-	event.detail("Key", req.key.printable())
+	event.detail("Key", req.key)
 	    .detail("Tenant", req.tenantInfo.tenantId)
 	    .detail("Version", req.version)
 	    .detail("SSReply", src.value.present() ? traceChecksumValue(src.value.get()) : "missing")
@@ -167,10 +167,10 @@ static void traceKeyValuesDiff(TraceEvent& event,
 		if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i] != tssKV[i]) {
 			event.detail("MismatchIndex", i);
 			if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i].key != tssKV[i].key) {
-				event.detail("MismatchSSKey", i < ssKV.size() ? ssKV[i].key.printable() : "missing");
-				event.detail("MismatchTSSKey", i < tssKV.size() ? tssKV[i].key.printable() : "missing");
+				event.detail("MismatchSSKey", i < ssKV.size() ? ssKV[i].key : "missing"_sr);
+				event.detail("MismatchTSSKey", i < tssKV.size() ? tssKV[i].key : "missing"_sr);
 			} else {
-				event.detail("MismatchKey", ssKV[i].key.printable());
+				event.detail("MismatchKey", ssKV[i].key);
 				event.detail("MismatchSSValue", traceChecksumValue(ssKV[i].value));
 				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value));
 			}
