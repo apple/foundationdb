@@ -638,7 +638,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 	// clear existing audits
 	self->audits.clear();
-	
+
 	if (self->initData->auditStates.empty()) {
 		self->auditInitialized.send(Void());
 		return Void();
