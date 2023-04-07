@@ -61,3 +61,12 @@ public:
 	Version getMaxVersion() const override;
 	Future<Void> run() override;
 };
+
+class MockRKRecoveryTracker : public IRKRecoveryTracker {
+public:
+	double getRecoveryDuration(Version) const override { return 0.0; }
+	void cleanupOldRecoveries() override {}
+	void updateMaxVersion(Version updateVersion) override {}
+	Version getMaxVersion() const override { return 0; }
+	Future<Void> run() override { return Never(); }
+};

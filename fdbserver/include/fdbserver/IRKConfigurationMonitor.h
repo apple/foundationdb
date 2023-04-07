@@ -38,3 +38,14 @@ public:
 	Optional<Key> getRemoteDC() const override;
 	Future<Void> run() override;
 };
+
+class MockRKConfigurationMonitor : public IRKConfigurationMonitor {
+	int storageTeamSize;
+
+public:
+	explicit MockRKConfigurationMonitor(int storageTeamSize) : storageTeamSize(storageTeamSize) {}
+	bool areBlobGranulesEnabled() const override { return false; }
+	int getStorageTeamSize() const override { return storageTeamSize; }
+	Optional<Key> getRemoteDC() const override { return {}; }
+	Future<Void> run() override { return Never(); }
+};

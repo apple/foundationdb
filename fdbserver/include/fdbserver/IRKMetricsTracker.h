@@ -142,3 +142,15 @@ public:
 	double getSmoothTotalDurableBytesRate() const override;
 	Future<Void> run() override;
 };
+
+class MockRKMetricsTracker : public IRKMetricsTracker {
+	Map<UID, StorageQueueInfo> storageQueueInfo;
+	Map<UID, TLogQueueInfo> tlogQueueInfo;
+
+public:
+	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const& override { return storageQueueInfo; }
+	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const& override { return tlogQueueInfo; }
+	bool ssListFetchTimedOut() const override { return false; }
+	double getSmoothTotalDurableBytesRate() const override { return 0; }
+	Future<Void> run() override { return Never(); }
+};

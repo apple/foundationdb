@@ -4,6 +4,7 @@
 
 #include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/TagThrottler.h"
+#include "flow/UnitTest.h"
 
 RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
   : limits(limits), lastWarning(0), ratekeeperId(ratekeeperId) {}
@@ -708,3 +709,41 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
     lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), bwLagTarget(bwLagTarget),
     priority(priority), context(context),
     rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
+
+namespace {
+
+void checkApproximatelyEqual(double a, double b) {
+	ASSERT(a < b + 0.01 || a < b * 1.01);
+	ASSERT(b < a + 0.01 || b < a * 1.01);
+}
+
+} // namespace
+
+TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
+	MockRKMetricsTracker metricsTracker;
+	MockRKRateServer rateServer;
+	MockTagThrottler tagThrottler;
+	MockRKConfigurationMonitor configurationMonitor(3);
+	MockRKRecoveryTracker recoveryTracker;
+	Deque<double> actualTpsHistory;
+	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	double blobWorkerTime{ 0.0 };
+	double unblockedAssignmentTime{ 0.0 };
+
+	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
+	RKRateUpdater rateUpdater(UID(), limits);
+
+	rateUpdater.update(metricsTracker,
+	                   rateServer,
+	                   tagThrottler,
+	                   configurationMonitor,
+	                   recoveryTracker,
+	                   actualTpsHistory,
+	                   false,
+	                   blobWorkerVersionHistory,
+	                   blobWorkerTime,
+	                   unblockedAssignmentTime);
+
+	checkApproximatelyEqual(rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
+	return Void();
+}

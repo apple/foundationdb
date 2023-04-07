@@ -78,3 +78,20 @@ public:
 	                 class ITagThrottler&,
 	                 class IRKRecoveryTracker&) override;
 };
+
+class MockRKRateServer : public IRKRateServer {
+	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
+
+public:
+	double getSmoothReleasedTransactionRate() const override { return 0; }
+	double getSmoothBatchReleasedTransactionRate() const override { return 0; }
+	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override { return grvProxyInfo; }
+	void cleanupExpiredGrvProxies() override {}
+	void updateLastLimited(double batchTpsLimit) override {}
+	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,
+	                 class IRKRateUpdater const& batchRateUpdater,
+	                 class ITagThrottler&,
+	                 class IRKRecoveryTracker&) override {
+		return Never();
+	}
+};
