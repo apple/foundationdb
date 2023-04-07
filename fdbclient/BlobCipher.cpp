@@ -1910,10 +1910,9 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 		Reference<BaseCipher> baseCipher = domainKeyMap[minDomainId][minBaseCipherKeyId];
 		uint8_t rawCipher[baseCipher->len];
 		memcpy(rawCipher, baseCipher->key.get(), baseCipher->len);
-		// modify few bytes in the cipherKey
-		for (int i = 2; i < 5; i++) {
-			rawCipher[i]++;
-		}
+		// modify cipherKey by flipping a bit
+		const int idx = deterministicRandom()->randomInt(0, baseCipher->len);
+		rawCipher[idx]++;
 		cipherKeyCache->insertCipherKey(baseCipher->domainId,
 		                                baseCipher->keyId,
 		                                &rawCipher[0],
