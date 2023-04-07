@@ -32,7 +32,7 @@ public:
 
 	// Returns a map of GRV proxy IDs to throttling-relevant GRV proxy
 	// statistics.
-	virtual std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const = 0;
+	virtual std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& = 0;
 
 	// Remove GRV proxies that have not sent messages recently from
 	// internal state
@@ -70,7 +70,7 @@ public:
 	~RKRateServer();
 	double getSmoothReleasedTransactionRate() const override;
 	double getSmoothBatchReleasedTransactionRate() const override;
-	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const override;
+	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override;
 	void cleanupExpiredGrvProxies() override;
 	void updateLastLimited(double batchTpsLimit) override;
 	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,

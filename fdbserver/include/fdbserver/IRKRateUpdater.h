@@ -23,7 +23,7 @@ struct RKVersionInfo {
 class IRKRateUpdater {
 public:
 	virtual ~IRKRateUpdater() = default;
-	virtual HealthMetrics const& getHealthMetrics() const = 0;
+	virtual HealthMetrics const& getHealthMetrics() const& = 0;
 	virtual double getTpsLimit() const = 0;
 	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
@@ -76,5 +76,5 @@ public:
 	            double& blobWorkerTime,
 	            double& unblockedAssignmentTime) override;
 
-	HealthMetrics const& getHealthMetrics() const override;
+	HealthMetrics const& getHealthMetrics() const& override;
 };

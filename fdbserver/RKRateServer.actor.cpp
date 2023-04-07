@@ -84,7 +84,7 @@ double RKRateServer::getSmoothBatchReleasedTransactionRate() const {
 	return smoothBatchReleasedTransactions.smoothRate();
 }
 
-std::map<UID, RKGrvProxyInfo> const& RKRateServer::getGrvProxyInfo() const {
+std::map<UID, RKGrvProxyInfo> const& RKRateServer::getGrvProxyInfo() const& {
 	return grvProxyInfo;
 }
 

@@ -638,7 +638,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 	}
 }
 
-HealthMetrics const& RKRateUpdater::getHealthMetrics() const {
+HealthMetrics const& RKRateUpdater::getHealthMetrics() const& {
 	return healthMetrics;
 }
 

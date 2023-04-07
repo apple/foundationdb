@@ -234,7 +234,7 @@ void RKMetricsTracker::updateCommitCostEstimation(
 	}
 }
 
-Map<UID, StorageQueueInfo> const& RKMetricsTracker::getStorageQueueInfo() const {
+Map<UID, StorageQueueInfo> const& RKMetricsTracker::getStorageQueueInfo() const& {
 	return storageQueueInfo;
 }
 
@@ -242,7 +242,7 @@ bool RKMetricsTracker::ssListFetchTimedOut() const {
 	return now() - lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT;
 }
 
-Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const {
+Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const& {
 	return tlogQueueInfo;
 }
 
