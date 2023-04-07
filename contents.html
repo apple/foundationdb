@@ -5,7 +5,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="generator" content="Docutils 0.19: https://docutils.sourceforge.io/" />
 
-    <title>Site Map &#8212; FoundationDB 7.2</title>
+    <title>Site Map &#8212; FoundationDB 7.1</title>
     <link rel="stylesheet" type="text/css" href="_static/pygments.css" />
     <link rel="stylesheet" type="text/css" href="_static/bootstrap-sphinx.css" />
     <script data-url_root="./" id="documentation_options" src="_static/documentation_options.js"></script>
@@ -36,7 +36,7 @@
         </button>
         <a class="navbar-brand" href="index.html">
           FoundationDB</a>
-        <span class="navbar-text navbar-version pull-left"><b>7.2</b></span>
+        <span class="navbar-text navbar-version pull-left"><b>7.1</b></span>
       </div>
 
         <div class="collapse navbar-collapse nav-collapse">
@@ -89,7 +89,6 @@
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html">Client Testing</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#testing-error-handling-with-buggify">Testing Error Handling with Buggify</a></li>
 <li class="toctree-l2"><a class="reference internal" href="client-testing.html#simulation-and-cluster-workloads">Simulation and Cluster Workloads</a></li>
-<li class="toctree-l2"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a></li>
 <li class="toctree-l2"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a></li>
 <li class="toctree-l2"><a class="reference internal" href="transaction-tagging.html">Transaction Tagging</a></li>
 <li class="toctree-l2"><a class="reference internal" href="known-limitations.html">Known Limitations</a></li>
@@ -144,7 +143,6 @@
 <li class="toctree-l2"><a class="reference internal" href="configuration.html">Configuration</a></li>
 <li class="toctree-l2"><a class="reference internal" href="moving-a-cluster.html">Moving a Cluster to New Machines</a></li>
 <li class="toctree-l2"><a class="reference internal" href="tls.html">Transport Layer Security</a></li>
-<li class="toctree-l2"><a class="reference internal" href="authorization.html">Authorization</a></li>
 </ul>
 </li>
 <li class="toctree-l1"><a class="reference internal" href="monitored-metrics.html"><strong>Monitored Metrics</strong></a></li>
@@ -178,7 +176,6 @@
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-630.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-700.html">Release Notes</a></li>
 <li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a></li>
-<li class="toctree-l2"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a></li>
 </ul>
 </li>
 </ul>
@@ -234,7 +231,7 @@
 If you are having trouble finding something in particular, try the search box in the navbar.</p>
 <div class="toctree-wrapper compound">
 <ul>
-<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 7.2</a><ul>
+<li class="toctree-l1"><a class="reference internal" href="index.html">FoundationDB 7.1</a><ul>
 <li class="toctree-l2"><a class="reference internal" href="index.html#overview">Overview</a></li>
 <li class="toctree-l2"><a class="reference internal" href="index.html#documentation">Documentation</a><ul>
 <li class="toctree-l3"><a class="reference internal" href="local-dev.html">Local Development</a><ul>
@@ -642,16 +639,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="client-testing.html#running-a-workload-on-an-actual-cluster">Running a Workload on an actual Cluster</a></li>
 </ul>
 </li>
-<li class="toctree-l4"><a class="reference internal" href="client-testing.html#api-tester">API Tester</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#introduction">Introduction</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#implementing-a-workload">Implementing a Workload</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#basic-workload-example">Basic Workload Example</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#implementing-control-structures">Implementing Control Structures</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#subclassing-apiworkload">Subclassing ApiWorkload</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#test-configuration">Test Configuration</a></li>
-<li class="toctree-l5"><a class="reference internal" href="client-testing.html#executing-the-tests">Executing the Tests</a></li>
-</ul>
-</li>
 <li class="toctree-l4"><a class="reference internal" href="api-general.html">Using FoundationDB Clients</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="api-general.html#versioning">Versioning</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-general.html#api-versions">API versions</a></li>
@@ -712,54 +699,50 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 <li class="toctree-l4"><a class="reference internal" href="api-version-upgrade-guide.html">API Version Upgrade Guide</a><ul>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#overview">Overview</a></li>
-<li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-720">API version 720</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-710">API version 710</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#general">General</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-710">API version 710</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id1">General</a></li>
-</ul>
-</li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-700">API version 700</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id2">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id1">General</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#python-bindings">Python bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-630">API version 630</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id3">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id2">General</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#c-bindings">C bindings</a></li>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id4">Python bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id3">Python bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-620">API version 620</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id5">C bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id4">C bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-610">API version 610</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id6">General</a></li>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id7">C bindings</a></li>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id8">Python bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id5">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id6">C bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id7">Python bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#java-bindings">Java bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#ruby-bindings">Ruby bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#go-bindings">Go bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-600">API version 600</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id9">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id8">General</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-520">API version 520</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id10">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id9">General</a></li>
 <li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#java-and-python-bindings">Java and Python bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-510">API version 510</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id11">General</a></li>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id12">Java bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id10">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id11">Java bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-500">API version 500</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id13">Java bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id12">Java bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-460">API version 460</a></li>
@@ -768,23 +751,23 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-430">API version 430</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-420">API version 420</a></li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-410">API version 410</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id14">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id13">General</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-400">API version 400</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id15">Java bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id14">Java bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-300">API version 300</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id16">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id15">General</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-200">API version 200</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id17">General</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id16">General</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#api-version-100">API version 100</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id18">Java bindings</a></li>
+<li class="toctree-l6"><a class="reference internal" href="api-version-upgrade-guide.html#id17">Java bindings</a></li>
 </ul>
 </li>
 <li class="toctree-l5"><a class="reference internal" href="api-version-upgrade-guide.html#older-api-versions">Older API versions</a></li>
@@ -1185,8 +1168,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="special-keys.html#tracing-module">Tracing module</a></li>
 </ul>
 </li>
-<li class="toctree-l5"><a class="reference internal" href="special-keys.html#deprecated-keys">Deprecated Keys</a></li>
-<li class="toctree-l5"><a class="reference internal" href="special-keys.html#versioning">Versioning</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="global-configuration.html">Global Configuration</a><ul>
@@ -1422,18 +1403,6 @@ If you are having trouble finding something in particular, try the search box in
 </li>
 </ul>
 </li>
-</ul>
-</li>
-<li class="toctree-l4"><a class="reference internal" href="authorization.html">Authorization</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#introduction">Introduction</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="authorization.html#privilege-levels">Privilege Levels</a></li>
-<li class="toctree-l6"><a class="reference internal" href="authorization.html#access-control">Access Control</a></li>
-</ul>
-</li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#enabling-clients-to-use-authorization-tokens">Enabling Clients to use Authorization Tokens</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#public-key-rotation">Public Key Rotation</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#token-caching">Token Caching</a></li>
-<li class="toctree-l5"><a class="reference internal" href="authorization.html#allowing-untrusted-clients-to-access-tenant-data-without-tokens">Allowing Untrusted Clients to Access Tenant Data Without Tokens</a></li>
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="administration.html#starting-and-stopping">Starting and stopping</a><ul>
@@ -2212,30 +2181,38 @@ If you are having trouble finding something in particular, try the search box in
 </ul>
 </li>
 <li class="toctree-l4"><a class="reference internal" href="release-notes/release-notes-710.html">Release Notes</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id1">7.1.23</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id2">7.1.22</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id3">7.1.21</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id4">7.1.20</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id5">7.1.19</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id6">7.1.18</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id7">7.1.17</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id8">7.1.16</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id9">7.1.15</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id10">7.1.14</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id11">7.1.13</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id12">7.1.12</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id13">7.1.11</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id14">7.1.10</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id15">7.1.9</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id16">7.1.8</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id17">7.1.7</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id18">7.1.6</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id19">7.1.5</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id20">7.1.4</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id21">7.1.3</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id22">7.1.2</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id23">7.1.1</a></li>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id24">7.1.0</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id2">7.1.31</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id3">7.1.30</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id4">7.1.29</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id5">7.1.28</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id6">7.1.27</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id7">7.1.26</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id8">7.1.25</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id9">7.1.24</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id10">7.1.23</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id11">7.1.22</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id12">7.1.21</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id13">7.1.20</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id14">7.1.19</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id15">7.1.18</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id16">7.1.17</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id17">7.1.16</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id18">7.1.15</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id19">7.1.14</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id20">7.1.13</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id21">7.1.12</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id22">7.1.11</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id23">7.1.10</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id24">7.1.9</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id25">7.1.8</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id26">7.1.7</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id27">7.1.6</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id28">7.1.5</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id29">7.1.4</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id30">7.1.3</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id31">7.1.2</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id32">7.1.1</a></li>
+<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-710.html#id33">7.1.0</a><ul>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#features">Features</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#performance">Performance</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#reliability">Reliability</a></li>
@@ -2244,20 +2221,6 @@ If you are having trouble finding something in particular, try the search box in
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#bindings">Bindings</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#other-changes">Other Changes</a></li>
 <li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-710.html#earlier-release-notes">Earlier release notes</a></li>
-</ul>
-</li>
-</ul>
-</li>
-<li class="toctree-l4"><a class="reference internal" href="release-notes/release-notes-720.html">Release Notes</a><ul>
-<li class="toctree-l5"><a class="reference internal" href="release-notes/release-notes-720.html#id2">7.2.0</a><ul>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#features">Features</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#performance">Performance</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#reliability">Reliability</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#fixes">Fixes</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#status">Status</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#bindings">Bindings</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#other-changes">Other Changes</a></li>
-<li class="toctree-l6"><a class="reference internal" href="release-notes/release-notes-720.html#earlier-release-notes">Earlier release notes</a></li>
 </ul>
 </li>
 </ul>
@@ -2292,7 +2255,7 @@ If you are having trouble finding something in particular, try the search box in
     </p>
     <p>
         &copy; Copyright 2013-2021 Apple, Inc and the FoundationDB project authors.<br/>
-      Last updated on Jan 19, 2023.<br/>
+      Last updated on Apr 07, 2023.<br/>
     </p>
   </div>
 </footer>
