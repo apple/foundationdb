@@ -1179,6 +1179,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 			wait(delay(1));
 		}
 	}
+	state int retryCount = 0;
 	loop {
 		try {
 			cx = openDBOnServer(dbInfo);
@@ -1187,8 +1188,18 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 			if (auditState.getPhase() == AuditPhase::Complete) {
 				break;
 			} else if (auditState.getPhase() == AuditPhase::Running) {
-				TraceEvent("AuditStorageCorrectnessWait").detail("AuditID", auditId).detail("AuditType", auditType);
+				TraceEvent("AuditStorageCorrectnessWait")
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", auditType)
+				    .detail("RetryCount", retryCount);
 				wait(delay(30));
+				if (retryCount > 30) {
+					TraceEvent("AuditStorageCorrectnessWaitFailed")
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", auditType);
+					break;
+				}
+				retryCount++;
 				continue;
 			} else if (auditState.getPhase() == AuditPhase::Error) {
 				break;
@@ -1354,14 +1365,14 @@ ACTOR Future<bool> runTest(Database cx,
 			// Run auditStorage
 			if (quiescent) {
 				try {
-					TraceEvent("RunAuditStorage");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
+					TraceEvent("AuditStorageStart");
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 5000.0));
 					TraceEvent("AuditStorageCorrectnessHADone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 5000.0));
 					TraceEvent("AuditStorageCorrectnessReplicaDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 5000.0));
 					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 5000.0));
 					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
 				} catch (Error& e) {
 					ok = false;

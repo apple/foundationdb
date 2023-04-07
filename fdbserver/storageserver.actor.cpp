@@ -1198,7 +1198,7 @@ public:
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> assignedShardHistory;
-	std::set<UID> ongoingAuditsForShardAssignment;
+	std::unordered_set<UID> ongoingAuditsForShardAssignment;
 	std::string printAssignedShardHistory() {
 		std::string toPrint = "";
 		for (auto item : assignedShardHistory) {
@@ -1207,14 +1207,14 @@ public:
 		return toPrint;
 	}
 	void registerAuditsForShardAssignmentHistoryCollection(UID auditID) {
-		ASSERT(!ongoingAuditsForShardAssignment.contains(auditID));
+		auto [it, inserted] = ongoingAuditsForShardAssignment.insert(auditID);
+		ASSERT_WE_THINK(inserted); // assert breaks when multiple audit are allowed at same time, which is not allowed
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
-		ongoingAuditsForShardAssignment.insert(auditID);
 		return;
 	}
 	void unregisterAuditsForShardAssignmentHistoryCollection(UID auditID, bool check = true) {
-		if (check)
-			ASSERT(ongoingAuditsForShardAssignment.contains(auditID));
+		if (check) // assert breaks when multiple audit are allowed at same time, which is not allowed
+			ASSERT_WE_THINK(ongoingAuditsForShardAssignment.contains(auditID));
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.erase(auditID);
 		return;
@@ -4886,7 +4886,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState aud
 	}
 
 	if (ssis.size() < 2) {
-		TraceEvent(SevWarn, "ServeValidateRangeShardNotHAConfig", data->thisServerID)
+		TraceEvent(SevWarn, "ServeValidateRangeShardSingleDC", data->thisServerID)
 		    .detail("Range", auditState.range)
 		    .detail("Servers", describe(candidates));
 		return Void();

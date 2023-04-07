@@ -612,7 +612,7 @@ void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditStates,
                      int retryCount,
                      std::string context);
-ACTOR Future<Void> waitAuditStorageUntilFinish(Reference<DataDistributor> self, UID auditID, AuditType auditType);
+ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType);
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
@@ -636,12 +636,13 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           AuditStorageRequest req);
 
 ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
-	if (self->audits.empty() && self->initData->auditStates.empty()) {
+	// clear existing audits
+	self->audits.clear();
+	
+	if (self->initData->auditStates.empty()) {
 		self->auditInitialized.send(Void());
 		return Void();
 	}
-	// clear existing audits
-	self->audits.clear();
 	// resume from disk
 	ASSERT(!self->auditInitialized.getFuture().isReady());
 	state std::vector<Future<Void>> fs;
@@ -655,7 +656,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 		    .detail("AuditType", auditState.getType())
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		runAuditStorage(self, auditState, 0, "ResumeAudit");
-		fs.push_back(waitAuditStorageUntilFinish(self, auditState.id, auditState.getType()));
+		fs.push_back(waitForAuditStorage(self, auditState.id, auditState.getType()));
 	}
 	wait(waitForAll(fs));
 	ASSERT(!self->auditInitialized.getFuture().isReady());
@@ -1531,7 +1532,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditType", auditType)
 		    .detail("Range", audit->coreState.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
-		if (e.code() == error_code_operation_cancelled) {
+		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && e.code() != error_code_not_implemented) {
 			audit->retryCount++;
@@ -1554,7 +1555,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 }
 
 // Wait until the audit completes or this actor gets cancelled
-ACTOR Future<Void> waitAuditStorageUntilFinish(Reference<DataDistributor> self, UID auditID, AuditType auditType) {
+ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType) {
 	loop {
 		try {
 			TraceEvent(SevVerbose, "AuditStorageWaitUntilFinish", self->ddId)
@@ -1760,6 +1761,8 @@ ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, st
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType());
 	state StorageServerInterface targetServer;
+	state int64_t completedCount = 0;
+	state int64_t totalCount = 0;
 	try {
 		state ServerWorkerInfos serverWorkers = wait(self->txnProcessor->getServerListAndProcessClasses());
 		if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
@@ -1769,6 +1772,7 @@ ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, st
 			AuditStorageRequest req(
 			    audit->coreState.id, systemKeys, audit->coreState.getType()); // use systemKeys to represent this goal
 			audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
+			totalCount++;
 			wait(delay(0.1));
 		} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
 			// Pick every storage server to compare local shard and global assignment
@@ -1786,9 +1790,11 @@ ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, st
 				                                                          targetServer.uniqueID));
 				const AuditPhase phase = auditState.getPhase();
 				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+				totalCount++;
 				if (phase == AuditPhase::Complete) {
-					continue;
+					completedCount++;
 				} else if (phase == AuditPhase::Error) {
+					completedCount++;
 					audit->foundError = true;
 				} else {
 					ASSERT(phase == AuditPhase::Invalid);
@@ -1808,6 +1814,12 @@ ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, st
 		    .detail("AuditType", audit->coreState.getType());
 		throw e;
 	}
+	TraceEvent(SevInfo, "DDPartitionAuditJobByServerEnd", self->ddId)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("AuditType", audit->coreState.getType())
+	    .detail("TotalServers", totalCount)
+	    .detail("TotalComplete", completedCount)
+	    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 
 	return Void();
 }
@@ -1824,6 +1836,8 @@ ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
 	    .detail("AuditType", audit->coreState.getType());
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
+	state int64_t completedCount = 0;
+	state int64_t totalCount = 0;
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
 		std::vector<AuditStorageState> auditStates = wait(getAuditStateByRange(
@@ -1839,9 +1853,11 @@ ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
 		for (const auto& auditState : auditStates) {
 			const AuditPhase phase = auditState.getPhase();
 			ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+			totalCount++;
 			if (phase == AuditPhase::Complete) {
-				continue;
+				completedCount++;
 			} else if (phase == AuditPhase::Error) {
+				completedCount++;
 				audit->foundError = true;
 			} else {
 				ASSERT(phase == AuditPhase::Invalid);
@@ -1850,6 +1866,13 @@ ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
 		}
 		wait(delay(0.1));
 	}
+	TraceEvent(SevInfo, "DDPartitionAuditJobByRangeEnd", self->ddId)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("Range", range)
+	    .detail("AuditType", audit->coreState.getType())
+	    .detail("TotalRanges", totalCount)
+	    .detail("TotalComplete", completedCount)
+	    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 	return Void();
 }
 
@@ -1863,10 +1886,15 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	    .detail("AuditType", audit->coreState.getType());
 	state Key begin = range.begin;
 	state KeyRange currentRange;
+	state int64_t issueDoAuditCount = 0;
 
 	while (begin < range.end) {
 		currentRange = KeyRangeRef(begin, range.end);
 		try {
+			TraceEvent(SevInfo, "DDScheduleAuditOnCurrentRange", self->ddId)
+			    .detail("AuditID", audit->coreState.id)
+			    .detail("CurrentRange", currentRange)
+			    .detail("AuditType", audit->coreState.getType());
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
 
@@ -1892,6 +1920,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 						const int idx = deterministicRandom()->randomInt(0, it->second.size());
 						req.targetServers.push_back(it->second[idx].id());
 					}
+					issueDoAuditCount++;
 					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 				} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
 					auto it = rangeLocations[i].servers.begin(); // always compare primary DC
@@ -1914,6 +1943,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							req.targetServers.push_back(ssi.id());
 						}
 					}
+					issueDoAuditCount++;
 					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 				}
 				begin = rangeLocations[i].range.end;
@@ -1933,7 +1963,8 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	    .detail("Reason", "End")
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
-	    .detail("AuditType", audit->coreState.getType());
+	    .detail("AuditType", audit->coreState.getType())
+	    .detail("DoAuditCount", issueDoAuditCount);
 
 	return Void();
 }

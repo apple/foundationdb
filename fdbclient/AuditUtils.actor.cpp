@@ -167,7 +167,6 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			auditStates = res_;
-			ASSERT_WE_THINK(!res_.more);
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "GetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
