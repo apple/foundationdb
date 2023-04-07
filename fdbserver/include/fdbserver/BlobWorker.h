@@ -23,6 +23,7 @@
 
 #include "fdbclient/BlobWorkerCommon.h"
 
+#include "fdbclient/Notified.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/Knobs.h"
 
@@ -90,7 +91,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	// for client to know when it is safe to read a certain version and from where (check waitForVersion)
 	Version bufferedDeltaVersion; // largest delta version in currentDeltas (including empty versions)
-	Version pendingDeltaVersion = 0; // largest version in progress writing to s3/fdb
+	NotifiedVersion pendingDeltaVersion = NotifiedVersion(0); // largest version in progress writing to s3/fdb
 	NotifiedVersion durableDeltaVersion; // largest version persisted in s3/fdb
 	NotifiedVersion durableSnapshotVersion; // same as delta vars, except for snapshots
 	Version pendingSnapshotVersion = 0;
@@ -132,7 +133,7 @@ struct GranuleMetadata : NonCopyable, ReferenceCounted<GranuleMetadata> {
 
 	inline bool doEarlyReSnapshot() {
 		return runRDC.isSet() ||
-		       (forceCompactVersion <= pendingDeltaVersion && forceCompactVersion > pendingSnapshotVersion);
+		       (forceCompactVersion <= pendingDeltaVersion.get() && forceCompactVersion > pendingSnapshotVersion);
 	}
 };
 
