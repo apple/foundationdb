@@ -87,6 +87,9 @@ message(STATUS "Current git version ${CURRENT_GIT_VERSION}")
 ################################################################################
 # Version information
 ################################################################################
+if(DEFINED VERSION AND NOT VERSION STREQUAL CMAKE_PROJECT_VERSION)
+  message(FATAL_ERROR "The version parameter ${VERSION} differs from the project version ${CMAKE_PROJECT_VERSION}")
+endif()
 if (FDB_RELEASE_CANDIDATE)
     set(FDB_RELEASE_CANDIDATE_VERSION 1 CACHE STRING "release candidate version")
     set(FDB_VERSION ${PROJECT_VERSION}-rc${FDB_RELEASE_CANDIDATE_VERSION})
