@@ -90,6 +90,8 @@ struct RKRateUpdaterTestEnvironment {
 
 } // namespace
 
+// No processes are reporting any metrics to the rate updater. The default ratekeeper limit
+// is applied.
 TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
 	RKRateUpdaterTestEnvironment env(1000.0, 1);
 	env.update();
@@ -119,5 +121,18 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0 / 3);
+	return Void();
+}
+
+// Currently, a workload of 1000 transactions per second exceeding the sum of the target
+// storage queue bytes and spring bytes. The rate updater applies the maximum possible throttling
+// based on storage queue, limiting throughput to half the current transaction rate, or 500
+// transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
+	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 1500e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
 	return Void();
 }
