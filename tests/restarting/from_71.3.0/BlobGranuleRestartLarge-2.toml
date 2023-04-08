@@ -53,5 +53,9 @@ runSetup=false
     testDuration = 60.0
 
     [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 60.0
+
+    [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 60.0

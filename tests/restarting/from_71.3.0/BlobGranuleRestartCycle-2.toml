@@ -45,6 +45,10 @@ runSetup=false
     testDuration = 30.0
 
     [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 30.0
+
+    [[test.workload]]
     testName = 'BlobGranuleVerifier'
     testDuration = 30.0
     # cycle does its own workload checking, don't want clear racing with its checking

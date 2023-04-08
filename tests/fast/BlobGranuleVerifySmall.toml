@@ -41,3 +41,7 @@ testTitle = 'BlobGranuleVerifySmall'
     reboot = true
     testDuration = 60.0 
 
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 60.0
+
