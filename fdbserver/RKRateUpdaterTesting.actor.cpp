@@ -121,3 +121,40 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 	checkApproximatelyEqual(rateUpdater.getTpsLimit(), 2000.0);
 	return Void();
 }
+
+// Currently, a workload of 1000 transactions per second is exceeding the target storage queue
+// size by half of the spring bytes limit (1050MB SQ, with a 1GB taret and 100MB of spring).
+// The rate updater estimates that the cluster can handle 2/3 of the current transaction rate,
+// or ~667 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
+	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 1050e6, 1e6));
+
+	MockRKMetricsTracker metricsTracker;
+	MockRKRateServer rateServer(1000.0);
+	MockTagThrottler tagThrottler;
+	MockRKConfigurationMonitor configurationMonitor(1);
+	MockRKRecoveryTracker recoveryTracker;
+	Deque<double> actualTpsHistory;
+	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	double blobWorkerTime{ 0.0 };
+	double unblockedAssignmentTime{ 0.0 };
+
+	metricsTracker.updateStorageQueueInfo(ss);
+
+	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
+	RKRateUpdater rateUpdater(UID(), limits);
+
+	rateUpdater.update(metricsTracker,
+	                   rateServer,
+	                   tagThrottler,
+	                   configurationMonitor,
+	                   recoveryTracker,
+	                   actualTpsHistory,
+	                   false,
+	                   blobWorkerVersionHistory,
+	                   blobWorkerTime,
+	                   unblockedAssignmentTime);
+
+	checkApproximatelyEqual(rateUpdater.getTpsLimit(), 2000.0 / 3);
+	return Void();
+}
