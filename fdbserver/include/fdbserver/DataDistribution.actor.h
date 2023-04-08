@@ -505,44 +505,6 @@ struct ShardSizeBounds {
 	}
 
 	static ShardSizeBounds shardSizeBoundsBeforeTrack();
-
-	void resetBytes() {
-		max.bytes = -1;
-		min.bytes = -1;
-		permittedError.bytes = -1;
-	}
-
-	void resetBytesWrittenPerKSecond() {
-		max.bytesWrittenPerKSecond = max.infinity;
-		min.bytesWrittenPerKSecond = 0;
-		permittedError.bytesWrittenPerKSecond = permittedError.infinity;
-	}
-
-	void resetBytesReadPerKSecond() {
-		max.bytesReadPerKSecond = max.infinity;
-		min.bytesReadPerKSecond = 0;
-		permittedError.bytesReadPerKSecond = permittedError.infinity;
-	}
-
-	void resetOpsReadPerKSecond() {
-		max.opsReadPerKSecond = max.infinity;
-		min.opsReadPerKSecond = 0;
-		permittedError.opsReadPerKSecond = permittedError.infinity;
-	}
-
-	void resetIOPerKSecond() {
-		max.iosPerKSecond = max.infinity;
-		min.iosPerKSecond = 0;
-		permittedError.iosPerKSecond = permittedError.infinity;
-	}
-
-	void reset() {
-		resetBytes();
-		resetBytesWrittenPerKSecond();
-		resetIOPerKSecond();
-		resetBytesReadPerKSecond();
-		resetOpsReadPerKSecond();
-	}
 };
 
 // Gets the permitted size and IO bounds for a shard
