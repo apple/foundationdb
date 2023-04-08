@@ -55,34 +55,45 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	return ss;
 }
 
-} // namespace
-
-TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
+struct RKRateUpdaterTestEnvironment {
 	MockRKMetricsTracker metricsTracker;
-	MockRKRateServer rateServer(1000.0);
+	MockRKRateServer rateServer;
 	MockTagThrottler tagThrottler;
-	MockRKConfigurationMonitor configurationMonitor(1);
+	MockRKConfigurationMonitor configurationMonitor;
 	MockRKRecoveryTracker recoveryTracker;
 	Deque<double> actualTpsHistory;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	double blobWorkerTime{ 0.0 };
 	double unblockedAssignmentTime{ 0.0 };
 
-	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
-	RKRateUpdater rateUpdater(UID(), limits);
+	RKRateUpdater rateUpdater;
 
-	rateUpdater.update(metricsTracker,
-	                   rateServer,
-	                   tagThrottler,
-	                   configurationMonitor,
-	                   recoveryTracker,
-	                   actualTpsHistory,
-	                   false,
-	                   blobWorkerVersionHistory,
-	                   blobWorkerTime,
-	                   unblockedAssignmentTime);
+	RKRateUpdaterTestEnvironment(double actualTps, int storageTeamSize)
+	  : rateServer(actualTps), configurationMonitor(storageTeamSize),
+	    rateUpdater(UID{},
+	                RatekeeperLimits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0)) {
+	}
 
-	checkApproximatelyEqual(rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
+	void update() {
+		rateUpdater.update(metricsTracker,
+		                   rateServer,
+		                   tagThrottler,
+		                   configurationMonitor,
+		                   recoveryTracker,
+		                   actualTpsHistory,
+		                   false,
+		                   blobWorkerVersionHistory,
+		                   blobWorkerTime,
+		                   unblockedAssignmentTime);
+	}
+};
+
+} // namespace
+
+TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.update();
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
 	return Void();
 }
 
@@ -91,34 +102,10 @@ TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
 // that the cluster can handle double the current transaction rate, or 2000 transactions per second.
 TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 950e6, 1e6));
-
-	MockRKMetricsTracker metricsTracker;
-	MockRKRateServer rateServer(1000.0);
-	MockTagThrottler tagThrottler;
-	MockRKConfigurationMonitor configurationMonitor(1);
-	MockRKRecoveryTracker recoveryTracker;
-	Deque<double> actualTpsHistory;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	double blobWorkerTime{ 0.0 };
-	double unblockedAssignmentTime{ 0.0 };
-
-	metricsTracker.updateStorageQueueInfo(ss);
-
-	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
-	RKRateUpdater rateUpdater(UID(), limits);
-
-	rateUpdater.update(metricsTracker,
-	                   rateServer,
-	                   tagThrottler,
-	                   configurationMonitor,
-	                   recoveryTracker,
-	                   actualTpsHistory,
-	                   false,
-	                   blobWorkerVersionHistory,
-	                   blobWorkerTime,
-	                   unblockedAssignmentTime);
-
-	checkApproximatelyEqual(rateUpdater.getTpsLimit(), 2000.0);
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0);
 	return Void();
 }
 
@@ -128,33 +115,9 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 // or ~667 transactions per second.
 TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 1050e6, 1e6));
-
-	MockRKMetricsTracker metricsTracker;
-	MockRKRateServer rateServer(1000.0);
-	MockTagThrottler tagThrottler;
-	MockRKConfigurationMonitor configurationMonitor(1);
-	MockRKRecoveryTracker recoveryTracker;
-	Deque<double> actualTpsHistory;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	double blobWorkerTime{ 0.0 };
-	double unblockedAssignmentTime{ 0.0 };
-
-	metricsTracker.updateStorageQueueInfo(ss);
-
-	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
-	RKRateUpdater rateUpdater(UID(), limits);
-
-	rateUpdater.update(metricsTracker,
-	                   rateServer,
-	                   tagThrottler,
-	                   configurationMonitor,
-	                   recoveryTracker,
-	                   actualTpsHistory,
-	                   false,
-	                   blobWorkerVersionHistory,
-	                   blobWorkerTime,
-	                   unblockedAssignmentTime);
-
-	checkApproximatelyEqual(rateUpdater.getTpsLimit(), 2000.0 / 3);
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0 / 3);
 	return Void();
 }
