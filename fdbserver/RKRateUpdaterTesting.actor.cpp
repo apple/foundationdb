@@ -140,3 +140,16 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
 	return Void();
 }
+
+// For the one storage process emitting metrics, storage queue is below the target bytes minus
+// the spring bytes. Therefore, throttling is enforced to ensure that at the current write rate
+// per transaction, an MVCC window worth of writes does not cause storage queue to rise above
+// the target bytes minus spring bytes.
+TEST_CASE("/fdbserver/RKRateUpdater/WriteBandwidthMVCC") {
+	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 500e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_bandwidth_mvcc);
+	return Void();
+}
