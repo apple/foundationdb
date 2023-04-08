@@ -1660,7 +1660,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
-			healthyDestinations.addReadInFlightToTeam(+metrics.bytesReadPerKSecond);
+			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1816,7 +1816,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				// Note: It’s equal to trigger([healthyDestinations, readLoad], which is a value capture of
 				// healthyDestinations. Have to create a reference to healthyDestinations because in ACTOR the state
 				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
@@ -1873,7 +1873,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			} else {
 				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
@@ -2000,7 +2000,9 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	}
 
 	auto& [shard, metrics] = metricsList[0];
-	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
+	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+	    .detail("ShardReadOps", metrics.opsReadPerKSecond);
+
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
