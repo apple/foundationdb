@@ -153,3 +153,37 @@ TEST_CASE("/fdbserver/RKRateUpdater/WriteBandwidthMVCC") {
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_bandwidth_mvcc);
 	return Void();
 }
+
+// The current 1000 transaction per second workload is saturating the storage queue of one server,
+// but not saturating the storage queue of the other storage server in a different zone.
+// If SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND > 0, the rate updated does not throttle based
+// on the worst storage server's queue.
+TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZone") {
+	state LocalityData locality1({}, "zone1"_sr, {}, {});
+	state LocalityData locality2({}, "zone2"_sr, {}, {});
+	state std::vector<Future<StorageQueueInfo>> ssFutures;
+
+	if (SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND == 0) {
+		return Void();
+	}
+
+	ssFutures.reserve(2);
+	ssFutures.push_back(getMockStorageQueueInfo(UID(1, 1), locality1, 500e6, 1e6));
+	ssFutures.push_back(getMockStorageQueueInfo(UID(2, 2), locality2, 1500e6, 1e6));
+	wait(waitForAll(ssFutures));
+	RKRateUpdaterTestEnvironment env(1000.0, 2);
+	env.metricsTracker.updateStorageQueueInfo(ssFutures[0].get());
+	env.metricsTracker.updateStorageQueueInfo(ssFutures[1].get());
+	env.update();
+
+	// Even though 1 storage server won't allow more that the current transaction rate, the
+	// rate updater will still allow more than the current transaction rate, because this storage
+	// server's zone is ignored.
+	ASSERT_GT(env.rateUpdater.getTpsLimit(), 1000.0);
+
+	// Even though the storage server with high storage queue is ignored, we still report write
+	// queue size as the limiting reason.
+	// TODO: Should this behaviour be changed?
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	return Void();
+}
