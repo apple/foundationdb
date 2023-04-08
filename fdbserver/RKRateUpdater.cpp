@@ -647,6 +647,10 @@ double RKRateUpdater::getTpsLimit() const {
 	return limits.tpsLimit;
 }
 
+limitReason_t RKRateUpdater::getLimitReason() const {
+	return static_cast<limitReason_t>(limits.reasonMetric.getValue());
+}
+
 double RKRateUpdater::getActualTps(IRKRateServer const& rateServer, IRKMetricsTracker const& metricsTracker) {
 	double result = rateServer.getSmoothReleasedTransactionRate();
 	// SOMEDAY: Remove the max( 1.0, ... ) since the below calculations _should_ be able to recover back

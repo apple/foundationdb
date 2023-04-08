@@ -96,6 +96,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
 	RKRateUpdaterTestEnvironment env(1000.0, 1);
 	env.update();
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::unlimited);
 	return Void();
 }
 
@@ -108,6 +109,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0);
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
 	return Void();
 }
 
@@ -121,6 +123,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0 / 3);
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
 	return Void();
 }
 
@@ -134,5 +137,6 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
 	return Void();
 }

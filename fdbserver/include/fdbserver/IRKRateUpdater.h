@@ -25,6 +25,7 @@ public:
 	virtual ~IRKRateUpdater() = default;
 	virtual HealthMetrics const& getHealthMetrics() const& = 0;
 	virtual double getTpsLimit() const = 0;
+	virtual limitReason_t getLimitReason() const = 0;
 	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
 	                    class ITagThrottler const&,
@@ -64,6 +65,8 @@ public:
 	~RKRateUpdater();
 
 	double getTpsLimit() const override;
+
+	limitReason_t getLimitReason() const override;
 
 	void update(class IRKMetricsTracker const&,
 	            class IRKRateServer const&,
