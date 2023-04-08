@@ -153,4 +153,5 @@ public:
 	bool ssListFetchTimedOut() const override { return false; }
 	double getSmoothTotalDurableBytesRate() const override { return 0; }
 	Future<Void> run() override { return Never(); }
+	void updateStorageQueueInfo(StorageQueueInfo const& ss) { storageQueueInfo.insert(mapPair(ss.id, ss)); }
 };

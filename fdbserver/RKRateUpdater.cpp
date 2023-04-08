@@ -608,7 +608,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		limits.tpsLimit = std::min(limits.tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MAX_RATE);
 	}
 
-	if (deterministicRandom()->random01() < 0.1) {
+	if (deterministicRandom()->random01() < 1.0) {
 		const std::string& name = limits.rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), ratekeeperId)
 		    .detail("TPSLimit", limits.tpsLimit)
@@ -673,8 +673,11 @@ int64_t RKRateUpdater::getTotalDiskUsageBytes(IRKMetricsTracker const& metricsTr
 }
 
 bool RKRateUpdater::shouldBeVerbose() {
+	/*
 	return SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
 	       (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
+	*/
+	return true;
 }
 
 void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& metricsTracker) {
@@ -709,41 +712,3 @@ RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,
     lastDurabilityLag(0), durabilityLagLimit(std::numeric_limits<double>::infinity()), bwLagTarget(bwLagTarget),
     priority(priority), context(context),
     rkUpdateEventCacheHolder(makeReference<EventCacheHolder>("RkUpdate" + context)) {}
-
-namespace {
-
-void checkApproximatelyEqual(double a, double b) {
-	ASSERT(a < b + 0.01 || a < b * 1.01);
-	ASSERT(b < a + 0.01 || b < a * 1.01);
-}
-
-} // namespace
-
-TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
-	MockRKMetricsTracker metricsTracker;
-	MockRKRateServer rateServer;
-	MockTagThrottler tagThrottler;
-	MockRKConfigurationMonitor configurationMonitor(3);
-	MockRKRecoveryTracker recoveryTracker;
-	Deque<double> actualTpsHistory;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	double blobWorkerTime{ 0.0 };
-	double unblockedAssignmentTime{ 0.0 };
-
-	RatekeeperLimits limits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0);
-	RKRateUpdater rateUpdater(UID(), limits);
-
-	rateUpdater.update(metricsTracker,
-	                   rateServer,
-	                   tagThrottler,
-	                   configurationMonitor,
-	                   recoveryTracker,
-	                   actualTpsHistory,
-	                   false,
-	                   blobWorkerVersionHistory,
-	                   blobWorkerTime,
-	                   unblockedAssignmentTime);
-
-	checkApproximatelyEqual(rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
-	return Void();
-}

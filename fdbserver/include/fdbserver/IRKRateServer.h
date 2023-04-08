@@ -81,9 +81,11 @@ public:
 
 class MockRKRateServer : public IRKRateServer {
 	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
+	double rate;
 
 public:
-	double getSmoothReleasedTransactionRate() const override { return 0; }
+	explicit MockRKRateServer(double rate) : rate(rate) {}
+	double getSmoothReleasedTransactionRate() const override { return rate; }
 	double getSmoothBatchReleasedTransactionRate() const override { return 0; }
 	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override { return grvProxyInfo; }
 	void cleanupExpiredGrvProxies() override {}
