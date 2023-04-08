@@ -71,11 +71,78 @@ ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState
 	return auditId;
 }
 
-ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState, std::string context) {
+ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
+                                            MoveKeyLockInfo lock,
+                                            bool isDDEnabled,
+                                            bool isWrite = true) {
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	if (!isDDEnabled) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
+		throw movekeys_conflict(); // need a new name
+	}
+	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+
+	if (currentOwner == lock.prevOwner) {
+		// Check that the previous owner hasn't touched the lock since we took it
+		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+		if (lastWrite != lock.prevWrite) {
+			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
+			throw movekeys_conflict(); // need a new name
+		}
+
+		// Take the lock
+		if (isWrite) {
+			BinaryWriter wrMyOwner(Unversioned());
+			wrMyOwner << lock.myOwner;
+			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
+			BinaryWriter wrLastWrite(Unversioned());
+			UID lastWriter = deterministicRandom()->randomUniqueID();
+			wrLastWrite << lastWriter;
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			TraceEvent("CheckMoveKeysLock")
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("Writer", lastWriter.toString());
+		}
+
+		return Void();
+	} else if (currentOwner == lock.myOwner) {
+		if (isWrite) {
+			// Touch the lock, preventing overlapping attempts to take it
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
+			tr->makeSelfConflicting();
+		}
+
+		return Void();
+	} else {
+		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
+		throw movekeys_conflict(); // need a new name
+	}
+}
+
+ACTOR Future<Void> persistAuditState(Database cx,
+                                     AuditStorageState auditState,
+                                     std::string context,
+                                     MoveKeyLockInfo lock,
+                                     bool ddEnabled) {
 	state Transaction tr(cx);
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			auto auditPhase = auditState.getPhase();
+			if (auditPhase == AuditPhase::Complete || auditPhase == AuditPhase::Failed ||
+			    auditPhase == AuditPhase::Error) {
+				wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			}
+
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
 			TraceEvent(SevDebug, "PersistAuditState", auditState.id)
@@ -104,6 +171,8 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
 			TraceEvent(SevDebug, "ReadAuditState", id)
@@ -139,6 +208,8 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(krmSetRange(&tr,
 			                 auditRangePrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
@@ -161,6 +232,8 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditRangePrefixFor(type, auditId),
 			                                     range,
@@ -198,6 +271,8 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(krmSetRange(&tr,
 			                 auditServerPrefixFor(auditState.getType(), auditState.id),
 			                 singleKeyRange(KeyRef(auditState.auditServerId.toString())),
@@ -217,6 +292,8 @@ ACTOR Future<AuditStorageState> getAuditStateByServer(Database cx, AuditType typ
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditServerPrefixFor(type, auditId),
 			                                     singleKeyRange(KeyRef(auditServerId.toString())),

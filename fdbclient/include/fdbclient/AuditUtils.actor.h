@@ -32,8 +32,16 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+struct MoveKeyLockInfo {
+	UID prevOwner, myOwner, prevWrite;
+};
+
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState);
-ACTOR Future<Void> persistAuditState(Database cx, AuditStorageState auditState, std::string context);
+ACTOR Future<Void> persistAuditState(Database cx,
+                                     AuditStorageState auditState,
+                                     std::string context,
+                                     MoveKeyLockInfo lock,
+                                     bool ddEnabled);
 ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
 
