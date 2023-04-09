@@ -146,11 +146,13 @@ public:
 class MockRKMetricsTracker : public IRKMetricsTracker {
 	Map<UID, StorageQueueInfo> storageQueueInfo;
 	Map<UID, TLogQueueInfo> tlogQueueInfo;
+	bool failedSSListFetch{ false };
 
 public:
 	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const& override { return storageQueueInfo; }
 	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const& override { return tlogQueueInfo; }
-	bool ssListFetchTimedOut() const override { return false; }
+	void failSSListFetch() { failedSSListFetch = true; }
+	bool ssListFetchTimedOut() const override { return failedSSListFetch; }
 	double getSmoothTotalDurableBytesRate() const override { return 0; }
 	Future<Void> run() override { return Never(); }
 	void updateStorageQueueInfo(StorageQueueInfo const& ss) { storageQueueInfo.insert(mapPair(ss.id, ss)); }

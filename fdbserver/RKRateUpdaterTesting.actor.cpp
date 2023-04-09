@@ -205,3 +205,14 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighNDV") {
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_durability_lag);
 	return Void();
 }
+
+// The rate updater was unable to fetch the list of storage servers. Therefore, the tps limit
+// is set to 0.
+TEST_CASE("/fdbserver/RKRateUpdater/ServerListFetchFailed") {
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.failSSListFetch();
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_list_fetch_failed);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	return Void();
+}
