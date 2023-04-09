@@ -1057,3 +1057,8 @@ Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(co
                                                                               double maxStaleness) const {
 	return cx->getStorageStats(id, maxStaleness);
 }
+
+Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
+                                                                                  double maxStaleness) const {
+	return {};
+}
