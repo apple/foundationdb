@@ -703,11 +703,11 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           AuditStorageRequest req);
 
 ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
-	cancelAllAuditsInAuditMap(self); // cancel existing audits
 	if (self->initData->auditStates.empty()) {
 		self->auditInitialized.send(Void());
 		return Void();
 	}
+	cancelAllAuditsInAuditMap(self); // cancel existing audits
 	// resume from disk
 	ASSERT(!self->auditInitialized.getFuture().isReady());
 	for (const auto& auditState : self->initData->auditStates) {
@@ -1619,13 +1619,13 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && e.code() != error_code_not_implemented) {
 			audit->retryCount++;
 			audit->actors.clear(true);
-			TraceEvent(SevInfo, "DDAuditStorageCoreRetry", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
 			    .detail("AuditID", auditID)
 			    .detail("AuditType", auditType)
 			    .detail("RetryCount", currentRetryCount)
 			    .detail("Contains", self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
 			wait(delay(0.1));
-			TraceEvent(SevInfo, "DDAuditStorageCoreRetryAfterWait", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageCoreRetryAfterWait", self->ddId)
 			    .detail("AuditID", auditID)
 			    .detail("AuditType", auditType)
 			    .detail("RetryCount", currentRetryCount)
