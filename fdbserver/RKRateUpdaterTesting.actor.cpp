@@ -21,7 +21,9 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
                                                        LocalityData locality,
                                                        int64_t storageQueueBytes,
                                                        double inputBytesPerSecond,
-                                                       int64_t targetNonDurableVersionsLag = 5e6) {
+                                                       int64_t targetNonDurableVersionsLag = 5e6,
+                                                       int64_t availableSpace = 100e9,
+                                                       int64_t totalSpace = 100e9) {
 	state int iterations = 10000;
 	state StorageQueueInfo ss(id, locality);
 	state StorageQueuingMetricsReply reply;
@@ -31,9 +33,10 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	reply.instanceID = 0;
 	reply.bytesInput = storageQueueBytes;
 	reply.bytesDurable = 0;
-	reply.storageBytes.total = 100e9;
-	reply.storageBytes.available = 100e9;
-	reply.storageBytes.free = 100e9;
+	reply.storageBytes.total = totalSpace;
+	reply.storageBytes.available = availableSpace;
+	reply.storageBytes.free = availableSpace;
+	reply.storageBytes.used = totalSpace - availableSpace;
 	reply.version = std::max<Version>(targetNonDurableVersionsLag, (1e6 * storageQueueBytes) / inputBytesPerSecond);
 	reply.durableVersion = 0;
 	ss.update(reply, smoothTotalDurableBytes);
@@ -49,8 +52,8 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 
 	checkApproximatelyEqual(ss.getSmoothInputBytesRate(), inputBytesPerSecond);
 	checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), inputBytesPerSecond);
-	checkApproximatelyEqual(ss.getSmoothFreeSpace(), 100e9);
-	checkApproximatelyEqual(ss.getSmoothTotalSpace(), 100e9);
+	checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace);
+	checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace);
 	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes);
 	checkApproximatelyEqual(
 	    ss.getDurabilityLag(),
@@ -214,5 +217,37 @@ TEST_CASE("/fdbserver/RKRateUpdater/ServerListFetchFailed") {
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_list_fetch_failed);
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	return Void();
+}
+
+// Though the storage queue is only 300MB (less than the threshold for throttling on storage queue alone),
+// the storage server only has 300MB of space to spare before hitting the MIN_AVAILABLE_SPACE threshold.
+// As a result, the rate updater throttles at the current transaction rate of 1000 TPS.
+TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpace") {
+	int64_t totalSpace = 1e9;
+	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + 300e6;
+	StorageQueueInfo ss =
+	    wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 300e6, 1e6, 5e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 1000.0);
+	return Void();
+}
+
+// Though the storage queue is only 600MB (less than the threshold for throttling on storage queue alone),
+// the storage server only has 300MB of space to spare before hitting the MIN_AVAILABLE_SPACE threshold.
+// As a result, the rate updater throttles at half the current transaction rate, or 500 TPS.
+TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpace2") {
+	int64_t totalSpace = 1e9;
+	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + 300e6;
+	StorageQueueInfo ss =
+	    wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 600e6, 1e6, 5e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
 	return Void();
 }
