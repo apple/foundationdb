@@ -181,12 +181,13 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
 // the spring bytes. Therefore, throttling is enforced to ensure that at the current write rate
 // per transaction, an MVCC window worth of writes does not cause storage queue to rise above
 // the target bytes minus spring bytes.
-TEST_CASE("/fdbserver/RKRateUpdater/WriteBandwidthMVCC") {
+TEST_CASE("/fdbserver/RKRateUpdater/StorageWriteBandwidthMVCC") {
 	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 500e6, 1e6));
 	RKRateUpdaterTestEnvironment env(1000.0, 1);
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_bandwidth_mvcc);
+	ASSERT_GT(env.rateUpdater.getTpsLimit(), 1000.0);
 	return Void();
 }
 
@@ -347,5 +348,19 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue3") {
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
+	return Void();
+}
+
+// For the one tlog process emitting metrics, the queue is below the target bytes minus
+// the spring bytes. Therefore, throttling is enforced to ensure that at the current write
+// rate per transaction, an MVCC window worth of writes does not cause tlog queue to rise
+// above the target bytes minues spring bytes.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogWriteBandwidthMVCC") {
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 500e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_mvcc_write_bandwidth);
+	ASSERT_GT(env.rateUpdater.getTpsLimit(), 1000.0);
 	return Void();
 }
