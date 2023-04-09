@@ -650,8 +650,10 @@ protected:
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
 
-	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
 	void updateTeamPivotValues();
+
+	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
+	void updateAvailableSpacePivots();
 
 	void updateCpuPivots();
 

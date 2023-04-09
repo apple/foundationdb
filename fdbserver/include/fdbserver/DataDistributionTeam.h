@@ -22,6 +22,33 @@
 
 #include "fdbclient/StorageServerInterface.h"
 
+struct GetTeamRequest;
+namespace data_distribution {
+class EligibilityCounter {
+public:
+	enum Type {
+		NONE = 0, // don't care about eligibility
+		LOW_CPU = 1,
+		LOW_DISK_UTIL = 2
+	};
+
+	// set the count of type to 0
+	void reset(Type type);
+
+	// return the minimal count of a combined eligible type
+	unsigned getCount(int combinedType) const;
+
+	// increase the count of type
+	void increase(Type type);
+
+	static int fromGetTeamRequest(GetTeamRequest const&);
+
+private:
+	std::map<Type, unsigned int> type_count;
+};
+
+} // namespace data_distribution
+
 struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
