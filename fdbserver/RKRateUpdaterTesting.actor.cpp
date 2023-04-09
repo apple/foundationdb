@@ -33,7 +33,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	reply.storageBytes.total = 100e9;
 	reply.storageBytes.available = 100e9;
 	reply.storageBytes.free = 100e9;
-	reply.version = std::max(5.0, storageQueueBytes / inputBytesPerSecond);
+	reply.version = std::max(5e6, (1e6 * storageQueueBytes) / inputBytesPerSecond);
 	reply.durableVersion = 0;
 	ss.update(reply, smoothTotalDurableBytes);
 
@@ -51,6 +51,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	checkApproximatelyEqual(ss.getSmoothFreeSpace(), 100e9);
 	checkApproximatelyEqual(ss.getSmoothTotalSpace(), 100e9);
 	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes);
+	checkApproximatelyEqual(ss.getDurabilityLag(), std::max(5e6, (1e6 * storageQueueBytes) / inputBytesPerSecond));
 
 	return ss;
 }
@@ -71,7 +72,10 @@ struct RKRateUpdaterTestEnvironment {
 	RKRateUpdaterTestEnvironment(double actualTps, int storageTeamSize)
 	  : rateServer(actualTps), configurationMonitor(storageTeamSize),
 	    rateUpdater(UID{},
-	                RatekeeperLimits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 1e6, 5e6, 300.0)) {
+	                RatekeeperLimits(TransactionPriority::DEFAULT, "", 1000e6, 100e6, 1000e6, 100e6, 2e9, 2e9, 300.0)) {
+		for (int i = 0; i <= SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES; ++i) {
+			actualTpsHistory.push_back(actualTps);
+		}
 	}
 
 	void update() {
