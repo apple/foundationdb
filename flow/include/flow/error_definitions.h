@@ -374,6 +374,7 @@ ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
 ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
+ERROR( encrypt_key_check_value_mismatch, 2711, "Encryption key-check-value mismatch")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

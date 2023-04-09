@@ -286,8 +286,12 @@ struct AesCtrWithAuthV1 {
 
 	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
+	// Text cipher Key Check Value
+	EncryptCipherKeyCheckValue textKCV;
 	// Header cipher encryption information
 	BlobCipherDetails cipherHeaderDetails;
+	// Header cipher Key Check Value
+	EncryptCipherKeyCheckValue headerKCV;
 	// Initialization vector
 	uint8_t iv[AES_256_IV_LENGTH];
 	// Authentication token
@@ -295,10 +299,12 @@ struct AesCtrWithAuthV1 {
 
 	AesCtrWithAuthV1() = default;
 	AesCtrWithAuthV1(const BlobCipherDetails& textDetails,
+	                 const EncryptCipherKeyCheckValue tKCV,
 	                 const BlobCipherDetails& headerDetails,
+	                 const EncryptCipherKeyCheckValue hKCV,
 	                 const uint8_t* ivBuf,
 	                 const int ivLen)
-	  : cipherTextDetails(textDetails), cipherHeaderDetails(headerDetails) {
+	  : cipherTextDetails(textDetails), textKCV(tKCV), cipherHeaderDetails(headerDetails), headerKCV(hKCV) {
 		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 		memcpy(&iv[0], ivBuf, ivLen);
 		memset(&authToken[0], 0, Params::authTokenSize);
@@ -306,15 +312,18 @@ struct AesCtrWithAuthV1 {
 
 	bool operator==(const Self& o) const {
 		return cipherHeaderDetails == o.cipherHeaderDetails && cipherTextDetails == o.cipherTextDetails &&
-		       memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0 &&
+		       textKCV == o.textKCV && headerKCV == o.headerKCV && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0 &&
 		       memcmp(&authToken[0], &o.authToken[0], Params::authTokenSize) == 0;
 	}
 
-	static uint32_t getSize() { return BlobCipherDetails::getSize() * 2 + AES_256_IV_LENGTH + Params::authTokenSize; }
+	static uint32_t getSize() {
+		return BlobCipherDetails::getSize() * 2 + sizeof(EncryptCipherKeyCheckValue) * 2 + AES_256_IV_LENGTH +
+		       Params::authTokenSize;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails, cipherHeaderDetails);
+		serializer(ar, cipherTextDetails, textKCV, cipherHeaderDetails, headerKCV);
 		ar.serializeBytes(iv, AES_256_IV_LENGTH);
 		ar.serializeBytes(authToken, Params::authTokenSize);
 	}
@@ -386,25 +395,33 @@ struct AesCtrNoAuthV1 {
 
 	// Text cipher encryption information
 	BlobCipherDetails cipherTextDetails;
+	// Text cipher Key Check Value
+	EncryptCipherKeyCheckValue textKCV;
 	// Initialization vector
 	uint8_t iv[AES_256_IV_LENGTH];
 
 	AesCtrNoAuthV1() = default;
-	AesCtrNoAuthV1(const BlobCipherDetails& textDetails, const uint8_t* ivBuf, const int ivLen)
-	  : cipherTextDetails(textDetails) {
+	AesCtrNoAuthV1(const BlobCipherDetails& textDetails,
+	               const EncryptCipherKeyCheckValue tKCV,
+	               const uint8_t* ivBuf,
+	               const int ivLen)
+	  : cipherTextDetails(textDetails), textKCV(tKCV) {
 		ASSERT_EQ(ivLen, AES_256_IV_LENGTH);
 		memcpy(&iv[0], ivBuf, ivLen);
 	}
 
 	bool operator==(const AesCtrNoAuthV1& o) const {
-		return cipherTextDetails == o.cipherTextDetails && memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
+		return cipherTextDetails == o.cipherTextDetails && textKCV == o.textKCV &&
+		       memcmp(&iv[0], &o.iv[0], AES_256_IV_LENGTH) == 0;
 	}
 
-	static uint32_t getSize() { return BlobCipherDetails::getSize() + AES_256_IV_LENGTH; }
+	static uint32_t getSize() {
+		return BlobCipherDetails::getSize() + sizeof(EncryptCipherKeyCheckValue) + AES_256_IV_LENGTH;
+	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, cipherTextDetails);
+		serializer(ar, cipherTextDetails, textKCV);
 		ar.serializeBytes(iv, AES_256_IV_LENGTH);
 	}
 };
@@ -453,6 +470,16 @@ struct AesCtrNoAuth {
 	}
 };
 
+struct EncryptHeaderCipherKCVs {
+	EncryptCipherKeyCheckValue textKCV;
+	Optional<EncryptCipherKeyCheckValue> headerKCV;
+
+	EncryptHeaderCipherKCVs() = default;
+	EncryptHeaderCipherKCVs(const EncryptCipherKeyCheckValue tKCV) : textKCV(tKCV) {}
+	EncryptHeaderCipherKCVs(const EncryptCipherKeyCheckValue tKCV, const EncryptCipherKeyCheckValue hKCV)
+	  : textKCV(tKCV), headerKCV(hKCV) {}
+};
+
 struct BlobCipherEncryptHeaderRef {
 	// Serializable fields
 	std::variant<BlobCipherEncryptHeaderFlagsV1> flags;
@@ -492,9 +519,11 @@ struct BlobCipherEncryptHeaderRef {
 	const EncryptHeaderCipherDetails getCipherDetails() const;
 	EncryptAuthTokenMode getAuthTokenMode() const;
 	EncryptCipherDomainId getDomainId() const;
+	EncryptHeaderCipherKCVs getKCVs() const;
 
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
+	                                     const EncryptHeaderCipherKCVs& kcvs,
 	                                     const StringRef& ivRef) const;
 };
 
@@ -508,7 +537,7 @@ struct BlobCipherEncryptHeaderRef {
 
 #pragma pack(push, 1) // exact fit - no padding
 typedef struct BlobCipherEncryptHeader {
-	static constexpr int headerSize = 104;
+	static constexpr int headerSize = 112;
 	union {
 		struct {
 			uint8_t size; // reading first byte is sufficient to determine header
@@ -524,8 +553,12 @@ typedef struct BlobCipherEncryptHeader {
 
 	// Cipher text encryption information
 	BlobCipherDetails cipherTextDetails;
+	// Text Key Check Value
+	EncryptCipherKeyCheckValue textKCV;
 	// Cipher header encryption information
 	BlobCipherDetails cipherHeaderDetails;
+	// Header Key Check Value
+	EncryptCipherKeyCheckValue headerKCV;
 	// Initialization vector used to encrypt the payload.
 	uint8_t iv[AES_256_IV_LENGTH];
 
@@ -592,12 +625,14 @@ public:
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
 	              const int baseCiphLen,
+	              const EncryptCipherKeyCheckValue baseCipherKCV,
 	              const int64_t refreshAt,
 	              int64_t expireAt);
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
-	              int baseCiphLen,
+	              const int baseCiphLen,
+	              const EncryptCipherKeyCheckValue baseCipherKCV,
 	              const EncryptCipherRandomSalt& salt,
 	              const int64_t refreshAt,
 	              const int64_t expireAt);
@@ -609,6 +644,7 @@ public:
 	EncryptCipherRandomSalt getSalt() const { return randomSalt; }
 	EncryptCipherBaseKeyId getBaseCipherId() const { return baseCipherId; }
 	int getBaseCipherLen() const { return baseCipherLen; }
+	EncryptCipherKeyCheckValue getBaseCipherKCV() const { return baseCipherKCV; }
 	uint8_t* rawCipher() const { return cipher.get(); }
 	uint8_t* rawBaseCipher() const { return baseCipher.get(); }
 	bool isEqual(const Reference<BlobCipherKey> toCompare) {
@@ -646,6 +682,7 @@ private:
 	EncryptCipherDomainId encryptDomainId;
 	// Base encryption cipher key properties
 	std::unique_ptr<uint8_t[]> baseCipher;
+	EncryptCipherKeyCheckValue baseCipherKCV;
 	int baseCipherLen;
 	EncryptCipherBaseKeyId baseCipherId;
 	// Random salt used for encryption cipher key derivation
@@ -658,9 +695,10 @@ private:
 	int64_t expireAtTS;
 
 	void initKey(const EncryptCipherDomainId& domainId,
+	             const EncryptCipherBaseKeyId& baseCiphId,
 	             const uint8_t* baseCiph,
 	             const int baseCiphLen,
-	             const EncryptCipherBaseKeyId& baseCiphId,
+	             const EncryptCipherKeyCheckValue baseCipherKCV,
 	             const EncryptCipherRandomSalt& salt,
 	             const int64_t refreshAt,
 	             const int64_t expireAt);
@@ -725,7 +763,8 @@ public:
 
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
-	                                             int baseCipherLen,
+	                                             const int baseCipherLen,
+	                                             const EncryptCipherKeyCheckValue baseCipherKCV,
 	                                             const int64_t refreshAt,
 	                                             const int64_t expireAt);
 
@@ -741,7 +780,8 @@ public:
 
 	Reference<BlobCipherKey> insertBaseCipherKey(const EncryptCipherBaseKeyId& baseCipherId,
 	                                             const uint8_t* baseCipher,
-	                                             int baseCipherLen,
+	                                             const int baseCipherLen,
+	                                             const EncryptCipherKeyCheckValue baseCipherKCV,
 	                                             const EncryptCipherRandomSalt& salt,
 	                                             const int64_t refreshAt,
 	                                             const int64_t expireAt);
@@ -784,7 +824,8 @@ public:
 	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
-	                                         int baseCipherLen,
+	                                         const int baseCipherLen,
+	                                         const EncryptCipherKeyCheckValue baseCipherKCV,
 	                                         const int64_t refreshAt,
 	                                         const int64_t expireAt);
 
@@ -802,7 +843,8 @@ public:
 	Reference<BlobCipherKey> insertCipherKey(const EncryptCipherDomainId& domainId,
 	                                         const EncryptCipherBaseKeyId& baseCipherId,
 	                                         const uint8_t* baseCipher,
-	                                         int baseCipherLen,
+	                                         const int baseCipherLen,
+	                                         const EncryptCipherKeyCheckValue baseCipherKCV,
 	                                         const EncryptCipherRandomSalt& salt,
 	                                         const int64_t refreshAt,
 	                                         const int64_t expireAt);
@@ -976,7 +1018,8 @@ private:
 	void validateAuthTokenV1(const uint8_t* ciphertext,
 	                         const int ciphertextLen,
 	                         const BlobCipherEncryptHeaderFlagsV1&,
-	                         const BlobCipherEncryptHeaderRef& header);
+	                         const BlobCipherEncryptHeaderRef&);
+	void vaidateEncryptHeaderCipherKCVs(const BlobCipherEncryptHeaderRef&, const BlobCipherEncryptHeaderFlagsV1&);
 
 	void verifyEncryptHeaderMetadata(const BlobCipherEncryptHeader& header);
 	void verifyAuthTokens(const uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
@@ -1007,6 +1050,19 @@ public:
 
 private:
 	CMAC_CTX* ctx;
+};
+
+class Sha256KCV final : NonCopyable {
+public:
+	Sha256KCV();
+	~Sha256KCV();
+
+	EncryptCipherKeyCheckValue computeKCV(const uint8_t* cipher, const int len);
+
+	static void checkEqual(const Reference<BlobCipherKey>& cipher, const EncryptCipherKeyCheckValue persited);
+
+private:
+	EVP_MD_CTX* ctx;
 };
 
 void computeAuthToken(const std::vector<std::pair<const uint8_t*, size_t>>& payload,
