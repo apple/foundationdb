@@ -608,7 +608,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		limits.tpsLimit = std::min(limits.tpsLimit, SERVER_KNOBS->RATEKEEPER_BATCH_MAX_RATE);
 	}
 
-	if (deterministicRandom()->random01() < 1.0) {
+	if (deterministicRandom()->random01() < 0.1) {
 		const std::string& name = limits.rkUpdateEventCacheHolder.getPtr()->trackingKey;
 		TraceEvent(name.c_str(), ratekeeperId)
 		    .detail("TPSLimit", limits.tpsLimit)
@@ -677,11 +677,8 @@ int64_t RKRateUpdater::getTotalDiskUsageBytes(IRKMetricsTracker const& metricsTr
 }
 
 bool RKRateUpdater::shouldBeVerbose() {
-	/*
 	return SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
 	       (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
-	*/
-	return true;
 }
 
 void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& metricsTracker) {
