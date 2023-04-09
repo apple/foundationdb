@@ -21,7 +21,8 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
                                                  int64_t queueBytes,
                                                  int64_t inputBytesPerSecond,
                                                  int64_t availableSpace = 100e9,
-                                                 int64_t totalSpace = 100e9) {
+                                                 int64_t totalSpace = 100e9,
+                                                 Version startVersion = 0) {
 	state int iterations = 10000;
 	state TLogQueueInfo result(id);
 	state TLogQueuingMetricsReply reply;
@@ -33,7 +34,7 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
 	reply.storageBytes.available = availableSpace;
 	reply.storageBytes.free = availableSpace;
 	reply.storageBytes.used = totalSpace - availableSpace;
-	reply.v = 0;
+	reply.v = startVersion;
 	result.update(reply, smoothTotalDurableBytes);
 
 	while (iterations--) {
@@ -425,5 +426,20 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio2") {
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space_ratio);
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
+	return Void();
+}
+
+// The tlog is 5e9 versions ahead of the storage server, but the target max version difference is only
+// 2e9. Therefore, the rate updater throttles based on the storage server readable version being behind.
+TEST_CASE("/fdbserver/RKRateUpdater/StorageReadableBehind") {
+	state Future<StorageQueueInfo> ssFuture = getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 500e6, 1e6);
+	state Future<TLogQueueInfo> tlFuture = getMockTLogQueueInfo(UID(1, 1), 500e6, 1e6, 100e9, 100e9, 5e9);
+	wait(success(ssFuture) && success(tlFuture));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ssFuture.get());
+	env.metricsTracker.updateTLogQueueInfo(tlFuture.get());
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_readable_behind);
+	ASSERT_LT(env.rateUpdater.getTpsLimit(), 1000.0);
 	return Void();
 }
