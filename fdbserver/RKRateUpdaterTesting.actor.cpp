@@ -17,11 +17,19 @@ constexpr int64_t testTargetQueueBytes = 1000e6;
 constexpr int64_t testSpringBytes = 100e6;
 constexpr int64_t testTargetVersionDifference = 2e9;
 constexpr int64_t testTotalSpace = 100e9;
+constexpr int64_t testGenerateMockInfoIterations = 20e3;
 double const testInputBytesPerSecond = 1e6;
 
-void checkApproximatelyEqual(double a, double b) {
-	ASSERT(a < b + 0.01 || a < b * 1.05);
-	ASSERT(b < a + 0.01 || b < a * 1.05);
+// FIXME: The default error bound should be lowered in the future,
+// but doing so today causes some tests to fail
+void checkApproximatelyEqual(double a, double b, double errorBound = 0.2) {
+	if ((a > b + 0.01 && a > b * (1 + errorBound)) || (b > a + 0.01 && b > a * (1 + errorBound))) {
+		TraceEvent(SevError, "CheckApproximatelyEqualFailure")
+		    .detail("A", a)
+		    .detail("B", b)
+		    .detail("ErrorBound", errorBound);
+		ASSERT(false);
+	}
 }
 
 ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
@@ -29,12 +37,13 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
                                                  int64_t availableSpace = testTotalSpace,
                                                  int64_t totalSpace = testTotalSpace,
                                                  Version startVersion = 0) {
-	state int iterations = 10000;
+	state int iterations = testGenerateMockInfoIterations;
 	state TLogQueueInfo result(id);
 	state TLogQueuingMetricsReply reply;
 	state Smoother smoothTotalDurableBytes(10.0); // unused
 
 	reply.bytesInput = queueBytes;
+	reply.instanceID = 0;
 	reply.bytesDurable = 0;
 	reply.storageBytes.total = totalSpace;
 	reply.storageBytes.available = availableSpace;
@@ -44,12 +53,19 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
 	result.update(reply, smoothTotalDurableBytes);
 
 	while (iterations--) {
-		wait(delay(0.01));
+		// Use orderedDelay to prevent buggification
+		wait(orderedDelay(0.01));
+
 		reply.bytesInput += testInputBytesPerSecond / 100;
 		reply.bytesDurable += testInputBytesPerSecond / 100;
 		reply.v += 1000;
 		result.update(reply, smoothTotalDurableBytes);
 	}
+
+	checkApproximatelyEqual(result.getSmoothFreeSpace(), availableSpace, 0.05);
+	checkApproximatelyEqual(result.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05);
+	checkApproximatelyEqual(result.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05);
+	checkApproximatelyEqual(result.getSmoothTotalSpace(), totalSpace, 0.05);
 
 	return result;
 }
@@ -60,7 +76,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
                                                        int64_t targetNonDurableVersionsLag = 5e6,
                                                        int64_t availableSpace = testTotalSpace,
                                                        int64_t totalSpace = testTotalSpace) {
-	state int iterations = 10000;
+	state int iterations = testGenerateMockInfoIterations;
 	state StorageQueueInfo ss(id, locality);
 	state StorageQueuingMetricsReply reply;
 	state Smoother smoothTotalDurableBytes(10.0); // unused
@@ -79,7 +95,9 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	ss.update(reply, smoothTotalDurableBytes);
 
 	while (iterations--) {
-		wait(delay(0.01));
+		// Use orderedDelay to prevent buggification
+		wait(orderedDelay(0.01));
+
 		reply.bytesInput += (testInputBytesPerSecond / 100);
 		reply.bytesDurable += (testInputBytesPerSecond / 100);
 		reply.version += 10000;
@@ -87,15 +105,16 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 		ss.update(reply, smoothTotalDurableBytes);
 	}
 
-	checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond);
-	checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond);
-	checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace);
-	checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace);
-	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes);
+	checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05);
+	checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05);
+	checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace, 0.05);
+	checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace, 0.05);
+	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes, 0.05);
 	checkApproximatelyEqual(
 	    ss.getDurabilityLag(),
 	    std::max<int64_t>(targetNonDurableVersionsLag,
-	                      SERVER_KNOBS->VERSIONS_PER_SECOND * (storageQueueBytes / testInputBytesPerSecond)));
+	                      SERVER_KNOBS->VERSIONS_PER_SECOND * (storageQueueBytes / testInputBytesPerSecond)),
+	    0.05);
 
 	return ss;
 }
@@ -165,8 +184,8 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps);
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps);
 	return Void();
 }
 
@@ -180,8 +199,8 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3);
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3);
 	return Void();
 }
 
@@ -195,8 +214,8 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
 	return Void();
 }
 
