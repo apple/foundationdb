@@ -156,4 +156,5 @@ public:
 	double getSmoothTotalDurableBytesRate() const override { return 0; }
 	Future<Void> run() override { return Never(); }
 	void updateStorageQueueInfo(StorageQueueInfo const& ss) { storageQueueInfo.insert(mapPair(ss.id, ss)); }
+	void updateTLogQueueInfo(TLogQueueInfo const& tl) { tlogQueueInfo.insert(mapPair(tl.id, tl)); }
 };

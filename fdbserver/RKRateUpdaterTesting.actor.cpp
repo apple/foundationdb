@@ -17,6 +17,32 @@ void checkApproximatelyEqual(double a, double b) {
 	ASSERT(b < a + 0.01 || b < a * 1.05);
 }
 
+ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id, int64_t queueBytes, int64_t inputBytesPerSecond) {
+	state int iterations = 10000;
+	state TLogQueueInfo result(id);
+	state TLogQueuingMetricsReply reply;
+	state Smoother smoothTotalDurableBytes(10.0); // unused
+
+	reply.bytesInput = queueBytes;
+	reply.bytesDurable = 0;
+	reply.storageBytes.total = 100e9;
+	reply.storageBytes.available = 100e9;
+	reply.storageBytes.free = 100e9;
+	reply.storageBytes.used = 0;
+	reply.v = 0;
+	result.update(reply, smoothTotalDurableBytes);
+
+	while (iterations--) {
+		wait(delay(0.01));
+		reply.bytesInput += inputBytesPerSecond / 100;
+		reply.bytesDurable += inputBytesPerSecond / 100;
+		reply.v += 1000;
+		result.update(reply, smoothTotalDurableBytes);
+	}
+
+	return result;
+}
+
 ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
                                                        LocalityData locality,
                                                        int64_t storageQueueBytes,
@@ -124,7 +150,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 }
 
 // Currently, a workload of 1000 transactions per second is exceeding the target storage queue
-// size by half of the spring bytes limit (1050MB SQ, with a 1GB taret and 100MB of spring).
+// size by half of the spring bytes limit (1050MB SQ, with a 1GB target and 100MB of spring).
 // The rate updater estimates that the cluster can handle 2/3 of the current transaction rate,
 // or ~667 transactions per second.
 TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
@@ -137,7 +163,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	return Void();
 }
 
-// Currently, a workload of 1000 transactions per second exceeding the sum of the target
+// Currently, a workload of 1000 transactions per second is exceeding the sum of the target
 // storage queue bytes and spring bytes. The rate updater applies the maximum possible throttling
 // based on storage queue, limiting throughput to half the current transaction rate, or 500
 // transactions per second.
@@ -280,6 +306,46 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpaceRatio2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space_ratio);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
+	return Void();
+}
+
+// Currently, a workload of 1000 transactions per second is using up half of the tlog queue
+// spring bytes (950MB queue, with a 1GB target and 100MB of spring). The rate updater estimates
+// that the cluster can handle double the current transaction rate, or 2000 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue") {
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 950e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0);
+	return Void();
+}
+
+// Currently, a workload of 1000 transactions per second is exceeding the target tlog queue size
+// by half of the spring bytes limit (1050MB queue, with a 1GB target and 100MB of spring).
+// The rate updater estimates that the cluster can handle 2/3 of the current transaction rate,
+// or ~667 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue2") {
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 1050e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2000.0 / 3);
+	return Void();
+}
+
+// Currently, a workload of 1000 transactions per second is exceeding the sum of the target
+// tlog queue bytes and spring bytes. The rate updater applies the maximum possible throttling based on
+// tlog queue, limiting throughput to half the current transaction rate, or 500 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue3") {
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 1500e6, 1e6));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
 	return Void();
 }
