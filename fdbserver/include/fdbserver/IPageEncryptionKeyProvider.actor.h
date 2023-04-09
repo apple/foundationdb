@@ -270,10 +270,12 @@ private:
 		    EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 		    AUTH_TOKEN_HMAC_SHA_SIZE);
 		ASSERT_EQ(AUTH_TOKEN_HMAC_SHA_SIZE, AES_256_KEY_LENGTH);
+		const EncryptCipherKeyCheckValue kcv = Sha256KCV().computeKCV(&digest[0], AES_256_KEY_LENGTH);
 		return makeReference<BlobCipherKey>(cipherDetails.encryptDomainId,
 		                                    cipherDetails.baseCipherId,
 		                                    &digest[0],
 		                                    AES_256_KEY_LENGTH,
+		                                    kcv,
 		                                    cipherDetails.salt,
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
@@ -294,6 +296,7 @@ private:
 		                                    cipherId,
 		                                    cipherKeys[cipherId - 1]->rawBaseCipher(),
 		                                    AES_256_KEY_LENGTH,
+		                                    cipherKeys[cipherId - 1]->getBaseCipherKCV(),
 		                                    cipherKeys[cipherId - 1]->getSalt(),
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
