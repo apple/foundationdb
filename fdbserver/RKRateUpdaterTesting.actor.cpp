@@ -251,3 +251,35 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpace2") {
 	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
 	return Void();
 }
+
+// Though the storage queue is only 300MB (less than the threshold for throttling on storage queue alone),
+// the storage server only has 300MB of space to spare before hitting the MIN_AVAILABLE_SPACE_RATIO threshold.
+// As a result, the rate updater throttles at the current transaction rate of 1000 TPS.
+TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpaceRatio") {
+	int64_t totalSpace = 1e15;
+	int64_t availableSpace = (totalSpace * SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO) + 300e6;
+	StorageQueueInfo ss =
+	    wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 300e6, 1e6, 5e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space_ratio);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 1000.0);
+	return Void();
+}
+
+// Though the storage queue is only 600MB (less than the threshold for throttling on storage queue alone),
+// the storage server only has 300MB of space to spare before hitting the MIN_AVAILABLE_SPACE_RATIO threshold.
+// As a result, the rate updater throttles at half the current transaction rate, or 500 TPS.
+TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpaceRatio2") {
+	int64_t totalSpace = 1e15;
+	int64_t availableSpace = (totalSpace * SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO) + 300e6;
+	StorageQueueInfo ss =
+	    wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 600e6, 1e6, 5e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space_ratio);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
+	return Void();
+}
