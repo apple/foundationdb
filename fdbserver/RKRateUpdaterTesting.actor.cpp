@@ -20,7 +20,8 @@ void checkApproximatelyEqual(double a, double b) {
 ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
                                                        LocalityData locality,
                                                        int64_t storageQueueBytes,
-                                                       double inputBytesPerSecond) {
+                                                       double inputBytesPerSecond,
+                                                       int64_t targetNonDurableVersionsLag = 5e6) {
 	state int iterations = 10000;
 	state StorageQueueInfo ss(id, locality);
 	state StorageQueuingMetricsReply reply;
@@ -33,7 +34,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	reply.storageBytes.total = 100e9;
 	reply.storageBytes.available = 100e9;
 	reply.storageBytes.free = 100e9;
-	reply.version = std::max(5e6, (1e6 * storageQueueBytes) / inputBytesPerSecond);
+	reply.version = std::max<Version>(targetNonDurableVersionsLag, (1e6 * storageQueueBytes) / inputBytesPerSecond);
 	reply.durableVersion = 0;
 	ss.update(reply, smoothTotalDurableBytes);
 
@@ -51,7 +52,9 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	checkApproximatelyEqual(ss.getSmoothFreeSpace(), 100e9);
 	checkApproximatelyEqual(ss.getSmoothTotalSpace(), 100e9);
 	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes);
-	checkApproximatelyEqual(ss.getDurabilityLag(), std::max(5e6, (1e6 * storageQueueBytes) / inputBytesPerSecond));
+	checkApproximatelyEqual(
+	    ss.getDurabilityLag(),
+	    std::max<int64_t>(targetNonDurableVersionsLag, (1e6 * storageQueueBytes) / inputBytesPerSecond));
 
 	return ss;
 }
@@ -189,5 +192,16 @@ TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZone") {
 	// queue size as the limiting reason.
 	// TODO: Should this behaviour be changed?
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	return Void();
+}
+
+// The durability lag on the single storage server exceeds the configured durability lag limit.
+// Therefore, the rate updated throttles based on storage server durability lag.
+TEST_CASE("/fdbserver/RKRateUpdater/HighNDV") {
+	StorageQueueInfo ss = wait(getMockStorageQueueInfo(UID(1, 1), LocalityData{}, 500e6, 1e6, 3e9));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateStorageQueueInfo(ss);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_durability_lag);
 	return Void();
 }
