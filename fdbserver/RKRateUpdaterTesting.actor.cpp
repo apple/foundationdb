@@ -17,7 +17,11 @@ void checkApproximatelyEqual(double a, double b) {
 	ASSERT(b < a + 0.01 || b < a * 1.05);
 }
 
-ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id, int64_t queueBytes, int64_t inputBytesPerSecond) {
+ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
+                                                 int64_t queueBytes,
+                                                 int64_t inputBytesPerSecond,
+                                                 int64_t availableSpace = 100e9,
+                                                 int64_t totalSpace = 100e9) {
 	state int iterations = 10000;
 	state TLogQueueInfo result(id);
 	state TLogQueuingMetricsReply reply;
@@ -25,10 +29,10 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id, int64_t queueBytes, int
 
 	reply.bytesInput = queueBytes;
 	reply.bytesDurable = 0;
-	reply.storageBytes.total = 100e9;
-	reply.storageBytes.available = 100e9;
-	reply.storageBytes.free = 100e9;
-	reply.storageBytes.used = 0;
+	reply.storageBytes.total = totalSpace;
+	reply.storageBytes.available = availableSpace;
+	reply.storageBytes.free = availableSpace;
+	reply.storageBytes.used = totalSpace - availableSpace;
 	reply.v = 0;
 	result.update(reply, smoothTotalDurableBytes);
 
@@ -362,5 +366,64 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogWriteBandwidthMVCC") {
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_mvcc_write_bandwidth);
 	ASSERT_GT(env.rateUpdater.getTpsLimit(), 1000.0);
+	return Void();
+}
+
+// The tlog queue plus currently used disk space add to leave only MIN_AVAILABLE_SPACE
+// bytes left on the tlog disk. The rate updater reacts by throttling at the current
+// transaction rate of 1000 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace") {
+	int64_t totalSpace = 1e9;
+	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + 300e6;
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 300e6, 1e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 1000.0);
+	return Void();
+}
+
+// The tlog queue plus currently used disk space add to leave than MIN_AVAILABLE_SPACE / 2
+// bytes on disk. In response, the rate updater throttles throughput to 0.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace2") {
+	int64_t totalSpace = 1e9;
+	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + 300e6;
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 600e6, 1e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	return Void();
+}
+
+// The tlog queue plus currently used disk space add to leave only the available
+// space ratio of total disk space. The rate updater reacts by throttling at the current
+// transaction rate of 1000 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio") {
+	int64_t totalSpace = 1e15;
+	int64_t availableSpace = (totalSpace * SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO) + 300e6;
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 300e6, 1e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space_ratio);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 1000.0);
+	return Void();
+}
+
+// The tlog queue plus currently used disk space add to exceed the minimum available disk
+// space ratio of total disk space plus spring bytes. In response, the rate updater throttles
+// at half the current transaction rate, or 500 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio2") {
+	int64_t totalSpace = 1e15;
+	int64_t availableSpace = (totalSpace * SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO) + 300e6;
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 600e6, 1e6, availableSpace, totalSpace));
+	RKRateUpdaterTestEnvironment env(1000.0, 1);
+	env.metricsTracker.updateTLogQueueInfo(tl);
+	env.update();
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space_ratio);
+	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 500.0);
 	return Void();
 }
