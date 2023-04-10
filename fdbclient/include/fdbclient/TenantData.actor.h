@@ -1,4 +1,3 @@
-
 /*
  * TenantData.actor.h
  *
@@ -23,19 +22,19 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANTDATA_ACTOR_G_H)
+#define FDBCLIENT_TENANTDATA_ACTOR_G_H
+#include "fdbclient/TenantData.actor.g.h"
+#elif !defined(FDBCLIENT_TENANTDATA_ACTOR_H)
+#define FDBCLIENT_TENANTDATA_ACTOR_H
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/KeyBackedTypes.h"
-#include "flow/BooleanParam.h"
-#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_TENANT_DATA_ACTOR_G_H)
-#define WORKLOADS_TENANT_DATA_ACTOR_G_H
-#include "fdbserver/workloads/TenantData.actor.g.h"
-#elif !defined(WORKLOADS_TENANT_DATA_ACTOR_H)
-#define WORKLOADS_TENANT_DATA_ACTOR_H
-
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "flow/BooleanParam.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class DB, class TenantTypes>
@@ -71,7 +70,7 @@ private:
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, int64_t>> storageQuotaList;
 
-		wait(store(self->metaclusterRegistration, MetaclusterMetadata::metaclusterRegistration().get(tr)));
+		wait(store(self->metaclusterRegistration, metacluster::metadata::metaclusterRegistration().get(tr)));
 
 		self->clusterType = self->metaclusterRegistration.present() ? self->metaclusterRegistration.get().clusterType
 		                                                            : ClusterType::STANDALONE;
