@@ -1176,6 +1176,7 @@ void DecryptBlobCipherAes256Ctr::validateAuthTokenV1(const uint8_t* ciphertext,
 	                 AUTH_TOKEN_MAX_SIZE);
 
 	if (memcmp(&persisted[0], &computed[0], Params::authTokenSize) != 0) {
+		// pragma: allowlist nextline secret
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
 		    .detail("HeaderFlagsVersion", headerRef.flagsVersion())
 		    .detail("HeaderMode", flags.encryptMode)
@@ -1345,6 +1346,7 @@ void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciph
 	int authTokenSize = getEncryptHeaderAuthTokenSize(header.flags.authTokenAlgo);
 	ASSERT_LE(authTokenSize, AUTH_TOKEN_MAX_SIZE);
 	if (memcmp(&header.singleAuthToken.authToken[0], &computed[0], authTokenSize) != 0) {
+		// pragma: allowlist nextline secret
 		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeaderAuthTokenMismatch")
 		    .detail("HeaderVersion", header.flags.headerVersion)
 		    .detail("HeaderMode", header.flags.encryptMode)
@@ -1674,7 +1676,8 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 			// ensure that baseCipher matches with the cached information
 			ASSERT_EQ(std::memcmp(cipherKey->rawBaseCipher(), baseCipher->key.get(), cipherKey->getBaseCipherLen()), 0);
 			// validate the encryption derivation
-			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), cipherKey->getBaseCipherLen()), 0);
+			const int len = std::min(AES_256_KEY_LENGTH, cipherKey->getBaseCipherLen());
+			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), len), 0);
 		}
 	}
 	TraceEvent("BlobCipherTestLooksupDone").log();
@@ -1698,10 +1701,9 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 		Reference<BaseCipher> baseCipher = domainKeyMap[minDomainId][minBaseCipherKeyId];
 		uint8_t rawCipher[baseCipher->len];
 		memcpy(rawCipher, baseCipher->key.get(), baseCipher->len);
-		// modify few bytes in the cipherKey
-		for (int i = 2; i < 5; i++) {
-			rawCipher[i]++;
-		}
+		// modify cipherKey by flipping a bit
+		const int idx = deterministicRandom()->randomInt(0, baseCipher->len);
+		rawCipher[idx]++;
 		cipherKeyCache->insertCipherKey(baseCipher->domainId,
 		                                baseCipher->keyId,
 		                                &rawCipher[0],
