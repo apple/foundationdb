@@ -152,6 +152,8 @@ struct GetTeamRequest;
 namespace data_distribution {
 class EligibilityCounter {
 public:
+	// The type value are used to do bit operations to get combined type. Ex. combineType = LOW_CPU | LOW_DISK_UTIL .
+	// When adding more types, the value should be 2^n, like 4, 8, 16...
 	enum Type {
 		NONE = 0, // don't care about eligibility
 		LOW_CPU = 1,

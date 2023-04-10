@@ -171,7 +171,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.
 	// TODO: choose a meaning value for real cluster
 	init( MAX_DEST_CPU_PERCENT, 		  					   100.0 );
-	init( CPU_STABLE_INTERVAL,            isSimulated ?  0.0 : 300.0 );
 	init( DD_TEAM_PIVOT_UPDATE_DELAY,                            5.0 );
 
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false );
