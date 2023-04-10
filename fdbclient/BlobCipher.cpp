@@ -1676,7 +1676,8 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 			// ensure that baseCipher matches with the cached information
 			ASSERT_EQ(std::memcmp(cipherKey->rawBaseCipher(), baseCipher->key.get(), cipherKey->getBaseCipherLen()), 0);
 			// validate the encryption derivation
-			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), cipherKey->getBaseCipherLen()), 0);
+			const int len = std::min(AES_256_KEY_LENGTH, cipherKey->getBaseCipherLen());
+			ASSERT_NE(std::memcmp(cipherKey->rawCipher(), baseCipher->key.get(), len), 0);
 		}
 	}
 	TraceEvent("BlobCipherTestLooksupDone").log();
