@@ -41,6 +41,8 @@ namespace data_distribution {
 int EligibilityCounter::fromGetTeamRequest(GetTeamRequest const& req) {
 	// equivalent to bit set operation
 	return req.preferLowerDiskUtil * EligibilityCounter::LOW_DISK_UTIL +
+	       // When preferLowerReadUtil, CPU stat is for admittance to eligible pool, and ReadLoad is for sorting inside
+	       // the pool.
 	       req.preferLowerReadUtil * EligibilityCounter::LOW_CPU;
 }
 
@@ -3333,7 +3335,7 @@ void DDTeamCollection::updateTeamEligibility() {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			}
 
-			if (team->hasLowCpu(teamPivots.pivotCPU)) {
+			if (team->hasLowerCpu(teamPivots.pivotCPU)) {
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);

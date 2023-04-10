@@ -198,8 +198,6 @@ public:
 	double CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;
-	// DD only move shard to teams that has CPU <= pivot CPU for enough time
-	double CPU_STABLE_INTERVAL;
 	// The constant interval DD update pivot values for team selection. It should be >=
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
