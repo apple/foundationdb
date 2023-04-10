@@ -460,6 +460,14 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 		//
 		// Approach compute KCV after reading it from the network buffer, HTTP checksum protects against potential
 		// on-wire corruption
+		if (cipher.size() > MAX_BASE_CIPHER_LEN) {
+			// HMAC_SHA digest generation accepts upto MAX_BASE_CIPHER_LEN key-buffer, longer keys are truncated and
+			// weakens the security guarantees.
+			TraceEvent(SevWarnAlways, "RESTKmsConnectorMaxBaseCipherKeyLimit")
+			    .detail("MaxAllowed", MAX_BASE_CIPHER_LEN)
+			    .detail("BaseCipherLen", cipher.size());
+			throw rest_max_base_cipher_len();
+		}
 
 		EncryptCipherKeyCheckValue cipherKCV = Sha256KCV().computeKCV(cipher.begin(), cipher.size());
 
