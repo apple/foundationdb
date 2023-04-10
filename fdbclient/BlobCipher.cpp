@@ -458,7 +458,8 @@ void BlobCipherKey::initKey(const EncryptCipherDomainId& domainId,
 		TraceEvent(SevWarnAlways, "MaxBaseCipherKeyLimit")
 		    .detail("MaxAllowed", MAX_BASE_CIPHER_LEN)
 		    .detail("BaseCipherLen", baseCiphLen);
-		throw encrypt_ops_error();
+		CODE_PROBE(true, "Encryption max base cipher len violation");
+		throw encrypt_max_base_cipher_len();
 	}
 
 	const EncryptCipherKeyCheckValue computedKCV = Sha256KCV().computeKCV(baseCiph, baseCiphLen);
@@ -1453,7 +1454,7 @@ void DecryptBlobCipherAes256Ctr::vaidateEncryptHeaderCipherKCVs(const BlobCipher
 	Sha256KCV::checkEqual(textCipherKey, kcvs.textKCV);
 	if (flags.authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
 		if (!kcvs.headerKCV.present()) {
-			TraceEvent("MissingHeaderKCV");
+			TraceEvent(SevWarnAlways, "MissingHeaderKCV");
 			throw encrypt_key_check_value_mismatch();
 		}
 		Sha256KCV::checkEqual(headerCipherKeyOpt.get(), kcvs.headerKCV.get());
@@ -1905,7 +1906,7 @@ EncryptAuthTokenMode getEncryptAuthTokenMode(const EncryptAuthTokenMode mode) {
 
 Sha256KCV::Sha256KCV() : ctx(EVP_MD_CTX_new()) {
 	if (ctx == nullptr) {
-		TraceEvent("ComputeSha256AllocFailed");
+		TraceEvent(SevError, "ComputeSha256AllocFailed");
 		throw encrypt_ops_error();
 	}
 }
@@ -1918,19 +1919,19 @@ Sha256KCV::~Sha256KCV() {
 
 EncryptCipherKeyCheckValue Sha256KCV::computeKCV(const uint8_t* cipher, const int len) {
 	if (!EVP_DigestInit_ex(ctx, EVP_sha256(), NULL)) {
-		TraceEvent("ComputeSha256DigestInitFailed");
+		TraceEvent(SevWarnAlways, "ComputeSha256DigestInitFailed");
 		throw encrypt_ops_error();
 	}
 
 	if (!EVP_DigestUpdate(ctx, cipher, len)) {
-		TraceEvent("ComputeSha256DigestUpdateFailed");
+		TraceEvent(SevWarnAlways, "ComputeSha256DigestUpdateFailed");
 		throw encrypt_ops_error();
 	}
 
 	unsigned char sha256[EVP_MAX_MD_SIZE];
 	unsigned int sha256Len;
 	if (!EVP_DigestFinal_ex(ctx, sha256, &sha256Len)) {
-		TraceEvent("ComputeSha256DigestFinalFailed");
+		TraceEvent(SevWarnAlways, "ComputeSha256DigestFinalFailed");
 		throw encrypt_ops_error();
 	}
 
@@ -2029,6 +2030,26 @@ using BaseKeyMap = std::unordered_map<EncryptCipherBaseKeyId, Reference<BaseCiph
 using DomainKeyMap = std::unordered_map<EncryptCipherDomainId, BaseKeyMap>;
 
 } // namespace
+
+void testMaxBaseCipherLen() {
+	TraceEvent("TestMaxBaseCipherLenStart");
+	try {
+		const int baseCipherLen = deterministicRandom()->randomInt(MAX_BASE_CIPHER_LEN + 1, MAX_BASE_CIPHER_LEN + 10);
+		uint8_t baseCipher[baseCipherLen];
+		deterministicRandom()->randomBytes(&baseCipher[0], baseCipherLen);
+		const EncryptCipherKeyCheckValue baseCipherKCV = Sha256KCV().computeKCV(&baseCipher[0], baseCipherLen);
+		Reference<BlobCipherKey> cipher = makeReference<BlobCipherKey>(1,
+		                                                               1,
+		                                                               &baseCipher[0],
+		                                                               baseCipherLen,
+		                                                               baseCipherKCV,
+		                                                               std::numeric_limits<int64_t>::max(),
+		                                                               std::numeric_limits<int64_t>::max());
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_encrypt_max_base_cipher_len);
+	}
+	TraceEvent("TestMaxBaseCipherLenDone");
+}
 
 void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
                             const int minDomainId,
@@ -2365,9 +2386,7 @@ void testNoAuthMode(const int minDomainId) {
 		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_key_check_value_mismatch) {
-			throw;
-		}
+		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
 		TraceEvent("TestNoAuthEncryptBaseCipherCorruptionDone");
 	}
 
@@ -2606,10 +2625,9 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 		DecryptBlobCipherAes256Ctr decryptor(
 		    corruptedTextCipher, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
 		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
+		ASSERT(false); // error expected
 	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_key_check_value_mismatch) {
-			throw;
-		}
+		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
 		TraceEvent("TestConfigurableEncryptionNoAuthBaseCipherCorruptionDone");
 	}
 
@@ -2765,9 +2783,7 @@ void testSingleAuthMode(const int minDomainId) {
 		}
 		ASSERT(false); // error expected
 	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_key_check_value_mismatch) {
-			throw;
-		}
+		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
 		TraceEvent("TestSingleAuthTokenBaseCipherCorruptionDone").detail("Mode", authAlgoStr);
 	}
 
@@ -2977,9 +2993,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 		}
 		ASSERT(false); // error expected
 	} catch (Error& e) {
-		if (e.code() != error_code_encrypt_key_check_value_mismatch) {
-			throw;
-		}
+		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
 		TraceEvent("TestConfigurableEncryptionBaseCipherCorruptionDone").detail("Mode", authAlgoStr);
 	}
 
@@ -3122,6 +3136,8 @@ TEST_CASE("/blobCipher") {
 		}
 	}
 	ASSERT_EQ(domainKeyMap.size(), maxDomainId);
+
+	testMaxBaseCipherLen();
 
 	testKeyCacheEssentials(domainKeyMap, minDomainId, maxDomainId, minBaseCipherKeyId);
 	testKeyCacheRefreshExpireCipherKey(domainKeyMap, maxDomainId);

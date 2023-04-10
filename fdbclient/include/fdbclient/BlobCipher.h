@@ -521,6 +521,13 @@ struct BlobCipherEncryptHeaderRef {
 	EncryptCipherDomainId getDomainId() const;
 	EncryptHeaderCipherKCVs getKCVs() const;
 
+	// API supports following validation:
+	// 1. Ensure input BlobCipherDetails (textDetails and/or headerDetails) matches with the input
+	// 2. Ensure persited KCV matches with the input values
+	// 3. Ensure input IV buffer matches with the persisted ones.
+	//
+	// Currently API is used by BlobGranule encryption where encryption key lookup based on persisted
+	// BlobGranuleCipherKeyCtx
 	void validateEncryptionHeaderDetails(const BlobCipherDetails& textCipherDetails,
 	                                     const BlobCipherDetails& headerCipherDetails,
 	                                     const EncryptHeaderCipherKCVs& kcvs,
