@@ -1039,6 +1039,7 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 		throw encrypt_ops_error();
 	}
 
+	// Padding is not needed for AES CTR mode, so EncryptUpdate() should encrypt all the data at once.
 	if (bytes != plaintextLen) {
 		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
@@ -1046,12 +1047,9 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
+	// EVP_CIPHER_CTX_reset(ctx) is called after EncryptUpdate() to make sure the same encryptor
+	// `EncryptBlobCipherAes265Ctr` could be reused to encrypt multiple text. Otherwise,
+	// ctx = EVP_CIPHER_CTX_new() is required before calling encrypt().
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
@@ -1091,13 +1089,6 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
 		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
-	}
-
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
 
@@ -1147,13 +1138,6 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherEncryptResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	updateEncryptHeader(ciphertext, plaintextLen, header);
 
 	encryptBuf->setLogicalSize(plaintextLen);
@@ -1196,13 +1180,6 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
 		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
-	}
-
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
 
@@ -1400,13 +1377,6 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
@@ -1529,13 +1499,6 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	decrypted->setLogicalSize(ciphertextLen);
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
@@ -1591,13 +1554,6 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
@@ -1636,13 +1592,6 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		TraceEvent(SevWarn, "BlobCipherDecryptUnexpectedPlaintextLen")
 		    .detail("CiphertextLen", ciphertextLen)
 		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
-	}
-
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
 
