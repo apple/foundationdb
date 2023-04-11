@@ -224,7 +224,8 @@ struct MoveKeysWorkload : FailureInjectionWorkload {
 
 		ASSERT(self->configuration.storageTeamSize > 0);
 
-		if (self->configuration.usableRegions > 1) { // FIXME: add support for generating random teams across DCs
+		// FIXME: add support for generating random teams across DCs
+		if (self->configuration.usableRegions > 1 || self->configuration.regions.size() > 1) {
 			return Void();
 		}
 
