@@ -119,6 +119,7 @@ public:
 		default:
 			ASSERT(false);
 		}
+		return "";
 	}
 
 	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
