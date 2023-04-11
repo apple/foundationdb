@@ -126,7 +126,7 @@ endif()
 set(Boost_USE_STATIC_LIBS ON)
 
 # Clang and Gcc will have different name mangling to std::call_once, etc.
-if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
+if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$" AND USE_LIBCXX)
   list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
   set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
   message(STATUS "Using Clang version of boost::context boost::filesystem and boost::iostreams")
