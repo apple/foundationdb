@@ -86,6 +86,8 @@ public:
 			return "Want_True_Best";
 		case ANY:
 			return "Any";
+		default:
+			ASSERT(false);
 		}
 	}
 
