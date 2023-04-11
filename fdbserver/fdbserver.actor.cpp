@@ -234,8 +234,6 @@ extern void pingtest();
 extern void copyTest();
 extern void versionedMapTest();
 extern void createTemplateDatabase();
-// FIXME: this really belongs in a header somewhere since it is actually used.
-extern IPAddress determinePublicIPAutomatically(ClusterConnectionString& ccs);
 
 extern const char* getSourceVersion();
 
@@ -897,7 +895,7 @@ std::pair<NetworkAddressList, NetworkAddressList> buildNetworkAddresses(
 		if (autoPublicAddress) {
 			try {
 				const NetworkAddress& parsedAddress = NetworkAddress::parse("0.0.0.0:" + publicAddressStr.substr(5));
-				const IPAddress publicIP = determinePublicIPAutomatically(connectionRecord.getConnectionString());
+				const IPAddress publicIP = connectionRecord.getConnectionString().determineLocalSourceIP();
 				currentPublicAddress = NetworkAddress(publicIP, parsedAddress.port, true, parsedAddress.isTLS());
 			} catch (Error& e) {
 				fprintf(stderr,
@@ -1114,7 +1112,7 @@ struct CLIOptions {
 				printHelpTeaser(name);
 				flushAndExit(FDB_EXIT_ERROR);
 			}
-			auto publicIP = determinePublicIPAutomatically(connectionFile->getConnectionString());
+			auto publicIP = connectionFile->getConnectionString().determineLocalSourceIP();
 			publicAddresses.address = NetworkAddress(publicIP, ::getpid());
 		}
 	}
@@ -1705,7 +1703,7 @@ private:
 				break;
 			}
 			case OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION: {
-				TraceEvent("RESTKmsConnAllowNotSecureConnection");
+				TraceEvent(SevWarnAlways, "RESTKmsConnAllowNotSecureConnection");
 				knobs.emplace_back("rest_kms_allow_not_secure_connection", "true");
 				break;
 			}

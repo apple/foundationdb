@@ -88,6 +88,11 @@ public:
 
 	size_t getNumberOfCoordinators() const { return coords.size() + hostnames.size(); }
 
+	// Determine the local source IP used to connect to the cluster by connecting to the first available coordinator.
+	// Throw bind_failed() if no connection attempts were successful.
+	// This function blocks on connection attempts.
+	IPAddress determineLocalSourceIP() const;
+
 	bool operator==(const ClusterConnectionString& other) const noexcept {
 		return key == other.key && keyDesc == other.keyDesc && coords == other.coords && hostnames == other.hostnames;
 	}
@@ -104,7 +109,7 @@ public:
 	}
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
+FDB_BOOLEAN_PARAM(ConnectionStringNeedsPersisted);
 
 // A record that stores the connection string used to connect to a cluster. This record can be updated when a cluster
 // notifies a connected party that the connection string has changed.

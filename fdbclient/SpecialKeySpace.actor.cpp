@@ -1001,6 +1001,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreUsedBytes = 0;
 	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
 	state int64_t totalKvStoreAvailableBytes = 0;
+	// Keep track if we exclude any storage process with the provided adddresses
+	state bool excludedAddressesContainsStorageRole = false;
 
 	try {
 		for (auto proc : processesMap.obj()) {
@@ -1011,8 +1013,8 @@ ACTOR Future<bool> checkExclusion(Database db,
 				return false;
 			}
 			NetworkAddress addr = NetworkAddress::parse(addrStr);
-			bool excluded =
-			    (process.has("excluded") && process.last().get_bool()) || addressExcluded(*exclusions, addr);
+			bool includedInExclusion = addressExcluded(*exclusions, addr);
+			bool excluded = (process.has("excluded") && process.last().get_bool()) || includedInExclusion;
 
 			StatusObjectReader localityObj;
 			std::string disk_id;
@@ -1024,6 +1026,12 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+
+					// Check if we are excluding a process that serves the storage role. We only have to check the free
+					// capacity if we are excluding at least one process that serves the storage role.
+					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
+						excludedAddressesContainsStorageRole = true;
+					}
 
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
@@ -1071,6 +1079,12 @@ ACTOR Future<bool> checkExclusion(Database db,
 	{
 		*msg = ManagementAPIError::toJsonString(false, markFailed ? "exclude failed" : "exclude", errorString);
 		return false;
+	}
+
+	// If the exclusion command only contains processes that serve a non storage role we can skip the free capacity
+	// check in order to not block those exclusions.
+	if (!excludedAddressesContainsStorageRole) {
+		return true;
 	}
 
 	// The numerator is the total space in use by FDB that is not immediately reusable.
@@ -1144,7 +1158,7 @@ ACTOR Future<Optional<std::string>> excludeCommitActor(ReadYourWritesTransaction
 		if (!safe)
 			return result;
 	}
-	excludeServers(ryw->getTransaction(), addresses, failed);
+	wait(excludeServers(&(ryw->getTransaction()), addresses, failed));
 	includeServers(ryw);
 
 	return result;
@@ -1189,7 +1203,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE); // necessary?
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-	state std::vector<AddressExclusion> excl = wait((getExcludedServers(&tr)));
+	state std::vector<AddressExclusion> excl = wait((getAllExcludedServers(&tr)));
 	state std::set<AddressExclusion> exclusions(excl.begin(), excl.end());
 	state std::set<NetworkAddress> inProgressExclusion;
 	// Just getting a consistent read version proves that a set of tlogs satisfying the exclusions has completed
@@ -2752,7 +2766,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
 	includeLocalities(ryw);
 
 	return result;

@@ -1,9 +1,9 @@
 /*
- * ClientBooleanParams.cpp
+ * ResolverBug.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "fdbserver/ResolverBug.h"
 
-#include "fdbclient/ClientBooleanParams.h"
-
-FDB_DEFINE_BOOLEAN_PARAM(EnableLocalityLoadBalance);
-FDB_DEFINE_BOOLEAN_PARAM(LockAware);
-FDB_DEFINE_BOOLEAN_PARAM(Reverse);
-FDB_DEFINE_BOOLEAN_PARAM(Snapshot);
-FDB_DEFINE_BOOLEAN_PARAM(IsInternal);
-FDB_DEFINE_BOOLEAN_PARAM(AddConflictRange);
-FDB_DEFINE_BOOLEAN_PARAM(UseMetrics);
-FDB_DEFINE_BOOLEAN_PARAM(IsSwitchable);
+std::shared_ptr<ISimBug> ResolverBugID::create() const {
+	return std::make_shared<ResolverBug>();
+}

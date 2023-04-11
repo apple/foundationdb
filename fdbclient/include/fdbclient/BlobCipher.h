@@ -54,9 +54,6 @@
 #include <unordered_map>
 #include <variant>
 #include <vector>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 
 #define AES_256_KEY_LENGTH 32
 #define AES_256_IV_LENGTH 16
@@ -594,7 +591,7 @@ public:
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
 	              const EncryptCipherBaseKeyId& baseCiphId,
 	              const uint8_t* baseCiph,
-	              int baseCiphLen,
+	              const int baseCiphLen,
 	              const int64_t refreshAt,
 	              int64_t expireAt);
 	BlobCipherKey(const EncryptCipherDomainId& domainId,
@@ -662,7 +659,7 @@ private:
 
 	void initKey(const EncryptCipherDomainId& domainId,
 	             const uint8_t* baseCiph,
-	             int baseCiphLen,
+	             const int baseCiphLen,
 	             const EncryptCipherBaseKeyId& baseCiphId,
 	             const EncryptCipherRandomSalt& salt,
 	             const int64_t refreshAt,
@@ -900,10 +897,15 @@ public:
 	                              Arena&);
 	StringRef encrypt(const uint8_t*, const int, BlobCipherEncryptHeaderRef*, Arena&);
 
+	void encryptInplace(uint8_t* plaintext, const int plaintextLen, BlobCipherEncryptHeader* header);
+
+	void encryptInplace(uint8_t* plaintext, const int plaintextLen, BlobCipherEncryptHeaderRef* headerRef);
+
 private:
 	void init();
 
 	void updateEncryptHeader(const uint8_t*, const int, BlobCipherEncryptHeaderRef* headerRef);
+	void updateEncryptHeader(const uint8_t*, const int, BlobCipherEncryptHeader* header);
 	void updateEncryptHeaderFlagsV1(BlobCipherEncryptHeaderRef* headerRef, BlobCipherEncryptHeaderFlagsV1* flags);
 	void setCipherAlgoHeaderV1(const uint8_t*,
 	                           const int,
@@ -944,6 +946,10 @@ public:
 	                  const int ciphertextLen,
 	                  const BlobCipherEncryptHeaderRef& headerRef,
 	                  Arena&);
+
+	void decryptInplace(uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
+
+	void decryptInplace(uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeaderRef& headerRef);
 
 private:
 	EVP_CIPHER_CTX* ctx;

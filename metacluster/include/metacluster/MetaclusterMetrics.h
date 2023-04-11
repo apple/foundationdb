@@ -1,9 +1,9 @@
-#/*
- * PerfMetric.cpp
+/*
+ * MetaclusterMetrics.h
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,24 @@
  * limitations under the License.
  */
 
-#include "fdbrpc/PerfMetric.h"
+#ifndef METACLUSTER_METACLUSTERMETRICS_H
+#define METACLUSTER_METACLUSTERMETRICS_H
+#pragma once
 
-FDB_DEFINE_BOOLEAN_PARAM(Averaged);
+#include "fdbclient/NativeAPI.actor.h"
+#include "flow/flow.h"
+
+namespace metacluster {
+struct MetaclusterMetrics {
+	int numTenants = 0;
+	int numDataClusters = 0;
+	int tenantGroupCapacity = 0;
+	int tenantGroupsAllocated = 0;
+
+	MetaclusterMetrics() = default;
+
+	static Future<MetaclusterMetrics> getMetaclusterMetrics(Database db);
+};
+} // namespace metacluster
+
+#endif

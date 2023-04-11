@@ -36,9 +36,6 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include <openssl/ec.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
@@ -210,8 +207,11 @@ StringRef toStringRef(Arena& arena, const TokenRef& tokenSpec) {
 	return StringRef(str, buf.size());
 }
 
-template <class FieldType, class Writer>
-void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldName) {
+template <class FieldType, class Writer, bool AllowSingletonArrayAsString = false>
+void putField(Optional<FieldType> const& field,
+              Writer& wr,
+              const char* fieldName,
+              std::bool_constant<AllowSingletonArrayAsString> _ = std::bool_constant<false>{}) {
 	if (!field.present())
 		return;
 	wr.Key(fieldName);
@@ -235,6 +235,14 @@ void putField(Optional<FieldType> const& field, Writer& wr, const char* fieldNam
 		}
 		wr.EndArray();
 	} else {
+		// VectorRef<StringRef> case
+		if constexpr (AllowSingletonArrayAsString) {
+			if (value.size() == 1 && deterministicRandom()->coinflip()) {
+				// randomly make the field string, not array, to test parsing behavior
+				wr.String(reinterpret_cast<const char*>(value[0].begin()), value[0].size());
+				return;
+			}
+		}
 		wr.StartArray();
 		for (auto elem : value) {
 			wr.String(reinterpret_cast<const char*>(elem.begin()), elem.size());
@@ -263,7 +271,7 @@ StringRef makeSignInput(Arena& arena, const TokenRef& tokenSpec) {
 	payload.StartObject();
 	putField(tokenSpec.issuer, payload, "iss");
 	putField(tokenSpec.subject, payload, "sub");
-	putField(tokenSpec.audience, payload, "aud");
+	putField(tokenSpec.audience, payload, "aud", std::bool_constant<true>{});
 	putField(tokenSpec.issuedAtUnixTime, payload, "iat");
 	putField(tokenSpec.expiresAtUnixTime, payload, "exp");
 	putField(tokenSpec.notBeforeUnixTime, payload, "nbf");
@@ -356,11 +364,12 @@ Optional<StringRef> parseHeaderPart(Arena& arena, TokenRef& token, StringRef b64
 	return {};
 }
 
-template <class FieldType>
+template <class FieldType, bool AllowStringAsSingletonArray = false>
 Optional<StringRef> parseField(Arena& arena,
                                Optional<FieldType>& out,
                                const rapidjson::Document& d,
-                               const char* fieldName) {
+                               const char* fieldName,
+                               std::bool_constant<AllowStringAsSingletonArray> _ = std::bool_constant<false>{}) {
 	auto fieldItr = d.FindMember(fieldName);
 	if (fieldItr == d.MemberEnd())
 		return {};
@@ -376,9 +385,24 @@ Optional<StringRef> parseField(Arena& arena,
 		if (!field.IsNumber()) {
 			return StringRef(arena, fmt::format("'{}' is not a number", fieldName));
 		}
-		out = static_cast<uint64_t>(field.GetDouble());
+		auto const number = field.GetDouble();
+		if (number < 0) {
+			return StringRef(arena, fmt::format("negative '{}' value is not allowed", fieldName));
+		}
+		out = static_cast<uint64_t>(number);
 	} else if constexpr (std::is_same_v<FieldType, VectorRef<StringRef>>) {
-		if (!field.IsArray()) {
+		if constexpr (AllowStringAsSingletonArray) {
+			if (field.IsString()) {
+				auto vector = new (arena) StringRef[1];
+				vector[0] =
+				    StringRef(arena, reinterpret_cast<const uint8_t*>(field.GetString()), field.GetStringLength());
+				out = VectorRef<StringRef>(vector, 1);
+				CODE_PROBE(true, "Interpret authorization token's claim value string as a singleton array");
+				return {};
+			} else if (!field.IsArray()) {
+				return StringRef(arena, fmt::format("'{}' is not an array or a string", fieldName));
+			}
+		} else if (!field.IsArray()) {
 			return StringRef(arena, fmt::format("'{}' is not an array", fieldName));
 		}
 		if (field.Size() > 0) {
@@ -453,7 +477,7 @@ Optional<StringRef> parsePayloadPart(Arena& arena, TokenRef& token, StringRef b6
 		return err;
 	if ((err = parseField(arena, token.subject, d, "sub")).present())
 		return err;
-	if ((err = parseField(arena, token.audience, d, "aud")).present())
+	if ((err = parseField(arena, token.audience, d, "aud", std::bool_constant<true>{})).present())
 		return err;
 	if ((err = parseField(arena, token.tokenId, d, "jti")).present())
 		return err;
@@ -594,18 +618,18 @@ TEST_CASE("/fdbrpc/TokenSign/JWT") {
 			auto parseError = parseToken(tmpArena, signedToken, parsedToken, signInput);
 			ASSERT(!parseError.present());
 			ASSERT_EQ(tokenSpec.algorithm, parsedToken.algorithm);
-			ASSERT(tokenSpec.issuer == parsedToken.issuer);
-			ASSERT(tokenSpec.subject == parsedToken.subject);
-			ASSERT(tokenSpec.tokenId == parsedToken.tokenId);
-			ASSERT(tokenSpec.audience == parsedToken.audience);
-			ASSERT(tokenSpec.keyId == parsedToken.keyId);
+			ASSERT_EQ(tokenSpec.issuer, parsedToken.issuer);
+			ASSERT_EQ(tokenSpec.subject, parsedToken.subject);
+			ASSERT_EQ(tokenSpec.tokenId, parsedToken.tokenId);
+			ASSERT_EQ(tokenSpec.audience, parsedToken.audience);
+			ASSERT_EQ(tokenSpec.keyId, parsedToken.keyId);
 			ASSERT_EQ(tokenSpec.issuedAtUnixTime.get(), parsedToken.issuedAtUnixTime.get());
 			ASSERT_EQ(tokenSpec.expiresAtUnixTime.get(), parsedToken.expiresAtUnixTime.get());
 			ASSERT_EQ(tokenSpec.notBeforeUnixTime.get(), parsedToken.notBeforeUnixTime.get());
-			ASSERT(tokenSpec.tenants == parsedToken.tenants);
+			ASSERT_EQ(tokenSpec.tenants, parsedToken.tenants);
 			auto optSig = base64::url::decode(tmpArena, signaturePart);
 			ASSERT(optSig.present());
-			ASSERT(optSig.get() == parsedToken.signature);
+			ASSERT_EQ(optSig.get(), parsedToken.signature);
 			std::tie(verifyOk, verifyErr) = authz::jwt::verifyToken(signInput, parsedToken, publicKey);
 			ASSERT(!verifyErr.present());
 			ASSERT(verifyOk);

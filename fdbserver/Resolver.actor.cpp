@@ -216,6 +216,31 @@ struct Resolver : ReferenceCounted<Resolver> {
 };
 } // namespace
 
+ACTOR Future<Void> versionReady(Resolver* self, ProxyRequestsInfo* proxyInfo, Version prevVersion) {
+	loop {
+		if (self->recentStateTransactionsInfo.size() &&
+		    proxyInfo->lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
+			self->neededVersion.set(std::max(self->neededVersion.get(), prevVersion));
+		}
+
+		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
+		int waiters = self->version.numWaiting();
+		if (self->version.get() < prevVersion) {
+			waiters++;
+		}
+		self->queueDepthDist->sampleRecordCounter(waiters);
+
+		choose {
+			when(wait(self->version.whenAtLeast(prevVersion))) {
+				// Update queue depth metric after waiting.
+				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
+				return Void();
+			}
+			when(wait(self->checkNeededVersion.onTrigger())) {}
+		}
+	}
+}
+
 ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
                                 ResolveTransactionBatchRequest req,
                                 Reference<AsyncVar<ServerDBInfo> const> db) {
@@ -267,28 +292,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		g_traceBatch.addEvent("CommitDebug", debugID.get().first(), "Resolver.resolveBatch.AfterQueueSizeCheck");
 	}
 
-	loop {
-		if (self->recentStateTransactionsInfo.size() &&
-		    proxyInfo.lastVersion <= self->recentStateTransactionsInfo.firstVersion()) {
-			self->neededVersion.set(std::max(self->neededVersion.get(), req.prevVersion));
-		}
-
-		// Update queue depth metric before waiting. Check if we're going to be one of the waiters or not.
-		int waiters = self->version.numWaiting();
-		if (self->version.get() < req.prevVersion) {
-			waiters++;
-		}
-		self->queueDepthDist->sampleRecordCounter(waiters);
-
-		choose {
-			when(wait(self->version.whenAtLeast(req.prevVersion))) {
-				// Update queue depth metric after waiting.
-				self->queueDepthDist->sampleRecordCounter(self->version.numWaiting());
-				break;
-			}
-			when(wait(self->checkNeededVersion.onTrigger())) {}
-		}
-	}
+	wait(versionReady(self.getPtr(), &proxyInfo, req.prevVersion));
 
 	if (check_yield(TaskPriority::DefaultEndpoint)) {
 		wait(delay(0, TaskPriority::Low) || delay(SERVER_KNOBS->COMMIT_SLEEP_TIME)); // FIXME: Is this still right?

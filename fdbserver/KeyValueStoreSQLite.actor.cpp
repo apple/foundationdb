@@ -153,17 +153,28 @@ struct PageChecksumCodec {
 		if (!silent) {
 			auto severity = SevError;
 			if (g_network->isSimulated()) {
-				auto firstBlock = pageNumber == 1 ? 0 : ((pageNumber - 1) * pageLen) / 4096,
-				     lastBlock = (pageNumber * pageLen) / 4096;
-				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, firstBlock));
-				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename && iter->second < lastBlock) {
+				// Calculate file offsets for the read/write operation space
+				// Operation starts at a 1-based pageNumber and is of size pageLen
+				int64_t fileOffsetStart = (pageNumber - 1) * pageLen;
+				// End refers to the offset after the operation, not the last byte.
+				int64_t fileOffsetEnd = fileOffsetStart + pageLen;
+
+				// Convert the file offsets to potentially corrupt block numbers
+				// Corrupt block numbers are 0-based and 4096 bytes in length.
+				int64_t corruptBlockStart = fileOffsetStart / 4096;
+				// corrupt block end is the block number AFTER the operation
+				int64_t corruptBlockEnd = (fileOffsetEnd + 4095) / 4096;
+
+				auto iter = g_simulator->corruptedBlocks.lower_bound(std::make_pair(filename, corruptBlockStart));
+				if (iter != g_simulator->corruptedBlocks.end() && iter->first == filename &&
+				    iter->second < corruptBlockEnd) {
 					severity = SevWarnAlways;
 				}
 				TraceEvent("CheckCorruption")
 				    .detail("Filename", filename)
 				    .detail("NextFile", iter->first)
-				    .detail("FirstBlock", firstBlock)
-				    .detail("LastBlock", lastBlock)
+				    .detail("BlockStart", corruptBlockStart)
+				    .detail("BlockEnd", corruptBlockEnd)
 				    .detail("NextBlock", iter->second);
 			}
 			TraceEvent trEvent(severity, "SQLitePageChecksumFailure");
@@ -1613,9 +1624,7 @@ public:
 	StorageBytes getStorageBytes() const override;
 
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override;
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = nullptr) override;
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override;
 	Future<Void> commit(bool sequential = false) override;
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> optionss) override;
@@ -2235,7 +2244,7 @@ void KeyValueStoreSQLite::set(KeyValueRef keyValue, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::SetAction(keyValue));
 }
-void KeyValueStoreSQLite::clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) {
+void KeyValueStoreSQLite::clear(KeyRangeRef range, const Arena* arena) {
 	++writesRequested;
 	writeThread->post(new Writer::ClearAction(range));
 }

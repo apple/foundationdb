@@ -74,14 +74,17 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			int64_t logicalSize;
 			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
+			    decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
+			BlobFileIndex idx(
+			    version, filename.toString(), offset, length, fullFileLength, logicalSize, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -250,7 +253,7 @@ static std::string makeTestFileName(Version v) {
 }
 
 static BlobFileIndex makeTestFile(Version v, int64_t len) {
-	return BlobFileIndex(v, makeTestFileName(v), 0, len, len);
+	return BlobFileIndex(v, makeTestFileName(v), 0, len, len, len);
 }
 
 static void checkFile(int expectedVersion, const BlobFilePointerRef& actualFile) {
@@ -468,10 +471,10 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	loop {
 		try {
 			Future<EKPGetLatestBlobMetadataReply> requestFuture;
-			if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+			if (self->dbInfo.isValid() && self->dbInfo->get().client.encryptKeyProxy.present()) {
 				req.reply.reset();
-				requestFuture =
-				    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+				requestFuture = brokenPromiseToNever(
+				    self->dbInfo->get().client.encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
 			} else {
 				requestFuture = Never();
 			}

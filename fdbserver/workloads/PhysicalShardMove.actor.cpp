@@ -240,16 +240,15 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint meta data.
-		state std::vector<CheckpointMetaData> records;
+		state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
 		loop {
 			records.clear();
 			try {
 				wait(store(records,
-				           getCheckpointMetaData(cx, checkpointRanges, version, format, Optional<UID>(dataMoveId))));
+				           getCheckpointMetaData(cx, restoreRanges, version, format, Optional<UID>(dataMoveId))));
 				TraceEvent(SevDebug, "TestCheckpointMetaDataFetched")
 				    .detail("Range", describe(checkpointRanges))
-				    .detail("Version", version)
-				    .detail("Checkpoints", describe(records));
+				    .detail("Version", version);
 
 				break;
 			} catch (Error& e) {
@@ -264,42 +263,31 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		}
 
 		// Fetch checkpoint.
-		state std::string checkpointDir = abspath("checkpoints");
+		state std::string checkpointDir = abspath("fetchedCheckpoints" + deterministicRandom()->randomAlphaNumeric(6));
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
+		state std::vector<Future<CheckpointMetaData>> checkpointFutures;
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				try {
-					state CheckpointMetaData record;
+		loop {
+			checkpointFutures.clear();
+			try {
+				for (int i = 0; i < records.size(); ++i) {
+					TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].second.toString());
+					state std::string currentDir = fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+					platform::eraseDirectoryRecursive(currentDir);
+					ASSERT(platform::createDirectory(currentDir));
 					if (asKeyValues) {
-						std::vector<KeyRange> fetchRanges;
-						for (const auto& range : restoreRanges) {
-							for (const auto& cRange : records[i].ranges) {
-								if (cRange.contains(range)) {
-									fetchRanges.push_back(range);
-									break;
-								}
-							}
-						}
-						ASSERT(!fetchRanges.empty());
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
+						checkpointFutures.push_back(
+						    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
 					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
-						ASSERT(record.getFormat() == format);
+						checkpointFutures.push_back(fetchCheckpoint(cx, records[i].second, currentDir));
 					}
-					fetchedCheckpoints.push_back(record);
-					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
-					wait(delay(1));
 				}
+				wait(store(fetchedCheckpoints, getAll(checkpointFutures)));
+				TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoints", describe(fetchedCheckpoints));
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestFetchCheckpointError").errorUnsuppressed(e);
 			}
 		}
 
@@ -507,7 +495,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 
 		state std::vector<UID> dests(includes.begin(), includes.end());
 		state UID owner = deterministicRandom()->randomUniqueID();
-		// state Key ownerKey = "\xff/moveKeysLock/Owner"_sr;
 		state DDEnabledState ddEnabledState;
 
 		state Transaction tr(cx);
@@ -529,6 +516,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					state DataMoveMetaData dataMove = decodeDataMoveValue(dataMoves[i].value);
 					ASSERT(dataMoveId == dataMove.id);
 					TraceEvent("TestCancelDataMoveBegin").detail("DataMove", dataMove.toString());
+					if (dataMove.ranges.empty()) {
+						// This dataMove cancellation is delayed to background cancellation
+						// For this case, the dataMove has empty ranges but it is in Deleting phase
+						// We simply bypass this case
+						ASSERT(dataMove.getPhase() == DataMoveMetaData::Deleting);
+						TraceEvent("TestCancelEmptyDataMoveEnd").detail("DataMove", dataMove.toString());
+						continue;
+					}
 					wait(cleanUpDataMove(cx,
 					                     dataMoveId,
 					                     moveKeysLock,

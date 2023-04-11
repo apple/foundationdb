@@ -128,6 +128,8 @@ public:
 	                          KillType* ktFinal = nullptr) = 0;
 	virtual bool killAll(KillType kt, bool forceKill = false, KillType* ktFinal = nullptr) = 0;
 	// virtual KillType getMachineKillState( UID zoneID ) = 0;
+	virtual void processInjectBlobFault(ProcessInfo* machine, double failureRate) = 0;
+	virtual void processStopInjectBlobFault(ProcessInfo* machine) = 0;
 	virtual bool canKillProcesses(std::vector<ProcessInfo*> const& availableProcesses,
 	                              std::vector<ProcessInfo*> const& deadProcesses,
 	                              KillType kt,
@@ -325,8 +327,11 @@ public:
 	double lastConnectionFailure;
 	double connectionFailuresDisableDuration;
 	bool speedUpSimulation;
+	double connectionFailureEnableTime; // Last time connection failure is enabled.
+	bool disableTLogRecoveryFinish;
 	BackupAgentType backupAgents;
 	BackupAgentType drAgents;
+	bool willRestart = false;
 	bool restarted = false;
 	ValidationData validationData;
 
@@ -347,6 +352,10 @@ public:
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
+
+	// A collection of custom shard boundaries (begin, end, replication factor) that will be removed once this feature
+	// is integrated with a way to set these boundaries in the database
+	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;

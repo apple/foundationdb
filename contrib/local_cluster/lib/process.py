@@ -12,7 +12,10 @@ class Process:
     """Maintain a process as coroutine"""
 
     def __init__(
-        self, executable: str, arguments: List[str] = None, env: Dict[str, str] = None
+        self,
+        executable: str,
+        arguments: Union[List[str], None] = None,
+        env: Union[Dict[str, str], None] = None,
     ):
         """Constructor
         :param str executable: Path to the executable
@@ -22,7 +25,7 @@ class Process:
         self._args = arguments or []
         self._env = env
 
-        self._process: asyncio.subprocess.Process = None
+        self._process: Union[asyncio.subprocess.Process, None] = None
 
     async def run(self) -> asyncio.subprocess.Process:
         logger.debug(

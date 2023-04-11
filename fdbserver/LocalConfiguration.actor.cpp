@@ -27,8 +27,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(IsTest);
-
 namespace {
 
 const KeyRef configPathKey = "configPath"_sr;

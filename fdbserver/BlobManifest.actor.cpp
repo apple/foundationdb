@@ -187,18 +187,20 @@ public:
 	}
 
 	// Delete all files of oldest manifest
-	static void deleteOldest(const std::vector<BlobManifestFile>& allFiles,
-	                         Reference<BackupContainerFileSystem> container) {
+	ACTOR static Future<Void> deleteOldest(std::vector<BlobManifestFile> allFiles,
+	                                       Reference<BackupContainerFileSystem> container) {
 		if (allFiles.empty()) {
-			return;
+			return Void();
 		}
-		int64_t epoch = allFiles.back().epoch;
-		int64_t seqNo = allFiles.back().seqNo;
+		state int64_t epoch = allFiles.back().epoch;
+		state int64_t seqNo = allFiles.back().seqNo;
 		for (auto& f : allFiles) {
 			if (f.epoch == epoch && f.seqNo == seqNo) {
-				container->deleteFile(f.fileName);
+				wait(container->deleteFile(f.fileName));
 			}
 		}
+		TraceEvent("BlobManfiestDelete").detail("Epoch", epoch).detail("SeqNo", seqNo);
+		return Void();
 	}
 
 	// Count how many manifests
@@ -415,6 +417,7 @@ private:
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
+				TraceEvent("BlobManfiestDump").detail("Size", splitter->totalBytes());
 				return splitter->totalBytes();
 			} catch (Error& e) {
 				TraceEvent("BlobManfiestDumpError").error(e).log();
@@ -433,11 +436,12 @@ private:
 
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
+			TraceEvent("BlobManfiestCleanup").detail("FileCount", allFiles.size());
 			int count = BlobManifest::count(allFiles);
 			if (count <= SERVER_KNOBS->BLOB_RESTORE_MANIFEST_RETENTION_MAX) {
 				return Void();
 			}
-			BlobManifest::deleteOldest(allFiles, writer);
+			wait(BlobManifest::deleteOldest(allFiles, writer));
 		}
 	}
 
@@ -767,10 +771,11 @@ private:
 				int64_t offset;
 				int64_t length;
 				int64_t fullFileLength;
+				int64_t logicalSize;
 				Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 				std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
-				std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) =
+				std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
 				    decodeBlobGranuleFileValue(row.value);
 				GranuleFileVersion vs = { version, fileType, filename.toString(), length };
 				files.push_back(vs);

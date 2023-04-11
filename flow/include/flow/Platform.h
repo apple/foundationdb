@@ -779,8 +779,8 @@ inline static int clz(uint32_t value) {
 #define clz __builtin_clz
 #endif
 
-// These return thread local counts
-int64_t getNumProfilesDeferred();
+// These return 0 unless run on the network thread
+int64_t getNumProfilesDisabled();
 int64_t getNumProfilesOverflowed();
 int64_t getNumProfilesCaptured();
 
@@ -815,6 +815,7 @@ void registerCrashHandlerCallback(void (*f)());
 void registerCrashHandler();
 
 void setupRunLoopProfiler();
+void stopRunLoopProfiler();
 EXTERNC void setProfilingEnabled(int enabled);
 
 // Use _exit() or criticalError(), not exit()

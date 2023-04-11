@@ -9,6 +9,9 @@ injectSSDelay = true
 # FIXME: re-enable rocks at some point
 storageEngineExcludeTypes = [4, 5]
 
+[[knobs]]
+enable_blob_granule_file_logical_size=false
+
 [[test]]
 testTitle = 'BlobGranuleRestartCycle'
 clearAfterTest=false
@@ -49,6 +52,10 @@ clearAfterTest=false
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
     testDuration = 30.0
 
     [[test.workload]]

@@ -430,6 +430,7 @@ public:
 
 	Optional<bool> generateFearless, buggify;
 	Optional<std::string> config;
+	Optional<std::string> remoteConfig;
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
 
@@ -500,6 +501,7 @@ public:
 		    .add("resolverCount", &resolverCount)
 		    .add("storageEngineType", &storageEngineType)
 		    .add("config", &config)
+		    .add("remoteConfig", &remoteConfig)
 		    .add("buggify", &buggify)
 		    .add("StderrSeverity", &stderrSeverity)
 		    .add("machineCount", &machineCount)
@@ -1870,34 +1872,38 @@ void SimulationConfig::setRegions(const TestConfig& testConfig) {
 			db.usableRegions = 2;
 		}
 
-		int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
-		switch (remote_replication_type) {
-		case 0: {
-			// FIXME: implement
-			CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
-			break;
-		}
-		case 1: {
-			CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
-			break;
-		}
-		case 2: {
-			CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
-			set_config("remote_single");
-			break;
-		}
-		case 3: {
-			CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
-			set_config("remote_double");
-			break;
-		}
-		case 4: {
-			CODE_PROBE(true, "Simulated cluster using triple remote redundancy mode");
-			set_config("remote_triple");
-			break;
-		}
-		default:
-			ASSERT(false); // Programmer forgot to adjust cases.
+		if (testConfig.remoteConfig.present()) {
+			set_config(testConfig.remoteConfig.get());
+		} else {
+			int remote_replication_type = deterministicRandom()->randomInt(0, datacenters > 4 ? 4 : 5);
+			switch (remote_replication_type) {
+			case 0: {
+				// FIXME: implement
+				CODE_PROBE(true, "Simulated cluster using custom remote redundancy mode");
+				break;
+			}
+			case 1: {
+				CODE_PROBE(true, "Simulated cluster using default remote redundancy mode");
+				break;
+			}
+			case 2: {
+				CODE_PROBE(true, "Simulated cluster using single remote redundancy mode");
+				set_config("remote_single");
+				break;
+			}
+			case 3: {
+				CODE_PROBE(true, "Simulated cluster using double remote redundancy mode");
+				set_config("remote_double");
+				break;
+			}
+			case 4: {
+				CODE_PROBE(true, "Simulated cluster using triple remote redundancy mode");
+				set_config("remote_triple");
+				break;
+			}
+			default:
+				ASSERT(false); // Programmer forgot to adjust cases.
+			}
 		}
 
 		if (deterministicRandom()->random01() < 0.25)
@@ -2585,6 +2591,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	g_simulator->connectionString = conn.toString();
 	g_simulator->testerCount = testerCount;
 	g_simulator->allowStorageMigrationTypeChange = gradualMigrationPossible;
+	g_simulator->willRestart = testConfig.isFirstTestInRestart;
 
 	TraceEvent("SimulatedClusterStarted")
 	    .detail("DataCenters", dataCenters)

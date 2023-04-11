@@ -25,8 +25,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(SkipDDModeCheck);
-
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -261,6 +259,12 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
+			result->customReplication->insert(allKeys, -1);
+			if (g_network->isSimulated() && ddLargeTeamEnabled()) {
+				for (auto& it : g_simulator->customReplicas) {
+					result->customReplication->insert(KeyRangeRef(std::get<0>(it), std::get<1>(it)), std::get<2>(it));
+				}
+			}
 			try {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -315,6 +319,16 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					if (meta.ranges.empty()) {
+						// Any persisted datamove with an empty range must be an tombstone persisted by
+						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
+						// and this datamove must be in DataMoveMetaData::Deleting state
+						// A datamove without processed by a background cleanup must have a non-empty range
+						// For this case, we simply clear the range when dd init
+						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+						result->toCleanDataMoveTombstone.push_back(meta.id);
+						continue;
+					}
 					ASSERT(!meta.ranges.empty());
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];

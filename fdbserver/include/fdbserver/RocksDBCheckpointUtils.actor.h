@@ -31,6 +31,15 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
+class ICheckpointByteSampleReader {
+public:
+	virtual ~ICheckpointByteSampleReader() {}
+
+	virtual KeyValue next() = 0;
+
+	virtual bool hasNext() const = 0;
+};
+
 class IRocksDBSstFileWriter {
 public:
 	virtual void open(const std::string localFile) = 0;
@@ -68,41 +77,65 @@ struct CheckpointFile {
 struct SstFileMetaData {
 	constexpr static FileIdentifier file_identifier = 3804347;
 	SstFileMetaData()
-	  : size(0), file_number(0), smallest_seqno(0), largest_seqno(0), num_reads_sampled(0), being_compacted(false),
-	    num_entries(0), num_deletions(0), temperature(0), oldest_blob_file_number(0), oldest_ancester_time(0),
-	    file_creation_time(0) {}
+	  : file_number(0), file_type(2), size(0), temperature(0), smallest_seqno(0), largest_seqno(0),
+	    num_reads_sampled(0), being_compacted(false), num_entries(0), num_deletions(0), oldest_blob_file_number(0),
+	    oldest_ancester_time(0), file_creation_time(0), epoch_number(0) {}
 
-	SstFileMetaData(const std::string& _file_name,
+	SstFileMetaData(const std::string& _relative_filename,
+	                const std::string& _directory,
 	                uint64_t _file_number,
-	                const std::string& _path,
-	                size_t _size,
+	                int _file_type,
+	                uint64_t _size,
+	                int _temperature,
+	                std::string& _file_checksum,
+	                std::string& _file_checksum_func_name,
 	                uint64_t _smallest_seqno,
 	                uint64_t _largest_seqno,
 	                const std::string& _smallestkey,
 	                const std::string& _largestkey,
 	                uint64_t _num_reads_sampled,
 	                bool _being_compacted,
-	                int _temperature,
+	                uint64_t _num_entries,
+	                uint64_t _num_deletions,
 	                uint64_t _oldest_blob_file_number,
 	                uint64_t _oldest_ancester_time,
 	                uint64_t _file_creation_time,
-	                std::string& _file_checksum,
-	                std::string& _file_checksum_func_name)
-	  : size(_size), name(_file_name), file_number(_file_number), db_path(_path), smallest_seqno(_smallest_seqno),
+	                uint64_t _epoch_number,
+	                const std::string& _name,
+	                const std::string& _db_path)
+	  : relative_filename(_relative_filename), directory(_directory), file_number(_file_number), file_type(_file_type),
+	    size(_size), temperature(_temperature), file_checksum(_file_checksum),
+	    file_checksum_func_name(_file_checksum_func_name), smallest_seqno(_smallest_seqno),
 	    largest_seqno(_largest_seqno), smallestkey(_smallestkey), largestkey(_largestkey),
-	    num_reads_sampled(_num_reads_sampled), being_compacted(_being_compacted), num_entries(0), num_deletions(0),
-	    temperature(_temperature), oldest_blob_file_number(_oldest_blob_file_number),
+	    num_reads_sampled(_num_reads_sampled), being_compacted(_being_compacted), num_entries(_num_entries),
+	    num_deletions(_num_deletions), oldest_blob_file_number(_oldest_blob_file_number),
 	    oldest_ancester_time(_oldest_ancester_time), file_creation_time(_file_creation_time),
-	    file_checksum(_file_checksum), file_checksum_func_name(_file_checksum_func_name) {}
+	    epoch_number(_epoch_number), name(_name), db_path(_db_path) {}
 
-	// File size in bytes.
-	size_t size;
-	// The name of the file.
-	std::string name;
-	// The id of the file.
+	// The name of the file within its directory (e.g. "123456.sst")
+	std::string relative_filename;
+	// The directory containing the file, without a trailing '/'. This could be
+	// a DB path, wal_dir, etc.
+	std::string directory;
+	// The id of the file within a single DB. Set to 0 if the file does not have
+	// a number (e.g. CURRENT)
 	uint64_t file_number;
-	// The full path where the file locates.
-	std::string db_path;
+	// The type of the file as part of a DB.
+	int file_type;
+	// File size in bytes. See also `trim_to_size`.
+	uint64_t size;
+	// This feature is experimental and subject to change.
+	int temperature;
+	// The checksum of a SST file, the value is decided by the file content and
+	// the checksum algorithm used for this SST file. The checksum function is
+	// identified by the file_checksum_func_name. If the checksum function is
+	// not specified, file_checksum is "0" by default.
+	std::string file_checksum;
+	// The name of the checksum function used to generate the file checksum
+	// value. If file checksum is not enabled (e.g., sst_file_checksum_func is
+	// null), file_checksum_func_name is UnknownFileChecksumFuncName, which is
+	// "Unknown".
+	std::string file_checksum_func_name;
 
 	uint64_t smallest_seqno; // Smallest sequence number in file.
 	uint64_t largest_seqno; // Largest sequence number in file.
@@ -110,13 +143,8 @@ struct SstFileMetaData {
 	std::string largestkey; // Largest user defined key in the file.
 	uint64_t num_reads_sampled; // How many times the file is read.
 	bool being_compacted; // true if the file is currently being compacted.
-
 	uint64_t num_entries;
 	uint64_t num_deletions;
-
-	// This feature is experimental and subject to change.
-	int temperature;
-
 	uint64_t oldest_blob_file_number; // The id of the oldest blob file
 	                                  // referenced by the file.
 	// An SST file may be generated by compactions whose input files may
@@ -130,26 +158,30 @@ struct SstFileMetaData {
 	// Timestamp when the SST file is created, provided by
 	// SystemClock::GetCurrentTime(). 0 if the information is not available.
 	uint64_t file_creation_time;
-
-	// The checksum of a SST file, the value is decided by the file content and
-	// the checksum algorithm used for this SST file. The checksum function is
-	// identified by the file_checksum_func_name. If the checksum function is
-	// not specified, file_checksum is "0" by default.
-	std::string file_checksum;
-
-	// The name of the checksum function used to generate the file checksum
-	// value. If file checksum is not enabled (e.g., sst_file_checksum_func is
-	// null), file_checksum_func_name is UnknownFileChecksumFuncName, which is
-	// "Unknown".
-	std::string file_checksum_func_name;
+	// The order of a file being flushed or ingested/imported.
+	// Compaction output file will be assigned with the minimum `epoch_number`
+	// among input files'.
+	// For L0, larger `epoch_number` indicates newer L0 file.
+	// 0 if the information is not available.
+	uint64_t epoch_number;
+	// DEPRECATED: The name of the file within its directory with a
+	// leading slash (e.g. "/123456.sst"). Use relative_filename from base struct
+	// instead.
+	std::string name;
+	// DEPRECATED: replaced by `directory` in base struct
+	std::string db_path;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
-		           size,
-		           name,
+		           relative_filename,
+		           directory,
 		           file_number,
-		           db_path,
+		           file_type,
+		           size,
+		           temperature,
+		           file_checksum,
+		           file_checksum_func_name,
 		           smallest_seqno,
 		           largest_seqno,
 		           smallestkey,
@@ -158,12 +190,12 @@ struct SstFileMetaData {
 		           being_compacted,
 		           num_entries,
 		           num_deletions,
-		           temperature,
 		           oldest_blob_file_number,
 		           oldest_ancester_time,
 		           file_creation_time,
-		           file_checksum,
-		           file_checksum_func_name);
+		           epoch_number,
+		           name,
+		           db_path);
 	}
 };
 
@@ -178,10 +210,14 @@ struct LiveFileMetaData : public SstFileMetaData {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
-		           SstFileMetaData::size,
-		           SstFileMetaData::name,
+		           SstFileMetaData::relative_filename,
+		           SstFileMetaData::directory,
 		           SstFileMetaData::file_number,
-		           SstFileMetaData::db_path,
+		           SstFileMetaData::file_type,
+		           SstFileMetaData::size,
+		           SstFileMetaData::temperature,
+		           SstFileMetaData::file_checksum,
+		           SstFileMetaData::file_checksum_func_name,
 		           SstFileMetaData::smallest_seqno,
 		           SstFileMetaData::largest_seqno,
 		           SstFileMetaData::smallestkey,
@@ -190,12 +226,12 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::being_compacted,
 		           SstFileMetaData::num_entries,
 		           SstFileMetaData::num_deletions,
-		           SstFileMetaData::temperature,
 		           SstFileMetaData::oldest_blob_file_number,
 		           SstFileMetaData::oldest_ancester_time,
 		           SstFileMetaData::file_creation_time,
-		           SstFileMetaData::file_checksum,
-		           SstFileMetaData::file_checksum_func_name,
+		           SstFileMetaData::epoch_number,
+		           SstFileMetaData::name,
+		           SstFileMetaData::db_path,
 		           column_family_name,
 		           level,
 		           fetched);
@@ -295,6 +331,8 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint);
 ICheckpointReader* newRocksDBCheckpointReader(const CheckpointMetaData& checkpoint,
                                               const CheckpointAsKeyValues checkpointAsKeyValues,
                                               UID logID);
+
+std::unique_ptr<ICheckpointByteSampleReader> newCheckpointByteSampleReader(const CheckpointMetaData& checkpoint);
 
 std::unique_ptr<IRocksDBSstFileWriter> newRocksDBSstFileWriter();
 

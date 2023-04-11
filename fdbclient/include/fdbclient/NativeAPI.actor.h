@@ -47,7 +47,7 @@
 	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
-FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseProvisionalProxies);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -266,8 +266,8 @@ struct Traceable<Tenant> : std::true_type {
 	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
-FDB_DECLARE_BOOLEAN_PARAM(ResolveDefaultTenant);
+FDB_BOOLEAN_PARAM(AllowInvalidTenantID);
+FDB_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
@@ -604,14 +604,15 @@ Future<Void> createCheckpoint(Reference<ReadYourWritesTransaction> tr,
                               Optional<UID> dataMoveId = Optional<UID>());
 
 // Gets checkpoint metadata for `ranges` at the specific version, with the particular format.
-// The keyranges of the returned checkpoint is a super-set of `ranges`.
+// Returns a list of [range, checkpoint], where the `checkpoint` has data over `range`.
 // checkpoint_not_found() error will be returned if the specific checkpoint cannot be found.
-ACTOR Future<std::vector<CheckpointMetaData>> getCheckpointMetaData(Database cx,
-                                                                    std::vector<KeyRange> ranges,
-                                                                    Version version,
-                                                                    CheckpointFormat format,
-                                                                    Optional<UID> dataMoveId = Optional<UID>(),
-                                                                    double timeout = 5.0);
+ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(
+    Database cx,
+    std::vector<KeyRange> ranges,
+    Version version,
+    CheckpointFormat format,
+    Optional<UID> dataMoveId = Optional<UID>(),
+    double timeout = 5.0);
 
 // Checks with Data Distributor that it is safe to mark all servers in exclusions as failed
 ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion> exclusions);

@@ -23,19 +23,22 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
-#include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/flow.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterConsistency.actor.h"
+#include "metacluster/TenantConsistency.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantManagementConcurrencyWorkload : TestWorkload {
@@ -106,7 +109,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
 
 		if (self->useMetacluster && self->createMetacluster && self->clientId == 0) {
-			wait(success(MetaclusterAPI::createMetacluster(
+			wait(success(metacluster::createMetacluster(
 			    cx.getReference(),
 			    "management_cluster"_sr,
 			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
@@ -115,12 +118,12 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 			state int extraDatabaseIdx;
 			for (extraDatabaseIdx = 0; extraDatabaseIdx < g_simulator->extraDatabases.size(); ++extraDatabaseIdx) {
-				DataClusterEntry entry;
+				metacluster::DataClusterEntry entry;
 				entry.capacity.numTenantGroups = 1e9;
-				wait(MetaclusterAPI::registerCluster(self->mvDb,
-				                                     ClusterName(fmt::format("cluster{}", extraDatabaseIdx)),
-				                                     g_simulator->extraDatabases[extraDatabaseIdx],
-				                                     entry));
+				wait(metacluster::registerCluster(self->mvDb,
+				                                  ClusterName(fmt::format("cluster{}", extraDatabaseIdx)),
+				                                  g_simulator->extraDatabases[extraDatabaseIdx],
+				                                  entry));
 			}
 		}
 
@@ -183,7 +186,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> createTenant(TenantManagementConcurrencyWorkload* self) {
 		state TenantName tenant = self->chooseTenantName();
-		state MetaclusterTenantMapEntry entry;
+		state metacluster::MetaclusterTenantMapEntry entry;
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
@@ -197,7 +200,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				    .detail("TenantGroup", entry.tenantGroup);
 				Future<Void> createFuture =
 				    self->useMetacluster
-				        ? MetaclusterAPI::createTenant(self->mvDb, entry, AssignClusterAutomatically::True)
+				        ? metacluster::createTenant(self->mvDb, entry, metacluster::AssignClusterAutomatically::True)
 				        : success(
 				              TenantAPI::createTenant(self->dataDb.getReference(), tenant, entry.toTenantMapEntry()));
 				Optional<Void> result = wait(timeout(createFuture, 30));
@@ -240,7 +243,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			loop {
 				TraceEvent(SevDebug, "TenantManagementConcurrencyDeletingTenant", debugId).detail("TenantName", tenant);
 				Future<Void> deleteFuture = self->useMetacluster
-				                                ? MetaclusterAPI::deleteTenant(self->mvDb, tenant)
+				                                ? metacluster::deleteTenant(self->mvDb, tenant)
 				                                : TenantAPI::deleteTenant(self->dataDb.getReference(), tenant);
 				Optional<Void> result = wait(timeout(deleteFuture, 30));
 
@@ -272,9 +275,9 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	ACTOR static Future<Void> configureImpl(TenantManagementConcurrencyWorkload* self,
 	                                        TenantName tenant,
 	                                        std::map<Standalone<StringRef>, Optional<Value>> configParams,
-	                                        IgnoreCapacityLimit ignoreCapacityLimit) {
+	                                        metacluster::IgnoreCapacityLimit ignoreCapacityLimit) {
 		if (self->useMetacluster) {
-			wait(MetaclusterAPI::configureTenant(self->mvDb, tenant, configParams, ignoreCapacityLimit));
+			wait(metacluster::configureTenant(self->mvDb, tenant, configParams, ignoreCapacityLimit));
 		} else {
 			state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 			loop {
@@ -302,7 +305,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		state std::map<Standalone<StringRef>, Optional<Value>> configParams;
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state UID debugId = deterministicRandom()->randomUniqueID();
-		state IgnoreCapacityLimit ignoreCapacityLimit = IgnoreCapacityLimit(deterministicRandom()->coinflip());
+		state metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
 
 		configParams["tenant_group"_sr] = tenantGroup;
 
@@ -355,7 +358,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				    .detail("OldTenantName", oldTenant)
 				    .detail("NewTenantName", newTenant);
 				Future<Void> renameFuture =
-				    self->useMetacluster ? MetaclusterAPI::renameTenant(self->mvDb, oldTenant, newTenant)
+				    self->useMetacluster ? metacluster::renameTenant(self->mvDb, oldTenant, newTenant)
 				                         : TenantAPI::renameTenant(self->dataDb.getReference(), oldTenant, newTenant);
 				Optional<Void> result = wait(timeout(renameFuture, 30));
 
@@ -395,14 +398,14 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	                                              bool useExistingId) {
 		state UID lockId;
 		if (self->useMetacluster) {
-			MetaclusterTenantMapEntry entry = wait(MetaclusterAPI::getTenant(self->mvDb, tenant));
+			metacluster::MetaclusterTenantMapEntry entry = wait(metacluster::getTenant(self->mvDb, tenant));
 			if (useExistingId && entry.tenantLockId.present()) {
 				lockId = entry.tenantLockId.get();
 			} else {
 				lockId = deterministicRandom()->randomUniqueID();
 			}
 
-			wait(MetaclusterAPI::changeTenantLockState(self->mvDb, tenant, lockState, lockId));
+			wait(metacluster::changeTenantLockState(self->mvDb, tenant, lockState, lockId));
 		} else {
 			state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 			loop {
@@ -499,12 +502,12 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(Database cx, TenantManagementConcurrencyWorkload* self) {
 		if (self->useMetacluster) {
 			// The metacluster consistency check runs the tenant consistency check for each cluster
-			state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-			    self->mvDb, AllowPartialMetaclusterOperations::True);
+			state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+			    self->mvDb, metacluster::util::AllowPartialMetaclusterOperations::True);
 			wait(metaclusterConsistencyCheck.run());
 		} else {
-			state TenantConsistencyCheck<DatabaseContext, StandardTenantTypes> tenantConsistencyCheck(
-			    self->dataDb.getReference(), &TenantMetadata::instance());
+			state metacluster::util::TenantConsistencyCheck<DatabaseContext, StandardTenantTypes>
+			    tenantConsistencyCheck(self->dataDb.getReference(), &TenantMetadata::instance());
 			wait(tenantConsistencyCheck.run());
 		}
 

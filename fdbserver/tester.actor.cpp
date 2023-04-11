@@ -54,11 +54,10 @@
 #include "fdbclient/MonitorLeader.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/MoveKeys.actor.h"
 #include "flow/Platform.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-FDB_DEFINE_BOOLEAN_PARAM(UntrustedMode);
 
 WorkloadContext::WorkloadContext() {}
 
@@ -1323,7 +1322,7 @@ ACTOR Future<bool> runTest(Database cx,
 				                                   spec.runConsistencyCheckOnCache,
 				                                   spec.runConsistencyCheckOnTSS,
 				                                   10000.0,
-				                                   18000,
+				                                   5000,
 				                                   spec.databasePingDelay,
 				                                   dbInfo),
 				                  20000.0));
@@ -1782,8 +1781,45 @@ ACTOR Future<Void> initializeSimConfig(Database db) {
 			g_simulator->storagePolicy = dbConfig.storagePolicy;
 			g_simulator->tLogPolicy = dbConfig.tLogPolicy;
 			g_simulator->tLogWriteAntiQuorum = dbConfig.tLogWriteAntiQuorum;
-			g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
 			g_simulator->usableRegions = dbConfig.usableRegions;
+
+			// If the same region is being shared between the remote and a satellite, then our simulated policy checking
+			// may fail to account for the total number of needed machines when deciding what can be killed. To work
+			// around this, we increase the required transaction logs in the remote policy to include the number of
+			// satellite logs that may get recruited there
+			bool foundSharedDcId = false;
+			std::set<Key> dcIds;
+			int maxSatelliteReplication = 0;
+			for (auto const& r : dbConfig.regions) {
+				if (!dcIds.insert(r.dcId).second) {
+					foundSharedDcId = true;
+				}
+				if (!r.satellites.empty() && r.satelliteTLogReplicationFactor > 0 && r.satelliteTLogUsableDcs > 0) {
+					for (auto const& s : r.satellites) {
+						if (!dcIds.insert(s.dcId).second) {
+							foundSharedDcId = true;
+						}
+					}
+
+					maxSatelliteReplication =
+					    std::max(maxSatelliteReplication, r.satelliteTLogReplicationFactor / r.satelliteTLogUsableDcs);
+				}
+			}
+
+			if (foundSharedDcId) {
+				int totalRequired = std::max(dbConfig.tLogReplicationFactor, dbConfig.remoteTLogReplicationFactor) +
+				                    maxSatelliteReplication;
+				g_simulator->remoteTLogPolicy = Reference<IReplicationPolicy>(
+				    new PolicyAcross(totalRequired, "zoneid", Reference<IReplicationPolicy>(new PolicyOne())));
+				TraceEvent("ChangingSimTLogPolicyForSharedRemote")
+				    .detail("TotalRequired", totalRequired)
+				    .detail("MaxSatelliteReplication", maxSatelliteReplication)
+				    .detail("ActualPolicy", dbConfig.getRemoteTLogPolicy()->info())
+				    .detail("SimulatorPolicy", g_simulator->remoteTLogPolicy->info());
+			} else {
+				g_simulator->remoteTLogPolicy = dbConfig.getRemoteTLogPolicy();
+			}
+
 			return Void();
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -2001,6 +2037,14 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
+
+		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
+		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x03", "\xff\x04", 3));
+			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x04", "\xff\x05", 3));
+			TraceEvent("SettingCustomReplicas");
+			MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
+		}
 	}
 
 	if (useDB) {

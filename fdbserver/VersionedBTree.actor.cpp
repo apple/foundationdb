@@ -1887,7 +1887,6 @@ Future<T> forwardError(Future<T> f, Promise<Void> target) {
 		if (e.code() != error_code_actor_cancelled && target.canBeSet()) {
 			target.sendError(e);
 		}
-
 		throw;
 	}
 }
@@ -4993,15 +4992,14 @@ public:
 
 	void clear(KeyRangeRef clearedRange) {
 		++m_mutationCount;
+		ASSERT(!clearedRange.empty());
 		// Optimization for single key clears to create just one mutation boundary instead of two
-		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
-		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
+		if (clearedRange.singleKeyRange()) {
 			++g_redwoodMetrics.metric.opClear;
 			++g_redwoodMetrics.metric.opClearKey;
 			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
 			return;
 		}
-
 		++g_redwoodMetrics.metric.opClear;
 		MutationBuffer::iterator iBegin = m_pBuffer->insert(clearedRange.begin);
 		MutationBuffer::iterator iEnd = m_pBuffer->insert(clearedRange.end);
@@ -8055,7 +8053,7 @@ public:
 			// Only proceed if the last commit is a success, but don't throw if it's not because shutdown
 			// should not throw.
 			wait(ready(self->m_lastCommit));
-			if (!self->m_lastCommit.isError()) {
+			if (!self->getErrorNoDelay().isReady()) {
 				// Run the destructive sanity check, but don't throw.
 				ErrorOr<Void> err = wait(errorOr(self->m_tree->clearAllAndCheckSanity()));
 				// If the test threw an error, it must be an injected fault or something has gone wrong.
@@ -8100,11 +8098,11 @@ public:
 
 	StorageBytes getStorageBytes() const override { return m_tree->getStorageBytes(); }
 
-	Future<Void> getError() const override { return delayed(m_errorPromise.getFuture() || m_tree->getError()); };
+	Future<Void> getError() const override { return delayed(getErrorNoDelay()); }
 
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = 0) override {
+	Future<Void> getErrorNoDelay() const { return m_errorPromise.getFuture() || m_tree->getError(); };
+
+	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
@@ -10228,7 +10226,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Check test op limits
 	state std::function<bool()> testFinished = [=]() {
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
-		         totalRecordsRead < maxRecordsRead);
+		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts);
 	};
 
 	while (!testFinished()) {
@@ -10405,8 +10403,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 			mutationBytesTargetThisCommit = randomSize(maxCommitSize);
 
 			// Recover from disk at random
-			if (!pagerMemoryOnly && coldStarts < maxColdStarts &&
-			    deterministicRandom()->random01() < coldStartProbability) {
+			if (!pagerMemoryOnly && deterministicRandom()->random01() < coldStartProbability) {
 				++coldStarts;
 				printf("Recovering from disk after next commit.\n");
 

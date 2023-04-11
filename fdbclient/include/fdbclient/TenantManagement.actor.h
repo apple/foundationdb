@@ -19,23 +19,23 @@
  */
 
 #pragma once
-#include "fdbclient/ClientBooleanParams.h"
-#include "fdbclient/Knobs.h"
-#include "fdbclient/Tenant.h"
-#include "flow/IRandom.h"
-#include "flow/ThreadHelper.actor.h"
-#include <algorithm>
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_G_H
 #include "fdbclient/TenantManagement.actor.g.h"
 #elif !defined(FDBCLIENT_TENANT_MANAGEMENT_ACTOR_H)
 #define FDBCLIENT_TENANT_MANAGEMENT_ACTOR_H
 
+#include <algorithm>
 #include <string>
 #include <map>
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/GenericTransactionHelper.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/Knobs.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
+#include "fdbclient/Tenant.h"
+#include "flow/IRandom.h"
+#include "flow/ThreadHelper.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace TenantAPI {
@@ -100,7 +100,7 @@ Future<TenantMapEntry> getTenant(Reference<DB> db, Tenant tenant) {
 ACTOR template <class Transaction>
 Future<ClusterType> getClusterType(Transaction tr) {
 	Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-	    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+	    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 
 	return metaclusterRegistration.present() ? metaclusterRegistration.get().clusterType : ClusterType::STANDALONE;
 }
@@ -127,7 +127,7 @@ TenantMode tenantModeForClusterType(ClusterType clusterType, TenantMode tenantMo
 int64_t extractTenantIdFromMutation(MutationRef m);
 int64_t extractTenantIdFromKeyRef(StringRef s);
 bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMapRange);
-bool nextTenantIdPrefixMatches(int64_t lastTenantId, int64_t nextTenantId);
+int64_t computeNextTenantId(int64_t tenantId, int64_t delta);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
 
@@ -199,7 +199,7 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 
 	if (tenantEntry.tenantGroup.present()) {
 		TenantMetadata::tenantGroupTenantIndex().insert(
-		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.id));
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.tenantName, tenantEntry.id));
 
 		// Create the tenant group associated with this tenant if it doesn't already exist
 		Optional<TenantGroupEntry> existingTenantGroup = wait(existingTenantGroupEntryFuture);
@@ -230,14 +230,13 @@ Future<int64_t> getNextTenantId(Transaction tr) {
 		// Shift by 6 bytes to make the prefix the first two bytes of the tenant id
 		lastId = tenantIdPrefix << 48;
 	}
-	int64_t tenantId = lastId.get() + 1;
+
+	int64_t delta = 1;
 	if (BUGGIFY) {
-		tenantId += deterministicRandom()->randomSkewedUInt32(1, 1e9);
+		delta += deterministicRandom()->randomSkewedUInt32(1, 1e9);
 	}
-	if (!TenantAPI::nextTenantIdPrefixMatches(lastId.get(), tenantId)) {
-		throw cluster_no_capacity();
-	}
-	return tenantId;
+
+	return TenantAPI::computeNextTenantId(lastId.get(), delta);
 }
 
 ACTOR template <class DB>
@@ -378,7 +377,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		if (tenantEntry.get().tenantGroup.present()) {
 			TenantMetadata::tenantGroupTenantIndex().erase(
-			    tr, Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), tenantId));
+			    tr, Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), tenantEntry.get().tenantName, tenantId));
 			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
 			    wait(TenantMetadata::tenantGroupTenantIndex().getRange(
 			        tr,
@@ -386,7 +385,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			        Tuple::makeTuple(keyAfter(tenantEntry.get().tenantGroup.get())),
 			        2));
 			if (tenantsInGroup.results.empty() ||
-			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getInt(1) == tenantId)) {
+			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getInt(2) == tenantId)) {
 				TenantMetadata::tenantGroupMap().erase(tr, tenantEntry.get().tenantGroup.get());
 			}
 		}
@@ -459,7 +458,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		if (originalEntry.tenantGroup.present()) {
 			// Remove this tenant from the original tenant group index
 			TenantMetadata::tenantGroupTenantIndex().erase(
-			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), updatedTenantEntry.id));
+			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), originalEntry.tenantName, updatedTenantEntry.id));
 
 			// Check if the original tenant group is now empty. If so, remove the tenant group.
 			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
@@ -469,7 +468,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			    2));
 
 			if (tenants.results.empty() ||
-			    (tenants.results.size() == 1 && tenants.results[0].getInt(1) == updatedTenantEntry.id)) {
+			    (tenants.results.size() == 1 && tenants.results[0].getInt(2) == updatedTenantEntry.id)) {
 				TenantMetadata::tenantGroupMap().erase(tr, originalEntry.tenantGroup.get());
 			}
 		}
@@ -482,8 +481,10 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			}
 
 			// Insert this tenant in the tenant group index
-			TenantMetadata::tenantGroupTenantIndex().insert(
-			    tr, Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(), updatedTenantEntry.id));
+			TenantMetadata::tenantGroupTenantIndex().insert(tr,
+			                                                Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(),
+			                                                                 updatedTenantEntry.tenantName,
+			                                                                 updatedTenantEntry.id));
 		}
 	}
 
@@ -626,6 +627,14 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	TenantMetadata::tenantMap().set(tr, tenantId.get(), entry);
 	TenantMetadata::tenantNameIndex().set(tr, newName, tenantId.get());
 	TenantMetadata::tenantNameIndex().erase(tr, oldName);
+
+	if (entry.tenantGroup.present()) {
+		TenantMetadata::tenantGroupTenantIndex().erase(
+		    tr, Tuple::makeTuple(entry.tenantGroup.get(), oldName, tenantId.get()));
+		TenantMetadata::tenantGroupTenantIndex().insert(
+		    tr, Tuple::makeTuple(entry.tenantGroup.get(), newName, tenantId.get()));
+	}
+
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {

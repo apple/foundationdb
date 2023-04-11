@@ -26,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
+#include "flow/flow.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -65,10 +66,6 @@
 #include <variant>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-FDB_DEFINE_BOOLEAN_PARAM(IncrementalBackupOnly);
-FDB_DEFINE_BOOLEAN_PARAM(OnlyApplyMutationLogs);
-FDB_DEFINE_BOOLEAN_PARAM(SnapshotBackupUseTenantCache);
 
 #define SevFRTestInfo SevVerbose
 // #define SevFRTestInfo SevInfo
@@ -175,7 +172,9 @@ public:
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
+	// XXX: Changed to restoreRangeSet. It can be removed.
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedSet<KeyRange> restoreRangeSet() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(__FUNCTION__sr); }
@@ -202,10 +201,29 @@ public:
 
 	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
 	                                                                          Reference<ReadYourWritesTransaction> tr) {
-		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
+		state std::vector<KeyRange> ranges;
+		state int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
+		state Optional<KeyRange> begin;
+		state Arena arena;
+		loop {
+			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
+			    wait(self->restoreRangeSet().getRange(tr, begin, {}, batchSize));
+			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
+			if (!rangeResult.more) {
+				break;
+			}
+			ASSERT(!rangeResult.results.empty());
+			begin = KeyRangeRef(KeyRef(arena, ranges.back().begin), keyAfter(ranges.back().end, arena));
+		}
+
+		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			state KeyRange range = wait(self->restoreRange().getD(tr));
-			ranges.push_back(range);
+			std::vector<KeyRange> _ranges = wait(self->restoreRanges().getD(tr));
+			ranges = _ranges;
+			if (ranges.empty()) {
+				KeyRange range = wait(self->restoreRange().getD(tr));
+				ranges.push_back(range);
+			}
 		}
 		return ranges;
 	}
@@ -5489,7 +5507,9 @@ public:
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
-			restore.restoreRanges().set(tr, restoreRanges);
+			for (auto& range : restoreRanges) {
+				restore.restoreRangeSet().insert(tr, range);
+			}
 		}
 
 		// this also sets restore.add/removePrefix.
