@@ -155,6 +155,11 @@ public:
 
 // A DataMoveMetaData object corresponds to a single data move.
 struct DataMoveMetaData {
+private:
+	// a deprecated field only for downgrade to or upgrade from 71.2 compatible;
+	KeyRange deprecated_range;
+
+public:
 	enum Phase {
 		InvalidPhase = 0,
 		Prepare = 1, // System keyspace is being modified.
@@ -166,6 +171,7 @@ struct DataMoveMetaData {
 	constexpr static FileIdentifier file_identifier = 13804362;
 	UID id; // A unique id for this data move.
 	Version version;
+
 	std::vector<KeyRange> ranges;
 	int priority;
 	std::set<UID> src;
@@ -196,7 +202,23 @@ struct DataMoveMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, version, ranges, priority, src, dest, checkpoints, phase, mode);
+		// In FDB 71.2, the serialization order is serializer(ar, id, version, range, phase, src, dest);
+		// We shouldn't change it until we don't support upgrade from 71.2
+		if (ar.isDeserializing) {
+			serializer(ar, id, version, deprecated_range, phase, src, dest, ranges, checkpoints, priority, mode);
+			if (!deprecated_range.empty() && ranges.empty()) {
+				// upgrade from 71.2 so ranges is empty
+				ranges.push_back(deprecated_range);
+			}
+		} else {
+			if (ranges.empty()) {
+				serializer(ar, id, version, deprecated_range, phase, src, dest, ranges, checkpoints, priority, mode);
+			} else {
+				// In case of degraded to 71.2 which only has a single key range rather than using the vector of range,
+				// we serialize the first element of ranges.
+				serializer(ar, id, version, ranges[0], phase, src, dest, ranges, checkpoints, priority, mode);
+			}
+		}
 	}
 };
 

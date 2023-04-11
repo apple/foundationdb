@@ -204,7 +204,6 @@ public:
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.encryptKeyProxy = interf;
 			newInfo.client.encryptKeyProxy = interf;
 			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
@@ -234,7 +233,6 @@ public:
 			} else if (t == ProcessClass::BlobMigratorClass) {
 				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
@@ -335,8 +333,8 @@ public:
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobMigrator.present() &&
 		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().encryptKeyProxy.present() &&
-		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
+		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
 		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}

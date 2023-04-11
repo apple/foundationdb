@@ -52,7 +52,6 @@ struct ServerDBInfo {
 	Optional<RatekeeperInterface> ratekeeper;
 	Optional<BlobManagerInterface> blobManager;
 	Optional<BlobMigratorInterface> blobMigrator;
-	Optional<EncryptKeyProxyInterface> encryptKeyProxy;
 	Optional<ConsistencyScanInterface> consistencyScan;
 	std::vector<ResolverInterface> resolvers;
 	DBRecoveryCount
@@ -87,7 +86,6 @@ struct ServerDBInfo {
 		           ratekeeper,
 		           blobManager,
 		           blobMigrator,
-		           encryptKeyProxy,
 		           consistencyScan,
 		           resolvers,
 		           recoveryCount,
@@ -126,6 +124,7 @@ struct GetServerDBInfoRequest {
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<GetServerDBInfoRequest, false>;
 extern template struct NetNotifiedQueue<GetServerDBInfoRequest, false>;
+extern template class GetEncryptCipherKeys<ServerDBInfo>;
 
 ACTOR Future<Void> broadcastTxnRequest(TxnStateRequest req, int sendAmount, bool sendReply);
 

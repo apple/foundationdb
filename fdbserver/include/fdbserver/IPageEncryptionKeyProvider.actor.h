@@ -28,7 +28,7 @@
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_H
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
@@ -259,6 +259,7 @@ public:
 
 private:
 	Reference<BlobCipherKey> generateCipherKey(const BlobCipherDetails& cipherDetails) {
+		// pragma: allowlist nextline secret
 		static unsigned char SHA_KEY[] = "3ab9570b44b8315fdb261da6b1b6c13b";
 		Arena arena;
 		uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
@@ -337,12 +338,13 @@ public:
 		state TextAndHeaderCipherKeys cipherKeys;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			TextAndHeaderCipherKeys cks =
-			    wait(getEncryptCipherKeys(self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
+			TextAndHeaderCipherKeys cks = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
 			cipherKeys = cks;
 		} else {
 			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-			TextAndHeaderCipherKeys cks = wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+			TextAndHeaderCipherKeys cks = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, header, BlobCipherMetrics::KV_REDWOOD));
 			cipherKeys = cks;
 		}
 		EncryptionKey encryptionKey;
@@ -361,7 +363,8 @@ public:
 	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(AESEncryptionKeyProvider* self, int64_t domainId) {
 		ASSERT(self->encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE || domainId < 0);
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;

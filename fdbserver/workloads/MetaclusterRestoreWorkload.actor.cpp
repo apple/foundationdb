@@ -404,7 +404,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		                                                        CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
 		std::unordered_set<int64_t> tenants;
 		for (auto const& tuple : groupTenants.results) {
-			tenants.insert(tuple.getInt(1));
+			tenants.insert(tuple.getInt(2));
 		}
 
 		return tenants;
