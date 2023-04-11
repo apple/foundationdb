@@ -750,11 +750,38 @@ struct GetRangeLimits {
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
-	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
-	           // limits requested) False implies that no such values remain
-	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
-	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guaranteed to be less than the requested range.
+	bool more; // True if values remain in the *key* range requested (possibly beyond the
+	           // limits requested), but not necessarily only if, for example, in getRangeStream(), 'more' is always set
+	           // to true, as each stream fragment doesn't know if it's the last one. Instead, it uses
+	           // `error_code_end_of_stream` for the end.
+	           // False implies that no such values remain
+
+	// Only present when 'more' is true, for example, when the read reaches the shard boundary, 'readThrough' is set to
+	// the shard boundary and the client's next range read should start with the 'readThrough'.
+	// But 'more' is true does not necessarily guarantee 'readThrough' is present, for example, when the read reaches
+	// size limit, 'readThrough' might not be set, the next read should just start from the keyAfter of the current
+	// query result's last key.
+	// In both cases, please use the getter function 'getReadThrough()' instead, which represents the end (or beginning
+	// if reverse) of the range which was read.
+	Optional<KeyRef> readThrough;
+
+	// return the value represent the end (or beginning if reverse) of the range which was read
+	KeyRef getReadThrough(Arena& arena) const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return readThrough.get();
+		}
+		ASSERT(size() > 0);
+		// TODO: is this still right if reverse
+		return keyAfter(back().key, arena);
+	}
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
+
 	bool readToBegin;
 	bool readThroughEnd;
 
@@ -874,6 +901,12 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	Optional<KeyRef> readThrough;
 	bool readToBegin;
 	bool readThroughEnd;
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
 
 	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)

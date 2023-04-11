@@ -394,6 +394,7 @@ private:
 					limits.minRows = 0;
 					state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
 					state KeySelectorRef end = firstGreaterOrEqual(range.end);
+					state Arena beginKeyArena;
 					loop {
 						state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
 						for (auto& row : result) {
@@ -402,11 +403,7 @@ private:
 						if (!result.more) {
 							break;
 						}
-						if (result.readThrough.present()) {
-							begin = firstGreaterOrEqual(result.readThrough.get());
-						} else {
-							begin = firstGreaterThan(result.back().key);
-						}
+						begin = firstGreaterOrEqual(result.getReadThrough(beginKeyArena));
 					}
 				}
 
@@ -491,6 +488,7 @@ public:
 				// Read all granules
 				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 				limits.minRows = 0;
+				state Arena arena;
 				state KeySelectorRef begin = firstGreaterOrEqual(blobGranuleMappingKeys.begin);
 				state KeySelectorRef end = firstGreaterOrEqual(blobGranuleMappingKeys.end);
 				loop {
@@ -501,11 +499,7 @@ public:
 					if (!rows.more) {
 						break;
 					}
-					if (rows.readThrough.present()) {
-						begin = firstGreaterOrEqual(rows.readThrough.get());
-					} else {
-						begin = firstGreaterThan(rows.end()[-1].key);
-					}
+					begin = firstGreaterOrEqual(rows.getReadThrough(arena));
 				}
 
 				// check each granule range
@@ -761,6 +755,7 @@ private:
 		limits.minRows = 0;
 		state KeySelectorRef begin = firstGreaterOrEqual(fileKeyRange.begin);
 		state KeySelectorRef end = firstGreaterOrEqual(fileKeyRange.end);
+		state Arena beginKeyArena;
 		loop {
 			RangeResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			for (auto& row : results) {
@@ -783,11 +778,7 @@ private:
 			if (!results.more) {
 				break;
 			}
-			if (results.readThrough.present()) {
-				begin = firstGreaterOrEqual(results.readThrough.get());
-			} else {
-				begin = firstGreaterThan(results.end()[-1].key);
-			}
+			begin = firstGreaterOrEqual(results.getReadThrough(beginKeyArena));
 		}
 		return files;
 	}

@@ -161,6 +161,22 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	// False implies that no such values remain
 	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
 	                              // beginning if reverse) of the range
+
+	KeyRef getReadThrough(Arena& arena) const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return readThrough.get();
+		}
+		ASSERT(size() > 0);
+		return keyAfter(back().key, arena);
+	}
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
+
 	// which was read to produce these results. This is guaranteed to be less than the requested range.
 	bool readToBegin;
 	bool readThroughEnd;

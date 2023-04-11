@@ -174,11 +174,7 @@ struct BlobRestoreWorkload : TestWorkload {
 				if (data.size() == self->readBatchSize_) {
 					break;
 				}
-				if (result.readThrough.present()) {
-					begin = firstGreaterOrEqual(KeyRef(arena, result.readThrough.get()));
-				} else {
-					begin = firstGreaterThan(KeyRef(arena, result.back().key));
-				}
+				begin = firstGreaterOrEqual(result.getReadThrough(arena));
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
