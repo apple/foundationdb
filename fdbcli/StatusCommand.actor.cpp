@@ -1133,6 +1133,34 @@ void printStatus(StatusObjectReader statusObj,
 							auto numKeyRanges = statusObjBlobGranules["number_of_key_ranges"].get_int();
 							outputString += "\n  Number of Key Ranges   - " + format("%d", numKeyRanges);
 						}
+						if (statusObjBlobGranules.has("last_manifest_dump_ts")) {
+							auto dumpTs = statusObjBlobGranules["last_manifest_dump_ts"].get_int64();
+							auto epoch = statusObjBlobGranules["last_manifest_epoch"].get_int64();
+							auto seqNo = statusObjBlobGranules["last_manifest_seq_no"].get_int64();
+							auto sizeInBytes = statusObjBlobGranules["last_manifest_size_in_bytes"].get_int64();
+							if (sizeInBytes > 0) {
+								auto value = fmt::format("{}.{} dumped at {:%H:%M}. Total {} bytes.",
+								                         epoch,
+								                         seqNo,
+								                         fmt::localtime(dumpTs),
+								                         sizeInBytes);
+								outputString += "\n  Last Manifest          - " + value;
+							} else {
+								outputString += "\n  Last Manifest          - Not dumped yet";
+							}
+						}
+						if (statusObjBlobGranules.has("mutation_log_location")) {
+							auto url = statusObjBlobGranules["mutation_log_location"].get_str();
+							if (statusObjBlobGranules.has("mutation_log_begin_version") &&
+							    statusObjBlobGranules.has("mutation_log_end_version")) {
+								auto begin = statusObjBlobGranules["mutation_log_begin_version"].get_int64();
+								auto end = statusObjBlobGranules["mutation_log_end_version"].get_int64();
+								outputString += "\n  Restorable log version - ";
+								outputString += fmt::format("{} - {}", begin, end);
+							} else {
+								outputString += "\n  Restorable log version - N/A";
+							}
+						}
 					}
 
 					if (statusObjCluster.has("blob_restore")) {
@@ -1154,10 +1182,10 @@ void printStatus(StatusObjectReader statusObj,
 								statusStr = "Starting migrator";
 								break;
 							case BlobRestorePhase::LOADING_MANIFEST:
-								statusStr = fmt::format("Loading manifest. Started at {}", progress, tsShortStr);
+								statusStr = fmt::format("Loading manifest. Started at {}", tsShortStr);
 								break;
 							case BlobRestorePhase::LOADED_MANIFEST:
-								statusStr = "Manifest is loaded";
+								statusStr = fmt::format("Manifest is loaded at {}", tsShortStr);
 								break;
 							case BlobRestorePhase::COPYING_DATA:
 								statusStr = fmt::format("Copying data {}%. Started at {}", progress, tsShortStr);
@@ -1171,11 +1199,12 @@ void printStatus(StatusObjectReader statusObj,
 								}
 								break;
 							case BlobRestorePhase::APPLYING_MLOGS:
-								statusStr = fmt::format("Applying mutation logs. Started at {}", progress, tsShortStr);
+								statusStr = fmt::format("Applying mutation logs. Started at {}", tsShortStr);
 								break;
 							case BlobRestorePhase::DONE:
-								statusStr = fmt::format(
-								    "Completed at {}. Total {} minutes used", tsLongStr, int(now() - startTs) / 60);
+								statusStr = fmt::format("Completed at {}. Total {} minutes used",
+								                        tsLongStr,
+								                        int(phaseStartTs - startTs) / 60);
 								break;
 							case BlobRestorePhase::ERROR:
 								statusStr = fmt::format("Aborted with fatal error at {}. {}", tsLongStr, error);

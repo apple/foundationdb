@@ -39,7 +39,7 @@ the contents of the system key space.
 #include "fdbclient/Status.h"
 #include "fdbclient/Subspace.h"
 #include "fdbclient/DatabaseConfiguration.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/StorageWiggleMetrics.actor.h"
@@ -497,7 +497,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 
 					if (newConfig.tenantMode != oldConfig.tenantMode) {
 						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
-						    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+						    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 						if (metaclusterRegistration.present()) {
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}
