@@ -99,7 +99,7 @@ public:
 	           const EncryptCipherBaseKeyId& kId,
 	           const int64_t rAt,
 	           const int64_t eAt)
-	  : domainId(dId), len(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN)), keyId(kId),
+	  : domainId(dId), len(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1)), keyId(kId),
 	    key(std::make_unique<uint8_t[]>(len)), refreshAt(rAt), expireAt(eAt) {
 		deterministicRandom()->randomBytes(key.get(), len);
 		kcv = Sha256KCV().computeKCV(key.get(), len);
