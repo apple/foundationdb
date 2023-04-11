@@ -531,9 +531,9 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	bool maybeInjectTargetedRestart() {
 		// inject a BW restart at most once per test
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    now() > g_simulator->injectTargetedBMRestartTime) {
+		    now() > g_simulator->injectTargetedBMRestartTime && iAmReplaced.canBeSet()) {
 			CODE_PROBE(true, "Injecting BM targeted restart");
-			TraceEvent("SimBMInjectTargetedRestart", id);
+			TraceEvent("SimBMInjectTargetedRestart", id).log();
 			g_simulator->injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 			iAmReplaced.send(Void());
 			return true;
@@ -5668,7 +5668,10 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 		// we need to recover the old blob manager's state (e.g. granule assignments) before
 		// before the new blob manager does anything
-		wait(recoverBlobManager(self) || collection);
+		choose {
+			when(wait(recoverBlobManager(self) || collection)) {}
+			when(wait(self->iAmReplaced.getFuture())) {}
+		}
 
 		self->addActor.send(doLockChecks(self));
 		self->addActor.send(monitorClientRanges(self));
