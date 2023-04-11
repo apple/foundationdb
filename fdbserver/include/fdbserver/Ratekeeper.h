@@ -28,44 +28,15 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
+#include "fdbserver/IRKRateServer.h"
+#include "fdbserver/IRKRateUpdater.h"
+#include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/TLogInterface.h"
-
-struct RatekeeperLimits {
-	double tpsLimit;
-	Int64MetricHandle tpsLimitMetric;
-	Int64MetricHandle reasonMetric;
-
-	int64_t storageTargetBytes;
-	int64_t storageSpringBytes;
-	int64_t logTargetBytes;
-	int64_t logSpringBytes;
-	double maxVersionDifference;
-
-	int64_t durabilityLagTargetVersions;
-	int64_t lastDurabilityLag;
-	double durabilityLagLimit;
-
-	double bwLagTarget;
-
-	TransactionPriority priority;
-	std::string context;
-
-	Reference<EventCacheHolder> rkUpdateEventCacheHolder;
-
-	RatekeeperLimits(TransactionPriority priority,
-	                 std::string context,
-	                 int64_t storageTargetBytes,
-	                 int64_t storageSpringBytes,
-	                 int64_t logTargetBytes,
-	                 int64_t logSpringBytes,
-	                 double maxVersionDifference,
-	                 int64_t durabilityLagTargetVersions,
-	                 double bwLagTarget);
-};
 
 /**
  * The Ratekeeper class is responsible for:
@@ -84,80 +55,29 @@ struct RatekeeperLimits {
 class Ratekeeper {
 	friend class RatekeeperImpl;
 
-	// Differentiate from GrvProxyInfo in DatabaseContext.h
-	struct GrvProxyInfo {
-		int64_t totalTransactions{ 0 };
-		int64_t batchTransactions{ 0 };
-		uint64_t lastThrottledTagChangeId{ 0 };
-
-		double lastUpdateTime{ 0.0 };
-		double lastTagPushTime{ 0.0 };
-		Version version{ 0 };
-	};
-
-	struct VersionInfo {
-		int64_t totalTransactions;
-		int64_t batchTransactions;
-		double created;
-
-		VersionInfo(int64_t totalTransactions, int64_t batchTransactions, double created)
-		  : totalTransactions(totalTransactions), batchTransactions(batchTransactions), created(created) {}
-
-		VersionInfo() : totalTransactions(0), batchTransactions(0), created(0.0) {}
-	};
-
 	UID id;
 	Database db;
 
 	std::unique_ptr<IRKMetricsTracker> metricsTracker;
-
-	std::map<UID, Ratekeeper::GrvProxyInfo> grvProxyInfo;
-	Smoother smoothReleasedTransactions, smoothBatchReleasedTransactions;
-	HealthMetrics healthMetrics;
-	DatabaseConfiguration configuration;
-	PromiseStream<Future<Void>> addActor;
-
-	Int64MetricHandle actualTpsMetric;
-
-	double lastWarning;
-
+	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
+	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
+	std::unique_ptr<IRKRateServer> rateServer;
+	std::unique_ptr<IRKRateUpdater> normalRateUpdater;
+	std::unique_ptr<IRKRateUpdater> batchRateUpdater;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
-	RatekeeperLimits normalLimits;
-	RatekeeperLimits batchLimits;
+	PromiseStream<Future<Void>> addActor;
 
 	Deque<double> actualTpsHistory;
-	Version maxVersion;
 	double blobWorkerTime;
 	double unblockedAssignmentTime;
-	std::map<Version, Ratekeeper::VersionInfo> version_transactions;
-	std::map<Version, std::pair<double, Optional<double>>> version_recovery;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
-	Optional<Key> remoteDC;
-
-	double getRecoveryDuration(Version ver) const {
-		auto it = version_recovery.lower_bound(ver);
-		double recoveryDuration = 0;
-		while (it != version_recovery.end()) {
-			if (it->second.second.present()) {
-				recoveryDuration += it->second.second.get() - it->second.first;
-			} else {
-				recoveryDuration += now() - it->second.first;
-			}
-			++it;
-		}
-		return recoveryDuration;
-	}
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
-	Future<Void> configurationMonitor();
-	void updateRate(RatekeeperLimits* limits);
+	void tryUpdateAutoTagThrottling();
 
-	void tryAutoThrottleTag(TransactionTag, double rate, double busyness, TagThrottledReason);
-	void tryAutoThrottleTag(StorageQueueInfo&, int64_t storageQueue, int64_t storageDurabilityLag);
-	Future<Void> monitorThrottlingChanges();
 	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
