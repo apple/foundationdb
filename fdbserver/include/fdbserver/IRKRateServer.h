@@ -63,7 +63,7 @@ class RKRateServer : public IRKRateServer {
 	Smoother smoothReleasedTransactions;
 	Smoother smoothBatchReleasedTransactions;
 	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
-	bool lastLimited;
+	bool lastLimited{ false };
 
 public:
 	explicit RKRateServer(FutureStream<GetRateInfoRequest>);
