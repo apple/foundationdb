@@ -2045,6 +2045,7 @@ void testMaxBaseCipherLen() {
 		                                                               baseCipherKCV,
 		                                                               std::numeric_limits<int64_t>::max(),
 		                                                               std::numeric_limits<int64_t>::max());
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_max_base_cipher_len);
 	}

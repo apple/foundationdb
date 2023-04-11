@@ -1007,6 +1007,13 @@ private:
 	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	bool authTokensValidationDone;
 
+	// API is resposible to validate persisted EncryptionHeader sanity, it does following checks
+	// 1. Parse and validate EncryptionHeaderFlags (version compliant checks)
+	// 2. Parse and validate KCVs
+	// 3. Parse and validate auth-tokens if applicable.
+	//
+	// Routine is invoked for every decryption buffer request and is done transparently to the caller
+
 	void validateEncryptHeader(const uint8_t*,
 	                           const int,
 	                           const BlobCipherEncryptHeaderRef&,

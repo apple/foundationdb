@@ -376,7 +376,7 @@ ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: 
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
 ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
 ERROR( encrypt_key_check_value_mismatch, 2711, "Encryption key-check-value mismatch")
-ERROR( encrypt_max_base_cipher_len, 2712, "Max Base Cipher buffer length violation")
+ERROR( encrypt_max_base_cipher_len, 2712, "Max BaseCipher buffer length violation")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error
