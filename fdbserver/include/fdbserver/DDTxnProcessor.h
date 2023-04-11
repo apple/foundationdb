@@ -233,7 +233,6 @@ protected:
 
 	Future<Void> rawFinishMovement(const MoveKeysParams& params,
 	                               const std::map<UID, StorageServerInterface>& tssMapping);
-
 };
 
 struct DDMockTxnProcessorImpl;
