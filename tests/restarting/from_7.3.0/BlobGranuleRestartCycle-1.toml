@@ -55,6 +55,10 @@ clearAfterTest=false
     testDuration = 30.0
 
     [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 30.0
+
+    [[test.workload]]
     testName='SaveAndKill'
     restartInfoLocation='simfdb/restartInfo.ini'
     testDuration=30.0

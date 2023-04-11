@@ -38,8 +38,17 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class T>
+Optional<EncryptKeyProxyInterface> _getEncryptKeyProxyInterface(const Reference<AsyncVar<T> const>& db) {
+	if constexpr (std::is_same_v<T, ClientDBInfo>) {
+		return db->get().encryptKeyProxy;
+	} else {
+		return db->get().client.encryptKeyProxy;
+	}
+}
+
+template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
-	return db->get().encryptKeyProxy.map(&EncryptKeyProxyInterface::id);
+	return _getEncryptKeyProxyInterface(db).map(&EncryptKeyProxyInterface::id);
 }
 
 ACTOR template <class T>
@@ -63,7 +72,7 @@ ACTOR template <class T>
 Future<EKPGetLatestBaseCipherKeysReply> _getUncachedLatestEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                             EKPGetLatestBaseCipherKeysRequest request,
                                                                             BlobCipherMetrics::UsageType usageType) {
-	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
+	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetLatestEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
@@ -165,7 +174,7 @@ ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                      EKPGetBaseCipherKeysByIdsRequest request,
                                                                      BlobCipherMetrics::UsageType usageType) {
-	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
+	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));

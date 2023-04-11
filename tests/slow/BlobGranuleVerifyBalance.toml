@@ -52,3 +52,7 @@ testTitle = 'BlobGranuleVerifyBalance'
     maxDelay = 100
     kill1Timeout = 30
     kill2Timeout = 6000
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 120.0

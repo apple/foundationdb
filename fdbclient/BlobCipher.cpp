@@ -454,17 +454,55 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::getLatestCipherKey() {
 	if (!latestBaseCipherKeyId.present()) {
 		return Reference<BlobCipherKey>();
 	}
+
 	ASSERT_NE(latestBaseCipherKeyId.get(), INVALID_ENCRYPT_CIPHER_KEY_ID);
 	ASSERT(latestRandomSalt.present());
 	ASSERT_NE(latestRandomSalt.get(), INVALID_ENCRYPT_RANDOM_SALT);
 
-	return getCipherByBaseCipherId(latestBaseCipherKeyId.get(), latestRandomSalt.get());
+	Reference<BlobCipherKey> latest = getCipherByBaseCipherId(latestBaseCipherKeyId.get(), latestRandomSalt.get());
+	if (!latest.isValid()) {
+		// Cipher already 'expired'
+		return Reference<BlobCipherKey>();
+	}
+
+	ASSERT(!latest->isExpired());
+	ASSERT_EQ(latest->getBaseCipherId(), latestBaseCipherKeyId.get());
+	ASSERT_EQ(latest->getSalt(), latestRandomSalt.get());
+
+	if (latest->needsRefresh()) {
+#if BLOB_CIPHER_DEBUG
+		TraceEvent(SevDebug, "BlobCipherGetLatestNeedsRefresh")
+		    .detail("DomainId", domainId)
+		    .detail("Now", now())
+		    .detail("RefreshAt", latest->getRefreshAtTS())
+		    .detail("ExpireAt", latest->getExpireAtTS());
+#endif
+		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh;
+		latestBaseCipherKeyId.reset();
+		latestRandomSalt.reset();
+		return Reference<BlobCipherKey>();
+	}
+	return latest;
 }
 
 Reference<BlobCipherKey> BlobCipherKeyIdCache::getCipherByBaseCipherId(const EncryptCipherBaseKeyId& baseCipherKeyId,
                                                                        const EncryptCipherRandomSalt& salt) {
 	BlobCipherKeyIdCacheMapCItr itr = keyIdCache.find(getCacheKey(baseCipherKeyId, salt));
 	if (itr == keyIdCache.end()) {
+		return Reference<BlobCipherKey>();
+	}
+
+	if (itr->second->isExpired()) {
+#if BLOB_CIPHER_DEBUG
+		TraceEvent(SevDebug, "BlobCipherGetCipherExpired")
+		    .detail("DomainId", domainId)
+		    .detail("BaseCipherId", itr->second->getBaseCipherId())
+		    .detail("Now", now())
+		    .detail("ExpireAt", itr->second->getExpireAtTS());
+#endif
+		++BlobCipherMetrics::getInstance()->cipherKeyCacheExpired;
+		// remove the expired key from the cache
+		keyIdCache.erase(itr);
 		return Reference<BlobCipherKey>();
 	}
 	return itr->second;
@@ -516,7 +554,8 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 	Reference<BlobCipherKey> cipherKey =
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, baseCipher, baseCipherLen, refreshAt, expireAt);
 	BlobCipherKeyIdCacheKey cacheKey = getCacheKey(cipherKey->getBaseCipherId(), cipherKey->getSalt());
-	keyIdCache.emplace(cacheKey, cipherKey);
+	auto result = keyIdCache.emplace(cacheKey, cipherKey);
+	ASSERT(result.second);
 
 	// Update the latest BaseCipherKeyId for the given encryption domain
 	latestBaseCipherKeyId = baseCipherId;
@@ -574,7 +613,9 @@ Reference<BlobCipherKey> BlobCipherKeyIdCache::insertBaseCipherKey(const Encrypt
 
 	Reference<BlobCipherKey> cipherKey =
 	    makeReference<BlobCipherKey>(domainId, baseCipherId, baseCipher, baseCipherLen, salt, refreshAt, expireAt);
-	keyIdCache.emplace(cacheKey, cipherKey);
+	auto result = keyIdCache.emplace(cacheKey, cipherKey);
+	ASSERT(result.second);
+
 	(*sizeStat)++;
 	return cipherKey;
 }
@@ -681,23 +722,8 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getLatestCipherKey(const EncryptCip
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getLatestCipherKey();
 
-	// Ensure 'freshness' guarantees for the latestCipher
-	if (cipherKey.isValid()) {
-		if (cipherKey->needsRefresh()) {
-#if BLOB_CIPHER_DEBUG
-			TraceEvent("SevDebug, BlobCipherGetLatestNeedsRefresh")
-			    .detail("DomainId", domainId)
-			    .detail("Now", now())
-			    .detail("RefreshAt", cipherKey->getRefreshAtTS());
-#endif
-			++BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh;
-			return Reference<BlobCipherKey>();
-		}
-		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit;
-	} else {
-		++BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss;
-	}
-
+	cipherKey.isValid() ? ++BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit
+	                    : ++BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss;
 	return cipherKey;
 }
 
@@ -712,23 +738,8 @@ Reference<BlobCipherKey> BlobCipherKeyCache::getCipherKey(const EncryptCipherDom
 	Reference<BlobCipherKeyIdCache> keyIdCache = domainItr->second;
 	Reference<BlobCipherKey> cipherKey = keyIdCache->getCipherByBaseCipherId(baseCipherId, salt);
 
-	// Ensure 'liveness' guarantees for the cipher
-	if (cipherKey.isValid()) {
-		if (cipherKey->isExpired()) {
-#if BLOB_CIPHER_DEBUG
-			TraceEvent(SevDebug, "BlobCipherGetCipherExpired")
-			    .detail("DomainId", domainId)
-			    .detail("BaseCipherId", baseCipherId)
-			    .detail("Now", now())
-			    .detail("ExpireAt", cipherKey->getExpireAtTS());
-#endif
-			++BlobCipherMetrics::getInstance()->cipherKeyCacheExpired;
-			return Reference<BlobCipherKey>();
-		}
-		++BlobCipherMetrics::getInstance()->cipherKeyCacheHit;
-	} else {
-		++BlobCipherMetrics::getInstance()->cipherKeyCacheMiss;
-	}
+	cipherKey.isValid() ? ++BlobCipherMetrics::getInstance()->cipherKeyCacheHit
+	                    : ++BlobCipherMetrics::getInstance()->cipherKeyCacheMiss;
 
 	return cipherKey;
 }
@@ -1825,9 +1836,6 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 
 	// validate getLatestCipherKey return empty when there's no cipher key
 	TraceEvent("BlobCipherTestLatestKeyNotExists").log();
-	Reference<BlobCipherKey> latestKeyNonexists =
-	    cipherKeyCache->getLatestCipherKey(deterministicRandom()->randomInt(minDomainId, maxDomainId));
-	ASSERT(!latestKeyNonexists.isValid());
 	try {
 		cipherKeyCache->getLatestCipherKey(INVALID_ENCRYPT_DOMAIN_ID);
 		ASSERT(false); // shouldn't get here
@@ -1902,10 +1910,9 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 		Reference<BaseCipher> baseCipher = domainKeyMap[minDomainId][minBaseCipherKeyId];
 		uint8_t rawCipher[baseCipher->len];
 		memcpy(rawCipher, baseCipher->key.get(), baseCipher->len);
-		// modify few bytes in the cipherKey
-		for (int i = 2; i < 5; i++) {
-			rawCipher[i]++;
-		}
+		// modify cipherKey by flipping a bit
+		const int idx = deterministicRandom()->randomInt(0, baseCipher->len);
+		rawCipher[idx]++;
 		cipherKeyCache->insertCipherKey(baseCipher->domainId,
 		                                baseCipher->keyId,
 		                                &rawCipher[0],
@@ -1920,6 +1927,117 @@ void testKeyCacheEssentials(DomainKeyMap& domainKeyMap,
 	TraceEvent("BlobCipherTestReinsertNonIdempotentKeyDone");
 
 	TraceEvent("BlobCipherCacheEssentialsEnd");
+}
+
+void testKeyCacheRefreshExpireCipherKey(DomainKeyMap& domainKeyMap, const int maxDomainId) {
+	TraceEvent("BlobCipherCacheRefreshCipherKey");
+
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+	EncryptCipherDomainId domId = maxDomainId + 1;
+	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(domId);
+	ASSERT(!cipherKey.isValid());
+
+	Standalone<StringRef> baseCipher = makeString(4);
+	deterministicRandom()->randomBytes(mutateString(baseCipher), 4);
+
+	Counter::Value expectedNeedRefreshCount =
+	    BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue();
+	Counter::Value expectedLatestHitCount = BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue();
+	Counter::Value expectedLatestMissCount = BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue();
+	Counter::Value expectedMissCount = BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue();
+	Counter::Value expectedHitCount = BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue();
+	Counter::Value expectedExpiredKeys = BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue();
+	// Insert key that needs refresh
+	int64_t refreshAt = now() - 1;
+	int64_t expireAt = std::numeric_limits<int64_t>::max();
+	Reference<BlobCipherKey> inserted =
+	    cipherKeyCache->insertCipherKey(domId, 1, baseCipher.begin(), baseCipher.size(), refreshAt, expireAt);
+	EncryptCipherRandomSalt salt = inserted->getSalt();
+
+	Reference<BlobCipherKey> cipher = cipherKeyCache->getLatestCipherKey(domId);
+	expectedLatestMissCount++;
+	expectedNeedRefreshCount++;
+	// Ensure cache return an invalid cipher
+	ASSERT(!cipher.isValid());
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue(), expectedNeedRefreshCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss.getValue(), expectedLatestMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue(), expectedLatestHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue(), expectedMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue(), expectedHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue(), expectedExpiredKeys);
+
+	// Ensure point-lookup still returns valid key
+	cipher = cipherKeyCache->getCipherKey(domId, 1, salt);
+	expectedHitCount++;
+	ASSERT(cipher.isValid());
+	ASSERT_EQ(cipher->getDomainId(), domId);
+	ASSERT_EQ(cipher->getBaseCipherId(), 1);
+	ASSERT_EQ(cipher->getBaseCipherLen(), 4);
+	ASSERT_EQ(memcmp(cipher->rawBaseCipher(), baseCipher.begin(), 4), 0);
+	ASSERT_EQ(cipher->getRefreshAtTS(), refreshAt);
+	ASSERT_EQ(cipher->getExpireAtTS(), expireAt);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue(), expectedNeedRefreshCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss.getValue(), expectedLatestMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue(), expectedLatestHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue(), expectedMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue(), expectedHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue(), expectedExpiredKeys);
+
+	// Re-insert same key with same 'baseCipherId' and cache should accept it
+	refreshAt = now() + 5;
+	expireAt = now() + 10; // limit the expiry of the cipher
+	Reference<BlobCipherKey> insertAgain =
+	    cipherKeyCache->insertCipherKey(domId, 1, baseCipher.begin(), baseCipher.size(), refreshAt, expireAt);
+	salt = insertAgain->getSalt();
+	cipher = cipherKeyCache->getLatestCipherKey(domId);
+	expectedLatestHitCount++;
+	ASSERT(cipher.isValid());
+	ASSERT_EQ(cipher->getDomainId(), domId);
+	ASSERT_EQ(cipher->getBaseCipherId(), 1);
+	ASSERT_EQ(cipher->getBaseCipherLen(), 4);
+	ASSERT_EQ(memcmp(cipher->rawBaseCipher(), baseCipher.begin(), 4), 0);
+	ASSERT_EQ(cipher->getRefreshAtTS(), refreshAt);
+	ASSERT_EQ(cipher->getExpireAtTS(), expireAt);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue(), expectedNeedRefreshCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss.getValue(), expectedLatestMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue(), expectedLatestHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue(), expectedMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue(), expectedHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue(), expectedExpiredKeys);
+
+	// Insert an expired cipherkey
+	domId++;
+	expireAt = now() - 100;
+	refreshAt = expireAt - 10;
+	inserted = cipherKeyCache->insertCipherKey(domId, 1, baseCipher.begin(), baseCipher.size(), refreshAt, expireAt);
+	salt = inserted->getSalt();
+
+	// Ensure getLatestCipher desired behavior
+	cipher = cipherKeyCache->getLatestCipherKey(domId);
+	ASSERT(!cipher.isValid());
+	// Already expired key, hence, getLookupByBaseCipher would fail, hence, NOT increment 'needsRefresh' counter
+	expectedLatestMissCount++;
+	expectedExpiredKeys++;
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue(), expectedNeedRefreshCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss.getValue(), expectedLatestMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue(), expectedLatestHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue(), expectedMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue(), expectedHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue(), expectedExpiredKeys);
+
+	// Ensure getCipher desired behavior
+	inserted = cipherKeyCache->insertCipherKey(domId, 1, baseCipher.begin(), baseCipher.size(), refreshAt, expireAt);
+	salt = inserted->getSalt();
+	cipher = cipherKeyCache->getCipherKey(domId, 1, salt);
+	ASSERT(!cipher.isValid());
+	expectedMissCount++;
+	expectedExpiredKeys++;
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheNeedsRefresh.getValue(), expectedNeedRefreshCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheMiss.getValue(), expectedLatestMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->latestCipherKeyCacheHit.getValue(), expectedLatestHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheMiss.getValue(), expectedMissCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheHit.getValue(), expectedHitCount);
+	ASSERT_EQ(BlobCipherMetrics::getInstance()->cipherKeyCacheExpired.getValue(), expectedExpiredKeys);
 }
 
 void testNoAuthMode(const int minDomainId) {
@@ -2718,6 +2836,7 @@ TEST_CASE("/blobCipher") {
 	ASSERT_EQ(domainKeyMap.size(), maxDomainId);
 
 	testKeyCacheEssentials(domainKeyMap, minDomainId, maxDomainId, minBaseCipherKeyId);
+	testKeyCacheRefreshExpireCipherKey(domainKeyMap, maxDomainId);
 
 	testConfigurableEncryptionBlobCipherHeaderFlagsV1Ser();
 	testConfigurableEncryptionAesCtrNoAuthV1Ser(minDomainId);

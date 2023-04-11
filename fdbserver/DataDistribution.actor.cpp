@@ -441,6 +441,39 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
+		state UID currentID;
+		try {
+			state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
+						currentID = dataMoveID;
+						tr.clear(dataMoveKeyFor(currentID));
+						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
+					}
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "RemoveDataMoveTombstoneError", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("CurrentDataMoveID", currentID);
+			// DD needs not restart when removing tombstone gets failed unless this actor gets cancelled
+			// So, do not throw error
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
 		// All physicalShard init must be completed before issuing data move
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -579,6 +612,10 @@ public:
 				wait(yield(TaskPriority::DataDistribution));
 			}
 		}
+
+		// Trigger background cleanup for datamove tombstones
+		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
+
 		return Void();
 	}
 
