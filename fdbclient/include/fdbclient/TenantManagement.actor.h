@@ -199,7 +199,7 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 
 	if (tenantEntry.tenantGroup.present()) {
 		TenantMetadata::tenantGroupTenantIndex().insert(
-		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.id));
+		    tr, Tuple::makeTuple(tenantEntry.tenantGroup.get(), tenantEntry.tenantName, tenantEntry.id));
 
 		// Create the tenant group associated with this tenant if it doesn't already exist
 		Optional<TenantGroupEntry> existingTenantGroup = wait(existingTenantGroupEntryFuture);
@@ -377,7 +377,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		if (tenantEntry.get().tenantGroup.present()) {
 			TenantMetadata::tenantGroupTenantIndex().erase(
-			    tr, Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), tenantId));
+			    tr, Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), tenantEntry.get().tenantName, tenantId));
 			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =
 			    wait(TenantMetadata::tenantGroupTenantIndex().getRange(
 			        tr,
@@ -385,7 +385,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			        Tuple::makeTuple(keyAfter(tenantEntry.get().tenantGroup.get())),
 			        2));
 			if (tenantsInGroup.results.empty() ||
-			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getInt(1) == tenantId)) {
+			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getInt(2) == tenantId)) {
 				TenantMetadata::tenantGroupMap().erase(tr, tenantEntry.get().tenantGroup.get());
 			}
 		}
@@ -458,7 +458,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 		if (originalEntry.tenantGroup.present()) {
 			// Remove this tenant from the original tenant group index
 			TenantMetadata::tenantGroupTenantIndex().erase(
-			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), updatedTenantEntry.id));
+			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), originalEntry.tenantName, updatedTenantEntry.id));
 
 			// Check if the original tenant group is now empty. If so, remove the tenant group.
 			KeyBackedSet<Tuple>::RangeResultType tenants = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
@@ -468,7 +468,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			    2));
 
 			if (tenants.results.empty() ||
-			    (tenants.results.size() == 1 && tenants.results[0].getInt(1) == updatedTenantEntry.id)) {
+			    (tenants.results.size() == 1 && tenants.results[0].getInt(2) == updatedTenantEntry.id)) {
 				TenantMetadata::tenantGroupMap().erase(tr, originalEntry.tenantGroup.get());
 			}
 		}
@@ -481,8 +481,10 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			}
 
 			// Insert this tenant in the tenant group index
-			TenantMetadata::tenantGroupTenantIndex().insert(
-			    tr, Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(), updatedTenantEntry.id));
+			TenantMetadata::tenantGroupTenantIndex().insert(tr,
+			                                                Tuple::makeTuple(updatedTenantEntry.tenantGroup.get(),
+			                                                                 updatedTenantEntry.tenantName,
+			                                                                 updatedTenantEntry.id));
 		}
 	}
 
@@ -625,6 +627,14 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	TenantMetadata::tenantMap().set(tr, tenantId.get(), entry);
 	TenantMetadata::tenantNameIndex().set(tr, newName, tenantId.get());
 	TenantMetadata::tenantNameIndex().erase(tr, oldName);
+
+	if (entry.tenantGroup.present()) {
+		TenantMetadata::tenantGroupTenantIndex().erase(
+		    tr, Tuple::makeTuple(entry.tenantGroup.get(), oldName, tenantId.get()));
+		TenantMetadata::tenantGroupTenantIndex().insert(
+		    tr, Tuple::makeTuple(entry.tenantGroup.get(), newName, tenantId.get()));
+	}
+
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {
