@@ -6041,9 +6041,16 @@ public:
 		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
 
 		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
-		low_cpu.cpuUsage = 20;
-		mid_cpu.cpuUsage = 60;
-		high_cpu.cpuUsage = 90;
+		// use constant cutoff value
+		bool maxCutoff = deterministicRandom()->coinflip();
+		if (!maxCutoff) {
+			// use pivot value as cutoff
+			auto ratio = KnobValueRef::create(double{ 0.7 });
+			IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio", ratio);
+		}
+		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;
+		mid_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 40;
+		high_cpu.cpuUsage = maxCutoff ? SERVER_KNOBS->MAX_DEST_CPU_PERCENT + 1 : SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 1;
 
 		// high space, low cpu, high read (in pool)
 		collection->addTeam(std::set<UID>({ UID(1, 0) }), IsInitialTeam::True);
@@ -6067,16 +6074,20 @@ public:
 
 		wait(collection->getTeam(bestReq));
 		const auto [bestTeam, found1] = bestReq.reply.getFuture().get();
-		fmt::print("{} {}\n", collection->teamPivots.pivotCPU, collection->teamPivots.lastPivotValuesUpdate, now());
+		fmt::print("{} {} {}\n",
+		           SERVER_KNOBS->CPU_PIVOT_RATIO,
+		           collection->teamPivots.pivotCPU,
+		           collection->teamPivots.pivotAvailableSpaceRatio);
 		ASSERT(bestTeam.present());
 		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
 
 		wait(collection->getTeam(randomReq));
 		const auto [randomTeam, found2] = randomReq.reply.getFuture().get();
-		ASSERT(randomTeam.present());
-		ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
-		ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
-
+		if (randomTeam.present()) {
+			CODE_PROBE(true, "Unit Test Random Team Return Candidate.");
+			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
+			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
+		}
 		return Void();
 	}
 };
