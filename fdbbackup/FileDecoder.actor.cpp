@@ -517,6 +517,16 @@ public:
 	int lfd = -1; // local file descriptor
 };
 
+// convert a StringRef to Hex string
+ std::string hexStringRef(const StringRef& s) {
+ 	std::string result;
+ 	result.reserve(s.size() * 2);
+ 	for (int i = 0; i < s.size(); i++) {
+ 		result.append(format("%02x", s[i]));
+ 	}
+ 	return result;
+ }
+
 ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile file, UID uid, DecodeParams params) {
 	if (file.fileSize == 0) {
 		TraceEvent("SkipEmptyFile", uid).detail("Name", file.fileName);
@@ -557,7 +567,8 @@ ACTOR Future<Void> process_file(Reference<IBackupContainer> container, LogFile f
 				    .detail("Version", vms.version)
 				    .setMaxFieldLength(10000)
 				    .detail("M", m.toString());
-				std::cout << vms.version << " " << m.toString() << "\n";
+				std::cout << vms.version << " " << typeString[(int)m.type]
+ 				          << " param1: " << hexStringRef(m.param1) << " param2: " << hexStringRef(m.param2) << "\n";
 			}
 		}
 	}

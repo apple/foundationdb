@@ -41,7 +41,7 @@ for i in `seq 1 $2` ; do
 	done
 	
 	CLI="$BUILD/bin/fdbcli -C ${CLUSTER} --exec"
-	( sleep 2 ; $CLI "configure new ssd single" ) &
+	( sleep 2 ; $CLI "configure new ssd-rocksdb-v1 single" ) &
 done;
 
 sleep 2

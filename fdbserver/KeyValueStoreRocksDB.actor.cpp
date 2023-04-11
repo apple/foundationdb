@@ -1186,6 +1186,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
+			/*if (db == nullptr) { 
+				std::cout << "\nYES";
+			} else {
+				std::cout << "\nNO";
+			}
+
+			rocksdb::ColumnFamilyMetaData cf_meta;
+			db->GetColumnFamilyMetaData(cf, &cf_meta);
+
+				for (int i = 0; i < cf_meta.levels.size(); i++) {
+					rocksdb::LevelMetaData level_meta = cf_meta.levels[i];
+					std::cout << "\nLevel:  " << level_meta.level;
+					for (int j = 0; j < level_meta.files.size(); j++) {
+						rocksdb::SstFileMetaData sst_meta = level_meta.files[j];
+						std::cout << "\n File Name: " << sst_meta.name << " SmallestKey: " << sst_meta.smallestkey.c_str() << " LargestKey: " << sst_meta.largestkey.c_str();
+					}
+				}
+*/
 			TraceEvent(SevInfo, "RocksDB", id)
 			    .detail("Path", a.path)
 			    .detail("Method", "Open")
@@ -2074,9 +2092,11 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
 		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
 		if (keyRange.singleKeyRange()) {
+			//std::cout << "SingleKeyRange\n";
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 			++counters.deleteKeyReqs;
 		} else {
+			//std::cout << "NOT SingleKeyRange\n";
 			++counters.deleteRangeReqs;
 			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
 			    storageMetrics->byteSample.getEstimate(keyRange) <
@@ -2090,6 +2110,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, defaultFdbCF));
 				cursor->Seek(toSlice(keyRange.begin));
 				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
+					//std::cout << "delete\n";
 					writeBatch->Delete(defaultFdbCF, cursor->key());
 					++counters.convertedDeleteKeyReqs;
 					cursor->Next();
@@ -2100,6 +2121,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				} else {
 					auto it = keysSet.lower_bound(keyRange.begin);
 					while (it != keysSet.end() && *it < keyRange.end) {
+						//std::cout << "delete from keySets\n";
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
 						++counters.convertedDeleteKeyReqs;
 						it++;
@@ -2321,6 +2343,351 @@ IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
 #include "flow/UnitTest.h"
 
 namespace {
+
+
+// Decode an ASCII string, e.g., "\x15\x1b\x19\x04\xaf\x0c\x28\x0a",
+// into the binary string.
+std::string decode_hex_string(std::string line) {
+	size_t i = 0;
+	std::string ret;
+
+	while (i <= line.length()) {
+		switch (line[i]) {
+		case '\\':
+			if (i + 2 > line.length()) {
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+			switch (line[i + 1]) {
+				char ent, save;
+			case '"':
+			case '\\':
+			case ' ':
+			case ';':
+				line.erase(i, 1);
+				break;
+			case 'x':
+				if (i + 4 > line.length()) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 4];
+				line[i + 4] = 0;
+				ent = char(strtoul(line.data() + i + 2, &pEnd, 16));
+				if (*pEnd) {
+					std::cerr << "Invalid hex string at: " << i << "\n";
+					return ret;
+				}
+				line[i + 4] = save;
+				line.replace(i, 4, 1, ent);
+				break;
+			default:
+				std::cerr << "Invalid hex string at: " << i << "\n";
+				return ret;
+			}
+		default:
+			i++;
+		}
+	}
+
+	return line.substr(0, i);
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/Test") {
+
+
+		/*std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2c9306b-f775-47ef-9861-ff0a6dc36a99\x00\x14");
+		std::string key2 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2c9306b-f775-47ef-9861-ff0a6dc36a99\x00\x14\x00");
+		std::string key3 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d0e4ac2c-84ec-4583-9d0f-2fab17064a3a\x00\x14");
+		std::string key4 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d0e4ac2c-84ec-4583-9d0f-2fab17064a3a\x00\x14\x00");
+		std::string key5 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2a18fdb-2c60-4e13-9b96-4c144cc5d846\x00\x14");
+		std::string key6 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2a18fdb-2c60-4e13-9b96-4c144cc5d846\x00\x14\x00");
+		std::string key7 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d1c2b7c5-6789-4f55-b0ae-b30974a71f56\x00\x14");
+		std::string key8 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d1c2b7c5-6789-4f55-b0ae-b30974a71f56\x00\x14\x00");
+		std::string key9 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d013a416-a507-4cfa-aee0-df7ccfff70f2\x00\x14");
+		std::string key10 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d013a416-a507-4cfa-aee0-df7ccfff70f2\x00\x14\x00");
+		std::string key11 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d0887343-6152-4555-96eb-a19ef15836fa\x00\x14");
+		std::string key12 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d0887343-6152-4555-96eb-a19ef15836fa\x00\x14\x00");
+		std::string key13 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02cf762008-6193-4ead-88a5-852178da0279\x00\x14");
+		std::string key14 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02cf762008-6193-4ead-88a5-852178da0279\x00\x14\x00");
+		std::string key15 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02cf06573a-639e-443f-a04e-271aed9dd951\x00\x14");
+		std::string key16 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02cf06573a\-639e\-443f\-a04e\-271aed9dd951\x00\x14\x00"); */
+		state std::string key17 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe3\x83\xaa\x00\x16o\xb4");
+		state std::string key18 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe3\x83\xaa\x00\x16o\xb4\x00");
+		//std::string key19 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe5\x8f\xa3\x00\x16\x81\xff");
+		//std::string key20 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe5\x8f\xa3\x00\x16\x81\xff\x00");
+		/*std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe4\xbd\x9c\x00\x16\x81\xff");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe4\xbd\x9c\x00\x16\x81\xff\x00");
+		std::string key1 =	decode_hex_string("x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe4\xb8\xad\x00\x16\xdd\xfc");
+		std::string key1 =	decode_hex_string("x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe4\xb8\xad\x00\x16\xdd\xfc\x00");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe7\xa7\x8b\x00\x16m\xb3");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe7\xa7\x8b\x00\x16m\xb3\x00");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe5\x85\xa8\x00\x16k\xf3");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe5\x85\xa8\x00\x16k\xf3\x00");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x020.57328.00000000\x00\x16\xb1\xf5");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x020.57328.00000000\x00\x16\xb1\xf5\x00");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe6\x83\x91\x00\x16o\x85");
+		std::string key1 =	decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe6\x83\x91\x00\x16o\x85\x00");*/
+
+		//std::vector<std::string> vec = { key1,key2, key3, key4, key5, key6, key7, key8, key9, key10,key11,key12, key13, key14, key15, key16, key17, key18, key19, key20};
+
+
+		state const std::string rocksDBTestDir = "testingstorage.rocksdb";
+       	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+       	wait(kvStore->init());
+
+
+			KeyRangeRef keys1(key17, key18);
+	    	state RangeResult range1 = wait(kvStore->readRange(keys1)); 
+	    	for (const auto& kv : range1) {
+	        	std::cout << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	    	}
+
+	Future<Void> closed = kvStore->onClosed();
+    kvStore->dispose();
+    wait(closed);
+
+       //platform::eraseDirectoryRecursive(rocksDBTestDir);
+    return Void();
+}
+
+std::string hexStringRef(const StringRef& s) {
+ 	std::string result;
+ 	result.reserve(s.size() * 2);
+ 	for (int i = 0; i < s.size(); i++) {
+ 		result.append(format("%02x", s[i]));
+ 	}
+ 	return result;
+ }
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CorruptionTest") {
+	   state const std::string rocksDBTestDir = "testingstorage.rocksdb";
+       state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+       wait(kvStore->init());
+		
+	   /*std::string key1 = decode_hex_string("\x15(\x19\x02\xa2\x81\x15\x07\x00\x15\x01\x00\x02\x00\x14");
+	   std::string key2 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2c9306b-f775-47ef-9861-ff0a6dc36a99\x00\x14\x00");
+	   std::cout << "inited " << key1 << " " << key2;
+	   KeyRangeRef keys1(key1, key2);
+	   state RangeResult range1 = wait(kvStore->readRange(keys1)); //allKeys
+	   for (const auto& kv : range1) {
+	       std::cout << "\nFirst Key:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   }*/
+
+	   /*state StringRef b2 = "\\x15(\\x19\\x02\\xb2\\xf7yl\\x15/\\x15+\\x15\\x01\\x15\\x01\\x15/\\x0239B329C6C0B04FE74651C9AEE9C3DB4ECFCA4C9A9DE03EFC4BC25750BCFCA9CA\\x00\\x13\\xfe"_sr;
+	   state StringRef b3 = "\x15(\x19\x02\xb2\xf7yl\x15/\x15+\x15\x01\x15\x01\x15/\x0239B329C6C0B04FE74651C9AEE9C3DB4ECFCA4C9A9DE03EFC4BC25750BCFCA9CA\x00\x13\xfe"_sr;
+
+	   state std::string hexFormat = hexStringRef(b3);
+	   std::cout<< "\nHEX FORMAT" << hexFormat << "\n";*/
+
+	   std::string key3 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01");
+	   std::string key4 = decode_hex_string("\x16");
+	   std::cout << "inited " << key3 << " " << key4;
+	   KeyRangeRef keys(key3, key4);
+	   state RangeResult range = wait(kvStore->readRange(keys));
+	   for (const auto& kv : range) {
+	       std::cout << "\n Key:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   }
+
+		//\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02bf619e55-b142-47ee-9a69-0cac33395aa2\x00\x14
+
+	   /*state StringRef a17 = "\x15(\x17\xc2\x19Q\x15\xb8\x00\x15\x01\x15\x03"_sr;
+	   state StringRef a18 = "\x15(\x17\xc2\x19Q\x15\xb8\x00\x15\x01\x15\x03\x00"_sr;
+	   state KeyRangeRef keys1(a17, a18);
+	   state RangeResult range1 = wait(kvStore->readRange(keys1)); //allKeys
+	   for (const auto& kv : range1) {
+	       std::cout << "\nFirst Key:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   }
+
+	   KeyRangeRef keys(KeyRef(), LiteralStringRef("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\x15H\x00\x02\xe7\xa7\x8b\x00\x16\xfb0\x00"));
+	   state RangeResult range = wait(kvStore->readRange(keys));
+	   for (const auto& kv : range) {
+	       std::cout << "\nKey:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   } */
+
+       Future<Void> closed = kvStore->onClosed();
+       kvStore->dispose();
+       wait(closed);
+
+       //platform::eraseDirectoryRecursive(rocksDBTestDir);
+       return Void();
+} 
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/def") {
+       state const std::string rocksDBTestDir = "rocksdb-kvstore-corruption-test-db";
+       platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	   state StringRef foo = "foo"_sr;
+	   state StringRef foo1 = "foo1"_sr;
+       state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+       wait(kvStore->init());
+
+	   std::string key1 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\xa7");
+	   kvStore->set({ key1, foo });
+	   wait(kvStore->commit(false));
+
+	   std::string key2 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02\xa7");
+	   kvStore->set({ key2, foo1 });
+	   wait(kvStore->commit(false));
+
+	   std::string key3 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x02");
+	   std::string key4 = decode_hex_string("\x16");
+	   KeyRangeRef keys(key3, key4);
+	   state RangeResult range = wait(kvStore->readRange(keys)); 
+	   for (const auto& kv : range) {
+	       std::cout << "\n Key:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   }
+
+       Future<Void> closed = kvStore->onClosed();
+       kvStore->dispose();
+       wait(closed);
+
+       platform::eraseDirectoryRecursive(rocksDBTestDir);
+       return Void();
+}
+
+TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/abc") {
+       state const std::string rocksDBTestDir = "rocksdb-kvstore-corruption-test-db";
+       platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	   state StringRef foo = "foo"_sr;
+       state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+       wait(kvStore->init());
+
+	   state StringRef b1 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x98D"_sr;
+	   kvStore->set({ b1, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b2 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x8c\\x95"_sr;
+	   kvStore->set({ b2, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b3 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\xbb\\x00\\x16n\\xbd"_sr;
+	   kvStore->set({ b3, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b4 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16m\\xb3"_sr;
+	   kvStore->set({ b4, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b5 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x91\\x00\\x16\\x8fP"_sr;
+	   kvStore->set({ b5, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b6 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x81\\x00\\x16p\\x8c"_sr;
+	   kvStore->set({ b6, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef b7 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x88\\xcf"_sr;
+	   state StringRef b8 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x88\\xcf\\x00"_sr;
+       kvStore->clear(KeyRangeRef(b7, b8));
+
+	   state StringRef b9 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x89)"_sr;
+	   kvStore->set({ b9, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef c1 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x98\\x00\\x16qa"_sr;
+	   state StringRef c2 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x98\\x00\\x16qa\\x00"_sr;
+       kvStore->clear(KeyRangeRef(c1, c2));
+
+	   state StringRef c3 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x98\\x00\\x16s\\xca"_sr;
+	   kvStore->set({ c3, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef c4 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x89)"_sr;
+	   kvStore->set({ c4, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef c5 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x81\\x00\\x16\\x92\\xad"_sr;
+	   state StringRef c6 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x81\\x00\\x16\\x92\\xad\\x00"_sr;
+       kvStore->clear(KeyRangeRef(c5, c6));
+
+	   state StringRef c7 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x8f\\x94"_sr;
+	   kvStore->set({ c7, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef d1 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x94\\xbc"_sr;
+	   kvStore->set({ d1, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef d2 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x81\\x00\\x16\\xc2="_sr;
+	   kvStore->set({ d2, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef d3 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\xbb\\x00\\x16n\\xbd"_sr;
+	   kvStore->set({ d3, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef d4 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x98D"_sr;
+	   kvStore->set({ d4, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef d5 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16m\\xb3"_sr;
+	   kvStore->set({ d5, foo });
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef a1 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x98D"_sr;
+	   state StringRef a2 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x98D\\x00"_sr;
+       kvStore->clear(KeyRangeRef(a1, a2));
+
+	   state StringRef a3 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x9a\\xaa"_sr;
+	   kvStore->set({ a3, foo });
+	   wait(kvStore->commit(false));
+
+	   state StringRef a4 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\xac\\x1f"_sr;
+	   kvStore->set({ a4, foo }); 
+	   wait(kvStore->commit(false)); 
+
+	   state StringRef a5 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x8f\\x94"_sr;
+	   kvStore->set({ a5, foo });  
+	   wait(kvStore->commit(false));	
+
+	   state StringRef a6 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x85G"_sr;
+	   kvStore->set({ a6, foo });	 
+	   wait(kvStore->commit(false));      
+
+	   state StringRef a7 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x8f\\x94"_sr;
+	   state StringRef a8 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x8f\\x94\\x00"_sr;
+       kvStore->clear(KeyRangeRef(a7, a8));
+
+	   state StringRef a9 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x90\\x17"_sr;
+	   kvStore->set({ a9, foo });  
+	   wait(kvStore->commit(false));	
+
+	   state StringRef a10 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x92$"_sr;
+	   kvStore->set({ a10, foo });
+	   wait(kvStore->commit(false));	
+
+	   state StringRef a11 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16m\\xb3"_sr;
+	   state StringRef a12 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16m\\xb3\\x00"_sr;
+       kvStore->clear(KeyRangeRef(a11, a12));
+
+	   state StringRef a13 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16r\\x8d"_sr;
+	   kvStore->set({ a13, foo }); 
+	   wait(kvStore->commit(false)); 	
+
+	   state StringRef a14 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\x94\\xbc"_sr;
+	   kvStore->set({ a14, foo });
+       wait(kvStore->commit(false));
+
+	   sleep(50);
+
+	   state StringRef a15 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x16\\xfb0\\x00"_sr;
+	   state StringRef a16 = "\\x15(\\x19\\x02\\xa2\\x81U8\\x15\\x07\\x00\\x15\\x02\\x15H\\x00\\x02\\xe7\\xa7\\x8b\\x00\\x17"_sr;
+	   state KeyRangeRef keys(a15, a16);
+	   state RangeResult range = wait(kvStore->readRange(keys));
+	   for (const auto& kv : range) {
+	       std::cout << "\nKey:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
+	   }
+
+       Future<Void> closed = kvStore->onClosed();
+       kvStore->dispose();
+       wait(closed);
+
+       //platform::eraseDirectoryRecursive(rocksDBTestDir);
+       return Void();
+}
 
 TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBBasic") {
 	state const std::string rocksDBTestDir = "rocksdb-kvstore-basic-test-db";

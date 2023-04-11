@@ -126,6 +126,16 @@ const char* TSS_mismatchTraceName(const GetKeyValuesRequest& req) {
 	return "TSSMismatchGetKeyValues";
 }
 
+// convert a StringRef to Hex string
+ static std::string hexStringRef(const StringRef& s) {
+ 	std::string result;
+ 	result.reserve(s.size() * 2);
+ 	for (int i = 0; i < s.size(); i++) {
+ 		result.append(format("%02x", s[i]));
+ 	}
+ 	return result;
+ } 
+
 static void traceKeyValuesSummary(TraceEvent& event,
                                   const KeySelectorRef& begin,
                                   const KeySelectorRef& end,
@@ -141,6 +151,8 @@ static void traceKeyValuesSummary(TraceEvent& event,
 	std::string tssSummaryString = format("(%d)%s", tssSize, tssMore ? "+" : "");
 	event.detail("Begin", format("%s%s:%d", begin.orEqual ? "=" : "", begin.getKey().printable().c_str(), begin.offset))
 	    .detail("End", format("%s%s:%d", end.orEqual ? "=" : "", end.getKey().printable().c_str(), end.offset))
+		.detail("BeginHex", format("%s%s:%d", begin.orEqual ? "=" : "", hexStringRef(begin.getKey()), begin.offset))
+	    .detail("EndHex", format("%s%s:%d", end.orEqual ? "=" : "", hexStringRef(end.getKey()), end.offset))
 	    .detail("Tenant", tenant)
 	    .detail("Version", version)
 	    .detail("Limit", limit)
@@ -169,8 +181,11 @@ static void traceKeyValuesDiff(TraceEvent& event,
 			if (i >= ssKV.size() || i >= tssKV.size() || ssKV[i].key != tssKV[i].key) {
 				event.detail("MismatchSSKey", i < ssKV.size() ? ssKV[i].key.printable() : "missing");
 				event.detail("MismatchTSSKey", i < tssKV.size() ? tssKV[i].key.printable() : "missing");
+				event.detail("MismatchSSKeyHex", i < ssKV.size() ? hexStringRef(ssKV[i].key) : "missing");
+				event.detail("MismatchTSSKeyHex", i < tssKV.size() ? hexStringRef(tssKV[i].key) : "missing");
 			} else {
 				event.detail("MismatchKey", ssKV[i].key.printable());
+				event.detail("MismatchKeyHex", hexStringRef(ssKV[i].key));
 				event.detail("MismatchSSValue", traceChecksumValue(ssKV[i].value));
 				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value));
 			}
