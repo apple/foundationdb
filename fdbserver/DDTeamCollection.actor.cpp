@@ -3348,10 +3348,11 @@ void DDTeamCollection::updateTeamEligibility() {
 }
 
 void DDTeamCollection::updateTeamPivotValues() {
-	if (now() - teamPivots.lastPivotValuesUpdate > SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
+	if (now() - teamPivots.lastPivotValuesUpdate >= SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
 		updateAvailableSpacePivots();
 		updateCpuPivots();
 		updateTeamEligibility();
+		teamPivots.lastPivotValuesUpdate = now();
 	}
 }
 
@@ -6235,7 +6236,82 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> GetTeam_CpuUtilSelection() { return Void(); }
+	// Cut off high Cpu teams
+	ACTOR static Future<Void> GetTeam_CutOffByCpu() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 4;
+		state int teamSize = 1;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+		state GetTeamRequest bestReq(TeamSelect::WANT_TRUE_BEST,
+		                             PreferLowerDiskUtil::True,
+		                             TeamMustHaveShards::False,
+		                             PreferLowerReadUtil::True,
+		                             ForReadBalance::True);
+		state GetTeamRequest randomReq(TeamSelect::ANY,
+		                               PreferLowerDiskUtil::True,
+		                               TeamMustHaveShards::False,
+		                               PreferLowerReadUtil::True,
+		                               ForReadBalance::True);
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
+		GetStorageMetricsReply high_s_high_r;
+		high_s_high_r.capacity.bytes = capacity;
+		high_s_high_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_high_r.load.bytes = loadBytes;
+		high_s_high_r.load.opsReadPerKSecond = 7000 * 1000;
+
+		GetStorageMetricsReply high_s_low_r;
+		high_s_low_r.capacity.bytes = capacity;
+		high_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_low_r.load.bytes = loadBytes;
+		high_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		GetStorageMetricsReply low_s_low_r;
+		low_s_low_r.capacity.bytes = capacity;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
+		low_s_low_r.load.bytes = loadBytes;
+		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
+		low_cpu.cpuUsage = 20;
+		mid_cpu.cpuUsage = 60;
+		high_cpu.cpuUsage = 90;
+
+		// high space, low cpu, high read (in pool)
+		collection->addTeam(std::set<UID>({ UID(1, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(1, 0)]->setMetrics(high_s_high_r);
+		collection->server_info[UID(1, 0)]->setStorageStats(low_cpu);
+		// high space, mid cpu, low read (in pool)
+		collection->addTeam(std::set<UID>({ UID(2, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(2, 0)]->setMetrics(high_s_low_r);
+		collection->server_info[UID(2, 0)]->setStorageStats(mid_cpu);
+		// low space, low cpu, low read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(3, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(3, 0)]->setMetrics(low_s_low_r);
+		collection->server_info[UID(3, 0)]->setStorageStats(low_cpu);
+		// high space, high cpu, low read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(4, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(4, 0)]->setMetrics(high_s_low_r);
+		collection->server_info[UID(4, 0)]->setStorageStats(high_cpu);
+
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		wait(collection->getTeam(bestReq));
+		const auto [bestTeam, found1] = bestReq.reply.getFuture().get();
+		fmt::print("{} {}\n", collection->teamPivots.pivotCPU, collection->teamPivots.lastPivotValuesUpdate, now());
+		ASSERT(bestTeam.present());
+		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
+
+		wait(collection->getTeam(randomReq));
+		const auto [randomTeam, found2] = randomReq.reply.getFuture().get();
+		ASSERT(randomTeam.present());
+		ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
+		ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
+
+		return Void();
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -6380,5 +6456,10 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 	    DDTeamCollectionImpl::getNextWigglingServerID(wiggler, Optional<Value>(), Optional<Value>(), collection.get()));
 	ASSERT(now() - startTime < SERVER_KNOBS->DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC + 150.0);
 	ASSERT(id == UID(2, 0));
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/CutOffByCpu") {
+	wait(DDTeamCollectionUnitTest::GetTeam_CutOffByCpu());
 	return Void();
 }
