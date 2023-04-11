@@ -45,6 +45,7 @@ ACTOR Future<BlobRestoreRangeState> BlobRestoreController::getRangeState(Referen
 			limits.minRows = 0;
 			state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreCommandKeys.begin);
 			state KeySelectorRef end = firstGreaterOrEqual(blobRestoreCommandKeys.end);
+			state Arena beginKeyArena;
 			loop {
 				RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
 				for (auto& r : ranges) {
@@ -59,11 +60,7 @@ ACTOR Future<BlobRestoreRangeState> BlobRestoreController::getRangeState(Referen
 				if (!ranges.more) {
 					break;
 				}
-				if (ranges.readThrough.present()) {
-					begin = firstGreaterOrEqual(ranges.readThrough.get());
-				} else {
-					begin = firstGreaterThan(ranges.end()[-1].key);
-				}
+				begin = firstGreaterOrEqual(ranges.getReadThrough(beginKeyArena));
 			}
 			return std::make_pair(KeyRangeRef(), BlobRestoreState(BlobRestorePhase::DONE));
 		} catch (Error& e) {
@@ -152,6 +149,7 @@ ACTOR Future<Optional<BlobRestoreArg>> BlobRestoreController::getArgument(Refere
 				limits.minRows = 0;
 				state KeySelectorRef begin = firstGreaterOrEqual(blobRestoreArgKeys.begin);
 				state KeySelectorRef end = firstGreaterOrEqual(blobRestoreArgKeys.end);
+				state Arena beginKeyArena;
 				loop {
 					RangeResult ranges = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& r : ranges) {
@@ -165,11 +163,7 @@ ACTOR Future<Optional<BlobRestoreArg>> BlobRestoreController::getArgument(Refere
 					if (!ranges.more) {
 						break;
 					}
-					if (ranges.readThrough.present()) {
-						begin = firstGreaterOrEqual(ranges.readThrough.get());
-					} else {
-						begin = firstGreaterThan(ranges.back().key);
-					}
+					begin = firstGreaterOrEqual(ranges.getReadThrough(beginKeyArena));
 				}
 				return result;
 			} catch (Error& e) {
