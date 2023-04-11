@@ -1191,8 +1191,8 @@ struct StorageQueuingMetricsReply {
 	StorageBytes storageBytes;
 	Version version; // current storage server version
 	Version durableVersion; // latest version durable on storage server
-	double cpuUsage;
-	double diskUsage;
+	double cpuUsage{ 0.0 };
+	double diskUsage{ 0.0 };
 	double localRateLimit;
 	std::vector<TagInfo> busiestTags;
 
