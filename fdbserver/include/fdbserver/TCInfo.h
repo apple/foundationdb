@@ -55,6 +55,7 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	Optional<HealthMetrics::StorageStats> storageStats;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
+	void setStorageStats(HealthMetrics::StorageStats stats) { storageStats = stats; }
 	void markTeamUnhealthy(int teamIndex);
 
 public:
