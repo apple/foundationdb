@@ -3831,7 +3831,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
 	teamPivots = { .lastPivotValuesUpdate = 0,
 		           .pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		           .pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
-		           .minTeamAvgCPU = -1.0 };
+		           .minTeamAvgCPU = std::numeric_limits<double>::max() };
 }
 
 DDTeamCollection::~DDTeamCollection() {
