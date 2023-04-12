@@ -1391,11 +1391,11 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 const KeyRef blobRangeActive = "1"_sr;
 const KeyRef blobRangeInactive = StringRef();
 
- bool isBlobRangeActive(const ValueRef& blobRangeValue) {
-    // Empty or "0" is inactive
-    // "1" is active
-    // Support future change where serialized metadata struct is also active
-    return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
+bool isBlobRangeActive(const ValueRef& blobRangeValue) {
+	// Empty or "0" is inactive
+	// "1" is active
+	// Support future change where serialized metadata struct is also active
+	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
 }
 
 const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);
