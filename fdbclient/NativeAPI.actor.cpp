@@ -10873,7 +10873,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, 
 
 		blobRanges.arena().dependsOn(results.arena());
 		for (int i = 0; i < results.size() - 1; i++) {
-			if (results[i].value == blobRangeActive) {
+			if (isBlobRangeActive(results[i].value)) {
 				blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
 			}
 			if (blobRanges.size() == batchLimit) {
@@ -11025,6 +11025,11 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
+	if (active && (!g_network->isSimulated() || !g_simulator->willRestart) && BUGGIFY_WITH_PROB(0.1)) {
+		// buggify to arbitrary if test isn't a restarting test that could downgrade to an earlier version that doesn't support this
+		int randLen = deterministicRandom()->randomInt(2, 20);
+		value = StringRef(deterministicRandom()->randomAlphaNumeric(randLen));
+	}
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
