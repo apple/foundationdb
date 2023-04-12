@@ -1580,7 +1580,7 @@ public:
 			std::vector<LocalityData> badCombo;
 			std::set<Optional<Standalone<StringRef>>> uniqueMachines;
 
-			if (!primaryDcId.present()) {
+			if (!primaryDcId.present() || usableRegions == 1) {
 				for (auto processInfo : availableProcesses) {
 					primaryProcessesLeft.add(processInfo->locality);
 					primaryLocalitiesLeft.push_back(processInfo->locality);
