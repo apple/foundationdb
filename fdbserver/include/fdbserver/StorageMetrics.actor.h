@@ -180,6 +180,26 @@ inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
 	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
 }
 
+struct CommonStorageCounters {
+	CounterCollection cc;
+	// read ops
+	Counter finishedQueries, bytesQueried;
+
+	// write ops
+	// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
+	// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
+	// and the lengths of both parameters.
+	Counter mutationBytes;
+	Counter mutations, setMutations, clearRangeMutations;
+
+	// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
+	Counter bytesFetched;
+	// The number of key-value pairs fetched by fetchKeys()
+	Counter kvFetched;
+
+	CommonStorageCounters(const std::string& name, const std::string& id);
+};
+
 class IStorageMetricsService {
 public:
 	StorageServerMetrics metrics;

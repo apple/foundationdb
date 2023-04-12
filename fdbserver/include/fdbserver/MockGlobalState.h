@@ -61,11 +61,13 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 }
 
 class MockStorageServerImpl;
-class MockStorageServer : public IStorageMetricsService {
+class MockStorageServer : public IStorageMetricsService, public ReferenceCounted<MockStorageServer> {
 	friend struct MockGlobalStateTester;
 	friend class MockStorageServerImpl;
 
 	ActorCollection actors;
+
+	CommonStorageCounters counters{ "", "" };
 
 public:
 	struct ShardInfo {
@@ -100,7 +102,8 @@ public:
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
+	  : counters("MockStorageServer", ssi.id().toString()), totalDiskSpace(usedDiskSpace + availableDiskSpace),
+	    usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
 
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
@@ -211,7 +214,7 @@ public:
 	// In-memory counterpart of the `keyServers` in system keyspace
 	Reference<ShardsAffectedByTeamFailure> shardMapping;
 	// In-memory counterpart of the `serverListKeys` in system keyspace
-	std::map<UID, MockStorageServer> allServers;
+	std::map<UID, Reference<MockStorageServer>> allServers;
 	DatabaseConfiguration configuration;
 
 	// user defined parameters for mock workload purpose
