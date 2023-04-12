@@ -357,7 +357,7 @@ TLogQueueInfo::TLogQueueInfo(UID id)
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
-	// from storageQueueInfO)
+	// from storageQueueInfo)
 	lastReply.instanceID = -1;
 }
 

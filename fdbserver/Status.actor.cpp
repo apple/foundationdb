@@ -841,8 +841,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (db->get().encryptKeyProxy.present()) {
-		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
+	if (db->get().client.encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().client.encryptKeyProxy.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {

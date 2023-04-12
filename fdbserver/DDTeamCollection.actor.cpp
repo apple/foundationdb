@@ -20,6 +20,7 @@
 
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
+#include "fdbserver/DataDistributionTeam.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -280,7 +281,7 @@ public:
 			}
 
 			// Note: this block does not apply any filters from the request
-			if (!req.wantsNewServers) {
+			if (req.teamSelect == TeamSelect::WANT_COMPLETE_SRCS) {
 				auto healthyTeam = self->findTeamFromServers(req.completeSources, /* wantHealthy=*/true);
 				if (healthyTeam.present()) {
 					req.reply.send(std::make_pair(healthyTeam, foundSrc));
@@ -288,7 +289,7 @@ public:
 				}
 			}
 
-			if (req.wantsTrueBest) {
+			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
 				ASSERT(!bestOption.present());
 				auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
 				if (startIndex >= self->teams.size()) {
@@ -2466,6 +2467,7 @@ public:
 		state RecruitStorageRequest lastRequest;
 		state bool hasHealthyTeam;
 		state std::map<AddressExclusion, int> numSSPerAddr;
+		state std::map<AddressExclusion, int> numSSIgnoredPerAddr;
 
 		// tss-specific recruitment state
 		state int32_t targetTSSInDC = 0;
@@ -2502,20 +2504,23 @@ public:
 					}
 				}
 				numSSPerAddr.clear();
+				numSSIgnoredPerAddr.clear();
 				hasHealthyTeam = (self->healthyTeamCount != 0);
 				RecruitStorageRequest rsr;
 				std::set<AddressExclusion> exclusions;
 				// Exclude existing servers running SS from being recruited again.
 				for (auto s = self->server_and_tss_info.begin(); s != self->server_and_tss_info.end(); ++s) {
 					auto serverStatus = self->server_status.get(s->second->getLastKnownInterface().id());
+					auto addr = s->second->getLastKnownInterface().stableAddress();
+					AddressExclusion addrExcl(addr.ip, addr.port);
 					if (serverStatus.excludeOnRecruit()) {
 						TraceEvent(SevDebug, "DDRecruitExcl1")
 						    .detail("Primary", self->primary)
 						    .detail("Excluding", s->second->getLastKnownInterface().address());
-						auto addr = s->second->getLastKnownInterface().stableAddress();
-						AddressExclusion addrExcl(addr.ip, addr.port);
 						exclusions.insert(addrExcl);
 						numSSPerAddr[addrExcl]++; // increase from 0
+					} else {
+						numSSIgnoredPerAddr[addrExcl]++;
 					}
 				}
 				for (auto addr : self->recruitingLocalities) {
@@ -2536,6 +2541,23 @@ public:
 				for (auto& addr : self->invalidLocalityAddr) {
 					TraceEvent(SevDebug, "DDRecruitExclInvalidAddr").detail("Excluding", addr.toString());
 					exclusions.insert(addr);
+				}
+
+				for (auto& it : numSSIgnoredPerAddr) {
+					if (it.second > 2) {
+						// In this case, we know initialize storage will skip recruiting this host due to too many
+						// storages already on the process. Exclude it from the request to the CC to try to find a
+						// better fit, especially in the critical recruitment case. This is temporary while storages are
+						// in this state. Either these failed storages will eventually have data moved away, which will
+						// trigger restartRecruiting again, or the host will become healthy again, in which case we
+						// won't need to recruit on it and it would be counted with Excl1.
+						exclusions.insert(it.first);
+						CODE_PROBE(true, "DD excluding host with many failed storages", probe::decoration::rare);
+						TraceEvent(SevDebug, "DDRecruitExcl3")
+						    .detail("Primary", self->primary)
+						    .detail("Excluding", it.first.toString())
+						    .detail("IgnoredCount", it.second);
+					}
 				}
 
 				rsr.criticalRecruitment = !hasHealthyTeam;
@@ -5711,8 +5733,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5763,8 +5784,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0), UID(4, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::False, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5813,8 +5833,7 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5862,8 +5881,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST, PreferLowerDiskUtil::False, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5913,8 +5931,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5969,8 +5986,7 @@ public:
 		 */
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6008,23 +6024,19 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
-		auto wantsNewServers = WantNewServers::True;
-		auto wantsTrueBest = WantTrueBest::True;
 		auto preferLowerDiskUtil = PreferLowerDiskUtil::True;
 		auto teamMustHaveShards = TeamMustHaveShards::False;
 		auto forReadBalance = ForReadBalance::True;
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(wantsNewServers,
-		                         wantsTrueBest,
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         preferLowerDiskUtil,
 		                         teamMustHaveShards,
 		                         forReadBalance,
 		                         PreferLowerReadUtil::True);
 		req.completeSources = completeSources;
 
-		state GetTeamRequest reqHigh(wantsNewServers,
-		                             wantsTrueBest,
+		state GetTeamRequest reqHigh(TeamSelect::WANT_TRUE_BEST,
 		                             PreferLowerDiskUtil::False,
 		                             teamMustHaveShards,
 		                             forReadBalance,
@@ -6087,8 +6099,7 @@ public:
 
 		std::vector<UID> completeSources{ UID(1, 0), UID(2, 0), UID(3, 0) };
 
-		state GetTeamRequest req(
-		    WantNewServers::True, WantTrueBest::True, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
+		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST, PreferLowerDiskUtil::True, TeamMustHaveShards::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
