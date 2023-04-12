@@ -68,6 +68,7 @@ FDB_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_BOOLEAN_PARAM(ForReadBalance);
 FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_BOOLEAN_PARAM(FindTeamByServers);
+FDB_BOOLEAN_PARAM(ForRelocateTeam);
 
 class TeamSelect {
 public:
@@ -76,10 +77,10 @@ public:
 		WANT_COMPLETE_SRCS, // Try best to select a healthy team consists of servers in completeSources
 		WANT_TRUE_BEST, // Ask for the most or least utilized team in the cluster
 	};
-	TeamSelect() : value(ANY) {}
-	TeamSelect(Value v) : value(v) {}
+	TeamSelect() : value_(ANY), forRelocateTeam_(ForRelocateTeam::False) {}
+	TeamSelect(Value v) : value_(v), forRelocateTeam_(ForRelocateTeam::False) {}
 	std::string toString() const {
-		switch (value) {
+		switch (value_) {
 		case WANT_COMPLETE_SRCS:
 			return "Want_Complete_Srcs";
 		case WANT_TRUE_BEST:
@@ -91,11 +92,15 @@ public:
 		}
 		return "";
 	}
+	void setForRelocateTeam(ForRelocateTeam forRelocate) { forRelocateTeam_ = forRelocate; }
 
-	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
+	bool isRelocateTeam() const { return forRelocateTeam_ == ForRelocateTeam::True; }
+
+	bool operator==(const TeamSelect& tmpTeamSelect) { return value_ == tmpTeamSelect.value_; }
 
 private:
-	Value value;
+	Value value_;
+	ForRelocateTeam forRelocateTeam_;
 };
 
 struct GetTeamRequest {
