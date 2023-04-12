@@ -95,7 +95,7 @@ double GranuleMetadata::weightRDC() {
 bool GranuleMetadata::isEligibleRDC() const {
 	// granule should be reasonably read-hot to be eligible
 	int64_t bytesWritten = bufferedDeltaBytes + bytesInNewDeltaFiles;
-	return bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
+	return bytesWritten > 0 && bytesWritten * SERVER_KNOBS->BG_RDC_READ_FACTOR < readStats.deltaBytesRead;
 }
 
 bool GranuleMetadata::updateReadStats(Version readVersion, const BlobGranuleChunkRef& chunk) {
@@ -109,9 +109,15 @@ bool GranuleMetadata::updateReadStats(Version readVersion, const BlobGranuleChun
 		return false;
 	}
 
+	// any memory deltas must be newer than snapshot
 	readStats.deltaBytesRead += chunk.newDeltas.expectedSize();
 	for (auto& it : chunk.deltaFiles) {
-		readStats.deltaBytesRead += it.length;
+		// some races where you get previous snapshot + deltas instead of new snapshot for read, don't count those
+		// as we already re-snapshotted after them
+		if (it.fileVersion > pendingSnapshotVersion) {
+			// TODO: should this be logical size instead?
+			readStats.deltaBytesRead += it.length;
+		}
 	}
 
 	if (rdcCandidate) {
