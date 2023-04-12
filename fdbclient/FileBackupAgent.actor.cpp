@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
@@ -25,6 +26,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
 #include "flow/FastRef.h"
+#include "flow/flow.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
@@ -32,7 +34,7 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -170,7 +172,9 @@ public:
 	KeyBackedProperty<bool> unlockDBAfterRestore() { return configSpace.pack(__FUNCTION__sr); }
 	// XXX: Remove restoreRange() once it is safe to remove. It has been changed to restoreRanges
 	KeyBackedProperty<KeyRange> restoreRange() { return configSpace.pack(__FUNCTION__sr); }
+	// XXX: Changed to restoreRangeSet. It can be removed.
 	KeyBackedProperty<std::vector<KeyRange>> restoreRanges() { return configSpace.pack(__FUNCTION__sr); }
+	KeyBackedSet<KeyRange> restoreRangeSet() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Key> batchFuture() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Version> beginVersion() { return configSpace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<Version> restoreVersion() { return configSpace.pack(__FUNCTION__sr); }
@@ -197,10 +201,29 @@ public:
 
 	ACTOR static Future<std::vector<KeyRange>> getRestoreRangesOrDefault_impl(RestoreConfig* self,
 	                                                                          Reference<ReadYourWritesTransaction> tr) {
-		state std::vector<KeyRange> ranges = wait(self->restoreRanges().getD(tr));
+		state std::vector<KeyRange> ranges;
+		state int batchSize = BUGGIFY ? 1 : CLIENT_KNOBS->RESTORE_RANGES_READ_BATCH;
+		state Optional<KeyRange> begin;
+		state Arena arena;
+		loop {
+			KeyBackedSet<KeyRange>::RangeResultType rangeResult =
+			    wait(self->restoreRangeSet().getRange(tr, begin, {}, batchSize));
+			ranges.insert(ranges.end(), rangeResult.results.begin(), rangeResult.results.end());
+			if (!rangeResult.more) {
+				break;
+			}
+			ASSERT(!rangeResult.results.empty());
+			begin = KeyRangeRef(KeyRef(arena, ranges.back().begin), keyAfter(ranges.back().end, arena));
+		}
+
+		// fall back to original fields if the new field is empty
 		if (ranges.empty()) {
-			state KeyRange range = wait(self->restoreRange().getD(tr));
-			ranges.push_back(range);
+			std::vector<KeyRange> _ranges = wait(self->restoreRanges().getD(tr));
+			ranges = _ranges;
+			if (ranges.empty()) {
+				KeyRange range = wait(self->restoreRange().getD(tr));
+				ranges.push_back(range);
+			}
 		}
 		return ranges;
 	}
@@ -581,8 +604,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
 			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys =
-			    wait(getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
+			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+			    dbInfo, headerRef, BlobCipherMetrics::RESTORE));
 			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
 			cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
 			if (cipherDetails.headerCipherDetails.present()) {
@@ -593,7 +616,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
+			TextAndHeaderCipherKeys cipherKeys = wait(
+			    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
 			header.cipherTextDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
 			if (header.cipherHeaderDetails.isValid()) {
 				header.cipherHeaderDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
@@ -616,7 +640,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                                                         EncryptCipherDomainId domainId) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = self->cx->clientInfo;
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, domainId, BlobCipherMetrics::BACKUP));
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, domainId, BlobCipherMetrics::BACKUP));
 		return cipherKeys.cipherTextKey;
 	}
 
@@ -674,7 +699,8 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 
 		// Get text and header cipher key
 		TextAndHeaderCipherKeys textAndHeaderCipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
+		    wait(GetEncryptCipherKeys<ClientDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        dbInfo, curDomainId, BlobCipherMetrics::BACKUP));
 		self->cipherKeys.textCipherKey = textAndHeaderCipherKeys.cipherTextKey;
 		self->cipherKeys.headerCipherKey = textAndHeaderCipherKeys.cipherHeaderKey;
 
@@ -5481,7 +5507,9 @@ public:
 		if (BUGGIFY && restoreRanges.size() == 1) {
 			restore.restoreRange().set(tr, restoreRanges[0]);
 		} else {
-			restore.restoreRanges().set(tr, restoreRanges);
+			for (auto& range : restoreRanges) {
+				restore.restoreRangeSet().insert(tr, range);
+			}
 		}
 
 		// this also sets restore.add/removePrefix.

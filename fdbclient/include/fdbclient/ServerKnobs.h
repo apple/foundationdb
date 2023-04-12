@@ -889,6 +889,8 @@ public:
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
+	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 
 	// Test harness
 	double WORKER_POLL_DELAY;
