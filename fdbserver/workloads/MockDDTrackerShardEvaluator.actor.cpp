@@ -114,7 +114,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 		}
 		uint64_t totalSize = 0;
 		for (auto& server : mgs->allServers) {
-			totalSize = server.second.sumRangeSize(allKeys);
+			totalSize = server.second->sumRangeSize(allKeys);
 		}
 		TraceEvent("PopulateMockGlobalState")
 		    .detail("Strategy", keySpaceStrategy)
