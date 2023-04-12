@@ -275,7 +275,7 @@ protected:
 		double lastPivotValuesUpdate = 0.0;
 
 		double pivotAvailableSpaceRatio = 0.0;
-		double pivotCPU = 0.0;
+		double pivotCPU = 100.0;
 		double minTeamAvgCPU = std::numeric_limits<double>::max();
 	} teamPivots;
 
