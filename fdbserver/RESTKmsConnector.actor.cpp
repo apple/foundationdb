@@ -452,11 +452,31 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 		EncryptCipherBaseKeyId baseCipherId = cipherDetail[BASE_CIPHER_ID_TAG].GetUint64();
 		StringRef cipher = StringRef(cipherKey.get(), cipherKeyLen);
 
+		// https://en.wikipedia.org/wiki/Key_checksum_value
+		// Key Check Value (KCV) is the checksum of a cryptographic key, it is used to validate integrity of the
+		// 'baseCipher' key supplied by the external KMS. The checksum computed is eventually persisted as part of
+		// EncryptionHeader and assists in following scenarios: a) 'baseCipher' corruption happen external to FDB b)
+		// 'baseCipher' corruption within FDB processes
+		//
+		// Approach compute KCV after reading it from the network buffer, HTTP checksum protects against potential
+		// on-wire corruption
+		if (cipher.size() > MAX_BASE_CIPHER_LEN) {
+			// HMAC_SHA digest generation accepts upto MAX_BASE_CIPHER_LEN key-buffer, longer keys are truncated and
+			// weakens the security guarantees.
+			TraceEvent(SevWarnAlways, "RESTKmsConnectorMaxBaseCipherKeyLimit")
+			    .detail("MaxAllowed", MAX_BASE_CIPHER_LEN)
+			    .detail("BaseCipherLen", cipher.size());
+			throw rest_max_base_cipher_len();
+		}
+
+		EncryptCipherKeyCheckValue cipherKCV = Sha256KCV().computeKCV(cipher.begin(), cipher.size());
+
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			TraceEvent event("RESTParseEncryptCipherResponse", ctx->uid);
 			event.detail("DomainId", domainId);
 			event.detail("BaseCipherId", baseCipherId);
 			event.detail("BaseCipherLen", cipher.size());
+			event.detail("BaseCipherKCV", cipherKCV);
 			if (refreshAfterSec.present()) {
 				event.detail("RefreshAt", refreshAfterSec.get());
 			}
@@ -465,7 +485,8 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 			}
 		}
 
-		result.emplace_back_deep(result.arena(), domainId, baseCipherId, cipher, refreshAfterSec, expireAfterSec);
+		result.emplace_back_deep(
+		    result.arena(), domainId, baseCipherId, cipher, cipherKCV, refreshAfterSec, expireAfterSec);
 	}
 
 	checkDocForNewKmsUrls(ctx, resp, doc);

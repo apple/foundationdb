@@ -165,8 +165,9 @@ class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDa
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
 
-	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
-		int64_t result = 0;
+	template <typename NUM>
+	NUM sum(std::function<NUM(IDataDistributionTeam const&)> func) const {
+		NUM result = 0;
 		for (const auto& team : teams) {
 			result += func(*team);
 		}
@@ -241,23 +242,27 @@ public:
 	}
 
 	int64_t getDataInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
 	}
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+		return sum<int64_t>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
 			return team.getLoadBytes(includeInFlight, inflightPenalty);
 		});
 	}
 
 	int64_t getReadInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
 	}
 
-	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
-			return team.getLoadReadBandwidth(includeInFlight, inflightPenalty);
+	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
+		return sum<double>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.getReadLoad(includeInFlight, inflightPenalty);
 		});
+	}
+
+	double getAverageCPU() const override {
+		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -1365,8 +1370,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
+						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
 						                          rd.keys);
 
@@ -1660,7 +1665,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
-			healthyDestinations.addReadInFlightToTeam(+metrics.bytesReadPerKSecond);
+			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1816,7 +1821,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				// Note: It’s equal to trigger([healthyDestinations, readLoad], which is a value capture of
 				// healthyDestinations. Have to create a reference to healthyDestinations because in ACTOR the state
 				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
@@ -1873,7 +1878,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			} else {
 				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
@@ -1966,7 +1971,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 	// check team difference
-	auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
+	auto srcLoad = sourceTeam->getReadLoad(false), destLoad = destTeam->getReadLoad();
 	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
 
 	// read bandwidth difference is less than 30% of src load
@@ -2000,7 +2005,9 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	}
 
 	auto& [shard, metrics] = metricsList[0];
-	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
+	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+	    .detail("ShardReadOps", metrics.opsReadPerKSecond);
+
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
@@ -2210,13 +2217,13 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                       PreferLowerDiskUtil::False,
 				                                       TeamMustHaveShards::True,
-				                                       ForReadBalance(readRebalance),
-				                                       PreferLowerReadUtil::False);
+				                                       PreferLowerReadUtil::False,
+				                                       ForReadBalance(readRebalance));
 				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
-				                                        ForReadBalance(readRebalance),
-				                                        PreferLowerReadUtil::True);
+				                                        PreferLowerReadUtil::True,
+				                                        ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
