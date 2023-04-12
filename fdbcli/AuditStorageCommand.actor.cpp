@@ -55,13 +55,18 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 
 	Key begin = allKeys.begin, end = allKeys.end;
 	if (tokens.size() == 3) {
-		begin = tokens[2];
+		// begin is empty, which means using allKeys.begin as begin
+		// and using tokens[2] as end
+		end = tokens[2];
 	} else if (tokens.size() == 4) {
 		begin = tokens[2];
 		end = tokens[3];
 	} else {
 		printUsage(tokens[0]);
 		return UID();
+	}
+	if (end > allKeys.end) {
+		end = allKeys.end;
 	}
 
 	UID auditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
