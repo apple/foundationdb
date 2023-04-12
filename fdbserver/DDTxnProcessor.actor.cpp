@@ -723,7 +723,7 @@ struct DDMockTxnProcessorImpl {
 			KeyRangeRef cloneRef = range;
 			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
 				    auto& server = selfP->mgs->allServers.at(id);
-				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
+				    return server->allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
 			    })) {
 				break;
 			}
@@ -766,7 +766,7 @@ struct DDMockTxnProcessorImpl {
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
-		res.servers.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+		res.servers.emplace_back(mss->ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
 	// FIXME(xwang): possible generate version from time?
 	res.readVersion = 0;
@@ -890,10 +890,10 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 		}
 		// insert to serverKeys
 		for (auto& id : shardInfo.primarySrc) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
 		}
 		for (auto& id : shardInfo.primaryDest) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
 		}
 	}
 
@@ -977,8 +977,8 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
 		auto& server = mgs->allServers.at(id);
-		server.setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
-		server.signalFetchKeys(keys, randomRangeSize);
+		server->setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server->signalFetchKeys(keys, randomRangeSize);
 	}
 	return Void();
 }
@@ -1021,7 +1021,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
 	// remove destination servers from source servers
@@ -1029,7 +1029,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	for (auto& id : srcTeams.front().servers) {
 		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
-			mgs->allServers.at(id).removeShard(keys);
+			mgs->allServers.at(id)->removeShard(keys);
 		}
 	}
 	mgs->shardMapping->finishMove(keys);
