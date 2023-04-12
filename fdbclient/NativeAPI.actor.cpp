@@ -11087,7 +11087,8 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
 	if (active && (!g_network->isSimulated() || !g_simulator->willRestart) && BUGGIFY_WITH_PROB(0.1)) {
-		// buggify to arbitrary if test isn't a restarting test that could downgrade to an earlier version that doesn't support this
+		// buggify to arbitrary if test isn't a restarting test that could downgrade to an earlier version that doesn't
+		// support this
 		int randLen = deterministicRandom()->randomInt(2, 20);
 		value = StringRef(deterministicRandom()->randomAlphaNumeric(randLen));
 	}
