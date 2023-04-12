@@ -1200,12 +1200,11 @@ public:
 
 	Optional<EncryptionAtRestMode> encryptionMode;
 
-	struct Counters {
-		CounterCollection cc;
+	struct Counters : CommonStorageCounters {
+
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
-		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries,
-		    feedVersionQueries;
+		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries, feedRowsQueried,
+		    feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries, feedVersionQueries;
 
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
@@ -1233,21 +1232,12 @@ public:
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
 		// reflect the current memory footprint of MVCC.
 		Counter bytesDurable;
-		// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
-		Counter bytesFetched;
-		// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
-		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
-		// and the lengths of both parameters.
-		Counter mutationBytes;
 
 		// Bytes fetched by fetchChangeFeed for data movements.
 		Counter feedBytesFetched;
 
 		Counter sampledBytesCleared;
-		// The number of key-value pairs fetched by fetchKeys()
-		Counter kvFetched;
-		Counter mutations, setMutations, clearRangeMutations, atomicMutations, changeFeedMutations,
-		    changeFeedMutationsDurable;
+		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -1298,25 +1288,22 @@ public:
 		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
 		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
-		Counters(StorageServer* self)
-		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
+		explicit Counters(StorageServer* self)
+		  : CommonStorageCounters("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
 		    systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
 		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
-		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
-		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
-		    emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
+		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
+		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
 		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
 		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
-		    bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
-		    feedBytesFetched("FeedBytesFetched", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
+		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
 		    changeFeedMutations("ChangeFeedMutations", cc),
 		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
