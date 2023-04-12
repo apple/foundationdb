@@ -103,20 +103,31 @@ struct EKPBaseCipherDetails {
 	int64_t encryptDomainId;
 	uint64_t baseCipherId;
 	Standalone<StringRef> baseCipherKey;
+	EncryptCipherKeyCheckValue baseCipherKCV;
 	int64_t refreshAt;
 	int64_t expireAt;
 
 	EKPBaseCipherDetails()
-	  : encryptDomainId(0), baseCipherId(0), baseCipherKey(Standalone<StringRef>()), refreshAt(0), expireAt(-1) {}
-	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, Standalone<StringRef> key)
-	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), refreshAt(std::numeric_limits<int64_t>::max()),
-	    expireAt(std::numeric_limits<int64_t>::max()) {}
-	explicit EKPBaseCipherDetails(int64_t dId, uint64_t id, Standalone<StringRef> key, int64_t refAt, int64_t expAt)
-	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), refreshAt(refAt), expireAt(expAt) {}
+	  : encryptDomainId(0), baseCipherId(0), baseCipherKey(Standalone<StringRef>()), baseCipherKCV(0), refreshAt(0),
+	    expireAt(-1) {}
+	explicit EKPBaseCipherDetails(int64_t dId,
+	                              uint64_t id,
+	                              Standalone<StringRef> key,
+	                              EncryptCipherKeyCheckValue cipherKCV)
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), baseCipherKCV(cipherKCV),
+	    refreshAt(std::numeric_limits<int64_t>::max()), expireAt(std::numeric_limits<int64_t>::max()) {}
+	explicit EKPBaseCipherDetails(int64_t dId,
+	                              uint64_t id,
+	                              Standalone<StringRef> key,
+	                              EncryptCipherKeyCheckValue cipherKCV,
+	                              int64_t refAt,
+	                              int64_t expAt)
+	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), baseCipherKCV(cipherKCV), refreshAt(refAt),
+	    expireAt(expAt) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, baseCipherId, baseCipherKey, refreshAt, expireAt);
+		serializer(ar, encryptDomainId, baseCipherId, baseCipherKey, baseCipherKCV, refreshAt, expireAt);
 	}
 };
 
