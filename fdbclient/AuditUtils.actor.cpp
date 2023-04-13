@@ -273,10 +273,10 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(krmSetRange(&tr,
-			                 auditServerPrefixFor(auditState.getType(), auditState.id),
-			                 singleKeyRange(KeyRef(auditState.auditServerId.toString())),
-			                 auditStorageStateValue(auditState)));
+			Key prefix = auditServerPrefixFor(auditState.getType(), auditState.id);
+			Key key = KeyRef(auditState.auditServerId.toString());
+			tr.set(key.withPrefix(prefix), auditStorageStateValue(auditState));
+			wait(tr.commit());
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -287,20 +287,22 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 }
 
 ACTOR Future<AuditStorageState> getAuditStateByServer(Database cx, AuditType type, UID auditId, UID auditServerId) {
-	state RangeResult auditStates;
 	state Transaction tr(cx);
-
+	state AuditStorageState res(auditId, auditServerId, type);
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			RangeResult res_ = wait(krmGetRanges(&tr,
-			                                     auditServerPrefixFor(type, auditId),
-			                                     singleKeyRange(KeyRef(auditServerId.toString())),
-			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
-			auditStates = res_;
-			ASSERT_WE_THINK(!res_.more);
+			Key prefix = auditServerPrefixFor(type, auditId);
+			Key key = KeyRef(auditServerId.toString());
+			Optional<Value> value = wait(tr.get(key.withPrefix(prefix)));
+			if (value.present()) {
+				AuditStorageState auditState = decodeAuditStorageState(value.get());
+				ASSERT(auditState.auditServerId.isValid());
+				ASSERT_WE_THINK(auditState.auditServerId == auditServerId);
+				res.setPhase(auditState.getPhase());
+				res.error = auditState.error;
+			}
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "GetAuditStateForRangeError")
@@ -308,18 +310,6 @@ ACTOR Future<AuditStorageState> getAuditStateByServer(Database cx, AuditType typ
 			    .detail("AuditID", auditId)
 			    .detail("AuditServerId", auditServerId);
 			wait(tr.onError(e));
-		}
-	}
-
-	ASSERT_WE_THINK(auditStates.size() <= 2);
-	AuditStorageState res(auditId, auditServerId, type);
-	for (int i = 0; i < auditStates.size() - 1; ++i) {
-		if (!auditStates[i].value.empty()) {
-			AuditStorageState auditState_ = decodeAuditStorageState(auditStates[i].value);
-			ASSERT(auditState_.auditServerId.isValid());
-			ASSERT_WE_THINK(auditState_.auditServerId == auditServerId);
-			res.setPhase(auditState_.getPhase());
-			res.error = auditState_.error;
 		}
 	}
 
