@@ -145,7 +145,7 @@ void updateClientBlobRanges(int64_t epoch,
 				}
 				break;
 			}
-			bool active = dbBlobRanges[i].value == blobRangeActive;
+			bool active = isBlobRangeActive(dbBlobRanges[i].value);
 			if (active) {
 				if (BM_DEBUG) {
 					fmt::print("BM {0} sees client range [{1} - {2})\n",
@@ -1382,7 +1382,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					needToCoalesce = false;
 
 					for (int i = 0; i < results.size() - 1; i++) {
-						bool active = results[i].value == blobRangeActive;
+						bool active = isBlobRangeActive(results[i].value);
 						bmData->knownBlobRanges.insert(KeyRangeRef(results[i].key, results[i + 1].key), active);
 					}
 				}
