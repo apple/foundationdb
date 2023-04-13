@@ -203,6 +203,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> encryptionKeyRefresher;
 	Future<Void> blobMetadataRefresher;
+	Future<Void> logger;
 
 	EncryptBaseDomainIdCache baseCipherDomainIdCache;
 	EncryptBaseCipherDomainIdKeyIdCache baseCipherDomainIdKeyIdCache;
@@ -252,7 +253,10 @@ public:
 	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
 	                              id,
 	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {}
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+		logger = ekpCacheMetrics.traceCounters(
+		    "EncryptKeyProxyMetrics", id, SERVER_KNOBS->ENCRYPTION_LOGGING_INTERVAL, "EncryptKeyProxyMetrics");
+	}
 
 	static EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,
