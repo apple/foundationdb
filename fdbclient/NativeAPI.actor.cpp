@@ -1242,6 +1242,16 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	}
 }
 
+inline HealthMetrics populateHealthMetrics(const HealthMetrics& detailedMetrics, bool detailedOutput) {
+	if (detailedOutput) {
+		return detailedMetrics;
+	} else {
+		HealthMetrics result;
+		result.update(detailedMetrics, false, false);
+		return result;
+	}
+}
+
 ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
 	loop {
 		choose {
@@ -1249,17 +1259,12 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bo
 			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
 			                                                       &GrvProxyInterface::getHealthMetrics,
 			                                                       GetHealthMetricsRequest(sendDetailedRequest)))) {
-				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
-				if (detailed) {
-					cx->healthMetricsLastUpdated = now();
+				cx->healthMetrics.update(rep.healthMetrics, sendDetailedRequest, true);
+				cx->healthMetricsLastUpdated = now();
+				if (sendDetailedRequest) {
 					cx->detailedHealthMetricsLastUpdated = now();
-					return cx->healthMetrics;
-				} else {
-					cx->healthMetricsLastUpdated = now();
-					HealthMetrics result;
-					result.update(cx->healthMetrics, false, false);
-					return result;
 				}
+				return populateHealthMetrics(cx->healthMetrics, detailed);
 			}
 		}
 	}
@@ -1267,13 +1272,7 @@ ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bo
 
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
 	if (now() - healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
-		if (detailed) {
-			return healthMetrics;
-		} else {
-			HealthMetrics result;
-			result.update(healthMetrics, false, false);
-			return result;
-		}
+		return populateHealthMetrics(healthMetrics, detailed);
 	}
 	bool sendDetailedRequest =
 	    detailed && now() - detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
