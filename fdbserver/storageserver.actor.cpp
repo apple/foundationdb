@@ -4978,13 +4978,25 @@ bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
 	return true;
 }
 
-bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
-	if (rangesA.empty() && rangesB.empty()) {
-		return true;
-	} else if (rangesA.empty() && !rangesB.empty()) {
-		return false;
-	} else if (!rangesA.empty() && rangesB.empty()) {
-		return false;
+bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
+	for (auto& range : ranges) {
+		if (range.empty()) {
+			return false;
+		}
+	}
+	return true;
+}
+
+Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
+	ASSERT(noEmptyRangeInRanges(rangesA));
+	ASSERT(noEmptyRangeInRanges(rangesB));
+	KeyRange emptyRange;
+	if (rangesA.empty() && rangesB.empty()) { // no mismatch
+		return Optional<std::pair<KeyRange, KeyRange>>();
+	} else if (rangesA.empty() && !rangesB.empty()) { // rangesA is empty while rangesB has range
+		return std::make_pair(emptyRange, rangesB.front());
+	} else if (!rangesA.empty() && rangesB.empty()) { // rangesB is empty while rangesA has range
+		return std::make_pair(rangesA.front(), emptyRange);
 	}
 	TraceEvent(SevVerbose, "RangesSameBeforeSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
 	// sort in ascending order
@@ -4993,13 +5005,17 @@ bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 	TraceEvent(SevVerbose, "RangesSameAfterSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
 	ASSERT(elementsAreExclusiveWithEachOther(rangesA));
 	ASSERT(elementsAreExclusiveWithEachOther(rangesB));
-	if (rangesA.front().begin != rangesB.front().begin || rangesA.back().end != rangesB.back().end) {
-		return false;
+	if (rangesA.front().begin != rangesB.front().begin) { // rangeList heads mismatch
+		return std::make_pair(rangesA.front(), rangesB.front());
+	} else if (rangesA.back().end != rangesB.back().end) { // rangeList backs mismatch
+		return std::make_pair(rangesA.back(), rangesB.back());
 	}
 	int ia = 0;
 	int ib = 0;
 	KeyRangeRef rangeA = rangesA[0];
 	KeyRangeRef rangeB = rangesB[0];
+	KeyRange lastRangeA = Standalone(rangeA);
+	KeyRange lastRangeB = Standalone(rangeB);
 	while (true) {
 		if (rangeA.begin == rangeB.begin) {
 			if (rangeA.end == rangeB.end) {
@@ -5010,20 +5026,24 @@ bool rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
 				++ib;
 				rangeA = rangesA[ia];
 				rangeB = rangesB[ib];
+				lastRangeA = Standalone(rangeA);
+				lastRangeB = Standalone(rangeB);
 			} else if (rangeA.end > rangeB.end) {
 				rangeA = KeyRangeRef(rangeB.end, rangeA.end);
 				++ib;
 				rangeB = rangesB[ib];
+				lastRangeB = Standalone(rangeB);
 			} else {
 				rangeB = KeyRangeRef(rangeA.end, rangeB.end);
 				++ia;
 				rangeA = rangesA[ia];
+				lastRangeA = Standalone(rangeA);
 			}
 		} else {
-			return false;
+			return std::make_pair(lastRangeA, lastRangeB);
 		}
 	}
-	return true;
+	return Optional<std::pair<KeyRange, KeyRange>>();
 }
 
 ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageServer* data, Version readAtVersion) {
@@ -5107,7 +5127,6 @@ ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageSe
 }
 
 std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Version readAtVersion) {
-	// state std::vector<StorageServerShard> localShards = data->getStorageServerShards(allKeys);
 	std::vector<KeyRange> res;
 	const UID serverID = data->thisServerID;
 	for (auto t : data->shards.intersectingRanges(allKeys)) {
@@ -5237,16 +5256,21 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		}
 
 		// Compare
-		if (!rangesSame(ownRangesSeenByServerKey, ownRangesLocalView)) {
+		Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(ownRangesSeenByServerKey, ownRangesLocalView);
+		if (anyMismatch.present()) { // mismatch detected
+			std::pair<KeyRange, KeyRange> res = anyMismatch.get();
+			KeyRange mismatchedRangeByServerKey = res.first;
+			KeyRange mismatchedRangeByLocalView = res.second;
 			std::string error =
 			    format("Storage server shard info mismatch on Server(%016llx):\t ServerShardInfo: %s; ServerKey: %s",
 			           data->thisServerID,
-			           describe(ownRangesLocalView).c_str(),
-			           describe(ownRangesSeenByServerKey).c_str());
+			           mismatchedRangeByLocalView.toString().c_str(),
+			           mismatchedRangeByServerKey.toString().c_str());
 			errors.push_back(error);
 			TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 			    .detail("ErrorMessage", error)
-			    .detail("Range", res.range)
+			    .detail("MismatchedRangeByLocalView", mismatchedRangeByLocalView)
+			    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
 			    .detail("AuditServer", data->thisServerID);
 			std::cout << error << "\n";
 		}
@@ -5258,7 +5282,6 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			req.reply.sendError(audit_storage_error());
 		} else {
 			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
-			    .detail("Range", res.range)
 			    .detail("Version", toReadVersion)
 			    .detail("AuditServer", data->thisServerID);
 			res.setPhase(AuditPhase::Complete);
@@ -5288,7 +5311,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
 	TraceEvent(SevInfo, "AuditStorageShardLocMetadataBegin", data->thisServerID);
 	state std::vector<std::string> errors;
-	state AuditStorageState res(req.id, req.range, req.getType());
+	state AuditStorageState res(req.id, req.getType());
 	state std::vector<Future<Void>> actors;
 	state int i = 0;
 	state int retryCount = 0;
@@ -5370,7 +5393,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					errors.push_back(error);
 					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
-					    .detail("Range", req.range)
 					    .detail("Version", version)
 					    .detail("AuditServer", data->thisServerID.first());
 				}
@@ -5386,8 +5408,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			for (auto& range : ranges) {
 				auto servers = keyServersMap.rangeContaining(range.begin).value();
 				if (std::find(servers.begin(), servers.end(), server) == servers.end()) { // not found
-					std::string error = format("ServerKeys Mismatch:\t keyServers[RangeBegin(%s), RangeEnd(%s)] = "
-					                           "Servers(%s) not find Server(%016llx)",
+					std::string error = format("ServerKeys Mismatch:\t Server(%016llx) is not covered by "
+					                           "keyServers[RangeBegin(%s), RangeEnd(%s)] = "
+					                           "Servers(%s)",
 					                           Traceable<StringRef>::toString(range.begin).c_str(),
 					                           Traceable<StringRef>::toString(range.end).c_str(),
 					                           describe(servers).c_str(),
@@ -5395,7 +5418,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					errors.push_back(error);
 					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
-					    .detail("Range", req.range)
 					    .detail("Version", version)
 					    .detail("AuditServer", data->thisServerID.first());
 				}
@@ -5404,14 +5426,12 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		if (!errors.empty()) {
 			TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 			    .detail("NumErrors", errors.size())
-			    .detail("Range", req.range)
 			    .detail("Version", version)
 			    .detail("AuditServer", data->thisServerID.first());
 			res.setPhase(AuditPhase::Error);
 			req.reply.sendError(audit_storage_error());
 		} else {
 			TraceEvent(SevInfo, "AuditStorageShardLocMetadataComplete", data->thisServerID)
-			    .detail("Range", req.range)
 			    .detail("Version", version)
 			    .detail("AuditServer", data->thisServerID.first())
 			    .detail("TotalShardsCount", totalShardsCount)
