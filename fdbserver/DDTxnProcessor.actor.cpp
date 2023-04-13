@@ -1049,5 +1049,9 @@ Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(co
 
 Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
                                                                                   double maxStaleness) const {
-	return {};
+	auto it = mgs->allServers.find(id);
+	if (it == mgs->allServers.end()) {
+		return Optional<HealthMetrics::StorageStats>();
+	}
+	return Optional<HealthMetrics::StorageStats>(it->second->getStorageStats());
 }

@@ -456,6 +456,13 @@ void MockStorageServer::signalFetchKeys(const KeyRangeRef& range, int64_t rangeT
 	}
 }
 
+HealthMetrics::StorageStats MockStorageServer::getStorageStats() const {
+	HealthMetrics::StorageStats res;
+	res.diskUsage = usedDiskSpace * 100.0 / totalDiskSpace;
+	res.cpuUsage = calculateCpuUsage();
+	return res;
+}
+
 void MockStorageServer::byteSampleApplySet(KeyRef const& key, int64_t kvSize) {
 	// Update byteSample in memory and notify waiting metrics
 	ByteSampleInfo sampleInfo = isKeyValueInSample(key, kvSize);
@@ -502,6 +509,14 @@ void MockStorageServer::byteSampleApplyClear(KeyRangeRef const& range) {
 	if (any) {
 		byteSample.eraseAsync(range.begin, range.end);
 	}
+}
+
+double MockStorageServer::calculateCpuUsage() const {
+	double res = counters.mutations.getRate() * write_op_cpu_multiplier +
+	             counters.finishedQueries.getRate() * read_op_cpu_multiplier +
+	             counters.mutationBytes.getRate() * write_byte_cpu_multiplier +
+	             counters.bytesQueried.getRate() * read_byte_cpu_multiplier;
+	return std::max(100.0, res);
 }
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
