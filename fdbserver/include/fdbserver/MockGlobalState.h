@@ -85,6 +85,22 @@ public:
 
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
 
+	// 100k/s small reads = 100% CPU
+	// 500MB/s of read throughput = 100% CPU
+	// 50k/s random small writes = 100% CPU
+	// 100MB/s write throughput = 100% CPU
+	// assume above operation will saturate the CPU linearly. We can change the model to a better one in the future.
+	static constexpr double DEFAULT_READ_OP_CPU_MULTIPLIER = 100.0 / 100000;
+	static constexpr double DEFAULT_WRITE_OP_CPU_MULTIPLIER = 100.0 / 50000;
+	static constexpr double DEFAULT_READ_BYTE_CPU_MULTIPLIER = 100.0 / 500000000;
+	static constexpr double DEFAULT_WRITE_BYTE_CPU_MULTIPLIER = 100.0 / 100000000;
+
+	// can be set by workloads
+	double read_op_cpu_multiplier = DEFAULT_READ_OP_CPU_MULTIPLIER;
+	double write_op_cpu_multiplier = DEFAULT_WRITE_OP_CPU_MULTIPLIER;
+	double read_byte_cpu_multiplier = DEFAULT_READ_BYTE_CPU_MULTIPLIER;
+	double write_byte_cpu_multiplier = DEFAULT_WRITE_BYTE_CPU_MULTIPLIER;
+
 	// control plane statistics associated with a real storage server
 	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, usedDiskSpace = DEFAULT_DISK_SPACE;
 
@@ -173,6 +189,8 @@ public:
 	// trigger the asynchronous fetch keys operation
 	void signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes);
 
+	HealthMetrics::StorageStats getStorageStats() const;
+
 protected:
 	PromiseStream<FetchKeysParams> fetchKeysRequests;
 
@@ -199,6 +217,8 @@ protected:
 
 	// Update byte sample as if clear a whole range
 	void byteSampleApplyClear(KeyRangeRef const& range);
+
+	double calculateCpuUsage() const;
 };
 
 class MockGlobalStateImpl;
