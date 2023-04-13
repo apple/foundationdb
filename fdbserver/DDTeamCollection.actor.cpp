@@ -4075,8 +4075,8 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 	}
 
-	if (totalShardCount >= SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS) {
-		TraceEvent(SevWarnAlways, "TooManyLargeTeams", distributorId)
+	if (totalShardCount >= SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+		TraceEvent(SevWarnAlways, "TooManyShardsOnLargeTeams", distributorId)
 		    .suppressFor(1.0)
 		    .detail("TeamCount", largeTeams.size())
 		    .detail("ShardCount", totalShardCount);
