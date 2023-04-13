@@ -7984,7 +7984,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 			} else {
 				bool ok = e.code() == error_code_tenant_not_found;
-				TraceEvent(ok ? SevInfo : SevError, "WaitStorageMetricsError1").error(e);
+				TraceEvent(ok ? SevInfo : SevError, "WaitStorageMetricsError").error(e);
 				throw;
 			}
 		}
