@@ -93,16 +93,18 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
                             int startIndex,
                             int& limit,
                             int& offset,
-                            std::vector<metacluster::TenantState>& filters) {
+                            std::vector<metacluster::TenantState>& filters,
+                            std::string& tenantGroup,
+                            bool& useJson) {
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		Optional<Value> value;
 		StringRef token = tokens[tokenNum];
 		StringRef param;
 		bool foundEquals;
 		param = token.eat("=", &foundEquals);
-		if (!foundEquals) {
+		if (!foundEquals && !tokencmp(param, "JSON")) {
 			fmt::print(stderr,
-			           "ERROR: invalid option string `{}'. String must specify a value using `='.\n",
+			           "ERROR: invalid option string `{}'. String must specify a value using `=' or be `JSON'.\n",
 			           param.toString().c_str());
 			return false;
 		}
@@ -131,6 +133,10 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 				fmt::print(stderr, "ERROR: unrecognized tenant state(s) `{}'.\n", value.get().toString());
 				return false;
 			}
+		} else if (tokencmp(param, "tenant_group")) {
+			tenantGroup = value.get().toString();
+		} else if (tokencmp(param, "JSON")) {
+			useJson = true;
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized parameter `{}'.\n", param.toString().c_str());
 			return false;
@@ -324,16 +330,60 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 
+void tenantListOutputJson(std::vector<std::pair<TenantName, int64_t>> tenants) {
+	json_spirit::mArray tenantsArr;
+	for (auto const& [tenantName, tenantId] : tenants) {
+		json_spirit::mObject tenantObj;
+		tenantObj["name"] = binaryToJson(tenantName);
+		tenantObj["id"] = tenantId;
+		tenantsArr.push_back(tenantObj);
+	}
+
+	json_spirit::mObject resultObj;
+	resultObj["tenants"] = tenantsArr;
+	resultObj["type"] = "success";
+
+	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+}
+
+void tenantListOutputJson(std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants) {
+	json_spirit::mArray tenantsArr;
+	for (auto const& [tenantName, entry] : tenants) {
+		json_spirit::mObject tenantObj;
+		tenantObj["name"] = binaryToJson(tenantName);
+		tenantObj["id"] = entry.id;
+		tenantsArr.push_back(tenantObj);
+	}
+
+	json_spirit::mObject resultObj;
+	resultObj["tenants"] = tenantsArr;
+	resultObj["type"] = "success";
+
+	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+}
+
+void tenantListOutputJsonError(Error e) {
+	json_spirit::mObject resultObj;
+	resultObj["type"] = "error";
+	resultObj["error"] = e.what();
+
+	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+}
+
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 7) {
+	if (tokens.size() > 9) {
 		fmt::print(
-		    "Usage: tenant list [BEGIN] [END] [limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...] ...\n\n");
+		    "Usage: tenant list [BEGIN] [END] "
+		    "[limit=<LIMIT>|offset=<OFFSET>|state=<STATE1>,<STATE2>,...|tenant_group=<TENANT_GROUP>] [JSON] ...\n\n");
 		fmt::print("Lists the tenants in a cluster.\n");
 		fmt::print("Only tenants in the range BEGIN - END will be printed.\n");
 		fmt::print("An optional LIMIT can be specified to limit the number of results (default 100).\n");
 		fmt::print("Optionally skip over the first OFFSET results (default 0).\n");
 		fmt::print("Optional comma-separated tenant state(s) can be provided to filter the list.\n");
+		fmt::print("Optional tenant group can be provided to filter the list.\n");
+		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
+		fmt::print("Specifying [offset] and [state] is only supported in a metacluster.\n");
 		return false;
 	}
 
@@ -342,6 +392,8 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state int limit = 100;
 	state int offset = 0;
 	state std::vector<metacluster::TenantState> filters;
+	state std::string tenantGroupString;
+	state bool useJson = false;
 
 	if (tokens.size() >= 3) {
 		beginTenant = tokens[2];
@@ -354,10 +406,11 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 		}
 	}
 	if (tokens.size() >= 5) {
-		if (!parseTenantListOptions(tokens, 4, limit, offset, filters)) {
+		if (!parseTenantListOptions(tokens, 4, limit, offset, filters, tenantGroupString, useJson)) {
 			return false;
 		}
 	}
+	state TenantGroupName tenantGroup(tenantGroupString);
 
 	state Key beginTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(beginTenant);
 	state Key endTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(endTenant);
@@ -368,27 +421,63 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			state std::vector<TenantName> tenantNames;
+			// State filters only apply to calls from the management cluster
+			// Tenant group filters can apply to management, data, and standalone clusters
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				if (filters.empty()) {
-					std::vector<std::pair<TenantName, int64_t>> tenants =
-					    wait(metacluster::listTenants(db, beginTenant, endTenant, limit, offset));
-					for (auto tenant : tenants) {
-						tenantNames.push_back(tenant.first);
+					std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
+					    wait(metacluster::listTenantMetadata(
+					        db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
+					if (useJson) {
+						tenantListOutputJson(tenants);
+						return true;
+					} else {
+						for (const auto& [tenantName, _] : tenants) {
+							tenantNames.push_back(tenantName);
+						}
 					}
 				} else {
 					std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
-					    wait(metacluster::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters));
-					for (auto tenant : tenants) {
-						tenantNames.push_back(tenant.first);
+					    wait(metacluster::listTenantMetadata(
+					        db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
+					if (useJson) {
+						tenantListOutputJson(tenants);
+						return true;
+					} else {
+						for (const auto& [tenantName, _] : tenants) {
+							tenantNames.push_back(tenantName);
+						}
 					}
 				}
 			} else {
-				// Hold the reference to the standalone's memory
-				state ThreadFuture<RangeResult> kvsFuture =
-				    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
-				RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
-				for (auto tenant : tenants) {
-					tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
+				if (!tenantGroup.empty()) {
+					try {
+						std::vector<std::pair<TenantName, int64_t>> tenants =
+						    wait(TenantAPI::listTenantGroupMetadata(db, beginTenant, endTenant, limit, tenantGroup));
+						if (useJson) {
+							tenantListOutputJson(tenants);
+							return true;
+						} else {
+							for (const auto& [tenantName, tenantId] : tenants) {
+								tenantNames.push_back(tenantName);
+							}
+						}
+					} catch (Error& e) {
+						if (useJson) {
+							tenantListOutputJsonError(e);
+						} else {
+							fmt::print(stderr, "ERROR: {}\n", e.what());
+						}
+						return false;
+					}
+				} else {
+					// Hold the reference to the standalone's memory
+					state ThreadFuture<RangeResult> kvsFuture =
+					    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
+					RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+					for (auto tenant : tenants) {
+						tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
+					}
 				}
 			}
 
@@ -942,9 +1031,13 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 		static std::vector<const char*> opts = { "<ID>" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 7) {
-		static std::vector<const char*> opts = {
-			"[BEGIN]", "[END]", "[limit=LIMIT]", "[offset=OFFSET]", "[state=<STATE1>,<STATE2>,...]"
-		};
+		static std::vector<const char*> opts = { "[BEGIN]",
+			                                     "[END]",
+			                                     "[limit=LIMIT]",
+			                                     "[offset=OFFSET]",
+			                                     "[state=<STATE1>,<STATE2>,...]",
+			                                     "[tenant_group=TENANT_GROUP]",
+			                                     "JSON" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };

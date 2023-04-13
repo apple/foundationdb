@@ -69,7 +69,8 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenantMetadataTransaction(
     Transaction tr,
-    std::vector<std::pair<TenantName, int64_t>> tenantIds) {
+    std::vector<std::pair<TenantName, int64_t>> tenantIds,
+    TenantGroupName tenantGroup = ""_sr) {
 
 	state int idIdx = 0;
 	state std::vector<Future<Optional<MetaclusterTenantMapEntry>>> futures;
@@ -85,7 +86,8 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 
 		// Tenants being renamed show up in tenantIds twice, once under each name. The destination name will be
 		// different from the tenant entry and is filtered from the list
-		if (entry.tenantName == tenantIds[i].first) {
+		if (entry.tenantName == tenantIds[i].first &&
+		    (tenantGroup.empty() || (entry.tenantGroup.present() && entry.tenantGroup.get() == tenantGroup))) {
 			results.emplace_back(entry.tenantName, entry);
 		}
 	}
@@ -94,13 +96,15 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 }
 
 ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
-                                                                                                    TenantNameRef begin,
-                                                                                                    TenantNameRef end,
-                                                                                                    int limit) {
+Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenantMetadataTransaction(
+    Transaction tr,
+    TenantNameRef begin,
+    TenantNameRef end,
+    int limit,
+    TenantGroupName tenantGroup) {
 	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
 	std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> results =
-	    wait(listTenantMetadataTransaction(tr, matchingTenants));
+	    wait(listTenantMetadataTransaction(tr, matchingTenants, tenantGroup));
 	return results;
 }
 
@@ -111,7 +115,8 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
     TenantName end,
     int limit,
     int offset = 0,
-    std::vector<TenantState> filters = std::vector<TenantState>()) {
+    std::vector<TenantState> filters = std::vector<TenantState>(),
+    TenantGroupName tenantGroup = ""_sr) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> results;
 
@@ -119,7 +124,7 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			if (filters.empty()) {
+			if (filters.empty() && tenantGroup.empty()) {
 				std::vector<std::pair<TenantName, int64_t>> ids =
 				    wait(listTenantsTransaction(tr, begin, end, limit, offset));
 				wait(store(results, listTenantMetadataTransaction(tr, ids)));
@@ -130,14 +135,14 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 			state int count = 0;
 			loop {
 				std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantBatch =
-				    wait(listTenantMetadataTransaction(tr, begin, end, std::max(limit + offset, 1000)));
+				    wait(listTenantMetadataTransaction(tr, begin, end, std::max(limit + offset, 1000), tenantGroup));
 
 				if (tenantBatch.empty()) {
 					return results;
 				}
 
 				for (auto const& [name, entry] : tenantBatch) {
-					if (std::count(filters.begin(), filters.end(), entry.tenantState)) {
+					if (filters.empty() || std::count(filters.begin(), filters.end(), entry.tenantState)) {
 						++count;
 						if (count > offset) {
 							results.emplace_back(name, entry);

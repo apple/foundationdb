@@ -547,6 +547,41 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 }
 
 ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupMetadataTransaction(Transaction tr,
+                                                                                       TenantName begin,
+                                                                                       TenantName end,
+                                                                                       int limit,
+                                                                                       StringRef tenantGroup) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	KeyBackedSet<Tuple>::RangeResultType result = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
+	    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
+	std::vector<std::pair<TenantName, int64_t>> returnResult;
+	if (!result.results.size()) {
+		return returnResult;
+	}
+	for (auto const& tupleEntry : result.results) {
+		TenantName tName = tupleEntry.getString(1);
+		if (tName >= begin && tName < end) {
+			returnResult.push_back(std::make_pair(tName, tupleEntry.getInt(2)));
+		}
+	}
+	return returnResult;
+}
+
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupMetadata(Reference<DB> db,
+                                                                            TenantName begin,
+                                                                            TenantName end,
+                                                                            int limit,
+                                                                            StringRef tenantGroup) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		return listTenantGroupMetadataTransaction(tr, begin, end, limit, tenantGroup);
+	});
+}
+
+ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
                                                                                          TenantName begin,
                                                                                          TenantName end,
