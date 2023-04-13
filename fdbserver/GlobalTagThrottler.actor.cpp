@@ -21,6 +21,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKThroughputQuotaCache.h"
 #include "fdbserver/TagThrottler.h"
 
 #include <limits>
@@ -116,7 +117,6 @@ class GlobalTagThrottlerImpl {
 
 	// Track various statistics per tag, aggregated across all storage servers
 	class PerTagStatistics {
-		Optional<ThrottleApi::TagQuotaValue> quota;
 		Smoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
@@ -127,12 +127,6 @@ class GlobalTagThrottlerImpl {
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()) {}
-
-		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
-
-		void setQuota(ThrottleApi::TagQuotaValue quota) { this->quota = quota; }
-
-		void clearQuota() { quota = {}; }
 
 		void addTransactions(int count) {
 			transactionsLastAdded = now();
@@ -166,7 +160,7 @@ class GlobalTagThrottlerImpl {
 		Optional<double> throttlingRatio;
 	};
 
-	Database db;
+	IRKThroughputQuotaCache* quotaCache;
 	UID id;
 	int maxFallingBehind{ 0 };
 	uint64_t throttledTagChangeId{ 0 };
@@ -269,22 +263,6 @@ class GlobalTagThrottlerImpl {
 		return result;
 	}
 
-	Optional<double> getQuota(TransactionTag tag, LimitType limitType) const {
-		auto const stats = tryGet(tagStatistics, tag);
-		if (!stats.present()) {
-			return {};
-		}
-		auto const quota = stats.get().getQuota();
-		if (!quota.present()) {
-			return {};
-		}
-		if (limitType == LimitType::TOTAL) {
-			return quota.get().totalQuota;
-		} else {
-			return quota.get().reservedQuota;
-		}
-	}
-
 	// Of all tags meaningfully performing workload on the given storage server,
 	// returns the ratio of total quota allocated to the specified tag
 	double getQuotaRatio(TransactionTagRef tag, UID storageServerId) const {
@@ -292,7 +270,7 @@ class GlobalTagThrottlerImpl {
 		double tagQuota{ 0.0 };
 		auto const tagsAffectingStorageServer = getTagsAffectingStorageServer(storageServerId);
 		for (const auto& t : tagsAffectingStorageServer) {
-			auto const tQuota = getQuota(t, LimitType::TOTAL);
+			auto const tQuota = quotaCache->getTotalQuota(t);
 			sumQuota += tQuota.orDefault(0);
 			if (t.compare(tag) == 0) {
 				tagQuota = tQuota.orDefault(0);
@@ -362,51 +340,11 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	void removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota) {
-		for (auto& [tag, stats] : tagStatistics) {
-			if (!tagsWithQuota.count(tag)) {
-				stats.clearQuota();
-			}
-		}
-	}
-
-	ACTOR static Future<Void> monitorThrottlingChanges(GlobalTagThrottlerImpl* self) {
-		state std::unordered_set<TransactionTag> tagsWithQuota;
-
-		loop {
-			state ReadYourWritesTransaction tr(self->db);
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-					tagsWithQuota.clear();
-					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id).detail("Size", currentQuotas.size());
-					for (auto const kv : currentQuotas) {
-						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
-						auto const quota = ThrottleApi::TagQuotaValue::fromValue(kv.value);
-						self->tagStatistics[tag].setQuota(quota);
-						tagsWithQuota.insert(tag);
-					}
-					self->removeUnseenQuotas(tagsWithQuota);
-					self->removeExpiredTags();
-					++self->throttledTagChangeId;
-					wait(delay(5.0));
-					break;
-				} catch (Error& e) {
-					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
-					wait(tr.onError(e));
-				}
-			}
-		}
-	}
-
 	Optional<double> getTargetTps(TransactionTag tag, bool& isBusy, TraceEvent& te) {
 		auto const limitingTps = getLimitingTps(tag);
 		auto const averageTransactionCost = getAverageTransactionCost(tag, te);
-		auto const totalQuota = getQuota(tag, LimitType::TOTAL);
-		auto const reservedQuota = getQuota(tag, LimitType::RESERVED);
+		auto const totalQuota = quotaCache->getTotalQuota(tag);
+		auto const reservedQuota = quotaCache->getReservedQuota(tag);
 		if (!averageTransactionCost.present() || !totalQuota.present() || !reservedQuota.present()) {
 			return {};
 		}
@@ -430,9 +368,8 @@ class GlobalTagThrottlerImpl {
 	}
 
 public:
-	GlobalTagThrottlerImpl(Database db, UID id, int maxFallingBehind)
-	  : db(db), id(id), maxFallingBehind(maxFallingBehind) {}
-	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
+	GlobalTagThrottlerImpl(IRKThroughputQuotaCache& quotaCache, UID id, int maxFallingBehind)
+	  : quotaCache(&quotaCache), id(id), maxFallingBehind(maxFallingBehind) {}
 	void addRequests(TransactionTag tag, int count) {
 		auto it = tagStatistics.find(tag);
 		if (it == tagStatistics.end()) {
@@ -503,13 +440,8 @@ public:
 	}
 
 	int64_t autoThrottleCount() const {
-		int64_t result{ 0 };
-		for (const auto& [tag, stats] : tagStatistics) {
-			if (stats.getQuota().present()) {
-				++result;
-			}
-		}
-		return result;
+		// FIXME: Return quotaCache size
+		return 0;
 	}
 	uint32_t busyReadTagCount() const { return lastBusyTagCount; }
 	uint32_t busyWriteTagCount() const { return lastBusyTagCount; }
@@ -534,12 +466,6 @@ public:
 		return Void();
 	}
 
-	void setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
-		tagStatistics[tag].setQuota(tagQuotaValue);
-	}
-
-	void removeQuota(TransactionTagRef tag) { tagStatistics[tag].clearQuota(); }
-
 	void removeExpiredTags() {
 		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
 			const auto& [tag, stats] = *it;
@@ -554,17 +480,22 @@ public:
 		}
 	}
 
+	Future<Void> removeExpiredTagsActor() {
+		return recurring([this] { removeExpiredTags(); }, 5.0);
+	}
+
 	uint32_t tagsTracked() const { return tagStatistics.size(); }
 };
 
-GlobalTagThrottler::GlobalTagThrottler(Database db, UID id, int maxFallingBehind)
-  : impl(PImpl<GlobalTagThrottlerImpl>::create(db, id, maxFallingBehind)) {}
+GlobalTagThrottler::GlobalTagThrottler(IRKThroughputQuotaCache& quotaCache, UID id, int maxFallingBehind)
+  : impl(PImpl<GlobalTagThrottlerImpl>::create(quotaCache, id, maxFallingBehind)) {}
 
 GlobalTagThrottler::~GlobalTagThrottler() = default;
 
 Future<Void> GlobalTagThrottler::monitorThrottlingChanges() {
-	return impl->monitorThrottlingChanges();
+	return impl->removeExpiredTagsActor();
 }
+
 void GlobalTagThrottler::addRequests(TransactionTag tag, int count) {
 	return impl->addRequests(tag, count);
 }
@@ -594,14 +525,6 @@ bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
 }
 Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 	return impl->tryUpdateAutoThrottling(ss);
-}
-
-void GlobalTagThrottler::setQuota(TransactionTagRef tag, ThrottleApi::TagQuotaValue const& tagQuotaValue) {
-	return impl->setQuota(tag, tagQuotaValue);
-}
-
-void GlobalTagThrottler::removeQuota(TransactionTagRef tag) {
-	return impl->removeQuota(tag);
 }
 
 uint32_t GlobalTagThrottler::tagsTracked() const {
@@ -825,12 +748,11 @@ ACTOR Future<Void> updateGlobalTagThrottler(GlobalTagThrottler* globalTagThrottl
 // Client attempts 5 6-byte read transactions per second.
 // Limit should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/Simple") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> monitor =
 	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 100.0 / 6.0); });
@@ -844,12 +766,11 @@ TEST_CASE("/GlobalTagThrottler/Simple") {
 // Client attempts 5 6-byte write transactions per second.
 // Limit should adjust to allow 100/(6*<fungibility_ratio>) transactions per second.
 TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::WRITE);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
 		return targetRateIsNear(gtt, testTag, 100.0 / (6.0 * CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO));
@@ -865,14 +786,13 @@ TEST_CASE("/GlobalTagThrottler/WriteThrottling") {
 // 2 clients each attempt 5 6-byte read transactions per second.
 // Both limits should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag1, tagQuotaValue);
-	globalTagThrottler.setQuota(testTag2, tagQuotaValue);
+	quotaCache.setQuota(testTag1, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
+	quotaCache.setQuota(testTag2, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state std::vector<Future<Void>> futures;
 	state std::vector<Future<Void>> monitorFutures;
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 5.0, 6.0, OpType::READ));
@@ -890,12 +810,11 @@ TEST_CASE("/GlobalTagThrottler/MultiTagThrottling") {
 // Client attempts 20 10-byte read transactions per second.
 // Limit should adjust to allow 100/10 transactions per second.
 TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
 	state Future<Void> monitor =
 	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 10.0); });
@@ -909,12 +828,11 @@ TEST_CASE("/GlobalTagThrottler/AttemptWorkloadAboveQuota") {
 // 2 clients each attempt 5 6-byte transactions per second.
 // Limit should adjust to allow 100/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
@@ -931,12 +849,11 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 // Target rate should adjust to allow 100/10 transactions per second.
 // Each client is throttled to only perform (100/10)/2 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
@@ -954,12 +871,11 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 // Target rate should adjust to allow 100/5 transactions per second.
 // This 20 transactions/second limit is split with a distribution of (5, 15) between the 2 clients.
 TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 5.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 25.0, 5.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
@@ -978,19 +894,17 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 // Total quota is modified to 50 pages/second.
 // Target rate should adjust to allow 50/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(
 	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
 	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
-	tagQuotaValue.totalQuota = 50 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 50 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	monitor =
 	    monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 50.0 / 6.0); });
 	wait(timeoutError(monitor || client || updater, 600.0));
@@ -1004,18 +918,17 @@ TEST_CASE("/GlobalTagThrottler/UpdateQuota") {
 // Then Quota is removed.
 // Target limit is removed as a result.
 TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 100);
-	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	state TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(
 	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
 	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
-	globalTagThrottler.removeQuota(testTag);
+	quotaCache.removeQuota(testTag);
 	monitor = monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, {}); });
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
@@ -1026,12 +939,11 @@ TEST_CASE("/GlobalTagThrottler/RemoveQuota") {
 // Client attempts 10 6-page transactions per second
 // Target is adjusted to 50/6 transactions per second, to match the total capacity all storage servers.
 TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
-	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
 		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadTagCount() == 1;
@@ -1048,16 +960,13 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 //   add storage servers. The two tags receive this capacity with a 2:1 ratio,
 //   matching the ratio of their total quotas.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
-	state ThrottleApi::TagQuotaValue tagQuotaValue1;
-	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalQuota = 50 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	tagQuotaValue2.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
-	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
+	quotaCache.setQuota(testTag1, 50 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
+	quotaCache.setQuota(testTag2, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	std::vector<Future<Void>> futures;
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ));
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ));
@@ -1077,16 +986,13 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 // Target rates for both tags are adjusted to 50/6 transactions per second to match the throughput
 //   that the busiest server can handle.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(3, 50);
-	state ThrottleApi::TagQuotaValue tagQuotaValue1;
-	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	tagQuotaValue2.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
-	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
+	quotaCache.setQuota(testTag1, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
+	quotaCache.setQuota(testTag2, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	std::vector<Future<Void>> futures;
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ, { 0, 1 }));
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
@@ -1107,16 +1013,13 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 // of the
 //   storage servers being accessed.
 TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(3, 50);
-	state ThrottleApi::TagQuotaValue tagQuotaValue1;
-	state ThrottleApi::TagQuotaValue tagQuotaValue2;
 	TransactionTag testTag1 = "sampleTag1"_sr;
 	TransactionTag testTag2 = "sampleTag2"_sr;
-	tagQuotaValue1.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	tagQuotaValue2.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag1, tagQuotaValue1);
-	globalTagThrottler.setQuota(testTag2, tagQuotaValue2);
+	quotaCache.setQuota(testTag1, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
+	quotaCache.setQuota(testTag2, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	std::vector<Future<Void>> futures;
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag1, 10.0, 6.0, OpType::READ, { 0 }));
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
@@ -1136,13 +1039,12 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 // Despite the storage server only having capacity to serve 50/6 transactions per second,
 //   the reserved quota will ensure the target rate adjusts to 70/6 transactions per second.
 TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
-	state ThrottleApi::TagQuotaValue tagQuotaValue;
 	TransactionTag testTag = "sampleTag1"_sr;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	tagQuotaValue.reservedQuota = 70 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(
+	    testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 70 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
 	state Future<Void> monitor =
 	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 70 / 6.0); });
@@ -1154,7 +1056,8 @@ TEST_CASE("/GlobalTagThrottler/ReservedQuota") {
 // Test that tags are expired iff a sufficient amount of time has passed since the
 // last transaction with that tag
 TEST_CASE("/GlobalTagThrottler/ExpireTags") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	TransactionTag testTag = "sampleTag1"_sr;
 
@@ -1176,7 +1079,8 @@ TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 
 // Test that the number of tags tracked does not grow beyond SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED
 TEST_CASE("/GlobalTagThrottler/TagLimit") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 0);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 0);
 	state StorageServerCollection storageServers(10, 5);
 	std::vector<Future<Void>> futures;
 	for (int i = 0; i < 2 * SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED; ++i) {
@@ -1198,13 +1102,12 @@ TEST_CASE("/GlobalTagThrottler/TagLimit") {
 // Then, a second storage server becomes unhealthy and can only handle 1 page/second.
 // Target rate adjusts down to 10/6 transactions per second, because only one bad zone can be ignored.
 TEST_CASE("/GlobalTagThrottler/IgnoreWorstZone") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 1);
+	state MockRKThroughputQuotaCache quotaCache;
+	state GlobalTagThrottler globalTagThrottler(quotaCache, UID{}, 1);
 	state StorageServerCollection storageServers(10, 100);
 	state TransactionTag testTag = "sampleTag1"_sr;
 	storageServers.setCapacity(0, 1);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
+	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(
 	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });

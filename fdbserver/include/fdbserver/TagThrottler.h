@@ -79,7 +79,7 @@ class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(Database db, UID id, int maxFallingBehind);
+	GlobalTagThrottler(IRKThroughputQuotaCache&, UID id, int maxFallingBehind);
 	~GlobalTagThrottler();
 
 	Future<Void> monitorThrottlingChanges() override;
@@ -98,8 +98,6 @@ public:
 
 	// Testing only:
 public:
-	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
-	void removeQuota(TransactionTagRef);
 	void removeExpiredTags();
 	uint32_t tagsTracked() const;
 };

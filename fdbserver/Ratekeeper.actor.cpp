@@ -199,6 +199,9 @@ public:
 		self.addActor.send(self.rateServer->run(
 		    *self.normalRateUpdater, *self.batchRateUpdater, *self.tagThrottler, *self.recoveryTracker));
 
+		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+			self.addActor.send(self.quotaCache->run());
+		}
 		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
@@ -295,7 +298,8 @@ Ratekeeper::Ratekeeper(UID id,
                        RatekeeperInterface rkInterf)
   : id(id), db(db), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
+		quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(*quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
