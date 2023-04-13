@@ -7976,7 +7976,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "WaitStorageMetricsError0").error(e);
+			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
