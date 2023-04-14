@@ -548,36 +548,33 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransaction(Transaction tr,
+                                                                                      TenantGroupName tenantGroup,
                                                                                       TenantName begin,
                                                                                       TenantName end,
-                                                                                      int limit,
-                                                                                      TenantGroupName tenantGroup) {
+                                                                                      int limit) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	KeyBackedSet<Tuple>::RangeResultType result = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
-	    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
+	    tr, Tuple::makeTuple(tenantGroup, begin), Tuple::makeTuple(tenantGroup, end), limit));
 	std::vector<std::pair<TenantName, int64_t>> returnResult;
 	if (!result.results.size()) {
 		return returnResult;
 	}
 	for (auto const& tupleEntry : result.results) {
-		TenantName tName = tupleEntry.getString(1);
-		if (tName >= begin && tName < end) {
-			returnResult.push_back(std::make_pair(tName, tupleEntry.getInt(2)));
-		}
+		returnResult.push_back(std::make_pair(tupleEntry.getString(1), tupleEntry.getInt(2)));
 	}
 	return returnResult;
 }
 
 template <class DB>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenants(Reference<DB> db,
+                                                                           TenantGroupName tenantGroup,
                                                                            TenantName begin,
                                                                            TenantName end,
-                                                                           int limit,
-                                                                           TenantGroupName tenantGroup) {
+                                                                           int limit) {
 	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		return listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup);
+		return listTenantGroupTenantsTransaction(tr, tenantGroup, begin, end, limit);
 	});
 }
 

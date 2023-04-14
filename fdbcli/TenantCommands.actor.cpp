@@ -410,7 +410,8 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			return false;
 		}
 	}
-	state TenantGroupName tenantGroup(tenantGroupString);
+	state Optional<TenantGroupName> tenantGroup =
+	    tenantGroupString.empty() ? Optional<TenantGroupName>() : Optional<TenantGroupName>(tenantGroupString);
 
 	state Key beginTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(beginTenant);
 	state Key endTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(endTenant);
@@ -424,9 +425,8 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			// State filters only apply to calls from the management cluster
 			// Tenant group filters can apply to management, data, and standalone clusters
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
-					wait(metacluster::listTenantMetadata(
-						db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
+				std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants = wait(
+				    metacluster::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
 				if (useJson) {
 					tenantListOutputJson(tenants);
 					return true;
@@ -436,10 +436,12 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					}
 				}
 			} else {
-				if (!tenantGroup.empty()) {
+				if (tenantGroup.present()) {
 					try {
-						std::vector<std::pair<TenantName, int64_t>> tenants =
-						    wait(TenantAPI::listTenantGroupTenants(db, beginTenant, endTenant, limit, tenantGroup));
+						// For expediency: does not use special key space
+						// TODO: add special key support
+						std::vector<std::pair<TenantName, int64_t>> tenants = wait(
+						    TenantAPI::listTenantGroupTenants(db, tenantGroup.get(), beginTenant, endTenant, limit));
 						if (useJson) {
 							tenantListOutputJson(tenants);
 							return true;
