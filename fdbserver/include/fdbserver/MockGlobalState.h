@@ -223,9 +223,32 @@ protected:
 
 class MockGlobalStateImpl;
 
+namespace mock {
+struct TopologyObject {
+	enum Type { PROCESS, MACHINE, ZONE, DATA_HALL, DATA_CENTER } type;
+	// corresponding to LocalityData field for each type
+	Standalone<StringRef> topoId;
+	std::shared_ptr<TopologyObject> parent;
+	std::vector<std::shared_ptr<TopologyObject>> children;
+	TopologyObject(Type type, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : type(type), topoId(id), parent(parent) {}
+};
+
+struct Process : public TopologyObject {
+	LocalityData locality;
+	std::vector<StorageServerInterface> ssInterfaces;
+	Process(LocalityData locality, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : TopologyObject(PROCESS, id, parent), locality(locality) {}
+};
+} // namespace mock
+
 class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
+
+	std::vector<std::shared_ptr<mock::TopologyObject>> clusterLayout;
+	std::vector<std::shared_ptr<mock::Process>> processes;
+	std::vector<std::shared_ptr<mock::Process>> seedProcesses;
 
 	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
@@ -245,6 +268,7 @@ public:
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
+	void initializeClusterLayout(const BasicSimulationConfig&);
 	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 

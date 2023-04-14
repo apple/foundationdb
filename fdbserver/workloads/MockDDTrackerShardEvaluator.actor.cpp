@@ -44,7 +44,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 	// --- test configs ---
 
 	// Each key space is convert from an int N. [N, N+1) represent a key space. So at most we have 2G key spaces
-	int keySpaceCount = 0;
+	int keySpaceCount = 1000;
 	// 1. fixed -- each key space has fixed size. The size of each key space is calculated as minSpaceKeyCount *
 	// (minByteSize + 16) ;
 	// 2. linear -- from 0 to keySpaceCount the size of key space increase by size linearStride, from
