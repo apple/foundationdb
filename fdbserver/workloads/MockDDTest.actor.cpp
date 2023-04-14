@@ -45,13 +45,14 @@ Future<Void> MockDDTestWorkload::setup(Database const& cx) {
 	testConfig.simpleConfig = simpleConfig;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 
 	// initialize mgs
 	mgs = std::make_shared<MockGlobalState>();
 	mgs->maxByteSize = maxByteSize;
 	mgs->minByteSize = minByteSize;
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 	mock = makeReference<DDMockTxnProcessor>(mgs);
 
 	return Void();

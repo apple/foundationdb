@@ -336,7 +336,14 @@ Future<Void> MockStorageServer::run() {
 
 	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
 	addActor(serveStorageMetricsRequests(this, ssi));
-	addActor(counters.cc.traceCounters("StorageMetrics", ssi.id(), SERVER_KNOBS->STORAGE_LOGGING_DELAY));
+	addActor(counters.cc.traceCounters("MockStorageMetrics",
+	                                   ssi.id(),
+	                                   SERVER_KNOBS->STORAGE_LOGGING_DELAY,
+	                                   std::string(),
+	                                   [self = this](TraceEvent& te) {
+		                                   te.detail("CpuUsage", self->calculateCpuUsage());
+		                                   te.detail("DiskUsedBytes", self->usedDiskSpace);
+	                                   }));
 	return actors.getResult();
 }
 
@@ -519,6 +526,40 @@ double MockStorageServer::calculateCpuUsage() const {
 	return std::max(100.0, res);
 }
 
+void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf) {
+	fmt::print("MGS Cluster Layout: {} dc, {} machines, {} processes per machine.\n",
+	           conf.datacenters,
+	           conf.machine_count,
+	           conf.processes_per_machine);
+
+	int mod = conf.machine_count % conf.datacenters;
+	for (int i = 0; i < conf.datacenters; ++i) {
+		Standalone<StringRef> dcId(StringRef(fmt::format("data_hall_{}", i)));
+		clusterLayout.emplace_back(new mock::TopologyObject(mock::TopologyObject::DATA_HALL, dcId));
+
+		auto& dc = clusterLayout.back();
+		int machineCount = conf.machine_count / conf.datacenters + int(i < mod);
+		for (int j = 0; j < machineCount; ++j) {
+			Standalone<StringRef> mcId(StringRef(fmt::format("machine_{}_{}", i, j)));
+			dc->children.emplace_back(new mock::TopologyObject(mock::TopologyObject::MACHINE, mcId, dc));
+
+			auto& machine = dc->children.back();
+			for (int k = 0; k < conf.processes_per_machine; ++k) {
+				Standalone<StringRef> pid(StringRef(fmt::format("process_{}_{}_{}", i, j, k)));
+				LocalityData localityData(pid, mcId, mcId, dcId);
+				processes.emplace_back(new mock::Process(localityData, pid, machine));
+				machine->children.emplace_back(processes.back());
+
+				if (seedProcesses.size() < conf.db.storageTeamSize && j == 0 && k == 0) {
+					seedProcesses.emplace_back(processes.back());
+					fmt::print("(seed) ");
+				}
+				fmt::print("Mock Process: {}\n", processes.back()->locality.toString());
+			}
+		}
+	}
+}
+
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
 	configuration = conf;
@@ -526,7 +567,14 @@ void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& 
 	for (int i = 1; i <= conf.storageTeamSize; ++i) {
 		UID id = indexToUID(i);
 		serverIds.push_back(id);
-		allServers[id] = makeReference<MockStorageServer>(id, defaultDiskSpace);
+
+		// select seed Storage Server
+		StorageServerInterface ssi(id);
+		auto& process = seedProcesses[(i - 1) % seedProcesses.size()];
+		ssi.locality = process->locality;
+		process->ssInterfaces.push_back(ssi);
+
+		allServers[id] = makeReference<MockStorageServer>(ssi, defaultDiskSpace);
 		allServers[id]->serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 });
 	}
 	shardMapping->assignRangeToTeams(allKeys, { Team(serverIds, true) });
