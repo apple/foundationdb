@@ -547,11 +547,11 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 }
 
 ACTOR template <class Transaction>
-Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupMetadataTransaction(Transaction tr,
-                                                                                       TenantName begin,
-                                                                                       TenantName end,
-                                                                                       int limit,
-                                                                                       StringRef tenantGroup) {
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransaction(Transaction tr,
+                                                                                      TenantName begin,
+                                                                                      TenantName end,
+                                                                                      int limit,
+                                                                                      TenantGroupName tenantGroup) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	KeyBackedSet<Tuple>::RangeResultType result = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
 	    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
@@ -569,15 +569,15 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupMetadataTrans
 }
 
 template <class DB>
-Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupMetadata(Reference<DB> db,
-                                                                            TenantName begin,
-                                                                            TenantName end,
-                                                                            int limit,
-                                                                            StringRef tenantGroup) {
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenants(Reference<DB> db,
+                                                                           TenantName begin,
+                                                                           TenantName end,
+                                                                           int limit,
+                                                                           TenantGroupName tenantGroup) {
 	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		return listTenantGroupMetadataTransaction(tr, begin, end, limit, tenantGroup);
+		return listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup);
 	});
 }
 

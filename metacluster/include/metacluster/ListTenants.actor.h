@@ -52,6 +52,28 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantsTransaction(Trans
 	    future);
 }
 
+ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransaction(Transaction tr,
+                                                                                      TenantName begin,
+                                                                                      TenantName end,
+                                                                                      int limit,
+                                                                                      TenantGroupName tenantGroup) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	state KeyBackedSet<Tuple>::RangeResultType result = wait(metadata::management::tenantMetadata().tenantGroupTenantIndex.getRange(
+	    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
+	std::vector<std::pair<TenantName, int64_t>> returnResult;
+	if (!result.results.size()) {
+		return returnResult;
+	}
+	for (auto const& tupleEntry : result.results) {
+		TenantName tName = tupleEntry.getString(1);
+		if (tName >= begin && tName < end) {
+			returnResult.push_back(std::make_pair(tName, tupleEntry.getInt(2)));
+		}
+	}
+	return returnResult;
+}
+
 template <class DB>
 Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db,
                                                                 TenantName begin,
@@ -69,8 +91,7 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenantMetadataTransaction(
     Transaction tr,
-    std::vector<std::pair<TenantName, int64_t>> tenantIds,
-    TenantGroupName tenantGroup = ""_sr) {
+    std::vector<std::pair<TenantName, int64_t>> tenantIds) {
 
 	state int idIdx = 0;
 	state std::vector<Future<Optional<MetaclusterTenantMapEntry>>> futures;
@@ -86,8 +107,7 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 
 		// Tenants being renamed show up in tenantIds twice, once under each name. The destination name will be
 		// different from the tenant entry and is filtered from the list
-		if (entry.tenantName == tenantIds[i].first &&
-		    (tenantGroup.empty() || (entry.tenantGroup.present() && entry.tenantGroup.get() == tenantGroup))) {
+		if (entry.tenantName == tenantIds[i].first) {
 			results.emplace_back(entry.tenantName, entry);
 		}
 	}
@@ -101,10 +121,15 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
     TenantNameRef begin,
     TenantNameRef end,
     int limit,
-    TenantGroupName tenantGroup) {
-	std::vector<std::pair<TenantName, int64_t>> matchingTenants = wait(listTenantsTransaction(tr, begin, end, limit));
+    TenantGroupName tenantGroup = ""_sr) {
+	state std::vector<std::pair<TenantName, int64_t>> matchingTenants;
+	if (tenantGroup.empty()) {
+		wait(store(matchingTenants, listTenantsTransaction(tr, begin, end, limit)));
+	} else {
+	    wait(store(matchingTenants, listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup)));
+	}
 	std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> results =
-	    wait(listTenantMetadataTransaction(tr, matchingTenants, tenantGroup));
+	    wait(listTenantMetadataTransaction(tr, matchingTenants));
 	return results;
 }
 
@@ -124,9 +149,13 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
-			if (filters.empty() && tenantGroup.empty()) {
-				std::vector<std::pair<TenantName, int64_t>> ids =
-				    wait(listTenantsTransaction(tr, begin, end, limit, offset));
+			if (filters.empty()) {
+				state std::vector<std::pair<TenantName, int64_t>> ids;
+				if (tenantGroup.empty()) {
+					wait(store(ids, listTenantsTransaction(tr, begin, end, limit)));
+				} else {
+					wait(store(ids, listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup)));
+				}
 				wait(store(results, listTenantMetadataTransaction(tr, ids)));
 				return results;
 			}

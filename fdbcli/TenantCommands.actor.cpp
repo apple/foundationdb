@@ -392,7 +392,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state int limit = 100;
 	state int offset = 0;
 	state std::vector<metacluster::TenantState> filters;
-	state std::string tenantGroupString;
+	state std::string tenantGroupString = "";
 	state bool useJson = false;
 
 	if (tokens.size() >= 3) {
@@ -424,36 +424,22 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			// State filters only apply to calls from the management cluster
 			// Tenant group filters can apply to management, data, and standalone clusters
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-				if (filters.empty()) {
-					std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
-					    wait(metacluster::listTenantMetadata(
-					        db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
-					if (useJson) {
-						tenantListOutputJson(tenants);
-						return true;
-					} else {
-						for (const auto& [tenantName, _] : tenants) {
-							tenantNames.push_back(tenantName);
-						}
-					}
+				std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
+					wait(metacluster::listTenantMetadata(
+						db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
+				if (useJson) {
+					tenantListOutputJson(tenants);
+					return true;
 				} else {
-					std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants =
-					    wait(metacluster::listTenantMetadata(
-					        db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
-					if (useJson) {
-						tenantListOutputJson(tenants);
-						return true;
-					} else {
-						for (const auto& [tenantName, _] : tenants) {
-							tenantNames.push_back(tenantName);
-						}
+					for (const auto& [tenantName, _] : tenants) {
+						tenantNames.push_back(tenantName);
 					}
 				}
 			} else {
 				if (!tenantGroup.empty()) {
 					try {
 						std::vector<std::pair<TenantName, int64_t>> tenants =
-						    wait(TenantAPI::listTenantGroupMetadata(db, beginTenant, endTenant, limit, tenantGroup));
+						    wait(TenantAPI::listTenantGroupTenants(db, beginTenant, endTenant, limit, tenantGroup));
 						if (useJson) {
 							tenantListOutputJson(tenants);
 							return true;
