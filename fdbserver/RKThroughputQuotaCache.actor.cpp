@@ -72,6 +72,10 @@ Optional<int64_t> RKThroughputQuotaCache::getReservedQuota(TransactionTag tag) c
 	}
 }
 
+int RKThroughputQuotaCache::size() const {
+	return quotas.size();
+}
+
 Future<Void> RKThroughputQuotaCache::run() {
 	return RKThroughputQuotaCacheImpl::run(this);
 }
@@ -94,6 +98,10 @@ Optional<int64_t> MockRKThroughputQuotaCache::getReservedQuota(TransactionTag ta
 	} else {
 		return it->second.reservedQuota;
 	}
+}
+
+int MockRKThroughputQuotaCache::size() {
+	return quotas.size();
 }
 
 void MockRKThroughputQuotaCache::setQuota(TransactionTag tag, int64_t totalQuota, int64_t reservedQuota) {

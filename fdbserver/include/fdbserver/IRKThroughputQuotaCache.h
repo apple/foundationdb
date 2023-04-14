@@ -22,6 +22,9 @@ public:
 	// for the provided tag (in bytes/second)
 	virtual Optional<int64_t> getReservedQuota(TransactionTag) const = 0;
 
+	// Returns the number of quotas currently cached
+	virtual int size() const = 0;
+
 	// Responsible for updating the quota cache. The returned future
 	// should never be ready, but can be used for propagating errors.
 	virtual Future<Void> run() = 0;
@@ -41,6 +44,7 @@ public:
 	~RKThroughputQuotaCache();
 	Optional<int64_t> getTotalQuota(TransactionTag) const override;
 	Optional<int64_t> getReservedQuota(TransactionTag) const override;
+	int size() const override;
 	Future<Void> run() override;
 };
 
@@ -52,6 +56,7 @@ public:
 	~MockRKThroughputQuotaCache();
 	Optional<int64_t> getTotalQuota(TransactionTag) const override;
 	Optional<int64_t> getReservedQuota(TransactionTag) const override;
+	int size() const override;
 	Future<Void> run() override;
 
 	void setQuota(TransactionTag tag, int64_t totalQuota, int64_t reservedQuota);

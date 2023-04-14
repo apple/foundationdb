@@ -439,10 +439,7 @@ public:
 		return result;
 	}
 
-	int64_t autoThrottleCount() const {
-		// FIXME: Return quotaCache size
-		return 0;
-	}
+	int64_t autoThrottleCount() const { return quotaCache->size(); }
 	uint32_t busyReadTagCount() const { return lastBusyTagCount; }
 	uint32_t busyWriteTagCount() const { return lastBusyTagCount; }
 	int64_t manualThrottleCount() const { return 0; }
