@@ -5046,86 +5046,6 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 	return Optional<std::pair<KeyRange, KeyRange>>();
 }
 
-ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageServer* data, Version readAtVersion) {
-	state RangeResult readResult;
-	state std::vector<KeyRange> res;
-	state KeyRef keyBegin;
-	state int retryCount = 0;
-	state int readRangeCount = 0;
-	state KeyRangeRef range;
-	state Transaction tr(data->cx);
-	state const UID serverID = data->thisServerID;
-	loop {
-		try {
-			tr.setVersion(readAtVersion);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			keyBegin = allKeys.begin;
-			while (true) {
-				range = KeyRangeRef(keyBegin, allKeys.end);
-				try {
-					wait(store(readResult, krmGetRanges(&tr, serverKeysPrefixFor(serverID), range, 1e5)));
-					TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRange", serverID)
-					    .detail("AtVersion", readAtVersion)
-					    .detail("Range", range)
-					    .detail("Prefix", serverKeysPrefixFor(serverID))
-					    .detail("ResultSize", readResult.size())
-					    .detail("ReadRangeCount", readRangeCount)
-					    .detail("RetryCount", retryCount)
-					    .detail("AduitServerID", serverID);
-				} catch (Error& e) {
-					TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadRangeError", serverID)
-					    .errorUnsuppressed(e)
-					    .detail("AtVersion", readAtVersion)
-					    .detail("AuditServer", serverID.first());
-					throw e;
-				}
-				readRangeCount++;
-				for (int i = 0; i < readResult.size() - 1; ++i) {
-					TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRangeAddToResult", serverID)
-					    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
-					    .detail("ServerHasKey", serverHasKey(readResult[i].value))
-					    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
-					    .detail("AtVersion", readAtVersion)
-					    .detail("AuditServer", serverID.first());
-					if (serverHasKey(readResult[i].value)) {
-						res.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
-					}
-				}
-				if (!readResult.more) {
-					break;
-				}
-				keyBegin = readResult.back().key;
-			}
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_transaction_too_old) {
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", serverID)
-				    .errorUnsuppressed(e)
-				    .detail("Reason", "Can never read at this version in further retrials")
-				    .detail("AtVersion", readAtVersion)
-				    .detail("AuditServer", serverID.first());
-				throw e;
-			} else if (retryCount > 10) {
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", serverID)
-				    .detail("Reason", "Read range retry exceeds maximum tryTimes")
-				    .detail("AtVersion", readAtVersion)
-				    .detail("AuditServer", serverID.first());
-				throw timed_out();
-			} else {
-				TraceEvent(SevDebug, "AuditStorageShardStorageServerShardRetriableError", serverID)
-				    .errorUnsuppressed(e)
-				    .detail("AtVersion", readAtVersion)
-				    .detail("AuditServer", serverID.first());
-				wait(tr.onError(e));
-				readRangeCount = 0;
-				retryCount++;
-				res.clear();
-			}
-		}
-	}
-	return res;
-}
-
 std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Version readAtVersion) {
 	std::vector<KeyRange> res;
 	const UID serverID = data->thisServerID;
@@ -5143,135 +5063,147 @@ std::vector<KeyRange> getServerShardsByReadingShardInfo(StorageServer* data, Ver
 	return res;
 }
 
-// Check shardInfo of SS is consistent with serverKeys space
+ACTOR Future<std::vector<KeyRange>> getServerShardsByReadingServerKeys(StorageServer* data, Transaction* tr) {
+	state RangeResult readResult;
+	state std::vector<KeyRange> res;
+	state KeyRef keyBegin;
+	state int retryCount = 0;
+	state int readRangeCount = 0;
+	state KeyRangeRef range;
+	state const UID serverID = data->thisServerID;
+	loop {
+		try {
+			res.clear();
+			keyBegin = allKeys.begin;
+			while (true) {
+				range = KeyRangeRef(keyBegin, allKeys.end);
+				wait(store(readResult, krmGetRanges(tr, serverKeysPrefixFor(serverID), range, 1e5)));
+				TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRange", serverID)
+				    .detail("Range", range)
+				    .detail("Prefix", serverKeysPrefixFor(serverID))
+				    .detail("ResultSize", readResult.size())
+				    .detail("ReadRangeCount", readRangeCount)
+				    .detail("RetryCount", retryCount)
+				    .detail("AduitServerID", serverID);
+				readRangeCount++;
+				for (int i = 0; i < readResult.size() - 1; ++i) {
+					TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardReadRangeAddToResult", serverID)
+					    .detail("ValueIsServerKeysFalse", readResult[i].value == serverKeysFalse)
+					    .detail("ServerHasKey", serverHasKey(readResult[i].value))
+					    .detail("Range", KeyRangeRef(readResult[i].key, readResult[i + 1].key))
+					    .detail("AuditServer", serverID.first());
+					if (serverHasKey(readResult[i].value)) {
+						res.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
+					}
+				}
+				if (!readResult.more) {
+					break;
+				}
+				keyBegin = readResult.back().key;
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardeError", serverID)
+			    .errorUnsuppressed(e)
+			    .detail("AuditServer", serverID.first());
+			wait(tr->onError(e));
+			readRangeCount = 0;
+			retryCount++;
+		}
+	}
+	return res;
+}
+
 ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
 	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", data->thisServerID);
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-
+	state Version grv;
+	state Version readAtVersion;
+	state Version versionBeforeWait;
+	state std::vector<std::pair<Version, KeyRangeRef>> shardAssignments;
+	state AuditStorageState res(req.id, data->thisServerID, req.getType());
+	state std::vector<std::string> errors;
+	state Transaction tr(data->cx);
+	// We want to find out any mismatch between ownRangesSeenByServerKey and ownRangesLocalView
+	state std::vector<KeyRange> ownRangesSeenByServerKey;
+	state std::vector<KeyRange> ownRangesLocalView;
 	try {
-		if (data->knownCommittedVersion.get() == 0 || data->version.get() == 0) {
+		if (data->version.get() == 0) {
 			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
-			    .detail("Reason", "Versions are not valid")
-			    .detail("LatestVersion", data->version.get())
-			    .detail("LatestCommitVersion", data->knownCommittedVersion.get());
+			    .detail("Reason", "Version is not valid")
+			    .detail("LatestVersion", data->version.get());
 			req.reply.sendError(audit_storage_failed()); // we cannot run this aduit for this time
 			return Void();
 		}
 
-		state AuditStorageState res(req.id, data->thisServerID, req.getType());
-		state std::vector<std::string> errors;
-
-		state Version VersionBeforeWait = data->version.get();
-		state Version KnownCommitVersionBeforeWait = data->knownCommittedVersion.get();
-		state Version VersionAfterWait;
-		state Version KnownCommitVersionAfterWait;
-		state Version toReadVersion;
-		state std::vector<std::pair<Version, KeyRangeRef>> shardAssignments;
-
-		// Read shard info from memory at VersionBeforeWait
-		state std::vector<KeyRange> ownRangesLocalView = getServerShardsByReadingShardInfo(data, VersionBeforeWait);
-
-		// Select Version to read serverKeys
-		if (VersionBeforeWait <= KnownCommitVersionBeforeWait) {
-			toReadVersion = VersionBeforeWait;
+		// Read local shard info and serverKeys
+		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		wait(store(grv, tr.getReadVersion()));
+		// When selecting which version to read, we should read at a new version
+		// As a result, any fall behind SS can eventually read the data
+		if (grv <= data->version.get()) {
+			readAtVersion = data->version.get();
+			ownRangesLocalView = getServerShardsByReadingShardInfo(data, readAtVersion);
+			tr.reset();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setVersion(readAtVersion); // this can be a future version
+			// getServerShardsByReadingServerKeys will intenally retry until get result
+			wait(store(ownRangesSeenByServerKey, getServerShardsByReadingServerKeys(data, &tr)));
 		} else {
-			// Wait until knownCommitVersion catches up with Version and
-			// to read serverKeys at the new knownCommitVersion
+			// read at grv version
+			readAtVersion = grv;
+			wait(store(ownRangesSeenByServerKey, getServerShardsByReadingServerKeys(data, &tr)));
+			versionBeforeWait = data->version.get();
+			// open trace
 			data->registerAuditsForShardAssignmentHistoryCollection(req.id);
-			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardBeforeWait", data->thisServerID)
-			    .detail("Version", VersionBeforeWait)
-			    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait);
-			try {
-				wait(timeoutError(data->knownCommittedVersion.whenAtLeast(VersionBeforeWait), 30));
-			} catch (Error& e) {
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
-				    .errorUnsuppressed(e)
-				    .detail("Reason", "Catch up version failed")
-				    .detail("Version", VersionBeforeWait)
-				    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
-				    .detail("AuditServer", data->thisServerID);
-				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
-				req.reply.sendError(audit_storage_failed()); // we cannot decide result for this time
-				return Void();
-			}
-
-			VersionAfterWait = data->version.get();
-			KnownCommitVersionAfterWait = data->knownCommittedVersion.get();
-			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardAfterWait", data->thisServerID)
-			    .detail("Version", VersionAfterWait)
-			    .detail("KnownCommitVersion", KnownCommitVersionAfterWait);
-			if (VersionAfterWait < KnownCommitVersionAfterWait) {
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
-				    .detail("Reason", "KnownCommittedVersion larger than version")
-				    .detail("Version", VersionAfterWait)
-				    .detail("KnownCommitVersion", KnownCommitVersionAfterWait)
-				    .detail("AuditServer", data->thisServerID);
-				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
-				// We cannot decide result for this time, because ServerKeys may not be updated yet
-				req.reply.sendError(audit_storage_failed());
-				return Void();
-			}
-
-			shardAssignments = data->getAssignmentHistory(VersionBeforeWait, KnownCommitVersionAfterWait);
+			wait(data->version.whenAtLeast(grv));
+			// close trace
+			data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
+			ownRangesLocalView = getServerShardsByReadingShardInfo(data, data->version.get());
+			// check any serverKey update between grv and data->version.get()
+			shardAssignments = data->getAssignmentHistory(grv, data->version.get());
 			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
-			    .detail("Version", VersionBeforeWait)
-			    .detail("VersionNew", VersionAfterWait)
-			    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
-			    .detail("KnownCommitVersionnNew", KnownCommitVersionAfterWait)
+			    .detail("ReadAtVersion", readAtVersion)
+			    .detail("VersionBeforeWait", versionBeforeWait)
+			    .detail("VersionAfterWait", data->version.get())
 			    .detail("ShardAssignmentsCount", shardAssignments.size())
 			    .detail("GHistory", data->printAssignedShardHistory());
-			// Ideally, we revert ownRangesLocalView changes from latestVersion to latestCommitVersion
+			// Ideally, we revert ownRangesLocalView changes from data->version.get() to grv
 			// Currently, we return failed if any update collected
 			if (shardAssignments.size() != 0) {
 				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 				    .detail("Reason", "History collection is not empty")
-				    .detail("Version", VersionBeforeWait)
-				    .detail("VersionNew", VersionAfterWait)
-				    .detail("KnownCommitVersion", KnownCommitVersionBeforeWait)
-				    .detail("KnownCommitVersionnNew", KnownCommitVersionAfterWait)
-				    .detail("ShardAssignmentsCountc", shardAssignments.size())
+				    .detail("ReadAtVersion", readAtVersion)
+				    .detail("VersionBeforeWait", versionBeforeWait)
+				    .detail("VersionAfterWait", data->version.get())
+				    .detail("ShardAssignmentsCount", shardAssignments.size())
 				    .detail("AuditServer", data->thisServerID);
-				data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
 				req.reply.sendError(audit_storage_failed()); // we cannot decide result for this time
 				return Void();
 			}
-			data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
-			toReadVersion = KnownCommitVersionAfterWait;
 		}
-
-		// Read shard info from serverKeys
-		state std::vector<KeyRange> ownRangesSeenByServerKey;
-		try {
-			wait(store(ownRangesSeenByServerKey, getServerShardsByReadingServerKeys(data, toReadVersion)));
-			TraceEvent(SevDebug, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
-			    .detail("LocalView", describe(ownRangesLocalView))
-			    .detail("SeenByServerKey", describe(ownRangesSeenByServerKey))
-			    .detail("ShardInfoAtVersion", VersionBeforeWait)
-			    .detail("ServerKeysAtVersion", toReadVersion);
-		} catch (Error& e) {
-			req.reply.sendError(audit_storage_failed());
-			return Void(); // give up for many retries or transaction too old
-		}
+		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
+		    .detail("ReadAtVersion", readAtVersion)
+		    .detail("LatestVersion", data->version.get());
 
 		// Compare
 		Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(ownRangesSeenByServerKey, ownRangesLocalView);
 		if (anyMismatch.present()) { // mismatch detected
-			std::pair<KeyRange, KeyRange> res = anyMismatch.get();
-			KeyRange mismatchedRangeByServerKey = res.first;
-			KeyRange mismatchedRangeByLocalView = res.second;
+			KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
+			KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
 			std::string error =
-			    format("Storage server shard info mismatch on Server(%016llx):\t ServerShardInfo: %s; ServerKey: %s",
-			           data->thisServerID,
+			    format("Storage server shard info mismatch on Server(%s):\t ServerShardInfo: %s; ServerKey: %s",
+			           data->thisServerID.toString().c_str(),
 			           mismatchedRangeByLocalView.toString().c_str(),
 			           mismatchedRangeByServerKey.toString().c_str());
-			errors.push_back(error);
 			TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 			    .detail("ErrorMessage", error)
 			    .detail("MismatchedRangeByLocalView", mismatchedRangeByLocalView)
 			    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
 			    .detail("AuditServer", data->thisServerID);
+			errors.push_back(error);
 			std::cout << error << "\n";
 		}
 
@@ -5282,7 +5214,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			req.reply.sendError(audit_storage_error());
 		} else {
 			TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardComplete", data->thisServerID)
-			    .detail("Version", toReadVersion)
+			    .detail("ReadAtVersion", readAtVersion)
 			    .detail("AuditServer", data->thisServerID);
 			res.setPhase(AuditPhase::Complete);
 			wait(persistAuditStateByServer(data->cx, res));
@@ -5386,15 +5318,15 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				if (!shardRange.isCovered(ranges)) {
 					std::string error =
 					    format("KeyServers Mismatch:\t RangeBegin(%s), RangeEnd(%s) is not fully covered "
-					           "by serverKeys[Server(%016llx)]",
+					           "by serverKeys[Server(%s)]",
 					           Traceable<StringRef>::toString(shardRange.begin).c_str(),
 					           Traceable<StringRef>::toString(shardRange.end).c_str(),
-					           ssid.first());
+					           ssid.toString().c_str());
 					errors.push_back(error);
 					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
 					    .detail("Version", version)
-					    .detail("AuditServer", data->thisServerID.first());
+					    .detail("AuditServer", data->thisServerID);
 				}
 			}
 			// generate keyServersMap for the following check
@@ -5411,10 +5343,10 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					std::string error = format("ServerKeys Mismatch:\t Server(%016llx) is not covered by "
 					                           "keyServers[RangeBegin(%s), RangeEnd(%s)] = "
 					                           "Servers(%s)",
+					                           server.toString().c_str(),
 					                           Traceable<StringRef>::toString(range.begin).c_str(),
 					                           Traceable<StringRef>::toString(range.end).c_str(),
-					                           describe(servers).c_str(),
-					                           server.first());
+					                           describe(servers).c_str());
 					errors.push_back(error);
 					TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 					    .detail("ErrorMessage", error)
