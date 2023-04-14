@@ -242,7 +242,8 @@ class DDTxnProcessorImpl {
 
 		state Transaction tr(cx);
 
-		wait(store(*result->userRangeConfig, DDConfiguration().userRangeConfigSnapshot(cx)));
+		wait(store(*result->userRangeConfig,
+		           DDConfiguration().userRangeConfig().getSnapshot(cx.getReference(), allKeys.begin, allKeys.end)));
 
 		state std::map<UID, Optional<Key>> server_dc;
 		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;

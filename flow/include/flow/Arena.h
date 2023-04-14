@@ -672,19 +672,19 @@ inline std::string StringRef::printable() const {
 }
 
 template <class T>
-struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
-};
+struct Traceable<Standalone<T>> : Traceable<T> {};
 
 #define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
 #define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
 
+template <class T>
+struct fmt::formatter<Standalone<T>> : fmt::formatter<T> {};
+
 template <>
-struct fmt::formatter<StringRef> : formatter<std::string_view> {
+struct fmt::formatter<StringRef> : formatter<std::string> {
 	template <typename FormatContext>
 	auto format(const StringRef& str, FormatContext& ctx) -> decltype(ctx.out()) {
-		std::string_view view(reinterpret_cast<const char*>(str.begin()), str.size());
-		return formatter<string_view>::format(view, ctx);
+		return formatter<std::string>::format(TraceableStringImpl<StringRef>::toString(str), ctx);
 	}
 };
 

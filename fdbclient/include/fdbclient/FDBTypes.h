@@ -407,7 +407,7 @@ struct KeyRangeRef {
 		}
 	};
 
-	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
+	std::string toString() const { return "{ begin=" + begin.printable() + "  end=" + end.printable() + " }"; }
 };
 
 template <>

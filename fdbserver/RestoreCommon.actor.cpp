@@ -26,7 +26,7 @@
 // Backup agent header
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/NativeAPI.actor.h"

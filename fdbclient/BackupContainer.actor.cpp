@@ -46,7 +46,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include <algorithm>
 #include <cinttypes>

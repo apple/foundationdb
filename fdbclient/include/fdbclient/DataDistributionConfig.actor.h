@@ -28,7 +28,8 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/KeyBackedRangeMap.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -40,7 +41,10 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	bool forceBoundary;
+	DDRangeConfig() {}
+	DDRangeConfig(int replication) : replicationFactor(replication) {}
+
+	bool forceBoundary = false;
 	Optional<int> replicationFactor;
 
 	DDRangeConfig update(DDRangeConfig const& update) const {
@@ -55,6 +59,12 @@ struct DDRangeConfig {
 		return result;
 	}
 
+	DDRangeConfig split() const {
+		DDRangeConfig result = *this;
+		result.forceBoundary = false;
+		return result;
+	}
+
 	bool canMerge(DDRangeConfig const& next) const {
 		// If either range has a forced boundary, they cannot merge
 		if (forceBoundary || next.forceBoundary) {
@@ -63,6 +73,8 @@ struct DDRangeConfig {
 
 		return replicationFactor == next.replicationFactor;
 	}
+
+	bool operator==(DDRangeConfig const& rhs) const = default;
 
 	// String description of the range config
 	std::string toString() const {
@@ -94,21 +106,6 @@ struct DDConfiguration : public KeyBackedClass {
 
 	// Range configuration options set by Users
 	RangeConfigMap userRangeConfig() const { return { subSpace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }
-
-	Future<RangeConfigMapSnapshot> userRangeConfigSnapshot(Reference<ReadYourWritesTransaction> tr) const {
-		return readRangeMap(tr, userRangeConfig());
-	}
-
-	Future<RangeConfigMapSnapshot> userRangeConfigSnapshot(Database cx) const {
-		return runTransaction(cx.getReference(),
-		                      [=](Reference<ReadYourWritesTransaction> tr) { return userRangeConfigSnapshot(tr); });
-	}
-
-private:
-	// Read all key ranges of a RangeConfigMap and return it as a RangeConfigMapSnapshot
-	// allKeys.begin/end will be set to default values in the result if they do not exist in the database
-	ACTOR static Future<RangeConfigMapSnapshot> readRangeMap(Reference<ReadYourWritesTransaction> tr,
-	                                                         RangeConfigMap map);
 };
 
 #include "flow/unactorcompiler.h"
