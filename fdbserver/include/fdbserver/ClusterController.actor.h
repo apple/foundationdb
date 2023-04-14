@@ -3168,25 +3168,34 @@ public:
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList,
-		                                      bool skipSatellite) -> bool {
+		auto transactionWorkerInList =
+		    [&dbi](const std::unordered_set<NetworkAddress>& serverList, bool skipSatellite, bool skipRemote) -> bool {
 			for (const auto& server : serverList) {
 				if (dbi.master.addresses().contains(server)) {
 					return true;
 				}
 
 				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (!logSet.isLocal) {
-						// We don't check server degradation for remote TLogs since it is not on the transaction system
-						// critical path.
-						continue;
-					}
 					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
 						continue;
 					}
-					for (const auto& tlog : logSet.tLogs) {
-						if (tlog.present() && tlog.interf().addresses().contains(server)) {
-							return true;
+
+					if (skipRemote && !logSet.isLocal) {
+						continue;
+					}
+
+					if (!logSet.isLocal) {
+						// Only check log routers in the remote region.
+						for (const auto& logRouter : logSet.logRouters) {
+							if (logRouter.present() && logRouter.interf().addresses().contains(server)) {
+								return true;
+							}
+						}
+					} else {
+						for (const auto& tlog : logSet.tLogs) {
+							if (tlog.present() && tlog.interf().addresses().contains(server)) {
+								return true;
+							}
 						}
 					}
 				}
@@ -3213,10 +3222,13 @@ public:
 			return false;
 		};
 
-		// Check if transaction system contains degraded/disconnected servers. For satellite, we only check for
-		// disconnection since the latency between prmary and satellite is across WAN and may not be very stable.
-		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers, /*skipSatellite=*/false);
+		// Check if transaction system contains degraded/disconnected servers. For satellite and remote regions, we only
+		// check for disconnection since the latency between prmary and satellite is across WAN and may not be very
+		// stable.
+		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true, /*skipRemote=*/true) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers,
+		                               /*skipSatellite=*/false,
+		                               /*skipRemote=*/!SERVER_KNOBS->CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
