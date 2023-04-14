@@ -160,7 +160,7 @@ class GlobalTagThrottlerImpl {
 		Optional<double> throttlingRatio;
 	};
 
-	IRKThroughputQuotaCache* quotaCache;
+	IRKThroughputQuotaCache const* quotaCache;
 	UID id;
 	int maxFallingBehind{ 0 };
 	uint64_t throttledTagChangeId{ 0 };
@@ -368,7 +368,7 @@ class GlobalTagThrottlerImpl {
 	}
 
 public:
-	GlobalTagThrottlerImpl(IRKThroughputQuotaCache& quotaCache, UID id, int maxFallingBehind)
+	GlobalTagThrottlerImpl(IRKThroughputQuotaCache const& quotaCache, UID id, int maxFallingBehind)
 	  : quotaCache(&quotaCache), id(id), maxFallingBehind(maxFallingBehind) {}
 	void addRequests(TransactionTag tag, int count) {
 		auto it = tagStatistics.find(tag);
@@ -484,7 +484,7 @@ public:
 	uint32_t tagsTracked() const { return tagStatistics.size(); }
 };
 
-GlobalTagThrottler::GlobalTagThrottler(IRKThroughputQuotaCache& quotaCache, UID id, int maxFallingBehind)
+GlobalTagThrottler::GlobalTagThrottler(IRKThroughputQuotaCache const& quotaCache, UID id, int maxFallingBehind)
   : impl(PImpl<GlobalTagThrottlerImpl>::create(quotaCache, id, maxFallingBehind)) {}
 
 GlobalTagThrottler::~GlobalTagThrottler() = default;
