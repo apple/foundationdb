@@ -26,7 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"

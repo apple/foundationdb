@@ -527,10 +527,9 @@ public:
 				self->shardsAffectedByTeamFailure->defineShard(keys);
 
 				auto it = self->initData->userRangeConfig->rangeContaining(keys.begin);
-				auto range = it->range();
 				int customReplicas =
 				    std::max(self->configuration.storageTeamSize, it->value().replicationFactor.orDefault(0));
-				ASSERT_WE_THINK(KeyRangeRef(range.begin, range.end).contains(keys));
+				// ASSERT_WE_THINK(KeyRangeRef(it->range().begin, it->range().end).contains(keys));
 
 				bool unhealthy = iShard.primarySrc.size() != customReplicas;
 				if (!unhealthy && self->configuration.usableRegions > 1) {

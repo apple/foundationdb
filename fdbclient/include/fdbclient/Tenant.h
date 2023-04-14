@@ -23,9 +23,8 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/VersionedMap.h"
-#include "fdbclient/KeyBackedTypes.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"

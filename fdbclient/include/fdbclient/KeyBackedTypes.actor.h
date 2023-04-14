@@ -1,5 +1,5 @@
 /*
- * KeyBackedTypes.h
+ * KeyBackedTypes.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,6 +20,14 @@
 
 #pragma once
 
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_KEYBACKEDTYPES_ACTOR_G_H)
+#define FDBCLIENT_KEYBACKEDTYPES_ACTOR_G_H
+#include "fdbclient/KeyBackedTypes.actor.g.h"
+#elif !defined(FDBCLIENT_KEYBACKEDTYPES_ACTOR_H)
+#define FDBCLIENT_KEYBACKEDTYPES_ACTOR_H
+
+#include "fdbclient/KeyBackedTypes.actor.h"
+
 #include <utility>
 #include <vector>
 #include <ranges>
@@ -27,6 +35,7 @@
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
 #include "flow/ObjectSerializer.h"
@@ -34,6 +43,15 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+#define KEYBACKEDTYPES_DEBUG 1
+#if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
+#define kbt_debug fmt::print
+#else
+#define kbt_debug(...)
+#endif
 
 // TupleCodec is a utility struct to convert a type to and from a value using Tuple encoding.
 // It is used by the template classes below like KeyBackedProperty and KeyBackedMap to convert
@@ -193,24 +211,21 @@ public:
 	WatchableTrigger(Key k) : key(k) {}
 
 	template <class Transaction>
-	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::False) {
-		std::array<uint8_t, 14> value;
-		value.fill(0);
-		tr->atomicOp(key, StringRef(value.begin(), value.size()), MutationRef::SetVersionstampedValue);
+	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::True) {
+		tr->set(key, BinaryCodec<UID>::pack(deterministicRandom()->randomUniqueID()));
 		if (conflict) {
 			tr->addReadConflictRange(singleKeyRange(key));
 		}
 	}
 
 	template <class Transaction>
-	Future<Versionstamp> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
+	Future<UID> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture,
-		                 map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Versionstamp {
-			                 Versionstamp v;
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> UID {
+			                 UID v;
 			                 if (val.present()) {
-				                 return v = BinaryReader::fromStringRef<Versionstamp>(val.get(), Unversioned());
+				                 return v = BinaryCodec<UID>::unpack(val.get());
 			                 }
 			                 return v;
 		                 }));
@@ -218,7 +233,8 @@ public:
 
 	template <class Transaction>
 	Future<Void> onChange(Transaction tr) const {
-		return safeThreadFutureToFuture(tr->watch(key));
+		typename transaction_future_type<Transaction, Void>::type f = tr->watch(key);
+		return holdWhile(f, safeThreadFutureToFuture(f));
 	}
 };
 
@@ -393,6 +409,62 @@ struct TypedRange {
 	KeyType end;
 };
 
+template <typename KeyType, typename KeyCodec>
+struct TypedKeySelector {
+	KeyType key;
+	bool orEqual;
+	int offset;
+
+	TypedKeySelector operator+(int delta) { return { key, orEqual, offset + delta }; }
+
+	TypedKeySelector operator-(int delta) { return { key, orEqual, offset - delta }; }
+
+	KeySelector pack(const KeyRef& prefix) const {
+		Key packed = KeyCodec::pack(key).withPrefix(prefix);
+		return KeySelector(KeySelectorRef(packed, orEqual, offset), packed.arena());
+	}
+
+	// Resolve a pair of key selectors for a range to a packed raw KeyRange clipped to the KeyRange bounds
+	ACTOR template <typename Transaction>
+	static Future<KeyRange> packBounded(Transaction tr, TypedKeySelector begin, TypedKeySelector end, KeyRange bounds) {
+		kbt_debug("KEYSELECT packBounded bounds: {}\n", bounds.toString());
+
+		kbt_debug("KEYSELECT resolve begin query {} - {}\n",
+		          ::firstGreaterOrEqual(bounds.begin).toString(),
+		          begin.pack(bounds.begin).toString());
+		state typename transaction_future_type<Transaction, RangeResult>::type beginFuture =
+		    tr->getRange(::firstGreaterOrEqual(bounds.begin),
+		                 begin.pack(bounds.begin),
+		                 GetRangeLimits(1),
+		                 Snapshot::False,
+		                 Reverse::True);
+
+		kbt_debug("KEYSELECT resolve end query {} - {}\n",
+		          end.pack(bounds.begin).toString(),
+		          ::firstGreaterOrEqual(bounds.end).toString());
+		state typename transaction_future_type<Transaction, RangeResult>::type endFuture =
+		    tr->getRange(end.pack(bounds.begin),
+		                 ::firstGreaterOrEqual(bounds.end),
+		                 GetRangeLimits(1),
+		                 Snapshot::False,
+		                 Reverse::False);
+
+		state RangeResult beginResult = wait(safeThreadFutureToFuture(beginFuture));
+		state RangeResult endResult = wait(safeThreadFutureToFuture(endFuture));
+
+		return KeyRangeRef(beginResult.empty() ? bounds.begin : beginResult.front().key,
+		                   endResult.empty() ? bounds.end : endResult.front().key);
+	}
+
+	static TypedKeySelector lastLessThan(const KeyType& k) { return { k, false, 0 }; }
+
+	static TypedKeySelector lastLessOrEqual(const KeyType& k) { return { k, true, 0 }; }
+
+	static TypedKeySelector firstGreaterThan(const KeyType& k) { return { k, true, +1 }; }
+
+	static TypedKeySelector firstGreaterOrEqual(const KeyType& k) { return { k, false, +1 }; }
+};
+
 // Convenient read/write access to a sorted map of KeyType to ValueType under prefix
 // Even though 'this' is not actually mutated, methods that change db keys are not const.
 template <typename _KeyType,
@@ -407,9 +479,10 @@ public:
 	typedef _KeyType KeyType;
 	typedef _ValueType ValueType;
 	typedef std::pair<KeyType, ValueType> PairType;
-	typedef TypedKVPair<KeyType, ValueType> KVType;
 	typedef KeyBackedRangeResult<PairType> RangeResultType;
+	typedef TypedKVPair<KeyType, ValueType> KVType;
 	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
+	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
 
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
@@ -419,26 +492,70 @@ public:
 	                                 int limit,
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
-		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
-
-		Key beginKey = begin.present() ? prefix.withSuffix(KeyCodec::pack(begin.get())) : subspace.begin;
-		Key endKey = end.present() ? prefix.withSuffix(KeyCodec::pack(end.get())) : subspace.end;
+		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
+		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(getRangeFuture,
-		                 map(safeThreadFutureToFuture(getRangeFuture),
-		                     [prefix, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
-			                     RangeResultType rangeResult;
-			                     for (int i = 0; i < kvs.size(); ++i) {
-				                     KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				                     ValueType val = valueCodec.unpack(kvs[i].value);
-				                     rangeResult.results.push_back(PairType(key, val));
-			                     }
-			                     rangeResult.more = kvs.more;
-			                     return rangeResult;
-		                     }));
+		return holdWhile(
+		    getRangeFuture,
+		    map(safeThreadFutureToFuture(getRangeFuture),
+		        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+			        RangeResultType rangeResult;
+			        for (int i = 0; i < kvs.size(); ++i) {
+				        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+				        ValueType val = valueCodec.unpack(kvs[i].value);
+				        rangeResult.results.push_back(PairType(key, val));
+			        }
+			        rangeResult.more = kvs.more;
+			        return rangeResult;
+		        }));
+	}
+
+	ACTOR template <class Transaction>
+	static Future<RangeResultType> getRangeActor(KeyBackedMap self,
+	                                             Transaction tr,
+	                                             KeySelector begin,
+	                                             KeySelector end,
+	                                             GetRangeLimits limits,
+	                                             Snapshot snapshot,
+	                                             Reverse reverse) {
+
+		state KeyRange range = wait(KeySelector::packBounded(tr, begin, end, self.subspace));
+		kbt_debug("MAP GETRANGE KeySelectors {} - {} resolve to {}\n",
+		          begin.pack(self.subspace.begin).toString(),
+		          end.pack(self.subspace.begin).toString(),
+		          range.toString());
+
+		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(range, limits, snapshot, reverse);
+
+		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		kbt_debug("MAP GETRANGE: {} results more={} for {}:\n", kvs.size(), kvs.more, range.toString());
+
+		RangeResultType rangeResult;
+		for (auto const& kv : kvs) {
+			kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
+
+			KeyType key = self.unpackKey(kv.key);
+			ValueType val = self.unpackValue(kv.value);
+
+			rangeResult.results.push_back(PairType(key, val));
+		}
+
+		rangeResult.more = kvs.more;
+		return rangeResult;
+	}
+
+	template <class Transaction>
+	Future<RangeResultType> getRange(Transaction tr,
+	                                 KeySelector begin,
+	                                 KeySelector end,
+	                                 GetRangeLimits limits,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
+		return getRangeActor(*this, tr, begin, end, limits, snapshot, reverse);
 	}
 
 	template <class Transaction>
@@ -473,6 +590,7 @@ public:
 	int set(Transaction tr, KeyType const& key, ValueType const& val) {
 		Key k = packKey(key);
 		Value v = packValue(val);
+		kbt_debug("MAP SET {} -> {}\n", k.printable(), v.printable());
 		tr->set(k, v);
 		if (trigger.present()) {
 			trigger.get().update(tr);
@@ -570,6 +688,7 @@ public:
 
 	typedef _ValueType ValueType;
 	typedef KeyBackedRangeResult<ValueType> RangeResultType;
+	typedef TypedKeySelector<ValueType, Codec> KeySelector;
 
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
@@ -578,23 +697,63 @@ public:
 	                                 int limit,
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
-		Key prefix = subspace.begin; // 'this' could be invalid inside lambda
-		Key beginKey = begin.present() ? prefix.withSuffix(Codec::pack(begin.get())) : subspace.begin;
-		Key endKey = end.present() ? prefix.withSuffix(Codec::pack(end.get())) : subspace.end;
+		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
+		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
 		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [prefix](RangeResult const& kvs) -> RangeResultType {
-			    RangeResultType rangeResult;
-			    for (int i = 0; i < kvs.size(); ++i) {
-				    rangeResult.results.push_back(Codec::unpack(kvs[i].key.removePrefix(prefix)));
-			    }
-			    rangeResult.more = kvs.more;
-			    return rangeResult;
-		    }));
+		return holdWhile(getRangeFuture,
+		                 map(safeThreadFutureToFuture(getRangeFuture),
+		                     [prefix = subspace.begin](RangeResult const& kvs) -> RangeResultType {
+			                     RangeResultType rangeResult;
+			                     for (auto const& kv : kvs) {
+				                     rangeResult.results.push_back(Codec::unpack(kv.key.removePrefix(prefix)));
+			                     }
+			                     rangeResult.more = kvs.more;
+			                     return rangeResult;
+		                     }));
+	}
+
+	ACTOR template <class Transaction>
+	static Future<RangeResultType> getRangeActor(KeyBackedSet self,
+	                                             Transaction tr,
+	                                             KeySelector begin,
+	                                             KeySelector end,
+	                                             GetRangeLimits limits,
+	                                             Snapshot snapshot,
+	                                             Reverse reverse) {
+
+		state KeyRange range = wait(KeySelector::packBounded(tr, begin, end, self.subspace));
+		kbt_debug("SET GETRANGE KeySelectors {} - {} resolve to {}\n",
+		          begin.pack(self.subspace.begin).toString(),
+		          end.pack(self.subspace.begin).toString(),
+		          range.toString());
+
+		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(range, limits, snapshot, reverse);
+
+		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		kbt_debug("SET GETRANGE: {} results more={} for {}:\n", kvs.size(), kvs.more, range.toString());
+
+		RangeResultType rangeResult;
+		for (auto const& kv : kvs) {
+			kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
+			rangeResult.results.push_back(self.unpackKey(kv.key));
+		}
+
+		rangeResult.more = kvs.more;
+		return rangeResult;
+	}
+
+	template <class Transaction>
+	Future<RangeResultType> getRange(Transaction tr,
+	                                 KeySelector begin,
+	                                 KeySelector end,
+	                                 GetRangeLimits limits,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
+		return getRangeActor(*this, tr, begin, end, limits, snapshot, reverse);
 	}
 
 	template <class Transaction>
@@ -648,191 +807,6 @@ public:
 	Key packKey(ValueType const& value) const { return subspace.begin.withSuffix(Codec::pack(value)); }
 };
 
-// A local in-memory representation of a KeyBackedRangeMap snapshot
-// It is invalid to look up a range in this map which not within the range of
-// [first key of map, last key of map)
-template <typename KeyType, typename ValueType>
-struct KeyRangeMapSnapshot {
-	typedef std::map<KeyType, ValueType> Map;
-
-	// Iterator for ranges in the map.  Ranges are represented by a key, its value, and the next key in the map.
-	struct RangeIter {
-		typename Map::const_iterator impl;
-
-		using iterator_category = std::bidirectional_iterator_tag;
-		using value_type = RangeIter;
-		using pointer = RangeIter*;
-		using reference = RangeIter&;
-
-		TypedRange<const KeyType&> range() const { return { impl->first, std::next(impl)->first }; }
-		const ValueType& value() const { return impl->second; }
-
-		const RangeIter& operator*() const { return *this; }
-		const RangeIter* operator->() const { return this; }
-
-		RangeIter operator++(int) { return { impl++ }; }
-		RangeIter operator--(int) { return { impl-- }; }
-		RangeIter & operator++() { ++impl; return *this; }
-		RangeIter & operator--() { --impl; return *this; }
-
-		bool operator==(const RangeIter &rhs) const { return impl == rhs.impl; }
-		bool operator!=(const RangeIter &rhs) const { return impl == rhs.impl; }
-	};
-
-	// Range-for compatible object representing a list of contiguous ranges.
-	struct Ranges {
-		RangeIter iBegin, iEnd;
-		RangeIter begin() const { return iBegin; }
-		RangeIter end() const { return iEnd; }
-	};
-
-	RangeIter rangeContaining(const KeyType& begin) const {
-		ASSERT(map.size() >= 2);
-		auto i = map.upper_bound(begin);
-		ASSERT(i != map.begin());
-		ASSERT(i != map.end());
-		return { --i };
-	}
-
-	// Get a set of Ranges which cover [begin, end)
-	Ranges intersectingRanges(const KeyType& begin, const KeyType& end) const {
-		return { rangeContaining(begin), { map.lower_bound(end) } };
-	}
-
-	Ranges ranges() const { return { { map.begin() }, { std::prev(map.end()) } }; }
-
-	Map map;
-};
-
-// KeyBackedKeyRangeMap is similar to KeyRangeMap but without a Metric
-// It is assumed that any range not covered by the map is set to a default ValueType()
-// The ValueType must have
-//     // Return a copy of *this updated with properties in value
-//     ValueType update(ValueType const& value) const;
-//
-//     // Return true if adjacent ranges with values *this and value could be merged to a single
-//     // range represented by *this and retain identical meaning
-//     bool canMerge(ValueType const& value) const;
-template <typename KeyType,
-          typename ValueType,
-          typename KeyCodec = TupleCodec<KeyType>,
-          typename ValueCodec = TupleCodec<ValueType>>
-class KeyBackedRangeMap {
-public:
-	typedef KeyBackedMap<KeyType, ValueType, KeyCodec, ValueCodec> Map;
-	typedef KeyBackedRangeResult<typename Map::KVType> RangeMapResult;
-	typedef KeyRangeMapSnapshot<KeyType, ValueType> LocalSnapshot;
-
-	KeyBackedRangeMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {})
-	  : kvMap(prefix, trigger, valueCodec) {}
-
-	// Get ranges for a given key range.
-	// The ranges returned will start at a key < end.
-	//
-	// If includeBeforeBegin is true, the ranges returned will fully cover the given range.  This means the first key of
-	// result could be < begin if begin does not exist as a boundary.
-	//
-	// If includeBeforeBegin is false, the ranges returned will be those which start at a key >= begin
-	template <class Transaction>
-	Future<RangeMapResult> getRanges(Transaction tr,
-	                                 KeyType const& begin,
-	                                 KeyType const& end,
-	                                 bool includeBeforeBegin = true) const {
-		KeySelector rangeBegin =
-		    includeBeforeBegin ? lastLessOrEqual(kvMap.packKey(begin)) : firstGreaterOrEqual(kvMap.packKey(begin));
-		KeySelector rangeEnd = lastLessOrEqual(kvMap.packKey(end));
-
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(rangeBegin, rangeEnd, std::numeric_limits<int>::max());
-
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
-			    RangeMapResult result;
-			    result.results.reserve(rawkvs.size());
-			    for (auto const& kv : rawkvs) {
-				    result.results.emplace_back(kvMap.unpackKV(kv));
-			    }
-			    result.more = rawkvs.more;
-			    return result;
-		    }));
-	}
-
-	// Get the Value for the range that key is in
-	template <class Transaction>
-	Future<ValueType> getRangeForKey(Transaction* tr, KeyType const& key) {
-		KeySelector rangeBegin = lastLessOrEqual(kvMap.packKey(key));
-		KeySelector rangeEnd = firstGreaterOrEqual(kvMap.packKey(key));
-
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(rangeBegin, rangeEnd, std::numeric_limits<int>::max());
-
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture), [=, kvMap = kvMap](RangeResult const& rawkvs) mutable {
-			    ASSERT(rawkvs.size() <= 1);
-			    if (rawkvs.empty()) {
-				    return ValueType();
-			    }
-			    return kvMap.unpackValue(rawkvs.back().value);
-		    }));
-	}
-
-	// Update the range from begin to end by applying valueUpdate to it
-	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
-	template <class Transaction>
-	Future<Void> updateRange(Transaction* tr, KeyType const& begin, KeyType const& end, ValueType const& valueUpdate) {
-		return map(getRanges(tr, begin, end), [=, kvMap = kvMap](RangeMapResult const& range) mutable {
-			// TODO:  Handle partial ranges.
-			ASSERT(!range.more);
-
-			// A deque here makes the following logic easier, though it's not very efficient.
-			std::deque<typename Map::KVType> kvs(range.results.begin(), range.results.end());
-
-			// First, handle modification at the begin boundary.
-			// If there are no records, or no records <= begin, then set begin to valueUpdate
-			if (kvs.empty() || kvs.front().key > begin) {
-				kvMap.set(tr, begin, valueUpdate);
-			} else {
-				// Otherwise, the first record represents the range that begin is currently in.
-				// This record may be begin or before it, either way the action is to set begin
-				// to the first record's value updated with valueUpdate
-				kvMap.set(tr, begin, kvs.front().value.update(valueUpdate));
-				// The first record has consumed
-				kvs.pop_front();
-			}
-
-			// Next, handle modification at the end boundary
-			// If there are no records, then set end to the default value to clear the effects of begin as of the
-			// end boundary.
-			if (kvs.empty()) {
-				kvMap.set(tr, end, ValueType());
-			} else if (kvs.back().key < end) {
-				// If the last key is less than end, then end is not yet a boundary in the range map so we must
-				// create it.  It will be set to the value of the range it resides in, which begins with the last
-				// item in kvs. Note that it is very important to do this *before* modifying all the middle
-				// boundaries of the range so that the changes we are making here terminate at end.
-				kvMap.set(tr, end, kvs.back().value);
-			} else {
-				// Otherwise end is in kvs, which effectively ends the range we are modifying so just pop it from
-				// kvs so that it is not modified in the loop below.
-				ASSERT(kvs.back().key == end);
-				kvs.pop_back();
-			}
-
-			// Last, update all of the range boundaries in the middle which are left in the kvs queue
-			for (auto const& kv : kvs) {
-				kvMap.set(tr, kv.key, kv.value.update(valueUpdate));
-			}
-
-			return Void();
-		});
-	}
-
-private:
-	Map kvMap;
-};
-
 // KeyBackedClass is a convenient base class for a set of related KeyBacked types that exist
 // under a single key prefix and other help functions relevant to the concepts that the class
 // represent.
@@ -850,3 +824,7 @@ protected:
 	Subspace subSpace;
 	WatchableTrigger trigger;
 };
+
+#include "flow/unactorcompiler.h"
+
+#endif

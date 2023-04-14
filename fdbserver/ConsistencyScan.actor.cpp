@@ -444,7 +444,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		sharedRandom.randomShuffle(shardOrder);
 	}
 
-	state DDConfiguration::RangeConfigMapSnapshot userRangeConfig = wait(DDConfiguration().userRangeConfigSnapshot(cx));
+	state DDConfiguration::RangeConfigMapSnapshot userRangeConfig =
+	    wait(DDConfiguration().userRangeConfig().getSnapshot(cx.getReference(), allKeys.begin, allKeys.end));
 
 	for (; i < ranges.size(); i++) {
 		state int shard = shardOrder[i];
@@ -486,6 +487,11 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				// The custom range should completely contain the shard range or a shard boundary that should exist
 				// does not exist.
 				if (!configuredRange.contains(range)) {
+					fmt::print("configured range: {}:{}  shard range: {}:{}\n",
+					           configuredRange.begin,
+					           configuredRange.end,
+					           range.begin,
+					           range.end);
 					testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
 					return Void();
 				}

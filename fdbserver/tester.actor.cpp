@@ -2047,28 +2047,50 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 
-		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
-		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
-			state DDRangeConfig triple;
-			triple.replicationFactor = 3;
-
+		if (deterministicRandom()->random01() < 0.25) {
 			state ReadYourWritesTransaction tr(cx);
 			loop {
 				try {
 					TraceEvent("SettingCustomReplicas").log();
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
 					// Map logic should work with or without allKeys endpoints initialized
 					if (deterministicRandom()->coinflip()) {
 						wait(rangeConfig.updateRange(&tr, allKeys.begin, allKeys.end, DDRangeConfig()));
 					}
 
-					wait(rangeConfig.updateRange(&tr, "\xff\x03"_sr, "\xff\x04"_sr, triple));
-					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, triple));
+					wait(rangeConfig.updateRange(&tr, "\xff\x03"_sr, "\xff\x04"_sr, DDRangeConfig(3)));
+					wait(rangeConfig.updateRange(&tr, "\xff\x06"_sr, "\xff\x07"_sr, DDRangeConfig(6)));
+					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, DDRangeConfig(4)));
+
+					state Optional<DDConfiguration::RangeConfigMap::RangeValue> verify;
+
+					// The ranges outside the above may or may not exist.
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\x01"_sr)));
+					ASSERT(!verify.present() || verify->value == DDRangeConfig());
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x10"_sr)));
+					ASSERT(!verify.present() || verify->value == DDRangeConfig());
+
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x03zzz"_sr)));
+					ASSERT(verify.present() && verify->value == DDRangeConfig(3));
+
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x04zzzz"_sr)));
+					ASSERT(verify.present() && verify->value == DDRangeConfig(4));
+
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x05"_sr)));
+					ASSERT(verify.present() && verify->value == DDRangeConfig());
+
+					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x06zzzz"_sr)));
+					ASSERT(verify.present() && verify->value == DDRangeConfig(6));
+
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
 			}
+
 			// TODO:  DD should check DDConfiguration().trigger.watch() for changes
 			wait(success(takeMoveKeysLock(cx, UID())));
 		}

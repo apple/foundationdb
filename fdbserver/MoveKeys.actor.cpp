@@ -23,7 +23,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"

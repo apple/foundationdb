@@ -481,7 +481,7 @@ struct DDShardInfo {
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution()
 	  : dataMoveMap(std::make_shared<DataMove>()),
-	    userRangeConfig(std::make_shared<DDConfiguration::RangeConfigMapSnapshot>()) {}
+	    userRangeConfig(std::make_shared<DDConfiguration::RangeConfigMapSnapshot>(allKeys.begin, allKeys.end)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts

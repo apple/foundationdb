@@ -30,7 +30,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include <ctime>
 #include <climits>
 #include "fdbclient/BackupContainer.h"

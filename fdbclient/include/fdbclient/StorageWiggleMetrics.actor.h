@@ -29,7 +29,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h"
 

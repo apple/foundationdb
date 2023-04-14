@@ -24,7 +24,7 @@
 #include <sstream>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
