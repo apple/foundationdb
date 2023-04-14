@@ -1455,21 +1455,14 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 }
 
 // Configuration details compiled in a structure used when setting up a simulated cluster
-struct SimulationConfig {
+struct SimulationConfig : public BasicSimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	ISimulator::ExtraDatabaseMode extraDatabaseMode;
 	int extraDatabaseCount;
 	bool generateFearless;
 
-	DatabaseConfiguration db;
-
 	void set_config(std::string config);
 
-	// Simulation layout
-	int datacenters;
-	int replication_type;
-	int machine_count; // Total, not per DC.
-	int processes_per_machine;
 	int coordinators;
 
 private:
@@ -2832,11 +2825,14 @@ ACTOR void setupAndRun(std::string dataFolder,
 }
 
 DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
+	return generateBasicSimulationConfig(testConfig).db;
+}
+
+BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
 	if (!rocksDBEnabled) {
 		config.storageEngineExcludeTypes.push_back(4);
 		config.storageEngineExcludeTypes.push_back(5);
 	}
-	SimulationConfig simConf(config);
-	return simConf.db;
+	return SimulationConfig(config);
 }
