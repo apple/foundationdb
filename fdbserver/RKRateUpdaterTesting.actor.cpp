@@ -427,7 +427,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace") {
 	return Void();
 }
 
-// The tlog queue plus currently used disk space add to leave than MIN_AVAILABLE_SPACE / 2
+// The tlog queue plus currently used disk space add to leave less than MIN_AVAILABLE_SPACE / 2
 // bytes on disk. In response, the rate updater throttles throughput to 0.
 TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace2") {
 	int64_t totalSpace = 1e9;
@@ -437,7 +437,10 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace2") {
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	// When simulation is sped up, ratekeeper limit is artificially increased
+	if (!g_network->isSimulated() || !g_simulator->speedUpSimulation) {
+		checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	}
 	return Void();
 }
 
