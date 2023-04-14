@@ -5525,19 +5525,20 @@ ACTOR Future<Void> checkUpdateEncryptionAtRestMode(Reference<BlobWorkerData> sel
 	DatabaseConfiguration config = wait(configF);
 	EncryptionAtRestMode encryptionAtRestMode = config.encryptionAtRestMode;
 	if (self->persistedEncryptMode.present()) {
-		// Ensure the BlobWorker encryptionAtRestMode status matches with the cluster config, if not, kill the TLog
-		// process. Approach prevents a fake TLog process joining the cluster.
+		// Ensure the BlobWorker encryptionAtRestMode status matches with the cluster config, if not, kill the
+		// BlobWorker process. Approach prevents a fake BlobWorker process joining the cluster.
 		if (self->persistedEncryptMode.get() != encryptionAtRestMode) {
 			TraceEvent(SevError, "BlobWorkerEncryptionAtRestMismatch", self->id)
 			    .detail("Expected", encryptionAtRestMode.toString())
 			    .detail("Present", self->persistedEncryptMode.get().toString());
 			ASSERT(false);
 		}
-		TraceEvent(SevDebug, "BlobWorkerPersistEncryptionAtRestModePresent", self->id)
+		TraceEvent("BlobWorkerPersistEncryptionAtRestModePresent", self->id)
 		    .detail("Mode", self->persistedEncryptMode.get().toString());
 	} else {
 		self->persistedEncryptMode = encryptionAtRestMode;
 		if (self->storage) {
+			CODE_PROBE(true, "BlobWorker: Persisting encryption at rest mode");
 			self->storage->set(KeyValueRef(persistEncryptionAtRestModeKey, self->persistedEncryptMode.get().toValue()));
 			wait(self->storage->commit());
 			TraceEvent("BlobWorkerPersistEncryptionAtRestMode", self->id)
@@ -5635,7 +5636,7 @@ ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 	ASSERT(recoveredID != self->id);
 
 	if (fEncryptionAtRestMode.get().present()) {
-		CODE_PROBE(true, "Retrieved persisted encryption at rest mode");
+		CODE_PROBE(true, "BlobWorker: Retrieved persisted encryption at rest mode");
 		self->persistedEncryptMode =
 		    Optional<EncryptionAtRestMode>(EncryptionAtRestMode::fromValue(fEncryptionAtRestMode.get()));
 		TraceEvent("BlobWorkerPersistEncryptionAtRestModeRead", self->id)
