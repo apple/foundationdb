@@ -209,12 +209,15 @@ public:
 	// added to the returned snapshot with a default ValueType.
 	ACTOR template <class Transaction>
 	static Future<LocalSnapshot> getSnapshotActor(KeyBackedRangeMap self, Transaction tr, KeyType begin, KeyType end) {
+		kbt_debug("RANGEMAP snapshot start\n");
+
 		// Start reading the range of of key boundaries which would cover begin through end using key selectors
 		state Future<RangeResultType> boundariesFuture = self.kvMap.getRange(
 		    tr, KeySelector::lastLessOrEqual(begin), KeySelector::firstGreaterThan(end), GetRangeLimits(1e4));
 
 		state LocalSnapshot result;
 		loop {
+			kbt_debug("RANGEMAP snapshot loop\n");
 			RangeResultType boundaries = wait(boundariesFuture);
 			for (auto const& bv : boundaries.results) {
 				result.map[bv.first] = bv.second;
@@ -238,6 +241,8 @@ public:
 		if (result.map.rbegin()->first < end) {
 			result.map[end] = ValueType();
 		}
+
+		kbt_debug("RANGEMAP snapshot end\n");
 		return result;
 	}
 

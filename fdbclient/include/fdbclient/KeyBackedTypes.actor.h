@@ -46,7 +46,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define KEYBACKEDTYPES_DEBUG 1
+#define KEYBACKEDTYPES_DEBUG 0
 #if KEYBACKEDTYPES_DEBUG || !defined(NO_INTELLISENSE)
 #define kbt_debug fmt::print
 #else
