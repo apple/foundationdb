@@ -58,6 +58,7 @@
 #include <memory>
 #include <tuple>
 #include <vector>
+#include <filesystem>
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
@@ -101,6 +102,54 @@ const StringRef ROCKSDB_READ_RANGE_BYTES_RETURNED_HISTOGRAM = LiteralStringRef("
 const StringRef ROCKSDB_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM = LiteralStringRef("RocksDBReadRangeKVPairsReturned");
 
 std::shared_ptr<rocksdb::Cache> rocksdb_block_cache = nullptr;
+
+
+class TableDeletionListener : public rocksdb::EventListener {
+ public:
+  void OnFlushCompleted(rocksdb::DB* /*db*/, const rocksdb::FlushJobInfo& fi) override {
+	platform::copyFile(fi.file_path);
+  }
+
+  void OnCompactionCompleted(rocksdb::DB* /*db*/, const rocksdb::CompactionJobInfo& ci) override {
+  //void OnTableFileDeleted(const rocksdb::TableFileDeletionInfo& info) override {
+	for(int i = 0; i < ci.output_files.size();i++) 
+	{
+		platform::copyFile(ci.output_files[i]);
+	}
+	//std::string filePath = path + "/" + ci.output_files[i];
+	/*TraceEvent("CopyError1")
+	    .detail("Reason", ci.output_files[i])
+		.detail("fdjh", std::filesystem::current_path().string())
+		.detail("jb", platform::getWorkingDirectory());*/
+	//std::string path = info.file_path;
+	//std::filesystem::copy("."+path, "."+path+".old");
+
+/*
+	//try 
+	//{
+		std::string path = info.file_path;
+		std::string p1 = path.substr(1);
+		TraceEvent("CopyError2").detail("Reason", p1);
+		std::filesystem::copy(p1, p1+".old");
+	//} catch(std::exception e) {
+		//TraceEvent("CopyError3").detail("Exception", e.what());
+	//}
+
+	try {
+		std::string path = info.file_path;
+		std::string p1 = path.substr(1);
+		std::filesystem::copy(p1, p1+".old");
+
+		if(path.find("/var/fdb/data/") == 0) {
+			std::string p = path.substr(14);
+			TraceEvent("CopyError2").detail("Reason", p);
+			std::filesystem::copy(p, p+".old");
+		}
+	} catch(std::exception e) {
+		TraceEvent("CopyError3").detail("Exception", e.what());
+	}*/
+  }
+};
 
 class SharedRocksDBState {
 public:
@@ -386,6 +435,9 @@ rocksdb::Options getOptions() {
 	}
 	if (SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE > 0) {
 		options.compaction_readahead_size = SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE;
+	}
+	if (SERVER_KNOBS->ROCKSB_WAL_TTL_SECONDS > 0) {
+		options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSB_WAL_TTL_SECONDS;
 	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
@@ -1133,14 +1185,16 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			const FlowLock* fetchLock;
 			std::shared_ptr<RocksDBErrorListener> errorListener;
 			Counters& counters;
+			std::shared_ptr<TableDeletionListener> deletionListener;
 			OpenAction(std::string path,
 			           Optional<Future<Void>>& metrics,
 			           const FlowLock* readLock,
 			           const FlowLock* fetchLock,
 			           std::shared_ptr<RocksDBErrorListener> errorListener,
-			           Counters& counters)
+			           Counters& counters,
+					   std::shared_ptr<TableDeletionListener> deletionListener)
 			  : path(std::move(path)), metrics(metrics), readLock(readLock), fetchLock(fetchLock),
-			    errorListener(errorListener), counters(counters) {}
+			    errorListener(errorListener), counters(counters), deletionListener(deletionListener) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 		};
@@ -1161,6 +1215,9 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			options.listeners.push_back(a.errorListener);
+			if (SERVER_KNOBS->ROCKSDB_BACKUP_SST) {
+				options.listeners.push_back(a.deletionListener);
+			}
 			if (SERVER_KNOBS->ROCKSDB_WRITE_RATE_LIMITER_BYTES_PER_SEC > 0) {
 				options.rate_limiter = rateLimiter;
 			}
@@ -1187,6 +1244,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					logRocksDBError(id, status, "Open");
 					a.done.sendError(statusToError(status));
 				}
+
+				platform::createDirectory("/var/fdb/data/backup");
 			}
 
 			/*if (db == nullptr) { 
@@ -1884,6 +1943,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Reference<IThreadPool> writeThread;
 	Reference<IThreadPool> readThreads;
 	std::shared_ptr<RocksDBErrorListener> errorListener;
+	std::shared_ptr<TableDeletionListener> deletionListener;
 	Future<Void> errorFuture;
 	Promise<Void> closePromise;
 	Future<Void> openFuture;
@@ -1905,7 +1965,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()) {
+	    errorListener(std::make_shared<RocksDBErrorListener>(id)), errorFuture(errorListener->getFuture()),
+		deletionListener(std::make_shared<TableDeletionListener>()) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage engine
 		// is still multi-threaded as background compaction threads are still present. Reads/writes to disk will also
 		// block the network thread in a way that would be unacceptable in production but is a necessary evil here. When
@@ -2067,7 +2128,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			return openFuture;
 		}
 		auto a = std::make_unique<Writer::OpenAction>(
-		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters);
+		    path, metrics, &readSemaphore, &fetchSemaphore, errorListener, counters, deletionListener);
 		openFuture = a->done.getFuture();
 		writeThread->post(a.release());
 		return openFuture;
@@ -2468,6 +2529,16 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CorruptionTest") {
 	   state const std::string rocksDBTestDir = "testingstorage.rocksdb";
        state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
        wait(kvStore->init());
+
+	   //wait(kvStore->readRange(keys1));
+
+
+	   //std::cout << platform::getWorkingDirectory() << "Listing\n";
+	   //platform::copyFile("/root/build_output/testingstorage.rocksdb/000004.log");
+	   //sleep(2);
+	  // std::cout << "After sleep\n";
+
+		//std::filesystem::copy("testingstorage.rocksdb/000004.log", "000004.log");
 		
 	   /*std::string key1 = decode_hex_string("\x15(\x19\x02\xa2\x81\x15\x07\x00\x15\x01\x00\x02\x00\x14");
 	   std::string key2 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02d2c9306b-f775-47ef-9861-ff0a6dc36a99\x00\x14\x00");
@@ -2484,6 +2555,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CorruptionTest") {
 	   state std::string hexFormat = hexStringRef(b3);
 	   std::cout<< "\nHEX FORMAT" << hexFormat << "\n";*/
 
+		/*
 	   std::string key3 = decode_hex_string("\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01");
 	   std::string key4 = decode_hex_string("\x16");
 	   std::cout << "inited " << key3 << " " << key4;
@@ -2492,6 +2564,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CorruptionTest") {
 	   for (const auto& kv : range) {
 	       std::cout << "\n Key:" << kv.key.printable().c_str() << " Value:" << kv.value.printable().c_str() << "\n" ;
 	   }
+		*/
 
 		//\x15(\x19\x02\xa2\x81U8\x15\x07\x00\x15\x01\x00\x02bf619e55-b142-47ee-9a69-0cac33395aa2\x00\x14
 

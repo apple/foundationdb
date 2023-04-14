@@ -416,6 +416,8 @@ std::string format_backtrace(void** addresses, int numAddresses);
 // Avoid in production code: not atomic, not fast, not reliable in all environments
 int eraseDirectoryRecursive(std::string const& directory);
 
+void copyFile(std::string const& source);
+
 bool isHwCrcSupported();
 
 } // namespace platform

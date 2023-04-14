@@ -114,6 +114,7 @@
 #include <signal.h>
 /* Needed for gnu_dev_{major,minor} */
 #include <sys/sysmacros.h>
+#include <sys/sendfile.h>
 #endif
 
 #ifdef __FreeBSD__
@@ -147,6 +148,7 @@
 #include <devstat.h>
 #include <kvm.h>
 #include <libutil.h>
+#include <sys/sendfile.h>
 #endif
 
 #ifdef __APPLE__
@@ -167,6 +169,7 @@
 #include <IOKit/storage/IOBlockStorageDriver.h>
 #include <IOKit/storage/IOMedia.h>
 #include <IOKit/IOBSD.h>
+#include <sys/sendfile.h>
 #endif
 
 #endif
@@ -3156,6 +3159,39 @@ void outOfMemory() {
 #endif
 
 	criticalError(FDB_EXIT_NO_MEM, "OutOfMemory", "Out of memory");
+}
+
+void copyFile(std::string const& source) {
+#ifdef _WIN32
+#error Port me!
+#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+	int fd_input, fd_output, rval;
+	off_t n_bytes = 0;
+	struct stat s_stat = {0};
+	
+	if ((fd_input = open(source.c_str(), O_RDONLY)) == -1)
+	{
+		TraceEvent("CopyError1").detail("Directory", source).detail("Error", strerror(errno));
+		return;
+	}
+	std::string p = source.substr(source.length() - 10);
+	std::string dest = "/var/fdb/data/backup/"+p;
+	//std::string dest = "/root/build_output/"+p;
+	if ((fd_output = creat(dest.c_str(), 0660)) == -1)
+	{
+		TraceEvent("CopyError2").detail("Directory", dest);
+		close(fd_input);
+		return;
+	}
+	
+	fstat(fd_input, &s_stat);
+	rval = sendfile(fd_output, fd_input, &n_bytes, s_stat.st_size);
+
+	close(fd_input);
+	close(fd_output);
+#else
+#error Port me!
+#endif
 }
 
 // Because the lambda used with nftw below cannot capture

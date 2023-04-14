@@ -183,11 +183,17 @@ static void traceKeyValuesDiff(TraceEvent& event,
 				event.detail("MismatchTSSKey", i < tssKV.size() ? tssKV[i].key.printable() : "missing");
 				event.detail("MismatchSSKeyHex", i < ssKV.size() ? hexStringRef(ssKV[i].key) : "missing");
 				event.detail("MismatchTSSKeyHex", i < tssKV.size() ? hexStringRef(tssKV[i].key) : "missing");
+				event.detail("MismatchSSValue", traceChecksumValue(ssKV[i].value));
+				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value));
+				event.detail("MismatchSSValueHex", hexStringRef(traceChecksumValue(ssKV[i].value)));
+				event.detail("MismatchTSSValueHex", hexStringRef(traceChecksumValue(tssKV[i].value)));
 			} else {
 				event.detail("MismatchKey", ssKV[i].key.printable());
 				event.detail("MismatchKeyHex", hexStringRef(ssKV[i].key));
 				event.detail("MismatchSSValue", traceChecksumValue(ssKV[i].value));
 				event.detail("MismatchTSSValue", traceChecksumValue(tssKV[i].value));
+				event.detail("MismatchSSValueHex", hexStringRef(traceChecksumValue(ssKV[i].value)));
+				event.detail("MismatchTSSValueHex", hexStringRef(traceChecksumValue(tssKV[i].value)));
 			}
 			mismatchFound = true;
 			break;
