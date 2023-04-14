@@ -59,8 +59,9 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransa
                                                                                       int limit,
                                                                                       TenantGroupName tenantGroup) {
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	state KeyBackedSet<Tuple>::RangeResultType result = wait(metadata::management::tenantMetadata().tenantGroupTenantIndex.getRange(
-	    tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
+	state KeyBackedSet<Tuple>::RangeResultType result =
+	    wait(metadata::management::tenantMetadata().tenantGroupTenantIndex.getRange(
+	        tr, Tuple::makeTuple(tenantGroup), Tuple::makeTuple(keyAfter(tenantGroup)), limit));
 	std::vector<std::pair<TenantName, int64_t>> returnResult;
 	if (!result.results.size()) {
 		return returnResult;
@@ -126,7 +127,7 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 	if (tenantGroup.empty()) {
 		wait(store(matchingTenants, listTenantsTransaction(tr, begin, end, limit)));
 	} else {
-	    wait(store(matchingTenants, listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup)));
+		wait(store(matchingTenants, listTenantGroupTenantsTransaction(tr, begin, end, limit, tenantGroup)));
 	}
 	std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> results =
 	    wait(listTenantMetadataTransaction(tr, matchingTenants));
