@@ -47,7 +47,7 @@ RKThroughputQuotaCache::~RKThroughputQuotaCache() = default;
 void RKThroughputQuotaCache::removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota) {
 	for (auto it = quotas.begin(); it != quotas.end();) {
 		if (!tagsWithQuota.count(it->first)) {
-			quotas.erase(it);
+			it = quotas.erase(it);
 		} else {
 			++it;
 		}
@@ -100,7 +100,7 @@ Optional<int64_t> MockRKThroughputQuotaCache::getReservedQuota(TransactionTag ta
 	}
 }
 
-int MockRKThroughputQuotaCache::size() {
+int MockRKThroughputQuotaCache::size() const {
 	return quotas.size();
 }
 
