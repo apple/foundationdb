@@ -94,7 +94,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
                             int& limit,
                             int& offset,
                             std::vector<metacluster::TenantState>& filters,
-                            std::string& tenantGroup,
+                            Optional<TenantGroupName>& tenantGroup,
                             bool& useJson) {
 	for (int tokenNum = startIndex; tokenNum < tokens.size(); ++tokenNum) {
 		Optional<Value> value;
@@ -134,7 +134,7 @@ bool parseTenantListOptions(std::vector<StringRef> const& tokens,
 				return false;
 			}
 		} else if (tokencmp(param, "tenant_group")) {
-			tenantGroup = value.get().toString();
+			tenantGroup = TenantGroupName(value.get().toString());
 		} else if (tokencmp(param, "JSON")) {
 			useJson = true;
 		} else {
@@ -392,7 +392,7 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 	state int limit = 100;
 	state int offset = 0;
 	state std::vector<metacluster::TenantState> filters;
-	state std::string tenantGroupString = "";
+	state Optional<TenantGroupName> tenantGroup;
 	state bool useJson = false;
 
 	if (tokens.size() >= 3) {
@@ -406,12 +406,10 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 		}
 	}
 	if (tokens.size() >= 5) {
-		if (!parseTenantListOptions(tokens, 4, limit, offset, filters, tenantGroupString, useJson)) {
+		if (!parseTenantListOptions(tokens, 4, limit, offset, filters, tenantGroup, useJson)) {
 			return false;
 		}
 	}
-	state Optional<TenantGroupName> tenantGroup =
-	    tenantGroupString.empty() ? Optional<TenantGroupName>() : Optional<TenantGroupName>(tenantGroupString);
 
 	state Key beginTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(beginTenant);
 	state Key endTenantKey = tenantMapSpecialKeyRange.begin.withSuffix(endTenant);
@@ -437,26 +435,17 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 				}
 			} else {
 				if (tenantGroup.present()) {
-					try {
-						// For expediency: does not use special key space
-						// TODO: add special key support
-						std::vector<std::pair<TenantName, int64_t>> tenants = wait(
-						    TenantAPI::listTenantGroupTenants(db, tenantGroup.get(), beginTenant, endTenant, limit));
-						if (useJson) {
-							tenantListOutputJson(tenants);
-							return true;
-						} else {
-							for (const auto& [tenantName, tenantId] : tenants) {
-								tenantNames.push_back(tenantName);
-							}
+					// For expediency: does not use special key space
+					// TODO: add special key support
+					std::vector<std::pair<TenantName, int64_t>> tenants =
+					    wait(TenantAPI::listTenantGroupTenants(db, tenantGroup.get(), beginTenant, endTenant, limit));
+					if (useJson) {
+						tenantListOutputJson(tenants);
+						return true;
+					} else {
+						for (const auto& [tenantName, tenantId] : tenants) {
+							tenantNames.push_back(tenantName);
 						}
-					} catch (Error& e) {
-						if (useJson) {
-							tenantListOutputJsonError(e);
-						} else {
-							fmt::print(stderr, "ERROR: {}\n", e.what());
-						}
-						return false;
 					}
 				} else {
 					// Hold the reference to the standalone's memory
@@ -488,6 +477,13 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 			if (e.code() == error_code_special_keys_api_failure) {
 				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
 				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
+				return false;
+			} else if (e.code() == error_code_tenants_disabled /* find more and add them */) {
+				if (useJson) {
+					tenantListOutputJsonError(e);
+				} else {
+					fmt::print(stderr, "ERROR: {}\n", e.what());
+				}
 				return false;
 			}
 			wait(safeThreadFutureToFuture(tr->onError(err)));
