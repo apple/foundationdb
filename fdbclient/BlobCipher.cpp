@@ -975,6 +975,50 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
 	setCipherAlgoHeaderV1(ciphertext, ciphertextLen, flags, headerRef);
 }
 
+void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
+                                                     const int ciphertextLen,
+                                                     BlobCipherEncryptHeader* header) {
+	// Populate encryption header flags details
+	header->flags.size = sizeof(BlobCipherEncryptHeader);
+	header->flags.headerVersion = EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION;
+	header->flags.encryptMode = ENCRYPT_CIPHER_MODE_AES_256_CTR;
+	header->flags.authTokenMode = authTokenMode;
+	header->flags.authTokenAlgo = authTokenAlgo;
+
+	// Ensure encryption header authToken details sanity
+	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
+
+	// Populate cipherText encryption-key details
+	header->cipherTextDetails = textCipherKey->details();
+	// Populate header encryption-key details
+	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		header->cipherHeaderDetails = headerCipherKeyOpt.get()->details();
+	} else {
+		header->cipherHeaderDetails = BlobCipherDetails();
+		ASSERT_EQ(INVALID_ENCRYPT_DOMAIN_ID, header->cipherHeaderDetails.encryptDomainId);
+		ASSERT_EQ(INVALID_ENCRYPT_CIPHER_KEY_ID, header->cipherHeaderDetails.baseCipherId);
+		ASSERT_EQ(INVALID_ENCRYPT_RANDOM_SALT, header->cipherHeaderDetails.salt);
+	}
+
+	memcpy(&header->iv[0], &iv[0], AES_256_IV_LENGTH);
+
+	if (authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		// No header 'authToken' generation needed.
+	} else {
+
+		// Populate header authToken details
+		ASSERT_EQ(header->flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+
+		computeAuthToken({ { ciphertext, ciphertextLen },
+		                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
+		                 headerCipherKeyOpt.get()->rawCipher(),
+		                 AES_256_KEY_LENGTH,
+		                 &header->singleAuthToken.authToken[0],
+		                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
+		                 AUTH_TOKEN_MAX_SIZE);
+	}
+}
+
 StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
                                               const int plaintextLen,
                                               BlobCipherEncryptHeaderRef* headerRef,
@@ -1028,6 +1072,52 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 	return encryptBuf.substr(0, plaintextLen);
 }
 
+void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
+                                                const int plaintextLen,
+                                                BlobCipherEncryptHeaderRef* headerRef) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
+
+	int bytes{ 0 };
+	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
+	if (bytes != plaintextLen) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
+		    .detail("PlaintextLen", plaintextLen)
+		    .detail("EncryptedBufLen", bytes);
+		throw encrypt_ops_error();
+	}
+
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	// Ensure encryption header authToken details sanity
+	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
+	updateEncryptHeader(plaintext, plaintextLen, headerRef);
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
+
+	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	           "encryptInplace: ConfigurableEncryption: Encryption with Auth token generation disabled");
+	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	           "encryptInplace: ConfigurableEncryption: Encryption with HMAC_SHA Auth token generation");
+	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+	           "encryptInplace: ConfigurableEncryption: Encryption with AES_CMAC Auth token generation");
+}
+
 Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
                                                           const int plaintextLen,
                                                           BlobCipherEncryptHeader* header,
@@ -1069,47 +1159,7 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 		throw encrypt_ops_error();
 	}
 
-	// Populate encryption header flags details
-	header->flags.size = sizeof(BlobCipherEncryptHeader);
-	header->flags.headerVersion = EncryptBlobCipherAes265Ctr::ENCRYPT_HEADER_VERSION;
-	header->flags.encryptMode = ENCRYPT_CIPHER_MODE_AES_256_CTR;
-	header->flags.authTokenMode = authTokenMode;
-	header->flags.authTokenAlgo = authTokenAlgo;
-
-	// Ensure encryption header authToken details sanity
-	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
-
-	// Populate cipherText encryption-key details
-	header->cipherTextDetails = textCipherKey->details();
-	// Populate header encryption-key details
-	if (authTokenMode != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		header->cipherHeaderDetails = headerCipherKeyOpt.get()->details();
-	} else {
-		header->cipherHeaderDetails = BlobCipherDetails();
-		ASSERT_EQ(INVALID_ENCRYPT_DOMAIN_ID, header->cipherHeaderDetails.encryptDomainId);
-		ASSERT_EQ(INVALID_ENCRYPT_CIPHER_KEY_ID, header->cipherHeaderDetails.baseCipherId);
-		ASSERT_EQ(INVALID_ENCRYPT_RANDOM_SALT, header->cipherHeaderDetails.salt);
-	}
-
-	memcpy(&header->iv[0], &iv[0], AES_256_IV_LENGTH);
-
-	if (authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
-		// No header 'authToken' generation needed.
-	} else {
-
-		// Populate header authToken details
-		ASSERT_EQ(header->flags.authTokenMode, EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-		ASSERT_GE(allocSize, (bytes + finalBytes));
-		ASSERT_GE(encryptBuf->getLogicalSize(), (bytes + finalBytes));
-
-		computeAuthToken({ { ciphertext, bytes + finalBytes },
-		                   { reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader) } },
-		                 headerCipherKeyOpt.get()->rawCipher(),
-		                 AES_256_KEY_LENGTH,
-		                 &header->singleAuthToken.authToken[0],
-		                 (EncryptAuthTokenAlgo)header->flags.authTokenAlgo,
-		                 AUTH_TOKEN_MAX_SIZE);
-	}
+	updateEncryptHeader(ciphertext, plaintextLen, header);
 
 	encryptBuf->setLogicalSize(plaintextLen);
 
@@ -1126,6 +1176,54 @@ Reference<EncryptBuf> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plainte
 	           "AES_CMAC Auth token generation");
 
 	return encryptBuf;
+}
+
+void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
+                                                const int plaintextLen,
+                                                BlobCipherEncryptHeader* header) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
+
+	memset(reinterpret_cast<uint8_t*>(header), 0, sizeof(BlobCipherEncryptHeader));
+
+	int bytes{ 0 };
+	if (EVP_EncryptUpdate(ctx, plaintext, &bytes, plaintext, plaintextLen) != 1) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUpdateFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	// Padding should be 0 for AES CTR mode, so encryptUpdate() should encrypt all the data
+	if (bytes != plaintextLen) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
+		    .detail("PlaintextLen", plaintextLen)
+		    .detail("EncryptedBufLen", bytes);
+		throw encrypt_ops_error();
+	}
+
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	updateEncryptHeader(plaintext, plaintextLen, header);
+
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
+
+	CODE_PROBE(true, "encryptInplace: BlobCipher data encryption");
+	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	           "encryptInplace: Encryption authentication disabled");
+	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	           "encryptInplace: HMAC_SHA Auth token generation");
+	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+	           "encryptInplace: AES_CMAC Auth token generation");
 }
 
 EncryptBlobCipherAes265Ctr::~EncryptBlobCipherAes265Ctr() {
@@ -1463,6 +1561,111 @@ Reference<EncryptBuf> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphert
 	           "Decryption AES_CMAC Auth token verification");
 
 	return decrypted;
+}
+
+void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
+                                                const int ciphertextLen,
+                                                const BlobCipherEncryptHeader& header) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
+
+	verifyEncryptHeaderMetadata(header);
+
+	if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE &&
+	    (!headerCipherKeyOpt.present() || !headerCipherKeyOpt.get().isValid())) {
+		TraceEvent(SevWarn, "BlobCipherDecryptInvalidHeaderCipherKey")
+		    .detail("AuthTokenMode", header.flags.authTokenMode);
+		throw encrypt_ops_error();
+	}
+
+	if (header.flags.authTokenMode != EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE) {
+		verifyAuthTokens(ciphertext, ciphertextLen, header);
+		ASSERT(authTokensValidationDone);
+	}
+
+	int bytesDecrypted{ 0 };
+	if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+		    .detail("BaseCipherId", header.cipherTextDetails.baseCipherId)
+		    .detail("EncryptDomainId", header.cipherTextDetails.encryptDomainId);
+		throw encrypt_ops_error();
+	}
+
+	// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
+	if (bytesDecrypted != ciphertextLen) {
+		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedPlaintextLen")
+		    .detail("CiphertextLen", ciphertextLen)
+		    .detail("DecryptedBufLen", bytesDecrypted);
+		throw encrypt_ops_error();
+	}
+
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
+
+	CODE_PROBE(true, "decryptInplace: BlobCipher data decryption");
+	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	           "decryptInplace: Decryption authentication disabled");
+	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	           "decryptInplace: Decryption HMAC_SHA Auth token verification");
+	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+	           "decryptInplace: Decryption AES_CMAC Auth token verification");
+}
+
+void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
+                                                const int ciphertextLen,
+                                                const BlobCipherEncryptHeaderRef& headerRef) {
+	double startTime = 0.0;
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		startTime = timer_monotonic();
+	}
+
+	EncryptAuthTokenMode authTokenMode;
+	EncryptAuthTokenAlgo authTokenAlgo;
+	validateEncryptHeader(ciphertext, ciphertextLen, headerRef, &authTokenMode, &authTokenAlgo);
+
+	int bytesDecrypted{ 0 };
+	if (!EVP_DecryptUpdate(ctx, ciphertext, &bytesDecrypted, ciphertext, ciphertextLen)) {
+		TraceEvent(SevWarn, "BlobCipherDecryptUpdateFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	// Padding should be 0 for AES CTR mode, so DecryptUpdate() should decrypt all the data
+	if (bytesDecrypted != ciphertextLen) {
+		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedPlaintextLen")
+		    .detail("CiphertextLen", ciphertextLen)
+		    .detail("DecryptedBufLen", bytesDecrypted);
+		throw encrypt_ops_error();
+	}
+
+	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
+		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
+		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
+		    .detail("EncryptDomainId", textCipherKey->getDomainId());
+		throw encrypt_ops_error();
+	}
+
+	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+	}
+
+	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	           "decryptInplace: ConfigurableEncryption: Decryption with Auth token generation disabled");
+	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
+	           "decryptInplace: ConfigurableEncryption: Decryption with HMAC_SHA Auth token generation");
+	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
+	           "decryptInplace: ConfigurableEncryption: Decryption with AES_CMAC Auth token generation");
 }
 
 DecryptBlobCipherAes256Ctr::~DecryptBlobCipherAes256Ctr() {
@@ -2515,6 +2718,103 @@ void testKeyCacheCleanup(const int minDomainId, const int maxDomainId) {
 	TraceEvent("BlobCipherTestKeyCacheCleanupDone");
 }
 
+void testEncryptInplaceNoAuthMode(const int minDomainId) {
+	TraceEvent("EncryptInplaceStart");
+
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("encrypt_inplace_enabled", KnobValueRef::create(bool{ true }));
+
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// Validate Encryption ops
+	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
+	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
+	// allocate the data align with AES_BLOCK_SIZE, encryption starts from orgData[1] so it's not aligned.
+	alignas(AES_BLOCK_SIZE) uint8_t orgData[bufLen + 1];
+	uint8_t* plaintext = &orgData[1];
+	deterministicRandom()->randomBytes(plaintext, bufLen);
+	uint8_t dataClone[bufLen];
+	memcpy(dataClone, plaintext, bufLen);
+
+	Arena arena;
+	uint8_t iv[AES_256_IV_LENGTH];
+	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
+
+	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+	                                     headerCipherKey,
+	                                     iv,
+	                                     AES_256_IV_LENGTH,
+	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
+	                                     BlobCipherMetrics::TEST);
+
+	BlobCipherEncryptHeaderRef headerRef;
+	encryptor.encryptInplace(plaintext, bufLen, &headerRef);
+
+	// validate header version details
+	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
+	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(noAuth.v1.cipherTextDetails.encryptDomainId,
+	                                                                      noAuth.v1.cipherTextDetails.baseCipherId,
+	                                                                      noAuth.v1.cipherTextDetails.salt);
+	ASSERT(tCipherKeyKey->isEqual(cipherKey));
+	DecryptBlobCipherAes256Ctr decryptor(
+	    tCipherKeyKey, Reference<BlobCipherKey>(), &noAuth.v1.iv[0], BlobCipherMetrics::TEST);
+
+	decryptor.decryptInplace(plaintext, bufLen, headerRef);
+	ASSERT_EQ(memcmp(dataClone, plaintext, bufLen), 0);
+
+	TraceEvent("EncryptInplaceDone");
+}
+
+template <class Params>
+void testEncryptInplaceSingleAuthMode(const int minDomainId) {
+	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmacParams>;
+	const std::string authAlgoStr = isHmac ? "HMAC-SHA" : "AES-CMAC";
+	const EncryptAuthTokenAlgo authAlgo = isHmac ? EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA
+	                                             : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
+
+	TraceEvent("BlobCipherTestEncryptInplaceSingleAuthStart").detail("Mode", authAlgoStr);
+
+	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
+
+	// Validate Encryption ops
+	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
+	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
+	const int bufLen = deterministicRandom()->randomInt(786, 2127) + 512;
+	Arena arena;
+	uint8_t iv[AES_256_IV_LENGTH];
+	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
+	uint8_t orgData[bufLen + 100];
+	memset(orgData + bufLen, 0, 100);
+	deterministicRandom()->randomBytes(&orgData[0], bufLen);
+	uint8_t dataClone[bufLen];
+	memcpy(dataClone, orgData, bufLen);
+
+	EncryptBlobCipherAes265Ctr encryptor(cipherKey,
+	                                     headerCipherKey,
+	                                     iv,
+	                                     AES_256_IV_LENGTH,
+	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE,
+	                                     authAlgo,
+	                                     BlobCipherMetrics::TEST);
+	BlobCipherEncryptHeader header;
+	encryptor.encryptInplace(&orgData[0], bufLen, &header);
+	uint8_t empty_buff[100];
+	memset(empty_buff, 0, 100);
+
+	Reference<BlobCipherKey> tCipherKeyKey = cipherKeyCache->getCipherKey(
+	    header.cipherTextDetails.encryptDomainId, header.cipherTextDetails.baseCipherId, header.cipherTextDetails.salt);
+	Reference<BlobCipherKey> hCipherKey = cipherKeyCache->getCipherKey(header.cipherHeaderDetails.encryptDomainId,
+	                                                                   header.cipherHeaderDetails.baseCipherId,
+	                                                                   header.cipherHeaderDetails.salt);
+
+	DecryptBlobCipherAes256Ctr decryptor(tCipherKeyKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
+	decryptor.decryptInplace(&orgData[0], bufLen, header);
+	ASSERT_EQ(memcmp(dataClone, &orgData[0], bufLen), 0);
+
+	TraceEvent("BlobCipherTestEncryptInplaceSingleAuthEnd").detail("Mode", authAlgoStr);
+}
+
 TEST_CASE("/blobCipher") {
 	DomainKeyMap domainKeyMap;
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
@@ -2554,6 +2854,11 @@ TEST_CASE("/blobCipher") {
 	testConfigurableEncryptionNoAuthMode(minDomainId);
 	testConfigurableEncryptionSingleAuthMode<AesCtrWithHmacParams>(minDomainId);
 	testConfigurableEncryptionSingleAuthMode<AesCtrWithCmacParams>(minDomainId);
+
+	testEncryptInplaceNoAuthMode(minDomainId);
+	testEncryptInplaceSingleAuthMode<AesCtrWithHmacParams>(minDomainId);
+	testEncryptInplaceSingleAuthMode<AesCtrWithCmacParams>(minDomainId);
+
 	testKeyCacheCleanup(minDomainId, maxDomainId);
 
 	return Void();
