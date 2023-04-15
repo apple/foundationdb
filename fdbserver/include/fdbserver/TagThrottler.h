@@ -79,7 +79,7 @@ class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
+	GlobalTagThrottler(IRKMetricsTracker const&, IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
 	~GlobalTagThrottler();
 
 	Future<Void> monitorThrottlingChanges() override;
