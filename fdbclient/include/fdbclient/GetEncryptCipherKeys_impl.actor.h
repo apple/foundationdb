@@ -135,6 +135,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> _get
 					                                                                     details.baseCipherId,
 					                                                                     details.baseCipherKey.begin(),
 					                                                                     details.baseCipherKey.size(),
+					                                                                     details.baseCipherKCV,
 					                                                                     details.refreshAt,
 					                                                                     details.expireAt);
 					ASSERT(cipherKey.isValid());
@@ -270,6 +271,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> _getEncr
 				                                                                     details.baseCipherId,
 				                                                                     itr->second.baseCipherKey.begin(),
 				                                                                     itr->second.baseCipherKey.size(),
+				                                                                     itr->second.baseCipherKCV,
 				                                                                     details.salt,
 				                                                                     itr->second.refreshAt,
 				                                                                     itr->second.expireAt);
