@@ -163,7 +163,13 @@ struct RelocateShard {
 
 	bool isRestore() const { return this->dataMove != nullptr; }
 
+	void setParentRange(KeyRange const& parent);
+	Optional<KeyRange> getParentRange() const;
+
 private:
+	// If this rs comes from a splitting, parent range is the original range.
+	Optional<KeyRange> parent_range;
+
 	RelocateShard()
 	  : priority(0), cancelled(false), dataMoveId(anonymousShardId), reason(RelocateReason::OTHER),
 	    moveReason(DataMovementReason::INVALID) {}
