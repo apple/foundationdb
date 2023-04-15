@@ -37,6 +37,9 @@ public:
 
 // DDQueue use RelocateData to track proposed movements
 class RelocateData {
+	// If this rs comes from a splitting, parent range is the original range.
+	Optional<KeyRange> parent_range;
+
 public:
 	KeyRange keys;
 	int priority;
@@ -73,6 +76,7 @@ public:
 	}
 
 	bool isRestore() const;
+	Optional<KeyRange> getParentRange() const;
 
 	bool operator>(const RelocateData& rhs) const;
 	bool operator==(const RelocateData& rhs) const;

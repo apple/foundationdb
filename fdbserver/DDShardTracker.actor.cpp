@@ -457,14 +457,18 @@ void executeShardSplit(DataDistributionTracker* self,
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 	for (int i = numShards - 1; i > skipRange; i--) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 
@@ -1109,7 +1113,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
+		RelocateReason reason = sizeSplit ? RelocateReason::SIZE_SPLIT : RelocateReason::WRITE_SPLIT;
 		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
