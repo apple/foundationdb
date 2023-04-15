@@ -31,10 +31,8 @@ RUN apt-get update
 RUN apt-get install -y --no-install-recommends ca-certificates dnsutils
 
 ARG FDB_WEBSITE=https://www.foundationdb.org
-RUN wget "${FDB_WEBSITE}/downloads/${FDB_VERSION}/ubuntu/installers/foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
+RUN wget "https://github.com/apple/foundationdb/releases/download/${FDB_VERSION}/foundationdb-clients_${FDB_VERSION}-1_amd64.deb"
 RUN dpkg -i foundationdb-clients_${FDB_VERSION}-1_amd64.deb
-
-COPY --from=fdb /var/fdb/scripts/create_cluster_file.bash /
 
 WORKDIR /go/src/app
 COPY . .
