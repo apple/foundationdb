@@ -850,6 +850,9 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	// Minimum read throughput (in pages/second) that a tag must register
+	// on a storage server in order for tag throughput statistics to be
+	// emitted to ratekeeper.
 	int64_t MIN_TAG_READ_PAGES_RATE;
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
