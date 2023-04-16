@@ -541,14 +541,26 @@ public:
 		ssInfo.zoneId = ss.locality.zoneId();
 
 		auto& tagToThroughputCounters = throughput[ss.id];
+		std::unordered_set<TransactionTag> busyReadTags, busyWriteTags;
 		for (const auto& busyReadTag : ss.busiestReadTags) {
+			busyReadTags.insert(busyReadTag.tag);
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
 				tagToThroughputCounters[busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
 			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
+			busyWriteTags.insert(busyWriteTag.tag);
 			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
 				tagToThroughputCounters[busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			}
+		}
+
+		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
+			if (!busyReadTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::READ);
+			}
+			if (!busyWriteTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::WRITE);
 			}
 		}
 		return Void();
