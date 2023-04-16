@@ -540,14 +540,15 @@ public:
 		                                                  SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
 		ssInfo.zoneId = ss.locality.zoneId();
 
+		auto& tagToThroughputCounters = throughput[ss.id];
 		for (const auto& busyReadTag : ss.busiestReadTags) {
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+				tagToThroughputCounters[busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
 			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
 			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+				tagToThroughputCounters[busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
 			}
 		}
 		return Void();
