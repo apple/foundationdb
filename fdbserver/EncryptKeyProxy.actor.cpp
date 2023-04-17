@@ -308,7 +308,9 @@ public:
 		    .detail("DomId", domainId)
 		    .detail("BaseCipherId", baseCipherId)
 		    .detail("BaseCipherLen", baseCipherKey.size())
-		    .detail("BaseCipherKCV", baseCipherKCV);
+		    .detail("BaseCipherKCV", baseCipherKCV)
+		    .detail("RefreshAt", refreshAtTS)
+		    .detail("ExpireAt", expireAtTS);
 	}
 
 	void insertIntoBlobMetadataCache(const BlobMetadataDomainId domainId,
