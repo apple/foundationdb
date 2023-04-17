@@ -169,7 +169,7 @@ Future<std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>>> listTenant
 				}
 
 				for (auto const& [name, entry] : tenantBatch) {
-					if (filters.empty() || std::count(filters.begin(), filters.end(), entry.tenantState)) {
+					if (std::count(filters.begin(), filters.end(), entry.tenantState)) {
 						++count;
 						if (count > offset) {
 							results.emplace_back(name, entry);

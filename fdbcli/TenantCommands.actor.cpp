@@ -330,28 +330,12 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 
-void tenantListOutputJson(std::vector<std::pair<TenantName, int64_t>> tenants) {
+void tenantListOutputJson(std::map<TenantName, int64_t> tenants) {
 	json_spirit::mArray tenantsArr;
 	for (auto const& [tenantName, tenantId] : tenants) {
 		json_spirit::mObject tenantObj;
 		tenantObj["name"] = binaryToJson(tenantName);
 		tenantObj["id"] = tenantId;
-		tenantsArr.push_back(tenantObj);
-	}
-
-	json_spirit::mObject resultObj;
-	resultObj["tenants"] = tenantsArr;
-	resultObj["type"] = "success";
-
-	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
-}
-
-void tenantListOutputJson(std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants) {
-	json_spirit::mArray tenantsArr;
-	for (auto const& [tenantName, entry] : tenants) {
-		json_spirit::mObject tenantObj;
-		tenantObj["name"] = binaryToJson(tenantName);
-		tenantObj["id"] = entry.id;
 		tenantsArr.push_back(tenantObj);
 	}
 
@@ -411,19 +395,14 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			state std::vector<TenantName> tenantNames;
+			state std::map<TenantName, int64_t> tenantInfo;
 			// State filters only apply to calls from the management cluster
 			// Tenant group filters can apply to management, data, and standalone clusters
 			if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 				std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> tenants = wait(
 				    metacluster::listTenantMetadata(db, beginTenant, endTenant, limit, offset, filters, tenantGroup));
-				if (useJson) {
-					tenantListOutputJson(tenants);
-					return true;
-				} else {
-					for (const auto& [tenantName, _] : tenants) {
-						tenantNames.push_back(tenantName);
-					}
+				for (const auto& [tenantName, entry] : tenants) {
+					tenantInfo[tenantName] = entry.id;
 				}
 			} else {
 				if (tenantGroup.present()) {
@@ -431,13 +410,8 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					// TODO: add special key support
 					std::vector<std::pair<TenantName, int64_t>> tenants =
 					    wait(TenantAPI::listTenantGroupTenants(db, tenantGroup.get(), beginTenant, endTenant, limit));
-					if (useJson) {
-						tenantListOutputJson(tenants);
-						return true;
-					} else {
-						for (const auto& [tenantName, tenantId] : tenants) {
-							tenantNames.push_back(tenantName);
-						}
+					for (const auto& [tenantName, tenantId] : tenants) {
+						tenantInfo[tenantName] = tenantId;
 					}
 				} else {
 					// Hold the reference to the standalone's memory
@@ -445,22 +419,33 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
 					RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
 					for (auto tenant : tenants) {
-						tenantNames.push_back(tenant.key.removePrefix(tenantMapSpecialKeyRange.begin));
+						TenantName tName = tenant.key.removePrefix(tenantMapSpecialKeyRange.begin);
+						json_spirit::mValue jsonObject;
+						json_spirit::read_string(tenant.value.toString(), jsonObject);
+						JSONDoc jsonDoc(jsonObject);
+
+						int64_t tId;
+						jsonDoc.get("id", tId);
+						tenantInfo[tName] = tId;
 					}
 				}
 			}
 
-			if (tenantNames.empty()) {
-				if (tokens.size() == 2) {
-					fmt::print("The cluster has no tenants\n");
-				} else {
-					fmt::print("The cluster has no tenants in the specified range\n");
+			if (useJson) {
+				tenantListOutputJson(tenantInfo);
+			} else {
+				if (tenantInfo.empty()) {
+					if (tokens.size() == 2) {
+						fmt::print("The cluster has no tenants\n");
+					} else {
+						fmt::print("The cluster has no tenants in the specified range\n");
+					}
 				}
-			}
 
-			int index = 0;
-			for (auto tenantName : tenantNames) {
-				fmt::print("  {}. {}\n", ++index, printable(tenantName).c_str());
+				int index = 0;
+				for (const auto& [tenantName, tenantId] : tenantInfo) {
+					fmt::print("  {}. {}\n", ++index, printable(tenantName).c_str());
+				}
 			}
 
 			return true;
@@ -973,8 +958,9 @@ void tenantGenerator(const char* text,
                      std::vector<std::string>& lc,
                      std::vector<StringRef> const& tokens) {
 	if (tokens.size() == 1) {
-		const char* opts[] = { "create",    "delete", "deleteId", "list",   "get",
-			                   "configure", "rename", "lock",     "unlock", nullptr };
+		const char* opts[] = {
+			"create", "delete", "deleteId", "get", "configure", "rename", "lock", "unlock", nullptr
+		};
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "create")) {
 		const char* opts[] = { "tenant_group=", nullptr };
@@ -984,6 +970,9 @@ void tenantGenerator(const char* text,
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "getId")) {
 		const char* opts[] = { "JSON", nullptr };
+		arrayGenerator(text, line, opts, lc);
+	} else if (tokens.size() == 4 && tokencmp(tokens[1], "list")) {
+		const char* opts[] = { "limit=", "offset=", "state=", "tenant_group=", "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokencmp(tokens[1], "configure")) {
 		if (tokens.size() == 3) {
@@ -1025,7 +1014,7 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 			                                     "[offset=OFFSET]",
 			                                     "[state=<STATE1>,<STATE2>,...]",
 			                                     "[tenant_group=TENANT_GROUP]",
-			                                     "JSON" };
+			                                     "[JSON]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "get") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "[JSON]" };
