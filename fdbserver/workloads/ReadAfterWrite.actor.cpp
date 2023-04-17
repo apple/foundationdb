@@ -119,4 +119,4 @@ struct ReadAfterWriteWorkload : KVWorkload {
 	}
 };
 
-WorkloadFactory<ReadAfterWriteWorkload> decryptionReadAfterWriteWorkloadFactory;
+WorkloadFactory<ReadAfterWriteWorkload> ReadAfterWriteWorkloadFactory;

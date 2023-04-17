@@ -642,6 +642,8 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 extern const StringRef blobRangeActive;
 extern const StringRef blobRangeInactive;
 
+bool isBlobRangeActive(const ValueRef& blobRangeValue);
+
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 

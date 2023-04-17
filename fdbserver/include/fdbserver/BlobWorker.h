@@ -186,6 +186,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	// FIXME: have cap on this independent of delta file size for larger granules
 	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 4;
 
+	Optional<EncryptionAtRestMode> persistedEncryptMode;
 	EncryptionAtRestMode encryptMode;
 	bool buggifyFull = false;
 

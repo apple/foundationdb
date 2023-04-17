@@ -21,6 +21,7 @@
 #include "benchmark/benchmark.h"
 
 #include "fdbclient/BlobCipher.h"
+#include "flow/EncryptUtils.h"
 #include "flow/StreamCipher.h"
 #include "flowbench/GlobalData.h"
 
@@ -79,6 +80,8 @@ static void bench_decrypt(benchmark::State& state) {
 BENCHMARK(bench_encrypt)->Ranges({ { 1 << 12, 1 << 20 }, { 1, 1 << 12 } });
 BENCHMARK(bench_decrypt)->Ranges({ { 1 << 12, 1 << 20 }, { 1, 1 << 12 } });
 
+// DEPRECATED -- Use EncryptionOps for benchmarking purposes.
+
 // blob_chipher* benchmarks are following the encrypt and decrypt unittests from BlobCipher.cpp
 // Construct a dummy External Key Manager representation and populate with some keys
 class BaseCipher : public ReferenceCounted<BaseCipher>, NonCopyable {
@@ -86,6 +89,7 @@ public:
 	EncryptCipherDomainId domainId;
 	int len;
 	EncryptCipherBaseKeyId keyId;
+	EncryptCipherKeyCheckValue kcv;
 	std::unique_ptr<uint8_t[]> key;
 	int64_t refreshAt;
 	int64_t expireAt;
@@ -95,9 +99,10 @@ public:
 	           const EncryptCipherBaseKeyId& kId,
 	           const int64_t rAt,
 	           const int64_t eAt)
-	  : domainId(dId), len(deterministicRandom()->randomInt(AES_256_KEY_LENGTH / 2, AES_256_KEY_LENGTH + 1)),
-	    keyId(kId), key(std::make_unique<uint8_t[]>(len)), refreshAt(rAt), expireAt(eAt) {
+	  : domainId(dId), len(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1)), keyId(kId),
+	    key(std::make_unique<uint8_t[]>(len)), refreshAt(rAt), expireAt(eAt) {
 		deterministicRandom()->randomBytes(key.get(), len);
+		kcv = Sha256KCV().computeKCV(key.get(), len);
 	}
 };
 
@@ -131,6 +136,7 @@ void static SetupEncryptCipher() {
 			                                baseCipher->keyId,
 			                                baseCipher->key.get(),
 			                                baseCipher->len,
+			                                baseCipher->kcv,
 			                                baseCipher->refreshAt,
 			                                baseCipher->expireAt);
 			Reference<BlobCipherKey> fetchedKey = cipherKeyCache->getLatestCipherKey(baseCipher->domainId);
