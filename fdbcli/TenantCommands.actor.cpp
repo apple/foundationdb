@@ -970,7 +970,7 @@ void tenantGenerator(const char* text,
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "getId")) {
 		const char* opts[] = { "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
-	} else if (tokens.size() == 4 && tokencmp(tokens[1], "list")) {
+	} else if (tokens.size() >= 4 && tokencmp(tokens[1], "list")) {
 		const char* opts[] = { "limit=", "offset=", "state=", "tenant_group=", "JSON", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokencmp(tokens[1], "configure")) {
