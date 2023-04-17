@@ -8303,7 +8303,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 			}
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
 			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
-			    e.code() == error_code_timed_out) {
+			    e.code() == error_code_request_maybe_delivered || e.code() == error_code_timed_out) {
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
 			} else {
 				throw e;
@@ -8553,6 +8553,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	if (clearRecord) {
 		const Key persistKey = persistMoveInShardKey(moveInShard->id());
 		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, persistKey, keyAfter(persistKey)));
+		// data->moveInShards.erase(moveInShard->id());
 	}
 	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
 
@@ -8601,8 +8602,6 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	validate(data);
 
 	TraceEvent(SevInfo, "FetchShardEnd", data->thisServerID).detail("MoveInShard", moveInShard->toString());
-
-	data->moveInShards.erase(moveInShard->id());
 
 	return Void();
 }
