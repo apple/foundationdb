@@ -21,7 +21,8 @@
 #include "fdbserver/workloads/MockDDTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
+class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
+public:
 	static constexpr auto NAME = "MockDDTrackerShardEvaluator";
 	DDSharedContext ddcx;
 
@@ -180,6 +181,7 @@ struct MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 
 	Future<bool> check(Database const& cx) override {
 		std::cout << "Check phase shards count: " << shards.size() << "\n";
+		ASSERT_GT(shards.size(), 1);
 		actors.clear(true);
 		return true;
 	}
