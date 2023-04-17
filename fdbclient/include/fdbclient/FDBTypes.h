@@ -1806,6 +1806,8 @@ private:
 // used to initialize default parameters' values for different storage engines
 struct StorageEngineParamsFactory {
 
+	static constexpr auto REMOTE_KV_STORE_PARAM_KEY = "remote_kv_store";
+
 	static std::map<KeyValueStoreType::StoreType,
 	                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>&
 	factories() {

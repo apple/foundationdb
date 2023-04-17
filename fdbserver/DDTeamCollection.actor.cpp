@@ -18,10 +18,11 @@
  * limitations under the License.
  */
 
+#include <climits>
+
 #include "fdbserver/DDTeamCollection.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <climits>
 
 FDB_DEFINE_BOOLEAN_PARAM(IsPrimary);
 FDB_DEFINE_BOOLEAN_PARAM(IsInitialTeam);
@@ -2219,13 +2220,19 @@ public:
 	                                               StorageEngineParamSet newParams,
 	                                               Future<Void> wigglerInitialized) {
 		// always set the params from database configuration when DD starts
-		// there is no effect if it's consistent with storage servers
+		// the API has no change if the storage servers already have the expected config
 		TraceEvent("DDTCStorageEngineParamsUpdaterStart")
 		    .detail("StoreType", self->configuration.storageServerStoreType.toString())
 		    .detail("NewParams", describe(newParams.getParams()));
 		// send update requests to all storages interfaces
 		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
 		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
+		// Read the metadata, which tells params being wiggled, for all storge servers
+		// If a param being wiggled is changed back to old value, we will update the metadata to not wiggle it
+		// Note: there's no race even the storage finishes the wiggle after it replies to the request and before we stop
+		// the wiggle In particular, the wiggle finished means the process rejoins as a storage server with the given
+		// configuration from txnStateStore
+		state Future<std::map<UID, std::set<std::string>>> paramsUnderWiggleF = getStorageParamsUnderWiggle(self);
 		for (const auto& [serverId, ss] : self->server_info) {
 			StorageServerInterface si = ss->getLastKnownInterface();
 			Future<ErrorOr<SetStorageEngineParamsReply>> f =
@@ -2233,7 +2240,7 @@ public:
 			fs.push_back(f);
 			fmap[serverId] = f;
 		}
-		wait(waitForAll(fs) && wigglerInitialized);
+		wait(waitForAll(fs) && wigglerInitialized && success(paramsUnderWiggleF));
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			if (!f.isReady() || f.get().isError()) {
@@ -2263,23 +2270,21 @@ public:
 				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			for (const auto& k : reply.result.unknown) {
-				TraceEvent(SevInfo, "UnknownStorageEngineParam")
+				TraceEvent(SevWarnAlways, "UnknownStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
 				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 			}
 			std::vector<std::string> noNeedReplacement;
-
+			auto paramsUnderWiggle = paramsUnderWiggleF.getValue()[serverId];
 			for (const auto& k : reply.result.unchanged) {
-				TraceEvent(SevInfo, "StorageEngineParamUpdaterUnchanged")
-				    .detail("ServerId", serverId)
-				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
-				if (StorageEngineParamsFactory::getChangeType(self->configuration.storageServerStoreType, k) ==
-				    StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT) {
-					// change back to old value, no need to wiggle now
-					// need to update the wiggle data
+				if (paramsUnderWiggle.contains(k)) {
+					// rollback to old value, no need to wiggle now, update the wiggle data
 					noNeedReplacement.push_back(k);
+					TraceEvent(SevInfo, "StorageEngineParamRollbackReplacement")
+					    .detail("ServerId", serverId)
+					    .detail("Param", k)
+					    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
 				}
 			}
 
@@ -2291,7 +2296,7 @@ public:
 					    self->server_info[serverId],
 					    self->updateStorageMetadata(
 					        self->server_info[serverId].getPtr(),
-					        false,
+					        false, // not used for now
 					        false, // it will use the number of needReplacement params to determine whether to wiggle
 					        reply.result.needReplacement,
 					        noNeedReplacement)));
@@ -3001,6 +3006,39 @@ public:
 			self->wigglingId = res.begin()->first;
 		}
 		return Void();
+	}
+
+	ACTOR static Future<std::map<UID, std::set<std::string>>> getStorageParamsUnderWiggle(DDTeamCollection* self) {
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+		// read each storage server's metadata
+		state std::vector<Future<Optional<StorageMetadataType>>> fs;
+		state std::map<UID, std::set<std::string>> result;
+		state std::map<UID, Reference<TCServerInfo>>::iterator iter;
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			result.clear();
+			try {
+				for (iter = self->server_info.begin(); iter != self->server_info.end(); ++iter) {
+					auto property = metadataMap.getProperty(iter->first);
+					fs.push_back((property.get(tr)));
+					Optional<StorageMetadataType> metadataOptinal = wait(property.get(tr));
+				}
+				wait(waitForAll(fs));
+				// std::map is ordered, so futures are matched with the server
+				iter = self->server_info.begin();
+				for (int i = 0; i < fs.size(); i++, iter++) {
+					auto metadataOptional = fs[i].get();
+					if (metadataOptional.present() && metadataOptional.get().paramsNeedTobeReplaced.size()) {
+						result[iter->first] = metadataOptional.get().paramsNeedTobeReplaced;
+					}
+				}
+				return result;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 
 	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self,

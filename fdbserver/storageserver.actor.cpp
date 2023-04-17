@@ -443,7 +443,6 @@ struct StorageServerDisk {
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
 	Future<StorageEngineParamSet> getStorageEngineParams() const;
-	Future<StorageEngineParamResult> checkStorageEngineParamsCompatibility(const StorageEngineParamSet& params) const;
 	Future<StorageEngineParamResult> setStorageEngineParams(const StorageEngineParamSet& params);
 
 	Future<EncryptionAtRestMode> encryptionMode() { return storage->encryptionMode(); }
@@ -10528,43 +10527,24 @@ Future<StorageEngineParamSet> StorageServerDisk::getStorageEngineParams() const 
 	    storage->getParameters());
 }
 
-Future<StorageEngineParamResult> StorageServerDisk::checkStorageEngineParamsCompatibility(
-    const StorageEngineParamSet& params) const {
-	return fmap(
-	    [this, &params](StorageEngineParamResult result) {
-		    const std::string remoteKVStoreParam("remote_kv_store");
-		    if (params.getParams().contains(remoteKVStoreParam)) {
-			    ASSERT(data->storageEngineParams->getParams().contains(remoteKVStoreParam));
-			    // TODO: check no result about remote_kv_store
-			    auto expected = params.getParams().at(remoteKVStoreParam);
-			    auto current = data->storageEngineParams->getParams().at(remoteKVStoreParam);
-			    TraceEvent("StorageServerDiskCheckStorageEngineParamsCompatibility")
-			        .detail("Expect", expected)
-			        .detail("Curr", current);
-			    if (expected != current) {
-				    result.needReboot.push_back(remoteKVStoreParam);
-			    }
-		    }
-		    return result;
-	    },
-	    storage->checkCompatibility(params));
-}
-
 Future<StorageEngineParamResult> StorageServerDisk::setStorageEngineParams(const StorageEngineParamSet& params) {
 	return fmap(
 	    [this, &params](StorageEngineParamResult result) {
-		    const std::string remoteKVStoreParam("remote_kv_store");
-		    if (params.getParams().contains(remoteKVStoreParam)) {
-			    ASSERT(data->storageEngineParams->getParams().contains(remoteKVStoreParam));
+		    if (params.getParams().contains(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY)) {
 			    // TODO: check no result about remote_kv_store
-			    auto expected = params.getParams().at(remoteKVStoreParam);
-			    auto current = data->storageEngineParams->getParams().at(remoteKVStoreParam);
+			    auto expected = params.get(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY, false);
+			    auto current =
+			        data->storageEngineParams->get(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY, false);
 			    TraceEvent("StorageServerDiskSetStorageEngineParamsCompatibility")
 			        .detail("Expect", expected)
 			        .detail("Curr", current);
 			    if (expected != current) {
-				    result.needReboot.push_back(remoteKVStoreParam);
-				    data->storageEngineParams->set(remoteKVStoreParam, expected);
+				    result.needReboot.push_back(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY);
+				    // TODO: handle the parse/write of bool in one place
+				    data->storageEngineParams->set(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY,
+				                                   expected ? "true" : "false");
+			    } else {
+				    result.unchanged.push_back(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY);
 			    }
 		    }
 		    return result;

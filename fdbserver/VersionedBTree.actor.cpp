@@ -8368,6 +8368,8 @@ public:
 			} else if (k == "default_page_size") {
 				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
 				                                          : result.needReplacement.push_back(k);
+			} else if (k == StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY) {
+				continue;
 			} else {
 				result.unknown.push_back(k);
 			}

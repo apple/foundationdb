@@ -223,8 +223,11 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 			    .detail("Message", "Encryption is not suppored on remote kv store yet");
 			throw encrypt_unsupported();
 		}
+		// erase the parameter to avoid cyclic calls of openRemoteKVStore
+		StorageEngineParamSet _params = params.present() ? params.get() : StorageEngineParamSet();
+		_params.getMutableParams().erase("remote_kv_store");
 		return openRemoteKVStore(
-		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, params);
+		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, _params);
 	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
