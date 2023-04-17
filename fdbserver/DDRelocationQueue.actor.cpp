@@ -1015,8 +1015,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
-		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1054,6 +1052,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			    .detail("Launch", rrs.dataMoveId)
 			    .detail("Total", activeRelocations);
 			startRelocation(rrs.priority, rrs.healthPriority);
+			// Any cleanup of a new relocator should only clean on the range moved by the new relocator
+			Future<Void> fCleanup =
+			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rrs.keys, ddEnabledState) : Void();
 			// Start the actor that relocates data in the rrs.keys
 			inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
 		}
@@ -1173,7 +1174,9 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 			}
 
 			wait(waitForAll(cleanup));
-
+			// At this point, the update of self->dataMoves by relocator happens atomatically
+			// with the following check
+			// As a result, if the cleanup passes the following check, self->dataMoves updates atomatically
 			for (auto observedDataMove : lastObservedDataMoves) {
 				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 				for (auto it = f.begin(); it != f.end(); ++it) {
