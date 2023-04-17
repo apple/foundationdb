@@ -3202,7 +3202,104 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 
 	return Void();
 }
+TEST_CASE("noSim/ShardedRocksDB/RangeClearSysKey") {
+	state const std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state KeyRef shardPrefix = "\xffprefix/"_sr;
+	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	state int i = 0;
+	for (; i < 20000; ++i) {
+		state std::string key1 = format("\xffprefix/%d", i);
+		state std::string key2 = format("\xffprefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+	}
+
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
+
+	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	std::cout << "Restarted.\n";
+	i = 0;
+	for (; i < 20000; ++i) {
+		key1 = format("\xffprefix/%d", i);
+		key2 = format("\xffprefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+		if (i % 100 == 0) {
+			std::cout << "Commit: " << i << "\n";
+		}
+	}
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	return Void();
+}
+TEST_CASE("noSim/ShardedRocksDB/RangeClearUserKey") {
+	state const std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore =
+	    new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state KeyRef shardPrefix = "prefix/"_sr;
+	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	state int i = 0;
+	for (; i < 20000; ++i) {
+		state std::string key1 = format("prefix/%d", i);
+		state std::string key2 = format("prefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+	}
+
+	{
+		Future<Void> closed = kvStore->onClosed();
+		kvStore->close();
+		wait(closed);
+	}
+
+	kvStore = new ShardedRocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	std::cout << "Restarted.\n";
+	i = 0;
+	for (; i < 20000; ++i) {
+		key1 = format("prefix/%d", i);
+		key2 = format("prefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+		if (i % 100 == 0) {
+			std::cout << "Commit: " << i << "\n";
+		}
+	}
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
