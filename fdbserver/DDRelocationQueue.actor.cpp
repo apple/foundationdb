@@ -1167,27 +1167,24 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
-void traceRelocateDecision(TraceEvent& ev,
-                           const RelocateData& rd,
-                           const UID& pairId,
-                           const std::vector<UID>& destIds,
-                           const std::vector<UID>& extraIds,
-                           const StorageMetrics& metrics) {
+void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDecision& decision) {
 	ev.detail("PairId", pairId)
-	    .detail("Priority", rd.priority)
-	    .detail("KeyBegin", rd.keys.begin)
-	    .detail("KeyEnd", rd.keys.end)
-	    .detail("Reason", rd.reason.toString())
-	    .detail("SourceServers", describe(rd.src))
-	    .detail("DestinationTeam", describe(destIds))
-	    .detail("ExtraIds", describe(extraIds));
+	    .detail("Priority", decision.rd.priority)
+	    .detail("KeyBegin", decision.rd.keys.begin)
+	    .detail("KeyEnd", decision.rd.keys.end)
+	    .detail("Reason", decision.rd.reason.toString())
+	    .detail("SourceServers", describe(decision.rd.src))
+	    .detail("DestinationTeam", describe(decision.destIds))
+	    .detail("ExtraIds", describe(decision.extraIds));
 	if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
 		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
-		ev.detail("StorageMetrics", metrics.toString());
+		ev.detail("StorageMetrics", decision.metrics.toString());
 	}
 	// tell if the splitter acted as expected for write bandwidth splitting
-	if (rd.reason == RelocateReason::WRITE_SPLIT) {
-		ev.detail("ShardWriteBytes", metrics.bytesWrittenPerKSecond);
+	if (decision.rd.reason == RelocateReason::WRITE_SPLIT) {
+		// SOMEDAY: trace the source team write bytes if necessary
+		ev.detail("ShardWriteBytes", decision.metrics.bytesWrittenPerKSecond)
+		    .detail("ParentShardWriteBytes", decision.parentMetrics.get().bytesWrittenPerKSecond);
 	}
 }
 // This actor relocates the specified keys to a good place.
@@ -1638,7 +1635,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			launchDest(rd, bestTeams, self->destBusymap);
 
 			TraceEvent ev(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId);
-			traceRelocateDecision(ev, rd, relocateShardInterval.pairID, destIds, extraIds, metrics);
+			RelocateDecision decision{ rd, destIds, extraIds, metrics, parentMetrics };
+			traceRelocateDecision(ev, relocateShardInterval.pairID, decision);
 
 			self->serverCounter.increaseForTeam(rd.src, rd.reason, DDQueue::ServerCounter::LaunchedSource);
 			self->serverCounter.increaseForTeam(destIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
