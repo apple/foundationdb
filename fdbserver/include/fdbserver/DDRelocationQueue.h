@@ -85,6 +85,14 @@ public:
 	bool operator!=(const RelocateData& rhs) const;
 };
 
+struct RelocateDecision {
+	const RelocateData& rd;
+	const std::vector<UID>& destIds;
+	const std::vector<UID>& extraIds;
+	const StorageMetrics& metrics;
+	const Optional<StorageMetrics>& parentMetrics;
+};
+
 // DDQueue uses Busyness to throttle too many movement to/from a same server
 struct Busyness {
 	std::vector<int> ledger;
