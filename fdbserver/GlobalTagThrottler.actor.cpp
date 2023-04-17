@@ -213,8 +213,6 @@ class GlobalTagThrottlerImpl {
 		for (const auto& [id, _] : throughput) {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
-		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
-		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
 
 		return result;
 	}
