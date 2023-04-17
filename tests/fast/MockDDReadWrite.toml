@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'MockDDReadWrite'
+useDB = false
+
+[[test.workload]]
+testName = 'MockDDTrackerShardEvaluator'
+keySpaceCount = 1000
+testDuration = 50.0
