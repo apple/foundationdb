@@ -171,8 +171,17 @@ struct EncryptBaseCipherKey {
 	  : domainId(dId), baseCipherId(cipherId), baseCipherKey(cipherKey), baseCipherKCV(cipherKCV), refreshAt(refAtTS),
 	    expireAt(expAtTS) {}
 
-	bool needsRefresh() const { return now() > refreshAt; }
-	bool isExpired() const { return now() > expireAt; }
+	bool needsRefresh() const {
+		bool shouldRefresh = now() > refreshAt;
+		CODE_PROBE(shouldRefresh, "EKP: Key needs refresh");
+		return shouldRefresh;
+	}
+
+	bool isExpired() const {
+		bool expired = now() > expireAt;
+		CODE_PROBE(expired, "EKP: Key is expired");
+		return expired;
+	}
 };
 
 // TODO: could refactor both into CacheEntry<T> with T data, creationTimeSec, and noExpiry
