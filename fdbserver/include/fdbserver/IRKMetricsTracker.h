@@ -27,8 +27,6 @@ class StorageQueueInfo {
 	UID ratekeeperID;
 	Smoother smoothFreeSpace, smoothTotalSpace;
 	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-
-	// Currently unused
 	Smoother smoothDurableVersion, smoothLatestVersion;
 
 public:
