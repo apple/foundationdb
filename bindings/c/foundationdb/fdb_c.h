@@ -599,7 +599,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
-                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 
