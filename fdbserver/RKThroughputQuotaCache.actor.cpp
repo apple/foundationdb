@@ -27,8 +27,6 @@ public:
 						tagsWithQuota.insert(tag);
 					}
 					self->removeUnseenQuotas(tagsWithQuota);
-					// self->removeExpiredTags();
-					//++self->throttledTagChangeId;
 					wait(delay(5.0));
 					break;
 				} catch (Error& e) {
