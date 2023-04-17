@@ -24,6 +24,8 @@
 
 struct GetTeamRequest;
 namespace data_distribution {
+// DD evaluate the metrics of server teams and will increase the count if corresponding metrics is within a eligible
+// range
 class EligibilityCounter {
 public:
 	// The type value are used to do bit operations to get combined type. Ex. combineType = LOW_CPU | LOW_DISK_UTIL .
@@ -38,15 +40,16 @@ public:
 	void reset(Type type);
 
 	// return the minimal count of a combined eligible type
-	unsigned getCount(int combinedType) const;
+	int getCount(int combinedType) const;
 
 	// increase the count of type
 	void increase(Type type);
 
+	// return combinedType that can be used as input to getCount().
 	static int fromGetTeamRequest(GetTeamRequest const&);
 
 private:
-	std::map<Type, unsigned int> type_count;
+	std::unordered_map<Type, int> type_count;
 };
 
 } // namespace data_distribution
@@ -62,6 +65,7 @@ struct IDataDistributionTeam {
 	virtual int64_t getReadInFlightToTeam() const = 0;
 	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual double getAverageCPU() const = 0;
+	virtual bool hasLowerCpu(double cpuThreshold) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
