@@ -222,7 +222,7 @@ public:
 
 	double getAverageCPU() const override;
 
-	bool hasLowerCpu(double cpuThreshold) const {
+	bool hasLowerCpu(double cpuThreshold) const override {
 		return getAverageCPU() <= std::min(cpuThreshold, SERVER_KNOBS->MAX_DEST_CPU_PERCENT);
 	}
 
