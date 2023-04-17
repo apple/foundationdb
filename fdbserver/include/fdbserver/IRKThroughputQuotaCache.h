@@ -16,11 +16,11 @@ public:
 
 	// Returns the cached value for the total throughput quota for
 	// the provided tag (in bytes/second)
-	virtual Optional<int64_t> getTotalQuota(TransactionTag) const = 0;
+	virtual Optional<int64_t> getTotalQuota(TransactionTag const&) const = 0;
 
 	// Returns the cached value for the reserved throughput quota
 	// for the provided tag (in bytes/second)
-	virtual Optional<int64_t> getReservedQuota(TransactionTag) const = 0;
+	virtual Optional<int64_t> getReservedQuota(TransactionTag const&) const = 0;
 
 	// Returns the number of quotas currently cached
 	virtual int size() const = 0;
@@ -40,8 +40,8 @@ class RKThroughputQuotaCache : public IRKThroughputQuotaCache {
 public:
 	RKThroughputQuotaCache(UID id, Database db);
 	~RKThroughputQuotaCache();
-	Optional<int64_t> getTotalQuota(TransactionTag) const override;
-	Optional<int64_t> getReservedQuota(TransactionTag) const override;
+	Optional<int64_t> getTotalQuota(TransactionTag const&) const override;
+	Optional<int64_t> getReservedQuota(TransactionTag const&) const override;
 	int size() const override;
 	Future<Void> run() override;
 };
@@ -52,11 +52,11 @@ class MockRKThroughputQuotaCache : public IRKThroughputQuotaCache {
 
 public:
 	~MockRKThroughputQuotaCache();
-	Optional<int64_t> getTotalQuota(TransactionTag) const override;
-	Optional<int64_t> getReservedQuota(TransactionTag) const override;
+	Optional<int64_t> getTotalQuota(TransactionTag const&) const override;
+	Optional<int64_t> getReservedQuota(TransactionTag const&) const override;
 	int size() const override;
 	Future<Void> run() override;
 
-	void setQuota(TransactionTag tag, int64_t totalQuota, int64_t reservedQuota);
-	void removeQuota(TransactionTag tag);
+	void setQuota(TransactionTag const& tag, int64_t totalQuota, int64_t reservedQuota);
+	void removeQuota(TransactionTag const& tag);
 };

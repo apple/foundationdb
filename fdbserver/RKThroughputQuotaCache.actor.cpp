@@ -41,7 +41,7 @@ RKThroughputQuotaCache::RKThroughputQuotaCache(UID id, Database db) : id(id), db
 
 RKThroughputQuotaCache::~RKThroughputQuotaCache() = default;
 
-Optional<int64_t> RKThroughputQuotaCache::getTotalQuota(TransactionTag tag) const {
+Optional<int64_t> RKThroughputQuotaCache::getTotalQuota(TransactionTag const& tag) const {
 	auto it = quotas.find(tag);
 	if (it == quotas.end()) {
 		return {};
@@ -50,7 +50,7 @@ Optional<int64_t> RKThroughputQuotaCache::getTotalQuota(TransactionTag tag) cons
 	}
 }
 
-Optional<int64_t> RKThroughputQuotaCache::getReservedQuota(TransactionTag tag) const {
+Optional<int64_t> RKThroughputQuotaCache::getReservedQuota(TransactionTag const& tag) const {
 	auto it = quotas.find(tag);
 	if (it == quotas.end()) {
 		return {};
@@ -69,7 +69,7 @@ Future<Void> RKThroughputQuotaCache::run() {
 
 MockRKThroughputQuotaCache::~MockRKThroughputQuotaCache() = default;
 
-Optional<int64_t> MockRKThroughputQuotaCache::getTotalQuota(TransactionTag tag) const {
+Optional<int64_t> MockRKThroughputQuotaCache::getTotalQuota(TransactionTag const& tag) const {
 	auto it = quotas.find(tag);
 	if (it == quotas.end()) {
 		return {};
@@ -78,7 +78,7 @@ Optional<int64_t> MockRKThroughputQuotaCache::getTotalQuota(TransactionTag tag) 
 	}
 }
 
-Optional<int64_t> MockRKThroughputQuotaCache::getReservedQuota(TransactionTag tag) const {
+Optional<int64_t> MockRKThroughputQuotaCache::getReservedQuota(TransactionTag const& tag) const {
 	auto it = quotas.find(tag);
 	if (it == quotas.end()) {
 		return {};
@@ -91,12 +91,12 @@ int MockRKThroughputQuotaCache::size() const {
 	return quotas.size();
 }
 
-void MockRKThroughputQuotaCache::setQuota(TransactionTag tag, int64_t totalQuota, int64_t reservedQuota) {
+void MockRKThroughputQuotaCache::setQuota(TransactionTag const& tag, int64_t totalQuota, int64_t reservedQuota) {
 	quotas[tag].totalQuota = totalQuota;
 	quotas[tag].reservedQuota = reservedQuota;
 }
 
-void MockRKThroughputQuotaCache::removeQuota(TransactionTag tag) {
+void MockRKThroughputQuotaCache::removeQuota(TransactionTag const& tag) {
 	quotas.erase(tag);
 }
 
