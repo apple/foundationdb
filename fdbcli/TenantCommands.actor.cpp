@@ -362,14 +362,6 @@ void tenantListOutputJson(std::vector<std::pair<TenantName, metacluster::Metaclu
 	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
 }
 
-void tenantListOutputJsonError(Error e) {
-	json_spirit::mObject resultObj;
-	resultObj["type"] = "error";
-	resultObj["error"] = e.what();
-
-	fmt::print("{}\n", json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
-}
-
 // tenant list command
 ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 9) {
@@ -473,20 +465,32 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 
 			return true;
 		} catch (Error& e) {
-			state Error err(e);
-			if (e.code() == error_code_special_keys_api_failure) {
-				std::string errorMsgStr = wait(getSpecialKeysFailureErrorMessage(tr));
-				fmt::print(stderr, "ERROR: {}\n", errorMsgStr.c_str());
-				return false;
-			} else if (e.code() == error_code_tenants_disabled /* find more and add them */) {
-				if (useJson) {
-					tenantListOutputJsonError(e);
+			try {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			} catch (Error& finalErr) {
+				state std::string errorStr;
+				if (finalErr.code() == error_code_special_keys_api_failure) {
+					std::string str = wait(getSpecialKeysFailureErrorMessage(tr));
+					errorStr = str;
+				} else if (useJson) {
+					errorStr = finalErr.what();
 				} else {
-					fmt::print(stderr, "ERROR: {}\n", e.what());
+					throw finalErr;
 				}
+
+				if (useJson) {
+					json_spirit::mObject resultObj;
+					resultObj["type"] = "error";
+					resultObj["error"] = errorStr;
+					fmt::print(
+					    "{}\n",
+					    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print).c_str());
+				} else {
+					fmt::print(stderr, "ERROR: {}\n", errorStr.c_str());
+				}
+
 				return false;
 			}
-			wait(safeThreadFutureToFuture(tr->onError(err)));
 		}
 	}
 }
