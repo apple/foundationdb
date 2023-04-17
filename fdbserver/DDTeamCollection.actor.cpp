@@ -65,7 +65,7 @@ void EligibilityCounter::reset(Type type) {
 	type_count[type] = 0;
 }
 
-unsigned EligibilityCounter::getCount(int combinedType) const {
+int EligibilityCounter::getCount(int combinedType) const {
 	unsigned minCount = std::numeric_limits<unsigned>::max();
 	for (auto& [t, c] : type_count) {
 		if ((combinedType & t) > 0 && minCount > c) {
@@ -271,9 +271,8 @@ public:
 					int currentIndex = (startIndex + i) % self->teams.size();
 					if (self->teams[currentIndex]->isHealthy()) {
 						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
-						bool eligible = eligibilityType == data_distribution::EligibilityCounter::NONE ||
-						                self->teams[currentIndex]->getEligibilityCount(eligibilityType) > 0;
-						if (!eligible) {
+						if (eligibilityType != data_distribution::EligibilityCounter::NONE &&
+						    self->teams[currentIndex]->getEligibilityCount(eligibilityType) <= 0) {
 							continue;
 						}
 

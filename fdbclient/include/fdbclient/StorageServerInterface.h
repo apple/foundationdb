@@ -645,8 +645,7 @@ struct StorageMetrics {
 
 	static const int64_t infinity = 1LL << 60;
 
-	// assume each read op has a constant load cost (knob EMPTY_READ_PENALTY),
-	// return max(op * cost, bytesRead)
+	// the read load model coming from both read ops and read bytes
 	int64_t readLoadKSecond() const;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {

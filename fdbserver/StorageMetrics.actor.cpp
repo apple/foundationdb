@@ -28,7 +28,7 @@
 // the bytes always round to EMPTY_READ_PENALTY when the returned result size is less than EMPTY_READ_PENALTY. This cost
 // is different from what tag throttling use to produce throttling decision.
 int64_t StorageMetrics::readLoadKSecond() const {
-	return std::max((int64_t)0, std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY));
+	return std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY);
 }
 
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
