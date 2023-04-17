@@ -1015,8 +1015,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
-		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1054,6 +1052,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			    .detail("Launch", rrs.dataMoveId)
 			    .detail("Total", activeRelocations);
 			startRelocation(rrs.priority, rrs.healthPriority);
+			Future<Void> fCleanup =
+                SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rrs.keys, ddEnabledState) : Void();
 			// Start the actor that relocates data in the rrs.keys
 			inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
 		}
