@@ -705,7 +705,7 @@ public:
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
-		                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER;
+		                              SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
 		return result;
 	}
 };
