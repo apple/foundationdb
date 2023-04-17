@@ -21,12 +21,11 @@ public:
 					tagsWithQuota.clear();
 					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id).detail("Size", currentQuotas.size());
+					self->quotas.clear();
 					for (auto const kv : currentQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						self->quotas[tag] = ThrottleApi::TagQuotaValue::fromValue(kv.value);
-						tagsWithQuota.insert(tag);
 					}
-					self->removeUnseenQuotas(tagsWithQuota);
 					wait(delay(5.0));
 					break;
 				} catch (Error& e) {
@@ -41,16 +40,6 @@ public:
 RKThroughputQuotaCache::RKThroughputQuotaCache(UID id, Database db) : id(id), db(db) {}
 
 RKThroughputQuotaCache::~RKThroughputQuotaCache() = default;
-
-void RKThroughputQuotaCache::removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota) {
-	for (auto it = quotas.begin(); it != quotas.end();) {
-		if (!tagsWithQuota.count(it->first)) {
-			it = quotas.erase(it);
-		} else {
-			++it;
-		}
-	}
-}
 
 Optional<int64_t> RKThroughputQuotaCache::getTotalQuota(TransactionTag tag) const {
 	auto it = quotas.find(tag);

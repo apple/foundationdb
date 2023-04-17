@@ -37,8 +37,6 @@ class RKThroughputQuotaCache : public IRKThroughputQuotaCache {
 	UID id;
 	Database db;
 
-	void removeUnseenQuotas(std::unordered_set<TransactionTag> const& tagsWithQuota);
-
 public:
 	RKThroughputQuotaCache(UID id, Database db);
 	~RKThroughputQuotaCache();
