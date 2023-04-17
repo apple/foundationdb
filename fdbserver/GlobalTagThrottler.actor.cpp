@@ -515,18 +515,31 @@ public:
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		auto& ssInfo = ssInfos[ss.id];
-		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
 		                                                  SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 		ssInfo.zoneId = ss.locality.zoneId();
 
+		auto& tagToThroughputCounters = throughput[ss.id];
+		std::unordered_set<TransactionTag> busyReadTags, busyWriteTags;
 		for (const auto& busyReadTag : ss.busiestReadTags) {
+			busyReadTags.insert(busyReadTag.tag);
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+				tagToThroughputCounters[busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
 			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
+			busyWriteTags.insert(busyWriteTag.tag);
 			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+				tagToThroughputCounters[busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			}
+		}
+
+		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
+			if (!busyReadTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::READ);
+			}
+			if (!busyWriteTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::WRITE);
 			}
 		}
 		return Void();
@@ -671,7 +684,7 @@ public:
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
-		                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER;
+		                              SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
 		return result;
 	}
 };
