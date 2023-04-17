@@ -52,10 +52,7 @@ class ThroughputQuotaCacheWorkload : public TestWorkload {
 		ASSERT_EQ(quotaCache.getReservedQuota("testTag"_sr).get(), 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 		ASSERT_EQ(quotaCache.getTotalQuota("testTag"_sr).get(), 1000 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 		wait(removeQuota(cx, "testTag"_sr));
-		loop {
-			if (quotaCache.size() == 0) {
-				break;
-			}
+		while (quotaCache.size() != 0) {
 			wait(delay(1.0));
 		}
 		ASSERT(!quotaCache.getReservedQuota("testTag"_sr).present());
