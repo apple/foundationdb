@@ -11,7 +11,7 @@
 // Tests the functionality of the RKThroughputQuotaCache class
 class ThroughputQuotaCacheWorkload : public TestWorkload {
 	ACTOR static Future<Void> setQuota(Database cx, TransactionTag tag, int64_t reservedQuota, int64_t totalQuota) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
