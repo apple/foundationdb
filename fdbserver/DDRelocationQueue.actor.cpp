@@ -1052,6 +1052,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			    .detail("Launch", rrs.dataMoveId)
 			    .detail("Total", activeRelocations);
 			startRelocation(rrs.priority, rrs.healthPriority);
+			// Cleanup waited by a new relocator should only include the range that is moved by the relocator
 			Future<Void> fCleanup =
                 SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rrs.keys, ddEnabledState) : Void();
 			// Start the actor that relocates data in the rrs.keys
