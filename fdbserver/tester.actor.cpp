@@ -2102,6 +2102,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 							ASSERT(snapshotRange.range().begin == verify->range.begin);
 							ASSERT(snapshotRange.range().end == verify->range.end);
 						}
+
+						fmt::print("Config: {}\n", json_spirit::write_string(DDConfiguration::toJSON(snapshot, true), json_spirit::pretty_print));
+
 					}
 
 					wait(tr.commit());

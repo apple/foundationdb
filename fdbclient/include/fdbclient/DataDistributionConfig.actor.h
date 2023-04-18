@@ -33,6 +33,7 @@
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // DD Configuration for a key range range.
@@ -70,6 +71,17 @@ struct DDRangeConfig {
 	void serialize(Ar& ar) {
 		serializer(ar, replicationFactor, teamID);
 	}
+
+	json_spirit::mObject toJSON() const {
+		json_spirit::mObject doc;
+		if(teamID.present()) {
+			doc["teamID"] = *teamID;
+		}
+		if(replicationFactor.present()) {
+			doc["replicationFactor"] = *replicationFactor;
+		}
+		return doc;
+	}
 };
 
 template <>
@@ -91,6 +103,8 @@ struct DDConfiguration : public KeyBackedClass {
 
 	// Range configuration options set by Users
 	RangeConfigMap userRangeConfig() const { return { subSpace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }
+
+	static json_spirit::mValue toJSON(RangeConfigMapSnapshot const& snapshot, bool includeDefaultRanges = false);
 };
 
 #include "flow/unactorcompiler.h"
