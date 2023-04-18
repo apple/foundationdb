@@ -508,6 +508,7 @@ std::unordered_set<EncryptCipherDomainId> getLookupDetailsLatest(
 			latestCipherReply.baseCipherDetails.emplace_back(domainId,
 			                                                 itr->second.baseCipherId,
 			                                                 itr->second.baseCipherKey,
+			                                                 itr->second.baseCipherKCV,
 			                                                 itr->second.refreshAt,
 			                                                 itr->second.expireAt);
 			numHits++;
@@ -970,11 +971,14 @@ void testLookupLatestCipherDetails() {
 	EKPGetLatestBaseCipherKeysReply latestCipherReply;
 	std::unordered_set<EncryptCipherDomainId> dedupedDomainIds = { 1, 2, 3, 4 };
 	double startTime = now();
-	ekpProxyData->baseCipherDomainIdCache[1] = EncryptBaseCipherKey(1, 1, "dom1"_sr, startTime + 300, startTime + 300);
+	ekpProxyData->baseCipherDomainIdCache[1] =
+	    EncryptBaseCipherKey(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
 	// key needs refresh
-	ekpProxyData->baseCipherDomainIdCache[2] = EncryptBaseCipherKey(2, 2, "dom2"_sr, startTime - 10, startTime + 300);
+	ekpProxyData->baseCipherDomainIdCache[2] =
+	    EncryptBaseCipherKey(2, 2, "dom2"_sr, 0, startTime - 10, startTime + 300);
 	// key is expired
-	ekpProxyData->baseCipherDomainIdCache[3] = EncryptBaseCipherKey(3, 3, "dom3"_sr, startTime + 300, startTime - 10);
+	ekpProxyData->baseCipherDomainIdCache[3] =
+	    EncryptBaseCipherKey(3, 3, "dom3"_sr, 0, startTime + 300, startTime - 10);
 
 	std::unordered_set<EncryptCipherDomainId> lookupCipherDomainIds =
 	    getLookupDetailsLatest(ekpProxyData, dbgTrace, latestCipherReply, numHits, dedupedDomainIds);
@@ -985,7 +989,7 @@ void testLookupLatestCipherDetails() {
 		ASSERT(false);
 	}
 	EKPBaseCipherDetails expectedCipherDetails =
-	    EKPBaseCipherDetails(1, 1, "dom1"_sr, startTime + 300, startTime + 300);
+	    EKPBaseCipherDetails(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
 	ASSERT_EQ(latestCipherReply.baseCipherDetails.size(), 1);
 	ASSERT(latestCipherReply.baseCipherDetails[0] == expectedCipherDetails);
 	ASSERT_EQ(ekpProxyData->baseCipherDomainIdCacheHits.getValue(), 1);
@@ -1003,13 +1007,13 @@ void testLookupCipherDetails() {
 	};
 	double startTime = now();
 	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(1, 1)] =
-	    EncryptBaseCipherKey(1, 1, "dom1"_sr, startTime + 300, startTime + 300);
+	    EncryptBaseCipherKey(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
 	// key needs refresh
 	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(2, 2)] =
-	    EncryptBaseCipherKey(2, 2, "dom2"_sr, startTime - 10, startTime + 300);
+	    EncryptBaseCipherKey(2, 2, "dom2"_sr, 0, startTime - 10, startTime + 300);
 	// key is expired
 	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(3, 3)] =
-	    EncryptBaseCipherKey(3, 3, "dom3"_sr, startTime + 300, startTime - 10);
+	    EncryptBaseCipherKey(3, 3, "dom3"_sr, 0, startTime + 300, startTime - 10);
 
 	std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
 	                   EKPGetBaseCipherKeysRequestInfo,
@@ -1019,10 +1023,10 @@ void testLookupCipherDetails() {
 	ASSERT(lookupCipherInfoMap.find({ 3, 3 }) != lookupCipherInfoMap.end());
 	ASSERT(lookupCipherInfoMap.find({ 4, 4 }) != lookupCipherInfoMap.end());
 	ASSERT_EQ(keyIdsReply.baseCipherDetails.size(), 2);
-	EKPBaseCipherDetails expectedCipherDetails1 =
-	    EKPBaseCipherDetails(1, 1, "dom1"_sr, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
-	EKPBaseCipherDetails expectedCipherDetails2 =
-	    EKPBaseCipherDetails(2, 2, "dom2"_sr, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
+	EKPBaseCipherDetails expectedCipherDetails1 = EKPBaseCipherDetails(
+	    1, 1, "dom1"_sr, 0, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
+	EKPBaseCipherDetails expectedCipherDetails2 = EKPBaseCipherDetails(
+	    2, 2, "dom2"_sr, 0, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
 	for (EKPBaseCipherDetails details : keyIdsReply.baseCipherDetails) {
 		if (details.encryptDomainId == 1) {
 			ASSERT(details == expectedCipherDetails1);
