@@ -41,49 +41,34 @@
 struct DDRangeConfig {
 	constexpr static FileIdentifier file_identifier = 9193856;
 
-	DDRangeConfig() {}
-	DDRangeConfig(int replication) : replicationFactor(replication) {}
+	DDRangeConfig(Optional<int> replicationFactor = {}, Optional<int> teamID = {})
+	  : replicationFactor(replicationFactor), teamID(teamID) {}
 
-	bool forceBoundary = false;
 	Optional<int> replicationFactor;
+	// Ranges with different team IDs should be assigned to different storage teams
+	// Shards with the same team ID can be assigned to the same storage team but nothing enforces/prefers this.
+	Optional<int> teamID;
 
-	DDRangeConfig update(DDRangeConfig const& update) const {
+	DDRangeConfig apply(DDRangeConfig const& update) const {
 		DDRangeConfig result = *this;
-		if (update.forceBoundary) {
-			result.forceBoundary = true;
-		}
 		if (update.replicationFactor.present()) {
 			result.replicationFactor = update.replicationFactor;
 		}
-
-		return result;
-	}
-
-	DDRangeConfig split() const {
-		DDRangeConfig result = *this;
-		result.forceBoundary = false;
-		return result;
-	}
-
-	bool canMerge(DDRangeConfig const& next) const {
-		// If either range has a forced boundary, they cannot merge
-		if (forceBoundary || next.forceBoundary) {
-			return false;
+		if (update.teamID.present()) {
+			result.teamID = update.teamID;
 		}
 
-		return replicationFactor == next.replicationFactor;
+		return result;
 	}
 
 	bool operator==(DDRangeConfig const& rhs) const = default;
 
 	// String description of the range config
-	std::string toString() const {
-		return fmt::format("forceBoundary={} replication={}", forceBoundary, replicationFactor);
-	}
+	std::string toString() const { return fmt::format("replication={} teamID={}", replicationFactor, teamID); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, forceBoundary, replicationFactor);
+		serializer(ar, replicationFactor, teamID);
 	}
 };
 

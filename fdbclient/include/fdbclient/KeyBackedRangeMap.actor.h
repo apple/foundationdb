@@ -108,11 +108,10 @@ struct KeyRangeMapSnapshot {
 // It is assumed that any range not covered by the map is set to a default ValueType()
 // The ValueType must have
 //     // Return a copy of *this updated with properties in value
-//     ValueType update(ValueType const& value) const;
+//     ValueType apply(ValueType const& value) const;
 //
-//     // Return true if adjacent ranges with values *this and value could be merged to a single
-//     // range represented by *this and retain identical meaning
-//     bool canMerge(ValueType const& value) const;
+//     // Return true if the two values are identical in meaning so adjacent ranges using either value can be merged
+//     bool operator==(ValueType const& value) const;
 template <typename KeyType,
           typename ValueType,
           typename KeyCodec = TupleCodec<KeyType>,
@@ -129,21 +128,26 @@ public:
 	  : kvMap(prefix, trigger, valueCodec) {}
 
 	// Get the RangeValue for the range that contains key, if there is a begin and end in the map which contain key
-	template <class Transaction>
-	Future<Optional<RangeValue>> getRangeForKey(Transaction tr, KeyType const& key) const {
-		GetRangeLimits limits(2);
-		limits.minRows = 2;
+	ACTOR template <class Transaction>
+	static Future<Optional<RangeValue>> getRangeForKey(KeyBackedRangeMap self,
+	                                                   Transaction tr,
+	                                                   KeyType key,
+	                                                   Snapshot snapshot = Snapshot::False) {
+		state Future<Optional<typename Map::KVType>> begin = self.kvMap.seekLessOrEqual(tr, key, snapshot);
+		state Future<Optional<typename Map::KVType>> end = self.kvMap.seekGreaterThan(tr, key, snapshot);
+		wait(success(begin) && success(end));
 
-		return map(
-		    kvMap.getRange(tr, KeySelector::lastLessOrEqual(key), KeySelector::firstGreaterThan(key) + 1, limits),
-		    [](RangeResultType const& bvs) -> Optional<RangeValue> {
-			    // Result set is (boundary, value) pairs
-			    if (bvs.results.size() != 2) {
-				    return {};
-			    }
-			    return RangeValue{ { bvs.results.front().first, bvs.results.back().first },
-				                   bvs.results.front().second };
-		    });
+		if (begin.get().present() && end.get().present()) {
+			return RangeValue{ { begin.get()->key, end.get()->key }, begin.get()->value };
+		}
+		return Optional<RangeValue>();
+	}
+
+	template <class Transaction>
+	Future<Optional<RangeValue>> getRangeForKey(Transaction tr,
+	                                            KeyType const& key,
+	                                            Snapshot snapshot = Snapshot::False) const {
+		return getRangeForKey(*this, tr, key, snapshot);
 	}
 
 	// Update the range from begin to end by applying valueUpdate to it
@@ -162,20 +166,23 @@ public:
 
 		wait(success(beginRange) && success(endRange));
 
+		kbt_debug("KEYRANGEMAP updateRange beginRange present={}\n", beginRange.get().present());
 		if (beginRange.get().present()) {
 			// Begin is in a range that exists, so set begin = the current value updated with valueUpdate.
 			// Note that begin may already be the start of the range it exists in, which also works.
-			self.kvMap.set(tr, begin, beginRange.get()->value.update(valueUpdate));
+			self.kvMap.set(tr, begin, beginRange.get()->value.apply(valueUpdate));
 		} else {
 			// Begin is not in any range that exists, so initialize the begin boundary to valueUpdate
 			self.kvMap.set(tr, begin, valueUpdate);
 		}
 
+		kbt_debug("KEYRANGEMAP updateRange endRange present={}\n", endRange.get().present());
 		if (endRange.get().present()) {
 			// End is in a range that exists, so if that range does not start with end split it at end by setting
 			// end to the range's value.
 			if (endRange.get()->range.begin != end) {
-				self.kvMap.set(tr, end, endRange.get()->value.split());
+				kbt_debug("KEYRANGEMAP set end, endRange does not start with end key\n");
+				self.kvMap.set(tr, end, endRange.get()->value);
 			}
 		} else {
 			// End is not in a range that exists, so set end to a new ValueType to terminate it
@@ -185,7 +192,8 @@ public:
 		loop {
 			RangeResultType boundaries = wait(middleBoundaries);
 			for (auto const& bv : boundaries.results) {
-				self.kvMap.set(tr, bv.first, bv.second.update(valueUpdate));
+				kbt_debug("KEYRANGEMAP set interior boundary\n");
+				self.kvMap.set(tr, bv.first, bv.second.apply(valueUpdate));
 			}
 			if (!boundaries.more) {
 				break;
@@ -211,9 +219,10 @@ public:
 	static Future<LocalSnapshot> getSnapshotActor(KeyBackedRangeMap self, Transaction tr, KeyType begin, KeyType end) {
 		kbt_debug("RANGEMAP snapshot start\n");
 
+		state int readSize = BUGGIFY ? 1 : 100000;
 		// Start reading the range of of key boundaries which would cover begin through end using key selectors
 		state Future<RangeResultType> boundariesFuture = self.kvMap.getRange(
-		    tr, KeySelector::lastLessOrEqual(begin), KeySelector::firstGreaterThan(end), GetRangeLimits(1e4));
+		    tr, KeySelector::lastLessOrEqual(begin), KeySelector::firstGreaterThan(end), GetRangeLimits(readSize));
 
 		state LocalSnapshot result;
 		loop {
@@ -225,11 +234,13 @@ public:
 			if (!boundaries.more) {
 				break;
 			}
+			ASSERT(!boundaries.results.empty());
+
 			// Continue reading starting from the first key after the last key read.
 			boundariesFuture = self.kvMap.getRange(tr,
 			                                       KeySelector::firstGreaterThan(boundaries.results.back().first),
 			                                       KeySelector::firstGreaterThan(end),
-			                                       GetRangeLimits(1e4));
+			                                       GetRangeLimits(readSize));
 		}
 
 		// LocalSnapshot requires initialization of the widest range it will be queried with, so we must ensure that has

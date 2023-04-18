@@ -424,38 +424,6 @@ struct TypedKeySelector {
 		return KeySelector(KeySelectorRef(packed, orEqual, offset), packed.arena());
 	}
 
-	// Resolve a pair of key selectors for a range to a packed raw KeyRange clipped to the KeyRange bounds
-	ACTOR template <typename Transaction>
-	static Future<KeyRange> packBounded(Transaction tr, TypedKeySelector begin, TypedKeySelector end, KeyRange bounds) {
-		kbt_debug("KEYSELECT packBounded bounds: {}\n", bounds.toString());
-
-		kbt_debug("KEYSELECT resolve begin query {} - {}\n",
-		          ::firstGreaterOrEqual(bounds.begin).toString(),
-		          begin.pack(bounds.begin).toString());
-		state typename transaction_future_type<Transaction, RangeResult>::type beginFuture =
-		    tr->getRange(::firstGreaterOrEqual(bounds.begin),
-		                 begin.pack(bounds.begin),
-		                 GetRangeLimits(1),
-		                 Snapshot::False,
-		                 Reverse::True);
-
-		kbt_debug("KEYSELECT resolve end query {} - {}\n",
-		          end.pack(bounds.begin).toString(),
-		          ::firstGreaterOrEqual(bounds.end).toString());
-		state typename transaction_future_type<Transaction, RangeResult>::type endFuture =
-		    tr->getRange(end.pack(bounds.begin),
-		                 ::firstGreaterOrEqual(bounds.end),
-		                 GetRangeLimits(1),
-		                 Snapshot::False,
-		                 Reverse::False);
-
-		state RangeResult beginResult = wait(safeThreadFutureToFuture(beginFuture));
-		state RangeResult endResult = wait(safeThreadFutureToFuture(endFuture));
-
-		return KeyRangeRef(beginResult.empty() ? bounds.begin : beginResult.front().key,
-		                   endResult.empty() ? bounds.end : endResult.front().key);
-	}
-
 	static TypedKeySelector lastLessThan(const KeyType& k) { return { k, false, 0 }; }
 
 	static TypedKeySelector lastLessOrEqual(const KeyType& k) { return { k, true, 0 }; }
@@ -521,33 +489,71 @@ public:
 	                                             GetRangeLimits limits,
 	                                             Snapshot snapshot,
 	                                             Reverse reverse) {
-
-		state KeyRange range = wait(KeySelector::packBounded(tr, begin, end, self.subspace));
-		kbt_debug("MAP GETRANGE KeySelectors {} - {} resolve to {}\n",
+		kbt_debug("MAP GETRANGE KeySelectors {} - {}\n",
 		          begin.pack(self.subspace.begin).toString(),
-		          end.pack(self.subspace.begin).toString(),
-		          range.toString());
+		          end.pack(self.subspace.begin).toString());
 
+		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
+		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
 		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(range, limits, snapshot, reverse);
+		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
-		kbt_debug("MAP GETRANGE: {} results more={} for {}:\n", kvs.size(), kvs.more, range.toString());
+		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
+		// TypedKeySelectors and GetRangeLimits yields a result in which no KV pairs are within the map subspace.  If
+		// this happens, we can't return any map KV pairs for the caller to base the next request on, so we will loop
+		// and continue with the next request here.
+		state RangeResultType rangeResult;
+		loop {
+			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
+			          begin.pack(self.subspace.begin).toString(),
+			          end.pack(self.subspace.begin).toString(),
+			          kvs.size(),
+			          kvs.more);
 
-		RangeResultType rangeResult;
-		for (auto const& kv : kvs) {
-			kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
+			for (auto const& kv : kvs) {
+				kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
 
-			KeyType key = self.unpackKey(kv.key);
-			ValueType val = self.unpackValue(kv.value);
+				// KeySelectors could resolve to keys outside the map subspace so we must filter
+				if (self.subspace.contains(kv.key)) {
+					KeyType key = self.unpackKey(kv.key);
+					ValueType val = self.unpackValue(kv.value);
+					rangeResult.results.push_back(PairType(key, val));
+				}
+			}
 
-			rangeResult.results.push_back(PairType(key, val));
+			// Stop if there are no more raw results
+			if (!kvs.more) {
+				break;
+			}
+
+			// There may be more raw results in the range, so now determine if we need to read any of them or if we can
+			// return what we have found so far. If the filtered result set is not empty then we can return it
+			if (!rangeResult.results.empty()) {
+				// kvs.more is known to be true and kvs is not empty since the filtered result set is not empty.  Set
+				// the output rangeResult.more to true if the last raw result was within the map range, else false.
+				rangeResult.more = self.subspace.contains(kvs.back().key);
+				break;
+			}
+
+			// At this point, the filtered rangeResult is empty but there may be more raw results in the db.  We cannot
+			// return this rangeResult to the caller because the caller won't know which key to start reading at for the
+			// next chunk, so we will use the raw keys to read the next chunk here and repeat the loop.
+			if (reverse) {
+				// The last key is the end of the new getRange, which includes the back key with orEqual because
+				// getRange end is exclusive
+				ksEnd = ::firstGreaterOrEqual(kvs.back().key);
+			} else {
+				// The last key is the exclusive begin of the new getRange
+				ksBegin = ::firstGreaterThan(kvs.back().key);
+			}
+			getRangeFuture = tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 		}
 
-		rangeResult.more = kvs.more;
 		return rangeResult;
 	}
 
+	// GetRange with typed KeySelectors
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
 	                                 KeySelector begin,
@@ -556,6 +562,70 @@ public:
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
 		return getRangeActor(*this, tr, begin, end, limits, snapshot, reverse);
+	}
+
+	// Find the closest key which is <, <=, >, or >= query
+	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
+	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
+	// located next to a shard which is currently unavailable.
+	ACTOR template <class Transaction>
+	static Future<Optional<KVType>> seek(KeyBackedMap self,
+	                                     Transaction tr,
+	                                     KeyType query,
+	                                     bool lessThan,
+	                                     bool orEqual,
+	                                     Snapshot snapshot) {
+		// Operations map to the following getRange operations
+		// <  query  getRange begin               query   1                reverse
+		// <= query  getRange begin               keyAfter(query)          reverse
+		// >= query  getRange key                 end   1                  forward
+		// >  query  getRange keyAfter(query)     end   1                  forward
+		Key begin;
+		Key end;
+
+		if (lessThan) {
+			begin = self.subspace.begin;
+			end = self.packKey(query);
+			if (orEqual) {
+				end = keyAfter(end);
+			}
+		} else {
+			begin = self.packKey(query);
+			if (!orEqual) {
+				begin = keyAfter(begin);
+			}
+			end = self.subspace.end;
+		}
+
+		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
+
+		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		if (kvs.empty()) {
+			return Optional<KVType>();
+		}
+
+		return self.unpackKV(kvs.front());
+	}
+
+	template <class Transaction>
+	Future<Optional<KVType>> seekLessThan(Transaction tr, KeyType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, true, false, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<KVType>> seekLessOrEqual(Transaction tr, KeyType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, true, true, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<KVType>> seekGreaterThan(Transaction tr, KeyType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, false, false, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<KVType>> seekGreaterOrEqual(Transaction tr, KeyType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, false, true, snapshot);
 	}
 
 	template <class Transaction>
@@ -723,29 +793,69 @@ public:
 	                                             GetRangeLimits limits,
 	                                             Snapshot snapshot,
 	                                             Reverse reverse) {
-
-		state KeyRange range = wait(KeySelector::packBounded(tr, begin, end, self.subspace));
-		kbt_debug("SET GETRANGE KeySelectors {} - {} resolve to {}\n",
+		kbt_debug("MAP GETRANGE KeySelectors {} - {}\n",
 		          begin.pack(self.subspace.begin).toString(),
-		          end.pack(self.subspace.begin).toString(),
-		          range.toString());
+		          end.pack(self.subspace.begin).toString());
 
+		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
+		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
 		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(range, limits, snapshot, reverse);
+		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
-		kbt_debug("SET GETRANGE: {} results more={} for {}:\n", kvs.size(), kvs.more, range.toString());
+		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
+		// TypedKeySelectors and GetRangeLimits yields a result in which no KV pairs are within the map subspace.  If
+		// this happens, we can't return any map KV pairs for the caller to base the next request on, so we will loop
+		// and continue with the next request here.
+		state RangeResultType rangeResult;
+		loop {
+			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
+			          begin.pack(self.subspace.begin).toString(),
+			          end.pack(self.subspace.begin).toString(),
+			          kvs.size(),
+			          kvs.more);
 
-		RangeResultType rangeResult;
-		for (auto const& kv : kvs) {
-			kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
-			rangeResult.results.push_back(self.unpackKey(kv.key));
+			for (auto const& kv : kvs) {
+				kbt_debug("   {} -> {}\n", kv.key.printable(), kv.value.printable());
+
+				// KeySelectors could resolve to keys outside the map subspace so we must filter
+				if (self.subspace.contains(kv.key)) {
+					rangeResult.results.push_back(self.unpackKey(kv.key));
+				}
+			}
+
+			// Stop if there are no more raw results
+			if (!kvs.more) {
+				break;
+			}
+
+			// There may be more raw results in the range, so now determine if we need to read any of them or if we can
+			// return what we have found so far. If the filtered result set is not empty then we can return it
+			if (!rangeResult.results.empty()) {
+				// kvs.more is known to be true and kvs is not empty since the filtered result set is not empty.  Set
+				// the output rangeResult.more to true if the last raw result was within the map range, else false.
+				rangeResult.more = self.subspace.contains(kvs.back().key);
+				break;
+			}
+
+			// At this point, the filtered rangeResult is empty but there may be more raw results in the db.  We cannot
+			// return this rangeResult to the caller because the caller won't know which key to start reading at for the
+			// next chunk, so we will use the raw keys to read the next chunk here and repeat the loop.
+			if (reverse) {
+				// The last key is the end of the new getRange, which includes the back key with orEqual because
+				// getRange end is exclusive
+				ksEnd = ::firstGreaterOrEqual(kvs.back().key);
+			} else {
+				// The last key is the exclusive begin of the new getRange
+				ksBegin = ::firstGreaterThan(kvs.back().key);
+			}
+			getRangeFuture = tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 		}
 
-		rangeResult.more = kvs.more;
 		return rangeResult;
 	}
 
+	// GetRange with typed KeySelectors
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
 	                                 KeySelector begin,
@@ -754,6 +864,70 @@ public:
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
 		return getRangeActor(*this, tr, begin, end, limits, snapshot, reverse);
+	}
+
+	// Find the closest key which is <, <=, >, or >= query
+	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
+	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
+	// located next to a shard which is currently unavailable.
+	ACTOR template <class Transaction>
+	static Future<Optional<ValueType>> seek(KeyBackedSet self,
+	                                        Transaction tr,
+	                                        ValueType query,
+	                                        bool lessThan,
+	                                        bool orEqual,
+	                                        Snapshot snapshot) {
+		// Operations map to the following getRange operations
+		// <  query  getRange begin               query   1                reverse
+		// <= query  getRange begin               keyAfter(query)          reverse
+		// >= query  getRange key                 end   1                  forward
+		// >  query  getRange keyAfter(query)     end   1                  forward
+		Key begin;
+		Key end;
+
+		if (lessThan) {
+			begin = self.subspace.begin;
+			end = self.packKey(query);
+			if (orEqual) {
+				end = keyAfter(end);
+			}
+		} else {
+			begin = self.packKey(query);
+			if (!orEqual) {
+				begin = keyAfter(begin);
+			}
+			end = self.subspace.end;
+		}
+
+		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
+
+		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		if (kvs.empty()) {
+			return Optional<ValueType>();
+		}
+
+		return self.unpackKey(kvs.front());
+	}
+
+	template <class Transaction>
+	Future<Optional<ValueType>> seekLessThan(Transaction tr, ValueType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, true, false, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<ValueType>> seekLessOrEqual(Transaction tr, ValueType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, true, true, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<ValueType>> seekGreaterThan(Transaction tr, ValueType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, false, false, snapshot);
+	}
+
+	template <class Transaction>
+	Future<Optional<ValueType>> seekGreaterOrEqual(Transaction tr, ValueType query, Snapshot snapshot) const {
+		return seek(*this, tr, query, false, true, snapshot);
 	}
 
 	template <class Transaction>
@@ -805,6 +979,7 @@ public:
 	Optional<WatchableTrigger> trigger;
 
 	Key packKey(ValueType const& value) const { return subspace.begin.withSuffix(Codec::pack(value)); }
+	ValueType unpackKey(KeyRef const& key) const { return Codec::unpack(key.removePrefix(subspace.begin)); }
 };
 
 // KeyBackedClass is a convenient base class for a set of related KeyBacked types that exist
