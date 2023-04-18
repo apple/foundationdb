@@ -44,13 +44,21 @@ public:
 			                                           UseProvisionalProxies::False,
 			                                           version)
 			                     .get();
-			TraceEvent(SevDebug, "MGSWaitStorageMetrics").detail("Phase", "GetLocation");
+			TraceEvent(SevDebug, "MGSWaitStorageMetrics")
+			    .detail("Phase", "GetLocation")
+			    .detail("KeyRange", keys.toString())
+			    .detail("LocationsCount", locations.size());
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
 			// there shouldn't have any delay to update the locations.
 			ASSERT_EQ(expectedShardCount, locations.size());
 
 			Optional<StorageMetrics> res =
 			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
+
+			TraceEvent(SevDebug, "MGSWaitStorageMetrics")
+			    .detail("Phase", "GetStorageMetrics")
+			    .detail("KeyRange", keys.toString())
+			    .detail("Present", res.present());
 
 			if (res.present()) {
 				return std::make_pair(res, -1);
@@ -521,7 +529,7 @@ double MockStorageServer::calculateCpuUsage() const {
 	             counters.finishedQueries.getRate() * read_op_cpu_multiplier +
 	             counters.mutationBytes.getRate() * write_byte_cpu_multiplier +
 	             counters.bytesQueried.getRate() * read_byte_cpu_multiplier;
-	return std::max(100.0, res);
+	return std::min(100.0, res);
 }
 
 void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf) {
