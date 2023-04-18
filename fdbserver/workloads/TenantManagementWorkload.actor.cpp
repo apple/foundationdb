@@ -1290,11 +1290,13 @@ struct TenantManagementWorkload : TestWorkload {
 					    wait(metacluster::listTenantMetadata(self->mvDb, beginTenant, endTenant, limit));
 					verifyTenantList<metacluster::MetaclusterTenantMapEntry>(
 					    self, metaTenants, limit, beginTenant, endTenant);
+
+					// Get all tenants in the specified tenant group
 					state std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>>
 					    metaTenantsFiltered =
 					        wait(metacluster::listTenantMetadata(self->mvDb,
-					                                             beginTenant,
-					                                             endTenant,
+					                                             ""_sr,
+					                                             "\xff"_sr,
 					                                             limit,
 					                                             /*offset=*/0,
 					                                             /*filters=*/std::vector<metacluster::TenantState>(),
@@ -1310,8 +1312,10 @@ struct TenantManagementWorkload : TestWorkload {
 						return Void();
 					}
 					verifyTenantList<TenantMapEntry>(self, tenants, limit, beginTenant, endTenant);
+
+					// Get all tenants in the specified tenant group
 					state std::vector<std::pair<TenantName, int64_t>> tenantsFiltered = wait(
-					    TenantAPI::listTenantGroupTenants(self->mvDb, tGroup.get(), beginTenant, endTenant, limit));
+					    TenantAPI::listTenantGroupTenants(self->mvDb, tGroup.get(), ""_sr, "\xff"_sr, limit));
 					auto tenantGroupItr = self->createdTenantGroups.find(tGroup.get());
 					if (tenantGroupItr == self->createdTenantGroups.end()) {
 						ASSERT_EQ(tenantsFiltered.size(), 0);
