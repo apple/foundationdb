@@ -468,6 +468,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			for (auto it : userRangeConfig.intersectingRanges(range.begin, range.end)) {
 				KeyRangeRef configuredRange(it->range().begin, it->range().end);
 
+				CODE_PROBE(true, "Checked custom replication configuration.");
 				TraceEvent("ConsistencyCheck_CheckCustomReplica")
 				    .detail("ShardBegin", printable(range.begin))
 				    .detail("ShardEnd", printable(range.end))
