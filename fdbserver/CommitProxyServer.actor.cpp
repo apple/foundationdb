@@ -1805,8 +1805,9 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
-		    commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
+		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
+		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.001)))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
