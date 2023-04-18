@@ -569,6 +569,7 @@ struct PhysicalShard {
 				TraceEvent(SevInfo, "RocksDBRestoreCFEnd").detail("Status", status.ToString());
 			}
 		} else if (format == RocksDBKeyValues) {
+			ASSERT(cf != nullptr);
 			std::vector<std::string> sstFiles;
 			const RocksDBCheckpointKeyValues rcp = getRocksKeyValuesCheckpoint(checkpoint);
 			for (const auto& file : rcp.fetchedFiles) {
@@ -583,7 +584,6 @@ struct PhysicalShard {
 			    .detail("Files", describe(sstFiles));
 
 			if (!sstFiles.empty()) {
-				ASSERT(cf != nullptr);
 				rocksdb::IngestExternalFileOptions ingestOptions;
 				ingestOptions.move_files = SERVER_KNOBS->ROCKSDB_IMPORT_MOVE_FILES;
 				ingestOptions.verify_checksums_before_ingest = SERVER_KNOBS->ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
@@ -684,10 +684,6 @@ struct PhysicalShard {
 	std::atomic<bool> isInitialized;
 	double deleteTimeSec;
 };
-
-bool DataShard::initialized() const {
-	return physicalShard != nullptr && physicalShard->initialized();
-}
 
 int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, int byteLimit, RangeResult* result) {
 	if (rowLimit == 0 || byteLimit == 0) {
@@ -1215,7 +1211,7 @@ public:
 
 	void clear(KeyRef key) {
 		auto it = dataShardMap.rangeContaining(key);
-		if (!it.value() || !it.value()->initialized()) {
+		if (!it.value()) {
 			return;
 		}
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
@@ -1226,7 +1222,7 @@ public:
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
-			if (it.value() == nullptr || !it.value()->initialized()) {
+			if (it.value() == nullptr) {
 				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}
