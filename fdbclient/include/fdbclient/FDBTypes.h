@@ -1794,6 +1794,14 @@ struct StorageEngineParamSet : public ReferenceCounted<StorageEngineParamSet> {
 
 	bool operator!=(const StorageEngineParamSet& b) const { return !(*this == b); }
 
+	StatusObject toJSON() const {
+		StatusObject result;
+		for (const auto& [name, value] : params) {
+			result[name] = value;
+		}
+		return result;
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, params);

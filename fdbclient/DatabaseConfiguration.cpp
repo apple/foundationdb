@@ -398,7 +398,7 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
 
-	// Add storage engine params, if not empty, into the json string
+	// Add non-empty storage engine params into the json string
 	if (storageEngineParams.getParams().size()) {
 		ASSERT(StorageEngineParamsFactory::isSupported(storageServerStoreType));
 		StatusObject params;

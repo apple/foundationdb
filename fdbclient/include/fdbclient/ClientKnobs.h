@@ -312,6 +312,7 @@ public:
 
 	// REST KMS configurations
 	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
+
 	bool ENABLE_STORAGE_ENGINE_PARAM_INTERFACE;
 
 	ClientKnobs(Randomize randomize);
