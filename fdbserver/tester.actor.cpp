@@ -1863,6 +1863,15 @@ void encryptionAtRestPlaintextMarkerCheck() {
 				    .detail("Filename", itr->path().string())
 				    .detail("NumLines", count);
 				scanned++;
+				if (itr->path().string().find("storage") != std::string::npos) {
+					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned storage file scanned");
+				} else if (itr->path().string().find("fdbblob") != std::string::npos) {
+					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned BlobGranule file scanned");
+				} else if (itr->path().string().find("logqueue") != std::string::npos) {
+					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned TLog file scanned");
+				} else if (itr->path().string().find("backup") != std::string::npos) {
+					CODE_PROBE(true, "EncryptionAtRestPlaintextMarkerCheckScanned KVBackup file scanned");
+				}
 			} else {
 				TraceEvent(SevError, "FileOpenError").detail("Filename", itr->path().string());
 			}
