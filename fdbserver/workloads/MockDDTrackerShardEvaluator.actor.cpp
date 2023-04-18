@@ -180,6 +180,9 @@ public:
 	}
 
 	Future<bool> check(Database const& cx) override {
+		if (!enabled)
+			return true;
+
 		std::cout << "Check phase shards count: " << shards.size() << "\n";
 		ASSERT_GT(shards.size(), 1);
 		actors.clear(true);
