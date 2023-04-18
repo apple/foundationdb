@@ -125,6 +125,11 @@ struct EKPBaseCipherDetails {
 	  : encryptDomainId(dId), baseCipherId(id), baseCipherKey(key), baseCipherKCV(cipherKCV), refreshAt(refAt),
 	    expireAt(expAt) {}
 
+	bool operator==(const EKPBaseCipherDetails& r) const {
+		return encryptDomainId == r.encryptDomainId && baseCipherId == r.baseCipherId && refreshAt == r.refreshAt &&
+		       expireAt == r.expireAt && baseCipherKey.toString() == r.baseCipherKey.toString();
+	}
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, encryptDomainId, baseCipherId, baseCipherKey, baseCipherKCV, refreshAt, expireAt);
