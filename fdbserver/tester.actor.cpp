@@ -2076,25 +2076,45 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					wait(rangeConfig.updateRange(&tr, "\xff\x06"_sr, "\xff\x07"_sr, DDRangeConfig(6)));
 					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, DDRangeConfig(4)));
 
-					state Optional<DDConfiguration::RangeConfigMap::RangeValue> verify;
+					state std::vector<std::tuple<Key, bool, DDRangeConfig>> rangeTests = {
+						{ "\x01"_sr, false, DDRangeConfig() },        { "\xff\x10"_sr, false, DDRangeConfig() },
+						{ "\xff\x03zzz"_sr, true, DDRangeConfig(3) }, { "\xff\x04zzz"_sr, true, DDRangeConfig(4) },
+						{ "\xff\x05"_sr, true, DDRangeConfig() },     { "\xff\x06"_sr, true, DDRangeConfig(6) },
+					};
 
-					// The ranges outside the above may or may not exist.
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\x01"_sr)));
-					ASSERT(!verify.present() || verify->value == DDRangeConfig());
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x10"_sr)));
-					ASSERT(!verify.present() || verify->value == DDRangeConfig());
+					state DDConfiguration::RangeConfigMapSnapshot snapshot =
+					    wait(rangeConfig.getSnapshot(&tr, allKeys.begin, allKeys.end));
+					state int i;
+					for (i = 0; i < rangeTests.size(); ++i) {
+						state Key query = std::get<0>(rangeTests[i]);
+						Optional<DDConfiguration::RangeConfigMap::RangeValue> verify =
+						    wait(rangeConfig.getRangeForKey(&tr, query));
 
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x03zzz"_sr)));
-					ASSERT(verify.present() && verify->value == DDRangeConfig(3));
+						if (KEYBACKEDTYPES_DEBUG) {
+							if (verify.present()) {
+								fmt::print("{} is in {} to {} with config {}\n",
+								           query.printable(),
+								           verify->range.begin,
+								           verify->range.end,
+								           verify->value.toString());
+							} else {
+								fmt::print("{} is not in a range in the config\n", query.printable());
+							}
+						}
 
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x04zzzz"_sr)));
-					ASSERT(verify.present() && verify->value == DDRangeConfig(4));
+						// Range value is either present or not required by test
+						ASSERT(verify.present() || !std::get<1>(rangeTests[i]));
+						DDRangeConfig rc = std::get<2>(rangeTests[i]);
+						ASSERT(!verify.present() || verify->value == rc);
 
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x05"_sr)));
-					ASSERT(verify.present() && verify->value == DDRangeConfig());
-
-					wait(store(verify, rangeConfig.getRangeForKey(&tr, "\xff\x06zzzz"_sr)));
-					ASSERT(verify.present() && verify->value == DDRangeConfig(6));
+						auto snapshotRange = snapshot.rangeContaining(query);
+						ASSERT(snapshotRange.value() == rc);
+						// The snapshot has all ranges covered but the db may not
+						if (verify.present()) {
+							ASSERT(snapshotRange.range().begin == verify->range.begin);
+							ASSERT(snapshotRange.range().end == verify->range.end);
+						}
+					}
 
 					wait(tr.commit());
 					break;
