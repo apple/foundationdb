@@ -7617,7 +7617,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						data->byteSampleApplySet(*kvItr, invalidVersion);
 					}
 					if (this_block.more) {
-						blockBegin = this_block.getReadThrough(blockBegin.arena());
+						blockBegin = this_block.getReadThrough();
 					} else {
 						ASSERT(!this_block.readThrough.present());
 						blockBegin = rangeEnd;
@@ -9717,7 +9717,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							numSampledKeys++;
 						}
 						if (readResult.more) {
-							readBegin = readResult.getReadThrough(readBegin.arena());
+							readBegin = readResult.getReadThrough();
 							ASSERT(readBegin <= readEnd);
 						} else {
 							break; // finish for current metaDataRangesIter
