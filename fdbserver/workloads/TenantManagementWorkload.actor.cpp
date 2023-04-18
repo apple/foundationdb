@@ -1306,9 +1306,9 @@ struct TenantManagementWorkload : TestWorkload {
 						ASSERT_EQ(metaTenantsFiltered.size(), 0);
 					} else {
 						ASSERT_GT(metaTenantsFiltered.size(), 0);
-					}
-					for (const auto& [tenantName, entry] : metaTenantsFiltered) {
-						ASSERT_EQ(entry.tenantGroup, tGroup);
+						for (const auto& [tenantName, entry] : metaTenantsFiltered) {
+							ASSERT_EQ(entry.tenantGroup, tGroup);
+						}
 					}
 				} else {
 					state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
