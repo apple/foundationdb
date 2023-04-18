@@ -326,15 +326,13 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
 
 Future<Void> MockStorageServer::run() {
-	ssi.locality = LocalityData(Optional<Standalone<StringRef>>(),
-	                            Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                            Standalone<StringRef>(deterministicRandom()->randomUniqueID().toString()),
-	                            Optional<Standalone<StringRef>>());
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();
 	IFailureMonitor::failureMonitor().setStatus(ssi.address(), FailureStatus(false));
 
-	TraceEvent("MockStorageServerStart").detail("Address", ssi.address());
+	TraceEvent("MockStorageServerStart", ssi.id()).detail("Address", ssi.address());
+	auto& recruited = ssi;
+	DUMPTOKEN(recruited.getStorageMetrics);
 	addActor(serveStorageMetricsRequests(this, ssi));
 	addActor(counters.cc.traceCounters("MockStorageMetrics",
 	                                   ssi.id(),
@@ -562,8 +560,10 @@ void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf)
 
 void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf, uint64_t defaultDiskSpace) {
 	ASSERT(conf.storageTeamSize > 0);
+	ASSERT(!seedProcesses.empty());
 	configuration = conf;
 	std::vector<UID> serverIds;
+	fmt::print("Initial Team Size: {}, initial server Ids: ", conf.storageTeamSize);
 	for (int i = 1; i <= conf.storageTeamSize; ++i) {
 		UID id = indexToUID(i);
 		serverIds.push_back(id);
@@ -573,10 +573,12 @@ void MockGlobalState::initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& 
 		auto& process = seedProcesses[(i - 1) % seedProcesses.size()];
 		ssi.locality = process->locality;
 		process->ssInterfaces.push_back(ssi);
+		fmt::print("{}, ", id.toString());
 
 		allServers[id] = makeReference<MockStorageServer>(ssi, defaultDiskSpace);
 		allServers[id]->serverKeys.insert(allKeys, { MockShardStatus::COMPLETED, 0 });
 	}
+	fmt::print("\n");
 	shardMapping->assignRangeToTeams(allKeys, { Team(serverIds, true) });
 }
 
@@ -832,12 +834,14 @@ TEST_CASE("/MockGlobalState/initializeAsEmptyDatabaseMGS/SimpleThree") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 3;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
 
-	auto mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
-	for (int i = 1; i <= dbConfig.storageTeamSize; ++i) {
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
+
+	for (int i = 1; i <= dbConfig.db.storageTeamSize; ++i) {
 		auto id = MockGlobalState::indexToUID(i);
 		std::cout << "Check server " << i << "\n";
 		ASSERT(mgs->serverIsSourceForShard(id, allKeys));
@@ -925,11 +929,11 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SplittingFunctions") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
-
-	auto mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
+	std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
 	MockGlobalStateTester tester;
 	auto& mss = mgs->allServers.at(MockGlobalState::indexToUID(1));
@@ -947,11 +951,11 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("SetShardStatusUnitTestDbConfig").detail("Config", dbConfig.toString());
-
-	auto mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
+	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 
 	auto& mss = mgs->allServers.at(MockGlobalState::indexToUID(1));
 	mss->serverKeys.insert(allKeys, { MockShardStatus::UNSET, 0 }); // manually reset status
@@ -990,11 +994,11 @@ TEST_CASE("/MockGlobalState/MockStorageServer/GetKeyLocations") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("UnitTestDbConfig").detail("Config", dbConfig.toString());
-
-	auto mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
+	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 	// add one empty server
 	mgs->addStorageServer(StorageServerInterface(mgs->indexToUID(mgs->allServers.size() + 1)));
 
@@ -1056,11 +1060,13 @@ TEST_CASE("/MockGlobalState/MockStorageServer/WaitStorageMetricsRequest") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("WaitStorageMetricsRequestUnitTestConfig").detail("Config", dbConfig.toString());
 
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
 	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
+
 	std::for_each(mgs->allServers.begin(), mgs->allServers.end(), [](auto& server) {
 		server.second->metrics.byteSample.sample.insert("something"_sr, 500000);
 	});
@@ -1083,10 +1089,13 @@ TEST_CASE("/MockGlobalState/MockStorageServer/DataOpsSet") {
 	testConfig.simpleConfig = true;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
-	DatabaseConfiguration dbConfig = generateNormalDatabaseConfiguration(testConfig);
-	TraceEvent("DataOpsUnitTestConfig").detail("Config", dbConfig.toString());
+
+	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
+	TraceEvent("UnitTestDBConfig").detail("Config", dbConfig.db.toString());
 	state std::shared_ptr<MockGlobalState> mgs = std::make_shared<MockGlobalState>();
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig);
+	mgs->initializeClusterLayout(dbConfig);
+	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
+
 	state Future<Void> allServerFutures = waitForAll(mgs->runAllMockServers());
 
 	// insert
