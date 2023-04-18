@@ -158,13 +158,12 @@ struct BlobRestoreWorkload : TestWorkload {
 		state Standalone<VectorRef<KeyValueRef>> data;
 		state Transaction tr(cx);
 		state KeySelectorRef end = firstGreaterOrEqual(normalKeys.end);
-		state Arena arena;
 
 		loop {
 			try {
 				GetRangeLimits limits(self->readBatchSize_ - data.size());
 				limits.minRows = 0;
-				RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+				state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
 				for (auto& row : result) {
 					data.push_back_deep(data.arena(), KeyValueRef(row.key, row.value));
 				}
@@ -174,7 +173,7 @@ struct BlobRestoreWorkload : TestWorkload {
 				if (data.size() == self->readBatchSize_) {
 					break;
 				}
-				begin = firstGreaterOrEqual(result.getReadThrough(arena));
+				begin = result.nextBeginKeySelector();
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}

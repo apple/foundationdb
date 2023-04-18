@@ -35,7 +35,6 @@
 ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
-	state Arena beginKeyArena;
 
 	try {
 		loop {
@@ -50,7 +49,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 				return Void();
 			}
 
-			begin = firstGreaterOrEqual(rep.getReadThrough(beginKeyArena));
+			begin = rep.nextBeginKeySelector();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {

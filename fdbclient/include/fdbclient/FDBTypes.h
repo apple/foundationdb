@@ -776,6 +776,17 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		return keyAfter(back().key, arena);
 	}
 
+	// Helper function to get the next range scan's BeginKeySelector, currently only for non-reverse range read.
+	// TODO: add another function for reverse range read
+	KeySelectorRef nextBeginKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterThan(back().key);
+	}
+
 	void setReadThrough(KeyRef key) {
 		ASSERT(more);
 		ASSERT(!readThrough.present());
