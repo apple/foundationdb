@@ -121,12 +121,13 @@ class GlobalTagThrottlerImpl {
 		Smoother perClientRate;
 		Smoother targetRate;
 		double transactionsLastAdded;
+		double lastLogged;
 
 	public:
 		explicit PerTagStatistics()
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()) {}
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()), lastLogged(0) {}
 
 		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
 
@@ -159,6 +160,10 @@ class GlobalTagThrottlerImpl {
 		bool recentTransactionsAdded() const {
 			return now() - transactionsLastAdded < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 		}
+
+		bool canLog() const { return now() - lastLogged > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRACE_INTERVAL; }
+
+		void updateLastLogged() { lastLogged = now(); }
 	};
 
 	struct StorageServerInfo {
@@ -458,6 +463,9 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
+			if (!stats.canLog()) {
+				te.disable();
+			}
 			bool isBusy{ false };
 			auto const targetTps = getTargetTps(tag, isBusy, te);
 			if (isBusy) {
@@ -467,6 +475,7 @@ public:
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
 				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
+				stats.updateLastLogged();
 			} else {
 				te.disable();
 			}
@@ -483,6 +492,9 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
+			if (!stats.canLog()) {
+				te.disable();
+			}
 			auto const targetTps = getTargetTps(tag, isBusy, te);
 
 			if (isBusy) {
@@ -493,6 +505,7 @@ public:
 				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
 				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
 				te.detail("ClientTps", clientRate.tpsRate);
+				stats.updateLastLogged();
 			} else {
 				te.disable();
 			}

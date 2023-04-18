@@ -718,6 +718,8 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below a certain threshold
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
+	// Interval at which ratekeeper logs statistics for each tag:
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
