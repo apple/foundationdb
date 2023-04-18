@@ -750,11 +750,14 @@ struct GetRangeLimits {
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
-	bool more; // True if values remain in the *key* range requested (possibly beyond the
-	           // limits requested), but not necessarily only if, for example, in getRangeStream(), 'more' is always set
-	           // to true, as each stream fragment doesn't know if it's the last one. Instead, it uses
-	           // `error_code_end_of_stream` for the end.
-	           // False implies that no such values remain
+
+	// True if the range may have more keys in it (possibly beyond the specified limits).
+	// 'more' can be true even if there are no keys left in the range, e.g. if a shard boundary is hit, it may or may
+	// not have more keys left, but 'more' will be set to true in that case.
+	// Additionally, 'getRangeStream()' always sets 'more' to true and uses the 'end_of_stream' error to indicate that a
+	// range is exhausted.
+	// If 'more' is false, the range is guaranteed to have been exhausted.
+	bool more;
 
 	// Only present when 'more' is true, for example, when the read reaches the shard boundary, 'readThrough' is set to
 	// the shard boundary and the client's next range read should start with the 'readThrough'.
@@ -765,18 +768,18 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	// if reverse) of the range which was read.
 	Optional<KeyRef> readThrough;
 
-	// return the value represent the end (or beginning if reverse) of the range which was read
-	KeyRef getReadThrough(Arena& arena) const {
+	// return the value represent the end of the range which was read, it's only for non-reverse range read.
+	// TODO: add support for reverse range read
+	Key getReadThrough() const {
 		ASSERT(more);
 		if (readThrough.present()) {
 			return readThrough.get();
 		}
 		ASSERT(size() > 0);
-		// TODO: is this still right if reverse
-		return keyAfter(back().key, arena);
+		return keyAfter(back().key);
 	}
 
-	// Helper function to get the next range scan's BeginKeySelector, currently only for non-reverse range read.
+	// Helper function to get the next range scan's BeginKeySelector, it's only for non-reverse range read.
 	// TODO: add another function for reverse range read
 	KeySelectorRef nextBeginKeySelector() const {
 		ASSERT(more);
