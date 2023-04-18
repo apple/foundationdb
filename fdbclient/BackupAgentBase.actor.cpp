@@ -1375,6 +1375,7 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
 		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), tagQuotaKeys);
 	}
 
 	return systemBackupRanges;
