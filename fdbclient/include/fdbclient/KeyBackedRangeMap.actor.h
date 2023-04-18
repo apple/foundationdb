@@ -76,7 +76,7 @@ struct KeyRangeMapSnapshot {
 		}
 
 		bool operator==(const RangeIter& rhs) const { return impl == rhs.impl; }
-		bool operator!=(const RangeIter& rhs) const { return impl == rhs.impl; }
+		bool operator!=(const RangeIter& rhs) const { return impl != rhs.impl; }
 	};
 
 	// Range-for compatible object representing a list of contiguous ranges.
