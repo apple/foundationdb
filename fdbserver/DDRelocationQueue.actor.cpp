@@ -1180,11 +1180,14 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
 		ev.detail("StorageMetrics", decision.metrics.toString());
 	}
-	// tell if the splitter acted as expected for write bandwidth splitting
+
 	if (decision.rd.reason == RelocateReason::WRITE_SPLIT) {
+		// tell if the splitter acted as expected for write bandwidth splitting
 		// SOMEDAY: trace the source team write bytes if necessary
 		ev.detail("ShardWriteBytes", decision.metrics.bytesWrittenPerKSecond)
 		    .detail("ParentShardWriteBytes", decision.parentMetrics.get().bytesWrittenPerKSecond);
+	} else if (decision.rd.reason == RelocateReason::SIZE_SPLIT) {
+		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
 	}
 }
 // This actor relocates the specified keys to a good place.

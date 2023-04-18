@@ -55,6 +55,7 @@
 #include "flow/serialize.h"
 
 void RelocateShard::setParentRange(KeyRange const& parent) {
+	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
 	parent_range = parent;
 }
 
