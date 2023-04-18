@@ -1160,6 +1160,18 @@ public:
 		return existingShards;
 	}
 
+	void flushShard(std::string shardId) {
+		auto it = physicalShards.find(shardId);
+		if (it == physicalShards.end()) {
+			return;
+		}
+		rocksdb::FlushOptions fOptions;
+		fOptions.wait = true;
+		fOptions.allow_write_stall = true;
+
+		db->Flush(fOptions, it->second->cf);
+	}
+
 	void closeAllShards() {
 		if (dbOptions.rate_limiter != nullptr) {
 			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
@@ -2511,6 +2523,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return res;
 	}
 
+	void flushShard(std::string shardId) { return shardManager.flushShard(shardId); }
+
 	void checkWaiters(const FlowLock& semaphore, int maxWaiters) {
 		if (semaphore.waiters() > maxWaiters) {
 			++counters.immediateThrottle;
@@ -3271,6 +3285,11 @@ TEST_CASE("noSim/ShardedRocksDB/RangeClearUserKey") {
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
+
+	std::cout << "start flush\n";
+	auto rocksdb = (ShardedRocksDBKeyValueStore*)kvStore;
+	rocksdb->flushShard("shard-1");
+	std::cout << "flush complete\n";
 
 	{
 		Future<Void> closed = kvStore->onClosed();
