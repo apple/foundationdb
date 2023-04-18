@@ -2694,15 +2694,15 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
 	wait(kvStore->init());
 
-	state KeyRef shardPrefix = "prefix/"_sr;
+	state KeyRef shardPrefix = "\xffprefix/"_sr;
 
 	state int i = 0;
-	for (; i < 5000; ++i) {
-		state std::string key1 = format("prefix/%d", i);
-		state std::string key2 = format("prefix/%d", i + 1);
+	for (; i < 50000; ++i) {
+		state std::string key1 = format("\xffprefix/%d", i);
+		state std::string key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
