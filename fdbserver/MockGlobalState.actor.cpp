@@ -47,10 +47,13 @@ public:
 			TraceEvent(SevDebug, "MGSWaitStorageMetrics")
 			    .detail("Phase", "GetLocation")
 			    .detail("KeyRange", keys.toString())
-			    .detail("LocationsCount", locations.size());
-			// NOTE(xwang): in native API, there's code handling the non-equal situation, but I think in mock world
-			// there shouldn't have any delay to update the locations.
-			ASSERT_EQ(expectedShardCount, locations.size());
+			    .detail("LocationsCount", locations.size())
+			    .detail("ExpectedShardCount", expectedShardCount);
+
+			// NOTE(xwang): in native API, there's code handling the non-equal situation, but in mock world it's
+			// possible for split shards stay in the same location
+			CODE_PROBE(expectedShardCount >= 0 && locations.size() != expectedShardCount,
+			           "Some shard is in the same location.");
 
 			Optional<StorageMetrics> res =
 			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
