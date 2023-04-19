@@ -286,7 +286,7 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	bool isCurrentGrvProxy(UID proxyId) const;
-	Future<Void> onProxiesChanged() const;
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Get storage stats of a storage server from the cached healthy metrics if now() - lastUpdate < maxStaleness.
 	// Otherwise, ask GRVProxy for the up-to-date health metrics.
@@ -763,6 +763,14 @@ public:
 	// { "InitializationError" : <error code> }
 	Standalone<StringRef> getClientStatus();
 
+	// Gets a database level backoff delay time in seconds.
+	double getBackoff() { return backoffDelay; }
+
+	// Updates internal Backoff state when a request fails or succeeds.
+	// E.g., commit_proxy_memory_limit_exceeded error means the database is overloaded
+	// and the client should back off more significantly than transaction-level errors.
+	void updateBackoff(const Error& err);
+
 private:
 	using WatchMapKey = std::pair<int64_t, Key>;
 	using WatchMapKeyHasher = boost::hash<WatchMapKey>;
@@ -784,6 +792,7 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+	double backoffDelay = 0.0;
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
