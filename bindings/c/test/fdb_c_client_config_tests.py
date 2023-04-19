@@ -97,6 +97,7 @@ class ClientConfigTest:
         self.status_json = None
 
         # Configuration parameters to be set directly as needed
+        self.tls_disable_plaintext_connection = False
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -155,7 +156,7 @@ class ClientConfigTest:
         self.test_cluster_file = self.test_dir.joinpath(
             "{}.cluster".format(random_alphanum_string(16))
         )
-        port = self.cluster.port_provider.get_free_port()
+        port = self.cluster.port_provider.get_free_port()  # noqa: F841
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
@@ -267,6 +268,9 @@ class ClientConfigTest:
         if self.disable_client_bypass:
             cmd_args += ["--network-option-disable_client_bypass", ""]
 
+        if self.disable_client_bypass:
+            cmd_args += ["--tls-disable-plaintext-connection", ""]
+
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
 
@@ -337,6 +341,14 @@ class ClientConfigTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.cluster.tear_down()
+
+    def test_tls_disable_plaintext_connection(self):
+        # Local client only
+        test = ClientConfigTest(self)
+        test.print_status = True
+        test.tls_disable_plaintext_connection = True
+        test.exec()
+        test.check_healthy_status(False)
 
     def test_local_client_only(self):
         # Local client only
@@ -610,7 +622,7 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
-        prev_ver_trace = self.find_trace_file(
+        prev_ver_trace = self.find_trace_file(  # noqa: F841
             with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
         )
         # there have been sporadic check failures in the trace check below, so we comment this out for the time being
@@ -771,7 +783,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-        Unit tests for running FDB client with different configurations. 
+        Unit tests for running FDB client with different configurations.
         Also accepts python unit tests command line arguments.
         """,
     )
