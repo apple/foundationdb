@@ -197,6 +197,7 @@ struct CommonStorageCounters {
 	// The number of key-value pairs fetched by fetchKeys()
 	Counter kvFetched;
 
+	// name and id are the inputs to CounterCollection initialization.
 	CommonStorageCounters(const std::string& name, const std::string& id);
 };
 
