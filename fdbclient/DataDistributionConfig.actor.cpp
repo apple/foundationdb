@@ -23,35 +23,35 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 json_spirit::mValue DDConfiguration::toJSON(RangeConfigMapSnapshot const& config, bool includeDefaultRanges) {
-    json_spirit::mObject doc;
-    json_spirit::mArray &ranges = (doc["ranges"] = json_spirit::mArray()).get_array();
-    int defaultRanges = 0;
-    int configuredRanges = 0;
+	json_spirit::mObject doc;
+	json_spirit::mArray& ranges = (doc["ranges"] = json_spirit::mArray()).get_array();
+	int defaultRanges = 0;
+	int configuredRanges = 0;
 
-    // Range config with no options set
-    DDRangeConfig defaultRangeConfig;
+	// Range config with no options set
+	DDRangeConfig defaultRangeConfig;
 
-    // Add each non-default configured range to the output ranges doc
-    for(auto const &rv : config.ranges()) {
-        bool configured = rv.value() != defaultRangeConfig;
-        if(configured) {
-            ++configuredRanges;
-        } else {
-            ++defaultRanges;
-        }
+	// Add each non-default configured range to the output ranges doc
+	for (auto const& rv : config.ranges()) {
+		bool configured = rv.value() != defaultRangeConfig;
+		if (configured) {
+			++configuredRanges;
+		} else {
+			++defaultRanges;
+		}
 
-        if(includeDefaultRanges || configured) {
-            json_spirit::mObject range;
-            range["begin"] = rv.range().begin.toString();
-            range["end"] = rv.range().end.toString();
-            range["configuration"] = rv.value().toJSON();
-            ranges.push_back(std::move(range));
-        }
-    }
+		if (includeDefaultRanges || configured) {
+			json_spirit::mObject range;
+			range["begin"] = rv.range().begin.toString();
+			range["end"] = rv.range().end.toString();
+			range["configuration"] = rv.value().toJSON();
+			ranges.push_back(std::move(range));
+		}
+	}
 
-    doc["numConfiguredRanges"] = configuredRanges;
-    doc["numDefaultRanges"] = defaultRanges;
-    doc["numBoundaries"] = config.map.size();
+	doc["numConfiguredRanges"] = configuredRanges;
+	doc["numDefaultRanges"] = defaultRanges;
+	doc["numBoundaries"] = (int)config.map.size();
 
-    return doc;
+	return doc;
 }
