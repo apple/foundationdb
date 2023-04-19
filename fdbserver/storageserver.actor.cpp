@@ -10823,6 +10823,12 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 	state Error error = success();
 	state bool timedout = false;
 
+	// state UID metricReqId = deterministicRandom()->randomUniqueID();
+	DisabledTraceEvent(SevDebug, "WaitMetrics", metricReqId)
+	    .detail("Keys", req.keys)
+	    .detail("Metrics", metrics.toString())
+	    .detail("ReqMin", req.min.toString())
+	    .detail("ReqMax", req.max.toString());
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
 		req.reply.send(metrics);
