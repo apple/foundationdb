@@ -5997,7 +5997,8 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			} catch (Error& e) {
 				if (e.code() != error_code_end_of_stream && e.code() != error_code_connection_failed &&
 				    e.code() != error_code_transaction_too_old && e.code() != error_code_future_version &&
-				    e.code() != error_code_process_behind && e.code() != error_code_server_overloaded) {
+				    e.code() != error_code_process_behind && e.code() != error_code_server_overloaded &&
+				    e.code() != error_code_proxy_memory_limit_exceeded) {
 					throw;
 				}
 				lastError = e;
