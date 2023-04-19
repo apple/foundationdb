@@ -294,7 +294,7 @@ public:
 	Future<Reference<CommitProxyInfo>> getCommitProxiesFuture(UseProvisionalProxies useProvisionalProxies);
 	Reference<GrvProxyInfo> getGrvProxies(UseProvisionalProxies useProvisionalProxies);
 	bool isCurrentGrvProxy(UID proxyId) const;
-	Future<Void> onProxiesChanged() const;
+	Future<Void> onProxiesChanged();
 	Future<HealthMetrics> getHealthMetrics(bool detailed);
 	// Pass a negative value for `shardLimit` to indicate no limit on the shard number.
 	Future<StorageMetrics> getStorageMetrics(KeyRange const& keys, int shardLimit);
@@ -656,9 +656,18 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
+	// Gets a database level backoff delay time in seconds.
+	double getBackoff() { return backoffDelay; }
+
+	// Updates internal Backoff state when a request fails or succeeds.
+	// E.g., commit_proxy_memory_limit_exceeded error means the database is overloaded
+	// and the client should back off more significantly than transaction-level errors.
+	void updateBackoff(const Error& err);
+
 private:
 	std::unordered_map<std::pair<int64_t, Key>, Reference<WatchMetadata>, boost::hash<std::pair<int64_t, Key>>>
 	    watchMap;
+	double backoffDelay = 0.0;
 };
 
 #endif

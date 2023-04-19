@@ -47,6 +47,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/GlobalConfig.actor.h"
 #include "fdbclient/IKnobCollection.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/JsonBuilder.h"
 #include "fdbclient/KeyBackedTypes.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -1998,7 +1999,8 @@ void DatabaseContext::clearFailedEndpointOnHealthyServer(const Endpoint& endpoin
 	failedEndpointsOnHealthyServersInfo.erase(endpoint);
 }
 
-Future<Void> DatabaseContext::onProxiesChanged() const {
+Future<Void> DatabaseContext::onProxiesChanged() {
+	backoffDelay = 0.0;
 	return this->proxiesChangeTrigger.onTrigger();
 }
 
@@ -3010,6 +3012,26 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	}
 }
 
+void DatabaseContext::updateBackoff(const Error& err) {
+	switch (err.code()) {
+	case error_code_success:
+		backoffDelay = 0.0;
+		break;
+
+	case error_code_commit_proxy_memory_limit_exceeded:
+		if (backoffDelay == 0.0) {
+			backoffDelay = CLIENT_KNOBS->DEFAULT_BACKOFF;
+		} else {
+			backoffDelay = std::min(backoffDelay * CLIENT_KNOBS->BACKOFF_GROWTH_RATE,
+			                        CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
+		}
+		break;
+
+	default:
+		ASSERT_WE_THINK(false);
+	}
+}
+
 ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Database cx,
     Optional<TenantName> tenant,
@@ -3024,57 +3046,57 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
-	state Transaction tr(cx); // Only used for exponential backoff
 	loop {
 		try {
-			loop {
-				++cx->transactionKeyServerLocationRequests;
-				choose {
-					when(wait(cx->onProxiesChanged())) {
-						tr.reset();
-					}
-					when(GetKeyServerLocationsReply _rep =
-					         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-					                               &CommitProxyInterface::getKeyServersLocations,
-					                               GetKeyServerLocationsRequest(span.context,
-					                                                            tenant.castTo<TenantNameRef>(),
-					                                                            keys.begin,
-					                                                            keys.end,
-					                                                            limit,
-					                                                            reverse,
-					                                                            version,
-					                                                            keys.arena()),
-					                               TaskPriority::DefaultPromiseEndpoint))) {
-						++cx->transactionKeyServerLocationRequestsCompleted;
-						state GetKeyServerLocationsReply rep = _rep;
-						if (debugID.present())
-							g_traceBatch.addEvent(
-							    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
-						ASSERT(rep.results.size());
+			double backoff = cx->getBackoff();
+			if (backoff > 0.0) {
+				wait(delay(backoff));
+			}
+			++cx->transactionKeyServerLocationRequests;
+			choose {
+				when(wait(cx->onProxiesChanged())) { }
+				when(GetKeyServerLocationsReply _rep =
+							wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+												&CommitProxyInterface::getKeyServersLocations,
+												GetKeyServerLocationsRequest(span.context,
+																			tenant.castTo<TenantNameRef>(),
+																			keys.begin,
+																			keys.end,
+																			limit,
+																			reverse,
+																			version,
+																			keys.arena()),
+												TaskPriority::DefaultPromiseEndpoint))) {
+					++cx->transactionKeyServerLocationRequestsCompleted;
+					state GetKeyServerLocationsReply rep = _rep;
+					if (debugID.present())
+						g_traceBatch.addEvent(
+							"TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+					ASSERT(rep.results.size());
 
-						state std::vector<KeyRangeLocationInfo> results;
-						state int shard = 0;
-						for (; shard < rep.results.size(); shard++) {
-							// FIXME: these shards are being inserted into the map sequentially, it would be much more
-							// CPU efficient to save the map pairs and insert them all at once.
-							results.emplace_back(
-							    rep.tenantEntry,
-							    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
-							    cx->setCachedLocation(
-							        tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
-							wait(yield());
-						}
-						updateTssMappings(cx, rep);
-						updateTagMappings(cx, rep);
-
-						return results;
+					state std::vector<KeyRangeLocationInfo> results;
+					state int shard = 0;
+					for (; shard < rep.results.size(); shard++) {
+						// FIXME: these shards are being inserted into the map sequentially, it would be much more
+						// CPU efficient to save the map pairs and insert them all at once.
+						results.emplace_back(
+							rep.tenantEntry,
+							(toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+							cx->setCachedLocation(
+								tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
+						wait(yield());
 					}
+					updateTssMappings(cx, rep);
+					updateTagMappings(cx, rep);
+
+					cx->updateBackoff(success());
+					return results;
 				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_proxy_memory_limit_exceeded) {
 				// Eats proxy_memory_limit_exceeded error from commit proxies
-				delay(tr.getBackoff(e.code()));
+				cx->updateBackoff(e);
 				continue;
 			}
 			if (e.code() == error_code_tenant_not_found) {
