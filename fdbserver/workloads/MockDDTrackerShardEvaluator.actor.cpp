@@ -56,6 +56,11 @@ public:
 	int minSpaceKeyCount = 1000, maxSpaceKeyCount = 1000;
 	int linearStride = 10 * (1 << 20), linearStartSize = 10 * (1 << 20);
 
+	// check threshold
+	int checkMinShardCount = 1;
+	int checkMinSizeSplit = 0;
+	int checkMinWriteSplit = 0;
+
 	MockDDTrackerShardEvaluatorWorkload(WorkloadContext const& wcx)
 	  : MockDDTestWorkload(wcx), ddcx(deterministicRandom()->randomUniqueID()) {
 		keySpaceCount = getOption(options, "keySpaceCount"_sr, keySpaceCount);
@@ -64,6 +69,9 @@ public:
 		maxSpaceKeyCount = getOption(options, "maxSpaceKeyCount"_sr, maxSpaceKeyCount);
 		linearStride = getOption(options, "linearStride"_sr, linearStride);
 		linearStartSize = getOption(options, "linearStartSize"_sr, linearStartSize);
+		checkMinShardCount = getOption(options, "checkMinShardCount"_sr, checkMinShardCount);
+		checkMinSizeSplit = getOption(options, "checkMinSizeSplit"_sr, checkMinSizeSplit);
+		checkMinWriteSplit = getOption(options, "checkMinWriteSplit"_sr, checkMinWriteSplit);
 	}
 
 	void populateRandomStrategy() {
@@ -135,9 +143,17 @@ public:
 
 	ACTOR static Future<Void> relocateShardReporter(MockDDTrackerShardEvaluatorWorkload* self,
 	                                                FutureStream<RelocateShard> input) {
-		loop choose {
-			when(RelocateShard rs = waitNext(input)) {
-				++self->rsReasonCounts[rs.reason];
+		loop {
+			try {
+				choose {
+					when(RelocateShard rs = waitNext(input)) {
+						++self->rsReasonCounts[rs.reason];
+					}
+				}
+			} catch (Error& e) {
+				if (e.code() != error_code_wrong_shard_server)
+					throw e;
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY));
 			}
 		}
 	}
@@ -183,8 +199,14 @@ public:
 		if (!enabled)
 			return true;
 
-		std::cout << "Check phase shards count: " << shards.size() << "\n";
-		ASSERT_GT(shards.size(), 1);
+		fmt::print("Check phase shards count: {}\n", shards.size());
+		ASSERT_GE(shards.size(), checkMinShardCount);
+		for (auto& [r, c] : rsReasonCounts) {
+			fmt::print("{}: {}\n", r.toString(), c);
+		}
+		ASSERT_GE(rsReasonCounts[RelocateReason::SIZE_SPLIT], checkMinSizeSplit);
+		ASSERT_GE(rsReasonCounts[RelocateReason::WRITE_SPLIT], checkMinWriteSplit);
+
 		actors.clear(true);
 		return true;
 	}
