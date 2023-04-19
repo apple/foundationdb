@@ -83,7 +83,7 @@ Future<EKPGetLatestBaseCipherKeysReply> _getUncachedLatestEncryptCipherKeys(Refe
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetLatestEncryptCipherKeysRequestFailed").error(reply.error.get());
-			throw encrypt_keys_fetch_failed();
+			throw reply.error.get();
 		}
 		return reply;
 	} catch (Error& e) {
@@ -186,8 +186,10 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetEncryptCipherKeysRequestFailed").error(reply.error.get());
-			throw encrypt_keys_fetch_failed();
+			throw reply.error.get();
 		}
+		// The code below is used only during simulation to test backup/restore ability to handle encryption keys
+		// not being found for deleted tenants
 		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
 			std::unordered_set<int64_t> tenantIdsToDrop =
 			    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
@@ -195,7 +197,11 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 				for (auto& baseCipherInfo : request.baseCipherInfos) {
 					if (tenantIdsToDrop.count(baseCipherInfo.domainId)) {
 						TraceEvent("GetEncryptCipherKeysSimulatedError").detail("DomainId", baseCipherInfo.domainId);
-						throw encrypt_keys_fetch_failed();
+						if (deterministicRandom()->coinflip()) {
+							throw encrypt_keys_fetch_failed();
+						} else {
+							throw encrypt_key_not_found();
+						}
 					}
 				}
 			}
