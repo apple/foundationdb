@@ -32,7 +32,7 @@ public:
 
 	// Returns a map of GRV proxy IDs to throttling-relevant GRV proxy
 	// statistics.
-	virtual std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& = 0;
+	virtual std::unordered_map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& = 0;
 
 	// Remove GRV proxies that have not sent messages recently from
 	// internal state
@@ -62,7 +62,7 @@ class RKRateServer : public IRKRateServer {
 	FutureStream<GetRateInfoRequest> getRateInfo;
 	Smoother smoothReleasedTransactions;
 	Smoother smoothBatchReleasedTransactions;
-	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
+	std::unordered_map<UID, RKGrvProxyInfo> grvProxyInfo;
 	bool lastLimited{ false };
 
 public:
@@ -70,7 +70,7 @@ public:
 	~RKRateServer();
 	double getSmoothReleasedTransactionRate() const override;
 	double getSmoothBatchReleasedTransactionRate() const override;
-	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override;
+	std::unordered_map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override;
 	void cleanupExpiredGrvProxies() override;
 	void updateLastLimited(double batchTpsLimit) override;
 	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,
@@ -80,14 +80,14 @@ public:
 };
 
 class MockRKRateServer : public IRKRateServer {
-	std::map<UID, RKGrvProxyInfo> grvProxyInfo;
+	std::unordered_map<UID, RKGrvProxyInfo> grvProxyInfo;
 	double rate;
 
 public:
 	explicit MockRKRateServer(double rate) : rate(rate) {}
 	double getSmoothReleasedTransactionRate() const override { return rate; }
 	double getSmoothBatchReleasedTransactionRate() const override { return 0; }
-	std::map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override { return grvProxyInfo; }
+	std::unordered_map<UID, RKGrvProxyInfo> const& getGrvProxyInfo() const& override { return grvProxyInfo; }
 	void cleanupExpiredGrvProxies() override {}
 	void updateLastLimited(double batchTpsLimit) override {}
 	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,

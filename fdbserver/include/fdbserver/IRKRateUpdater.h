@@ -53,8 +53,8 @@ class RKRateUpdater : public IRKRateUpdater {
 	// in the cluster.
 	static int64_t getTotalDiskUsageBytes(IRKMetricsTracker const&);
 
-	// If verbose tracing is enabled, randomly determine if
-	// a particular rate calculation should be verbose
+	// If verbose tracing is enabled, randomly determine if the
+	// tracing for a particular rate calculation should be verbose
 	static bool shouldBeVerbose();
 
 	void updateHealthMetricsStorageStats(IRKMetricsTracker const&);
