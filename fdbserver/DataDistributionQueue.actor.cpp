@@ -386,15 +386,19 @@ void launchDest(RelocateData& relocation,
 	}
 }
 
+void completeDest(const RelocateData& relocation, std::map<UID, Busyness>& destBusymap) {
+	int destWorkFactor = getDestWorkFactor();
+	for (UID id : relocation.completeDests) {
+		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
+	}
+}
+
 void complete(RelocateData const& relocation, std::map<UID, Busyness>& busymap, std::map<UID, Busyness>& destBusymap) {
 	ASSERT(relocation.workFactor > 0);
 	for (int i = 0; i < relocation.src.size(); i++)
 		busymap[relocation.src[i]].removeWork(relocation.priority, relocation.workFactor);
 
-	int destWorkFactor = getDestWorkFactor();
-	for (UID id : relocation.completeDests) {
-		destBusymap[id].removeWork(relocation.priority, destWorkFactor);
-	}
+	completeDest(relocation, destBusymap);
 }
 
 ACTOR Future<Void> dataDistributionRelocator(struct DDQueueData* self,
@@ -1388,6 +1392,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueueData* self, RelocateData rd,
 			} else {
 				TEST(true); // move to removed server
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				if (!signalledTransferComplete) {
+					// Update destination busyness map to allow further movement to them.
+					// signalling transferComplete calls completeDest() in complete(), so
+					// doing so here would double-complete the work.
+					completeDest(rd, self->destBusymap);
+				}
 				rd.completeDests.clear();
 				wait(delay(SERVER_KNOBS->RETRY_RELOCATESHARD_DELAY, TaskPriority::DataDistributionLaunch));
 			}
