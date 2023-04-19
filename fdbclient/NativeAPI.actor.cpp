@@ -34,6 +34,7 @@
 
 #include "boost/algorithm/string.hpp"
 
+#include "fdbclient/Knobs.h"
 #include "flow/CodeProbe.h"
 #include "fmt/format.h"
 
@@ -2043,7 +2044,8 @@ void DatabaseContext::clearFailedEndpointOnHealthyServer(const Endpoint& endpoin
 	failedEndpointsOnHealthyServersInfo.erase(endpoint);
 }
 
-Future<Void> DatabaseContext::onProxiesChanged() const {
+Future<Void> DatabaseContext::onProxiesChanged() {
+	backoffDelay = 0.0;
 	return this->proxiesChangeTrigger.onTrigger();
 }
 
@@ -3103,6 +3105,26 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 	                          : latestVersion);
 }
 
+void DatabaseContext::updateBackoff(const Error& err) {
+	switch (err.code()) {
+	case error_code_success:
+		backoffDelay = 0.0;
+		break;
+
+	case error_code_commit_proxy_memory_limit_exceeded:
+		if (backoffDelay == 0.0) {
+			backoffDelay = CLIENT_KNOBS->DEFAULT_BACKOFF;
+		} else {
+			backoffDelay = std::min(backoffDelay * CLIENT_KNOBS->BACKOFF_GROWTH_RATE,
+			                        CLIENT_KNOBS->RESOURCE_CONSTRAINED_MAX_BACKOFF);
+		}
+		break;
+
+	default:
+		ASSERT_WE_THINK(false);
+	}
+}
+
 ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
     Database cx,
     TenantInfo tenant,
@@ -3117,14 +3139,15 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.Before");
 
-	state Transaction tr(cx); // Only used for exponential backoff
 	loop {
 		try {
+			double backoff = cx->getBackoff();
+			if (backoff > 0.0) {
+				wait(delay(backoff));
+			}
 			++cx->transactionKeyServerLocationRequests;
 			choose {
-				when(wait(cx->onProxiesChanged())) {
-					tr.reset();
-				}
+				when(wait(cx->onProxiesChanged())) {}
 				when(GetKeyServerLocationsReply _rep = wait(basicLoadBalance(
 				         cx->getCommitProxies(useProvisionalProxies),
 				         &CommitProxyInterface::getKeyServersLocations,
@@ -3151,13 +3174,14 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 					updateTssMappings(cx, rep);
 					updateTagMappings(cx, rep);
 
+					cx->updateBackoff(success());
 					return results;
 				}
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
 				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
-				delay(tr.getBackoff(e.code()));
+				cx->updateBackoff(e);
 				continue;
 			}
 
