@@ -3444,16 +3444,32 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 
 ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 	loop {
-		++cx->transactionTenantLookupRequests;
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(GetTenantIdReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                                  &CommitProxyInterface::getTenantId,
-			                                                  GetTenantIdRequest(tenant, latestVersion),
-			                                                  TaskPriority::DefaultPromiseEndpoint))) {
-				++cx->transactionTenantLookupRequestsCompleted;
-				return rep.tenantId;
+		try {
+			double backoff = cx->getBackoff();
+			if (backoff > 0.0) {
+				wait(delay(backoff));
 			}
+
+			++cx->transactionTenantLookupRequests;
+			choose {
+				when(wait(cx->onProxiesChanged())) {}
+				when(GetTenantIdReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+				                                                  &CommitProxyInterface::getTenantId,
+				                                                  GetTenantIdRequest(tenant, latestVersion),
+				                                                  TaskPriority::DefaultPromiseEndpoint))) {
+					++cx->transactionTenantLookupRequestsCompleted;
+					cx->updateBackoff(success());
+					return rep.tenantId;
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_commit_proxy_memory_limit_exceeded) {
+				// Eats commit_proxy_memory_limit_exceeded error from commit proxies
+				cx->updateBackoff(e);
+				continue;
+			}
+
+			throw;
 		}
 	}
 }
