@@ -2061,6 +2061,8 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (deterministicRandom()->random01() < 0.25) {
 			state ReadYourWritesTransaction tr(cx);
+			state bool verbose = false;
+
 			loop {
 				try {
 					TraceEvent("SettingCustomReplicas").log();
@@ -2090,7 +2092,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 						Optional<DDConfiguration::RangeConfigMap::RangeValue> verify =
 						    wait(rangeConfig.getRangeForKey(&tr, query));
 
-						if (KEYBACKEDTYPES_DEBUG) {
+						if (verbose) {
 							if (verify.present()) {
 								fmt::print("{} is in {} to {} with config {}\n",
 								           query.printable(),
@@ -2114,9 +2116,12 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 							ASSERT(snapshotRange.range().begin == verify->range.begin);
 							ASSERT(snapshotRange.range().end == verify->range.end);
 						}
+					}
 
-						fmt::print("Config: {}\n", json_spirit::write_string(DDConfiguration::toJSON(snapshot, true), json_spirit::pretty_print));
-
+					if (verbose) {
+						fmt::print("DD User Range Config:\n{}\n",
+						           json_spirit::write_string(DDConfiguration::toJSON(snapshot, true),
+						                                     json_spirit::pretty_print));
 					}
 
 					wait(tr.commit());

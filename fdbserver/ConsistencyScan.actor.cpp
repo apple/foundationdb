@@ -485,11 +485,11 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				// The custom range should completely contain the shard range or a shard boundary that should exist
 				// does not exist.
 				if (!configuredRange.contains(range)) {
-					fmt::print("configured range: {}:{}  shard range: {}:{}\n",
-					           configuredRange.begin,
-					           configuredRange.end,
-					           range.begin,
-					           range.end);
+					TraceEvent(SevWarn, "ConsistencyCheck_BoundaryMissing")
+					    .detail("ShardBegin", printable(range.begin))
+					    .detail("ShardEnd", printable(range.end))
+					    .detail("CustomBegin", configuredRange.begin)
+					    .detail("CustomEnd", configuredRange.end);
 					testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
 					return Void();
 				}
