@@ -1296,7 +1296,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 		}
 		return results;
 	} catch (Error& e) {
-		if (e.code() == error_code_encrypt_keys_fetch_failed) {
+		if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_encrypt_key_not_found) {
 			ASSERT(!isReservedEncryptDomain(blockDomainId));
 			TraceEvent(SevWarnAlways, "SnapshotRestoreEncryptKeyFetchFailed").detail("TenantId", blockDomainId);
 			CODE_PROBE(true, "Snapshot restore encrypt keys not found");
@@ -3765,7 +3765,8 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 			blockData = data;
 		} catch (Error& e) {
 			// It's possible a tenant was deleted and the encrypt key fetch failed
-			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_tenant_not_found) {
+			if (e.code() == error_code_encrypt_keys_fetch_failed || e.code() == error_code_tenant_not_found ||
+			    e.code() == error_code_encrypt_key_not_found) {
 				return Void();
 			}
 			throw;
