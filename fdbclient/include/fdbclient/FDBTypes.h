@@ -768,19 +768,19 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 	// if reverse) of the range which was read.
 	Optional<KeyRef> readThrough;
 
-	// return the value represent the end of the range which was read, it's only for non-reverse range read.
-	// TODO: add support for reverse range read
-	Key getReadThrough() const {
+	// return the value represents the end of the range which was read. If 'reverse' is true, returns the last key, as
+	// it should be used as the new "end" of the next query and the end key should be non-inclusive.
+	Key getReadThrough(bool reverse = false) const {
 		ASSERT(more);
 		if (readThrough.present()) {
 			return readThrough.get();
 		}
 		ASSERT(size() > 0);
-		return keyAfter(back().key);
+		return reverse ? back().key : keyAfter(back().key);
 	}
 
-	// Helper function to get the next range scan's BeginKeySelector, it's only for non-reverse range read.
-	// TODO: add another function for reverse range read
+	// Helper function to get the next range scan's BeginKeySelector, use it when the range read is non-reverse,
+	// otherwise, please use nextEndKeySelector().
 	KeySelectorRef nextBeginKeySelector() const {
 		ASSERT(more);
 		if (readThrough.present()) {
@@ -788,6 +788,16 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		}
 		ASSERT(size() > 0);
 		return firstGreaterThan(back().key);
+	}
+
+	// Helper function to get the next range scan's EndKeySelector, use it when the range read is reverse.
+	KeySelectorRef nextEndKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterOrEqual(back().key);
 	}
 
 	void setReadThrough(KeyRef key) {
