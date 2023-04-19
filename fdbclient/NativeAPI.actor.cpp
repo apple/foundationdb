@@ -7977,6 +7977,8 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 		                              UseProvisionalProxies::False,
 		                              version));
 		if (expectedShardCount >= 0 && locations.size() != expectedShardCount) {
+			// NOTE(xwang): This happens only when a split shard haven't been moved to another location. We may need to
+			// change this if we allow split shard stay the same location.
 			return std::make_pair(Optional<StorageMetrics>(), locations.size());
 		}
 
