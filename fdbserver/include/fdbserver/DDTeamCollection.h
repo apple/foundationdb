@@ -286,6 +286,8 @@ protected:
 
 		double pivotAvailableSpaceRatio = 0.0;
 		double pivotCPU = 100.0;
+		double strictPivotAS = 0.0;
+		double strictPivotCPU = 100.0;
 		double minTeamAvgCPU = std::numeric_limits<double>::max();
 	} teamPivots;
 
@@ -327,6 +329,9 @@ protected:
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.
 	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
+
+	// Evaluate the CPU and AvailableSpace of source team.
+	Optional<Reference<IDataDistributionTeam>> evaluateSourceTeam(const std::vector<UID>& servers);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 

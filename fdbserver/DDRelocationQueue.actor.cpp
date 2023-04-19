@@ -293,6 +293,10 @@ public:
 		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
 	}
 
+	bool hasLowerCpu(double cpuThreshold) const override {
+		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
+	}
+
 	Future<Void> updateStorageMetrics() override {
 		std::vector<Future<Void>> futures;
 
@@ -1408,17 +1412,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
-						auto req = GetTeamRequest(destTeamSelect,
-						                          PreferLowerDiskUtil::True,
-						                          TeamMustHaveShards::False,
-						                          PreferLowerReadUtil::True,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
-						                          inflightPenalty,
-						                          rd.keys);
+						destTeamSelect.setForRelocateShard(ForRelocateShard::True);
+						state GetTeamRequest req =
+						    GetTeamRequest(destTeamSelect,
+						                   PreferLowerDiskUtil::True,
+						                   TeamMustHaveShards::False,
+						                   PreferLowerReadUtil::True,
+						                   ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
+						                   inflightPenalty,
+						                   rd.keys);
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
-
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
@@ -1439,7 +1444,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								req.keys = rd.keys;
 							}
 						}
-
 						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 						// server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
@@ -1450,7 +1454,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
 							// getting the destination team or we could miss failure notifications for the storage
-							// servers in the destination team
+							// servers in the d:estination team
 							TraceEvent("BestTeamNotReady");
 							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady]++;
 							foundTeams = false;
