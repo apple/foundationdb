@@ -189,6 +189,9 @@ inline bool isActive() noexcept {
 	return detail::g_active;
 }
 
+// While this scope is active, default allocator is overridden for Arena and PacketBuffer to test correct post-use
+// memory policy: e.g. secure deletion of sensitive contents To ensure correct state management, nested creation of this
+// scope is not allowed Also, any memory allocated while this scope is active must be freed before the scope deactivates
 class ActiveScope {
 public:
 	ActiveScope();
@@ -197,6 +200,9 @@ public:
 
 void* allocate(size_t);
 void invalidate(void*);
+
+void trackWipedArea(const uint8_t* begin, int size);
+std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
 
 } // namespace keepalive_allocator
 
