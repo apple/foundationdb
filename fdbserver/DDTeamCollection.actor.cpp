@@ -54,7 +54,7 @@ void EligibilityCounter::reset(Type type) {
 	type_count[type] = 0;
 }
 
-unsigned EligibilityCounter::getCount(int combinedType) const {
+int EligibilityCounter::getCount(int combinedType) const {
 	unsigned minCount = std::numeric_limits<unsigned>::max();
 	for (auto& [t, c] : type_count) {
 		if ((combinedType & t) > 0 && minCount > c) {
@@ -303,9 +303,8 @@ public:
 					int currentIndex = (startIndex + i) % self->teams.size();
 					if (self->teams[currentIndex]->isHealthy()) {
 						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
-						bool eligible = eligibilityType == data_distribution::EligibilityCounter::NONE ||
-						                self->teams[currentIndex]->getEligibilityCount(eligibilityType) > 0;
-						if (!eligible) {
+						if (eligibilityType != data_distribution::EligibilityCounter::NONE &&
+						    self->teams[currentIndex]->getEligibilityCount(eligibilityType) <= 0) {
 							continue;
 						}
 
@@ -3282,7 +3281,8 @@ void DDTeamCollection::updateAvailableSpacePivots() {
 	}
 
 	if (!teamAvailableSpace.empty()) {
-		size_t pivot = teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO);
+		ASSERT_LT(SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO, 1.0);
+		size_t pivot = teamAvailableSpace.size() * SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO;
 		std::nth_element(
 		    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end(), std::greater{});
 		teamPivots.pivotAvailableSpaceRatio =
@@ -3311,7 +3311,8 @@ void DDTeamCollection::updateCpuPivots() {
 	}
 
 	if (!teamAverageCPU.empty()) {
-		size_t pivot = teamAverageCPU.size() * std::min(1.0, SERVER_KNOBS->CPU_PIVOT_RATIO);
+		ASSERT_LT(SERVER_KNOBS->CPU_PIVOT_RATIO, 1.0);
+		size_t pivot = teamAverageCPU.size() * SERVER_KNOBS->CPU_PIVOT_RATIO;
 		std::nth_element(teamAverageCPU.begin(), teamAverageCPU.begin() + pivot, teamAverageCPU.end());
 		teamPivots.pivotCPU = teamAverageCPU[pivot];
 	} else {

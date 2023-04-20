@@ -171,11 +171,17 @@ struct EncryptBaseCipherKey {
 	  : domainId(dId), baseCipherId(cipherId), baseCipherKey(cipherKey), baseCipherKCV(cipherKCV), refreshAt(refAtTS),
 	    expireAt(expAtTS) {}
 
-	bool isValid() const {
-		int64_t currTS = (int64_t)now();
-		return expireAt > currTS && refreshAt > currTS;
+	bool needsRefresh() const {
+		bool shouldRefresh = now() > refreshAt;
+		CODE_PROBE(shouldRefresh, "EKP: Key needs refresh");
+		return shouldRefresh;
 	}
-	bool isExpired() const { return now() > expireAt; }
+
+	bool isExpired() const {
+		bool expired = now() > expireAt;
+		CODE_PROBE(expired, "EKP: Key is expired");
+		return expired;
+	}
 };
 
 // TODO: could refactor both into CacheEntry<T> with T data, creationTimeSec, and noExpiry
@@ -206,6 +212,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> encryptionKeyRefresher;
 	Future<Void> blobMetadataRefresher;
+	Future<Void> logger;
 
 	EncryptBaseDomainIdCache baseCipherDomainIdCache;
 	EncryptBaseCipherDomainIdKeyIdCache baseCipherDomainIdKeyIdCache;
@@ -255,9 +262,12 @@ public:
 	    kmsBlobMetadataReqLatency("EKPKmsBlobMetadataReqLatency",
 	                              id,
 	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {}
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
+		logger = ekpCacheMetrics.traceCounters(
+		    "EncryptKeyProxyMetrics", id, SERVER_KNOBS->ENCRYPTION_LOGGING_INTERVAL, "EncryptKeyProxyMetrics");
+	}
 
-	EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
+	static EncryptBaseCipherDomainIdKeyIdCacheKey getBaseCipherDomainIdKeyIdCacheKey(
 	    const EncryptCipherDomainId domainId,
 	    const EncryptCipherBaseKeyId baseCipherId) {
 		return std::make_pair(domainId, baseCipherId);
@@ -307,7 +317,9 @@ public:
 		    .detail("DomId", domainId)
 		    .detail("BaseCipherId", baseCipherId)
 		    .detail("BaseCipherLen", baseCipherKey.size())
-		    .detail("BaseCipherKCV", baseCipherKCV);
+		    .detail("BaseCipherKCV", baseCipherKCV)
+		    .detail("RefreshAt", refreshAtTS)
+		    .detail("ExpireAt", expireAtTS);
 	}
 
 	void insertIntoBlobMetadataCache(const BlobMetadataDomainId domainId,
@@ -337,35 +349,19 @@ public:
 	}
 };
 
-ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData> ekpProxyData,
-                                                   KmsConnectorInterface kmsConnectorInf,
-                                                   EKPGetBaseCipherKeysByIdsRequest req) {
-	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
-	// for the rest, reachout to KMS to fetch the required details
-
-	state std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
-	                         EKPGetBaseCipherKeysRequestInfo,
-	                         boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>>>
+std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
+                   EKPGetBaseCipherKeysRequestInfo,
+                   boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>>>
+getLookupDetails(
+    Reference<EncryptKeyProxyData> ekpProxyData,
+    Optional<TraceEvent>& dbgTrace,
+    EKPGetBaseCipherKeysByIdsReply& keyIdsReply,
+    int& numHits,
+    std::unordered_set<EKPGetBaseCipherKeysRequestInfo, EKPGetBaseCipherKeysRequestInfo_Hash> dedupedCipherInfos) {
+	std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
+	                   EKPGetBaseCipherKeysRequestInfo,
+	                   boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>>>
 	    lookupCipherInfoMap;
-
-	state int numHits = 0;
-	state EKPGetBaseCipherKeysByIdsRequest keysByIds = req;
-	state EKPGetBaseCipherKeysByIdsReply keyIdsReply;
-	state Optional<TraceEvent> dbgTrace =
-	    keysByIds.debugId.present() ? TraceEvent("GetByKeyIds", ekpProxyData->myId) : Optional<TraceEvent>();
-
-	if (dbgTrace.present()) {
-		dbgTrace.get().setMaxEventLength(SERVER_KNOBS->ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH);
-		dbgTrace.get().detail("DbgId", keysByIds.debugId.get());
-	}
-
-	// Dedup the requested pair<baseCipherId, encryptDomainId>
-	// TODO: endpoint serialization of std::unordered_set isn't working at the moment
-	std::unordered_set<EKPGetBaseCipherKeysRequestInfo, EKPGetBaseCipherKeysRequestInfo_Hash> dedupedCipherInfos;
-	for (const auto& item : req.baseCipherInfos) {
-		dedupedCipherInfos.emplace(item);
-	}
-
 	if (dbgTrace.present()) {
 		dbgTrace.get().detail("NKeys", dedupedCipherInfos.size());
 		for (const auto& item : dedupedCipherInfos) {
@@ -379,7 +375,7 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 		const EncryptBaseCipherDomainIdKeyIdCacheKey cacheKey =
 		    ekpProxyData->getBaseCipherDomainIdKeyIdCacheKey(item.domainId, item.baseCipherId);
 		const auto itr = ekpProxyData->baseCipherDomainIdKeyIdCache.find(cacheKey);
-		if (itr != ekpProxyData->baseCipherDomainIdKeyIdCache.end() && itr->second.isValid()) {
+		if (itr != ekpProxyData->baseCipherDomainIdKeyIdCache.end() && !itr->second.isExpired()) {
 			keyIdsReply.baseCipherDetails.emplace_back(
 			    itr->second.domainId, itr->second.baseCipherId, itr->second.baseCipherKey, itr->second.baseCipherKCV);
 			numHits++;
@@ -400,7 +396,36 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 
 	ekpProxyData->baseCipherKeyIdCacheHits += numHits;
 	ekpProxyData->baseCipherKeyIdCacheMisses += lookupCipherInfoMap.size();
+	return lookupCipherInfoMap;
+}
 
+ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData> ekpProxyData,
+                                                   KmsConnectorInterface kmsConnectorInf,
+                                                   EKPGetBaseCipherKeysByIdsRequest req) {
+	// Scan the cached cipher-keys and filter our baseCipherIds locally cached
+	// for the rest, reachout to KMS to fetch the required details
+	state int numHits = 0;
+	state EKPGetBaseCipherKeysByIdsRequest keysByIds = req;
+	state EKPGetBaseCipherKeysByIdsReply keyIdsReply;
+	state Optional<TraceEvent> dbgTrace =
+	    keysByIds.debugId.present() ? TraceEvent("GetByKeyIds", ekpProxyData->myId) : Optional<TraceEvent>();
+
+	if (dbgTrace.present()) {
+		dbgTrace.get().setMaxEventLength(SERVER_KNOBS->ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH);
+		dbgTrace.get().detail("DbgId", keysByIds.debugId.get());
+	}
+
+	// Dedup the requested pair<baseCipherId, encryptDomainId>
+	// TODO: endpoint serialization of std::unordered_set isn't working at the moment
+	std::unordered_set<EKPGetBaseCipherKeysRequestInfo, EKPGetBaseCipherKeysRequestInfo_Hash> dedupedCipherInfos;
+	for (const auto& item : req.baseCipherInfos) {
+		dedupedCipherInfos.emplace(item);
+	}
+
+	state std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
+	                         EKPGetBaseCipherKeysRequestInfo,
+	                         boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>>>
+	    lookupCipherInfoMap = getLookupDetails(ekpProxyData, dbgTrace, keyIdsReply, numHits, dedupedCipherInfos);
 	if (!lookupCipherInfoMap.empty()) {
 		try {
 			KmsConnLookupEKsByKeyIdsReq keysByIdsReq;
@@ -469,6 +494,46 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 	return Void();
 }
 
+std::unordered_set<EncryptCipherDomainId> getLookupDetailsLatest(
+    Reference<EncryptKeyProxyData> ekpProxyData,
+    Optional<TraceEvent>& dbgTrace,
+    EKPGetLatestBaseCipherKeysReply& latestCipherReply,
+    int& numHits,
+    std::unordered_set<EncryptCipherDomainId> dedupedDomainIds) {
+	std::unordered_set<EncryptCipherDomainId> lookupCipherDomainIds;
+	for (const auto domainId : dedupedDomainIds) {
+		const auto itr = ekpProxyData->baseCipherDomainIdCache.find(domainId);
+		if (itr != ekpProxyData->baseCipherDomainIdCache.end() && !itr->second.needsRefresh() &&
+		    !itr->second.isExpired()) {
+			latestCipherReply.baseCipherDetails.emplace_back(domainId,
+			                                                 itr->second.baseCipherId,
+			                                                 itr->second.baseCipherKey,
+			                                                 itr->second.baseCipherKCV,
+			                                                 itr->second.refreshAt,
+			                                                 itr->second.expireAt);
+			numHits++;
+
+			if (dbgTrace.present()) {
+				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
+				dbgTrace.get().detail(getEncryptDbgTraceKeyWithTS(ENCRYPT_DBG_TRACE_CACHED_PREFIX,
+				                                                  domainId,
+				                                                  itr->second.baseCipherId,
+				                                                  itr->second.refreshAt,
+				                                                  itr->second.expireAt),
+				                      "");
+			}
+		} else {
+			lookupCipherDomainIds.emplace(domainId);
+		}
+	}
+
+	ASSERT_EQ(numHits, latestCipherReply.baseCipherDetails.size());
+
+	ekpProxyData->baseCipherDomainIdCacheHits += numHits;
+	ekpProxyData->baseCipherDomainIdCacheMisses += lookupCipherDomainIds.size();
+	return lookupCipherDomainIds;
+}
+
 ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyData,
                                        KmsConnectorInterface kmsConnectorInf,
                                        EKPGetLatestBaseCipherKeysRequest req) {
@@ -502,38 +567,8 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 
 	// First, check if the requested information is already cached by the server.
 	// Ensure the cached information is within FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL time window.
-
-	state std::unordered_set<EncryptCipherDomainId> lookupCipherDomainIds;
-	for (const auto domainId : dedupedDomainIds) {
-		const auto itr = ekpProxyData->baseCipherDomainIdCache.find(domainId);
-		if (itr != ekpProxyData->baseCipherDomainIdCache.end() && itr->second.isValid()) {
-			latestCipherReply.baseCipherDetails.emplace_back(domainId,
-			                                                 itr->second.baseCipherId,
-			                                                 itr->second.baseCipherKey,
-			                                                 itr->second.baseCipherKCV,
-			                                                 itr->second.refreshAt,
-			                                                 itr->second.expireAt);
-			numHits++;
-
-			if (dbgTrace.present()) {
-				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
-				dbgTrace.get().detail(getEncryptDbgTraceKeyWithTS(ENCRYPT_DBG_TRACE_CACHED_PREFIX,
-				                                                  domainId,
-				                                                  itr->second.baseCipherId,
-				                                                  itr->second.refreshAt,
-				                                                  itr->second.expireAt),
-				                      "");
-			}
-		} else {
-			lookupCipherDomainIds.emplace(domainId);
-		}
-	}
-
-	ASSERT_EQ(numHits, latestCipherReply.baseCipherDetails.size());
-
-	ekpProxyData->baseCipherDomainIdCacheHits += numHits;
-	ekpProxyData->baseCipherDomainIdCacheMisses += lookupCipherDomainIds.size();
-
+	state std::unordered_set<EncryptCipherDomainId> lookupCipherDomainIds =
+	    getLookupDetailsLatest(ekpProxyData, dbgTrace, latestCipherReply, numHits, dedupedDomainIds);
 	if (!lookupCipherDomainIds.empty()) {
 		try {
 			KmsConnLookupEKsByDomainIdsReq keysByDomainIdReq;
@@ -925,5 +960,88 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 		TraceEvent("EKPTerminated", self->myId).errorUnsuppressed(e);
 	}
 
+	return Void();
+}
+
+void testLookupLatestCipherDetails() {
+	Reference<EncryptKeyProxyData> ekpProxyData =
+	    makeReference<EncryptKeyProxyData>(deterministicRandom()->randomUniqueID());
+	Optional<TraceEvent> dbgTrace = TraceEvent("GetLatestCipherTest", ekpProxyData->myId);
+	int numHits = 0;
+	EKPGetLatestBaseCipherKeysReply latestCipherReply;
+	std::unordered_set<EncryptCipherDomainId> dedupedDomainIds = { 1, 2, 3, 4 };
+	double startTime = now();
+	ekpProxyData->baseCipherDomainIdCache[1] =
+	    EncryptBaseCipherKey(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
+	// key needs refresh
+	ekpProxyData->baseCipherDomainIdCache[2] =
+	    EncryptBaseCipherKey(2, 2, "dom2"_sr, 0, startTime - 10, startTime + 300);
+	// key is expired
+	ekpProxyData->baseCipherDomainIdCache[3] =
+	    EncryptBaseCipherKey(3, 3, "dom3"_sr, 0, startTime + 300, startTime - 10);
+
+	std::unordered_set<EncryptCipherDomainId> lookupCipherDomainIds =
+	    getLookupDetailsLatest(ekpProxyData, dbgTrace, latestCipherReply, numHits, dedupedDomainIds);
+	std::unordered_set<EncryptCipherDomainId> expectedLookupCipherDomainIds = { 2, 3, 4 };
+
+	ASSERT_EQ(numHits, 1);
+	if (lookupCipherDomainIds != expectedLookupCipherDomainIds) {
+		ASSERT(false);
+	}
+	EKPBaseCipherDetails expectedCipherDetails =
+	    EKPBaseCipherDetails(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
+	ASSERT_EQ(latestCipherReply.baseCipherDetails.size(), 1);
+	ASSERT(latestCipherReply.baseCipherDetails[0] == expectedCipherDetails);
+	ASSERT_EQ(ekpProxyData->baseCipherDomainIdCacheHits.getValue(), 1);
+	ASSERT_EQ(ekpProxyData->baseCipherDomainIdCacheMisses.getValue(), 3);
+}
+
+void testLookupCipherDetails() {
+	Reference<EncryptKeyProxyData> ekpProxyData =
+	    makeReference<EncryptKeyProxyData>(deterministicRandom()->randomUniqueID());
+	Optional<TraceEvent> dbgTrace = TraceEvent("GetCipherTest", ekpProxyData->myId);
+	int numHits = 0;
+	EKPGetBaseCipherKeysByIdsReply keyIdsReply;
+	std::unordered_set<EKPGetBaseCipherKeysRequestInfo, EKPGetBaseCipherKeysRequestInfo_Hash> dedupedCipherInfos = {
+		{ 1, 1 }, { 2, 2 }, { 3, 3 }, { 4, 4 }
+	};
+	double startTime = now();
+	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(1, 1)] =
+	    EncryptBaseCipherKey(1, 1, "dom1"_sr, 0, startTime + 300, startTime + 300);
+	// key needs refresh
+	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(2, 2)] =
+	    EncryptBaseCipherKey(2, 2, "dom2"_sr, 0, startTime - 10, startTime + 300);
+	// key is expired
+	ekpProxyData->baseCipherDomainIdKeyIdCache[EncryptKeyProxyData::getBaseCipherDomainIdKeyIdCacheKey(3, 3)] =
+	    EncryptBaseCipherKey(3, 3, "dom3"_sr, 0, startTime + 300, startTime - 10);
+
+	std::unordered_map<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>,
+	                   EKPGetBaseCipherKeysRequestInfo,
+	                   boost::hash<std::pair<EncryptCipherDomainId, EncryptCipherBaseKeyId>>>
+	    lookupCipherInfoMap = getLookupDetails(ekpProxyData, dbgTrace, keyIdsReply, numHits, dedupedCipherInfos);
+	ASSERT_EQ(numHits, 2);
+	ASSERT(lookupCipherInfoMap.find({ 3, 3 }) != lookupCipherInfoMap.end());
+	ASSERT(lookupCipherInfoMap.find({ 4, 4 }) != lookupCipherInfoMap.end());
+	ASSERT_EQ(keyIdsReply.baseCipherDetails.size(), 2);
+	EKPBaseCipherDetails expectedCipherDetails1 = EKPBaseCipherDetails(
+	    1, 1, "dom1"_sr, 0, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
+	EKPBaseCipherDetails expectedCipherDetails2 = EKPBaseCipherDetails(
+	    2, 2, "dom2"_sr, 0, std::numeric_limits<int64_t>::max(), std::numeric_limits<int64_t>::max());
+	for (EKPBaseCipherDetails details : keyIdsReply.baseCipherDetails) {
+		if (details.encryptDomainId == 1) {
+			ASSERT(details == expectedCipherDetails1);
+		} else if (details.encryptDomainId == 2) {
+			ASSERT(details == expectedCipherDetails2);
+		} else {
+			ASSERT(false);
+		}
+	}
+	ASSERT_EQ(ekpProxyData->baseCipherKeyIdCacheHits.getValue(), 2);
+	ASSERT_EQ(ekpProxyData->baseCipherKeyIdCacheMisses.getValue(), 2);
+}
+
+TEST_CASE("/EncryptKeyProxy") {
+	testLookupLatestCipherDetails();
+	testLookupCipherDetails();
 	return Void();
 }

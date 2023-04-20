@@ -63,7 +63,6 @@ public:
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,
-	                                         int matchIndex,
 	                                         Snapshot = Snapshot::False,
 	                                         Reverse = Reverse::False) override {
 		throw client_invalid_operation();

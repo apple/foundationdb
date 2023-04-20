@@ -1075,7 +1075,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
                                                                  int target_bytes,
                                                                  FDBStreamingMode mode,
                                                                  int iteration,
-                                                                 int matchIndex,
                                                                  fdb_bool_t snapshot,
                                                                  fdb_bool_t reverse) {
 	FDBFuture* r = validate_and_update_parameters(limit, target_bytes, mode, iteration, reverse);
@@ -1088,7 +1087,6 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_get_mapped_range(FDBTransaction*
 	                        KeySelectorRef(KeyRef(end_key_name, end_key_name_length), end_or_equal, end_offset),
 	                        StringRef(mapper_name, mapper_name_length),
 	                        GetRangeLimits(limit, target_bytes),
-	                        matchIndex,
 	                        snapshot,
 	                        reverse)
 	                    .extractPtr());
