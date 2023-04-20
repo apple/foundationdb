@@ -268,8 +268,8 @@ class ClientConfigTest:
         if self.disable_client_bypass:
             cmd_args += ["--network-option-disable_client_bypass", ""]
 
-        if self.disable_client_bypass:
-            cmd_args += ["--tls-disable-plaintext-connection", ""]
+        if self.tls_disable_plaintext_connection:
+            cmd_args += ["--network-option-tls_disable_plaintext_connection", ""]
 
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
@@ -347,6 +347,8 @@ class ClientConfigTests(unittest.TestCase):
         test = ClientConfigTest(self)
         test.print_status = True
         test.tls_disable_plaintext_connection = True
+        test.transaction_timeout = 100
+        test.expected_error = 1031  # Timeout
         test.exec()
         test.check_healthy_status(False)
 

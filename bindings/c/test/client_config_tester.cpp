@@ -92,7 +92,6 @@ public:
 	std::string externalClientDir;
 	bool disableLocalClient = false;
 	bool disableClientBypass = false;
-	bool tlsDisablePlainTextConnection = false;
 	int transactionTimeout = 0;
 	bool trace = false;
 	std::string traceDir;
