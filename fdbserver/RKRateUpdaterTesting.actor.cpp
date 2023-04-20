@@ -183,6 +183,32 @@ struct RKRateUpdaterTestEnvironment {
 	}
 };
 
+struct RateAndReason {
+	double tpsLimit;
+	limitReason_t limitReason;
+	RateAndReason(double tpsLimit, limitReason_t limitReason) : tpsLimit(tpsLimit), limitReason(limitReason) {}
+};
+
+ACTOR static Future<RateAndReason> testIgnoreWorstZones(int numBadStorageServers) {
+	state std::vector<Future<StorageQueueInfo>> ssFutures;
+	int smallStorageQueueBytes = testTargetQueueBytes - 5 * testSpringBytes;
+	int largeStorageQueueBytes = testTargetQueueBytes + 5 * testSpringBytes;
+
+	ssFutures.reserve(10);
+	for (int i = 0; i < 10; ++i) {
+		LocalityData locality({}, format("zone%d", i), {}, {});
+		int64_t storageQueueBytes = (i < numBadStorageServers) ? largeStorageQueueBytes : smallStorageQueueBytes;
+		ssFutures.push_back(getMockStorageQueueInfo(UID(i, i), locality, storageQueueBytes));
+	}
+	wait(waitForAll(ssFutures));
+	RKRateUpdaterTestEnvironment env(/*storageTeamSize=*/3);
+	for (auto const& ssFuture : ssFutures) {
+		env.metricsTracker.updateStorageQueueInfo(ssFuture.get());
+	}
+	env.update();
+	return RateAndReason(env.rateUpdater.getTpsLimit(), env.rateUpdater.getLimitReason());
+}
+
 } // namespace
 
 // No processes are reporting any metrics to the rate updater. The default ratekeeper limit
@@ -254,37 +280,36 @@ TEST_CASE("/fdbserver/RKRateUpdater/StorageWriteBandwidthMVCC") {
 	return Void();
 }
 
-// The current 1000 transaction per second workload is saturating the storage queue of one server,
-// but not saturating the storage queue of the other storage server in a different zone.
-// If SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND > 0, the rate updated does not throttle based
-// on the worst storage server's queue.
-TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZone") {
-	state LocalityData locality1({}, "zone1"_sr, {}, {});
-	state LocalityData locality2({}, "zone2"_sr, {}, {});
-	state std::vector<Future<StorageQueueInfo>> ssFutures;
+// The current 1000 transaction per second workload is saturating the storage queue of
+// MAX_MACHINES_FALLING_BEHIND servers, but not saturating the storage queue of the other storage
+// servers in different zones. The rate updater does not throttle based on the worst
+// storage servers' queues.
+TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZones") {
+	RateAndReason rateAndReason = wait(testIgnoreWorstZones(SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND));
 
-	if (SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND == 0) {
-		return Void();
-	}
+	// Even though some storage servers won't allow more than the current transaction rate, the
+	// rate updater will still allow more than the current transaction rate, because these storage
+	// servers' zones are ignored.
+	ASSERT_GT(rateAndReason.tpsLimit, testActualTps);
 
-	ssFutures.reserve(2);
-	ssFutures.push_back(getMockStorageQueueInfo(UID(1, 1), locality1, testTargetQueueBytes - 5 * testSpringBytes));
-	ssFutures.push_back(getMockStorageQueueInfo(UID(2, 2), locality2, testTargetQueueBytes + 5 * testSpringBytes));
-	wait(waitForAll(ssFutures));
-	RKRateUpdaterTestEnvironment env(2);
-	env.metricsTracker.updateStorageQueueInfo(ssFutures[0].get());
-	env.metricsTracker.updateStorageQueueInfo(ssFutures[1].get());
-	env.update();
-
-	// Even though 1 storage server won't allow more that the current transaction rate, the
-	// rate updater will still allow more than the current transaction rate, because this storage
-	// server's zone is ignored.
-	ASSERT_GT(env.rateUpdater.getTpsLimit(), testActualTps);
-
-	// Even though the storage server with high storage queue is ignored, we still report write
+	// Even though the storage servers with high storage queue are ignored, we still report write
 	// queue size as the limiting reason.
 	// TODO: Should this behaviour be changed?
-	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	ASSERT_EQ(rateAndReason.limitReason, limitReason_t::storage_server_write_queue_size);
+	return Void();
+}
+
+// The current 1000 transaction per second workload is saturating the storage queue of
+// (MAX_MACHINES_FALLING_BEHIND + 1) servers, but not saturating the storage queue of the other
+// storage servers in different zones. The rate updater throttles based on the worst storage
+// servers' queues.
+TEST_CASE("/fdbserver/RKRateUpdater/DontIgnoreWorstZones") {
+	RateAndReason rateAndReason = wait(testIgnoreWorstZones(SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND + 1));
+
+	// The storage queues with high storage queue cannot be ignored, so the
+	// rate updater should throttle to less than the current transaction rate.
+	ASSERT_LT(rateAndReason.tpsLimit, testActualTps);
+	ASSERT_EQ(rateAndReason.limitReason, limitReason_t::storage_server_write_queue_size);
 	return Void();
 }
 
