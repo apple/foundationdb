@@ -667,22 +667,22 @@ public:
 	}
 
 	template <class Transaction>
-	Future<Optional<KVType>> seekLessThan(Transaction tr, KeyType query, Snapshot snapshot) const {
+	Future<Optional<KVType>> seekLessThan(Transaction tr, KeyType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<KVType>> seekLessOrEqual(Transaction tr, KeyType query, Snapshot snapshot) const {
+	Future<Optional<KVType>> seekLessOrEqual(Transaction tr, KeyType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, true, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<KVType>> seekGreaterThan(Transaction tr, KeyType query, Snapshot snapshot) const {
+	Future<Optional<KVType>> seekGreaterThan(Transaction tr, KeyType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<KVType>> seekGreaterOrEqual(Transaction tr, KeyType query, Snapshot snapshot) const {
+	Future<Optional<KVType>> seekGreaterOrEqual(Transaction tr, KeyType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, true, snapshot);
 	}
 
@@ -970,22 +970,22 @@ public:
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekLessThan(Transaction tr, ValueType query, Snapshot snapshot) const {
+	Future<Optional<ValueType>> seekLessThan(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekLessOrEqual(Transaction tr, ValueType query, Snapshot snapshot) const {
+	Future<Optional<ValueType>> seekLessOrEqual(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, true, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekGreaterThan(Transaction tr, ValueType query, Snapshot snapshot) const {
+	Future<Optional<ValueType>> seekGreaterThan(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekGreaterOrEqual(Transaction tr, ValueType query, Snapshot snapshot) const {
+	Future<Optional<ValueType>> seekGreaterOrEqual(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, true, snapshot);
 	}
 
