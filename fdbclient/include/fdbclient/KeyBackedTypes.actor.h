@@ -211,32 +211,89 @@ public:
 	WatchableTrigger(Key k) : key(k) {}
 
 	template <class Transaction>
-	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::True) {
-		tr->set(key, BinaryCodec<UID>::pack(deterministicRandom()->randomUniqueID()));
+	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::False) {
+		std::array<uint8_t, 14> value;
+		value.fill(0);
+		tr->atomicOp(key, StringRef(value.begin(), value.size()), MutationRef::SetVersionstampedValue);
 		if (conflict) {
 			tr->addReadConflictRange(singleKeyRange(key));
 		}
 	}
 
 	template <class Transaction>
-	Future<UID> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<Versionstamp>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
 		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> UID {
-			                 UID v;
-			                 if (val.present()) {
-				                 return v = BinaryCodec<UID>::unpack(val.get());
-			                 }
-			                 return v;
-		                 }));
+		return holdWhile(
+		    getFuture,
+		    map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<Versionstamp> {
+			    if (val.present()) {
+				    return BinaryReader::fromStringRef<Versionstamp>(*val, Unversioned());
+			    }
+			    return {};
+		    }));
 	}
 
 	template <class Transaction>
-	Future<Void> onChange(Transaction tr) const {
-		typename transaction_future_type<Transaction, Void>::type f = tr->watch(key);
-		return holdWhile(f, safeThreadFutureToFuture(f));
+	Future<Void> watch(Transaction tr) const {
+		typename transaction_future_type<Transaction, Void>::type watchFuture = tr->watch(key);
+		return holdWhile(watchFuture, safeThreadFutureToFuture(watchFuture));
+	}
+
+// Forward declaration of this static template actor does not work correctly, so this actor is forward declared
+// in a way that works for both compiling and in IDEs.
+#if defined(NO_INTELLISENSE)
+	template <class DB>
+	static Future<Void> onChangeActor(WatchableTrigger const& self,
+	                                  Reference<DB> const& db,
+	                                  Optional<Version> const& lastKnownVersion);
+#else
+	ACTOR template <class DB>
+	static Future<Void> onChangeActor(WatchableTrigger self, Reference<DB> db, Optional<Version> lastKnownVersion);
+#endif
+
+	template <class DB>
+	Future<Void> onChange(Reference<DB> db, Optional<Version> lastKnownVersion = {}) const {
+		return onChangeActor(*this, db, lastKnownVersion);
 	}
 };
+
+ACTOR template <class DB>
+Future<Void> WatchableTrigger::onChangeActor(WatchableTrigger self,
+                                             Reference<DB> db,
+                                             Optional<Version> lastKnownVersion) {
+	state Reference<typename DB::TransactionT> tr = db->createTransaction();
+
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// If the lastKnownVersion is not set yet, then initialize it with the read version
+			if (!lastKnownVersion.present()) {
+				wait(store(lastKnownVersion, safeThreadFutureToFuture(tr->getReadVersion())));
+			}
+
+			// Get the trigger's latest value.
+			Optional<Versionstamp> v = wait(self.get(tr));
+
+			// If the trigger has a value and its version is > lastKnownVersion then the trigger has fired so break
+			if (v.present() && v->version > *lastKnownVersion) {
+				break;
+			}
+
+			// Otherwise, watch the key and repeat the loop once the watch fires
+			state Future<Void> watch = self.watch(tr);
+			wait(safeThreadFutureToFuture(tr->commit()));
+			wait(watch);
+			tr->reset();
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+	}
+
+	return Void();
+}
 
 // Convenient read/write access to a single value of type T stored at key
 // Even though 'this' is not actually mutated, methods that change the db key are not const.
@@ -567,7 +624,8 @@ public:
 	// Find the closest key which is <, <=, >, or >= query
 	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
 	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
-	// located next to a shard which is currently unavailable.
+	// located next to a shard which is currently unavailable or, more likely, an adjacent key has been modified by
+	// a VersionStamp atomic op so it is not allowed to be read in a range read operation.
 	ACTOR template <class Transaction>
 	static Future<Optional<KVType>> seek(KeyBackedMap self,
 	                                     Transaction tr,
@@ -869,7 +927,8 @@ public:
 	// Find the closest key which is <, <=, >, or >= query
 	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
 	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
-	// located next to a shard which is currently unavailable.
+	// located next to a shard which is currently unavailable or, more likely, an adjacent key has been modified by
+	// a VersionStamp atomic op so it is not allowed to be read in a range read operation.
 	ACTOR template <class Transaction>
 	static Future<Optional<ValueType>> seek(KeyBackedSet self,
 	                                        Transaction tr,
@@ -995,7 +1054,6 @@ public:
 	KeyBackedClass(StringRef prefix, Optional<Key> triggerOverride = {})
 	  : subSpace(prefix), trigger(triggerOverride.orDefault(subSpace.pack("_changeTrigger"_sr))) {}
 
-protected:
 	Subspace subSpace;
 	WatchableTrigger trigger;
 };
