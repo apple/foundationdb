@@ -10,8 +10,6 @@ static_assert(detail::is_wipe_enabled<ObjectWriter::SaveContext>);
 
 TEST_CASE("/flow/WipedString/basic") {
 	auto& rng = *deterministicRandom();
-	g_allocation_tracing_disabled++;
-	auto reenableAllocTracingOnUnwind = ScopeExit([]() { g_allocation_tracing_disabled--; });
 	for (auto iter = 0; iter < 100; iter++) {
 		auto randomString = rng.randomAlphaNumeric(rng.randomInt(1, 1000));
 		// keeps arena-allocated memory from being really freed, for test purposes
@@ -207,8 +205,6 @@ void testWipeAfterPacketSerialize(GenerateObjectFunc&& fn) {
 	// Note that kaScope is not created before object creation.
 	// This is because ArenaBlock wiping is not a target of this test function
 	auto obj = fn();
-	g_allocation_tracing_disabled++;
-	auto reenableAllocTracingOnUnwind = ScopeExit([]() { g_allocation_tracing_disabled--; });
 	{
 		// Emulate network packet writing with keepalive allocator active
 		auto pq = UnsentPacketQueue();

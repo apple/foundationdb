@@ -29,19 +29,17 @@
 #include "flow/ObjectSerializerTraits.h"
 
 namespace detail {
-// wraps StringRef for the sole purpose of offering distinct serializable trait
-// we avoid inheritance by choice, to guarantee that no traits are shared with StringRef by unintended implicit
-// conversion
-class WipedStringRef {
+// Wraps StringRef for the sole purpose of offering distinct serializable trait
+// we avoid inheritance by choice, to prevent this from sharing traits with StringRef, which would bypass wiping.
+class WipedStringSerdesWrapper {
 	StringRef* value;
 
-	WipedStringRef(StringRef& s) noexcept : value(&s) {}
-
 public:
-	WipedStringRef() noexcept : value(nullptr) {}
+	// Flatbuffer implementation requires default constructor
+	WipedStringSerdesWrapper() noexcept : value(nullptr) {}
 
-	// deliberately avoid WipedStringRef(StringRef) to prevent implicit conversion
-	static WipedStringRef create(StringRef& s) noexcept { return WipedStringRef(s); }
+	// deliberately avoid WipedStringSerdesWrapper(StringRef) to prevent implicit conversion
+	explicit WipedStringSerdesWrapper(StringRef& s) noexcept : value(&s) {}
 
 	StringRef& get() const noexcept { return *value; }
 };
@@ -55,29 +53,29 @@ concept is_wipe_enabled = requires(Context& context) {
 
 } // namespace detail
 
-// This trait is meant to be used by WipedString::serialize()
+// This trait is only meant for internal use by WipedString::serialize()
 template <>
-struct dynamic_size_traits<detail::WipedStringRef> : std::true_type {
+struct dynamic_size_traits<detail::WipedStringSerdesWrapper> : std::true_type {
 	template <class Context>
-	static size_t size(const detail::WipedStringRef& t, Context&) {
+	static size_t size(const detail::WipedStringSerdesWrapper& t, Context&) {
 		return t.get().size();
 	}
 
 	template <class Context>
-	static void save(uint8_t* out, const detail::WipedStringRef& t, Context& context) {
+	static void save(uint8_t* out, const detail::WipedStringSerdesWrapper& t, Context& context) {
 		if (!t.get().empty()) {
 			::memcpy(out, t.get().begin(), t.get().size());
 			if constexpr (detail::is_wipe_enabled<Context>) {
 				context.markForWipe(out, t.get().size());
-				// below condition is only active with unit test
-				if (keepalive_allocator::isActive())
+				// Below condition is only active with unit test
+				if (keepalive_allocator::isActive()) [[unlikely]]
 					keepalive_allocator::trackWipedArea(out, t.get().size());
 			}
 		}
 	}
 
 	template <class Context>
-	static void load(const uint8_t* ptr, size_t sz, detail::WipedStringRef& t, Context& context) {
+	static void load(const uint8_t* ptr, size_t sz, detail::WipedStringSerdesWrapper& t, Context& context) {
 		dynamic_size_traits<StringRef>::load(ptr, sz, t.get(), context);
 	}
 };
@@ -126,7 +124,7 @@ public:
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		auto ws = detail::WipedStringRef::create(string);
+		auto ws = detail::WipedStringSerdesWrapper(string);
 		serializer(ar, ws, arena);
 	}
 };

@@ -322,13 +322,18 @@ ActiveScope::ActiveScope() {
 	ASSERT(detail::g_freedSet.empty());
 	ASSERT(detail::g_wipedSet.empty());
 	detail::g_active = true;
+	// As of writing, TraceEvent uses eventname-based throttling keyed by Standalone<StringRef>,
+	// which uses Arena and stays allocated after scope.
+	// Therefore, we disable allocation tracing (e.g. hugeArenaSample()) while this scope is active.
+	g_allocation_tracing_disabled++;
 }
 
 ActiveScope::~ActiveScope() {
 	ASSERT_ABORT(detail::g_active);
 	ASSERT_ABORT(detail::g_allocatedSet == detail::g_freedSet);
+	g_allocation_tracing_disabled--;
 	for (auto memory : detail::g_allocatedSet) {
-		delete[] reinterpret_cast<uint8_t*>(memory);
+		delete[] static_cast<uint8_t*>(memory);
 	}
 	detail::g_allocatedSet.clear();
 	detail::g_freedSet.clear();
