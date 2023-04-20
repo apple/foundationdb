@@ -1015,6 +1015,15 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+		// We assume inFlightActors are immediately cancelled.
+		// If this is not true, multiple inflightActors can have overlapped range,
+		// which leads to conflicts of moving keys
+
+		// cancelDataMoves and inFlightActors are decoupled
+		// During the wait in cancelDataMove, a relocator may start and update self->dataMoves.
+		// This old cancelDataMove should be transparent to the new relocator
+		Future<Void> fCleanup =
+		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
@@ -1052,9 +1061,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			    .detail("Launch", rrs.dataMoveId)
 			    .detail("Total", activeRelocations);
 			startRelocation(rrs.priority, rrs.healthPriority);
-			// Cleanup waited by a new relocator should only include the range that is moved by the relocator
-			Future<Void> fCleanup =
-			    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rrs.keys, ddEnabledState) : Void();
 			// Start the actor that relocates data in the rrs.keys
 			inFlightActors.insert(rrs.keys, dataDistributionRelocator(this, rrs, fCleanup, ddEnabledState));
 		}
@@ -1149,34 +1155,6 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
 
 	try {
-		// Check if there exists any ongoing cancellation, if it exists, wait until no existence of cancellation
-		// As a result, any cancelDataMove called later must wait for the cancelDataMove called earlier on
-		// the same range. Since relocator as well as the update of self->dataMoves waits for the completion
-		// of cancelDataMove. Thus, any relocator called later must wait for the cancelDataMove called by an
-		// earlier relocator and the earlier relocator must update self->dataMoves which must reflect on the
-		// cancelDataMove of the later relocator, aka, serialize relocators and their cancelDataMoves
-		loop {
-			existingCleanup.clear();
-			auto f = self->dataMoves.intersectingRanges(range);
-			for (auto it = f.begin(); it != f.end(); ++it) {
-				if (!it->value().isValid()) {
-					continue;
-				}
-				if (it->value().cancel.isValid()) {
-					existingCleanup.push_back(it->value().cancel);
-				}
-			}
-			Future<Void> waitAllCleanF = waitForAll(existingCleanup);
-			if (waitAllCleanF.isReady()) {
-				break;
-			}
-			wait(waitAllCleanF);
-		}
-
-		// At this point, no ongoing clean up, atomically takeover the range by
-		// Updating it->value().cancel at the range
-		// Later cancelDataMoves as well as relocators will wait
-		cleanup.clear();
 		lastObservedDataMoves.clear();
 		auto f = self->dataMoves.intersectingRanges(range);
 		for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1202,7 +1180,10 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 		}
 
 		wait(waitForAll(cleanup));
-		// At this point, if there has any update to self->dataMoves by other relocators, cancel this relocator
+
+		// Newer relocators may start during the wait in this cancelDataMove
+		// This cancelDataMove should be transparent to the new relocator
+		std::vector<KeyRange> toResetRanges;
 		for (auto observedDataMove : lastObservedDataMoves) {
 			auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 			for (auto it = f.begin(); it != f.end(); ++it) {
@@ -1212,17 +1193,14 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 					    .detail("OldRange", observedDataMove.first)
 					    .detail("LastObservedDataMoveID", observedDataMove.second)
 					    .detail("CurrentDataMoveID", it->value().id);
-					throw movekeys_conflict(); // make sure we have serialized all ongoing cleanups, as well as
-					                           // relocators
+				} else {
+					toResetRanges.push_back(Standalone(it->range()));
 				}
 			}
 		}
-		auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-		if (!ranges.empty()) {
-			self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
+		for (auto& toResetRange : toResetRanges) {
+			self->dataMoves.insert(toResetRange, DDQueue::DDDataMove());
 		}
-		// Since the start of relocator and update of self->dataMoves by the relocator is atomic with
-		// here, the relocator waiting on this cleanup must be visable to other cleanups
 
 	} catch (Error& e) {
 		throw e;
