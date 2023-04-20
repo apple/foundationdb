@@ -119,6 +119,29 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 	return false;
 }
 
+bool simulator_should_inject_blob_fault(const char* context, const char* file, int line, int error_code) {
+	if (!g_network->isSimulated() || !faultInjectionActivated)
+		return false;
+
+	auto p = g_simulator->getCurrentProcess();
+
+	if (!g_simulator->speedUpSimulation && deterministicRandom()->random01() < p->blob_inject_failure_rate) {
+		CODE_PROBE(true, "A blob fault was injected", probe::assert::simOnly, probe::context::sim2);
+		CODE_PROBE(error_code == error_code_http_request_failed,
+		           "A failed http request was injected",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		TraceEvent("BlobFaultInjected")
+		    .detail("Context", context)
+		    .detail("File", file)
+		    .detail("Line", line)
+		    .detail("ErrorCode", error_code);
+		return true;
+	}
+
+	return false;
+}
+
 void ISimulator::disableFor(const std::string& desc, double time) {
 	disabledMap[desc] = time;
 }
@@ -1505,6 +1528,7 @@ public:
 	// The following function will determine if a machine can be remove in case when it has a blob worker
 	bool canKillMachineWithBlobWorkers(Optional<Standalone<StringRef>> machineId, KillType kt, KillType* ktFinal) {
 		// Allow if no blob workers, or it's a reboot(without removing the machine)
+		// FIXME: this should be ||
 		if (!blobGranulesEnabled && kt >= KillType::RebootAndDelete) {
 			return true;
 		}
@@ -1567,7 +1591,7 @@ public:
 			std::vector<LocalityData> badCombo;
 			std::set<Optional<Standalone<StringRef>>> uniqueMachines;
 
-			if (!primaryDcId.present()) {
+			if (!primaryDcId.present() || usableRegions == 1) {
 				for (auto processInfo : availableProcesses) {
 					primaryProcessesLeft.add(processInfo->locality);
 					primaryLocalitiesLeft.push_back(processInfo->locality);
@@ -1960,8 +1984,10 @@ public:
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[machineId].processes) {
-			if (protectedAddresses.count(process->address))
+			if (protectedAddresses.count(process->address) && kt != KillType::RebootProcessAndSwitch) {
 				kt = KillType::Reboot;
+			}
+
 			if (!process->rebooting)
 				processesOnMachine++;
 			if (process->drProcess) {
@@ -2348,6 +2374,18 @@ public:
 	void unclogPair(const IPAddress& from, const IPAddress& to) override {
 		TraceEvent("UncloggingPair").detail("From", from).detail("To", to);
 		g_clogging.unclogPair(from, to);
+	}
+
+	void processInjectBlobFault(ProcessInfo* machine, double failureRate) override {
+		CODE_PROBE(true, "Simulated process beginning blob fault", probe::context::sim2, probe::assert::simOnly);
+		should_inject_blob_fault = simulator_should_inject_blob_fault;
+		ASSERT(machine->blob_inject_failure_rate == 0.0);
+		machine->blob_inject_failure_rate = failureRate;
+	}
+
+	void processStopInjectBlobFault(ProcessInfo* machine) override {
+		CODE_PROBE(true, "Simulated process stopping blob fault", probe::context::sim2, probe::assert::simOnly);
+		machine->blob_inject_failure_rate = 0.0;
 	}
 
 	std::vector<ProcessInfo*> getAllProcesses() const override {

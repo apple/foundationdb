@@ -71,7 +71,7 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/Stats.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LatencyBandConfig.h"
@@ -395,6 +395,10 @@ struct StorageServerDisk {
 	Future<Void> addRange(KeyRangeRef range, std::string id) { return storage->addRange(range, id); }
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
+
+	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+		return storage->replaceRange(range, data);
+	}
 
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
@@ -3058,7 +3062,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherMap;
 		if (cipherDetails.size()) {
 			std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-			    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+			    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 			cipherMap = getCipherKeysResult;
 		}
 
@@ -5074,7 +5079,6 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
                                Version version,
                                GetMappedKeyValuesRequest* pOriginalReq,
                                Arena* pArena,
-                               int matchIndex,
                                bool isRangeQuery,
                                KeyValueRef* it,
                                MappedKeyValueRef* kvm,
@@ -5082,11 +5086,8 @@ ACTOR Future<Void> mapSubquery(StorageServer* data,
 	if (isRangeQuery) {
 		// Use the mappedKey as the prefix of the range query.
 		GetRangeReqAndResultRef getRange = wait(quickGetKeyValues(data, mappedKey, version, pArena, pOriginalReq));
-		if ((!getRange.result.empty() && matchIndex == MATCH_INDEX_MATCHED_ONLY) ||
-		    (getRange.result.empty() && matchIndex == MATCH_INDEX_UNMATCHED_ONLY) || matchIndex == MATCH_INDEX_ALL) {
-			kvm->key = it->key;
-			kvm->value = it->value;
-		}
+		kvm->key = it->key;
+		kvm->value = it->value;
 		kvm->reqAndResult = getRange;
 	} else {
 		GetValueReqAndResultRef getValue = wait(quickGetValue(data, mappedKey, version, pArena, pOriginalReq));
@@ -5115,7 +5116,6 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
                                                    StringRef mapper,
                                                    // To provide span context, tags, debug ID to underlying lookups.
                                                    GetMappedKeyValuesRequest* pOriginalReq,
-                                                   int matchIndex,
                                                    int* remainingLimitBytes) {
 	state GetMappedKeyValuesReply result;
 	result.version = input.version;
@@ -5163,8 +5163,8 @@ ACTOR Future<GetMappedKeyValuesReply> mapKeyValues(StorageServer* data,
 			// std::cout << "key:" << printable(kvm->key) << ", value:" << printable(kvm->value)
 			//          << ", mappedKey:" << printable(mappedKey) << std::endl;
 
-			subqueries.push_back(mapSubquery(
-			    data, input.version, pOriginalReq, &result.arena, matchIndex, isRangeQuery, it, kvm, mappedKey));
+			subqueries.push_back(
+			    mapSubquery(data, input.version, pOriginalReq, &result.arena, isRangeQuery, it, kvm, mappedKey));
 		}
 		wait(waitForAll(subqueries));
 		if (pOriginalReq->options.present() && pOriginalReq->options.get().debugID.present())
@@ -5528,7 +5528,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			try {
 				// Map the scanned range to another list of keys and look up.
 				GetMappedKeyValuesReply _r =
-				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, req.matchIndex, &remainingLimitBytes));
+				    wait(mapKeyValues(data, getKeyValuesReply, req.mapper, &req, &remainingLimitBytes));
 				r = _r;
 			} catch (Error& e) {
 				// catch txn_too_old here if prefetch runs for too long, and returns it back to client
@@ -7570,7 +7570,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				hold = tryGetRange(results, &tr, keys);
 			}
 
-			state Key nfk = keys.begin;
+			state Key blockBegin = keys.begin;
 
 			try {
 				loop {
@@ -7605,20 +7605,19 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
-					state int sinceYield = 0;
+					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+					state Key blockEnd =
+					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+					wait(data->storage.replaceRange(blockRange, blockData));
+
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
-						data->storage.writeKeyValue(*kvItr);
 						data->byteSampleApplySet(*kvItr, invalidVersion);
-						if (++sinceYield > 1000) {
-							wait(yield());
-							sinceYield = 0;
-						}
 					}
-
 					ASSERT(this_block.readThrough.present() || this_block.size());
-					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
-					                                       : keyAfter(this_block.end()[-1].key);
+					blockBegin = this_block.readThrough.present() ? this_block.readThrough.get()
+					                                              : keyAfter(this_block.end()[-1].key);
 					this_block = RangeResult();
 
 					data->fetchKeysBytesBudget -= expectedBlockSize;
@@ -7633,7 +7632,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					throw;
 				}
 				lastError = e;
-				if (nfk == keys.begin) {
+				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0)
@@ -7657,7 +7656,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
 				}
-				if (nfk < keys.end) {
+				if (blockBegin < keys.end) {
 					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
@@ -7665,18 +7664,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// fetchKeys.
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
-						rightShard.range = KeyRangeRef(nfk, keys.end);
-						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard);
+						rightShard.range = KeyRangeRef(blockBegin, keys.end);
+						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
 						leftShard->populateShard(rightShard);
 						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
-						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
+						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(blockBegin, keys.end)));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
+					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
@@ -9324,7 +9323,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			if (collectingCipherKeys) {
 				std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult =
-				    wait(getEncryptCipherKeys(data->db, cipherDetails, BlobCipherMetrics::TLOG));
+				    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+				        data->db, cipherDetails, BlobCipherMetrics::TLOG));
 				cipherKeys = getCipherKeysResult;
 				collectingCipherKeys = false;
 				eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
@@ -12034,12 +12034,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}
@@ -12138,12 +12138,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}

@@ -1345,6 +1345,18 @@ class Tenant(_TransactionCreator):
     def get_id(self):
         return FutureInt64(self.capi.fdb_tenant_get_id(self.tpointer))
 
+    def list_blobbified_ranges(self, begin, end, limit):
+        return FutureKeyValueArray(
+            self.capi.fdb_tenant_list_blobbified_ranges(
+                self.tpointer,
+                begin,
+                len(begin),
+                end,
+                len(end),
+                limit
+            )
+        )
+
 
 fill_operations()
 
@@ -1721,6 +1733,16 @@ def init_c_api():
 
     _capi.fdb_tenant_get_id.argtypes = [ctypes.c_void_p]
     _capi.fdb_tenant_get_id.restype = ctypes.c_void_p
+
+    _capi.fdb_tenant_list_blobbified_ranges.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_void_p,
+        ctypes.c_int,
+        ctypes.c_int,
+    ]
+    _capi.fdb_tenant_list_blobbified_ranges.restype = ctypes.c_void_p
 
     _capi.fdb_tenant_create_transaction.argtypes = [
         ctypes.c_void_p,

@@ -189,12 +189,19 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
-	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
-	// pivot = pivot percent * team count.
-	double AVAILABLE_SPACE_PIVOT_PERCENT;
-	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
-	// team count.
-	double READ_LOAD_PIVOT_PERCENT;
+	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
+	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
+	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
+	// has available space ratio < pivotAvailableSpaceRatio.
+	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
+	// team count. DD won't move shard to teams that has CPU > pivot CPU.
+	double CPU_PIVOT_RATIO;
+	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	double MAX_DEST_CPU_PERCENT;
+	// The constant interval DD update pivot values for team selection. It should be >=
+	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
+	double DD_TEAM_PIVOT_UPDATE_DELAY;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
@@ -614,6 +621,8 @@ public:
 	                                             // be determined as degraded worker.
 	int CC_SATELLITE_DEGRADATION_MIN_BAD_SERVER; // The minimum amount of degraded server in satellite DC to be
 	                                             // determined as degraded satellite.
+	bool CC_ENABLE_REMOTE_LOG_ROUTER_MONITORING; // When enabled, gray failure tries to detect whether the remote log
+	                                             // router is degraded and may use trigger recovery to recover from it.
 	double CC_THROTTLE_SINGLETON_RERECRUIT_INTERVAL; // The interval to prevent re-recruiting the same singleton if a
 	                                                 // recruiting fight between two cluster controllers occurs.
 
@@ -659,6 +668,7 @@ public:
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
 	double METRIC_UPDATE_RATE;
+	// The interval of detailed HealthMetric is pushed to GRV proxies
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 	double RATEKEEPER_DEFAULT_LIMIT;
@@ -733,14 +743,16 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below a certain threshold
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
+	// Interval at which ratekeeper logs statistics for each tag:
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_AVAILABLE_SPACE;
+	// DD won't move data to a team that has available space ratio < MIN_AVAILABLE_SPACE_RATIO
 	double MIN_AVAILABLE_SPACE_RATIO;
 	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
-	double AVAILABLE_SPACE_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
@@ -839,7 +851,13 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	// Minimum read throughput (in pages/second) that a tag must register
+	// on a storage server in order for tag throughput statistics to be
+	// emitted to ratekeeper.
 	int64_t MIN_TAG_READ_PAGES_RATE;
+	// Minimum write throughput (in pages/second, multiplied by fungibility ratio)
+	// that a tag must register on a storage server in order for ratekeeper to
+	// track the write throughput of this tag on the storage server.
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
@@ -904,6 +922,8 @@ public:
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
+	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -1033,6 +1053,7 @@ public:
 	// Encryption
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+	double ENCRYPTION_LOGGING_INTERVAL;
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;
@@ -1119,6 +1140,7 @@ public:
 	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	bool ENABLE_REST_KMS_COMMUNICATION;
 	bool REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;

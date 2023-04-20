@@ -304,8 +304,54 @@ static int64_t getSizeCode(int i) {
 }
 #endif
 
+namespace keepalive_allocator {
+
+namespace detail {
+
+std::set<void*> g_allocatedSet;
+std::set<void*> g_freedSet;
+bool g_active = false;
+
+} // namespace detail
+
+ActiveScope::ActiveScope() {
+	// no nested scopes allowed
+	ASSERT(!detail::g_active);
+	ASSERT(detail::g_allocatedSet.empty());
+	ASSERT(detail::g_freedSet.empty());
+	detail::g_active = true;
+}
+
+ActiveScope::~ActiveScope() {
+	ASSERT_ABORT(detail::g_active);
+	ASSERT_ABORT(detail::g_allocatedSet == detail::g_freedSet);
+	for (auto memory : detail::g_allocatedSet) {
+		delete[] reinterpret_cast<uint8_t*>(memory);
+	}
+	detail::g_allocatedSet.clear();
+	detail::g_freedSet.clear();
+	detail::g_active = false;
+}
+
+void* allocate(size_t size) {
+	auto ptr = new uint8_t[size];
+	auto [_, inserted] = detail::g_allocatedSet.insert(ptr);
+	ASSERT(inserted); // no duplicates
+	return ptr;
+}
+
+void invalidate(void* ptr) {
+	ASSERT(detail::g_allocatedSet.contains(ptr));
+	ASSERT(!detail::g_freedSet.contains(ptr));
+	detail::g_freedSet.insert(ptr);
+}
+
+} // namespace keepalive_allocator
+
 template <int Size>
 void* FastAllocator<Size>::allocate() {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		return keepalive_allocator::allocate(Size);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	// Some usages of FastAllocator require 4096 byte alignment.
@@ -359,6 +405,8 @@ void* FastAllocator<Size>::allocate() {
 
 template <int Size>
 void FastAllocator<Size>::release(void* ptr) {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		return keepalive_allocator::invalidate(ptr);
 
 #if defined(USE_GPERFTOOLS) || defined(ADDRESS_SANITIZER)
 	return aligned_free(ptr);

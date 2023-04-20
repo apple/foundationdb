@@ -353,7 +353,9 @@ public:
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
 					    .detail("MaxVer", self->maxVersion)
-					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID());
+					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID())
+					    .detail("BMBlocked",
+					            now() - self->unblockedAssignmentTime >= SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL);
 				}
 			}
 			wait(blobWorkerDelay);
@@ -1358,7 +1360,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;

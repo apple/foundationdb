@@ -3766,7 +3766,10 @@ thread_local bool profileThread = false;
 // to see if we are on the profiled thread. Can be used in the signal handler.
 volatile int64_t profileThreadId = -1;
 
-void (*chainedSignalHandler)(int) = nullptr;
+#ifdef __linux__
+struct sigaction chainedAction;
+#endif
+
 volatile bool profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
 
@@ -3800,8 +3803,9 @@ int64_t getNumProfilesCaptured() {
 
 void profileHandler(int sig) {
 #ifdef __linux__
-	if (chainedSignalHandler) {
-		chainedSignalHandler(sig);
+	if (chainedAction.sa_handler != SIG_DFL && chainedAction.sa_handler != SIG_IGN &&
+	    chainedAction.sa_handler != nullptr) {
+		chainedAction.sa_handler(sig);
 	}
 
 	// This is not documented in the POSIX list of signal-safe functions, but numbered syscalls are reported to be
@@ -3835,8 +3839,14 @@ void profileHandler(int sig) {
 	       // problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
 	       // profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
 
+#if defined(USE_SANITIZER)
+	// In sanitizer builds the workaround implemented in SignalSafeUnwind.cpp is disabled
+	// so calling backtrace may cause a deadlock
+	size_t size = 0;
+#else
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+#endif
 
 	ps->length = size;
 
@@ -3999,6 +4009,8 @@ std::string getExecPath() {
 void setupRunLoopProfiler() {
 #ifdef __linux__
 	if (profileThreadId == -1 && FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL > 0) {
+		chainedAction.sa_handler = SIG_DFL;
+
 		TraceEvent("StartingRunLoopProfilingThread").detail("Interval", FLOW_KNOBS->RUN_LOOP_PROFILING_INTERVAL);
 
 		profileThread = true;
@@ -4012,22 +4024,15 @@ void setupRunLoopProfiler() {
 
 		initProfiling();
 
-		struct sigaction oldAction;
 		struct sigaction action;
 		action.sa_handler = profileHandler;
 		sigfillset(&action.sa_mask);
 		action.sa_flags = 0;
-		if (sigaction(SIGPROF, &action, &oldAction)) {
+		if (sigaction(SIGPROF, &action, &chainedAction)) {
 			TraceEvent(SevWarnAlways, "RunLoopProfilingSetupFailed")
 			    .detail("Reason", "Error configuring signal handler")
 			    .GetLastError();
 			return;
-		}
-
-		if (oldAction.sa_handler != SIG_DFL && oldAction.sa_handler != SIG_IGN && oldAction.sa_handler != NULL) {
-			chainedSignalHandler = oldAction.sa_handler;
-		} else {
-			chainedSignalHandler = nullptr;
 		}
 
 		// Start a thread which will use signals to log stacks on long events

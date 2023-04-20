@@ -177,6 +177,29 @@ void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
+// allow temporary overriding of default allocators used by arena to let memory survive deallocation and test
+// correctness of memory policy (e.g. zeroing out sensitive contents after use)
+namespace keepalive_allocator {
+
+namespace detail {
+extern bool g_active;
+} // namespace detail
+
+inline bool isActive() noexcept {
+	return detail::g_active;
+}
+
+class ActiveScope {
+public:
+	ActiveScope();
+	~ActiveScope();
+};
+
+void* allocate(size_t);
+void invalidate(void*);
+
+} // namespace keepalive_allocator
+
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 16384);
 	if (x <= 16)

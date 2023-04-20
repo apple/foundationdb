@@ -673,7 +673,10 @@ TEST_CASE("/ManagementAPI/ChangeConfig/TenantAndEncryptMode") {
 	return Void();
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bool useSystemPriority) {
+	if (useSystemPriority) {
+		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	}
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
@@ -683,11 +686,11 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr) {
 	return config;
 }
 
-ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx) {
+ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Database cx, bool useSystemPriority) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr));
+			DatabaseConfiguration config = wait(getDatabaseConfiguration(&tr, useSystemPriority));
 			return config;
 		} catch (Error& e) {
 			wait(tr.onError(e));

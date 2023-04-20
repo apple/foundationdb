@@ -28,7 +28,7 @@
 #define FDBSERVER_IPAGEENCRYPTIONKEYPROVIDER_ACTOR_H
 
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tenant.h"
 
@@ -270,10 +270,12 @@ private:
 		    EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 		    AUTH_TOKEN_HMAC_SHA_SIZE);
 		ASSERT_EQ(AUTH_TOKEN_HMAC_SHA_SIZE, AES_256_KEY_LENGTH);
+		const EncryptCipherKeyCheckValue kcv = Sha256KCV().computeKCV(&digest[0], AES_256_KEY_LENGTH);
 		return makeReference<BlobCipherKey>(cipherDetails.encryptDomainId,
 		                                    cipherDetails.baseCipherId,
 		                                    &digest[0],
 		                                    AES_256_KEY_LENGTH,
+		                                    kcv,
 		                                    cipherDetails.salt,
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
@@ -294,6 +296,7 @@ private:
 		                                    cipherId,
 		                                    cipherKeys[cipherId - 1]->rawBaseCipher(),
 		                                    AES_256_KEY_LENGTH,
+		                                    cipherKeys[cipherId - 1]->getBaseCipherKCV(),
 		                                    cipherKeys[cipherId - 1]->getSalt(),
 		                                    std::numeric_limits<int64_t>::max() /* refreshAt */,
 		                                    std::numeric_limits<int64_t>::max() /* expireAt */);
@@ -337,12 +340,13 @@ public:
 		state TextAndHeaderCipherKeys cipherKeys;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef = Encoder::getEncryptionHeaderRef(encodingHeader);
-			TextAndHeaderCipherKeys cks =
-			    wait(getEncryptCipherKeys(self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
+			TextAndHeaderCipherKeys cks = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, headerRef, BlobCipherMetrics::KV_REDWOOD));
 			cipherKeys = cks;
 		} else {
 			const BlobCipherEncryptHeader& header = reinterpret_cast<const EncodingHeader*>(encodingHeader)->encryption;
-			TextAndHeaderCipherKeys cks = wait(getEncryptCipherKeys(self->db, header, BlobCipherMetrics::KV_REDWOOD));
+			TextAndHeaderCipherKeys cks = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+			    self->db, header, BlobCipherMetrics::KV_REDWOOD));
 			cipherKeys = cks;
 		}
 		EncryptionKey encryptionKey;
@@ -361,7 +365,8 @@ public:
 	ACTOR static Future<EncryptionKey> getLatestEncryptionKey(AESEncryptionKeyProvider* self, int64_t domainId) {
 		ASSERT(self->encryptionMode == EncryptionAtRestMode::DOMAIN_AWARE || domainId < 0);
 		TextAndHeaderCipherKeys cipherKeys =
-		    wait(getLatestEncryptCipherKeysForDomain(self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
+		    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeysForDomain(
+		        self->db, domainId, BlobCipherMetrics::KV_REDWOOD));
 		EncryptionKey encryptionKey;
 		encryptionKey.aesKey = cipherKeys;
 		return encryptionKey;

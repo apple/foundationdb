@@ -907,13 +907,14 @@ struct InitializeEncryptKeyProxyRequest {
 	UID reqId;
 	UID interfaceId;
 	ReplyPromise<EncryptKeyProxyInterface> reply;
+	EncryptionAtRestMode encryptMode;
 
 	InitializeEncryptKeyProxyRequest() {}
 	explicit InitializeEncryptKeyProxyRequest(UID uid) : reqId(uid) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, reply);
+		serializer(ar, reqId, interfaceId, reply, encryptMode);
 	}
 };
 
@@ -1198,7 +1199,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwi,
                               Promise<Void> recovered,
                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                               IKeyValueStore* persistentData);
-ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei, Reference<AsyncVar<ServerDBInfo>> db);
+ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ei,
+                                         Reference<AsyncVar<ServerDBInfo>> db,
+                                         EncryptionAtRestMode encryptMode);
 
 ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  StorageServerInterface ssi,
@@ -1318,6 +1321,8 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time, const char* context = nullptr) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
+	state double orig = now();
+	state std::string trace = platform::get_backtrace();
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
@@ -1328,15 +1333,15 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (!isSimulatorProcessReliable()) {
+			if (g_network->isSimulated()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent e(SevError, "IoTimeoutError");
+			TraceEvent e(g_network->isSimulated() ? SevWarn : SevError, "IoTimeoutError");
 			e.error(err);
 			if (context != nullptr) {
 				e.detail("Context", context);
 			}
-			e.log();
+			e.detail("OrigTime", orig).detail("OrigTrace", trace).log();
 			throw err;
 		}
 	}
