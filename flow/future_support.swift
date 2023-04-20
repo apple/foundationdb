@@ -31,9 +31,8 @@ extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.Associate
         return try await self.waitValue
     }
 
-    // TODO: make a discardable value() but
-    @available(*, deprecated, renamed: "value()")
-    public var waitValue: Element {
+    @inlinable
+    internal var waitValue: Element {
         mutating get async throws {
             guard !self.isReady() else {
                 // FIXME(flow): handle isError and cancellation
