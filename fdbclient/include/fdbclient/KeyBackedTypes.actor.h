@@ -266,6 +266,7 @@ Future<Void> WatchableTrigger::onChangeActor(WatchableTrigger self,
 
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
@@ -682,7 +683,9 @@ public:
 	}
 
 	template <class Transaction>
-	Future<Optional<KVType>> seekGreaterOrEqual(Transaction tr, KeyType query, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<KVType>> seekGreaterOrEqual(Transaction tr,
+	                                            KeyType query,
+	                                            Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, true, snapshot);
 	}
 
@@ -738,6 +741,7 @@ public:
 
 	template <class Transaction>
 	void erase(Transaction tr, KeyType const& key) {
+		kbt_debug("MAP ERASE {}\n", packKey(key).printable());
 		tr->clear(packKey(key));
 		if (trigger.present()) {
 			trigger.get().update(tr);
@@ -970,22 +974,30 @@ public:
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekLessThan(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<ValueType>> seekLessThan(Transaction tr,
+	                                         ValueType query,
+	                                         Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekLessOrEqual(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<ValueType>> seekLessOrEqual(Transaction tr,
+	                                            ValueType query,
+	                                            Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, true, true, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekGreaterThan(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<ValueType>> seekGreaterThan(Transaction tr,
+	                                            ValueType query,
+	                                            Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, false, snapshot);
 	}
 
 	template <class Transaction>
-	Future<Optional<ValueType>> seekGreaterOrEqual(Transaction tr, ValueType query, Snapshot snapshot = Snapshot::False) const {
+	Future<Optional<ValueType>> seekGreaterOrEqual(Transaction tr,
+	                                               ValueType query,
+	                                               Snapshot snapshot = Snapshot::False) const {
 		return seek(*this, tr, query, false, true, snapshot);
 	}
 

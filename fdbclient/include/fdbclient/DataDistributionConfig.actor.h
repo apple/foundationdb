@@ -74,10 +74,10 @@ struct DDRangeConfig {
 
 	json_spirit::mObject toJSON() const {
 		json_spirit::mObject doc;
-		if(teamID.present()) {
+		if (teamID.present()) {
 			doc["teamID"] = *teamID;
 		}
-		if(replicationFactor.present()) {
+		if (replicationFactor.present()) {
 			doc["replicationFactor"] = *replicationFactor;
 		}
 		return doc;
@@ -87,6 +87,14 @@ struct DDRangeConfig {
 template <>
 struct Traceable<DDRangeConfig> : std::true_type {
 	static std::string toString(const DDRangeConfig& c) { return c.toString(); }
+};
+
+template <>
+struct fmt::formatter<DDRangeConfig> : formatter<std::string> {
+	template <typename FormatContext>
+	auto format(const DDRangeConfig& val, FormatContext& ctx) {
+		return fmt::formatter<std::string>::format(val.toString(), ctx);
+	}
 };
 
 struct DDConfiguration : public KeyBackedClass {
