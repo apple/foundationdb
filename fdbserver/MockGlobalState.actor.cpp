@@ -352,6 +352,7 @@ Future<Void> MockStorageServer::run() {
 	                                   [self = this](TraceEvent& te) {
 		                                   te.detail("CpuUsage", self->calculateCpuUsage());
 		                                   te.detail("DiskUsedBytes", self->usedDiskSpace);
+		                                   te.detail("BytesStored", self->metrics.byteSample.getEstimate(allKeys));
 	                                   }));
 	return actors.getResult();
 }
