@@ -427,8 +427,8 @@ extension _Concurrency.TaskPriority {
     }
 }
 
-extension _Concurrency.TaskPriority: CustomStringConvertible {
-    public var description: String {
+extension _Concurrency.TaskPriority {
+    public var flowDescription: String {
         "_Concurrency.TaskPriority(\(self.name), rawValue: \(rawValue), rawValueNet2: \(self.rawValueNet2))"
     }
 }
