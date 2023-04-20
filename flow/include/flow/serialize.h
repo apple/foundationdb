@@ -836,11 +836,7 @@ private:
 public:
 	static PacketBuffer* create(size_t size = 0) {
 		size = std::max(size, PACKET_BUFFER_MIN_SIZE - PACKET_BUFFER_OVERHEAD);
-		uint8_t* mem = nullptr;
-		if (keepalive_allocator::isActive()) [[unlikely]]
-			mem = static_cast<uint8_t*>(keepalive_allocator::allocate(size + PACKET_BUFFER_OVERHEAD));
-		else
-			mem = new uint8_t[size + PACKET_BUFFER_OVERHEAD];
+		uint8_t* mem = allocateAndMaybeKeepalive(size + PACKET_BUFFER_OVERHEAD);
 		return new (mem) PacketBuffer{ size };
 	}
 
@@ -873,10 +869,7 @@ public:
 			if (wipe_len > 0) {
 				::memset(data() + wipe_begin, 0, wipe_len);
 			}
-			if (keepalive_allocator::isActive()) [[unlikely]]
-				keepalive_allocator::invalidate(this);
-			else
-				delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(reinterpret_cast<uint8_t*>(this));
 		}
 	}
 	int bytes_unwritten() const { return size_ - bytes_written; }
