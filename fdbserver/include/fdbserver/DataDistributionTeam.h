@@ -121,6 +121,7 @@ public:
 		case ANY:
 			return "Any";
 		}
+		return "";
 	}
 
 	bool operator==(const TeamSelect& tmpTeamSelect) { return value == tmpTeamSelect.value; }
