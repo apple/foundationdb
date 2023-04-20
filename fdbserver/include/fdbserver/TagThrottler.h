@@ -103,3 +103,20 @@ public:
 	void removeExpiredTags();
 	uint32_t tagsTracked() const;
 };
+
+class MockTagThrottler : public ITagThrottler {
+public:
+	Future<Void> monitorThrottlingChanges() override { return Never(); }
+	void addRequests(TransactionTag, int) override {}
+	uint64_t getThrottledTagChangeId() const override { return 0; }
+
+	int64_t autoThrottleCount() const override { return 0; }
+	uint32_t busyReadTagCount() const override { return 0; }
+	uint32_t busyWriteTagCount() const override { return 0; }
+	int64_t manualThrottleCount() const override { return 0; }
+	bool isAutoThrottlingEnabled() const override { return 0; }
+
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override { return {}; }
+	TransactionTagMap<double> getProxyRates(int numProxies) override { return {}; }
+};

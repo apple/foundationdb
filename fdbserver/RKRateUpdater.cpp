@@ -4,6 +4,7 @@
 
 #include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/TagThrottler.h"
+#include "flow/UnitTest.h"
 
 RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
   : limits(limits), lastWarning(0), ratekeeperId(ratekeeperId) {}
@@ -39,9 +40,9 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 
 	std::map<UID, limitReason_t> ssReasons;
 
-	bool printRateKeepLimitReasonDetails =
-	    SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
-	    (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
+	bool verbose = shouldBeVerbose();
+
+	updateHealthMetricsStorageStats(metricsTracker);
 
 	// Look at each storage server's write queue and local rate, compute and store the desired rate
 	// ratio
@@ -71,7 +72,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			} else {
 				ssLimitReason = limitReason_t::storage_server_min_free_space_ratio;
 			}
-			if (printRateKeepLimitReasonDetails) {
+			if (verbose) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("Reason", ssLimitReason)
 				    .detail("SSID", ss.id)
@@ -90,12 +91,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		worstDurabilityLag = std::max(worstDurabilityLag, storageDurabilityLag);
 
 		storageDurabilityLagReverseIndex.insert(std::make_pair(-1 * storageDurabilityLag, &ss));
-
-		auto& ssMetrics = healthMetrics.storageStats[ss.id];
-		ssMetrics.storageQueue = storageQueue;
-		ssMetrics.storageDurabilityLag = storageDurabilityLag;
-		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
-		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 
 		double targetRateRatio = std::min((storageQueue - targetBytes + springBytes) / (double)springBytes, 2.0);
 
@@ -140,7 +135,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 				limitTps = lim;
 				if (ssLimitReason == limitReason_t::unlimited ||
 				    ssLimitReason == limitReason_t::storage_server_write_bandwidth_mvcc) {
-					if (printRateKeepLimitReasonDetails) {
+					if (verbose) {
 						TraceEvent("RatekeeperLimitReasonDetails")
 						    .detail("Reason", limitReason_t::storage_server_write_queue_size)
 						    .detail("FromReason", ssLimitReason)
@@ -230,7 +225,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 				limits.durabilityLagLimit = SERVER_KNOBS->DURABILITY_LAG_REDUCTION_RATE * limits.durabilityLagLimit;
 			}
 			if (limits.durabilityLagLimit < limits.tpsLimit) {
-				if (printRateKeepLimitReasonDetails) {
+				if (verbose) {
 					TraceEvent("RatekeeperLimitReasonDetails")
 					    .detail("SSID", ss->second->id)
 					    .detail("Reason", limitReason_t::storage_server_durability_lag)
@@ -324,7 +319,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					}
 
 					if (bwTPS < limits.tpsLimit) {
-						if (printRateKeepLimitReasonDetails) {
+						if (verbose) {
 							TraceEvent("RatekeeperLimitReasonDetails")
 							    .detail("Reason", limitReason_t::blob_worker_lag)
 							    .detail("BWLag", blobWorkerLag)
@@ -349,7 +344,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 
 					if (blobWorkerLag > 3 * limits.bwLagTarget) {
 						limits.tpsLimit = 0.0;
-						if (printRateKeepLimitReasonDetails) {
+						if (verbose) {
 							TraceEvent("RatekeeperLimitReasonDetails")
 							    .detail("Reason", limitReason_t::blob_worker_missing)
 							    .detail("LastValid", lastIter != version_transactions.end())
@@ -365,7 +360,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 						ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
 						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 					} else if (bwTPS < limits.tpsLimit) {
-						if (printRateKeepLimitReasonDetails) {
+						if (verbose) {
 							TraceEvent("RatekeeperLimitReasonDetails")
 							    .detail("Reason", limitReason_t::blob_worker_lag)
 							    .detail("BWLag", blobWorkerLag)
@@ -380,7 +375,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 				}
 			} else if (blobWorkerLag > 3 * limits.bwLagTarget) {
 				limits.tpsLimit = 0.0;
-				if (printRateKeepLimitReasonDetails) {
+				if (verbose) {
 					TraceEvent("RatekeeperLimitReasonDetails")
 					    .detail("Reason", limitReason_t::blob_worker_missing)
 					    .detail("Elapsed", elapsed)
@@ -396,7 +391,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			}
 		} else if (blobWorkerLag > 3 * limits.bwLagTarget) {
 			limits.tpsLimit = 0.0;
-			if (printRateKeepLimitReasonDetails) {
+			if (verbose) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("Reason", limitReason_t::blob_worker_missing)
 				    .detail("BWLag", blobWorkerLag)
@@ -482,7 +477,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			} else {
 				tlogLimitReason = limitReason_t::log_server_min_free_space_ratio;
 			}
-			if (printRateKeepLimitReasonDetails) {
+			if (verbose) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("TLogID", tl.id)
 				    .detail("Reason", tlogLimitReason)
@@ -512,7 +507,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		double targetRateRatio = std::min((b + springBytes) / (double)springBytes, 2.0);
 
 		if (writeToReadLatencyLimit > targetRateRatio) {
-			if (printRateKeepLimitReasonDetails) {
+			if (verbose) {
 				TraceEvent("RatekeeperLimitReasonDetails")
 				    .detail("TLogID", tl.id)
 				    .detail("Reason", limitReason_t::storage_server_readable_behind)
@@ -559,7 +554,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			    inputRate;
 			double lim = actualTps * x;
 			if (lim < limits.tpsLimit) {
-				if (printRateKeepLimitReasonDetails) {
+				if (verbose) {
 					TraceEvent("RatekeeperLimitReasonDetails")
 					    .detail("Reason", limitReason_t::log_server_mvcc_write_bandwidth)
 					    .detail("TLogID", tl.id)
@@ -644,12 +639,16 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 	}
 }
 
-HealthMetrics const& RKRateUpdater::getHealthMetrics() const {
+HealthMetrics const& RKRateUpdater::getHealthMetrics() const& {
 	return healthMetrics;
 }
 
 double RKRateUpdater::getTpsLimit() const {
 	return limits.tpsLimit;
+}
+
+limitReason_t RKRateUpdater::getLimitReason() const {
+	return static_cast<limitReason_t>(limits.reasonMetric.getValue());
 }
 
 double RKRateUpdater::getActualTps(IRKRateServer const& rateServer, IRKMetricsTracker const& metricsTracker) {
@@ -675,6 +674,23 @@ int64_t RKRateUpdater::getTotalDiskUsageBytes(IRKMetricsTracker const& metricsTr
 		}
 	}
 	return result;
+}
+
+bool RKRateUpdater::shouldBeVerbose() {
+	return SERVER_KNOBS->RATEKEEPER_PRINT_LIMIT_REASON &&
+	       (deterministicRandom()->random01() < SERVER_KNOBS->RATEKEEPER_LIMIT_REASON_SAMPLE_RATE);
+}
+
+void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& metricsTracker) {
+	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
+	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
+		auto const& ss = i->value;
+		auto& ssMetrics = healthMetrics.storageStats[ss.id];
+		ssMetrics.storageQueue = ss.getStorageQueueBytes();
+		ssMetrics.storageDurabilityLag = ss.getDurabilityLag();
+		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
+		ssMetrics.diskUsage = ss.lastReply.diskUsage;
+	}
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,

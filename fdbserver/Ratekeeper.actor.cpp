@@ -307,7 +307,7 @@ Ratekeeper::Ratekeeper(UID id,
 	rateServer = std::make_unique<RKRateServer>(rkInterf.getRateInfo.getFuture());
 
 	RatekeeperLimits normalLimits(TransactionPriority::DEFAULT,
-	                              "",
+	                              /*context=*/"",
 	                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
 	                              SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
 	                              SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
@@ -316,7 +316,7 @@ Ratekeeper::Ratekeeper(UID id,
 	                              SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
 	                              SERVER_KNOBS->TARGET_BW_LAG);
 	RatekeeperLimits batchLimits(TransactionPriority::BATCH,
-	                             "Batch",
+	                             /*context=*/"Batch",
 	                             SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
 	                             SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH,
 	                             SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,

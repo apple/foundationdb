@@ -23,8 +23,9 @@ struct RKVersionInfo {
 class IRKRateUpdater {
 public:
 	virtual ~IRKRateUpdater() = default;
-	virtual HealthMetrics const& getHealthMetrics() const = 0;
+	virtual HealthMetrics const& getHealthMetrics() const& = 0;
 	virtual double getTpsLimit() const = 0;
+	virtual limitReason_t getLimitReason() const = 0;
 	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
 	                    class ITagThrottler const&,
@@ -52,12 +53,20 @@ class RKRateUpdater : public IRKRateUpdater {
 	// in the cluster.
 	static int64_t getTotalDiskUsageBytes(IRKMetricsTracker const&);
 
+	// If verbose tracing is enabled, randomly determine if the
+	// tracing for a particular rate calculation should be verbose
+	static bool shouldBeVerbose();
+
+	void updateHealthMetricsStorageStats(IRKMetricsTracker const&);
+
 public:
 	explicit RKRateUpdater(UID ratekeeperId, RatekeeperLimits const&);
 
 	~RKRateUpdater();
 
 	double getTpsLimit() const override;
+
+	limitReason_t getLimitReason() const override;
 
 	void update(class IRKMetricsTracker const&,
 	            class IRKRateServer const&,
@@ -70,5 +79,5 @@ public:
 	            double& blobWorkerTime,
 	            double& unblockedAssignmentTime) override;
 
-	HealthMetrics const& getHealthMetrics() const override;
+	HealthMetrics const& getHealthMetrics() const& override;
 };
