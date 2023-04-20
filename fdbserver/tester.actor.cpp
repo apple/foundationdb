@@ -2049,7 +2049,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 		if (deterministicRandom()->random01() < 0.25) {
 			state ReadYourWritesTransaction tr(cx);
-			state bool verbose = false;
+			state bool verbose = (KEYBACKEDTYPES_DEBUG != 0);
 
 			loop {
 				try {
@@ -2066,14 +2066,28 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					wait(rangeConfig.updateRange(&tr, "\xff\x06"_sr, "\xff\x07"_sr, DDRangeConfig(6)));
 					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, DDRangeConfig(4)));
 
+					wait(rangeConfig.updateRange(&tr, "\xff\x03k"_sr, "\xff\x03z"_sr, DDRangeConfig(3)));
+					wait(rangeConfig.updateRange(&tr, "\xff\x04t"_sr, "\xff\x05h"_sr, DDRangeConfig(3, 1), true));
+					wait(rangeConfig.updateRange(&tr, "\xff\x06u"_sr, "\xff\x07m"_sr, DDRangeConfig({}, 2)));
+
 					state std::vector<std::tuple<Key, bool, DDRangeConfig>> rangeTests = {
-						{ "\x01"_sr, false, DDRangeConfig() },        { "\xff\x10"_sr, false, DDRangeConfig() },
-						{ "\xff\x03zzz"_sr, true, DDRangeConfig(3) }, { "\xff\x04zzz"_sr, true, DDRangeConfig(4) },
-						{ "\xff\x05"_sr, true, DDRangeConfig() },     { "\xff\x06"_sr, true, DDRangeConfig(6) },
+						{ "\x01"_sr, false, DDRangeConfig() },         { "\xff\x10"_sr, false, DDRangeConfig() },
+						{ "\xff\x03x"_sr, true, DDRangeConfig(3) },    { "\xff\x04z"_sr, true, DDRangeConfig(3, 1) },
+						{ "\xff\x05"_sr, true, DDRangeConfig(3, 1) },  { "\xff\x06"_sr, true, DDRangeConfig(6) },
+
+						{ "\xff\x06u"_sr, true, DDRangeConfig(6, 2) }, { "\xff\x06v"_sr, true, DDRangeConfig(6, 2) },
+						{ "\xff\x07m"_sr, false, DDRangeConfig() },    { "\xff\x07k"_sr, true, DDRangeConfig({}, 2) }
 					};
 
 					state DDConfiguration::RangeConfigMapSnapshot snapshot =
 					    wait(rangeConfig.getSnapshot(&tr, allKeys.begin, allKeys.end));
+
+					if (verbose) {
+						fmt::print("DD User Range Config:\n{}\n",
+						           json_spirit::write_string(DDConfiguration::toJSON(snapshot, true),
+						                                     json_spirit::pretty_print));
+					}
+
 					state int i;
 					for (i = 0; i < rangeTests.size(); ++i) {
 						state Key query = std::get<0>(rangeTests[i]);
@@ -2104,12 +2118,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 							ASSERT(snapshotRange.range().begin == verify->range.begin);
 							ASSERT(snapshotRange.range().end == verify->range.end);
 						}
-					}
-
-					if (verbose) {
-						fmt::print("DD User Range Config:\n{}\n",
-						           json_spirit::write_string(DDConfiguration::toJSON(snapshot, true),
-						                                     json_spirit::pretty_print));
 					}
 
 					wait(tr.commit());

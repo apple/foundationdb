@@ -58,7 +58,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 		return fail("No subcommand given.");
 	}
 
-	StringRef cmd = nextArg();
+	state StringRef cmd = nextArg();
 
 	if (cmd == "show"_sr) {
 		state bool includeDefault = false;
@@ -78,7 +78,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 		    "{}\n",
 		    json_spirit::write_string(DDConfiguration::toJSON(config, includeDefault), json_spirit::pretty_print));
 
-	} else if (cmd == "set"_sr) {
+	} else if (cmd == "update"_sr || cmd == "set"_sr) {
 		if (args.size() < 3) {
 			return fail("Begin, end, and at least one configuration option are required.");
 		}
@@ -99,6 +99,8 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 					rangeConfig.replicationFactor = nextArgInt();
 				} else if (option == "teamID"_sr) {
 					rangeConfig.teamID = nextArgInt();
+				} else if (option == "default"_sr) {
+					rangeConfig = DDRangeConfig();
 				} else {
 					return fail(fmt::format("Unknown range option: '{}'", option.printable()));
 				}
@@ -114,7 +116,8 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-					wait(DDConfiguration().userRangeConfig().updateRange(&tr, begin, end, rangeConfig));
+					wait(
+					    DDConfiguration().userRangeConfig().updateRange(&tr, begin, end, rangeConfig, cmd == "set"_sr));
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
@@ -132,18 +135,23 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 CommandFactory rangeConfigFactory(
     "rangeconfig",
     CommandHelp(
-        "rangeconfig show [includeDefault] | [set <beginKey> <endKey> [replication <N>] [teamID <N>]",
-        "Show or set the per-keyrange configuration options.",
+        "rangeconfig show [includeDefault] | (update|set) <beginKey> <endKey> [default] [replication <N>] [teamID <N>]",
+        "Show or change the per-keyrange configuration options.",
         "The 'show' command will print the range configuration in JSON.  By default, ranges with no configured "
-        "options are not shown, these are called 'default ranges' and can be shown with the 'includeDefault' flag."
-        "A key range can have zero or more override options set.  Unset options for the range will keep their "
-        "default values.  These options do not change anything about the shard map directly, rather they are "
-        "hints which DataDistribution should honor.\n"
-        " Setting 'replication' for a range can be used to increase "
-        "the replication factor for that range, but not to decrease it.  Replication factors in the "
-        "configuration lower than the cluster's configured replication factor will be treated as the cluster's "
-        "replication factor.\n"
-        " Ranges with different teamID settings should be assigned to different storage teams.  Shards with the same "
-        "team ID can be assigned to the same storage team, but nothing explicitly attempts to do or prefer this."));
-
+        "options are not shown, these are called 'default ranges' and can be shown with the 'includeDefault' flag.\n\n"
+        "The 'update' command will apply the given options to the given key range.  Any option not explicitly given "
+        "will remain at its present setting for the range in the configuration.\n"
+        "The 'set' command will change the given key range to be exactly given configuration, meaning that any option "
+        "not explicitly given will be changed to unset for the range.\n"
+        "Note that key range configuration options do not alter the shard map directly, rather they are hints which "
+        "DataDistribution should honor.\n"
+        "Range Options:\n"
+        "    default         - Resets the configuration to apply to have no options set.  This can be used with 'set'\n"
+        "                      to explicitly clear all configured options for a range.\n"
+        "    replication <N> - Set replication factor for the range.  Ranges set to a replication factor lower than\n"
+        "                      the cluster's configured replication level will be treated as the same as the\n"
+        "                      cluster's replication level.\n"
+        "    teamID <N> - This provides a way to indicate that shards should be on different teams.  Ranges with\n"
+        "                 different teamID settings should be assigned to different storage teams.  Shards with the\n"
+        "                 same team ID can be assigned to the same storage team, but nothing enforces this.\n"));
 } // namespace fdb_cli

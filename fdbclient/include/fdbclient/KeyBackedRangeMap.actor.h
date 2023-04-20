@@ -112,6 +112,7 @@ struct KeyRangeMapSnapshot {
 //
 //     // Return true if the two values are identical in meaning so adjacent ranges using either value can be merged
 //     bool operator==(ValueType const& value) const;
+// For debug output, KeyType and ValueType must both be supported by fmt::formatter<>
 template <typename KeyType,
           typename ValueType,
           typename KeyCodec = TupleCodec<KeyType>,
@@ -152,65 +153,142 @@ public:
 
 	// Update the range from begin to end by either applying valueUpdate to it, or if replace is true then replace
 	// the the range with the given value.
+	// Adjacent ranges that are identical will be coalesced in the update transaction.
 	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
 	ACTOR template <class Transaction>
 	Future<Void> updateRangeActor(KeyBackedRangeMap self,
 	                              Transaction tr,
 	                              KeyType begin,
 	                              KeyType end,
-	                              ValueType valueUpdate) {
+	                              ValueType valueUpdate,
+	                              bool replace) {
+		kbt_debug("RANGEMAP updateRange start {} to {} value {}\n", begin, end, valueUpdate);
 
-		state Future<Optional<RangeValue>> beginRange = self.getRangeForKey(tr, begin);
-		state Future<Optional<RangeValue>> endRange = self.getRangeForKey(tr, end);
-		state Future<RangeResultType> middleBoundaries = self.kvMap.getRange(
-		    tr, KeySelector::firstGreaterThan(begin), KeySelector::firstGreaterOrEqual(end), GetRangeLimits(1e4));
+		// In order to update and coalsce the range, we need all range boundaries from
+		//   lastLessThan(begin) inclusive
+		// through
+		//   firstGreaterOrEqual(end) inclusive, which is firstGreaterThan(end) exclusive
+		// so we can
+		//   - compare each modified range boundary to the previous boundary to see if the modified boundary
+		//     can be removed, which is the case if its value matches the previous boundary's value
+		//   - compare the boundary after the last modified boundary to see if it can be removed because
+		//     its value matches the last modified boundary's value
+		Optional<typename Map::KVType> beginKV = wait(self.kvMap.seekLessThan(tr, begin));
+		state KeySelector rangeBegin = KeySelector::firstGreaterOrEqual(beginKV.present() ? beginKV->key : begin);
 
-		wait(success(beginRange) && success(endRange));
+		// rangeEnd is past end so the result will include end if it exists
+		state KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		kbt_debug("KEYRANGEMAP updateRange beginRange present={}\n", beginRange.get().present());
-		if (beginRange.get().present()) {
-			// Begin is in a range that exists, so set begin = the current value updated with valueUpdate.
-			// Note that begin may already be the start of the range it exists in, which also works.
-			self.kvMap.set(tr, begin, beginRange.get()->value.apply(valueUpdate));
-		} else {
-			// Begin is not in any range that exists, so initialize the begin boundary to valueUpdate
-			self.kvMap.set(tr, begin, valueUpdate);
-		}
+		state int readSize = 1; // BUGGIFY ? 1 : 100000;
+		state Future<RangeResultType> boundariesFuture =
+		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		kbt_debug("KEYRANGEMAP updateRange endRange present={}\n", endRange.get().present());
-		if (endRange.get().present()) {
-			// End is in a range that exists, so if that range does not start with end split it at end by setting
-			// end to the range's value.
-			if (endRange.get()->range.begin != end) {
-				kbt_debug("KEYRANGEMAP set end, endRange does not start with end key\n");
-				self.kvMap.set(tr, end, endRange.get()->value);
-			}
-		} else {
-			// End is not in a range that exists, so set end to a new ValueType to terminate it
-			self.kvMap.set(tr, end, ValueType());
-		}
+		// Previous range value starts as a default value
+		state Optional<ValueType> previous;
+		// Indicates that begin has been either seen/updated or created.
+		state bool beginDone = false;
+		// Indicates that end was found
+		state bool endFound = false;
 
+		// The results will contain
+		//   A) 0 or 1 key < begin.  Use this to initialize previousRangeValue
+		//   B) 0 or 1 key == begin.  Update this value, create if it doesn't exist.
+		//   C) >=0 keys > begin and < end.  Update these, delete if they match previous
+		//   D) 0 or 1 key == end.  Delete this key if it matches previous. Set to default if it doesn't exist.
 		loop {
-			RangeResultType boundaries = wait(middleBoundaries);
+			kbt_debug("RANGEMAP updateRange loop\n");
+			RangeResultType boundaries = wait(boundariesFuture);
 			for (auto const& bv : boundaries.results) {
-				kbt_debug("KEYRANGEMAP set interior boundary\n");
-				self.kvMap.set(tr, bv.first, bv.second.apply(valueUpdate));
+				kbt_debug("RANGEMAP updateRange   result key={} value={}\n", bv.first, bv.second);
+				// Should never see a result past the end key
+				ASSERT(!endFound);
+
+				if (bv.first > begin) {
+					if (!beginDone) {
+						kbt_debug("RANGEMAP updateRange !beginDone\n");
+						// Begin was not found and we've passed it.
+						ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
+						// Set begin if the new val is different from the previous range value if it exists
+						if (previous != val) {
+							self.kvMap.set(tr, begin, val);
+							previous = val;
+						}
+						beginDone = true;
+					}
+					if (bv.first < end) {
+						// Case C
+						kbt_debug("RANGEMAP updateRange Case C\n");
+						ValueType val = replace ? valueUpdate : bv.second.apply(valueUpdate);
+						if (previous == val) {
+							self.kvMap.erase(tr, bv.first);
+						} else {
+							self.kvMap.set(tr, bv.first, val);
+							previous = val;
+						}
+					} else {
+						if (bv.first == end) {
+							// Case D
+							kbt_debug("RANGEMAP updateRange Case D\n");
+							if (previous == bv.second) {
+								self.kvMap.erase(tr, end);
+							}
+							endFound = true;
+						}
+					}
+				} else if (bv.first == begin) {
+					// Case B
+					kbt_debug("RANGEMAP updateRange Case B\n");
+					ValueType val = replace ? valueUpdate : bv.second.apply(valueUpdate);
+					if (previous == val) {
+						self.kvMap.erase(tr, begin);
+					} else {
+						self.kvMap.set(tr, begin, val);
+					}
+					beginDone = true;
+					previous = val;
+				} else {
+					// Case A
+					kbt_debug("RANGEMAP updateRange Case A\n");
+					previous = bv.second;
+				}
 			}
 			if (!boundaries.more) {
 				break;
 			}
-			middleBoundaries = self.kvMap.getRange(tr,
-			                                       KeySelector::firstGreaterThan(boundaries.results.back().first),
-			                                       KeySelector::firstGreaterOrEqual(end),
-			                                       GetRangeLimits(1e4));
+			ASSERT(!boundaries.results.empty());
+
+			// Continue reading starting from the first key after the last key read.
+			rangeBegin = KeySelector::firstGreaterThan(boundaries.results.back().first);
+			boundariesFuture = self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
+		}
+
+		// If begin was never found or passed/created
+		if (!beginDone) {
+			ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
+			if (previous != val) {
+				kbt_debug("RANGEMAP updateRange set begin\n");
+				self.kvMap.set(tr, begin, valueUpdate);
+				previous = val;
+			}
+		}
+
+		kbt_debug("RANGEMAP updateRange endFound {}  previous {}  default {}\n", endFound, previous, ValueType());
+		// If end was not found and the final range was non-default then set end to terminate the final range
+		if (!endFound && previous != ValueType()) {
+			kbt_debug("RANGEMAP updateRange set end\n");
+			self.kvMap.set(tr, end, ValueType());
 		}
 
 		return Void();
 	}
 
 	template <class Transaction>
-	Future<Void> updateRange(Transaction* tr, KeyType const& begin, KeyType const& end, ValueType const& valueUpdate) {
-		return updateRangeActor(*this, tr, begin, end, valueUpdate);
+	Future<Void> updateRange(Transaction* tr,
+	                         KeyType const& begin,
+	                         KeyType const& end,
+	                         ValueType const& valueUpdate,
+	                         bool replace = false) {
+		return updateRangeActor(*this, tr, begin, end, valueUpdate, replace);
 	}
 
 	ACTOR template <class Transaction>
@@ -221,8 +299,9 @@ public:
 		// However this could touch a key outside of the map subspace which can lead to various errors.
 		// Use seekLessOrEqual() to find a begin key safely.
 		Optional<typename Map::KVType> beginKV = wait(self.kvMap.seekLessOrEqual(tr, begin));
-
 		state KeySelector rangeBegin = KeySelector::firstGreaterOrEqual(beginKV.present() ? beginKV->key : begin);
+
+		// rangeEnd is past end so the result will include end if it exists
 		state KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
 		state int readSize = BUGGIFY ? 1 : 100000;
