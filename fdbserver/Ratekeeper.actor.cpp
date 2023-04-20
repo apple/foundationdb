@@ -199,6 +199,9 @@ public:
 		self.addActor.send(self.rateServer->run(
 		    *self.normalRateUpdater, *self.batchRateUpdater, *self.tagThrottler, *self.recoveryTracker));
 
+		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
+			self.addActor.send(self.quotaCache->run());
+		}
 		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.monitorBlobWorkers(dbInfo));
@@ -294,13 +297,15 @@ Ratekeeper::Ratekeeper(UID id,
                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                        RatekeeperInterface rkInterf)
   : id(id), db(db), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
+	metricsTracker =
+	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		tagThrottler = std::make_unique<GlobalTagThrottler>(db, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
+		quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
+		tagThrottler = std::make_unique<GlobalTagThrottler>(
+		    *metricsTracker, *quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
-	metricsTracker =
-	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
 	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db, dbInfo);
 	recoveryTracker = std::make_unique<RKRecoveryTracker>(IAsyncListener<bool>::create(
 	    dbInfo, [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; }));
