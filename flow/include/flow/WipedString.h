@@ -20,16 +20,72 @@
 #ifndef WIPED_STRING_H
 #define WIPED_STRING_H
 #pragma once
+#include <concepts>
 #include <cstring>
 #include <type_traits>
+#include "flow/serialize.h"
 #include "flow/Arena.h"
 #include "flow/FileIdentifier.h"
-#include "flow/serialize.h"
+#include "flow/ObjectSerializerTraits.h"
 
-// String that wipes its memory after use
-// Intentionally diverged from Standalone<StringRef> for more robust preservation of wiping guarantees through more
-// restrictive interface e.g. no non-const contents() member or direct access to StringRef&, and no non-const arena()
-// member.
+namespace detail {
+// Wraps StringRef for the sole purpose of offering distinct serializable trait
+// we avoid inheritance by choice, to prevent this from sharing traits with StringRef, which would bypass wiping.
+class WipedStringSerdesWrapper {
+	StringRef* value;
+
+public:
+	// Flatbuffer implementation requires default constructor
+	WipedStringSerdesWrapper() noexcept : value(nullptr) {}
+
+	// deliberately avoid WipedStringSerdesWrapper(StringRef) to prevent implicit conversion
+	explicit WipedStringSerdesWrapper(StringRef& s) noexcept : value(&s) {}
+
+	StringRef& get() const noexcept { return *value; }
+};
+
+template <class Context>
+concept is_wipe_enabled = requires(Context& context) {
+	                          {
+		                          context.markForWipe(std::declval<uint8_t*>(), std::declval<size_t>())
+		                          } -> std::same_as<void>;
+                          };
+
+} // namespace detail
+
+// This trait is only meant for internal use by WipedString::serialize()
+template <>
+struct dynamic_size_traits<detail::WipedStringSerdesWrapper> : std::true_type {
+	template <class Context>
+	static size_t size(const detail::WipedStringSerdesWrapper& t, Context&) {
+		return t.get().size();
+	}
+
+	template <class Context>
+	static void save(uint8_t* out, const detail::WipedStringSerdesWrapper& t, Context& context) {
+		if (!t.get().empty()) {
+			::memcpy(out, t.get().begin(), t.get().size());
+			if constexpr (detail::is_wipe_enabled<Context>) {
+				context.markForWipe(out, t.get().size());
+				// Below condition is only active with unit test
+				if (keepalive_allocator::isActive()) [[unlikely]]
+					keepalive_allocator::trackWipedArea(out, t.get().size());
+			}
+		}
+	}
+
+	template <class Context>
+	static void load(const uint8_t* ptr, size_t sz, detail::WipedStringSerdesWrapper& t, Context& context) {
+		dynamic_size_traits<StringRef>::load(ptr, sz, t.get(), context);
+	}
+};
+
+// String that wipes its memory after use.
+// Also wipes any buffer containing its content upon serialization.
+// NOTE: This class intentionally diverged from Standalone<StringRef> for more robust preservation of
+//       wiping guarantees through more restrictive interface: e.g. not allowing non-const access to arena or StringRef.
+// IMPORTANT: currently deserialized WipedString does not make the deserialized WipedString
+//            to wipe upon destruction, simply because there's no need for it.
 class WipedString {
 	Arena arena;
 	StringRef string;
@@ -47,6 +103,15 @@ public:
 		}
 	}
 
+	WipedString(StringRef s, Arena& arena) {
+		if (!s.empty()) {
+			auto buf = new (arena, WipeAfterUse{}) uint8_t[s.size()];
+			::memcpy(buf, s.begin(), s.size());
+			string = StringRef(buf, s.size());
+			this->arena = arena;
+		}
+	}
+
 	WipedString(const WipedString& other) noexcept = default;
 	WipedString(WipedString&& other) noexcept = default;
 	WipedString& operator=(const WipedString& other) noexcept = default;
@@ -59,10 +124,8 @@ public:
 
 	template <class Archive>
 	void serialize(Archive& ar) {
-		// does not force the deserialized string to wipe because packet containing this string
-		// is received as a non-wiping chunk of binary string and we cannot control how packets are received at this
-		// layer
-		serializer(ar, string, arena);
+		auto ws = detail::WipedStringSerdesWrapper(string);
+		serializer(ar, ws, arena);
 	}
 };
 
