@@ -121,12 +121,13 @@ class GlobalTagThrottlerImpl {
 		Smoother perClientRate;
 		Smoother targetRate;
 		double transactionsLastAdded;
+		double lastLogged;
 
 	public:
 		explicit PerTagStatistics()
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()) {}
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()), lastLogged(0) {}
 
 		void addTransactions(int count) {
 			transactionsLastAdded = now();
@@ -153,6 +154,10 @@ class GlobalTagThrottlerImpl {
 		bool recentTransactionsAdded() const {
 			return now() - transactionsLastAdded < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 		}
+
+		bool canLog() const { return now() - lastLogged > SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRACE_INTERVAL; }
+
+		void updateLastLogged() { lastLogged = now(); }
 	};
 
 	IRKMetricsTracker const* metricsTracker;
@@ -197,8 +202,6 @@ class GlobalTagThrottlerImpl {
 		for (const auto& [id, _] : throughput) {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
-		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
-		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
 
 		return result;
 	}
@@ -406,6 +409,9 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
+			if (!stats.canLog()) {
+				te.disable();
+			}
 			bool isBusy{ false };
 			auto const targetTps = getTargetTps(tag, isBusy, te);
 			if (isBusy) {
@@ -415,6 +421,7 @@ public:
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
 				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
+				stats.updateLastLogged();
 			} else {
 				te.disable();
 			}
@@ -431,6 +438,9 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
+			if (!stats.canLog()) {
+				te.disable();
+			}
 			auto const targetTps = getTargetTps(tag, isBusy, te);
 
 			if (isBusy) {
@@ -441,6 +451,7 @@ public:
 				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
 				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
 				te.detail("ClientTps", clientRate.tpsRate);
+				stats.updateLastLogged();
 			} else {
 				te.disable();
 			}
@@ -454,14 +465,27 @@ public:
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
+		auto& tagToThroughputCounters = throughput[ss.id];
+		std::unordered_set<TransactionTag> busyReadTags, busyWriteTags;
 		for (const auto& busyReadTag : ss.busiestReadTags) {
+			busyReadTags.insert(busyReadTag.tag);
 			if (tagStatistics.find(busyReadTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
+				tagToThroughputCounters[busyReadTag.tag].updateCost(busyReadTag.rate, OpType::READ);
 			}
 		}
 		for (const auto& busyWriteTag : ss.busiestWriteTags) {
+			busyWriteTags.insert(busyWriteTag.tag);
 			if (tagStatistics.find(busyWriteTag.tag) != tagStatistics.end()) {
-				throughput[ss.id][busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+				tagToThroughputCounters[busyWriteTag.tag].updateCost(busyWriteTag.rate, OpType::WRITE);
+			}
+		}
+
+		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
+			if (!busyReadTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::READ);
+			}
+			if (!busyWriteTags.count(tag)) {
+				throughputCounters.updateCost(0.0, OpType::WRITE);
 			}
 		}
 		return Void();
@@ -600,7 +624,7 @@ public:
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
-		                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER;
+		                              SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
 		return result;
 	}
 };

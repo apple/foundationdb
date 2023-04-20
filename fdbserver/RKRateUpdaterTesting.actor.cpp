@@ -12,9 +12,18 @@
 
 namespace {
 
+// WARNING: If any of these test* constants are changed, make sure to update
+// comments that refer to these values in the test cases below.
+
 double const testActualTps = 1000.0;
+// Corresponds to TARGET_BYTES_PER_STORAGE_SERVER, TARGET_BYTES_PER_TLOG,
+// TARGET_BYTES_PER_STORAGE_SERVER_BATCH, and TARGET_BYTES_PER_TLOG_BATCH:
 constexpr int64_t testTargetQueueBytes = 1000e6;
+// Corresponds to SPRING_BYTES_STORAGE_SERVER, SPRING_BYTES_TLOG,
+// SPRING_BYTES_STORAGE_SERVER_BATCH, and SPRING_BYTES_TLOG_BATCH:
 constexpr int64_t testSpringBytes = 100e6;
+// Corresponds to TARGET_DURABILITY_LAG_VERSIONS, MAX_TL_SS_VERSION_DIFFERENCE,
+// TARGET_DURABILTY_LAG_VERSIONS_BATCH, and MAX_TL_SS_VERSION_DIFFERENCE_BATCH:
 constexpr int64_t testTargetVersionDifference = 2e9;
 constexpr int64_t testTotalSpace = 100e9;
 constexpr int64_t testGenerateMockInfoIterations = 20e3;
@@ -22,13 +31,15 @@ double const testInputBytesPerSecond = 1e6;
 
 // FIXME: The default error bound should be lowered in the future,
 // but doing so today causes some tests to fail
-void checkApproximatelyEqual(double a, double b, double errorBound = 0.2) {
+bool checkApproximatelyEqual(double a, double b, double errorBound = 0.2) {
 	if ((a > b + 0.01 && a > b * (1 + errorBound)) || (b > a + 0.01 && b > a * (1 + errorBound))) {
 		TraceEvent(SevError, "CheckApproximatelyEqualFailure")
 		    .detail("A", a)
 		    .detail("B", b)
 		    .detail("ErrorBound", errorBound);
-		ASSERT(false);
+		return false;
+	} else {
+		return true;
 	}
 }
 
@@ -52,6 +63,9 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
 	reply.v = startVersion;
 	result.update(reply, smoothTotalDurableBytes);
 
+	// Each iteration simulates 10ms of work on a tlog server.
+	// We iterate many times in order for smoothers to catch up
+	// to their desired values.
 	while (iterations--) {
 		// Use orderedDelay to prevent buggification
 		wait(orderedDelay(0.01));
@@ -62,10 +76,11 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
 		result.update(reply, smoothTotalDurableBytes);
 	}
 
-	checkApproximatelyEqual(result.getSmoothFreeSpace(), availableSpace, 0.05);
-	checkApproximatelyEqual(result.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05);
-	checkApproximatelyEqual(result.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05);
-	checkApproximatelyEqual(result.getSmoothTotalSpace(), totalSpace, 0.05);
+	// Validate that result statistics approximately match desired values:
+	ASSERT(checkApproximatelyEqual(result.getSmoothFreeSpace(), availableSpace, 0.05));
+	ASSERT(checkApproximatelyEqual(result.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05));
+	ASSERT(checkApproximatelyEqual(result.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05));
+	ASSERT(checkApproximatelyEqual(result.getSmoothTotalSpace(), totalSpace, 0.05));
 
 	return result;
 }
@@ -94,6 +109,9 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	reply.durableVersion = 0;
 	ss.update(reply, smoothTotalDurableBytes);
 
+	// Each iteration simulates 10ms of work on a storage server.
+	// We iterate many times in order for smoothers to catch up
+	// to their desired values.
 	while (iterations--) {
 		// Use orderedDelay to prevent buggification
 		wait(orderedDelay(0.01));
@@ -105,16 +123,17 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 		ss.update(reply, smoothTotalDurableBytes);
 	}
 
-	checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05);
-	checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05);
-	checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace, 0.05);
-	checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace, 0.05);
-	checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes, 0.05);
-	checkApproximatelyEqual(
+	// Validate that ss statistics approximately match desired values:
+	ASSERT(checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05));
+	ASSERT(checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05));
+	ASSERT(checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace, 0.05));
+	ASSERT(checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace, 0.05));
+	ASSERT(checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes, 0.05));
+	ASSERT(checkApproximatelyEqual(
 	    ss.getDurabilityLag(),
 	    std::max<int64_t>(targetNonDurableVersionsLag,
 	                      SERVER_KNOBS->VERSIONS_PER_SECOND * (storageQueueBytes / testInputBytesPerSecond)),
-	    0.05);
+	    0.05));
 
 	return ss;
 }
@@ -144,6 +163,7 @@ struct RKRateUpdaterTestEnvironment {
 	                                 testTargetVersionDifference,
 	                                 testTargetVersionDifference,
 	                                 300.0)) {
+		// TODO: Fix RkRateUpdater::updateRate so this can use < instead of <=
 		for (int i = 0; i <= SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES; ++i) {
 			actualTpsHistory.push_back(testActualTps);
 		}
@@ -163,6 +183,32 @@ struct RKRateUpdaterTestEnvironment {
 	}
 };
 
+struct RateAndReason {
+	double tpsLimit;
+	limitReason_t limitReason;
+	RateAndReason(double tpsLimit, limitReason_t limitReason) : tpsLimit(tpsLimit), limitReason(limitReason) {}
+};
+
+ACTOR static Future<RateAndReason> testIgnoreWorstZones(int numBadStorageServers) {
+	state std::vector<Future<StorageQueueInfo>> ssFutures;
+	int smallStorageQueueBytes = testTargetQueueBytes - 5 * testSpringBytes;
+	int largeStorageQueueBytes = testTargetQueueBytes + 5 * testSpringBytes;
+
+	ssFutures.reserve(10);
+	for (int i = 0; i < 10; ++i) {
+		LocalityData locality({}, format("zone%d", i), {}, {});
+		int64_t storageQueueBytes = (i < numBadStorageServers) ? largeStorageQueueBytes : smallStorageQueueBytes;
+		ssFutures.push_back(getMockStorageQueueInfo(UID(i, i), locality, storageQueueBytes));
+	}
+	wait(waitForAll(ssFutures));
+	RKRateUpdaterTestEnvironment env(/*storageTeamSize=*/3);
+	for (auto const& ssFuture : ssFutures) {
+		env.metricsTracker.updateStorageQueueInfo(ssFuture.get());
+	}
+	env.update();
+	return RateAndReason(env.rateUpdater.getTpsLimit(), env.rateUpdater.getLimitReason());
+}
+
 } // namespace
 
 // No processes are reporting any metrics to the rate updater. The default ratekeeper limit
@@ -170,7 +216,7 @@ struct RKRateUpdaterTestEnvironment {
 TEST_CASE("/fdbserver/RKRateUpdater/Simple") {
 	RKRateUpdaterTestEnvironment env;
 	env.update();
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), SERVER_KNOBS->RATEKEEPER_DEFAULT_LIMIT));
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::unlimited);
 	return Void();
 }
@@ -185,7 +231,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps));
 	return Void();
 }
 
@@ -200,7 +246,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3));
 	return Void();
 }
 
@@ -215,7 +261,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/HighSQ3") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2));
 	return Void();
 }
 
@@ -234,37 +280,36 @@ TEST_CASE("/fdbserver/RKRateUpdater/StorageWriteBandwidthMVCC") {
 	return Void();
 }
 
-// The current 1000 transaction per second workload is saturating the storage queue of one server,
-// but not saturating the storage queue of the other storage server in a different zone.
-// If SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND > 0, the rate updated does not throttle based
-// on the worst storage server's queue.
-TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZone") {
-	state LocalityData locality1({}, "zone1"_sr, {}, {});
-	state LocalityData locality2({}, "zone2"_sr, {}, {});
-	state std::vector<Future<StorageQueueInfo>> ssFutures;
+// The current 1000 transaction per second workload is saturating the storage queue of
+// MAX_MACHINES_FALLING_BEHIND servers, but not saturating the storage queue of the other storage
+// servers in different zones. The rate updater does not throttle based on the worst
+// storage servers' queues.
+TEST_CASE("/fdbserver/RKRateUpdater/IgnoreWorstZones") {
+	RateAndReason rateAndReason = wait(testIgnoreWorstZones(SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND));
 
-	if (SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND == 0) {
-		return Void();
-	}
+	// Even though some storage servers won't allow more than the current transaction rate, the
+	// rate updater will still allow more than the current transaction rate, because these storage
+	// servers' zones are ignored.
+	ASSERT_GT(rateAndReason.tpsLimit, testActualTps);
 
-	ssFutures.reserve(2);
-	ssFutures.push_back(getMockStorageQueueInfo(UID(1, 1), locality1, testTargetQueueBytes - 5 * testSpringBytes));
-	ssFutures.push_back(getMockStorageQueueInfo(UID(2, 2), locality2, testTargetQueueBytes + 5 * testSpringBytes));
-	wait(waitForAll(ssFutures));
-	RKRateUpdaterTestEnvironment env(2);
-	env.metricsTracker.updateStorageQueueInfo(ssFutures[0].get());
-	env.metricsTracker.updateStorageQueueInfo(ssFutures[1].get());
-	env.update();
-
-	// Even though 1 storage server won't allow more that the current transaction rate, the
-	// rate updater will still allow more than the current transaction rate, because this storage
-	// server's zone is ignored.
-	ASSERT_GT(env.rateUpdater.getTpsLimit(), testActualTps);
-
-	// Even though the storage server with high storage queue is ignored, we still report write
+	// Even though the storage servers with high storage queue are ignored, we still report write
 	// queue size as the limiting reason.
 	// TODO: Should this behaviour be changed?
-	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_write_queue_size);
+	ASSERT_EQ(rateAndReason.limitReason, limitReason_t::storage_server_write_queue_size);
+	return Void();
+}
+
+// The current 1000 transaction per second workload is saturating the storage queue of
+// (MAX_MACHINES_FALLING_BEHIND + 1) servers, but not saturating the storage queue of the other
+// storage servers in different zones. The rate updater throttles based on the worst storage
+// servers' queues.
+TEST_CASE("/fdbserver/RKRateUpdater/DontIgnoreWorstZones") {
+	RateAndReason rateAndReason = wait(testIgnoreWorstZones(SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND + 1));
+
+	// The storage queues with high storage queue cannot be ignored, so the
+	// rate updater should throttle to less than the current transaction rate.
+	ASSERT_LT(rateAndReason.tpsLimit, testActualTps);
+	ASSERT_EQ(rateAndReason.limitReason, limitReason_t::storage_server_write_queue_size);
 	return Void();
 }
 
@@ -287,7 +332,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/ServerListFetchFailed") {
 	env.metricsTracker.failSSListFetch();
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_list_fetch_failed);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0));
 	return Void();
 }
 
@@ -304,7 +349,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpace") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps));
 	return Void();
 }
 
@@ -320,7 +365,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpace2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2));
 	return Void();
 }
 
@@ -337,7 +382,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpaceRatio") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space_ratio);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps));
 	return Void();
 }
 
@@ -353,7 +398,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/SSFreeSpaceRatio2") {
 	env.metricsTracker.updateStorageQueueInfo(ss);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_min_free_space_ratio);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2));
 	return Void();
 }
 
@@ -366,7 +411,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue") {
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 2 * testActualTps));
 	return Void();
 }
 
@@ -380,7 +425,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue2") {
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps * 2 / 3));
 	return Void();
 }
 
@@ -388,12 +433,12 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue2") {
 // tlog queue bytes and spring bytes. The rate updater applies the maximum possible throttling based on
 // tlog queue, limiting throughput to half the current transaction rate, or 500 transactions per second.
 TEST_CASE("/fdbserver/RKRateUpdater/TLogQueue3") {
-	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 1500e6));
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), testTargetQueueBytes + 5 * testSpringBytes));
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_write_queue);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2));
 	return Void();
 }
 
@@ -423,7 +468,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace") {
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps));
 	return Void();
 }
 
@@ -431,15 +476,16 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace") {
 // bytes on disk. In response, the rate updater throttles throughput to 0.
 TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpace2") {
 	int64_t totalSpace = 1e9;
-	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + 3 * testSpringBytes;
-	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 6 * testSpringBytes, availableSpace, totalSpace));
+	int64_t tlogQueueBytes = (SERVER_KNOBS->MIN_AVAILABLE_SPACE * 3) / 2;
+	int64_t availableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE + tlogQueueBytes / 2;
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), tlogQueueBytes, availableSpace, totalSpace));
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space);
 	// When simulation is sped up, ratekeeper limit is artificially increased
-	if (!g_network->isSimulated() || !g_simulator->speedUpSimulation) {
-		checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0);
+	if (!(g_network->isSimulated() && g_simulator->speedUpSimulation)) {
+		ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0));
 	}
 	return Void();
 }
@@ -456,7 +502,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio") {
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space_ratio);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps));
 	return Void();
 }
 
@@ -465,13 +511,14 @@ TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio") {
 // at half the current transaction rate, or 500 transactions per second.
 TEST_CASE("/fdbserver/RKRateUpdater/TLogFreeSpaceRatio2") {
 	int64_t totalSpace = 1e15;
+	int64_t tlogQueueBytes = 6 * testSpringBytes;
 	int64_t availableSpace = (totalSpace * SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO) + 3 * testSpringBytes;
-	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), 6 * testSpringBytes, availableSpace, totalSpace));
+	TLogQueueInfo tl = wait(getMockTLogQueueInfo(UID(1, 1), tlogQueueBytes, availableSpace, totalSpace));
 	RKRateUpdaterTestEnvironment env;
 	env.metricsTracker.updateTLogQueueInfo(tl);
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::log_server_min_free_space_ratio);
-	checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), testActualTps / 2));
 	return Void();
 }
 
