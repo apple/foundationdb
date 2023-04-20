@@ -26,7 +26,7 @@ struct TaskTests: SimpleSwiftTestSuite {
     var tests: [TestCase] {
         TestCase("await \(FutureVoid.self)") {
             let p = PromiseVoid()
-            var voidF = p.getFuture()
+            let voidF = p.getFuture()
 
             var void = Flow.Void()
             p.send(&void)
@@ -35,7 +35,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
         TestCase("await \(FutureCInt.self)") {
             let p = PromiseCInt()
-            var intF: FutureCInt = p.getFuture()
+            let intF: FutureCInt = p.getFuture()
 
             var value: CInt = 42
             p.send(&value)
@@ -45,14 +45,13 @@ struct TaskTests: SimpleSwiftTestSuite {
 
         TestCase("more Flow task await tests") {
             let p: PromiseCInt = PromiseCInt()
-            var f: FutureCInt = p.getFuture() // FIXME(swift): getFuture: C++ method 'getFuture' that returns unsafe projection of type 'Future' not imported
-            // TODO(swift): we perhaps should add a note that getFuture() is available?
+            let f: FutureCInt = p.getFuture()
 
-            pprint("got PromiseCInt") // FIXME(swift/c++): printing the promise crashes!
+            pprint("got PromiseCInt")
             precondition(!f.isReady(), "Future should not be ready yet")
 
             var num = 1111
-            pprint("send \(num)") // FIXME: printing the promise crashes!
+            pprint("send \(num)")
             p.send(&num) // FIXME: rdar://99583467 ([C++ interop][fdb] Support xvalues, so we can use Future.send(U&& value))
             pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
 
@@ -66,7 +65,7 @@ struct TaskTests: SimpleSwiftTestSuite {
 
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
             let p2 = PromiseCInt()
-            var f2: FutureCInt = p2.getFuture() // FIXME: Make these not unsafe...
+            let f2: FutureCInt = p2.getFuture()
             let num2 = 2222
             Task { [num2] in
                 assertOnNet2EventLoop()

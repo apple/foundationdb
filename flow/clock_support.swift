@@ -97,8 +97,7 @@ extension FlowClock: Clock {
         let nanosDouble = 0 // TODO: fix this handling of nanos from the deadline
         _ = nanosDouble // silence warning
 
-        var f = flow_gNetwork_delay(/*secondsDouble=*/secondsDouble, /*priority=*/TaskPriority.DefaultDelay)
-        _ = try await f.value()
+        try await flow_gNetwork_delay(/*secondsDouble=*/secondsDouble, /*priority=*/TaskPriority.DefaultDelay).value()
     }
 
     public static func sleep(

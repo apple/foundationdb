@@ -27,13 +27,14 @@ public protocol FlowFutureOps {
 
 extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture {
 
-    public mutating func value() async throws -> Element {
+    /// Swift async method to make a Flow future awaitable.
+    public func value() async throws -> Element {
         return try await self.waitValue
     }
 
     @inlinable
     internal var waitValue: Element {
-        mutating get async throws {
+        get async throws {
             guard !self.isReady() else {
                 // FIXME(flow): handle isError and cancellation
                 if self.isError() {
@@ -63,8 +64,10 @@ extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.Associate
 extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.AssociatedFuture,
                               Element == Flow.Void {
 
+    /// Swift async method to make a Flow future awaitable.
+    /// Specialized for Flow.Void making the returned result (Flow.Void) discardable.
     @discardableResult
-    public mutating func value() async throws -> Element {
+    public func value() async throws -> Element {
         return try await self.waitValue
     }
 }

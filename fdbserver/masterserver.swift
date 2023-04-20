@@ -60,8 +60,7 @@ public func updateLiveCommittedVersion(myself: MasterData, req: ReportRawCommitt
 
 extension NotifiedVersionValue {
     mutating func atLeast(_ limit: VersionMetricHandle.ValueType) async throws {
-        var f = self.whenAtLeast(limit) // FutureVoid
-        try await f.value()
+        try await self.whenAtLeast(limit).value()
     }
 }
 
@@ -456,8 +455,7 @@ public func masterServerSwift(
         do {
             try await withThrowingTaskGroup(of: Swift.Void.self) { group in
                 group.addTask {
-                    var traceRoleFuture = traceRole(Role.MASTER, mi.id())
-                    try await traceRoleFuture.value()
+                    try await traceRole(Role.MASTER, mi.id()).value()
                 }
                 group.addTask {
                     try await myself.provideVersions(myself: masterData)
@@ -474,8 +472,7 @@ public func masterServerSwift(
 //                TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
 
                 while true {
-                    var change = db.onChange()
-                    guard (try? await change.value()) != nil else {
+                    guard (try? await db.onChange().value()) != nil else {
                         return
                     }
 

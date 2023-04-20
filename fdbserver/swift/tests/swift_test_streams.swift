@@ -134,8 +134,7 @@ struct StreamTests: SimpleSwiftTestSuite {
 
                     if lastCollected?.isReady ?? true {
                         group.addTask {
-                            var future = promise.getFuture()
-                            try! await future.value()
+                            try! await promise.getFuture().value()
                             return .ready(12)
                         }
                     }
@@ -244,8 +243,7 @@ struct StreamTests: SimpleSwiftTestSuite {
                 ps2.sendCopy(20)
             }.value
 
-            var f = p.getFuture()
-            try await f.value()
+            try await p.getFuture().value()
             pprint("All done")
         }
     }
