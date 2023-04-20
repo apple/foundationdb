@@ -6010,12 +6010,14 @@ public:
 		state int processSize = 4;
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
-		state GetTeamRequest bestReq(TeamSelect::WANT_TRUE_BEST,
+		state GetTeamRequest bestReq(WantNewServers::True,
+		                             WantTrueBest::True,
 		                             PreferLowerDiskUtil::True,
 		                             TeamMustHaveShards::False,
 		                             PreferLowerReadUtil::True,
 		                             ForReadBalance::True);
-		state GetTeamRequest randomReq(TeamSelect::ANY,
+		state GetTeamRequest randomReq(WantNewServers::True,
+		                               WantTrueBest::False,
 		                               PreferLowerDiskUtil::True,
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
@@ -6080,14 +6082,14 @@ public:
 		           collection->teamPivots.pivotCPU,
 		           collection->teamPivots.pivotAvailableSpaceRatio);
 		ASSERT(bestTeam.present());
-		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
+		ASSERT(bestTeam.get()->getServerIDs() == std::vector<UID>{ UID(2, 0) });
 
 		wait(collection->getTeam(randomReq));
 		const auto [randomTeam, found2] = randomReq.reply.getFuture().get();
 		if (randomTeam.present()) {
 			CODE_PROBE(true, "Unit Test Random Team Return Candidate.");
-			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
-			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
+			ASSERT(randomTeam.get()->getServerIDs() != std::vector<UID>{ UID(3, 0) });
+			ASSERT(randomTeam.get()->getServerIDs() != std::vector<UID>{ UID(4, 0) });
 		}
 		return Void();
 	}
