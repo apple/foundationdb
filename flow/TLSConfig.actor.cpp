@@ -66,11 +66,6 @@ std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 }
 
 bool LoadedTLSConfig::getDisablePlainTextConnection() const {
-	std::string envDisablePlainTextConnection;
-	if (platform::getEnvironmentVar("FDB_TLS_DISABLE_PLAINTEXT_CONNECTION", envDisablePlainTextConnection)) {
-		return boost::lexical_cast<bool>(envDisablePlainTextConnection);
-	}
-
 	return tlsDisablePlainTextConnection;
 }
 
@@ -224,7 +219,14 @@ std::string TLSConfig::getCAPathSync() const {
 bool TLSConfig::getDisablePlainTextConnection() const {
 	std::string envDisablePlainTextConnection;
 	if (platform::getEnvironmentVar("FDB_TLS_DISABLE_PLAINTEXT_CONNECTION", envDisablePlainTextConnection)) {
-		return boost::lexical_cast<bool>(envDisablePlainTextConnection);
+		try {
+			return boost::lexical_cast<bool>(envDisablePlainTextConnection);
+		} catch (boost::bad_lexical_cast& e) {
+			fprintf(stderr,
+			        "Warning: Ignoring invalid FDB_TLS_DISABLE_PLAINTEXT_CONNECTION [%s]: %s\n",
+			        envDisablePlainTextConnection.c_str(),
+			        e.what());
+		}
 	}
 
 	return tlsDisablePlainTextConnection;
