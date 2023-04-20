@@ -2384,8 +2384,7 @@ int main(int argc, char** argv) {
 		try {
 			setNetworkOption(FDBNetworkOptions::TLS_DISABLE_PLAINTEXT_CONNECTION);
 		} catch (Error& e) {
-			fprintf(
-			    stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
+			fprintf(stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
 			return 1;
 		}
 	}

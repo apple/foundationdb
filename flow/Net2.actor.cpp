@@ -1789,8 +1789,7 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 	}
 
 	if (tlsConfig.getDisablePlainTextConnection()) {
-		TraceEvent(SevError, "PlainTextConnectionDisabled")
-			.detail("toAddr", toAddr);
+		TraceEvent(SevError, "PlainTextConnectionDisabled").detail("toAddr", toAddr);
 		throw connection_failed();
 	}
 

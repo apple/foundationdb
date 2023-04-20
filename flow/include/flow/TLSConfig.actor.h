@@ -268,8 +268,9 @@ public:
 	    { TLSConfig::OPT_TLS_KEY, TLS_KEY_FILE_FLAG, SO_REQ_SEP },                                                     \
 	    { TLSConfig::OPT_TLS_VERIFY_PEERS, TLS_VERIFY_PEERS_FLAG, SO_REQ_SEP },                                        \
 	    { TLSConfig::OPT_TLS_PASSWORD, TLS_PASSWORD_FLAG, SO_REQ_SEP },                                                \
-		{ TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP},                                                   \
-		{ TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION, TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG, SO_NONE }
+	    { TLSConfig::OPT_TLS_CA_FILE, TLS_CA_FILE_FLAG, SO_REQ_SEP }, {                                                \
+		TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION, TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG, SO_NONE                \
+	}
 
 #define TLS_HELP                                                                                                       \
 	"  " TLS_CERTIFICATE_FILE_FLAG " CERTFILE\n"                                                                       \
@@ -285,7 +286,7 @@ public:
 	"  " TLS_VERIFY_PEERS_FLAG " CONSTRAINTS\n"                                                                        \
 	"                 The constraints by which to validate TLS peers. The contents\n"                                  \
 	"                 and format of CONSTRAINTS are plugin-specific.\n"                                                \
-	"  " TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG "\n"                                                                         \
+	"  " TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG "\n"                                                                    \
 	"                 Disable non-TLS connections. All plaintext connection attempts will result in an error\n"
 
 #include "flow/unactorcompiler.h"
