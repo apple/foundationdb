@@ -35,26 +35,12 @@ public:
 	KeyRangeMap<ShardTrackedData> shards;
 
 	ActorCollection actors;
-	uint64_t mockDbSize = 0;
-	const int keySize = 16;
 
 	std::map<RelocateReason, int> rsReasonCounts;
 
 	Reference<DataDistributionTracker> shardTracker;
 
 	// --- test configs ---
-
-	// Each key space is convert from an int N. [N, N+1) represent a key space. So at most we have 2G key spaces
-	int keySpaceCount = 1000;
-	// 1. fixed -- each key space has fixed size. The size of each key space is calculated as minSpaceKeyCount *
-	// (minByteSize + 16) ;
-	// 2. linear -- from 0 to keySpaceCount the size of key space increase by size linearStride, from
-	// linearStartSize. Each value is fixed to minByteSize;
-	// 3. random -- each key space can has [minSpaceKeyCount,
-	// maxSpaceKeyCount] pairs and the size of value varies from [minByteSize, maxByteSize];
-	Value keySpaceStrategy = "fixed"_sr;
-	int minSpaceKeyCount = 1000, maxSpaceKeyCount = 1000;
-	int linearStride = 10 * (1 << 20), linearStartSize = 10 * (1 << 20);
 
 	// check threshold
 	int checkMinShardCount = 1;
@@ -63,73 +49,9 @@ public:
 
 	MockDDTrackerShardEvaluatorWorkload(WorkloadContext const& wcx)
 	  : MockDDTestWorkload(wcx), ddcx(deterministicRandom()->randomUniqueID()) {
-		keySpaceCount = getOption(options, "keySpaceCount"_sr, keySpaceCount);
-		keySpaceStrategy = getOption(options, "keySpaceStrategy"_sr, keySpaceStrategy);
-		minSpaceKeyCount = getOption(options, "minSpaceKeyCount"_sr, minSpaceKeyCount);
-		maxSpaceKeyCount = getOption(options, "maxSpaceKeyCount"_sr, maxSpaceKeyCount);
-		linearStride = getOption(options, "linearStride"_sr, linearStride);
-		linearStartSize = getOption(options, "linearStartSize"_sr, linearStartSize);
 		checkMinShardCount = getOption(options, "checkMinShardCount"_sr, checkMinShardCount);
 		checkMinSizeSplit = getOption(options, "checkMinSizeSplit"_sr, checkMinSizeSplit);
 		checkMinWriteSplit = getOption(options, "checkMinWriteSplit"_sr, checkMinWriteSplit);
-	}
-
-	void populateRandomStrategy() {
-		mockDbSize = 0;
-		for (int i = 0; i < keySpaceCount; ++i) {
-			int kCount = deterministicRandom()->randomInt(minSpaceKeyCount, maxSpaceKeyCount);
-			for (int j = 0; j < kCount; ++j) {
-				Key k = doubleToTestKey(i + deterministicRandom()->random01());
-				auto vSize = deterministicRandom()->randomInt(minByteSize, maxByteSize + 1);
-				mgs->set(k, vSize, true);
-				mockDbSize += vSize + k.size();
-			}
-		}
-	}
-
-	void populateLinearStrategy() {
-		mockDbSize = 0;
-		auto pSize = minByteSize + keySize;
-		for (int i = 0; i < keySpaceCount; ++i) {
-			int kCount = std::ceil((linearStride * i + linearStartSize) * 1.0 / pSize);
-			for (int j = 0; j < kCount; ++j) {
-				Key k = doubleToTestKey(i + deterministicRandom()->random01());
-				mgs->set(k, minByteSize, true);
-			}
-			mockDbSize += pSize * kCount;
-		}
-	}
-
-	void populateFixedStrategy() {
-		auto pSize = minByteSize + keySize;
-		for (int i = 0; i < keySpaceCount; ++i) {
-			for (int j = 0; j < minSpaceKeyCount; ++j) {
-				Key k = doubleToTestKey(i + deterministicRandom()->random01());
-				mgs->set(k, minByteSize, true);
-			}
-		}
-		mockDbSize = keySpaceCount * minSpaceKeyCount * pSize;
-	}
-
-	void populateMgs() {
-		// Will the sampling structure become too large?
-		std::cout << "MGS Populating ...\n";
-		if (keySpaceStrategy == "linear") {
-			populateLinearStrategy();
-		} else if (keySpaceStrategy == "fixed") {
-			populateFixedStrategy();
-		} else if (keySpaceStrategy == "random") {
-			populateRandomStrategy();
-		}
-		uint64_t totalSize = 0;
-		for (auto& server : mgs->allServers) {
-			totalSize = server.second->sumRangeSize(allKeys);
-		}
-		TraceEvent("PopulateMockGlobalState")
-		    .detail("Strategy", keySpaceStrategy)
-		    .detail("EstimatedDbSize", mockDbSize)
-		    .detail("MGSReportedTotalSize", totalSize);
-		std::cout << "MGS Populated.\n";
 	}
 
 	Future<Void> setup(Database const& cx) override {
