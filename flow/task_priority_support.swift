@@ -20,6 +20,7 @@ extension Flow.TaskPriority {
         case Max =                               255
         case RunLoop =                           200
         case ASIOReactor =                       173
+        case SSSpilledChangeFeedReply =          74
         case RunCycleFunction =                  73
         case FlushTrace =                        72
         case WriteSocket =                       71
@@ -163,6 +164,7 @@ extension Flow.TaskPriority {
         case .UpdateStorage:                     return .init(rawValue: Repr.UpdateStorage.rawValue)
         case .CompactCache:                      return .init(rawValue: Repr.CompactCache.rawValue)
         case .TLogSpilledPeekReply:              return .init(rawValue: Repr.TLogSpilledPeekReply.rawValue)
+        case .SSSpilledChangeFeedReply:          return .init(rawValue: Repr.SSSpilledChangeFeedReply.rawValue)
         case .BlobWorkerReadChangeFeed:          return .init(rawValue: Repr.BlobWorkerReadChangeFeed.rawValue)
         case .BlobWorkerUpdateFDB:               return .init(rawValue: Repr.BlobWorkerUpdateFDB.rawValue)
         case .BlobWorkerUpdateStorage:           return .init(rawValue: Repr.BlobWorkerUpdateStorage.rawValue)
@@ -246,6 +248,7 @@ extension _Concurrency.TaskPriority {
     public static var UpdateStorage: Self { Flow.TaskPriority.UpdateStorage.asSwift }
     public static var CompactCache: Self { Flow.TaskPriority.CompactCache.asSwift }
     public static var TLogSpilledPeekReply: Self { Flow.TaskPriority.TLogSpilledPeekReply.asSwift }
+    public static var SSSpilledChangeFeedReply: Self { Flow.TaskPriority.SSSpilledChangeFeedReply.asSwift }
     public static var BlobWorkerReadChangeFeed: Self { Flow.TaskPriority.BlobWorkerReadChangeFeed.asSwift }
     public static var BlobWorkerUpdateFDB: Self { Flow.TaskPriority.BlobWorkerUpdateFDB.asSwift }
     public static var BlobWorkerUpdateStorage: Self { Flow.TaskPriority.BlobWorkerUpdateStorage.asSwift }
@@ -326,6 +329,7 @@ extension _Concurrency.TaskPriority {
         case .UpdateStorage: return Flow.TaskPriority.UpdateStorage.rawValue
         case .CompactCache: return Flow.TaskPriority.CompactCache.rawValue
         case .TLogSpilledPeekReply: return Flow.TaskPriority.TLogSpilledPeekReply.rawValue
+        case .SSSpilledChangeFeedReply: return Flow.TaskPriority.SSSpilledChangeFeedReply.rawValue
         case .BlobWorkerReadChangeFeed: return Flow.TaskPriority.BlobWorkerReadChangeFeed.rawValue
         case .BlobWorkerUpdateFDB: return Flow.TaskPriority.BlobWorkerUpdateFDB.rawValue
         case .BlobWorkerUpdateStorage: return Flow.TaskPriority.BlobWorkerUpdateStorage.rawValue
@@ -409,6 +413,7 @@ extension _Concurrency.TaskPriority {
         case .UpdateStorage: return "UpdateStorage"
         case .CompactCache: return "CompactCache"
         case .TLogSpilledPeekReply: return "TLogSpilledPeekReply"
+        case .SSSpilledChangeFeedReply: return "SSSpilledChangeFeedReply"
         case .BlobWorkerReadChangeFeed: return "BlobWorkerReadChangeFeed"
         case .BlobWorkerUpdateFDB: return "BlobWorkerUpdateFDB"
         case .BlobWorkerUpdateStorage: return "BlobWorkerUpdateStorage"
