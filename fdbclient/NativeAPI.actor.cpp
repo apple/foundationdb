@@ -2920,6 +2920,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 		} catch (Error& e) {
 			if (e.code() == error_code_proxy_memory_limit_exceeded) {
 				// Eats proxy_memory_limit_exceeded error from commit proxies
+				TraceEvent(SevWarnAlways, "CommitProxyOverloadedForKeyLocation").suppressFor(5);
 				cx->updateBackoff(e);
 				continue;
 			}
@@ -3025,10 +3026,14 @@ Future<KeyRangeLocationInfo> getKeyLocation(Reference<TransactionState> trState,
 void DatabaseContext::updateBackoff(const Error& err) {
 	switch (err.code()) {
 	case error_code_success:
-		backoffDelay = 0.0;
+		backoffDelay = backoffDelay / CLIENT_KNOBS->BACKOFF_GROWTH_RATE;
+		if (backoffDelay < CLIENT_KNOBS->DEFAULT_BACKOFF) {
+			backoffDelay = 0.0;
+		}
 		break;
 
 	case error_code_proxy_memory_limit_exceeded:
+		++transactionsResourceConstrained;
 		if (backoffDelay == 0.0) {
 			backoffDelay = CLIENT_KNOBS->DEFAULT_BACKOFF;
 		} else {
@@ -3106,6 +3111,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 		} catch (Error& e) {
 			if (e.code() == error_code_proxy_memory_limit_exceeded) {
 				// Eats proxy_memory_limit_exceeded error from commit proxies
+				TraceEvent(SevWarnAlways, "CommitProxyOverloadedForRangeLocation").suppressFor(5);
 				cx->updateBackoff(e);
 				continue;
 			}
