@@ -1015,13 +1015,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
-		// We assume inFlightActors are immediately cancelled.
+		// The cancelDataMove feature assumes inFlightActors are immediately cancelled.
 		// If this is not true, multiple inflightActors can have overlapped range,
 		// which leads to conflicts of moving keys
 
-		// cancelDataMoves and inFlightActors are decoupled
-		// During the wait in cancelDataMove, a relocator may start and update self->dataMoves.
-		// This old cancelDataMove should be transparent to the new relocator
 		Future<Void> fCleanup =
 		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
@@ -1150,7 +1147,6 @@ int DDQueue::getUnhealthyRelocationCount() const {
 
 // Cancel existing relocation if exists, and serialize all concurrent relocations
 ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	state std::vector<Future<Void>> existingCleanup;
 	state std::vector<Future<Void>> cleanup;
 	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
 
@@ -1181,7 +1177,10 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 
 		wait(waitForAll(cleanup));
 
-		// Newer relocators may start during the wait in this cancelDataMove
+		// Since self->dataMoves can only be updated by relocator,
+		// and any old relocator has been cancelled (by overwrite inflightActors)
+		// Thus, any update of self->dataMoves during the wait must come from
+		// a newer relocator.
 		// This cancelDataMove should be transparent to the new relocator
 		std::vector<KeyRange> toResetRanges;
 		for (auto observedDataMove : lastObservedDataMoves) {
