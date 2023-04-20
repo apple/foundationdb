@@ -1099,6 +1099,10 @@ public:
 	}
 
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
+		// If sim http connection, do connect instead of external connect
+		if (httpServerIps.count(toAddr.ip)) {
+			return connect(toAddr);
+		}
 		return SimExternalConnection::connect(toAddr);
 	}
 
@@ -2409,6 +2413,69 @@ public:
 			killProcess_internal(machine.machineProcess, KillType::KillInstantly);
 		}
 		machines.erase(machineId);
+	}
+
+	// add a simulated http server process. New http servers called by registerHTTPServer will run on this process
+	void addSimHTTPProcess(Reference<HTTP::SimServerContext> context) override {
+		ProcessInfo* p = getCurrentProcess();
+		// make sure this process isn't already added
+		for (int i = 0; i < httpServerProcesses.size(); i++) {
+			ASSERT(p != httpServerProcesses[i].first);
+		}
+		httpServerProcesses.push_back({ p, context });
+		httpServerIps.insert(p->address.ip);
+	}
+
+	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
+	                                                     std::string hostname,
+	                                                     int numAddresses,
+	                                                     HTTP::ServerCallback callback) {
+		// handle race where test client tries to register server before all processes are up, but time out eventually
+		// FIXME: make this so a server that starts after this or a server that restarts will automatically re-add
+		// itself, register the callback, and register with dns
+		state int checks = 0;
+		while (self->httpServerProcesses.empty()) {
+			TraceEvent(SevWarn, "NoAvailableHTTPServerProcesses").detail("Checks", checks);
+			checks++;
+			ASSERT(checks < 10);
+			wait(self->delay(1.0, TaskPriority::DefaultDelay));
+		}
+		ASSERT(!self->httpServerProcesses.empty());
+		ASSERT(!self->httpServerHostnames.count(hostname));
+		ASSERT(numAddresses > 0);
+
+		self->httpServerHostnames.insert(hostname);
+
+		state std::vector<NetworkAddress> addresses;
+		addresses.reserve(numAddresses);
+
+		// randomize order and round-robin servers among numAddresses
+		deterministicRandom()->randomShuffle(self->httpServerProcesses);
+
+		state ProcessInfo* callingProcess = self->getCurrentProcess();
+		state int i = 0;
+		for (; i < numAddresses; i++) {
+			state ProcessInfo* serverProcess = self->httpServerProcesses[i % self->httpServerProcesses.size()].first;
+			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
+			auto& proc = self->httpServerProcesses[i % self->httpServerProcesses.size()].second;
+			NetworkAddress addr = proc->newAddress();
+			addresses.push_back(addr);
+			serverProcess->listenerMap[addr] = Reference<IListener>(new Sim2Listener(serverProcess, addr));
+			self->addressMap[addr] = serverProcess;
+
+			proc->registerNewServer(addr, callback);
+		}
+
+		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
+
+		INetworkConnections::net()->addMockTCPEndpoint(hostname, "80", addresses);
+
+		return Void();
+	}
+
+	// starts a numAddresses http servers with the dns alias hostname:80 with the provided server callback
+	Future<Void> registerSimHTTPServer(std::string hostname, int numAddresses, HTTP::ServerCallback callback) override {
+		return registerSimHTTPServerActor(this, hostname, numAddresses, callback);
 	}
 
 	Sim2(bool printSimTime)

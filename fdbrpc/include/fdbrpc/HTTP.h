@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,60 +21,19 @@
 #ifndef FDBRPC_HTTP_H
 #define FDBRPC_HTTP_H
 
+#include "flow/NetworkAddress.h"
 #pragma once
 
 #include "flow/flow.h"
-#include "flow/Net2Packet.h"
+#include "flow/ActorCollection.h"
+#include "flow/IConnection.h"
 #include "flow/IRateControl.h"
-
-class IConnection;
+#include "flow/Net2Packet.h"
 
 namespace HTTP {
 struct is_iless {
 	bool operator()(const std::string& a, const std::string& b) const { return strcasecmp(a.c_str(), b.c_str()) < 0; }
 };
-
-typedef std::map<std::string, std::string, is_iless> Headers;
-
-std::string urlEncode(const std::string& s);
-std::string awsV4URIEncode(const std::string& s, bool encodeSlash);
-
-struct Response : ReferenceCounted<Response> {
-	Response() {}
-	Future<Void> read(Reference<IConnection> conn, bool header_only);
-	std::string toString();
-	float version;
-	int code;
-	Headers headers;
-	std::string content;
-	int64_t contentLen;
-
-	bool verifyMD5(bool fail_if_header_missing, Optional<std::string> content_sum = Optional<std::string>());
-};
-
-// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
-PacketBuffer* writeRequestHeader(std::string const& verb,
-                                 std::string const& resource,
-                                 HTTP::Headers const& headers,
-                                 PacketBuffer* dest);
-
-// Do an HTTP request to the blob store, parse the response.
-Future<Reference<Response>> doRequest(Reference<IConnection> const& conn,
-                                      std::string const& verb,
-                                      std::string const& resource,
-                                      HTTP::Headers const& headers,
-                                      UnsentPacketQueue* const& pContent,
-                                      int const& contentLen,
-                                      Reference<IRateControl> const& sendRate,
-                                      int64_t* const& pSent,
-                                      Reference<IRateControl> const& recvRate,
-                                      const std::string& requestHeader = std::string());
-
-// Connect to proxy, send CONNECT command, and connect to the remote host.
-Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
-                                            const std::string& remoteService,
-                                            const std::string& proxyHost,
-                                            const std::string& proxyService);
 
 constexpr int HTTP_STATUS_CODE_OK = 200;
 constexpr int HTTP_STATUS_CODE_CREATED = 201;
@@ -87,7 +46,7 @@ constexpr int HTTP_STATUS_CODE_TOO_MANY_REQUESTS = 429;
 constexpr int HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR = 500;
 constexpr int HTTP_STATUS_CODE_BAD_GATEWAY = 502;
 constexpr int HTTP_STATUS_CODE_SERVICE_UNAVAILABLE = 503;
-constexpr int HTTP_STATUS_GATEWAY_TIMEOUT = 504;
+constexpr int HTTP_STATUS_CODE_GATEWAY_TIMEOUT = 504;
 
 constexpr int HTTP_RETRYAFTER_DELAY_SECS = 300;
 
@@ -97,6 +56,100 @@ const std::string HTTP_VERB_DELETE = "DELETE";
 const std::string HTTP_VERB_TRACE = "TRACE";
 const std::string HTTP_VERB_PUT = "PUT";
 const std::string HTTP_VERB_POST = "POST";
+const std::string HTTP_VERB_CONNECT = "CONNECT";
+
+typedef std::map<std::string, std::string, is_iless> Headers;
+
+std::string urlEncode(const std::string& s);
+std::string awsV4URIEncode(const std::string& s, bool encodeSlash);
+
+template <class T>
+struct HTTPData {
+	Headers headers;
+	int64_t contentLen;
+	T content;
+};
+
+// class methods on template type classes are weird
+bool verifyMD5(HTTPData<std::string>* data,
+               bool fail_if_header_missing,
+               Optional<std::string> content_sum = Optional<std::string>());
+
+template <class T>
+struct RequestBase : ReferenceCounted<RequestBase<T>> {
+	RequestBase() {}
+	std::string verb;
+	std::string resource;
+	HTTPData<T> data;
+
+	bool isHeaderOnlyResponse() {
+		return verb == HTTP_VERB_HEAD || verb == HTTP_VERB_DELETE || verb == HTTP_VERB_CONNECT;
+	}
+};
+
+// TODO: utility for constructing packet buffer from string OutgoingRequest
+struct IncomingRequest : RequestBase<std::string> {
+	Future<Void> read(Reference<IConnection> conn, bool header_only = false);
+};
+struct OutgoingRequest : RequestBase<UnsentPacketQueue*> {};
+
+template <class T>
+struct ResponseBase : ReferenceCounted<ResponseBase<T>> {
+	ResponseBase() {}
+	float version;
+	int code;
+	HTTPData<T> data;
+
+	std::string getCodeDescription();
+};
+
+struct IncomingResponse : ResponseBase<std::string> {
+	std::string toString() const; // for debugging
+	Future<Void> read(Reference<IConnection> conn, bool header_only = false);
+};
+struct OutgoingResponse : ResponseBase<UnsentPacketQueue*> {
+	Future<Void> write(Reference<IConnection> conn);
+	void reset();
+};
+
+// Do an HTTP request to the blob store, parse the response.
+Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> const& conn,
+                                              Reference<OutgoingRequest> const& request,
+                                              Reference<IRateControl> const& sendRate,
+                                              int64_t* const& pSent,
+                                              Reference<IRateControl> const& recvRate);
+
+// Connect to proxy, send CONNECT command, and connect to the remote host.
+Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
+                                            const std::string& remoteService,
+                                            const std::string& proxyHost,
+                                            const std::string& proxyService);
+
+// HTTP server stuff
+typedef std::function<Future<Void>(Reference<IncomingRequest>, Reference<OutgoingResponse>)> ServerCallback;
+
+struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {
+	UID dbgid;
+	bool running;
+	int nextPort;
+	ActorCollection actors;
+	std::vector<NetworkAddress> listenAddresses;
+	std::vector<Future<Void>> listenBinds;
+	std::vector<Reference<IListener>> listeners;
+
+	SimServerContext() : dbgid(deterministicRandom()->randomUniqueID()), running(true), actors(false), nextPort(5000) {}
+
+	NetworkAddress newAddress();
+	void registerNewServer(NetworkAddress addr, ServerCallback server);
+
+	void stop() {
+		running = false;
+		actors = ActorCollection(false);
+		listenAddresses.clear();
+		listenBinds.clear();
+		listeners.clear();
+	}
+};
 
 } // namespace HTTP
 
