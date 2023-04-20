@@ -288,7 +288,7 @@ class GlobalTagThrottlerImpl {
 			return {};
 		}
 		auto const& [_, ssInfo] = *it;
-		return ssInfo.getTagThrottlingRatio(SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+		return ssInfo.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
 		                                    SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
 	}
 
