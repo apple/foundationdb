@@ -180,7 +180,6 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 	state int attempt = 0;
 	state int64_t offset = 0;
 	state Reference<IAsyncFile> asyncFile;
-	state Future<Void> writeFuture;
 	loop {
 		offset = 0;
 		try {
@@ -208,21 +207,13 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 			    .detail("Attempt", attempt);
 			loop {
 				state FetchCheckpointReply rep = waitNext(stream.getFuture());
-				writeFuture = asyncFile->write(rep.data.begin(), rep.data.size(), offset);
-				wait(writeFuture);
+				wait(asyncFile->write(rep.data.begin(), rep.data.size(), offset));
 				wait(asyncFile->flush());
 				offset += rep.data.size();
 			}
-		} catch (Error& err) {
-			state Error e = err;
-			if (e.code() == error_code_actor_cancelled) {
-				if (g_network->isSimulated() && writeFuture.isValid() && !writeFuture.isReady()) {
-					wait(writeFuture);
-				}
-				throw e;
-			} else if (e.code() != error_code_end_of_stream ||
-			           (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
-				TraceEvent(e.code() != error_code_end_of_stream ? SevWarnAlways : SevWarn, "FetchCheckpointFileError")
+		} catch (Error& e) {
+			if (e.code() != error_code_end_of_stream) {
+				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
 				    .detail("LocalFile", localFile)

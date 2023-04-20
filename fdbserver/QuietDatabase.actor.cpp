@@ -397,7 +397,6 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 		state Future<TraceEventFields> eventLogReply =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
 		state Future<Void> timeout = delay(30.0);
-		TraceEvent("QuietDatabaseGettingStorageMetrics").detail("Storage", storage);
 		state TraceEventFields storageMetrics;
 		choose {
 			when(wait(store(storageMetrics, eventLogReply))) {

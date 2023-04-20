@@ -1,6 +1,3 @@
-[configuration]
- allowDefaultTenant = false
- 
 [[test]]
 testTitle = 'ApiCorrectnessTest'
 clearAfterTest = true

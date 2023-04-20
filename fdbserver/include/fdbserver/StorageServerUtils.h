@@ -33,7 +33,8 @@ enum class MoveInPhase {
 	ApplyingUpdates = 3,
 	ReadWritePending = 4,
 	Complete = 5,
-	Fail = 6,
+	Cancel = 6,
+	Error = 7,
 };
 
 struct MoveInShardMetaData {

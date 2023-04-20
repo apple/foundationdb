@@ -43,7 +43,6 @@ if(NOT DEFINED RocksDB_ROOT)
 endif()
 message(STATUS "Using RocksDB_ROOT: ${RocksDB_ROOT}")
 
-# if(NOT "${RocksDB_ROOT}" STREQUAL "")
 if(ROCKSDB_FOUND)
   # Build the RocksDB at a specific location
   ExternalProject_Add(

@@ -171,6 +171,7 @@ bool canReplyWith(Error e) {
 #define PERSIST_PREFIX "\xff\xff"
 
 FDB_BOOLEAN_PARAM(UnlimitedCommitBytes);
+FDB_BOOLEAN_PARAM(MoveInFailed);
 
 // Immutable
 static const KeyValueRef persistFormat(PERSIST_PREFIX "Format"_sr, "FoundationDB/StorageServer/1/4"_sr);
@@ -328,9 +329,10 @@ struct MoveInShard {
 	std::string destShardIdString() const { return this->meta->destShardIdString(); }
 	void addRange(const KeyRangeRef range);
 	void removeRange(const KeyRangeRef range);
-	void cancel();
+	void cancel(const MoveInFailed failed = MoveInFailed::False);
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ApplyingUpdates; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
+	bool failed() const { return this->getPhase() == MoveInPhase::Cancel || this->getPhase() == MoveInPhase::Error; }
 
 	void addMutation(Version version,
 	                 bool fromFetch,
@@ -8244,7 +8246,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	state double fetchStartTime = now();
 	loop {
 		wait(delay(0, TaskPriority::FetchKeys));
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
+		if (moveInShard->failed()) {
 			return Void();
 		}
 		++attempt;
@@ -8259,7 +8261,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 			                                 moveInShard->meta->createVersion,
 			                                 DataMoveRocksCF,
 			                                 moveInShard->dataMoveId())));
-			if (moveInShard->getPhase() == MoveInPhase::Fail) {
+			if (moveInShard->failed()) {
 				return Void();
 			}
 
@@ -8286,7 +8288,7 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 				fFetchCheckpoint.push_back(fetchCheckpointRanges(data->cx, record, checkpointDir, { range }));
 			}
 			wait(store(localRecords, getAll(fFetchCheckpoint)));
-			if (moveInShard->getPhase() == MoveInPhase::Fail) {
+			if (moveInShard->failed()) {
 				return Void();
 			}
 			break;
@@ -8296,17 +8298,13 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 			    .detail("Attempt", attempt)
 			    .detail("MoveInShard", moveInShard->toString());
 			state Error e = err;
-			if ((e.code() == error_code_checkpoint_not_found || attempt > 10) &&
-			    moveInShard->getPhase() == MoveInPhase::Fetching) {
+			if (e.code() == error_code_actor_cancelled || moveInShard->getPhase() != MoveInPhase::Fetching) {
+				throw e;
+			} else if (attempt > 10 || e.code() == error_code_checkpoint_not_found) {
 				wait(fallBackToAddingShard(data, moveInShard));
 				return Void();
-			}
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-			    e.code() == error_code_connection_failed || e.code() == error_code_broken_promise ||
-			    e.code() == error_code_request_maybe_delivered || e.code() == error_code_timed_out) {
-				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
 			} else {
-				throw e;
+				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::FetchKeys));
 			}
 		}
 	}
@@ -8344,7 +8342,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 		    .errorUnsuppressed(e)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Checkpoints", describe(moveInShard->checkpoints()));
-		if (e.code() == error_code_failed_to_restore_checkpoint && moveInShard->getPhase() != MoveInPhase::Fail) {
+		if (e.code() == error_code_failed_to_restore_checkpoint && !moveInShard->failed()) {
 			moveInShard->setPhase(MoveInPhase::Fetching);
 			wait(updateMoveInShardMetaData(data, moveInShard));
 			return Void();
@@ -8356,8 +8354,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	    .detail("MoveInShard", moveInShard->toString())
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 
-	wait(delay(0));
-	if (moveInShard->getPhase() == MoveInPhase::Fail) {
+	if (moveInShard->failed()) {
 		return Void();
 	}
 
@@ -8408,7 +8405,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 	    .detail("MoveInShard", moveInShard->toString());
 	try {
 		wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
+		if (moveInShard->failed()) {
 			return Void();
 		}
 		TraceEvent(moveInShard->logSev, "FetchShardApplyingUpdatesRestored", data->thisServerID)
@@ -8418,7 +8415,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		Promise<FetchInjectionInfo*> p;
 		data->readyFetchKeys.push_back(p);
 		FetchInjectionInfo* batch = wait(p.getFuture());
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
+		if (moveInShard->failed()) {
 			return Void();
 		}
 
@@ -8484,7 +8481,7 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 
 		// Wait for the transferredVersion (and therefore the shard data) to be committed and durable.
 		wait(data->durableVersion.whenAtLeast(data->data().getLatestVersion() + 1));
-		if (moveInShard->getPhase() == MoveInPhase::Fail) {
+		if (moveInShard->failed()) {
 			return Void();
 		}
 		moveInShard->setPhase(MoveInPhase::Complete);
@@ -8539,7 +8536,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	    mLV, MutationRef(MutationRef::ClearRange, persistUpdatesRange.begin, persistUpdatesRange.end));
 
 	bool clearRecord = true;
-	if (moveInShard->getPhase() == MoveInPhase::Fail) {
+	if (moveInShard->failed()) {
 		for (const auto& mir : moveInShard->ranges()) {
 			auto existingShards = data->shards.intersectingRanges(mir);
 			for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
@@ -8585,7 +8582,7 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			} else if (phase == MoveInPhase::Complete) {
 				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
-			} else if (phase == MoveInPhase::Fail) {
+			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
 				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
@@ -8699,16 +8696,21 @@ void MoveInShard::removeRange(const KeyRangeRef range) {
 	std::sort(this->meta->ranges.begin(), this->meta->ranges.end(), KeyRangeRef::ArbitraryOrder());
 }
 
-void MoveInShard::cancel() {
+void MoveInShard::cancel(const MoveInFailed failed) {
 	const Version version = this->server->data().getLatestVersion();
 	TraceEvent(SevDebug, "MoveInCancelled", this->server->thisServerID)
 	    .detail("MoveInShard", this->meta->toString())
 	    .detail("Version", version);
-	if (this->getPhase() == MoveInPhase::Fail) {
+	if (this->getPhase() == MoveInPhase::Error || this->getPhase() == MoveInPhase::Cancel) {
 		return;
 	}
-	this->setPhase(MoveInPhase::Fail);
-	this->meta->error = "Cancelled";
+	if (failed) {
+		this->setPhase(MoveInPhase::Error);
+		this->meta->error = "Error";
+	} else {
+		this->setPhase(MoveInPhase::Cancel);
+		this->meta->error = "Cancelled";
+	}
 	this->updates->fail = true;
 	auto& mLV = this->server->addVersionToMutationLog(version);
 	this->server->addMutationToMutationLog(
