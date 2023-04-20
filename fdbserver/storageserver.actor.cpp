@@ -7389,6 +7389,7 @@ bool fetchKeyCanRetry(const Error& e) {
 	case error_code_server_overloaded:
 	case error_code_blob_granule_request_failed:
 	case error_code_blob_granule_transaction_too_old:
+	case error_code_grv_proxy_memory_limit_exceeded:
 	case error_code_commit_proxy_memory_limit_exceeded:
 		return true;
 	default:
