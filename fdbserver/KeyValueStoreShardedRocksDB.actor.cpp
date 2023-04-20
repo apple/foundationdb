@@ -30,6 +30,7 @@
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Histogram.h"
+#include "flow/UnitTest.h"
 
 #include <memory>
 #include <tuple>
@@ -547,6 +548,11 @@ struct PhysicalShard {
 		this->readIterPool->refreshIterators();
 	}
 
+	bool shouldFlush() {
+		return SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0 &&
+		       numRangeDeletions > SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT;
+	}
+
 	std::string toString() {
 		std::string ret = "[ID]: " + this->id + ", [CF]: ";
 		if (initialized()) {
@@ -592,6 +598,7 @@ struct PhysicalShard {
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
+	uint64_t numRangeDeletions;
 	double deleteTimeSec;
 };
 
@@ -1072,6 +1079,8 @@ public:
 
 	void clearRange(KeyRangeRef range) {
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
+		auto beginSlice = toSlice(range.begin);
+		auto endSlice = toSlice(range.end);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
 			if (it.value() == nullptr) {
@@ -1079,8 +1088,29 @@ public:
 				continue;
 			}
 
+			auto physicalShard = it.value()->physicalShard;
+
+			// TODO: Disable this once RocksDB is upgraded to a version with range delete improvement.
+			if (SERVER_KNOBS->ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS && systemKeys.contains(range)) {
+				rocksdb::ReadOptions options = getReadOptions();
+				options.iterate_lower_bound = &beginSlice;
+				options.iterate_upper_bound = &endSlice;
+				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, physicalShard->cf));
+				cursor->Seek(beginSlice);
+				while (cursor->Valid() && toStringRef(cursor->key()) < toStringRef(endSlice)) {
+					writeBatch->Delete(physicalShard->cf, cursor->key());
+					cursor->Next();
+				}
+				if (!cursor->status().ok()) {
+					// if readrange iteration fails, then do a deleteRange.
+					writeBatch->DeleteRange(physicalShard->cf, beginSlice, endSlice);
+				}
+			} else {
+				writeBatch->DeleteRange(physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+				++physicalShard->numRangeDeletions;
+			}
+
 			// TODO: Skip clear range and compaction when entire CF is cleared.
-			writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
 			dirtyShards->insert(it.value()->physicalShard);
 		}
 	}
@@ -2024,11 +2054,12 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				return;
 			}
 
-			for (auto shard : *(a.dirtyShards)) {
-				shard->readIterPool->update();
+			if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
+				for (auto shard : *(a.dirtyShards)) {
+					shard->readIterPool->update();
+				}
 			}
 
-			a.done.send(Void());
 			if (SERVER_KNOBS->ROCKSDB_SUGGEST_COMPACT_CLEAR_RANGE) {
 				for (const auto& [id, range] : deletes) {
 					auto cf = columnFamilyMap->find(id);
@@ -2040,6 +2071,22 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				}
 			}
 
+			// Check for number of range deletes in shards.
+			// TODO: Disable this once RocksDB is upgraded to a version with range delete improvement.
+			if (SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT) {
+				rocksdb::FlushOptions fOptions;
+				fOptions.wait = true;
+				fOptions.allow_write_stall = true;
+
+				for (auto shard : (*a.dirtyShards)) {
+					if (shard->shouldFlush()) {
+						TraceEvent("FlushCF").detail("PhysicalShardId", shard->id);
+						a.db->Flush(fOptions, shard->cf);
+						shard->numRangeDeletions = 0;
+					}
+				}
+			}
+
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
 				rocksDBMetrics->getCommitActionHistogram()->sampleSeconds(currTime - commitBeginTime);
@@ -2047,6 +2094,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			}
 
 			sample();
+
+			a.done.send(Void());
 		}
 
 		struct CloseAction : TypedAction<Writer, CloseAction> {
@@ -3216,8 +3265,11 @@ TEST_CASE("noSim/ShardedRocksDB/Metadata") {
 
 	return Void();
 }
-TEST_CASE("noSim/ShardedRocksDB/RangeClearSysKey") {
-	state const std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
+	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	std::cout << "delete count: " << deleteCount << "\n";
+
+	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	state IKeyValueStore* kvStore =
@@ -3226,8 +3278,9 @@ TEST_CASE("noSim/ShardedRocksDB/RangeClearSysKey") {
 
 	state KeyRef shardPrefix = "\xffprefix/"_sr;
 	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
 	state int i = 0;
-	for (; i < 20000; ++i) {
+	for (; i < deleteCount; ++i) {
 		state std::string key1 = format("\xffprefix/%d", i);
 		state std::string key2 = format("\xffprefix/%d", i + 1);
 
@@ -3236,6 +3289,11 @@ TEST_CASE("noSim/ShardedRocksDB/RangeClearSysKey") {
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
+
+	std::cout << "start flush\n";
+	auto rocksdb = (ShardedRocksDBKeyValueStore*)kvStore;
+	rocksdb->flushShard("shard-1");
+	std::cout << "flush complete\n";
 
 	{
 		Future<Void> closed = kvStore->onClosed();
@@ -3265,8 +3323,11 @@ TEST_CASE("noSim/ShardedRocksDB/RangeClearSysKey") {
 	wait(closed);
 	return Void();
 }
-TEST_CASE("noSim/ShardedRocksDB/RangeClearUserKey") {
-	state const std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
+TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
+	state int deleteCount = params.getInt("deleteCount").orDefault(20000);
+	std::cout << "delete count: " << deleteCount << "\n";
+
+	state std::string rocksDBTestDir = "sharded-rocksdb-perf-db";
 	platform::eraseDirectoryRecursive(rocksDBTestDir);
 
 	state IKeyValueStore* kvStore =
@@ -3275,8 +3336,9 @@ TEST_CASE("noSim/ShardedRocksDB/RangeClearUserKey") {
 
 	state KeyRef shardPrefix = "prefix/"_sr;
 	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
+	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
 	state int i = 0;
-	for (; i < 20000; ++i) {
+	for (; i < deleteCount; ++i) {
 		state std::string key1 = format("prefix/%d", i);
 		state std::string key2 = format("prefix/%d", i + 1);
 
