@@ -4213,14 +4213,14 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->readOptions.get().debugID.get().first(),
 					                      "NativeAPI.getExactRange.Before");
-					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.debugID.get())
+					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.get().debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("ReqLimit", req.limit)
 					    .detail("ReqLimitBytes", req.limitBytes)
 					    .detail("ReqVersion", req.version)
 					    .detail("Reverse", reverse)
-					    .detail("Servers", locations[shard].second->description());*/
+					    .detail("Servers", locations[shard].locations->locations()->description());*/
 				}
 				++trState->cx->transactionPhysicalReads;
 				state GetKeyValuesFamilyReply rep;
@@ -4598,20 +4598,23 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			try {
 				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
-					    .detail("ReqBeginKey", req.begin.getKey())
-					    .detail("ReqEndKey", req.end.getKey())
-					    .detail("OriginalBegin", originalBegin.toString())
-					    .detail("OriginalEnd", originalEnd.toString())
-					    .detail("Begin", begin.toString())
-					    .detail("End", end.toString())
-					    .detail("Shard", shard)
-					    .detail("ReqLimit", req.limit)
-					    .detail("ReqLimitBytes", req.limitBytes)
-					    .detail("ReqVersion", req.version)
-					    .detail("Reverse", reverse)
-					    .detail("ModifiedSelectors", modifiedSelectors)
-					    .detail("Servers", beginServer.second->description());*/
+					/*
+					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					    TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.get().debugID.get())
+					        .detail("ReqBeginKey", req.begin.getKey())
+					        .detail("ReqEndKey", req.end.getKey())
+					        .detail("OriginalBegin", originalBegin.toString())
+					        .detail("OriginalEnd", originalEnd.toString())
+					        .detail("Begin", begin.toString())
+					        .detail("End", end.toString())
+					        .detail("Shard", shard)
+					        .detail("ReqLimit", req.limit)
+					        .detail("ReqLimitBytes", req.limitBytes)
+					        .detail("ReqVersion", req.version)
+					        .detail("Reverse", reverse)
+					        .detail("ModifiedSelectors", modifiedSelectors)
+					        .detail("Servers", beginServer.locations->locations()->description());
+					}*/
 				}
 
 				++trState->cx->transactionPhysicalReads;
@@ -4641,12 +4644,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					g_traceBatch.addEvent("TransactionDebug",
 					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
-					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
-					    .detail("ReqBeginKey", req.begin.getKey())
-					    .detail("ReqEndKey", req.end.getKey())
-					    .detail("RepIsMore", rep.more)
-					    .detail("VersionReturned", rep.version)
-					    .detail("RowsReturned", rep.data.size());*/
+					/*
+					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					    TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.get().debugID.get())
+					        .detail("ReqBeginKey", req.begin.getKey())
+					        .detail("ReqEndKey", req.end.getKey())
+					        .detail("RepIsMore", rep.more)
+					        .detail("VersionReturned", rep.version)
+					        .detail("RowsReturned", rep.data.size());
+					}*/
 				}
 
 				ASSERT(!rep.more || rep.data.size());
@@ -7722,7 +7728,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 		} else {
 			bool ok = e.code() == error_code_tenant_not_found;
-			TraceEvent(ok ? SevInfo : SevError, "WaitStorageMetricsError").error(e);
+			TraceEvent(ok ? SevInfo : SevError, "DoGetStorageMetricsError").error(e);
 			throw;
 		}
 
@@ -7984,7 +7990,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
