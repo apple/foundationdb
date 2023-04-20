@@ -22,6 +22,7 @@
 #define FDBCLIENT_MULTIVERSIONASSIGNMENTVARS_H
 #pragma once
 
+#include "MultiVersionTransaction.h"
 #include "flow/ThreadHelper.actor.h"
 
 template <class T>

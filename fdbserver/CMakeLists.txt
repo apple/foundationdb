@@ -46,6 +46,7 @@ target_include_directories(fdbserver_swift PUBLIC
     "${CMAKE_BINARY_DIR}/fdbserver/include"
     "${CMAKE_SOURCE_DIR}/fdbrpc/include"
     "${CMAKE_BINARY_DIR}/fdbrpc/include"
+    "${CMAKE_SOURCE_DIR}/metacluster/include"
     "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
     "${CMAKE_SOURCE_DIR}/contrib/md5/include"
     "${CMAKE_SOURCE_DIR}/contrib/libb64/include"

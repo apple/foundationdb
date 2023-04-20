@@ -19,7 +19,6 @@
  */
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/Metacluster.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbserver/ApplyMetadataMutation.h"
@@ -29,7 +28,7 @@
 #include "fdbserver/MasterInterface.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ProtocolVersion.h"
-#include "flow/swift.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {

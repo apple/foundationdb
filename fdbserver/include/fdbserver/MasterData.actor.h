@@ -100,7 +100,13 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
     Version version; // The last version assigned to a proxy by getVersion()
     double lastVersionTime;
     Optional<Version> referenceVersion;
-    MasterInterface myInterface;
+
+	#ifndef USE_SWIFT
+	// When using Swift master server impl this is declared in Swift.
+	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
+	#endif // USE_SWIFT
+
+	MasterInterface myInterface;
 
     ResolutionBalancer resolutionBalancer;
 
@@ -151,13 +157,13 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
 
     ~MasterData();
 
-    // FIXME: return a reference once https://github.com/apple/swift/issues/64315 is fixed.
+    // FIXME(swift): return a reference once https://github.com/apple/swift/issues/64315 is fixed.
     inline ResolutionBalancer *getResolutionBalancer() {
         return &resolutionBalancer;
     }
 };
 
-// FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
+// FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
 inline void addrefMasterData(MasterData* ptr) {
     addref(ptr);
 }

@@ -164,7 +164,6 @@ public actor MasterDataActor {
 
         rep.version = myself.version
         rep.requestNum = req.requestNum
-        // print("[swift][\(#fileID):\(#line)](\(#function))\(Self.self) reply with version: \(rep.version)")
 
         // TODO: highlight some collection use (c++ collection, find on it etc)
         lastVersionReplies.replies = lastVersionReplies.replies.filter { $0.0 > req.mostRecentProcessedRequestNum }
@@ -173,7 +172,6 @@ public actor MasterDataActor {
 
         assert(lastVersionReplies.latestRequestNum.get() == req.requestNum - 1)
         lastVersionReplies.latestRequestNum.set(Int(req.requestNum))
-        print("[swift] getVersion impl, requestNum: \(req.requestNum) -> version: \(rep.version)")
         return rep
     }
 
