@@ -268,10 +268,10 @@ public:
 
 		void operator()() {
 			if (auto job = swiftJob) {
-				fprintf(stderr, "[%s:%d](%s) apply\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 				swift_job_run(job, ExecutorRef::generic());
+			} else {
+				promise.send(Void());
 			}
-			promise.send(Void());
 			delete this;
 		}
 	};
