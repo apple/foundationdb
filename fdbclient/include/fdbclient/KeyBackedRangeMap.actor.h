@@ -213,17 +213,21 @@ public:
 		return updateRangeActor(*this, tr, begin, end, valueUpdate);
 	}
 
-	// Return a LocalSnapshot of all ranges from the map which cover the range of begin through end.
-	// If the map in the database does not have boundaries <=begin or >=end then these boundaries will be
-	// added to the returned snapshot with a default ValueType.
 	ACTOR template <class Transaction>
 	static Future<LocalSnapshot> getSnapshotActor(KeyBackedRangeMap self, Transaction tr, KeyType begin, KeyType end) {
 		kbt_debug("RANGEMAP snapshot start\n");
 
+		// The range read should start at KeySelector::lastLessOrEqual(begin) to get the range which covers begin.
+		// However this could touch a key outside of the map subspace which can lead to various errors.
+		// Use seekLessOrEqual() to find a begin key safely.
+		Optional<typename Map::KVType> beginKV = wait(self.kvMap.seekLessOrEqual(tr, begin));
+
+		state KeySelector rangeBegin = KeySelector::firstGreaterOrEqual(beginKV.present() ? beginKV->key : begin);
+		state KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
+
 		state int readSize = BUGGIFY ? 1 : 100000;
-		// Start reading the range of key boundaries which would cover begin through end using key selectors
-		state Future<RangeResultType> boundariesFuture = self.kvMap.getRange(
-		    tr, KeySelector::lastLessOrEqual(begin), KeySelector::firstGreaterThan(end), GetRangeLimits(readSize));
+		state Future<RangeResultType> boundariesFuture =
+		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
 		state LocalSnapshot result;
 		loop {
@@ -238,10 +242,8 @@ public:
 			ASSERT(!boundaries.results.empty());
 
 			// Continue reading starting from the first key after the last key read.
-			boundariesFuture = self.kvMap.getRange(tr,
-			                                       KeySelector::firstGreaterThan(boundaries.results.back().first),
-			                                       KeySelector::firstGreaterThan(end),
-			                                       GetRangeLimits(readSize));
+			rangeBegin = KeySelector::firstGreaterThan(boundaries.results.back().first);
+			boundariesFuture = self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 		}
 
 		// LocalSnapshot requires initialization of the widest range it will be queried with, so we must ensure that has
@@ -258,6 +260,9 @@ public:
 		return result;
 	}
 
+	// Return a LocalSnapshot of all ranges from the map which cover the range of begin through end.
+	// If the map in the database does not have boundaries <=begin or >=end then these boundaries will be
+	// added to the returned snapshot with a default ValueType.
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, Future<LocalSnapshot>>::type
 	getSnapshot(Transaction tr, KeyType begin, KeyType end) const {
