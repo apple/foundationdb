@@ -150,7 +150,8 @@ public:
 		return getRangeForKey(*this, tr, key, snapshot);
 	}
 
-	// Update the range from begin to end by applying valueUpdate to it
+	// Update the range from begin to end by either applying valueUpdate to it, or if replace is true then replace
+	// the the range with the given value.
 	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
 	ACTOR template <class Transaction>
 	Future<Void> updateRangeActor(KeyBackedRangeMap self,
@@ -220,7 +221,7 @@ public:
 		kbt_debug("RANGEMAP snapshot start\n");
 
 		state int readSize = BUGGIFY ? 1 : 100000;
-		// Start reading the range of of key boundaries which would cover begin through end using key selectors
+		// Start reading the range of key boundaries which would cover begin through end using key selectors
 		state Future<RangeResultType> boundariesFuture = self.kvMap.getRange(
 		    tr, KeySelector::lastLessOrEqual(begin), KeySelector::firstGreaterThan(end), GetRangeLimits(readSize));
 
