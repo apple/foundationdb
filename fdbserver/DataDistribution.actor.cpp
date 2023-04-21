@@ -718,6 +718,16 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
 
+	// Start watching for changes before reading the config in init() below
+	state Future<Void> onConfigChange = map(DDConfiguration().trigger.onChange(cx.getReference()),
+	                                        [](Void) {
+		                                        CODE_PROBE(true, "DataDistribution change detected");
+		                                        TraceEvent("DataDistributionConfigChanged").log();
+		                                        throw dd_config_changed();
+		                                        return Void();
+	                                        }) ||
+	                                    (BUGGIFY ? delayJittered(100) : Never());
+
 	loop {
 		trackerCancelled = false;
 		// whether all initial shard are tracked
@@ -759,6 +769,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
+			actors.push_back(onConfigChange);
+
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				replicaSize = 2 * self->configuration.storageTeamSize;
@@ -943,7 +955,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				wait(self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(), teamForDroppedRange));
 				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
-				if (err.code() != error_code_movekeys_conflict) {
+				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
 					throw err;
 				}
 
@@ -967,6 +979,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_data_move_cancelled);
 		s.insert(error_code_data_move_dest_team_not_found);
+		s.insert(error_code_dd_config_changed);
 	}
 	return s;
 }

@@ -2151,9 +2151,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					wait(tr.onError(e));
 				}
 			}
-
-			// TODO:  DD should check DDConfiguration().trigger.watch() for changes
-			wait(success(takeMoveKeysLock(cx, UID())));
 		}
 	}
 
