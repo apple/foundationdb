@@ -95,7 +95,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( MAX_CACHE_VERSIONS,                                   10e6 );
 	init( TLOG_IGNORE_POP_AUTO_ENABLE_DELAY,                   300.0 );
 	init( TXS_POPPED_MAX_DELAY,                                  1.0 ); if ( randomize && BUGGIFY ) TXS_POPPED_MAX_DELAY = deterministicRandom()->random01();
-	init( TLOG_MAX_CREATE_DURATION,                             10.0 );
+	init( TLOG_MAX_CREATE_DURATION,                             10.0 ); if ( isSimulated ) TLOG_MAX_CREATE_DURATION = 20.0;
 	init( PEEK_LOGGING_AMOUNT,                                     5 );
 	init( PEEK_LOGGING_DELAY,                                    5.0 );
 	init( PEEK_RESET_INTERVAL,                                 300.0 ); if ( randomize && BUGGIFY ) PEEK_RESET_INTERVAL = 20.0;
