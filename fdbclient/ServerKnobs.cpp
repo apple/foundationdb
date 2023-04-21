@@ -174,7 +174,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// In order to make sure GetTeam has enough eligible destination team:
 	ASSERT_GT(AVAILABLE_SPACE_PIVOT_PERCENT + READ_LOAD_PIVOT_PERCENT, 1.0);
 
-	init( SHARD_ENCODE_LOCATION_METADATA,                        true ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
+	init( SHARD_ENCODE_LOCATION_METADATA,                       false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                             false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
 	init( ENABLE_DD_PHYSICAL_SHARD_MOVE,                         true );
 	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server

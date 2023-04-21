@@ -9939,7 +9939,7 @@ private:
 	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
 	// 2. Schedule deleting a checkpoint.
 	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
-		if (!data->shardAware) {
+		if (!data->shardAware || data->isTss()) {
 			return;
 		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
@@ -10651,6 +10651,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 }
 
 ACTOR Future<Void> createCheckpoint(StorageServer* data, CheckpointMetaData metaData) {
+	TraceEvent(SevDebug, "SSCreateCheckpoint", data->thisServerID).detail("CheckpointMeta", metaData.toString());
 	ASSERT(std::find(metaData.src.begin(), metaData.src.end(), data->thisServerID) != metaData.src.end() &&
 	       !metaData.ranges.empty());
 	state std::string checkpointDir = serverCheckpointDir(data->checkpointFolder, metaData.checkpointID);

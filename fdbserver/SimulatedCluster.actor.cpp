@@ -1657,8 +1657,11 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		}
 	}
 
-	if ((!testConfig.excludedStorageEngineType(5))) {
-		storage_engine_type = 5;
+	// if ((!testConfig.excludedStorageEngineType(5))) {
+	// 	storage_engine_type = 5;
+	// 	set_config("encryption_at_rest_mode=disabled");
+	// }
+	if (storage_engine_type == 5) {
 		set_config("encryption_at_rest_mode=disabled");
 	}
 
