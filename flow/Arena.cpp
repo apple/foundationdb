@@ -21,6 +21,7 @@
 #include "flow/Arena.h"
 
 #include "flow/UnitTest.h"
+#include "flow/ScopeExit.h"
 
 #include "flow/config.h"
 
@@ -385,23 +386,23 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)new uint8_t[512];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)new uint8_t[1024];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)new uint8_t[2048];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)new uint8_t[4096];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)new uint8_t[8192];
+				b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
@@ -413,7 +414,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)new uint8_t[reqSize];
+			b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
@@ -505,26 +506,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			delete[] reinterpret_cast<uint8_t*>(this);
+			freeOrMaybeKeepalive(this);
 		}
 	}
 }
@@ -996,15 +997,7 @@ TEST_CASE("/flow/Arena/OptionalMap") {
 	return Void();
 }
 
-// TODO: remove the following `#if 0 ... #endif` once we come up with a way of reliably, temporarily swapping
-// Arena alloc/free implementation for the duration of a test run.
-// See https://github.com/apple/foundationdb/pull/9865/files#r1155735635.
-#if 0
 TEST_CASE("/flow/Arena/Secure") {
-#if !defined(USE_SANITIZER) && !defined(VALGRIND)
-	// Note: Assumptions underlying this unit test are speculative.
-	//       Disable for a build configuration or entirely if deemed flaky.
-	//       As of writing, below equivalency of (buf == newBuf) holds except for ASAN builds.
 	auto& rng = *deterministicRandom();
 	auto sizes = std::vector<int>{ 1 };
 	for (auto i = 2; i <= ArenaBlock::LARGE * 2; i *= 2) {
@@ -1012,49 +1005,37 @@ TEST_CASE("/flow/Arena/Secure") {
 		// randomly select one value between this pow2 and the next
 		sizes.push_back(rng.randomInt(sizes.back() + 1, sizes.back() * 2));
 	}
-	auto totalIters = 0;
-	auto samePtrCount = 0;
+	// temporarily disable allocation tracing: runs with hugeArenaSample seems to cause test to fail for some reason
+	g_allocation_tracing_disabled++;
+	auto reenableAllocTracingOnUnwind = ScopeExit([]() { g_allocation_tracing_disabled--; });
 	for (auto iter = 0; iter < 100; iter++) {
-		for (auto len : sizes) {
-			uint8_t* buf = nullptr;
-			{
-				Arena arena;
-				buf = new (arena, WipeAfterUse{}) uint8_t[len];
+		auto const allocsPerArena = rng.randomInt(1, 80);
+		std::vector<std::pair<uint8_t*, int>> buffers;
+		// below scope object keeps deallocated memory alive to test if wipe-after-use behaves correctly
+		auto keepaliveScope = keepalive_allocator::ActiveScope{};
+		{
+			Arena arena;
+			for (auto i = 0; i < allocsPerArena; i++) {
+				auto const len = sizes[rng.randomInt(0, sizes.size())];
+				auto const buf = new (arena, WipeAfterUse{}) uint8_t[len];
 				for (auto i = 0; i < len; i++)
 					buf[i] = rng.randomInt(1, 256);
+				buffers.push_back(std::make_pair(buf, len));
 			}
-			{
-				Arena arena;
-				uint8_t* newBuf = nullptr;
-				if (rng.coinflip()) {
-					newBuf = new (arena, WipeAfterUse{}) uint8_t[len];
-				} else {
-					newBuf = new (arena) uint8_t[len];
-				}
-				ASSERT(newBuf == buf);
-				// there's no hard guarantee about the above equality and the result could vary by platform,
-				// malloc implementation, and tooling instrumentation (e.g. ASAN, valgrind)
-				// but it is practically likely because of
-				//   a) how Arena uses (and malloc variants tend to use) thread-local freelists, and
-				//   b) the fact that we earlier allocated the memory blocks in some size sequence,
-				//      freed them in reverse order, and then allocated them again immediately in the same size
-				//      sequence.
-				// in the same vein, it is speculative but likely that if buf == newBuf,
-				// the memory backing the address is the same and remained untouched,
-				// because FDB servers are single-threaded
-				samePtrCount++;
-				for (auto i = 0; i < len; i++) {
-					if (newBuf[i] != 0) {
-						fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
-						ASSERT(false);
-					}
+		}
+		// make sure the buffers have been zeroed out
+		for (auto const& buffer : buffers) {
+			auto buf = buffer.first;
+			auto len = buffer.second;
+			makeDefined(buf, len);
+			auto poisonOnUnwind = ScopeExit([buf, len]() { makeNoAccess(buf, len); });
+			for (auto i = 0; i < len; i++) {
+				if (buf[i] != 0) {
+					fmt::print("Non-zero byte found at iter {} size {} offset {}\n", iter + 1, len, i);
+					ASSERT(false);
 				}
 			}
-			totalIters++;
 		}
 	}
-	fmt::print("Total iterations: {}, # of times check passed: {}\n", totalIters, samePtrCount);
-#endif // !defined(USE_SANITIZER) && !defind(VALGRIND)
 	return Void();
 }
-#endif // 0

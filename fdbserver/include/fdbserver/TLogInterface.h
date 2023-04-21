@@ -344,7 +344,7 @@ struct TLogQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 12206626;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
-	int64_t bytesDurable, bytesInput;
+	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
 	Version v; // committed version
 

@@ -24,7 +24,7 @@
 #include "fdbclient/Tenant.h"
 #include "fdbrpc/ReplicationTypes.h"
 #include "fdbserver/DataDistributionTeam.h"
-
+#include "fdbserver/DDTxnProcessor.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 
@@ -53,10 +53,12 @@ class TCServerInfo : public ReferenceCounted<TCServerInfo> {
 	KeyValueStoreType storeType; // Storage engine type
 
 	int64_t dataInFlightToServer = 0, readInFlightToServer = 0;
-	std::vector<Reference<TCTeamInfo>> teams;
+	std::vector<Reference<TCTeamInfo>> teams{};
 	ErrorOr<GetStorageMetricsReply> metrics;
+	Optional<HealthMetrics::StorageStats> storageStats;
 
 	void setMetrics(GetStorageMetricsReply serverMetrics) { this->metrics = serverMetrics; }
+	void setStorageStats(HealthMetrics::StorageStats stats) { storageStats = stats; }
 	void markTeamUnhealthy(int teamIndex);
 
 public:
@@ -81,6 +83,7 @@ public:
 	             Version addedVersion = 0);
 
 	GetStorageMetricsReply const& getMetrics() const { return metrics.get(); }
+	Optional<HealthMetrics::StorageStats> const& getStorageStats() const { return storageStats; }
 
 	UID const& getId() const { return id; }
 	bool isInDesiredDC() const { return inDesiredDC; }
@@ -116,7 +119,7 @@ public:
 
 	Future<Void> updateServerMetrics();
 	static Future<Void> updateServerMetrics(Reference<TCServerInfo> server);
-	Future<Void> serverMetricsPolling();
+	Future<Void> serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor);
 
 	~TCServerInfo();
 };
@@ -180,6 +183,8 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	int priority;
 	UID id;
 
+	data_distribution::EligibilityCounter eligibilityCounter;
+
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
 	Future<Void> tracker;
@@ -213,7 +218,13 @@ public:
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
 
-	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
+	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override;
+
+	double getAverageCPU() const override;
+
+	bool hasLowerCpu(double cpuThreshold) const override {
+		return getAverageCPU() <= std::min(cpuThreshold, SERVER_KNOBS->MAX_DEST_CPU_PERCENT);
+	}
 
 	int64_t getReadInFlightToTeam() const override;
 
@@ -222,6 +233,10 @@ public:
 	double getMinAvailableSpaceRatio(bool includeInFlight = true) const override;
 
 	bool hasHealthyAvailableSpace(double minRatio) const override;
+
+	unsigned getEligibilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
+	void increaseEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.increase(t); }
+	void resetEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.reset(t); }
 
 	Future<Void> updateStorageMetrics() override;
 

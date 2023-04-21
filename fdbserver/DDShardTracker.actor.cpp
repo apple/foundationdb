@@ -93,6 +93,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.max.bytesWrittenPerKSecond = bounds.max.infinity;
 	bounds.max.iosPerKSecond = bounds.max.infinity;
 	bounds.max.bytesReadPerKSecond = bounds.max.infinity;
+	bounds.max.opsReadPerKSecond = bounds.max.infinity;
 
 	// The first shard can have arbitrarily small size
 	if (shard.begin == allKeys.begin) {
@@ -104,6 +105,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.min.bytesWrittenPerKSecond = 0;
 	bounds.min.iosPerKSecond = 0;
 	bounds.min.bytesReadPerKSecond = 0;
+	bounds.min.opsReadPerKSecond = 0;
 
 	// The permitted error is 1/3 of the general-case minimum bytes (even in the special case where this is the last
 	// shard)
@@ -111,6 +113,7 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize) {
 	bounds.permittedError.bytesWrittenPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.iosPerKSecond = bounds.permittedError.infinity;
 	bounds.permittedError.bytesReadPerKSecond = bounds.permittedError.infinity;
+	bounds.permittedError.opsReadPerKSecond = bounds.permittedError.infinity;
 
 	return bounds;
 }
@@ -457,14 +460,18 @@ void executeShardSplit(DataDistributionTracker* self,
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 	for (int i = numShards - 1; i > skipRange; i--) {
 		KeyRangeRef r(splitKeys[i], splitKeys[i + 1]);
 		self->shardsAffectedByTeamFailure->defineShard(r);
 		if (relocate) {
-			self->output.send(RelocateShard(r, DataMovementReason::SPLIT_SHARD, reason));
+			RelocateShard rs(r, DataMovementReason::SPLIT_SHARD, reason);
+			rs.setParentRange(keys);
+			self->output.send(rs);
 		}
 	}
 
@@ -1109,7 +1116,7 @@ ACTOR Future<Void> shardEvaluator(DataDistributionTracker* self,
 		onChange = onChange || shardMerger(self, keys, shardSize);
 	}
 	if (shouldSplit) {
-		RelocateReason reason = writeSplit ? RelocateReason::WRITE_SPLIT : RelocateReason::SIZE_SPLIT;
+		RelocateReason reason = sizeSplit ? RelocateReason::SIZE_SPLIT : RelocateReason::WRITE_SPLIT;
 		onChange = onChange || shardSplitter(self, keys, shardSize, shardBounds, reason);
 	}
 
@@ -1264,15 +1271,11 @@ ACTOR Future<Void> fetchTopKShardMetrics_impl(DataDistributionTracker* self, Get
 					break;
 				}
 
-				if (metrics.bytesReadPerKSecond > 0) {
-					if (minReadLoad == -1) {
-						minReadLoad = metrics.bytesReadPerKSecond;
-					} else {
-						minReadLoad = std::min(metrics.bytesReadPerKSecond, minReadLoad);
-					}
-					maxReadLoad = std::max(metrics.bytesReadPerKSecond, maxReadLoad);
-					if (req.minBytesReadPerKSecond <= metrics.bytesReadPerKSecond &&
-					    metrics.bytesReadPerKSecond <= req.maxBytesReadPerKSecond) {
+				auto readLoad = metrics.readLoadKSecond();
+				if (readLoad > 0) {
+					minReadLoad = std::min(readLoad, minReadLoad);
+					maxReadLoad = std::max(readLoad, maxReadLoad);
+					if (req.minReadLoadPerKSecond <= readLoad && readLoad <= req.maxReadLoadPerKSecond) {
 						returnMetrics.emplace_back(range, metrics);
 					}
 				}

@@ -5518,6 +5518,38 @@ bool blobWorkerTerminated(Reference<BlobWorkerData> self, IKeyValueStore* persis
 
 #define PERSIST_PREFIX "\xff\xff"
 static const KeyRef persistID = PERSIST_PREFIX "ID"_sr;
+static const KeyRef persistEncryptionAtRestModeKey = "encryptionAtRestMode"_sr;
+
+ACTOR Future<Void> checkUpdateEncryptionAtRestMode(Reference<BlobWorkerData> self,
+                                                   Future<DatabaseConfiguration> configF) {
+	DatabaseConfiguration config = wait(configF);
+	EncryptionAtRestMode encryptionAtRestMode = config.encryptionAtRestMode;
+	if (self->persistedEncryptMode.present()) {
+		// Ensure the BlobWorker encryptionAtRestMode status matches with the cluster config, if not, kill the
+		// BlobWorker process. Approach prevents a fake BlobWorker process joining the cluster.
+		if (self->persistedEncryptMode.get() != encryptionAtRestMode) {
+			TraceEvent(SevError, "BlobWorkerEncryptionAtRestMismatch", self->id)
+			    .detail("Expected", encryptionAtRestMode.toString())
+			    .detail("Present", self->persistedEncryptMode.get().toString());
+			ASSERT(false);
+		}
+		TraceEvent("BlobWorkerPersistEncryptionAtRestModePresent", self->id)
+		    .detail("Mode", self->persistedEncryptMode.get().toString());
+	} else {
+		self->persistedEncryptMode = encryptionAtRestMode;
+		if (self->storage) {
+			CODE_PROBE(true, "BlobWorker: Persisting encryption at rest mode");
+			self->storage->set(KeyValueRef(persistEncryptionAtRestModeKey, self->persistedEncryptMode.get().toValue()));
+			wait(self->storage->commit());
+			TraceEvent("BlobWorkerPersistEncryptionAtRestMode", self->id)
+			    .detail("Mode", self->persistedEncryptMode.get().toString());
+		}
+	}
+
+	ASSERT(self->persistedEncryptMode.present());
+	self->encryptMode = self->persistedEncryptMode.get();
+	return Void();
+}
 
 ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
                               ReplyPromise<InitializeBlobWorkerReply> recruitReply,
@@ -5568,8 +5600,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		rep.interf = bwInterf;
 		recruitReply.send(rep);
 
-		DatabaseConfiguration config = wait(configFuture);
-		self->encryptMode = config.encryptionAtRestMode;
+		wait(checkUpdateEncryptionAtRestMode(self, configFuture));
 		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
 
 		TraceEvent("BlobWorkerInit", self->id).log();
@@ -5593,8 +5624,9 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 
 ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 	state Future<Optional<Value>> fID = self->storage->readValue(persistID);
+	state Future<Optional<Value>> fEncryptionAtRestMode = self->storage->readValue(persistEncryptionAtRestModeKey);
 
-	wait(waitForAll(std::vector{ fID }));
+	wait(waitForAll(std::vector{ fID, fEncryptionAtRestMode }));
 
 	if (!SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED || !fID.get().present()) {
 		CODE_PROBE(true, "Restored uninitialized blob worker");
@@ -5602,6 +5634,14 @@ ACTOR Future<UID> restorePersistentState(Reference<BlobWorkerData> self) {
 	}
 	UID recoveredID = BinaryReader::fromStringRef<UID>(fID.get().get(), Unversioned());
 	ASSERT(recoveredID != self->id);
+
+	if (fEncryptionAtRestMode.get().present()) {
+		CODE_PROBE(true, "BlobWorker: Retrieved persisted encryption at rest mode");
+		self->persistedEncryptMode =
+		    Optional<EncryptionAtRestMode>(EncryptionAtRestMode::fromValue(fEncryptionAtRestMode.get()));
+		TraceEvent("BlobWorkerPersistEncryptionAtRestModeRead", self->id)
+		    .detail("Mode", self->persistedEncryptMode.get().toString());
+	}
 	return recoveredID;
 }
 
@@ -5659,9 +5699,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 		wait(self->storage->commit());
 
-		DatabaseConfiguration config = wait(configFuture);
-		self->encryptMode = config.encryptionAtRestMode;
-		TraceEvent("BWEncryptionAtRestMode", self->id).detail("Mode", self->encryptMode.toString());
+		wait(checkUpdateEncryptionAtRestMode(self, configFuture));
+		TraceEvent("BWEncryptionAtRestModeRecover", self->id).detail("Mode", self->encryptMode.toString());
 
 		TraceEvent("BlobWorkerInit", self->id).log();
 		wait(blobWorkerCore(bwInterf, self));
