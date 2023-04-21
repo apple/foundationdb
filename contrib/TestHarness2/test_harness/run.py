@@ -579,7 +579,7 @@ class TestRunner:
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
-            if count == 0 and unseed_check and run.summary.unseed is not None:
+            if count == 0 and unseed_check and run.summary.unseed is not None and run.summary.unseed >= 0:
                 run2 = TestRun(
                     binary,
                     file.absolute(),
