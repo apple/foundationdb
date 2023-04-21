@@ -719,14 +719,18 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state bool trackerCancelled;
 
 	// Start watching for changes before reading the config in init() below
-	state Future<Void> onConfigChange = map(DDConfiguration().trigger.onChange(cx.getReference()),
-	                                        [](Void) {
-		                                        CODE_PROBE(true, "DataDistribution change detected");
-		                                        TraceEvent("DataDistributionConfigChanged").log();
-		                                        throw dd_config_changed();
-		                                        return Void();
-	                                        }) ||
-	                                    (BUGGIFY ? delayJittered(100) : Never());
+	state Promise<Version> configChangeWatching;
+	state Future<Void> onConfigChange =
+	    map(DDConfiguration().trigger.onChange(cx.getReference(), {}, configChangeWatching), [](Version v) {
+		    CODE_PROBE(true, "DataDistribution change detected");
+		    TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
+		    throw dd_config_changed();
+		    return Void();
+	    });
+
+	// Make sure that the watcher has established a baseline before init() below so the watcher will
+	// see any changes that occur after init() has read the config state.
+	wait(success(configChangeWatching.getFuture()));
 
 	loop {
 		trackerCancelled = false;

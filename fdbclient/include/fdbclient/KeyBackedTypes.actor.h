@@ -244,24 +244,41 @@ public:
 // in a way that works for both compiling and in IDEs.
 #if defined(NO_INTELLISENSE)
 	template <class DB>
-	static Future<Void> onChangeActor(WatchableTrigger const& self,
-	                                  Reference<DB> const& db,
-	                                  Optional<Version> const& lastKnownVersion);
+	static Future<Version> onChangeActor(WatchableTrigger const& self,
+	                                     Reference<DB> const& db,
+	                                     Optional<Version> const& initialVersion,
+	                                     Promise<Version> const& watching);
 #else
 	ACTOR template <class DB>
-	static Future<Void> onChangeActor(WatchableTrigger self, Reference<DB> db, Optional<Version> lastKnownVersion);
+	static Future<Version> onChangeActor(WatchableTrigger self,
+	                                     Reference<DB> db,
+	                                     Optional<Version> initialVersion,
+	                                     Promise<Version> watching);
 #endif
 
+	// Watch the trigger until it changes.  The result will be ready when it is observed that the trigger value's
+	// version is greater than initialVersion, and the observed trigger value version will be returned.
+	//
+	// If initialVersion is not present it will be initialized internally to the first read version successfully
+	// obtained from the db.
+	//
+	// initialVersion can be thought of as a "last known version" but it could also be used to indiciate some future
+	// version after which you want to be notifified if the trigger's value changes.
+	//
+	// If watching can be set, the initialized value of initialVersion will be sent to it once known.
 	template <class DB>
-	Future<Void> onChange(Reference<DB> db, Optional<Version> lastKnownVersion = {}) const {
-		return onChangeActor(*this, db, lastKnownVersion);
+	Future<Version> onChange(Reference<DB> db,
+	                         Optional<Version> initialVersion = {},
+	                         Promise<Version> watching = {}) const {
+		return onChangeActor(*this, db, initialVersion, watching);
 	}
 };
 
 ACTOR template <class DB>
-Future<Void> WatchableTrigger::onChangeActor(WatchableTrigger self,
-                                             Reference<DB> db,
-                                             Optional<Version> lastKnownVersion) {
+Future<Version> WatchableTrigger::onChangeActor(WatchableTrigger self,
+                                                Reference<DB> db,
+                                                Optional<Version> initialVersion,
+                                                Promise<Version> watching) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
@@ -270,17 +287,20 @@ Future<Void> WatchableTrigger::onChangeActor(WatchableTrigger self,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			// If the lastKnownVersion is not set yet, then initialize it with the read version
-			if (!lastKnownVersion.present()) {
-				wait(store(lastKnownVersion, safeThreadFutureToFuture(tr->getReadVersion())));
+			// If the initialVersion is not set yet, then initialize it with the read version
+			if (!initialVersion.present()) {
+				wait(store(initialVersion, safeThreadFutureToFuture(tr->getReadVersion())));
+			}
+			if (watching.canBeSet()) {
+				watching.send(*initialVersion);
 			}
 
 			// Get the trigger's latest value.
-			Optional<Versionstamp> v = wait(self.get(tr));
+			Optional<Versionstamp> currentVal = wait(self.get(tr));
 
-			// If the trigger has a value and its version is > lastKnownVersion then the trigger has fired so break
-			if (v.present() && v->version > *lastKnownVersion) {
-				break;
+			// If the trigger has a value and its version is > initialVersion then the trigger has fired so break
+			if (currentVal.present() && currentVal->version > *initialVersion) {
+				return currentVal->version;
 			}
 
 			// Otherwise, watch the key and repeat the loop once the watch fires
@@ -292,8 +312,6 @@ Future<Void> WatchableTrigger::onChangeActor(WatchableTrigger self,
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
-
-	return Void();
 }
 
 // Convenient read/write access to a single value of type T stored at key
