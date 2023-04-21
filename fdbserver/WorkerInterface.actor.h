@@ -1204,6 +1204,8 @@ ACTOR template <class T>
 Future<T> ioTimeoutError(Future<T> what, double time) {
 	// Before simulation is sped up, IO operations can take a very long time so limit timeouts
 	// to not end until at least time after simulation is sped up.
+	state double orig = now();
+	state std::string trace = platform::get_backtrace();
 	if (g_network->isSimulated() && !g_simulator.speedUpSimulation) {
 		time += std::max(0.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 	}
@@ -1217,7 +1219,7 @@ Future<T> ioTimeoutError(Future<T> what, double time) {
 			if (g_network->isSimulated() && !g_simulator.getCurrentProcess()->isReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent(SevError, "IoTimeoutError").error(err);
+			TraceEvent(SevError, "IoTimeoutError").error(err).detail("OrigTime", orig).detail("OrigTrace", trace);
 			throw err;
 		}
 	}
