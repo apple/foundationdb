@@ -1330,10 +1330,10 @@ Future<T> ioTimeoutError(Future<T> what, double time, const char* context = null
 		}
 		when(wait(end)) {
 			Error err = io_timeout();
-			if (g_network->isSimulated()) {
+			if (!isSimulatorProcessReliable()) {
 				err = err.asInjectedFault();
 			}
-			TraceEvent e(g_network->isSimulated() ? SevWarn : SevError, "IoTimeoutError");
+			TraceEvent e(SevError, "IoTimeoutError");
 			e.error(err);
 			if (context != nullptr) {
 				e.detail("Context", context);
