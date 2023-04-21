@@ -10128,6 +10128,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int maxColdStarts = params.getInt("maxColdStarts").orDefault(300);
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
+	// Max test runtime (in seconds). After the test runs for this amount of time, the next iteration of the test
+	// loop will terminate.
+	state double maxRuntimeWallTime = params.getDouble("maxRuntimeWallTime").orDefault(20 * 60);
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =
@@ -10223,10 +10226,15 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
 
-	// Check test op limits
+	state double testStartWallTime = timer();
+
+	// Check test op limits and wall time
 	state std::function<bool()> testFinished = [=]() {
+		if (timer() - testStartWallTime >= maxRuntimeWallTime) {
+			noUnseed = true;
+		}
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
-		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts);
+		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts && !noUnseed);
 	};
 
 	while (!testFinished()) {
