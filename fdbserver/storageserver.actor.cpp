@@ -1289,8 +1289,8 @@ public:
 		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
 		explicit Counters(StorageServer* self)
-		  : CommonStorageCounters("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
-		    systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
+		  : CommonStorageCounters("StorageServer", self->thisServerID.toString(), &self->metrics),
+		    allQueries("QueryQueue", cc), systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
 		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
@@ -1372,7 +1372,6 @@ public:
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
 			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
 
-			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
@@ -1395,7 +1394,6 @@ public:
 				return self->serveAuditStorageParallelismLock.waiters();
 			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
-			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
 			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
 			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });

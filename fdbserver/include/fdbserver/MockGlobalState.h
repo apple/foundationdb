@@ -67,7 +67,7 @@ class MockStorageServer : public IStorageMetricsService, public ReferenceCounted
 
 	ActorCollection actors;
 
-	CommonStorageCounters counters{ /*name=*/"", /*id=*/"" };
+	CommonStorageCounters counters{ /*name=*/"", /*id=*/"", &metrics };
 
 public:
 	struct ShardInfo {
