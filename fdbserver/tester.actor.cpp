@@ -2070,13 +2070,26 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					wait(rangeConfig.updateRange(&tr, "\xff\x04t"_sr, "\xff\x05h"_sr, DDRangeConfig(3, 1), true));
 					wait(rangeConfig.updateRange(&tr, "\xff\x06u"_sr, "\xff\x07m"_sr, DDRangeConfig({}, 2)));
 
-					state std::vector<std::tuple<Key, bool, DDRangeConfig>> rangeTests = {
-						{ "\x01"_sr, false, DDRangeConfig() },         { "\xff\x10"_sr, false, DDRangeConfig() },
-						{ "\xff\x03x"_sr, true, DDRangeConfig(3) },    { "\xff\x04z"_sr, true, DDRangeConfig(3, 1) },
-						{ "\xff\x05"_sr, true, DDRangeConfig(3, 1) },  { "\xff\x06"_sr, true, DDRangeConfig(6) },
+					wait(rangeConfig.updateRange(&tr, "a"_sr, "b"_sr, DDRangeConfig(3, 20), true));
+					wait(rangeConfig.updateRange(&tr, "a"_sr, "a10"_sr, DDRangeConfig(3, 20), true));
 
-						{ "\xff\x06u"_sr, true, DDRangeConfig(6, 2) }, { "\xff\x06v"_sr, true, DDRangeConfig(6, 2) },
-						{ "\xff\x07m"_sr, false, DDRangeConfig() },    { "\xff\x07k"_sr, true, DDRangeConfig({}, 2) }
+					// Key, entryRequiredInDB, expectedRangeConfig
+					state std::vector<std::tuple<Key, bool, DDRangeConfig>> rangeTests = {
+						{ "\x01"_sr, false, DDRangeConfig() },
+						{ "\xff\x10"_sr, false, DDRangeConfig() },
+						{ "\xff\x03x"_sr, true, DDRangeConfig(3) },
+						{ "\xff\x04z"_sr, true, DDRangeConfig(3, 1) },
+						{ "\xff\x05"_sr, true, DDRangeConfig(3, 1) },
+						{ "\xff\x06"_sr, true, DDRangeConfig(6) },
+						{ "\xff\x06u"_sr, true, DDRangeConfig(6, 2) },
+						{ "\xff\x06v"_sr, true, DDRangeConfig(6, 2) },
+						{ "\xff\x07m"_sr, false, DDRangeConfig() },
+						{ "\xff\x07k"_sr, true, DDRangeConfig({}, 2) },
+						{ "a"_sr, true, DDRangeConfig(3, 20) },
+						{ "a10"_sr, true, DDRangeConfig(3, 20) },
+						{ "a11"_sr, true, DDRangeConfig(3, 20) },
+						{ "b"_sr, false, DDRangeConfig() },
+						{ "b1"_sr, false, DDRangeConfig() }
 					};
 
 					state DDConfiguration::RangeConfigMapSnapshot snapshot =
@@ -2096,13 +2109,13 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 						if (verbose) {
 							if (verify.present()) {
-								fmt::print("{} is in {} to {} with config {}\n",
+								fmt::print("'{}' is in '{}' to '{}' with config {}\n",
 								           query.printable(),
 								           verify->range.begin,
 								           verify->range.end,
 								           verify->value.toString());
 							} else {
-								fmt::print("{} is not in a range in the config\n", query.printable());
+								fmt::print("'{}' is not in a range in the config\n", query.printable());
 							}
 						}
 
