@@ -66,6 +66,9 @@ extension FlowFutureOps where Self == FlowCallbackForSwiftContinuation.Associate
 
     /// Swift async method to make a Flow future awaitable.
     /// Specialized for Flow.Void making the returned result (Flow.Void) discardable.
+    ///
+    /// The reason these are done as value() and not a computed property is to allow discardable value
+    /// on Flow.Void returning futures.
     @discardableResult
     public func value() async throws -> Element {
         return try await self.waitValue
