@@ -1195,12 +1195,13 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 			auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 			for (auto it = f.begin(); it != f.end(); ++it) {
 				if (it->value().id != observedDataMove.second) {
-					TraceEvent(SevWarn, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
+					TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
 					    .detail("Range", range)
 					    .detail("OldRange", observedDataMove.first)
 					    .detail("LastObservedDataMoveID", observedDataMove.second)
 					    .detail("CurrentDataMoveID", it->value().id);
 				} else {
+					ASSERT(!it->value().isValid() || (it->value().cancel.isValid() && it->value().cancel.isReady()));
 					toResetRanges.push_back(Standalone(it->range()));
 				}
 			}
