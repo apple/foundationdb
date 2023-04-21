@@ -156,12 +156,12 @@ public:
 	// Adjacent ranges that are identical will be coalesced in the update transaction.
 	// Since the transaction type may not be RYW, this method must take care to not rely on reading its own updates.
 	ACTOR template <class Transaction>
-	Future<Void> updateRangeActor(KeyBackedRangeMap self,
-	                              Transaction tr,
-	                              KeyType begin,
-	                              KeyType end,
-	                              ValueType valueUpdate,
-	                              bool replace) {
+	static Future<Void> updateRangeActor(KeyBackedRangeMap self,
+	                                     Transaction tr,
+	                                     KeyType begin,
+	                                     KeyType end,
+	                                     ValueType valueUpdate,
+	                                     bool replace) {
 		kbt_debug("RANGEMAP updateRange start {} to {} value {}\n", begin, end, valueUpdate);
 
 		// In order to update and coalsce the range, we need all range boundaries from
@@ -183,17 +183,19 @@ public:
 		state Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		// Previous range value starts as a default value
-		state Optional<ValueType> previous;
+		// As we walk through the range boundaries, keep two values about the last visited boundary
+		state ValueType original; // value prior to modification
+		state Optional<ValueType> previous; // value after modification
 		// Indicates that begin has been either seen/updated or created.
 		state bool beginDone = false;
 		// Indicates that end was found
 		state bool endFound = false;
 
 		// The results will contain
-		//   A) 0 or 1 key < begin.  Use this to initialize previousRangeValue
-		//   B) 0 or 1 key == begin.  Update this value, create if it doesn't exist.
-		//   C) >=0 keys > begin and < end.  Update these, delete if they match previous
+		//   A) 0 or 1 key < begin    Use this to initialize previous.
+		//   B) 0 or 1 key == begin   Create/update this value if it doesn't exist.
+		//                            Possibly delete it if update matches previous range.
+		//   C) >=0 keys > begin and < end   Update these, delete if they match previous
 		//   D) 0 or 1 key == end.  Delete this key if it matches previous. Set to default if it doesn't exist.
 		loop {
 			kbt_debug("RANGEMAP updateRange loop\n");
@@ -202,6 +204,8 @@ public:
 				kbt_debug("RANGEMAP updateRange   result key={} value={}\n", bv.first, bv.second);
 				// Should never see a result past the end key
 				ASSERT(!endFound);
+
+				original = bv.second;
 
 				if (bv.first > begin) {
 					if (!beginDone) {
@@ -262,6 +266,12 @@ public:
 			boundariesFuture = self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 		}
 
+		kbt_debug("RANGEMAP updateRange beginDone {} endFound {}  previous {}  default {}\n",
+		          beginDone,
+		          endFound,
+		          previous,
+		          ValueType());
+
 		// If begin was never found or passed/created
 		if (!beginDone) {
 			ValueType val = replace ? valueUpdate : previous.orDefault(ValueType()).apply(valueUpdate);
@@ -272,23 +282,41 @@ public:
 			}
 		}
 
-		kbt_debug("RANGEMAP updateRange endFound {}  previous {}  default {}\n", endFound, previous, ValueType());
-		// If end was not found and the final range was non-default then set end to terminate the final range
-		if (!endFound && previous != ValueType()) {
+		// If end was not found, we may need to set it to restore the value of the range that begin-end has split.
+		// The value that the range starting at end should have is in original, the unmodified value of the last
+		// range boundary visited.  If the previous range value leading up to end is not the same as original, then
+		// set end to original to restore the range >= end to what it was before this update.
+		if (!endFound && previous != original) {
 			kbt_debug("RANGEMAP updateRange set end\n");
-			self.kvMap.set(tr, end, ValueType());
+			self.kvMap.set(tr, end, original);
 		}
 
 		return Void();
 	}
 
 	template <class Transaction>
-	Future<Void> updateRange(Transaction* tr,
-	                         KeyType const& begin,
-	                         KeyType const& end,
-	                         ValueType const& valueUpdate,
-	                         bool replace = false) {
+	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Void>>::type updateRange(
+	    Transaction tr,
+	    KeyType const& begin,
+	    KeyType const& end,
+	    ValueType const& valueUpdate,
+	    bool replace = false) const {
 		return updateRangeActor(*this, tr, begin, end, valueUpdate, replace);
+	}
+
+	template <class DB>
+	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type updateRange(Reference<DB> db,
+	                                                                                    KeyType const& begin,
+	                                                                                    KeyType const& end,
+	                                                                                    ValueType const& valueUpdate,
+	                                                                                    bool replace = false) const {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			return self.updateRange(tr, begin, end, valueUpdate, replace);
+		});
 	}
 
 	ACTOR template <class Transaction>
@@ -344,15 +372,14 @@ public:
 	// added to the returned snapshot with a default ValueType.
 	template <class Transaction>
 	typename std::enable_if<!is_transaction_creator<Transaction>, Future<LocalSnapshot>>::type
-	getSnapshot(Transaction tr, KeyType begin, KeyType end) const {
+	getSnapshot(Transaction tr, KeyType const& begin, KeyType const& end) const {
 		return getSnapshotActor(*this, tr, begin, end);
 	}
 
 	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<LocalSnapshot>>::type getSnapshot(Reference<DB> db,
-	                                                                                             KeyType begin,
-	                                                                                             KeyType end) const {
-		return runTransaction(db, [self = *this, begin, end](Reference<typename DB::TransactionT> tr) {
+	typename std::enable_if<is_transaction_creator<DB>, Future<LocalSnapshot>>::type
+	getSnapshot(Reference<DB> db, KeyType const& begin, KeyType const& end) const {
+		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);

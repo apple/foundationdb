@@ -109,21 +109,8 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 				    fmt::format("Required argument for range option '{}' missing or invalid.", option.toString()));
 			}
 
-			state ReadYourWritesTransaction tr(localDb);
-			loop {
-				try {
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-
-					wait(
-					    DDConfiguration().userRangeConfig().updateRange(&tr, begin, end, rangeConfig, cmd == "set"_sr));
-					wait(tr.commit());
-					break;
-				} catch (Error& e) {
-					wait(tr.onError(e));
-				}
-			}
+			wait(DDConfiguration().userRangeConfig().updateRange(
+			    localDb.getReference(), begin, end, rangeConfig, cmd == "set"_sr));
 		}
 	} else {
 		return fail(fmt::format("Unknown command: '{}'", cmd.printable()));
