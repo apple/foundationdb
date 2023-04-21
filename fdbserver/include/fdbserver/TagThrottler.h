@@ -79,7 +79,7 @@ class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(Database db, UID id, int maxFallingBehind);
+	GlobalTagThrottler(IRKMetricsTracker const&, IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
 	~GlobalTagThrottler();
 
 	Future<Void> monitorThrottlingChanges() override;
@@ -98,8 +98,23 @@ public:
 
 	// Testing only:
 public:
-	void setQuota(TransactionTagRef, ThrottleApi::TagQuotaValue const&);
-	void removeQuota(TransactionTagRef);
 	void removeExpiredTags();
 	uint32_t tagsTracked() const;
+};
+
+class MockTagThrottler : public ITagThrottler {
+public:
+	Future<Void> monitorThrottlingChanges() override { return Never(); }
+	void addRequests(TransactionTag, int) override {}
+	uint64_t getThrottledTagChangeId() const override { return 0; }
+
+	int64_t autoThrottleCount() const override { return 0; }
+	uint32_t busyReadTagCount() const override { return 0; }
+	uint32_t busyWriteTagCount() const override { return 0; }
+	int64_t manualThrottleCount() const override { return 0; }
+	bool isAutoThrottlingEnabled() const override { return 0; }
+
+	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
+	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() override { return {}; }
+	TransactionTagMap<double> getProxyRates(int numProxies) override { return {}; }
 };

@@ -89,14 +89,14 @@ public:
 
 	// Returns a map of storage server id to throttling-relevant statistics
 	// for all storage servers in the cluster.
-	virtual Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const = 0;
+	virtual Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const& = 0;
 
 	// Returns true iff the list of storage servers is too stale.
 	virtual bool ssListFetchTimedOut() const = 0;
 
 	// Returns a map of tlog id to throttling-relevant statistics for all tlogs
 	// in the cluster.
-	virtual Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const = 0;
+	virtual Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const& = 0;
 
 	// Returns the smoothed rate at which bytes are being made durable
 	// on the whole cluster
@@ -134,9 +134,25 @@ public:
 	                 FutureStream<ReportCommitCostEstimationRequest>,
 	                 Reference<AsyncVar<ServerDBInfo> const>);
 	~RKMetricsTracker();
-	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const override;
+	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const& override;
 	bool ssListFetchTimedOut() const override;
-	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const override;
+	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const& override;
 	double getSmoothTotalDurableBytesRate() const override;
 	Future<Void> run() override;
+};
+
+class MockRKMetricsTracker : public IRKMetricsTracker {
+	Map<UID, StorageQueueInfo> storageQueueInfo;
+	Map<UID, TLogQueueInfo> tlogQueueInfo;
+	bool failedSSListFetch{ false };
+
+public:
+	Map<UID, StorageQueueInfo> const& getStorageQueueInfo() const& override { return storageQueueInfo; }
+	Map<UID, TLogQueueInfo> const& getTlogQueueInfo() const& override { return tlogQueueInfo; }
+	void failSSListFetch() { failedSSListFetch = true; }
+	bool ssListFetchTimedOut() const override { return failedSSListFetch; }
+	double getSmoothTotalDurableBytesRate() const override { return 0; }
+	Future<Void> run() override { return Never(); }
+	void updateStorageQueueInfo(StorageQueueInfo const& ss) { storageQueueInfo.insert(mapPair(ss.id, ss)); }
+	void updateTLogQueueInfo(TLogQueueInfo const& tl) { tlogQueueInfo.insert(mapPair(tl.id, tl)); }
 };

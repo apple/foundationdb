@@ -33,6 +33,7 @@
 #include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/IRKRecoveryTracker.h"
+#include "fdbserver/IRKThroughputQuotaCache.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
@@ -64,6 +65,7 @@ class Ratekeeper {
 	std::unique_ptr<IRKRateServer> rateServer;
 	std::unique_ptr<IRKRateUpdater> normalRateUpdater;
 	std::unique_ptr<IRKRateUpdater> batchRateUpdater;
+	std::unique_ptr<IRKThroughputQuotaCache> quotaCache;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	PromiseStream<Future<Void>> addActor;
