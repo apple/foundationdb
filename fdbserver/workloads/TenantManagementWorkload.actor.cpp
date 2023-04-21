@@ -1253,15 +1253,29 @@ struct TenantManagementWorkload : TestWorkload {
 	                                     std::vector<std::pair<TenantName, TenantMapEntryImpl>> tenants,
 	                                     int limit,
 	                                     TenantName beginTenant,
-	                                     TenantName endTenant) {
+	                                     TenantName endTenant,
+	                                     Optional<TenantGroupName> tenantGroup) {
 		ASSERT(tenants.size() <= limit);
 
 		// Compare the resulting tenant list to the list we expected to get
 		auto localItr = self->createdTenants.lower_bound(beginTenant);
 		auto tenantMapItr = tenants.begin();
 		for (; tenantMapItr != tenants.end(); ++tenantMapItr, ++localItr) {
+			if (tenantGroup.present()) {
+				while (localItr != self->createdTenants.end() && localItr->second.tenantGroup != tenantGroup) {
+					++localItr;
+				}
+			}
 			ASSERT(localItr != self->createdTenants.end());
 			ASSERT(localItr->first == tenantMapItr->first);
+		}
+		// "tenants" exhausted to end. If tenantGroup was specified,
+		// continue iterating localItr until end to verify there are no matches
+		if (tenantGroup.present()) {
+			while (localItr != self->createdTenants.end() && localItr->first < endTenant) {
+				ASSERT(localItr->second.tenantGroup != tenantGroup);
+				++localItr;
+			}
 		}
 
 		// Make sure the list terminated at the right spot
@@ -1277,6 +1291,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state OperationType operationType =
 		    self->useMetacluster ? OperationType::METACLUSTER : self->randomOperationType();
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb);
+		state Optional<TenantGroupName> tGroup =
+		    deterministicRandom()->coinflip() ? self->chooseTenantGroup(false, false) : Optional<TenantGroupName>();
 
 		if (beginTenant > endTenant) {
 			std::swap(beginTenant, endTenant);
@@ -1286,17 +1302,29 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				if (self->useMetacluster) {
 					state std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> metaTenants =
-					    wait(metacluster::listTenantMetadata(self->mvDb, beginTenant, endTenant, limit));
+					    wait(metacluster::listTenantMetadata(self->mvDb,
+					                                         beginTenant,
+					                                         endTenant,
+					                                         limit,
+					                                         /*offset=*/0,
+					                                         /*filters=*/std::vector<metacluster::TenantState>(),
+					                                         tGroup));
 					verifyTenantList<metacluster::MetaclusterTenantMapEntry>(
-					    self, metaTenants, limit, beginTenant, endTenant);
+					    self, metaTenants, limit, beginTenant, endTenant, tGroup);
 				} else {
-					state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
-					    wait(listTenantsImpl(tr, beginTenant, endTenant, limit, operationType, self));
-					if (operationType == OperationType::METACLUSTER) {
-						ASSERT_EQ(tenants.size(), 0);
-						return Void();
+					if (tGroup.present()) {
+						state std::vector<std::pair<TenantName, int64_t>> tenantsFiltered = wait(
+						    TenantAPI::listTenantGroupTenants(self->mvDb, tGroup.get(), beginTenant, endTenant, limit));
+						verifyTenantList<int64_t>(self, tenantsFiltered, limit, beginTenant, endTenant, tGroup);
+					} else {
+						state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
+						    wait(listTenantsImpl(tr, beginTenant, endTenant, limit, operationType, self));
+						if (operationType == OperationType::METACLUSTER) {
+							ASSERT_EQ(tenants.size(), 0);
+							return Void();
+						}
+						verifyTenantList<TenantMapEntry>(self, tenants, limit, beginTenant, endTenant, tGroup);
 					}
-					verifyTenantList<TenantMapEntry>(self, tenants, limit, beginTenant, endTenant);
 				}
 				return Void();
 			} catch (Error& e) {
@@ -1770,11 +1798,11 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	template <class TenantMapEntryImpl>
-	static void verifyTenantList(TenantManagementWorkload* self,
-	                             std::vector<std::pair<TenantGroupName, TenantMapEntryImpl>> tenantGroups,
-	                             TenantGroupName beginTenantGroup,
-	                             TenantGroupName endTenantGroup,
-	                             int limit) {
+	static void verifyTenantGroupList(TenantManagementWorkload* self,
+	                                  std::vector<std::pair<TenantGroupName, TenantMapEntryImpl>> tenantGroups,
+	                                  TenantGroupName beginTenantGroup,
+	                                  TenantGroupName endTenantGroup,
+	                                  int limit) {
 		ASSERT(tenantGroups.size() <= limit);
 
 		// Compare the resulting tenant group list to the list we expected to get
@@ -1815,11 +1843,11 @@ struct TenantManagementWorkload : TestWorkload {
 						ASSERT(mTenantGroups.size() == 0);
 						return Void();
 					}
-					verifyTenantList(self, mTenantGroups, beginTenantGroup, endTenantGroup, limit);
+					verifyTenantGroupList(self, mTenantGroups, beginTenantGroup, endTenantGroup, limit);
 				} else {
 					state std::vector<std::pair<TenantGroupName, TenantGroupEntry>> tenantGroups =
 					    wait(listTenantGroupsImpl(tr, beginTenantGroup, endTenantGroup, limit, operationType, self));
-					verifyTenantList(self, tenantGroups, beginTenantGroup, endTenantGroup, limit);
+					verifyTenantGroupList(self, tenantGroups, beginTenantGroup, endTenantGroup, limit);
 				}
 				return Void();
 			} catch (Error& e) {
