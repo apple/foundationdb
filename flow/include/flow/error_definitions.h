@@ -105,6 +105,7 @@ ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single s
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
 ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
+ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
