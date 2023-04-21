@@ -26,10 +26,9 @@
 // this model is Redwood will have a constant cost of seek of each read ops then read the actual data.
 // As by 71.2.8, bytesReadPerKSecond should be larger than opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY because
 // the bytes always round to EMPTY_READ_PENALTY when the returned result size is less than EMPTY_READ_PENALTY. This cost
-// is different from what tag throttling use for external customer, which is prefer a model that's easier to understand
-// for customers.
+// is different from what tag throttling use to produce throttling decision.
 int64_t StorageMetrics::readLoadKSecond() const {
-	return std::max((int64_t)0, std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY));
+	return std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY);
 }
 
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {

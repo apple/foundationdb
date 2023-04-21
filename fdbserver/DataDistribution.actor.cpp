@@ -54,6 +54,15 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
+void RelocateShard::setParentRange(KeyRange const& parent) {
+	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
+	parent_range = parent;
+}
+
+Optional<KeyRange> RelocateShard::getParentRange() const {
+	return parent_range;
+}
+
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 	return ShardSizeBounds{ .max = StorageMetrics{ .bytes = -1,
 		                                           .bytesWrittenPerKSecond = StorageMetrics::infinity,

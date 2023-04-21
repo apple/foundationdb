@@ -128,7 +128,8 @@ RelocateData::RelocateData()
     interval("QueuedRelocation"){};
 
 RelocateData::RelocateData(RelocateShard const& rs)
-  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
+  : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
+    boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
     healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
     randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId),
     workFactor(0),
@@ -159,6 +160,9 @@ bool RelocateData::operator==(const RelocateData& rhs) const {
 }
 bool RelocateData::operator!=(const RelocateData& rhs) const {
 	return !(*this == rhs);
+}
+Optional<KeyRange> RelocateData::getParentRange() const {
+	return parent_range;
 }
 
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
@@ -263,6 +267,10 @@ public:
 
 	double getAverageCPU() const override {
 		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
+	}
+
+	bool hasLowerCpu(double cpuThreshold) const override {
+		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -1222,6 +1230,29 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
+void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDecision& decision) {
+	ev.detail("PairId", pairId)
+	    .detail("Priority", decision.rd.priority)
+	    .detail("KeyBegin", decision.rd.keys.begin)
+	    .detail("KeyEnd", decision.rd.keys.end)
+	    .detail("Reason", decision.rd.reason.toString())
+	    .detail("SourceServers", describe(decision.rd.src))
+	    .detail("DestinationTeam", describe(decision.destIds))
+	    .detail("ExtraIds", describe(decision.extraIds));
+	if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
+		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
+		ev.detail("StorageMetrics", decision.metrics.toString());
+	}
+
+	if (decision.rd.reason == RelocateReason::WRITE_SPLIT) {
+		// tell if the splitter acted as expected for write bandwidth splitting
+		// SOMEDAY: trace the source team write bytes if necessary
+		ev.detail("ShardWriteBytes", decision.metrics.bytesWrittenPerKSecond)
+		    .detail("ParentShardWriteBytes", decision.parentMetrics.get().bytesWrittenPerKSecond);
+	} else if (decision.rd.reason == RelocateReason::SIZE_SPLIT) {
+		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
+	}
+}
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1299,8 +1330,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			// are all invalid. i.e. the range of new relocators is match to the range of prevCleanup.
 		}
 
-		state StorageMetrics metrics =
-		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+		state Optional<StorageMetrics> parentMetrics;
+		state StorageMetrics metrics;
+
+		Future<StorageMetrics> metricsF =
+		    brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys)));
+		if (rd.getParentRange().present()) {
+			Future<StorageMetrics> parentMetricsF =
+			    brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.getParentRange().get())));
+			wait(store(metrics, metricsF) && store(parentMetrics, parentMetricsF));
+		} else {
+			wait(store(metrics, metricsF));
+		}
 
 		state std::unordered_set<uint64_t> excludedDstPhysicalShards;
 
@@ -1669,27 +1710,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
-			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
-				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
-				TraceEvent(SevInfo, "RelocateShardDecision", distributorId)
-				    .detail("PairId", relocateShardInterval.pairID)
-				    .detail("Priority", rd.priority)
-				    .detail("KeyBegin", rd.keys.begin)
-				    .detail("KeyEnd", rd.keys.end)
-				    .detail("StorageMetrics", metrics.toString())
-				    .detail("SourceServers", describe(rd.src))
-				    .detail("DestinationTeam", describe(destIds))
-				    .detail("ExtraIds", describe(extraIds));
-			} else {
-				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
-				    .detail("PairId", relocateShardInterval.pairID)
-				    .detail("Priority", rd.priority)
-				    .detail("KeyBegin", rd.keys.begin)
-				    .detail("KeyEnd", rd.keys.end)
-				    .detail("SourceServers", describe(rd.src))
-				    .detail("DestinationTeam", describe(destIds))
-				    .detail("ExtraIds", describe(extraIds));
-			}
+			TraceEvent ev(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId);
+			RelocateDecision decision{ rd, destIds, extraIds, metrics, parentMetrics };
+			traceRelocateDecision(ev, relocateShardInterval.pairID, decision);
 
 			self->serverCounter.increaseForTeam(rd.src, rd.reason, DDQueue::ServerCounter::LaunchedSource);
 			self->serverCounter.increaseForTeam(destIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);

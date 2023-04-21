@@ -1466,19 +1466,8 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
                                                        const BlobCipherEncryptHeaderRef& headerRef,
                                                        EncryptAuthTokenMode* authTokenMode,
                                                        EncryptAuthTokenAlgo* authTokenAlgo) {
-	if (headerRef.flagsVersion() != 1) {
-		TraceEvent(SevWarn, "BlobCipherVerifyEncryptBlobHeader")
-		    .detail("HeaderVersion", headerRef.flagsVersion())
-		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION);
-
-		CODE_PROBE(true, "ConfigurableEncryption: Encryption header version unsupported");
-
-		throw encrypt_header_metadata_mismatch();
-	}
-
-	if (headerRef.flagsVersion() != 1) {
-		throw not_implemented();
-	}
+	// FlagsVersion is computed based on std::variant available index
+	ASSERT_EQ(headerRef.flagsVersion(), 1);
 
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
 	validateEncryptHeaderFlagsV1(headerRef.flagsVersion(), flags);

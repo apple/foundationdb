@@ -387,7 +387,8 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
 					    .detail("Version", version)
 					    .detail("TenantId", domainId);
-					if (e.code() == error_code_encrypt_keys_fetch_failed) {
+					if (e.code() == error_code_encrypt_keys_fetch_failed ||
+					    e.code() == error_code_encrypt_key_not_found) {
 						CODE_PROBE(true, "mutation log restore encrypt keys not found");
 						consumed += BackupAgentBase::logHeaderSize + len1 + len2;
 						continue;
