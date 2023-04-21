@@ -138,8 +138,6 @@ inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool =
 	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
-// FIXME(swift): we should likely not leak this type in the INetwork interface, but we need a "submit this thing" API
-class OrderedTask;
 
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork {
 public:
