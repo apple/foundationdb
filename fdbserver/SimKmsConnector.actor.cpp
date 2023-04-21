@@ -297,7 +297,7 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 				swapAndPop(&rep.metadataDetails, deterministicRandom()->randomInt(0, rep.metadataDetails.size()));
 			}
 		} else {
-			req.reply.sendError(operation_failed());
+			req.reply.sendError(connection_failed());
 			return Void();
 		}
 	}
