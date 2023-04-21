@@ -27,10 +27,6 @@
 #include "flow/serialize.h"
 #include "flow/UnitTest.h"
 
-FDB_DEFINE_BOOLEAN_PARAM(AssignEmptyRange);
-FDB_DEFINE_BOOLEAN_PARAM(UnassignShard);
-FDB_DEFINE_BOOLEAN_PARAM(EnablePhysicalShardMove);
-
 const KeyRef systemKeysPrefix = "\xff"_sr;
 const KeyRangeRef normalKeys(KeyRef(), systemKeysPrefix);
 const KeyRangeRef systemKeys(systemKeysPrefix, "\xff\xff"_sr);
@@ -1398,6 +1394,13 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 // blob granule data
 const KeyRef blobRangeActive = "1"_sr;
 const KeyRef blobRangeInactive = StringRef();
+
+bool isBlobRangeActive(const ValueRef& blobRangeValue) {
+	// Empty or "0" is inactive
+	// "1" is active
+	// Support future change where serialized metadata struct is also active
+	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
+}
 
 const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);
 const KeyRangeRef blobGranuleMappingKeys("\xff\x02/bgm/"_sr, "\xff\x02/bgm0"_sr);

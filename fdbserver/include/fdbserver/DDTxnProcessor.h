@@ -26,7 +26,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/MockGlobalState.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(SkipDDModeCheck);
+FDB_BOOLEAN_PARAM(SkipDDModeCheck);
 
 struct InitialDataDistribution;
 struct DDShardInfo;
@@ -140,6 +140,8 @@ public:
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
 	virtual Future<std::vector<ProcessData>> getWorkers() const = 0;
+
+	virtual Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const = 0;
 };
 
 class DDTxnProcessorImpl;
@@ -224,6 +226,8 @@ public:
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
@@ -292,6 +296,8 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);

@@ -23,6 +23,7 @@
 #include <utility>
 #include <vector>
 
+#include "fdbserver/DataDistributionTeam.h"
 #include "flow/ActorCollection.h"
 #include "flow/Deque.h"
 #include "flow/FastRef.h"
@@ -127,7 +128,8 @@ RelocateData::RelocateData()
     interval("QueuedRelocation"){};
 
 RelocateData::RelocateData(RelocateShard const& rs)
-  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
+  : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
+    boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
     healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
     randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId),
     workFactor(0),
@@ -159,13 +161,17 @@ bool RelocateData::operator==(const RelocateData& rhs) const {
 bool RelocateData::operator!=(const RelocateData& rhs) const {
 	return !(*this == rhs);
 }
+Optional<KeyRange> RelocateData::getParentRange() const {
+	return parent_range;
+}
 
 class ParallelTCInfo final : public ReferenceCounted<ParallelTCInfo>, public IDataDistributionTeam {
 	std::vector<Reference<IDataDistributionTeam>> teams;
 	std::vector<UID> tempServerIDs;
 
-	int64_t sum(std::function<int64_t(IDataDistributionTeam const&)> func) const {
-		int64_t result = 0;
+	template <typename NUM>
+	NUM sum(std::function<NUM(IDataDistributionTeam const&)> func) const {
+		NUM result = 0;
 		for (const auto& team : teams) {
 			result += func(*team);
 		}
@@ -240,23 +246,31 @@ public:
 	}
 
 	int64_t getDataInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getDataInFlightToTeam(); });
 	}
 
 	int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+		return sum<int64_t>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
 			return team.getLoadBytes(includeInFlight, inflightPenalty);
 		});
 	}
 
 	int64_t getReadInFlightToTeam() const override {
-		return sum([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
+		return sum<int64_t>([](IDataDistributionTeam const& team) { return team.getReadInFlightToTeam(); });
 	}
 
-	double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
-		return sum([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
-			return team.getLoadReadBandwidth(includeInFlight, inflightPenalty);
+	double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const override {
+		return sum<double>([includeInFlight, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.getReadLoad(includeInFlight, inflightPenalty);
 		});
+	}
+
+	double getAverageCPU() const override {
+		return sum<double>([](IDataDistributionTeam const& team) { return team.getAverageCPU(); }) / teams.size();
+	}
+
+	bool hasLowerCpu(double cpuThreshold) const override {
+		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
 	}
 
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
@@ -401,6 +415,11 @@ bool canLaunchSrc(RelocateData& relocation,
 	ASSERT(relocation.src.size() != 0);
 	ASSERT(teamSize >= singleRegionTeamSize);
 
+	// Blob migrator is backed by s3 so it can allow unlimited data movements
+	if (relocation.src.size() == 1 && BlobMigratorInterface::isBlobMigrator(relocation.src.back())) {
+		return true;
+	}
+
 	// find the "workFactor" for this, were it launched now
 	int workFactor = getSrcWorkFactor(relocation, singleRegionTeamSize);
 	int neededServers = std::min<int>(relocation.src.size(), teamSize - singleRegionTeamSize + 1);
@@ -424,6 +443,7 @@ bool canLaunchSrc(RelocateData& relocation,
 				return true;
 		}
 	}
+
 	return false;
 }
 
@@ -989,9 +1009,6 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			}
 		}
 
-		Future<Void> fCleanup =
-		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
-
 		// If there is a job in flight that wants data relocation which we are about to cancel/modify,
 		//     make sure that we keep the relocation intent for the job that we launch
 		auto f = inFlight.intersectingRanges(rd.keys);
@@ -1006,6 +1023,9 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+		Future<Void> fCleanup =
+		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
+
 		inFlight.insert(rd.keys, rd);
 		for (int r = 0; r < ranges.size(); r++) {
 			RelocateData& rrs = inFlight.rangeContaining(ranges[r].begin)->value();
@@ -1104,8 +1124,13 @@ void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDE
 	}
 
 	DDQueue::DDDataMove dataMove(dataMoveId);
-	dataMove.cancel =
-	    cleanUpDataMove(this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
+	dataMove.cancel = cleanUpDataMove(this->cx,
+	                                  dataMoveId,
+	                                  this->lock,
+	                                  &this->cleanUpDataMoveParallelismLock,
+	                                  range,
+	                                  ddEnabledState,
+	                                  this->addBackgroundCleanUpDataMoveActor);
 	this->dataMoves.insert(range, dataMove);
 	TraceEvent(SevInfo, "DDEnqueuedCancelledDataMove", this->distributorId)
 	    .detail("DataMoveID", dataMoveId)
@@ -1125,28 +1150,71 @@ int DDQueue::getUnhealthyRelocationCount() const {
 }
 
 ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
-	std::vector<Future<Void>> cleanup;
-	auto f = self->dataMoves.intersectingRanges(range);
-	for (auto it = f.begin(); it != f.end(); ++it) {
-		if (!it->value().isValid()) {
-			continue;
+	state std::vector<Future<Void>> cleanup;
+	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
+
+	loop {
+		try {
+			cleanup.clear();
+			lastObservedDataMoves.clear();
+			auto f = self->dataMoves.intersectingRanges(range);
+			for (auto it = f.begin(); it != f.end(); ++it) {
+				if (!it->value().isValid()) {
+					continue;
+				}
+				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
+				    .detail("DataMoveID", it->value().id)
+				    .detail("DataMoveRange", keys)
+				    .detail("Range", range);
+				if (!it->value().cancel.isValid()) {
+					it->value().cancel = cleanUpDataMove(self->cx,
+					                                     it->value().id,
+					                                     self->lock,
+					                                     &self->cleanUpDataMoveParallelismLock,
+					                                     keys,
+					                                     ddEnabledState,
+					                                     self->addBackgroundCleanUpDataMoveActor);
+				}
+				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
+				cleanup.push_back(it->value().cancel);
+			}
+
+			wait(waitForAll(cleanup));
+
+			for (auto observedDataMove : lastObservedDataMoves) {
+				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
+				for (auto it = f.begin(); it != f.end(); ++it) {
+					if (it->value().id != observedDataMove.second) {
+						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
+						// the one who set ddQueue->dataMoves at first win the race
+						// the other one does backoff and retry cleanup later
+						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
+						// Thus, the cleanup retries later
+						TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
+						    .detail("Range", range)
+						    .detail("OldRange", observedDataMove.first)
+						    .detail("LastObservedDataMoveID", observedDataMove.second)
+						    .detail("CurrentDataMoveID", it->value().id);
+						throw retry();
+					}
+				}
+			}
+			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
+			if (!ranges.empty()) {
+				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
+			}
+			break;
+
+		} catch (Error& e) {
+			if (e.code() == error_code_retry) {
+				wait(delay(1));
+			} else {
+				throw e;
+			}
 		}
-		KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-		TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
-		    .detail("DataMoveID", it->value().id)
-		    .detail("DataMoveRange", keys)
-		    .detail("Range", range);
-		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
-		}
-		cleanup.push_back(it->value().cancel);
 	}
-	wait(waitForAll(cleanup));
-	auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-	if (!ranges.empty()) {
-		self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
-	}
+
 	return Void();
 }
 
@@ -1162,6 +1230,29 @@ static std::string destServersString(std::vector<std::pair<Reference<IDataDistri
 	return std::move(ss).str();
 }
 
+void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDecision& decision) {
+	ev.detail("PairId", pairId)
+	    .detail("Priority", decision.rd.priority)
+	    .detail("KeyBegin", decision.rd.keys.begin)
+	    .detail("KeyEnd", decision.rd.keys.end)
+	    .detail("Reason", decision.rd.reason.toString())
+	    .detail("SourceServers", describe(decision.rd.src))
+	    .detail("DestinationTeam", describe(decision.destIds))
+	    .detail("ExtraIds", describe(decision.extraIds));
+	if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
+		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
+		ev.detail("StorageMetrics", decision.metrics.toString());
+	}
+
+	if (decision.rd.reason == RelocateReason::WRITE_SPLIT) {
+		// tell if the splitter acted as expected for write bandwidth splitting
+		// SOMEDAY: trace the source team write bytes if necessary
+		ev.detail("ShardWriteBytes", decision.metrics.bytesWrittenPerKSecond)
+		    .detail("ParentShardWriteBytes", decision.parentMetrics.get().bytesWrittenPerKSecond);
+	} else if (decision.rd.reason == RelocateReason::SIZE_SPLIT) {
+		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
+	}
+}
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1232,10 +1323,25 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 				self->dataMoves.insert(rd.keys, DDQueue::DDDataMove(rd.dataMoveId));
 			}
+			// TODO: split-brain issue for physical shard move
+			// the update of inflightActor and the update of dataMoves is not atomic
+			// Currently, the relocator is triggered based on the inflightActor info.
+			// In future, we should assert at here that the intersecting DataMove in self->dataMoves
+			// are all invalid. i.e. the range of new relocators is match to the range of prevCleanup.
 		}
 
-		state StorageMetrics metrics =
-		    wait(brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys))));
+		state Optional<StorageMetrics> parentMetrics;
+		state StorageMetrics metrics;
+
+		Future<StorageMetrics> metricsF =
+		    brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.keys)));
+		if (rd.getParentRange().present()) {
+			Future<StorageMetrics> parentMetricsF =
+			    brokenPromiseToNever(self->getShardMetrics.getReply(GetMetricsRequest(rd.getParentRange().get())));
+			wait(store(metrics, metricsF) && store(parentMetrics, parentMetricsF));
+		} else {
+			wait(store(metrics, metricsF));
+		}
 
 		state std::unordered_set<uint64_t> excludedDstPhysicalShards;
 
@@ -1294,12 +1400,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						    rd.healthPriority == SERVER_KNOBS->PRIORITY_TEAM_0_LEFT)
 							inflightPenalty = SERVER_KNOBS->INFLIGHT_PENALTY_ONE_LEFT;
 
-						auto req = GetTeamRequest(WantNewServers(rd.wantsNewServers),
-						                          wantTrueBest,
+						TeamSelect destTeamSelect;
+						if (!rd.wantsNewServers) {
+							destTeamSelect = TeamSelect::WANT_COMPLETE_SRCS;
+						} else if (wantTrueBest) {
+							destTeamSelect = TeamSelect::WANT_TRUE_BEST;
+						} else {
+							destTeamSelect = TeamSelect::ANY;
+						}
+						auto req = GetTeamRequest(destTeamSelect,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          PreferLowerReadUtil::True,
+						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
 						                          rd.keys);
 
@@ -1593,31 +1706,13 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 
 			// FIXME: do not add data in flight to servers that were already in the src.
 			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
-			healthyDestinations.addReadInFlightToTeam(+metrics.bytesReadPerKSecond);
+			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
-			if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
-				// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
-				TraceEvent(SevInfo, "RelocateShardDecision", distributorId)
-				    .detail("PairId", relocateShardInterval.pairID)
-				    .detail("Priority", rd.priority)
-				    .detail("KeyBegin", rd.keys.begin)
-				    .detail("KeyEnd", rd.keys.end)
-				    .detail("StorageMetrics", metrics.toString())
-				    .detail("SourceServers", describe(rd.src))
-				    .detail("DestinationTeam", describe(destIds))
-				    .detail("ExtraIds", describe(extraIds));
-			} else {
-				TraceEvent(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId)
-				    .detail("PairId", relocateShardInterval.pairID)
-				    .detail("Priority", rd.priority)
-				    .detail("KeyBegin", rd.keys.begin)
-				    .detail("KeyEnd", rd.keys.end)
-				    .detail("SourceServers", describe(rd.src))
-				    .detail("DestinationTeam", describe(destIds))
-				    .detail("ExtraIds", describe(extraIds));
-			}
+			TraceEvent ev(relocateShardInterval.severity, "RelocateShardHasDestination", distributorId);
+			RelocateDecision decision{ rd, destIds, extraIds, metrics, parentMetrics };
+			traceRelocateDecision(ev, relocateShardInterval.pairID, decision);
 
 			self->serverCounter.increaseForTeam(rd.src, rd.reason, DDQueue::ServerCounter::LaunchedSource);
 			self->serverCounter.increaseForTeam(destIds, rd.reason, DDQueue::ServerCounter::LaunchedDest);
@@ -1749,7 +1844,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				// Note: It’s equal to trigger([healthyDestinations, readLoad], which is a value capture of
 				// healthyDestinations. Have to create a reference to healthyDestinations because in ACTOR the state
 				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
@@ -1806,7 +1901,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 			} else {
 				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
 				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
-				auto readLoad = metrics.bytesReadPerKSecond;
+				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
 				self->noErrorActors.add(
 				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
@@ -1899,7 +1994,7 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 		return false;
 	}
 	// check team difference
-	auto srcLoad = sourceTeam->getLoadReadBandwidth(false), destLoad = destTeam->getLoadReadBandwidth();
+	auto srcLoad = sourceTeam->getReadLoad(false), destLoad = destTeam->getReadLoad();
 	traceEvent->detail("SrcReadBandwidth", srcLoad).detail("DestReadBandwidth", destLoad);
 
 	// read bandwidth difference is less than 30% of src load
@@ -1933,7 +2028,9 @@ ACTOR Future<bool> rebalanceReadLoad(DDQueue* self,
 	}
 
 	auto& [shard, metrics] = metricsList[0];
-	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond);
+	traceEvent->detail("ShardReadBandwidth", metrics.bytesReadPerKSecond)
+	    .detail("ShardReadOps", metrics.opsReadPerKSecond);
+
 	//  Verify the shard is still in ShardsAffectedByTeamFailure
 	shards = self->shardsAffectedByTeamFailure->getShardsFor(
 	    ShardsAffectedByTeamFailure::Team(sourceTeam->getServerIDs(), primary));
@@ -2114,8 +2211,6 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 		state bool moved = false;
 		state Reference<IDataDistributionTeam> sourceTeam;
 		state Reference<IDataDistributionTeam> destTeam;
-		state GetTeamRequest srcReq;
-		state GetTeamRequest destReq;
 		state TraceEvent traceEvent(eventName, self->distributorId);
 		traceEvent.suppressFor(5.0)
 		    .detail("PollingInterval", rebalancePollingInterval)
@@ -2142,18 +2237,16 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 
 			if (self->priority_relocations[ddPriority] < SERVER_KNOBS->DD_REBALANCE_PARALLELISM) {
 				bool mcMove = isDataMovementForMountainChopper(reason);
-				srcReq = GetTeamRequest(WantNewServers::True,
-				                        WantTrueBest(mcMove),
-				                        PreferLowerDiskUtil::False,
-				                        TeamMustHaveShards::True,
-				                        ForReadBalance(readRebalance),
-				                        PreferLowerReadUtil::False);
-				destReq = GetTeamRequest(WantNewServers::True,
-				                         WantTrueBest(!mcMove),
-				                         PreferLowerDiskUtil::True,
-				                         TeamMustHaveShards::False,
-				                         ForReadBalance(readRebalance),
-				                         PreferLowerReadUtil::True);
+				GetTeamRequest srcReq = GetTeamRequest(mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                       PreferLowerDiskUtil::False,
+				                                       TeamMustHaveShards::True,
+				                                       PreferLowerReadUtil::False,
+				                                       ForReadBalance(readRebalance));
+				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+				                                        PreferLowerDiskUtil::True,
+				                                        TeamMustHaveShards::False,
+				                                        PreferLowerReadUtil::True,
+				                                        ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);
 				wait(ready(getTeamFuture));
@@ -2200,6 +2293,8 @@ struct DDQueueImpl {
 
 		state PromiseStream<KeyRange> rangesComplete;
 		state Future<Void> launchQueuedWorkTimeout = Never();
+		state Future<Void> onCleanUpDataMoveActorError =
+		    actorCollection(self->addBackgroundCleanUpDataMoveActor.getFuture());
 
 		for (int i = 0; i < self->teamCollections.size(); i++) {
 			ddQueueFutures.push_back(
@@ -2375,6 +2470,7 @@ struct DDQueueImpl {
 					when(Promise<int> r = waitNext(getUnhealthyRelocationCount)) {
 						r.send(self->getUnhealthyRelocationCount());
 					}
+					when(wait(onCleanUpDataMoveActorError)) {}
 				}
 			}
 		} catch (Error& e) {

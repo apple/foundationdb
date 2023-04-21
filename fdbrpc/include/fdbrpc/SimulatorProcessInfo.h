@@ -62,7 +62,7 @@ struct ProcessInfo : NonCopyable {
 	INetworkConnections* network;
 
 	uint64_t fault_injection_r;
-	double fault_injection_p1, fault_injection_p2;
+	double fault_injection_p1, fault_injection_p2, blob_inject_failure_rate;
 	bool failedDisk;
 
 	UID uid;
@@ -82,7 +82,8 @@ struct ProcessInfo : NonCopyable {
 	  : name(name), coordinationFolder(coordinationFolder), dataFolder(dataFolder), machine(nullptr),
 	    addresses(addresses), address(addresses.address), locality(locality), startingClass(startingClass),
 	    failed(false), excluded(false), cleared(false), rebooting(false), drProcess(false), network(net),
-	    fault_injection_r(0), fault_injection_p1(0), fault_injection_p2(0), failedDisk(false) {
+	    fault_injection_r(0), fault_injection_p1(0), fault_injection_p2(0), blob_inject_failure_rate(0),
+	    failedDisk(false) {
 		uid = deterministicRandom()->randomUniqueID();
 	}
 

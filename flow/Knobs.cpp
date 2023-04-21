@@ -145,6 +145,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,            300 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
 	init( TOKEN_CACHE_SIZE,                                   2000 );
+	init( WIPE_SENSITIVE_DATA_FROM_PACKET_BUFFER,             true );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );
@@ -313,10 +314,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	// Refer to EncryptUtil::EncryptAuthTokenAlgo for more details
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ENABLED,                 false ); if ( randomize && BUGGIFY ) { ENCRYPT_HEADER_AUTH_TOKEN_ENABLED = !ENCRYPT_HEADER_AUTH_TOKEN_ENABLED; }
 	init( ENCRYPT_HEADER_AUTH_TOKEN_ALGO,                        0 ); if ( randomize && ENCRYPT_HEADER_AUTH_TOKEN_ENABLED ) { ENCRYPT_HEADER_AUTH_TOKEN_ALGO = getRandomAuthTokenAlgo(); }
-	// start exponential backoff at 5s when reaching out to the KMS from EKP
-	init( EKP_KMS_CONNECTION_BACKOFF,                          5.0 );
-	// number of times to retry KMS requests from the EKP (roughly attempt to reach out to the KMS for a total of 5 minutes)
-	init( EKP_KMS_CONNECTION_RETRIES,                            6 );
 	init( ENCRYPT_INPLACE_ENABLED,                           false ); if ( randomize && BUGGIFY ) { ENCRYPT_INPLACE_ENABLED = true; }
 
 	// REST Client

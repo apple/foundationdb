@@ -526,6 +526,8 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	int unpoppedRecoveredTagCount;
 	std::set<Tag> unpoppedRecoveredTags;
 	std::map<Tag, Promise<Void>> waitingTags;
+	std::map<Tag, std::vector<Version>> tagUnpoppedOldGenerations;
+	AsyncTrigger updateGenerationRecovery;
 
 	Reference<TagData> getTagData(Tag tag) {
 		int idx = tag.toTagDataIndex();
@@ -1219,23 +1221,39 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 		tagData->popped = upTo;
 		tagData->poppedRecently = true;
 
-		if (tagData->unpoppedRecovered && upTo > logData->recoveredAt) {
-			tagData->unpoppedRecovered = false;
-			logData->unpoppedRecoveredTagCount--;
-			logData->unpoppedRecoveredTags.erase(tag);
-			TraceEvent("TLogPoppedTag", logData->logId)
-			    .detail("Tags", logData->unpoppedRecoveredTagCount)
-			    .detail("Tag", tag.toString())
-			    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
-			    .detail("RecoveredAt", logData->recoveredAt)
-			    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
-			if (logData->unpoppedRecoveredTagCount == 0 &&
-			    logData->durableKnownCommittedVersion >= logData->recoveredAt && logData->recoveryComplete.canBeSet()) {
-				TraceEvent("TLogRecoveryComplete", logData->logId)
+		if (tagData->unpoppedRecovered) {
+			// Check for `tag`, if earlier generations are no longer needed. This is by comparing the `upTo` value with
+			// start version of the second earliest generation. If `upTo` > secondEarliestGenStartVersion, the earliest
+			// generation is no longer needed for `tag`.
+			// When there is only one old generation left, GC that generation uses `recoveryComplete` mechanism.
+			std::vector<Version>* unpoppedGen = &(logData->tagUnpoppedOldGenerations[tag]);
+			bool poppedGen = false;
+			while (unpoppedGen->size() > 1 && ((*unpoppedGen)[unpoppedGen->size() - 2] < upTo)) {
+				unpoppedGen->pop_back();
+				poppedGen = true;
+			}
+			if (poppedGen) {
+				logData->updateGenerationRecovery.trigger();
+			}
+			if (upTo > logData->recoveredAt) {
+				tagData->unpoppedRecovered = false;
+				logData->unpoppedRecoveredTagCount--;
+				logData->unpoppedRecoveredTags.erase(tag);
+				TraceEvent("TLogPoppedTag", logData->logId)
 				    .detail("Tags", logData->unpoppedRecoveredTagCount)
+				    .detail("Tag", tag.toString())
 				    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
-				    .detail("RecoveredAt", logData->recoveredAt);
-				logData->recoveryComplete.send(Void());
+				    .detail("RecoveredAt", logData->recoveredAt)
+				    .detail("UnpoppedTags", describe(logData->unpoppedRecoveredTags));
+				if (logData->unpoppedRecoveredTagCount == 0 &&
+				    logData->durableKnownCommittedVersion >= logData->recoveredAt &&
+				    logData->recoveryComplete.canBeSet()) {
+					TraceEvent("TLogRecoveryComplete", logData->logId)
+					    .detail("Tags", logData->unpoppedRecoveredTagCount)
+					    .detail("DurableKCVer", logData->durableKnownCommittedVersion)
+					    .detail("RecoveredAt", logData->recoveredAt);
+					logData->recoveryComplete.send(Void());
+				}
 			}
 		}
 
@@ -2553,6 +2571,14 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 		}
 		finishedRecovery = false;
 	}
+
+	// This delay is added for testing purpose in simulation where by setting `disableTLogRecoveryFinish`, we disable
+	// TLogs to send back `TLogRecoveryFinishedRequest`.
+	while (g_network->isSimulated() && g_simulator->disableTLogRecoveryFinish) {
+		TraceEvent("WaitingToBeUnblocked", tli.id());
+		wait(delay(10));
+	}
+
 	TraceEvent("TLogRespondToRecovered", tli.id()).detail("Finished", finishedRecovery);
 	loop {
 		TLogRecoveryFinishedRequest req = waitNext(tli.recoveryFinished.getFuture());
@@ -2561,6 +2587,32 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 		} else {
 			req.reply.send(Never());
 		}
+	}
+}
+
+ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
+	loop {
+		Version oldestGenerationStartVersion = MAX_VERSION;
+		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
+			oldestGenerationStartVersion = std::min(genVersions.back(), oldestGenerationStartVersion);
+		}
+
+		if (req.oldestGenStartVersion < oldestGenerationStartVersion) {
+			TraceEvent("TLogRespondRecoveredVersion", tli.id())
+			    .detail("RecoveredVersion", oldestGenerationStartVersion);
+			req.reply.send(TrackTLogRecoveryReply(oldestGenerationStartVersion));
+			break;
+		}
+
+		wait(logData->updateGenerationRecovery.onTrigger());
+	}
+	return Void();
+}
+
+ACTOR Future<Void> respondToTrackRecovery(TLogInterface tli, Reference<LogData> logData) {
+	loop {
+		TrackTLogRecoveryRequest req = waitNext(tli.trackRecovery.getFuture());
+		logData->addActor.send(trackRecoveryReq(tli, req, logData));
 	}
 }
 
@@ -3474,6 +3526,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 	DUMPTOKEN(recruited.disablePopRequest);
 	DUMPTOKEN(recruited.enablePopRequest);
 	DUMPTOKEN(recruited.snapRequest);
+	DUMPTOKEN(recruited.trackRecovery);
 
 	stopAllTLogs(self, recruited.id());
 
@@ -3500,7 +3553,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 	TraceEvent("TLogStart", logData->logId)
 	    .detail("RecoveryCount", logData->recoveryCount)
-	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion);
+	    .detail("RecoveryTxnVersion", logData->recoveryTxnVersion)
+	    .detail("IsPrimary", req.isPrimary);
 
 	state Future<Void> updater;
 	state bool pulledRecoveryVersions = false;
@@ -3521,6 +3575,9 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
+			for (const auto& tag : req.allTags) {
+				logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationStartVersions);
+			}
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
 			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
 			                    "TLogInit"));
@@ -3532,7 +3589,8 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			    .detail("Unrecovered", logData->unrecoveredBefore)
 			    .detail("Tags", describe(req.recoverTags))
 			    .detail("Locality", req.locality)
-			    .detail("LogRouterTags", logData->logRouterTags);
+			    .detail("LogRouterTags", logData->logRouterTags)
+			    .detail("OldGenerationStartVersions", describe(req.oldGenerationStartVersions));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
@@ -3585,6 +3643,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			}
 
 			logData->addActor.send(respondToRecovered(recruited, logData->recoveryComplete));
+			logData->addActor.send(respondToTrackRecovery(recruited, logData));
 		} else {
 			// Brand new tlog, initialization has already been done by caller
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,

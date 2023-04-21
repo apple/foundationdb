@@ -163,21 +163,11 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	static bool validateRecord(int expectedId,
 	                           const MappedKeyValueRef* it,
 	                           GetMappedRangeWorkload* self,
-	                           int matchIndex,
-	                           bool isBoundary,
 	                           bool allMissing) {
 		// std::cout << "validateRecord expectedId " << expectedId << " it->key " << printable(it->key)
-		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId))
-		//           << " matchIndex: " << matchIndex << std::endl;
-		if (matchIndex == MATCH_INDEX_ALL || isBoundary) {
-			ASSERT(it->key == indexEntryKey(expectedId));
-		} else if (matchIndex == MATCH_INDEX_MATCHED_ONLY) {
-			ASSERT(it->key == (allMissing ? EMPTY : indexEntryKey(expectedId)));
-		} else if (matchIndex == MATCH_INDEX_UNMATCHED_ONLY) {
-			ASSERT(it->key == (allMissing ? indexEntryKey(expectedId) : EMPTY));
-		} else {
-			ASSERT(it->key == EMPTY);
-		}
+		//           << " indexEntryKey(expectedId) " << printable(indexEntryKey(expectedId)) << std::endl;
+
+		ASSERT(it->key == indexEntryKey(expectedId));
 		ASSERT(it->value == EMPTY);
 
 		if (self->SPLIT_RECORDS) {
@@ -223,7 +213,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                                          int byteLimit,
 	                                                          int expectedBeginId,
 	                                                          GetMappedRangeWorkload* self,
-	                                                          int matchIndex,
 	                                                          bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
@@ -238,7 +227,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				                                                   endSelector,
 				                                                   mapper,
 				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   matchIndex,
 				                                                   self->snapshot,
 				                                                   Reverse::False));
 				//			showResult(result);
@@ -253,8 +241,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				int cnt = 0;
 				const MappedKeyValueRef* it = result.begin();
 				for (; cnt < result.size(); cnt++, it++) {
-					if (validateRecord(
-					        expectedId, it, self, matchIndex, cnt == 0 || cnt == result.size() - 1, allMissing)) {
+					if (validateRecord(expectedId, it, self, allMissing)) {
 						needRetry = true;
 						break;
 					}
@@ -301,7 +288,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state int byteLimit = 10000;
 		while (true) {
 			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
-			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self, MATCH_INDEX_ALL, false));
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, beginId, self, false));
 			if (result.empty()) {
 				TraceEvent("EmptyResult");
 			}
@@ -315,7 +302,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	                                   int endId,
 	                                   Key mapper,
 	                                   GetMappedRangeWorkload* self,
-	                                   int matchIndex,
 	                                   bool allMissing = false) {
 		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		state KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));
@@ -328,16 +314,8 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(cx,
-			                                                                beginSelector,
-			                                                                endSelector,
-			                                                                mapper,
-			                                                                limit,
-			                                                                byteLimit,
-			                                                                expectedBeginId,
-			                                                                self,
-			                                                                matchIndex,
-			                                                                allMissing));
+			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(
+			    cx, beginSelector, endSelector, mapper, limit, byteLimit, expectedBeginId, self, allMissing));
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
@@ -410,7 +388,6 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		                          endSelector,
 		                          mapper,
 		                          GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED),
-		                          MATCH_INDEX_ALL,
 		                          self->snapshot,
 		                          Reverse::False);
 	}
@@ -570,23 +547,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state Key mapper = getMapper(self, false);
 		// The scanned range cannot be too large to hit get_mapped_key_values_has_more. We have a unit validating the
 		// error is thrown when the range is large.
-		const double r = deterministicRandom()->random01();
-		int matchIndex = MATCH_INDEX_ALL;
-		if (r < 0.25) {
-			matchIndex = MATCH_INDEX_NONE;
-		} else if (r < 0.5) {
-			matchIndex = MATCH_INDEX_MATCHED_ONLY;
-		} else if (r < 0.75) {
-			matchIndex = MATCH_INDEX_UNMATCHED_ONLY;
-		}
 		state bool originalStrictlyEnforeByteLimit = SERVER_KNOBS->STRICTLY_ENFORCE_BYTE_LIMIT;
 		(const_cast<ServerKnobs*> SERVER_KNOBS)->STRICTLY_ENFORCE_BYTE_LIMIT = deterministicRandom()->coinflip();
-		wait(self->scanMappedRange(cx, 10, 490, mapper, self, matchIndex));
-
-		{
-			Key mapperMissing = getMapper(self, true);
-			wait(self->scanMappedRange(cx, 10, 490, mapperMissing, self, MATCH_INDEX_UNMATCHED_ONLY, true));
-		}
+		wait(self->scanMappedRange(cx, 10, 490, mapper, self));
 		wait(testMetric(cx, self, 10, 490, mapper, self->checkStorageQueueSeconds));
 
 		// reset it to default

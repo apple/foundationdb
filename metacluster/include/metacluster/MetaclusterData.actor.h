@@ -23,21 +23,24 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
+#if defined(NO_INTELLISENSE) && !defined(METACLUSTER_METACLUSTERDATA_ACTOR_G_H)
+#define METACLUSTER_METACLUSTERDATA_ACTOR_G_H
+#include "metacluster/MetaclusterData.actor.g.h"
+#elif !defined(METACLUSTER_METACLUSTERDATA_ACTOR_H)
+#define METACLUSTER_METACLUSTERDATA_ACTOR_H
+
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/Tenant.h"
+#include "fdbclient/TenantData.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "flow/BooleanParam.h"
-#if defined(NO_INTELLISENSE) && !defined(WORKLOADS_METACLUSTER_DATA_ACTOR_G_H)
-#define WORKLOADS_METACLUSTER_DATA_ACTOR_G_H
-#include "fdbserver/workloads/MetaclusterData.actor.g.h"
-#elif !defined(WORKLOADS_METACLUSTER_DATA_ACTOR_H)
-#define WORKLOADS_METACLUSTER_DATA_ACTOR_H
 
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
-#include "fdbserver/workloads/TenantData.actor.h"
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterUtil.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+namespace metacluster::util {
 template <class DB>
 class MetaclusterData {
 public:
@@ -114,8 +117,8 @@ private:
 		state KeyBackedRangeResult<Tuple> clusterTenantTuples;
 		state KeyBackedRangeResult<Tuple> clusterTenantGroupTuples;
 
-		self->managementMetadata.tenantData = TenantData<DB, MetaclusterTenantTypes>(
-		    self->managementDb, &MetaclusterAPI::ManagementClusterMetadata::tenantMetadata());
+		self->managementMetadata.tenantData =
+		    TenantData<DB, MetaclusterTenantTypes>(self->managementDb, &metadata::management::tenantMetadata());
 
 		loop {
 			try {
@@ -123,27 +126,26 @@ private:
 				wait(store(self->managementMetadata.tenantIdPrefix,
 				           TenantMetadata::tenantIdPrefix().get(managementTr)) &&
 				     store(self->managementMetadata.metaclusterRegistration,
-				           MetaclusterMetadata::metaclusterRegistration().get(managementTr)) &&
+				           metadata::metaclusterRegistration().get(managementTr)) &&
 				     store(self->managementMetadata.dataClusters,
-				           MetaclusterAPI::listClustersTransaction(
+				           listClustersTransaction(
 				               managementTr, ""_sr, "\xff\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS + 1)) &&
 				     store(self->managementMetadata.clusterTenantCounts,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantCount.getRange(
+				           metadata::management::clusterTenantCount().getRange(
 				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
 				     store(self->managementMetadata.registrationTombstones,
-				           MetaclusterMetadata::registrationTombstones().getRange(
-				               managementTr, {}, {}, CLIENT_KNOBS->TOO_MANY)) &&
+				           metadata::registrationTombstones().getRange(managementTr, {}, {}, CLIENT_KNOBS->TOO_MANY)) &&
 				     store(self->managementMetadata.activeRestoreIds,
-				           MetaclusterMetadata::activeRestoreIds().getRange(
+				           metadata::activeRestoreIds().getRange(
 				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
 				     store(clusterCapacityTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterCapacityIndex.getRange(
+				           metadata::management::clusterCapacityIndex().getRange(
 				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
 				     store(clusterTenantTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantIndex.getRange(
+				           metadata::management::clusterTenantIndex().getRange(
 				               managementTr, {}, {}, metaclusterMaxTenants)) &&
 				     store(clusterTenantGroupTuples,
-				           MetaclusterAPI::ManagementClusterMetadata::clusterTenantGroupIndex.getRange(
+				           metadata::management::clusterTenantGroupIndex().getRange(
 				               managementTr, {}, {}, metaclusterMaxTenants)) &&
 				     self->managementMetadata.tenantData.load(managementTr));
 
@@ -172,8 +174,7 @@ private:
 			}
 			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
 			if (renaming) {
-				ASSERT(entry.tenantState == MetaclusterAPI::TenantState::RENAMING ||
-				       entry.tenantState == MetaclusterAPI::TenantState::REMOVING);
+				ASSERT(entry.tenantState == TenantState::RENAMING || entry.tenantState == TenantState::REMOVING);
 				ASSERT(entry.renameDestination == tenantName);
 			} else {
 				ASSERT(entry.tenantName == tenantName);
@@ -198,7 +199,7 @@ private:
 		    self->dataClusterMetadata.try_emplace(clusterName);
 
 		if (clusterItr.second) {
-			state Reference<IDatabase> dataDb = wait(MetaclusterAPI::openDatabase(connectionString));
+			state Reference<IDatabase> dataDb = wait(openDatabase(connectionString));
 			state Reference<ITransaction> tr = dataDb->createTransaction();
 
 			clusterItr.first->second.tenantData =
@@ -207,7 +208,7 @@ private:
 				try {
 					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					wait(store(clusterItr.first->second.metaclusterRegistration,
-					           MetaclusterMetadata::metaclusterRegistration().get(tr)) &&
+					           metadata::metaclusterRegistration().get(tr)) &&
 					     clusterItr.first->second.tenantData.load(tr));
 
 					break;
@@ -261,6 +262,7 @@ public:
 
 	bool operator!=(MetaclusterData const& other) const { return !(*this == other); }
 };
+} // namespace metacluster::util
 
 #include "flow/unactorcompiler.h"
 

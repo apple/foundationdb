@@ -1031,7 +1031,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 					// capacity if we are excluding at least one process that serves the storage role.
 					if (!excludedAddressesContainsStorageRole && includedInExclusion) {
 						excludedAddressesContainsStorageRole = true;
-						break;
 					}
 
 					int64_t used_bytes;
@@ -2767,7 +2766,7 @@ ACTOR Future<Optional<std::string>> excludeLocalityCommitActor(ReadYourWritesTra
 			return result;
 	}
 
-	excludeLocalities(ryw->getTransaction(), localities, failed);
+	wait(excludeLocalities(&ryw->getTransaction(), localities, failed));
 	includeLocalities(ryw);
 
 	return result;
