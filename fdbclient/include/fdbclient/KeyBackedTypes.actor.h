@@ -397,7 +397,7 @@ public:
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
 		tr->set(key, packValue(val));
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -415,7 +415,7 @@ public:
 	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
 		tr->clear(key);
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -457,7 +457,7 @@ public:
 	void atomicOp(Transaction tr, T const& val, MutationRef::Type type) {
 		tr->atomicOp(this->key, BinaryWriter::toValue<T>(val, Unversioned()), type);
 		if (this->trigger.present()) {
-			this->trigger.get().update(tr);
+			this->trigger->update(tr);
 		}
 	}
 
@@ -468,7 +468,7 @@ public:
 		    BinaryWriter::toValue<T>(val, Unversioned()).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4)),
 		    MutationRef::SetVersionstampedValue);
 		if (this->trigger.present()) {
-			this->trigger.get().update(tr);
+			this->trigger->update(tr);
 		}
 	}
 };
@@ -742,7 +742,7 @@ public:
 		kbt_debug("MAP SET {} -> {}\n", k.printable(), v.printable());
 		tr->set(k, v);
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 		return k.expectedSize() + v.expectedSize();
 	}
@@ -753,7 +753,7 @@ public:
 		Value v = packValue(val);
 		tr->atomicOp(k, v, type);
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -762,7 +762,7 @@ public:
 		kbt_debug("MAP ERASE {}\n", packKey(key).printable());
 		tr->clear(packKey(key));
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -770,7 +770,7 @@ public:
 	void erase(Transaction tr, KeyType const& begin, KeyType const& end) {
 		tr->clear(KeyRangeRef(packKey(begin), packKey(end)));
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -778,7 +778,7 @@ public:
 	void clear(Transaction tr) {
 		tr->clear(subspace);
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -1035,7 +1035,7 @@ public:
 		Key k = packKey(val);
 		tr->set(k, StringRef());
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 		return k.expectedSize();
 	}
@@ -1044,7 +1044,7 @@ public:
 	void erase(Transaction tr, ValueType const& val) {
 		tr->clear(packKey(val));
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -1052,7 +1052,7 @@ public:
 	void erase(Transaction tr, ValueType const& begin, ValueType const& end) {
 		tr->clear(KeyRangeRef(packKey(begin), packKey(end)));
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
@@ -1060,7 +1060,7 @@ public:
 	void clear(Transaction tr) {
 		tr->clear(subspace);
 		if (trigger.present()) {
-			trigger.get().update(tr);
+			trigger->update(tr);
 		}
 	}
 
