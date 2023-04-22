@@ -59,12 +59,11 @@ class Ratekeeper {
 	UID id;
 	Database db;
 
-	std::unique_ptr<IRKMetricsTracker> metricsTracker;
-	std::unique_ptr<IRKConfigurationMonitor> configurationMonitor;
-	std::unique_ptr<IRKRecoveryTracker> recoveryTracker;
-	std::unique_ptr<IRKRateServer> rateServer;
-	std::unique_ptr<IRKRateUpdater> normalRateUpdater;
-	std::unique_ptr<IRKRateUpdater> batchRateUpdater;
+	RKMetricsTracker metricsTracker;
+	RKConfigurationMonitor configurationMonitor;
+	RKRecoveryTracker recoveryTracker;
+	RKRateServer rateServer;
+	RKRateUpdater normalRateUpdater, batchRateUpdater;
 	std::unique_ptr<IRKThroughputQuotaCache> quotaCache;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
