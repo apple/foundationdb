@@ -213,7 +213,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 
 		limitingDurabilityLag = -1 * ss->first;
 		if (limitingDurabilityLag > limits.durabilityLagTargetVersions &&
-		    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
+		    actualTpsHistory.size() >= SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
 			if (limits.durabilityLagLimit == std::numeric_limits<double>::infinity()) {
 				double maxTps = 0;
 				for (int i = 0; i < actualTpsHistory.size(); i++) {

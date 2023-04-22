@@ -163,8 +163,7 @@ struct RKRateUpdaterTestEnvironment {
 	                                 testTargetVersionDifference,
 	                                 testTargetVersionDifference,
 	                                 300.0)) {
-		// TODO: Fix RkRateUpdater::updateRate so this can use < instead of <=
-		for (int i = 0; i <= SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES; ++i) {
+		for (int i = 0; i < SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES; ++i) {
 			actualTpsHistory.push_back(testActualTps);
 		}
 	}
