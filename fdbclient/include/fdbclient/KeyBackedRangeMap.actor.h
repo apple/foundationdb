@@ -295,24 +295,18 @@ public:
 	}
 
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Void>>::type updateRange(
-	    Transaction tr,
-	    KeyType const& begin,
-	    KeyType const& end,
-	    ValueType const& valueUpdate,
-	    bool replace = false) const {
-		return updateRangeActor(*this, tr, begin, end, valueUpdate, replace);
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type updateRange(Reference<DB> db,
-	                                                                                    KeyType const& begin,
-	                                                                                    KeyType const& end,
-	                                                                                    ValueType const& valueUpdate,
-	                                                                                    bool replace = false) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			return self.updateRange(tr, begin, end, valueUpdate, replace);
-		});
+	Future<Void> updateRange(Transaction tr,
+	                         KeyType const& begin,
+	                         KeyType const& end,
+	                         ValueType const& valueUpdate,
+	                         bool replace = false) const {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				return self.updateRange(tr, begin, end, valueUpdate, replace);
+			});
+		} else {
+			return updateRangeActor(*this, tr, begin, end, valueUpdate, replace);
+		}
 	}
 
 	ACTOR template <class Transaction>
@@ -367,17 +361,14 @@ public:
 	// If the map in the database does not have boundaries <=begin or >=end then these boundaries will be
 	// added to the returned snapshot with a default ValueType.
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<LocalSnapshot>>::type
-	getSnapshot(Transaction tr, KeyType const& begin, KeyType const& end) const {
-		return getSnapshotActor(*this, tr, begin, end);
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<LocalSnapshot>>::type
-	getSnapshot(Reference<DB> db, KeyType const& begin, KeyType const& end) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			return self.getSnapshot(tr, begin, end);
-		});
+	Future<LocalSnapshot> getSnapshot(Transaction tr, KeyType const& begin, KeyType const& end) const {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				return self.getSnapshot(tr, begin, end);
+			});
+		} else {
+			return getSnapshotActor(*this, tr, begin, end);
+		}
 	}
 
 private:

@@ -321,99 +321,91 @@ public:
 	  : key(key), trigger(trigger), codec(codec) {}
 
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<Optional<T>>>::type get(
-	    Transaction tr,
-	    Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+	Future<Optional<T>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
 
-		return holdWhile(
-		    getFuture,
-		    map(safeThreadFutureToFuture(getFuture), [codec = codec](Optional<Value> const& val) -> Optional<T> {
-			    if (val.present())
-				    return codec.unpack(val.get());
-			    return {};
-		    }));
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.get(tr, snapshot);
+			});
+		} else {
+			typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+
+			return holdWhile(
+			    getFuture,
+			    map(safeThreadFutureToFuture(getFuture), [codec = codec](Optional<Value> const& val) -> Optional<T> {
+				    if (val.present())
+					    return codec.unpack(val.get());
+				    return {};
+			    }));
+		}
 	}
 
 	// Get property's value or defaultValue if it doesn't exist
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
-	getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
-		return map(get(tr, snapshot), [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+	Future<T> getD(Transaction tr, Snapshot snapshot = Snapshot::False, T defaultValue = T()) const {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.getD(tr, snapshot, defaultValue);
+			});
+		} else {
+			return map(get(tr, snapshot),
+			           [=](Optional<T> val) -> T { return val.present() ? val.get() : defaultValue; });
+		}
 	}
 
 	// Get property's value or throw error if it doesn't exist
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, Future<T>>::type
-	getOrThrow(Transaction tr, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
-		return map(get(tr, snapshot), [=](Optional<T> val) -> T {
-			if (!val.present()) {
-				throw err;
-			}
+	Future<T> getOrThrow(Transaction tr, Snapshot snapshot = Snapshot::False, Error err = key_not_found()) const {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.getOrThrow(tr, snapshot, err);
+			});
+		} else {
+			return map(get(tr, snapshot), [=](Optional<T> val) -> T {
+				if (!val.present()) {
+					throw err;
+				}
 
-			return val.get();
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<Optional<T>>>::type get(
-	    Reference<DB> db,
-	    Snapshot snapshot = Snapshot::False) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.get(tr, snapshot);
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getD(Reference<DB> db,
-	                                                                          Snapshot snapshot = Snapshot::False,
-	                                                                          T defaultValue = T()) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.getD(tr, snapshot, defaultValue);
-		});
-	}
-
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<T>>::type getOrThrow(Reference<DB> db,
-	                                                                                Snapshot snapshot = Snapshot::False,
-	                                                                                Error err = key_not_found()) const {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-			return self.getOrThrow(tr, snapshot, err);
-		});
-	}
-
-	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type set(Transaction tr, T const& val) {
-		tr->set(key, packValue(val));
-		if (trigger.present()) {
-			trigger->update(tr);
+				return val.get();
+			});
 		}
 	}
 
-	template <class DB>
-	typename std::enable_if<is_transaction_creator<DB>, Future<Void>>::type set(Reference<DB> db, T const& val) {
-		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			self->set(tr, val);
-			return Future<Void>(Void());
-		});
+	template <class Transaction>
+	void set(Transaction tr, T const& val) {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.set(tr, val);
+			});
+		} else {
+			tr->set(key, packValue(val));
+			if (trigger.present()) {
+				trigger->update(tr);
+			}
+		}
 	}
 
 	template <class Transaction>
-	typename std::enable_if<!is_transaction_creator<Transaction>, void>::type clear(Transaction tr) {
-		tr->clear(key);
-		if (trigger.present()) {
-			trigger->update(tr);
+	void clear(Transaction tr) {
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.clear(tr);
+			});
+		} else {
+			tr->clear(key);
+			if (trigger.present()) {
+				trigger->update(tr);
+			}
 		}
 	}
 
