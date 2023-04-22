@@ -836,12 +836,19 @@ namespace actorcompiler
 
         Statement ParseIfStatement(TokenRange toks)
         {
-            var expr = toks.Consume("if")
-                           .First(NonWhitespace)
+            toks = toks.Consume("if");
+            toks = toks.SkipWhile(Whitespace);
+            bool constexpr = toks.First().Value == "constexpr";
+            if(constexpr) {
+               toks = toks.Consume("constexpr").SkipWhile(Whitespace);
+            }
+
+            var expr = toks.First(NonWhitespace)
                            .Assert("Expected (", t => t.Value == "(")
                            .GetMatchingRangeIn(toks);
             return new IfStatement {
                 expression = str(NormalizeWhitespace(expr)),
+                constexpr = constexpr,
                 ifBody = ParseCompoundStatement(range(expr.End+1, toks.End))
                 // elseBody will be filled in later if necessary by ParseElseStatement
             };

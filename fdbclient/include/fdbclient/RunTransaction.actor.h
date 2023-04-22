@@ -34,12 +34,25 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <typename, typename = void>
+struct transaction_option_setter : std::false_type {};
+
+template <typename T>
+struct transaction_option_setter<Reference<T>> : transaction_option_setter<T> {};
+
+template <typename T>
+constexpr bool can_set_transaction_options = transaction_option_setter<T>::value;
+
 ACTOR template <class Function, class DB>
 Future<decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue())> runTransaction(
     Reference<DB> db,
     Function func) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
+		if constexpr (can_set_transaction_options<DB>) {
+			db->setOptions(tr);
+		}
+
 		try {
 			// func should be idempotent; otherwise, retry will get undefined result
 			state decltype(std::declval<Function>()(Reference<typename DB::TransactionT>()).getValue()) result =
@@ -56,6 +69,9 @@ ACTOR template <class Function, class DB>
 Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 	loop {
+		if constexpr (can_set_transaction_options<DB>) {
+			db->setOptions(tr);
+		}
 		try {
 			// func should be idempotent; otherwise, retry will get undefined result
 			wait(func(tr));
@@ -77,9 +93,9 @@ struct SystemTransactionGenerator : ReferenceCounted<SystemTransactionGenerator<
 	SystemTransactionGenerator(Reference<DB> db, bool write, bool lockAware, bool immediate)
 	  : db(db), write(write), lockAware(lockAware), immediate(immediate) {}
 
-	Reference<TransactionT> createTransaction() const {
-		Reference<TransactionT> tr = db->createTransaction();
+	Reference<TransactionT> createTransaction() const { return db->createTransaction(); }
 
+	void setOptions(Reference<TransactionT> tr) const {
 		if (write) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		} else {
@@ -93,7 +109,6 @@ struct SystemTransactionGenerator : ReferenceCounted<SystemTransactionGenerator<
 		if (lockAware) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		}
-		return tr;
 	}
 
 	Reference<DB> db;
@@ -101,6 +116,9 @@ struct SystemTransactionGenerator : ReferenceCounted<SystemTransactionGenerator<
 	bool lockAware;
 	bool immediate;
 };
+
+template <typename DB>
+struct transaction_option_setter<SystemTransactionGenerator<DB>> : std::true_type {};
 
 // Convenient wrapper for creating SystemTransactionGenerators.
 template <typename DB>
