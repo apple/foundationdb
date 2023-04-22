@@ -26,14 +26,13 @@
 #elif !defined(FDBCLIENT_KEYBACKEDTYPES_ACTOR_H)
 #define FDBCLIENT_KEYBACKEDTYPES_ACTOR_H
 
-#include "fdbclient/KeyBackedTypes.actor.h"
-
 #include <utility>
 #include <vector>
 #include <ranges>
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/CommitTransaction.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
@@ -282,11 +281,10 @@ Future<Version> WatchableTrigger::onChangeActor(WatchableTrigger self,
 	state Reference<typename DB::TransactionT> tr = db->createTransaction();
 
 	loop {
+		if constexpr (can_set_transaction_options<DB>) {
+			db->setOptions(tr);
+		}
 		try {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 			// If the initialVersion is not set yet, then initialize it with the read version
 			if (!initialVersion.present()) {
 				wait(store(initialVersion, safeThreadFutureToFuture(tr->getReadVersion())));

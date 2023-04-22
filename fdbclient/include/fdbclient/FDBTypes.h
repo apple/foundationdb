@@ -1742,6 +1742,9 @@ template <typename T>
 struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
 
 template <typename T>
+struct transaction_creator_traits<Reference<T>> : transaction_creator_traits<T> {};
+
+template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;
 
 struct Versionstamp {
