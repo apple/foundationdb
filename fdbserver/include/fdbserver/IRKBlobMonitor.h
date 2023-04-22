@@ -11,16 +11,29 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "flow/Deque.h"
 
+// Responsible for tracking the current throttling-relevant statistics
+// for blob workers
 class IRKBlobMonitor {
 public:
 	virtual ~IRKBlobMonitor() = default;
+
+	// Returns a deque of timestamp, version pairs, where the version is the minimum blob version
+	// across all blob workers at the corresponding timestamp.
 	virtual Deque<std::pair<double, Version>> const& getBlobWorkerVersionHistory() const& = 0;
+
+	// Returns true iff any blob ranges exist in the database
 	virtual bool hasAnyRanges() const = 0;
+
+	// Returns the last time that the blob manager reported zero
+	// blocked assignments
 	virtual double getUnblockedAssignmentTime() const = 0;
 
+	// Update the last unblocked assignment time to the current time
 	// TODO: Refactor to remove mutable access here?
 	virtual void setUnblockedAssignmentTimeNow() = 0;
 
+	// Runs actors to periodically refresh throttling-relevant statistics
+	// Returned Future should never be ready, but can be used to propagate errors
 	virtual Future<Void> run(IRKConfigurationMonitor const&, IRKRecoveryTracker const&) = 0;
 };
 
