@@ -721,12 +721,13 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	// Start watching for changes before reading the config in init() below
 	state Promise<Version> configChangeWatching;
 	state Future<Void> onConfigChange =
-	    map(DDConfiguration().trigger.onChange(cx.getReference(), {}, configChangeWatching), [](Version v) {
-		    CODE_PROBE(true, "DataDistribution change detected");
-		    TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
-		    throw dd_config_changed();
-		    return Void();
-	    });
+	    map(DDConfiguration().trigger.onChange(SystemDBLockWriteNow(cx.getReference()), {}, configChangeWatching),
+	        [](Version v) {
+		        CODE_PROBE(true, "DataDistribution change detected");
+		        TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
+		        throw dd_config_changed();
+		        return Void();
+	        });
 
 	// Make sure that the watcher has established a baseline before init() below so the watcher will
 	// see any changes that occur after init() has read the config state.

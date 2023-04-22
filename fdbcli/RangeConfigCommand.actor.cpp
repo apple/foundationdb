@@ -31,7 +31,7 @@
 
 namespace fdb_cli {
 
-ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringRef> tokens) {
+ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens) {
 	state std::function<bool(std::string)> fail = [&](std::string msg) {
 		if (!msg.empty()) {
 			fmt::print(stderr, "ERROR: {}\n", msg);
@@ -72,8 +72,8 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 			}
 		}
 
-		DDConfiguration::RangeConfigMapSnapshot config =
-		    wait(DDConfiguration().userRangeConfig().getSnapshot(localDb.getReference(), allKeys.begin, allKeys.end));
+		DDConfiguration::RangeConfigMapSnapshot config = wait(DDConfiguration().userRangeConfig().getSnapshot(
+		    SystemDBLockWriteNow(cx.getReference()), allKeys.begin, allKeys.end));
 		fmt::print(
 		    "{}\n",
 		    json_spirit::write_string(DDConfiguration::toJSON(config, includeDefault), json_spirit::pretty_print));
@@ -110,7 +110,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database localDb, std::vector<StringR
 			}
 
 			wait(DDConfiguration().userRangeConfig().updateRange(
-			    localDb.getReference(), begin, end, rangeConfig, cmd == "set"_sr));
+			    SystemDBLockWriteNow(cx.getReference()), begin, end, rangeConfig, cmd == "set"_sr));
 		}
 	} else {
 		return fail(fmt::format("Unknown command: '{}'", cmd.printable()));
