@@ -1202,7 +1202,7 @@ public:
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
-	std::unordered_set<UID> ongoingAuditsForShardAssignment;
+	std::map<UID, Version> ongoingAuditsForShardAssignment;
 	std::string printShardAssignmentHistory() {
 		std::string toPrint = "";
 		for (auto item : shardAssignmentHistory) {
@@ -1210,20 +1210,32 @@ public:
 		}
 		return toPrint;
 	}
-	void registerAuditsForShardAssignmentHistoryCollection(UID auditID) {
-		auto [it, inserted] = ongoingAuditsForShardAssignment.insert(auditID);
-		ASSERT_WE_THINK(inserted); // assert breaks when multiple audit are allowed at same time, which is not allowed
+
+	void registerAuditsForShardAssignmentHistoryCollection(UID auditID, Version beginVersion) {
+		ASSERT_WE_THINK(!ongoingAuditsForShardAssignment.contains(auditID));
+		ongoingAuditsForShardAssignment[auditID] = beginVersion;
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
 		return;
 	}
+
 	void unregisterAuditsForShardAssignmentHistoryCollection(UID auditID, bool check = true) {
-		if (check) // assert breaks when multiple audit are allowed at same time, which is not allowed
+		if (check)
 			ASSERT_WE_THINK(ongoingAuditsForShardAssignment.contains(auditID));
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
 		ongoingAuditsForShardAssignment.erase(auditID);
 		return;
 	}
-	bool existAuditUsingShardAssignmentHistory() { return !ongoingAuditsForShardAssignment.empty(); }
+
+	bool needCollectShardAssignment(Version currentVersion) {
+		Version minRecordVersion = MAX_VERSION;
+		for (auto& [auditID, startRecordVersion] : ongoingAuditsForShardAssignment) {
+			if (startRecordVersion < minRecordVersion) {
+				minRecordVersion = startRecordVersion;
+			}
+		}
+		return currentVersion >= minRecordVersion;
+	}
+
 	void addShardAssignmentToHistory(Version version, const KeyRange keys, Version ssVersion) {
 		shardAssignmentHistory.push_back(std::make_pair(version, keys));
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", thisServerID)
@@ -1232,11 +1244,13 @@ public:
 		    .detail("SSVersion", ssVersion);
 		return;
 	}
+
 	void clearShardAssignmentHistory() {
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryClear", thisServerID);
 		shardAssignmentHistory.clear();
 		return;
 	}
+
 	std::vector<std::pair<Version, KeyRangeRef>> getShardAssignmentHistory(Version early, Version later) {
 		std::vector<std::pair<Version, KeyRangeRef>> res;
 		for (auto shardAssignment : shardAssignmentHistory) {
@@ -5160,7 +5174,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			versionBeforeWait = data->version.get();
 			// open trace
-			data->registerAuditsForShardAssignmentHistoryCollection(req.id);
+			data->registerAuditsForShardAssignmentHistoryCollection(req.id, grv);
 			wait(data->version.whenAtLeast(grv));
 			// close trace
 			data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
@@ -8817,7 +8831,7 @@ void changeServerKeys(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->existAuditUsingShardAssignmentHistory()) {
+	if (data->needCollectShardAssignment(version)) {
 		data->addShardAssignmentToHistory(version, Standalone(keys), data->version.get());
 	} else {
 		data->clearShardAssignmentHistory();
@@ -9053,7 +9067,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->existAuditUsingShardAssignmentHistory()) {
+	if (data->needCollectShardAssignment(version)) {
 		data->addShardAssignmentToHistory(version, Standalone(keys), data->version.get());
 	} else {
 		data->clearShardAssignmentHistory();
