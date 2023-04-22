@@ -19,7 +19,7 @@ public:
 
 	// Returns a deque of timestamp, version pairs, where the version is the minimum blob version
 	// across all blob workers at the corresponding timestamp.
-	virtual Deque<std::pair<double, Version>> const& getBlobWorkerVersionHistory() const& = 0;
+	virtual Deque<std::pair<double, Version>> const& getVersionHistory() const& = 0;
 
 	// Returns true iff any blob ranges exist in the database
 	virtual bool hasAnyRanges() const = 0;
@@ -41,14 +41,14 @@ class RKBlobMonitor : public IRKBlobMonitor {
 	friend class RKBlobMonitorImpl;
 	Database db;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	Deque<std::pair<double, Version>> versionHistory;
 	bool anyBlobRanges;
 	double unblockedAssignmentTime;
 
 public:
 	RKBlobMonitor(Database, Reference<AsyncVar<ServerDBInfo> const>);
 	~RKBlobMonitor();
-	Deque<std::pair<double, Version>> const& getBlobWorkerVersionHistory() const& override;
+	Deque<std::pair<double, Version>> const& getVersionHistory() const& override;
 	bool hasAnyRanges() const override;
 	double getUnblockedAssignmentTime() const override;
 	void setUnblockedAssignmentTimeNow() override;
@@ -56,13 +56,11 @@ public:
 };
 
 class MockRKBlobMonitor : public IRKBlobMonitor {
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
+	Deque<std::pair<double, Version>> versionHistory;
 
 public:
 	~MockRKBlobMonitor() = default;
-	Deque<std::pair<double, Version>> const& getBlobWorkerVersionHistory() const& override {
-		return blobWorkerVersionHistory;
-	}
+	Deque<std::pair<double, Version>> const& getVersionHistory() const& override { return versionHistory; }
 	bool hasAnyRanges() const override { return false; }
 	double getUnblockedAssignmentTime() const override { return now(); }
 	void setUnblockedAssignmentTimeNow() override {}

@@ -260,7 +260,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		loop {
 			auto secondEntry = version_transactions.begin();
 			++secondEntry;
-			auto const& blobWorkerVersionHistory = blobMonitor.getBlobWorkerVersionHistory();
+			auto const& blobWorkerVersionHistory = blobMonitor.getVersionHistory();
 			if (secondEntry != version_transactions.end() &&
 			    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
 			    (blobWorkerVersionHistory.empty() || secondEntry->first < blobWorkerVersionHistory.front().second)) {
@@ -275,7 +275,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 	    blobMonitor.hasAnyRanges()) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
-		auto const& blobWorkerVersionHistory = blobMonitor.getBlobWorkerVersionHistory();
+		auto const& blobWorkerVersionHistory = blobMonitor.getVersionHistory();
 		if (!blobWorkerVersionHistory.empty()) {
 			lastBWVer = blobWorkerVersionHistory.back().second;
 			lastIter = version_transactions.lower_bound(lastBWVer);

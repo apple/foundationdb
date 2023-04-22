@@ -101,16 +101,15 @@ public:
 				}
 				if (minVer > 0 && blobWorkers.size() > 0 &&
 				    now() - self->unblockedAssignmentTime < SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL) {
-					while (!self->blobWorkerVersionHistory.empty() &&
-					       minVer < self->blobWorkerVersionHistory.back().second) {
-						self->blobWorkerVersionHistory.pop_back();
+					while (!self->versionHistory.empty() && minVer < self->versionHistory.back().second) {
+						self->versionHistory.pop_back();
 					}
-					self->blobWorkerVersionHistory.push_back(std::make_pair(now(), minVer));
+					self->versionHistory.push_back(std::make_pair(now(), minVer));
 				}
-				while (self->blobWorkerVersionHistory.size() > SERVER_KNOBS->MIN_BW_HISTORY &&
-				       self->blobWorkerVersionHistory[1].first <
-				           self->blobWorkerVersionHistory.back().first - SERVER_KNOBS->BW_ESTIMATION_INTERVAL) {
-					self->blobWorkerVersionHistory.pop_front();
+				while (self->versionHistory.size() > SERVER_KNOBS->MIN_BW_HISTORY &&
+				       self->versionHistory[1].first <
+				           self->versionHistory.back().first - SERVER_KNOBS->BW_ESTIMATION_INTERVAL) {
+					self->versionHistory.pop_front();
 				}
 				if (now() - lastLoggedTime > SERVER_KNOBS->BW_RW_LOGGING_INTERVAL) {
 					lastLoggedTime = now();
@@ -133,8 +132,8 @@ RKBlobMonitor::RKBlobMonitor(Database db, Reference<AsyncVar<ServerDBInfo> const
 
 RKBlobMonitor::~RKBlobMonitor() = default;
 
-Deque<std::pair<double, Version>> const& RKBlobMonitor::getBlobWorkerVersionHistory() const& {
-	return blobWorkerVersionHistory;
+Deque<std::pair<double, Version>> const& RKBlobMonitor::getVersionHistory() const& {
+	return versionHistory;
 }
 
 bool RKBlobMonitor::hasAnyRanges() const {
