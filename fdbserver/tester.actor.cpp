@@ -1932,7 +1932,6 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             Optional<TenantName> defaultTenant,
                             Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
                             bool restartingTest) {
-	state DDConfiguration::RangeConfigMap rangeConfig(DDConfiguration().userRangeConfig());
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
 	state Future<Void> ccMonitor = monitorServerDBInfo(cc, LocalityData(), dbInfo); // FIXME: locality
@@ -2063,6 +2062,10 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			state ReadYourWritesTransaction tr(cx);
 			state bool verbose = (KEYBACKEDTYPES_DEBUG != 0);
 
+			// This has to be optional because state vars need default constructors and VersionOptions types can't be
+			// default constructed and RangeConfigMap uses ObjectWriter which needs VersionOptions.
+			state Optional<DDConfiguration::RangeConfigMap> rangeConfig = DDConfiguration().userRangeConfig();
+
 			loop {
 				try {
 					TraceEvent("SettingCustomReplicas").log();
@@ -2071,19 +2074,19 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 
 					// Map logic should work with or without allKeys endpoints initialized
 					if (deterministicRandom()->coinflip()) {
-						wait(rangeConfig.updateRange(&tr, allKeys.begin, allKeys.end, DDRangeConfig()));
+						wait(rangeConfig->updateRange(&tr, allKeys.begin, allKeys.end, DDRangeConfig()));
 					}
 
-					wait(rangeConfig.updateRange(&tr, "\xff\x03"_sr, "\xff\x04"_sr, DDRangeConfig(3)));
-					wait(rangeConfig.updateRange(&tr, "\xff\x06"_sr, "\xff\x07"_sr, DDRangeConfig(6)));
-					wait(rangeConfig.updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, DDRangeConfig(4)));
+					wait(rangeConfig->updateRange(&tr, "\xff\x03"_sr, "\xff\x04"_sr, DDRangeConfig(3)));
+					wait(rangeConfig->updateRange(&tr, "\xff\x06"_sr, "\xff\x07"_sr, DDRangeConfig(6)));
+					wait(rangeConfig->updateRange(&tr, "\xff\x04"_sr, "\xff\x05"_sr, DDRangeConfig(4)));
 
-					wait(rangeConfig.updateRange(&tr, "\xff\x03k"_sr, "\xff\x03z"_sr, DDRangeConfig(3)));
-					wait(rangeConfig.updateRange(&tr, "\xff\x04t"_sr, "\xff\x05h"_sr, DDRangeConfig(3, 1), true));
-					wait(rangeConfig.updateRange(&tr, "\xff\x06u"_sr, "\xff\x07m"_sr, DDRangeConfig({}, 2)));
+					wait(rangeConfig->updateRange(&tr, "\xff\x03k"_sr, "\xff\x03z"_sr, DDRangeConfig(3)));
+					wait(rangeConfig->updateRange(&tr, "\xff\x04t"_sr, "\xff\x05h"_sr, DDRangeConfig(3, 1), true));
+					wait(rangeConfig->updateRange(&tr, "\xff\x06u"_sr, "\xff\x07m"_sr, DDRangeConfig({}, 2)));
 
-					wait(rangeConfig.updateRange(&tr, "a"_sr, "b"_sr, DDRangeConfig(3, 20), true));
-					wait(rangeConfig.updateRange(&tr, "a"_sr, "a10"_sr, DDRangeConfig(3, 20), true));
+					wait(rangeConfig->updateRange(&tr, "a"_sr, "b"_sr, DDRangeConfig(3, 20), true));
+					wait(rangeConfig->updateRange(&tr, "a"_sr, "a10"_sr, DDRangeConfig(3, 20), true));
 
 					// Key, entryRequiredInDB, expectedRangeConfig
 					state std::vector<std::tuple<Key, bool, DDRangeConfig>> rangeTests = {
@@ -2105,7 +2108,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					};
 
 					state DDConfiguration::RangeConfigMapSnapshot snapshot =
-					    wait(rangeConfig.getSnapshot(&tr, allKeys.begin, allKeys.end));
+					    wait(rangeConfig->getSnapshot(&tr, allKeys.begin, allKeys.end));
 
 					if (verbose) {
 						fmt::print("DD User Range Config:\n{}\n",
@@ -2117,7 +2120,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 					for (i = 0; i < rangeTests.size(); ++i) {
 						state Key query = std::get<0>(rangeTests[i]);
 						Optional<DDConfiguration::RangeConfigMap::RangeValue> verify =
-						    wait(rangeConfig.getRangeForKey(&tr, query));
+						    wait(rangeConfig->getRangeForKey(&tr, query));
 
 						if (verbose) {
 							if (verify.present()) {
