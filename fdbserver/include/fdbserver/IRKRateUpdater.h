@@ -32,9 +32,7 @@ public:
 	                    class IRKConfigurationMonitor const&,
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
-	                    bool anyBlobRanges,
-	                    Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	                    double& unblockedAssignmentTime) = 0;
+	                    class IRKBlobMonitor&) = 0;
 };
 
 class RKRateUpdater : public IRKRateUpdater {
@@ -74,9 +72,7 @@ public:
 	            class IRKConfigurationMonitor const&,
 	            class IRKRecoveryTracker const&,
 	            Deque<double> const& actualTpsHistory,
-	            bool anyBlobRanges,
-	            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	            double& unblockedAssignmentTime) override;
+	            class IRKBlobMonitor&) override;
 
 	HealthMetrics const& getHealthMetrics() const& override;
 };

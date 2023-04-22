@@ -17,9 +17,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKConfigurationMonitor const& configurationMonitor,
                            IRKRecoveryTracker const& recoveryTracker,
                            Deque<double> const& actualTpsHistory,
-                           bool anyBlobRanges,
-                           Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-                           double& unblockedAssignmentTime) {
+                           IRKBlobMonitor& blobMonitor) {
 	// double controlFactor = ;  // dt / eFoldingTime
 	double actualTps = getActualTps(rateServer, metricsTracker);
 
@@ -262,6 +260,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		loop {
 			auto secondEntry = version_transactions.begin();
 			++secondEntry;
+			auto const& blobWorkerVersionHistory = blobMonitor.getBlobWorkerVersionHistory();
 			if (secondEntry != version_transactions.end() &&
 			    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
 			    (blobWorkerVersionHistory.empty() || secondEntry->first < blobWorkerVersionHistory.front().second)) {
@@ -272,9 +271,11 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		}
 	}
 
-	if (configurationMonitor.areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
+	if (configurationMonitor.areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED &&
+	    blobMonitor.hasAnyRanges()) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
+		auto const& blobWorkerVersionHistory = blobMonitor.getBlobWorkerVersionHistory();
 		if (!blobWorkerVersionHistory.empty()) {
 			lastBWVer = blobWorkerVersionHistory.back().second;
 			lastIter = version_transactions.lower_bound(lastBWVer);
@@ -403,7 +404,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		}
 	} else {
 		blobWorkerTime = now();
-		unblockedAssignmentTime = now();
+		blobMonitor.setUnblockedAssignmentTimeNow();
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;

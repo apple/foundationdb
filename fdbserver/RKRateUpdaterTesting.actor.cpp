@@ -145,8 +145,7 @@ struct RKRateUpdaterTestEnvironment {
 	MockRKConfigurationMonitor configurationMonitor;
 	MockRKRecoveryTracker recoveryTracker;
 	Deque<double> actualTpsHistory;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	double unblockedAssignmentTime{ 0.0 };
+	MockRKBlobMonitor blobMonitor;
 
 	RKRateUpdater rateUpdater;
 
@@ -174,9 +173,7 @@ struct RKRateUpdaterTestEnvironment {
 		                   configurationMonitor,
 		                   recoveryTracker,
 		                   actualTpsHistory,
-		                   false,
-		                   blobWorkerVersionHistory,
-		                   unblockedAssignmentTime);
+		                   blobMonitor);
 	}
 };
 

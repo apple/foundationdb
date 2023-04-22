@@ -28,6 +28,7 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbrpc/Smoother.h"
+#include "fdbserver/IRKBlobMonitor.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKRateServer.h"
@@ -62,6 +63,7 @@ class Ratekeeper {
 	RKMetricsTracker metricsTracker;
 	RKConfigurationMonitor configurationMonitor;
 	RKRecoveryTracker recoveryTracker;
+	RKBlobMonitor blobMonitor;
 	RKRateServer rateServer;
 	RKRateUpdater normalRateUpdater, batchRateUpdater;
 	std::unique_ptr<IRKThroughputQuotaCache> quotaCache;
@@ -70,15 +72,10 @@ class Ratekeeper {
 	PromiseStream<Future<Void>> addActor;
 
 	Deque<double> actualTpsHistory;
-	double unblockedAssignmentTime;
-	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
-	bool anyBlobRanges;
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
 	void tryUpdateAutoTagThrottling();
-
-	Future<Void> monitorBlobWorkers(Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
