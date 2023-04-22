@@ -875,11 +875,11 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 
 ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterClearingDatabaseStart", tr.trState->readOptions.get().debugID.get()).log();
 			// This transaction needs to be self-conflicting, but not conflict consistently with
 			// any other transactions
@@ -894,16 +894,14 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 
 	tr = Transaction(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
-
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
 			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
 			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
@@ -935,15 +933,13 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 
 	tr = Transaction(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
 			state Optional<Key> tenantPrefix;
@@ -969,13 +965,13 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 
 				ASSERT(false);
 			}
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get());
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError", tr.trState->readOptions.get().debugID.get())
 			    .error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 	return Void();
