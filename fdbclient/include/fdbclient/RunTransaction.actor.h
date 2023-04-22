@@ -128,8 +128,8 @@ auto SystemDB(Reference<DB> db, bool write = false, bool lockAware = false, bool
 
 // SystemDB with all options true
 template <typename DB>
-auto SystemDBLockWriteNow(Reference<DB> db) {
-	return SystemDB(db, true, true, true);
+auto SystemDBWriteLockedNow(Reference<DB> db) {
+	return makeReference<SystemTransactionGenerator<DB>>(db, true, true, true);
 }
 
 #include "flow/unactorcompiler.h"

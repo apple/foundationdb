@@ -73,7 +73,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 		}
 
 		DDConfiguration::RangeConfigMapSnapshot config = wait(DDConfiguration().userRangeConfig().getSnapshot(
-		    SystemDBLockWriteNow(cx.getReference()), allKeys.begin, allKeys.end));
+		    SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
 		fmt::print(
 		    "{}\n",
 		    json_spirit::write_string(DDConfiguration::toJSON(config, includeDefault), json_spirit::pretty_print));
@@ -110,7 +110,7 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 			}
 
 			wait(DDConfiguration().userRangeConfig().updateRange(
-			    SystemDBLockWriteNow(cx.getReference()), begin, end, rangeConfig, cmd == "set"_sr));
+			    SystemDBWriteLockedNow(cx.getReference()), begin, end, rangeConfig, cmd == "set"_sr));
 		}
 	} else {
 		return fail(fmt::format("Unknown command: '{}'", cmd.printable()));
