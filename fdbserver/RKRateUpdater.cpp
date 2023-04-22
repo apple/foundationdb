@@ -7,7 +7,7 @@
 #include "flow/UnitTest.h"
 
 RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
-  : limits(limits), lastWarning(0), ratekeeperId(ratekeeperId) {}
+  : limits(limits), lastWarning(0), blobWorkerTime(now()), ratekeeperId(ratekeeperId) {}
 
 RKRateUpdater::~RKRateUpdater() = default;
 
@@ -19,7 +19,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            Deque<double> const& actualTpsHistory,
                            bool anyBlobRanges,
                            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-                           double& blobWorkerTime,
                            double& unblockedAssignmentTime) {
 	// double controlFactor = ;  // dt / eFoldingTime
 	double actualTps = getActualTps(rateServer, metricsTracker);

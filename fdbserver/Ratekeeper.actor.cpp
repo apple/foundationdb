@@ -249,7 +249,6 @@ public:
 					                              self.actualTpsHistory,
 					                              self.anyBlobRanges,
 					                              self.blobWorkerVersionHistory,
-					                              self.blobWorkerTime,
 					                              self.unblockedAssignmentTime);
 					self.batchRateUpdater.update(self.metricsTracker,
 					                             self.rateServer,
@@ -259,7 +258,6 @@ public:
 					                             self.actualTpsHistory,
 					                             self.anyBlobRanges,
 					                             self.blobWorkerVersionHistory,
-					                             self.blobWorkerTime,
 					                             self.unblockedAssignmentTime);
 					self.tryUpdateAutoTagThrottling();
 
@@ -322,7 +320,7 @@ Ratekeeper::Ratekeeper(UID id,
                                       SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                                       SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                                       SERVER_KNOBS->TARGET_BW_LAG_BATCH)),
-    blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
+    unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
 		tagThrottler = std::make_unique<GlobalTagThrottler>(

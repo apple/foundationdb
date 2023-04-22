@@ -70,7 +70,6 @@ class Ratekeeper {
 	PromiseStream<Future<Void>> addActor;
 
 	Deque<double> actualTpsHistory;
-	double blobWorkerTime;
 	double unblockedAssignmentTime;
 	Deque<std::pair<double, Version>> blobWorkerVersionHistory;
 	bool anyBlobRanges;
