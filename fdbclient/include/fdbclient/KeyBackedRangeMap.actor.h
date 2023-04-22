@@ -311,10 +311,6 @@ public:
 	                                                                                    ValueType const& valueUpdate,
 	                                                                                    bool replace = false) const {
 		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 			return self.updateRange(tr, begin, end, valueUpdate, replace);
 		});
 	}
@@ -380,10 +376,6 @@ public:
 	typename std::enable_if<is_transaction_creator<DB>, Future<LocalSnapshot>>::type
 	getSnapshot(Reference<DB> db, KeyType const& begin, KeyType const& end) const {
 		return runTransaction(db, [=, self = *this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
 			return self.getSnapshot(tr, begin, end);
 		});
 	}

@@ -445,7 +445,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 	}
 
 	state DDConfiguration::RangeConfigMapSnapshot userRangeConfig =
-	    wait(DDConfiguration().userRangeConfig().getSnapshot(cx.getReference(), allKeys.begin, allKeys.end));
+	    wait(DDConfiguration().userRangeConfig().getSnapshot(
+	        SystemDBLockWriteNow(cx.getReference()), allKeys.begin, allKeys.end));
 
 	for (; i < ranges.size(); i++) {
 		state int shard = shardOrder[i];

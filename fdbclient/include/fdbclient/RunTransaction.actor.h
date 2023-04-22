@@ -31,6 +31,7 @@
 #include <utility>
 
 #include "flow/flow.h"
+#include "fdbclient/FDBOptions.g.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR template <class Function, class DB>
@@ -64,6 +65,53 @@ Future<Void> runTransactionVoid(Reference<DB> db, Function func) {
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
+}
+
+// SystemTransactionGenerator is a Database-like wrapper which produces transactions which have selected
+// options set for lock awareness, reading and optionally writing the system keys, and immediate priority.
+// All options are false by default.
+template <typename DB>
+struct SystemTransactionGenerator : ReferenceCounted<SystemTransactionGenerator<DB>> {
+	typedef typename DB::TransactionT TransactionT;
+
+	SystemTransactionGenerator(Reference<DB> db, bool write, bool lockAware, bool immediate)
+	  : db(db), write(write), lockAware(lockAware), immediate(immediate) {}
+
+	Reference<TransactionT> createTransaction() const {
+		Reference<TransactionT> tr = db->createTransaction();
+
+		if (write) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		} else {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		}
+
+		if (immediate) {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		}
+
+		if (lockAware) {
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		}
+		return tr;
+	}
+
+	Reference<DB> db;
+	bool write;
+	bool lockAware;
+	bool immediate;
+};
+
+// Convenient wrapper for creating SystemTransactionGenerators.
+template <typename DB>
+auto SystemDB(Reference<DB> db, bool write = false, bool lockAware = false, bool immediate = false) {
+	return makeReference<SystemTransactionGenerator<DB>>(db, write, lockAware, immediate);
+}
+
+// SystemDB with all options true
+template <typename DB>
+auto SystemDBLockWriteNow(Reference<DB> db) {
+	return SystemDB(db, true, true, true);
 }
 
 #include "flow/unactorcompiler.h"
