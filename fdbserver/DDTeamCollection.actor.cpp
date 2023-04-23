@@ -3327,22 +3327,27 @@ void DDTeamCollection::updateCpuPivots() {
 }
 
 void DDTeamCollection::updateTeamEligibility() {
-	int healthyCount = 0, lowDiskCount = 0, lowCpuCount = 0;
+	int healthyCount = 0, lowDiskUtilOnly = 0, lowCpuOnly = 0, lowDiskUtilLowCpu = 0;
 	for (auto& team : teams) {
 		if (team->isHealthy()) {
 			healthyCount++;
 			if (team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio)) {
-				lowDiskCount++;
+				lowDiskUtilOnly++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			}
 
 			if (team->hasLowerCpu(teamPivots.pivotCPU)) {
-				lowCpuCount++;
+				lowCpuOnly++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+			}
+
+			if (team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio) &&
+			    (team->hasLowerCpu(teamPivots.pivotCPU))) {
+				lowDiskUtilLowCpu++;
 			}
 		} else {
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
@@ -3352,8 +3357,9 @@ void DDTeamCollection::updateTeamEligibility() {
 	TraceEvent("TeamEligibilityCount", distributorId)
 	    .detail("TotalTeamCount", teams.size())
 	    .detail("HealthyTeamCount", healthyCount)
-	    .detail("LowDiskTeamCount", lowDiskCount)
-	    .detail("LowCpuTeamCount", lowCpuCount)
+	    .detail("LowDishUtilLowCPUTeamCount", lowDiskUtilLowCpu)
+	    .detail("LowDiskUtilTeamCount", lowDiskUtilOnly)
+	    .detail("LowCPUTeamCount", lowCpuOnly)
 	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
 	    .detail("PivotCpuRatio", teamPivots.pivotCPU);
 }
