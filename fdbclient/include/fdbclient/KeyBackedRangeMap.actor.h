@@ -179,7 +179,7 @@ public:
 		// rangeEnd is past end so the result will include end if it exists
 		state KeySelector rangeEnd = KeySelector::firstGreaterThan(end);
 
-		state int readSize = 1; // BUGGIFY ? 1 : 100000;
+		state int readSize = BUGGIFY ? 1 : 100000;
 		state Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
