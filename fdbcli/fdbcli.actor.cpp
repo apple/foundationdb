@@ -26,7 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
@@ -2153,6 +2153,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!_result) {
 						is_error = true;
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "rangeconfig")) {
+					bool _result = wait(makeInterruptable(rangeConfigCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 
