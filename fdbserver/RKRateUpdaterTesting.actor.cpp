@@ -581,3 +581,27 @@ TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag2") {
 	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_INCREASE_AMOUNT));
 	return Void();
 }
+
+// Blob worker is updating its versions at half the speed of the GRV proxy.
+// After TARGET_BW_LAG * 8 seconds, the lag is equal to TARGET_BW_LAG * 4.
+// At this point, the ratekeeper throttles to 0 transactions per second.
+TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag3") {
+	state RKRateUpdaterTestEnvironment env;
+	state int64_t i = 0;
+
+	env.blobMonitor.addRange();
+	env.configurationMonitor.enableBlobGranules();
+
+	for (; i < 8 * SERVER_KNOBS->TARGET_BW_LAG; ++i) {
+		wait(delay(1.0));
+		env.blobMonitor.setCurrentVersion(SERVER_KNOBS->VERSIONS_PER_SECOND * i / 2);
+		env.rateServer.updateProxy(UID(1, 1), SERVER_KNOBS->VERSIONS_PER_SECOND * i, testActualTps);
+		env.update();
+	}
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
+	// When simulation is sped up, ratekeeper limit is artificially increased
+	if (!(g_network->isSimulated() && g_simulator->speedUpSimulation)) {
+		ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(), 0.0));
+	}
+	return Void();
+}
