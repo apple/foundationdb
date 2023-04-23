@@ -312,7 +312,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					    lastIter->second.batchTransactions - firstIter->second.batchTransactions;
 					int64_t normalTransactions = totalTransactions - batchTransactions;
 					double bwTPS;
-					if (limits.bwLagTarget == SERVER_KNOBS->TARGET_BW_LAG) {
+					if (limits.priority == TransactionPriority::DEFAULT) {
 						bwTPS = targetRateRatio * (totalTransactions) / elapsed;
 					} else {
 						bwTPS = std::max(0.0, ((targetRateRatio * (totalTransactions)) - normalTransactions) / elapsed);
