@@ -95,7 +95,7 @@ public:
 		state double lastLoggedTime = 0;
 
 		loop {
-			while (!self->configurationMonitor->areBlobGranulesEnabled()) {
+			while (!self->configurationMonitor.areBlobGranulesEnabled()) {
 				// FIXME: clear blob worker state if granules were previously enabled?
 				wait(delay(SERVER_KNOBS->SERVER_LIST_DELAY));
 			}
@@ -111,7 +111,7 @@ public:
 				wait(store(blobWorkers, getBlobWorkers(self->db, true, &grv)));
 				wait(store(self->anyBlobRanges, anyBlobRangesCheck));
 			} else {
-				grv = self->recoveryTracker->getMaxVersion();
+				grv = self->recoveryTracker.getMaxVersion();
 			}
 
 			lastStartTime = startTime;
@@ -173,7 +173,7 @@ public:
 					lastLoggedTime = now();
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
-					    .detail("MaxVer", self->recoveryTracker->getMaxVersion())
+					    .detail("MaxVer", self->recoveryTracker.getMaxVersion())
 					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID())
 					    .detail("BMBlocked",
 					            now() - self->unblockedAssignmentTime >= SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL);
@@ -191,13 +191,13 @@ public:
 
 		TraceEvent("RatekeeperStarting", rkInterf.id());
 		self.addActor.send(waitFailureServer(rkInterf.waitFailure.getFuture()));
-		self.addActor.send(self.configurationMonitor->run());
+		self.addActor.send(self.configurationMonitor.run());
 
-		self.addActor.send(self.metricsTracker->run());
+		self.addActor.send(self.metricsTracker.run());
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
-		self.addActor.send(self.rateServer->run(
-		    *self.normalRateUpdater, *self.batchRateUpdater, *self.tagThrottler, *self.recoveryTracker));
+		self.addActor.send(self.rateServer.run(
+		    self.normalRateUpdater, self.batchRateUpdater, *self.tagThrottler, self.recoveryTracker));
 
 		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 			self.addActor.send(self.quotaCache->run());
@@ -229,9 +229,9 @@ public:
 		try {
 			loop choose {
 				when(wait(timeout)) {
-					double actualTps = self.rateServer->getSmoothReleasedTransactionRate();
+					double actualTps = self.rateServer.getSmoothReleasedTransactionRate();
 					actualTps = std::max(std::max(1.0, actualTps),
-					                     self.metricsTracker->getSmoothTotalDurableBytesRate() /
+					                     self.metricsTracker.getSmoothTotalDurableBytesRate() /
 					                         CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT);
 
 					if (self.actualTpsHistory.size() > SERVER_KNOBS->MAX_TPS_HISTORY_SAMPLES) {
@@ -239,32 +239,32 @@ public:
 					}
 					self.actualTpsHistory.push_back(actualTps);
 
-					self.recoveryTracker->cleanupOldRecoveries();
+					self.recoveryTracker.cleanupOldRecoveries();
 
-					self.normalRateUpdater->update(*self.metricsTracker,
-					                               *self.rateServer,
-					                               *self.tagThrottler,
-					                               *self.configurationMonitor,
-					                               *self.recoveryTracker,
-					                               self.actualTpsHistory,
-					                               self.anyBlobRanges,
-					                               self.blobWorkerVersionHistory,
-					                               self.blobWorkerTime,
-					                               self.unblockedAssignmentTime);
-					self.batchRateUpdater->update(*self.metricsTracker,
-					                              *self.rateServer,
+					self.normalRateUpdater.update(self.metricsTracker,
+					                              self.rateServer,
 					                              *self.tagThrottler,
-					                              *self.configurationMonitor,
-					                              *self.recoveryTracker,
+					                              self.configurationMonitor,
+					                              self.recoveryTracker,
 					                              self.actualTpsHistory,
 					                              self.anyBlobRanges,
 					                              self.blobWorkerVersionHistory,
 					                              self.blobWorkerTime,
 					                              self.unblockedAssignmentTime);
+					self.batchRateUpdater.update(self.metricsTracker,
+					                             self.rateServer,
+					                             *self.tagThrottler,
+					                             self.configurationMonitor,
+					                             self.recoveryTracker,
+					                             self.actualTpsHistory,
+					                             self.anyBlobRanges,
+					                             self.blobWorkerVersionHistory,
+					                             self.blobWorkerTime,
+					                             self.unblockedAssignmentTime);
 					self.tryUpdateAutoTagThrottling();
 
-					self.rateServer->updateLastLimited(self.batchRateUpdater->getTpsLimit());
-					self.rateServer->cleanupExpiredGrvProxies();
+					self.rateServer.updateLastLimited(self.batchRateUpdater.getTpsLimit());
+					self.rateServer.cleanupExpiredGrvProxies();
 					timeout = delayJittered(SERVER_KNOBS->METRIC_UPDATE_RATE);
 				}
 				when(HaltRatekeeperRequest req = waitNext(rkInterf.haltRatekeeper.getFuture())) {
@@ -296,45 +296,44 @@ Ratekeeper::Ratekeeper(UID id,
                        Database db,
                        Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                        RatekeeperInterface rkInterf)
-  : id(id), db(db), blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
-	metricsTracker =
-	    std::make_unique<RKMetricsTracker>(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo);
+  : id(id), db(db), metricsTracker(id, db, rkInterf.reportCommitCostEstimation.getFuture(), dbInfo),
+    configurationMonitor(db, dbInfo),
+    recoveryTracker(IAsyncListener<bool>::create(
+        dbInfo,
+        [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; })),
+    rateServer(rkInterf.getRateInfo.getFuture()),
+    normalRateUpdater(id,
+                      RatekeeperLimits(TransactionPriority::DEFAULT,
+                                       /*context=*/"",
+                                       SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
+                                       SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
+                                       SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
+                                       SERVER_KNOBS->SPRING_BYTES_TLOG,
+                                       SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
+                                       SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
+                                       SERVER_KNOBS->TARGET_BW_LAG)),
+    batchRateUpdater(id,
+                     RatekeeperLimits(TransactionPriority::BATCH,
+                                      /*context=*/"Batch",
+                                      SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
+                                      SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH,
+                                      SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
+                                      SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
+                                      SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
+                                      SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
+                                      SERVER_KNOBS->TARGET_BW_LAG_BATCH)),
+    blobWorkerTime(now()), unblockedAssignmentTime(now()), anyBlobRanges(false) {
 	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
 		quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
 		tagThrottler = std::make_unique<GlobalTagThrottler>(
-		    *metricsTracker, *quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
+		    metricsTracker, *quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 	} else {
 		tagThrottler = std::make_unique<TagThrottler>(db, id);
 	}
-	configurationMonitor = std::make_unique<RKConfigurationMonitor>(db, dbInfo);
-	recoveryTracker = std::make_unique<RKRecoveryTracker>(IAsyncListener<bool>::create(
-	    dbInfo, [](auto const& info) { return info.recoveryState < RecoveryState::ACCEPTING_COMMITS; }));
-	rateServer = std::make_unique<RKRateServer>(rkInterf.getRateInfo.getFuture());
-
-	RatekeeperLimits normalLimits(TransactionPriority::DEFAULT,
-	                              /*context=*/"",
-	                              SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER,
-	                              SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER,
-	                              SERVER_KNOBS->TARGET_BYTES_PER_TLOG,
-	                              SERVER_KNOBS->SPRING_BYTES_TLOG,
-	                              SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE,
-	                              SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS,
-	                              SERVER_KNOBS->TARGET_BW_LAG);
-	RatekeeperLimits batchLimits(TransactionPriority::BATCH,
-	                             /*context=*/"Batch",
-	                             SERVER_KNOBS->TARGET_BYTES_PER_STORAGE_SERVER_BATCH,
-	                             SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER_BATCH,
-	                             SERVER_KNOBS->TARGET_BYTES_PER_TLOG_BATCH,
-	                             SERVER_KNOBS->SPRING_BYTES_TLOG_BATCH,
-	                             SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
-	                             SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
-	                             SERVER_KNOBS->TARGET_BW_LAG_BATCH);
-	normalRateUpdater = std::make_unique<RKRateUpdater>(id, normalLimits);
-	batchRateUpdater = std::make_unique<RKRateUpdater>(id, batchLimits);
 }
 
 void Ratekeeper::tryUpdateAutoTagThrottling() {
-	auto const& storageQueueInfo = metricsTracker->getStorageQueueInfo();
+	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
 		addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
