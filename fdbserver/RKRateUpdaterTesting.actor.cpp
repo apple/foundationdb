@@ -160,7 +160,7 @@ struct RKRateUpdaterTestEnvironment {
 	                                 testSpringBytes,
 	                                 testTargetVersionDifference,
 	                                 testTargetVersionDifference,
-	                                 300.0)) {
+	                                 SERVER_KNOBS->TARGET_BW_LAG)) {
 		for (int i = 0; i < SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES; ++i) {
 			actualTpsHistory.push_back(testActualTps);
 		}
@@ -533,5 +533,51 @@ TEST_CASE("/fdbserver/RKRateUpdater/StorageReadableBehind") {
 	env.update();
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::storage_server_readable_behind);
 	ASSERT_LT(env.rateUpdater.getTpsLimit(), testActualTps);
+	return Void();
+}
+
+// Blob worker is updating its versions at half the speed of the GRV proxy.
+// After TARGET_BW_LAG*4 seconds, the lag is equal to TARGET_BW_LAG*2.
+// At this point, the ratekeeper throttles to a rate BW_LAG_DECREASE_AMOUNT
+// times the blob worker rate.
+TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag1") {
+	state RKRateUpdaterTestEnvironment env;
+	state int64_t i = 0;
+
+	env.blobMonitor.addRange();
+	env.configurationMonitor.enableBlobGranules();
+
+	for (; i < 4 * SERVER_KNOBS->TARGET_BW_LAG; ++i) {
+		wait(delay(1.0));
+		env.blobMonitor.setCurrentVersion(SERVER_KNOBS->VERSIONS_PER_SECOND * i / 2);
+		env.rateServer.updateProxy(UID(1, 1), SERVER_KNOBS->VERSIONS_PER_SECOND * i, testActualTps);
+		env.update();
+	}
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(),
+	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT));
+	return Void();
+}
+
+// Blob worker is updating its versions at half the speed of the GRV proxy.
+// After TARGET_BW_LAG * 1.5 seconds, the lag is equal to TARGET_BW_LAG * 0.75.
+// At this point, the ratekeeper throttles to a rate BW_LAG_INCREASE_AMOUNT
+// times the blob worker rate.
+TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag2") {
+	state RKRateUpdaterTestEnvironment env;
+	state int64_t i = 0;
+
+	env.blobMonitor.addRange();
+	env.configurationMonitor.enableBlobGranules();
+
+	for (; i < 3 * SERVER_KNOBS->TARGET_BW_LAG / 2; ++i) {
+		wait(delay(1.0));
+		env.blobMonitor.setCurrentVersion(SERVER_KNOBS->VERSIONS_PER_SECOND * i / 2);
+		env.rateServer.updateProxy(UID(1, 1), SERVER_KNOBS->VERSIONS_PER_SECOND * i, testActualTps);
+		env.update();
+	}
+	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
+	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(),
+	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_INCREASE_AMOUNT));
 	return Void();
 }

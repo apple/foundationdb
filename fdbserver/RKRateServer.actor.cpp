@@ -108,3 +108,10 @@ Future<Void> RKRateServer::run(IRKRateUpdater const& normalRateUpdater,
                                IRKRecoveryTracker& recoveryTracker) {
 	return RKRateServerImpl::run(this, &normalRateUpdater, &batchRateUpdater, &tagThrottler, &recoveryTracker);
 }
+
+void MockRKRateServer::updateProxy(UID proxyId, Version v, int newTotalTransactions) {
+	auto& proxy = grvProxyInfo[proxyId];
+	proxy.version = v;
+	proxy.totalTransactions += newTotalTransactions;
+	proxy.lastUpdateTime = now();
+}

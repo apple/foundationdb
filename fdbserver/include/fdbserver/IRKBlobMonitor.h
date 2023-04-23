@@ -57,12 +57,16 @@ public:
 
 class MockRKBlobMonitor : public IRKBlobMonitor {
 	Deque<std::pair<double, Version>> versionHistory;
+	bool anyBlobRanges{ false };
 
 public:
 	~MockRKBlobMonitor() = default;
 	Deque<std::pair<double, Version>> const& getVersionHistory() const& override { return versionHistory; }
-	bool hasAnyRanges() const override { return false; }
+	bool hasAnyRanges() const override { return anyBlobRanges; }
 	double getUnblockedAssignmentTime() const override { return now(); }
 	void setUnblockedAssignmentTimeNow() override {}
 	Future<Void> run(IRKConfigurationMonitor const&, IRKRecoveryTracker const&) override { return Never(); }
+
+	void setCurrentVersion(Version v);
+	void addRange() { anyBlobRanges = true; }
 };

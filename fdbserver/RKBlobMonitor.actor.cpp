@@ -152,3 +152,11 @@ Future<Void> RKBlobMonitor::run(IRKConfigurationMonitor const& configurationMoni
                                 IRKRecoveryTracker const& recoveryTracker) {
 	return RKBlobMonitorImpl::run(this, &configurationMonitor, &recoveryTracker);
 }
+
+void MockRKBlobMonitor::setCurrentVersion(Version v) {
+	versionHistory.emplace_back(now(), v);
+	while (versionHistory.size() > SERVER_KNOBS->MIN_BW_HISTORY &&
+	       versionHistory[1].first < now() - SERVER_KNOBS->BW_ESTIMATION_INTERVAL) {
+		versionHistory.pop_front();
+	}
+}
