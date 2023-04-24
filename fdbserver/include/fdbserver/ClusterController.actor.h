@@ -33,12 +33,14 @@
 #define FDBSERVER_CLUSTERCONTROLLER_ACTOR_H
 
 #include "fdbclient/DatabaseContext.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbrpc/Replication.h"
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/SystemMonitor.h"
+
+#include "metacluster/MetaclusterMetrics.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -148,7 +150,7 @@ public:
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
-		MetaclusterMetrics metaclusterMetrics;
+		metacluster::MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()
 		  : clientInfo(new AsyncVar<ClientDBInfo>()), serverInfo(new AsyncVar<ServerDBInfo>()),
@@ -202,7 +204,6 @@ public:
 			newClientInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.id = deterministicRandom()->randomUniqueID();
 			newInfo.infoGeneration = ++dbInfoCount;
-			newInfo.encryptKeyProxy = interf;
 			newInfo.client.encryptKeyProxy = interf;
 			newClientInfo.encryptKeyProxy = interf;
 			serverInfo->set(newInfo);
@@ -232,7 +233,6 @@ public:
 			} else if (t == ProcessClass::BlobMigratorClass) {
 				newInfo.blobMigrator = Optional<BlobMigratorInterface>();
 			} else if (t == ProcessClass::EncryptKeyProxyClass) {
-				newInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newInfo.client.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 				newClientInfo.encryptKeyProxy = Optional<EncryptKeyProxyInterface>();
 			} else if (t == ProcessClass::ConsistencyScanClass) {
@@ -333,8 +333,8 @@ public:
 		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().blobMigrator.present() &&
 		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().encryptKeyProxy.present() &&
-		        db.serverInfo->get().encryptKeyProxy.get().locality.processId() == processId) ||
+		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
+		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
 		       (db.serverInfo->get().consistencyScan.present() &&
 		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 	}

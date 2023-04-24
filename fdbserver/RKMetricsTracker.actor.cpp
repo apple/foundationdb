@@ -234,7 +234,7 @@ void RKMetricsTracker::updateCommitCostEstimation(
 	}
 }
 
-Map<UID, StorageQueueInfo> const& RKMetricsTracker::getStorageQueueInfo() const {
+Map<UID, StorageQueueInfo> const& RKMetricsTracker::getStorageQueueInfo() const& {
 	return storageQueueInfo;
 }
 
@@ -242,7 +242,7 @@ bool RKMetricsTracker::ssListFetchTimedOut() const {
 	return now() - lastSSListFetchedTimestamp > SERVER_KNOBS->STORAGE_SERVER_LIST_FETCH_TIMEOUT;
 }
 
-Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const {
+Map<UID, TLogQueueInfo> const& RKMetricsTracker::getTlogQueueInfo() const& {
 	return tlogQueueInfo;
 }
 
@@ -317,7 +317,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
@@ -357,7 +357,7 @@ TLogQueueInfo::TLogQueueInfo(UID id)
     smoothInputBytes(SERVER_KNOBS->SMOOTHING_AMOUNT), verySmoothDurableBytes(SERVER_KNOBS->SLOW_SMOOTHING_AMOUNT),
     smoothFreeSpace(SERVER_KNOBS->SMOOTHING_AMOUNT), smoothTotalSpace(SERVER_KNOBS->SMOOTHING_AMOUNT) {
 	// FIXME: this is a tacky workaround for a potential uninitialized use in trackTLogQueueInfo (copied
-	// from storageQueueInfO)
+	// from storageQueueInfo)
 	lastReply.instanceID = -1;
 }
 

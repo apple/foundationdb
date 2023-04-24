@@ -718,6 +718,8 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below a certain threshold
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
+	// Interval at which ratekeeper logs statistics for each tag:
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -824,7 +826,13 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	// Minimum read throughput (in pages/second) that a tag must register
+	// on a storage server in order for tag throughput statistics to be
+	// emitted to ratekeeper.
 	int64_t MIN_TAG_READ_PAGES_RATE;
+	// Minimum write throughput (in pages/second, multiplied by fungibility ratio)
+	// that a tag must register on a storage server in order for ratekeeper to
+	// track the write throughput of this tag on the storage server.
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
@@ -889,6 +897,8 @@ public:
 	                                          // Enabling this can reduce toil of manually restarting the SS.
 	                                          // Enable with caution: If io_timeout is caused by disk failure, we won't
 	                                          // want to restart the SS, which increases risk of data corruption.
+	int STORAGE_DISK_CLEANUP_MAX_RETRIES; // Max retries to cleanup left-over disk files from last storage server
+	int STORAGE_DISK_CLEANUP_RETRY_INTERVAL; // Sleep interval between cleanup retries
 
 	// Test harness
 	double WORKER_POLL_DELAY;
@@ -1104,6 +1114,7 @@ public:
 	std::string REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_MODE;
 	std::string REST_KMS_CONNECTOR_VALIDATION_TOKEN_DETAILS;
+	bool ENABLE_REST_KMS_COMMUNICATION;
 	bool REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKEN_MAX_SIZE;
 	int REST_KMS_CONNECTOR_VALIDATION_TOKENS_MAX_PAYLOAD_SIZE;

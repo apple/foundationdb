@@ -26,16 +26,17 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/simulator.h"
 #include "flow/ActorCollection.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include "flow/network.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 std::string BackupAgentBase::formatTime(int64_t epochs) {
 	time_t curTime = (time_t)epochs;
@@ -371,12 +372,14 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 				try {
 					if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-						TextAndHeaderCipherKeys cipherKeys = wait(getEncryptCipherKeys(
-						    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
+						TextAndHeaderCipherKeys cipherKeys =
+						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+						        dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
 						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
 					} else {
-						TextAndHeaderCipherKeys cipherKeys = wait(
-						    getEncryptCipherKeys(dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
+						TextAndHeaderCipherKeys cipherKeys =
+						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+						        dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
 						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
 					}
 				} catch (Error& e) {
@@ -1371,7 +1374,7 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 	if (systemBackupRanges.empty()) {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), prefixRange(TenantMetadata::subspace()));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
-		                                  singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 	}
 
 	return systemBackupRanges;

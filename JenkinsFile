@@ -13,8 +13,6 @@ pipeline {
                     repo_url = "https://github.com/snowflakedb/frostdb.git"
                     scmInfo = checkout scm
                     println("${scmInfo}")
-                    //extracting the LDAP portion from sfc-gh-xxx
-                    user_id=sh(script: "git show -s --pretty=%ae | cut -d '@' -f 1 | cut -d '-' -f 3", returnStdout: true).trim()
                     precommit_job_status = "SUCCESS"
                     labels = getLabels()
                 }
@@ -35,11 +33,11 @@ pipeline {
 
                     if ("${j.result}" == "SUCCESS") {
                         currentBuild.result = 'SUCCESS'
-                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "success");
+                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "completed", "success");
                     } else {
                         currentBuild.result = 'FAILURE'
                         println("clang format check failure.")
-                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "failure");
+                        createCheck("clang format check", "clang format check", j.absoluteUrl+"/clang", "completed", "failure");
                     }
                 }
             }
@@ -54,10 +52,13 @@ pipeline {
                     if ("${build_trigger_cause}" == "GitHub pull request comment" &&
                             "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
                         println("Moving ahead with pipeline")
-                        createCheck("github_comment", "Criteria Satisfied", "", "success");
+
+                        //extracting the LDAP portion from commentAuthor sfc-gh-xxx
+                        user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
+                        createCheck("github_comment", "Criteria Satisfied", "", "completed", "success");
                     } else {
                         def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
-                        createCheck("github_comment", triggerMessage, triggerMessage, "failure");
+                        createCheck("github_comment", triggerMessage, triggerMessage, "completed", "failure");
                         println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
                         currentBuild.result = 'FAILURE'
                         error("Aborting the build.")
@@ -114,15 +115,15 @@ pipeline {
     }
 }
 
-void trigger_job(jobname, profile) {
+void trigger_job(jobName, profile) {
     script {
         if (labels.contains("bypass_all_checks")) {
             msg = "Skipped due to label 'bypass_all_checks'"
-            createCheck(jobname, msg, msg, "success");
+            createCheck(jobName, msg, msg, "completed", "success");
             return
         }
 
-        createCheck(jobname, "In progress", "In Progress", "neutral");
+        createCheck(jobName, "Build and Test", "In Progress", "in_progress", "");
 
         def job_params = [string(name: 'ARCH', value: "x86_64"),
                          string(name: 'GIT_REMOTE', value: "${repo_url}"),
@@ -139,7 +140,7 @@ void trigger_job(jobname, profile) {
         def logLines = logContent.split("\n")
         def testCount = 0
         def details = []
-        def jobStatus = "success"
+        def jobConclusion = "success"
         def failureCount = 0
         def summary = ""
 
@@ -149,7 +150,7 @@ void trigger_job(jobname, profile) {
                 build_details = line.split("Build job run status:")
                 build_info = build_details[1].split(" ")
                 if (build_info[0] != "SUCCESS") {
-                    jobStatus = "failure"
+                    jobConclusion = "failure"
                     failureCount += 1
                 }
                 summary += "Build Status: " + build_info[0] + ", Build Job URL : " + build_info[1] + " , "
@@ -162,7 +163,7 @@ void trigger_job(jobname, profile) {
                 if (build_info[0] != "SUCCESS") {
                      // Ignore test failure if label 'bypass_test_failures' is set
                     if (!labels.contains("bypass_test_failures")) {
-                        jobStatus = "failure"
+                        jobConclusion = "failure"
                     }
                     failureCount += 1
                 }
@@ -171,32 +172,44 @@ void trigger_job(jobname, profile) {
                            " Test Job URL : " + build_info[1] + " ,"
 
                 if (labels.contains("bypass_test_failures")) {
-                    jobStatus = "success"
+                    jobConclusion = "success"
                 }
 
             }
         }
         title = "Failure count : " + Integer.toString(failureCount)
-        createCheck(jobname, title, summary, jobStatus);
+        createCheck(jobName, title, summary, "completed", jobConclusion);
 
-        if (job_status == "failure") {
+        if (jobConclusion == "failure") {
             // In case if any of the build or test fails we will mark current build as FAILURE
             precommit_job_status = "FAILURE"
         }
     }
 }
 
-void createCheck(context, title, summary, job_status) {
+void createCheck(context, title, summary, jobStatus, jobConclusion) {
     withCredentials([usernamePassword(credentialsId: 'Jenkins-FDB-GithubApp ',
     usernameVariable: 'GITHUB_USER',
     passwordVariable: 'GITHUB_TOKEN')]) {
         //create check
-        sh """curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" \\
-              -X POST https://api.github.com/repos/snowflakedb/frostdb/check-runs \\
-             -d '{"name":"${context}","head_sha":"${scmInfo["GIT_COMMIT"]}",
-                  "status":"completed", "conclusion":"${job_status}",
-                  "output":{"title":"${title}","summary":"${summary}"}'
-        """
+        // Handling separate condition for 'in_progress' and 'completed' jobStatus because
+        //as per Github API's providing conclusion will automatically set the status parameter to completed
+        if ("${jobStatus}" == "in_progress") {
+            sh """curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" \\
+                  -X POST https://api.github.com/repos/snowflakedb/frostdb/check-runs \\
+                 -d '{"name":"${context}","head_sha":"${scmInfo["GIT_COMMIT"]}",
+                      "status":"in_progress",
+                      "output":{"title":"${title}","summary":"${summary}"}'
+            """
+        }
+        if ("${jobStatus}" == "completed") {
+            sh """curl -S -u "$GITHUB_USER:$GITHUB_TOKEN" \\
+                  -X POST https://api.github.com/repos/snowflakedb/frostdb/check-runs \\
+                 -d '{"name":"${context}","head_sha":"${scmInfo["GIT_COMMIT"]}",
+                      "status":"completed", "conclusion":"${jobConclusion}",
+                      "output":{"title":"${title}","summary":"${summary}"}'
+            """
+        }
     }
 }
 

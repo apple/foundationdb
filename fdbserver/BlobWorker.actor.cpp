@@ -22,7 +22,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleFiles.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -39,9 +39,10 @@
 
 #include "fdbserver/BlobWorker.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
-#include "fdbclient/GetEncryptCipherKeys.actor.h"
+#include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/IKeyValueStore.h"
@@ -360,14 +361,16 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	std::unordered_set<EncryptCipherDomainId> domainIds;
 	domainIds.emplace(domainId);
 	std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>> domainKeyMap =
-	    wait(getLatestEncryptCipherKeys(bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestEncryptCipherKeys(
+	        bwData->dbInfo, domainIds, BlobCipherMetrics::BLOB_GRANULE));
 
 	auto domainKeyItr = domainKeyMap.find(domainId);
 	ASSERT(domainKeyItr != domainKeyMap.end());
 	cipherKeysCtx.textCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(domainKeyItr->second, *arena);
 
 	TextAndHeaderCipherKeys systemCipherKeys =
-	    wait(getLatestSystemEncryptCipherKeys(bwData->dbInfo, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getLatestSystemEncryptCipherKeys(bwData->dbInfo,
+	                                                                              BlobCipherMetrics::BLOB_GRANULE));
 	ASSERT(systemCipherKeys.cipherHeaderKey.isValid());
 	cipherKeysCtx.headerCipherKey = BlobGranuleCipherKey::fromBlobCipherKey(systemCipherKeys.cipherHeaderKey, *arena);
 
@@ -394,7 +397,8 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
-	    wait(getEncryptCipherKeys(bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
+	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
+	        bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 
@@ -1824,7 +1828,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
                           std::deque<std::pair<Version, Version>>& rollbacksInProgress,
                           std::deque<std::pair<Version, Version>>& rollbacksCompleted) {
 	Version cfRollbackVersion;
-	if (metadata->pendingDeltaVersion > rollbackVersion) {
+	if (metadata->pendingDeltaVersion.get() > rollbackVersion) {
 		// if we already started writing mutations to a delta or snapshot file with version > rollbackVersion,
 		// we need to rescind those delta file writes
 		ASSERT(!inFlightFiles.empty());
@@ -1873,7 +1877,8 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 			inFlightFiles.pop_back();
 			toPop--;
 		}
-		metadata->pendingDeltaVersion = cfRollbackVersion;
+		metadata->pendingDeltaVersion = NotifiedVersion();
+		metadata->pendingDeltaVersion.set(cfRollbackVersion);
 		if (BW_DEBUG) {
 			fmt::print("[{0} - {1}) rollback discarding all {2} in-memory mutations",
 			           metadata->keyRange.begin.printable(),
@@ -2095,7 +2100,7 @@ ACTOR Future<Void> forceFlushCleanup(Reference<BlobWorkerData> bwData, Reference
 		return Void();
 	}
 	wait(delay(cleanupDelay));
-	if (metadata->forceFlushVersion.get() < v && metadata->pendingDeltaVersion < v) {
+	if (metadata->forceFlushVersion.get() < v && metadata->pendingDeltaVersion.get() < v) {
 		metadata->forceFlushVersion.set(v);
 		++bwData->stats.forceFlushCleanups;
 		if (BW_DEBUG) {
@@ -2264,7 +2269,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		                                                                       : success(inFlightFiles.back().future));
 
 		metadata->durableDeltaVersion.set(startVersion);
-		metadata->pendingDeltaVersion = startVersion;
+		metadata->pendingDeltaVersion.set(startVersion);
 		metadata->bufferedDeltaVersion = startVersion;
 		metadata->knownCommittedVersion = startVersion;
 		metadata->resetReadStats();
@@ -2519,7 +2524,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								// FIXME: add counter for granule rollbacks and rollbacks skipped?
 								// explicitly check last delta in currentDeltas because lastVersion and
 								// bufferedDeltaVersion include empties
-								if (metadata->pendingDeltaVersion <= rollbackVersion &&
+								if (metadata->pendingDeltaVersion.get() <= rollbackVersion &&
 								    (metadata->currentDeltas.empty() ||
 								     metadata->currentDeltas.back().version <= rollbackVersion)) {
 									CODE_PROBE(true, "Granule ignoring rollback");
@@ -2684,7 +2689,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// The force flush contract is a version cannot be put in forceFlushVersion unless the change feed
 			// is already whenAtLeast that version
 			// FIXME: with non-uniform delta file sizes, we could potentially over-shoot target write amp
-			bool forceFlush = !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion;
+			bool forceFlush =
+			    !forceFlushVersions.empty() && forceFlushVersions.back() > metadata->pendingDeltaVersion.get();
 			bool doEarlyFlush = !metadata->currentDeltas.empty() && metadata->doEarlyReSnapshot();
 			CODE_PROBE(forceFlush, "Force flushing granule");
 			if ((processedAnyMutations &&
@@ -2712,7 +2718,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				}
 				if (!metadata->currentDeltas.empty()) {
 					ASSERT(lastDeltaVersion >= metadata->currentDeltas.back().version);
-					ASSERT(metadata->pendingDeltaVersion < metadata->currentDeltas.front().version);
+					ASSERT(metadata->pendingDeltaVersion.get() < metadata->currentDeltas.front().version);
 				} else {
 					ASSERT(forceFlush);
 					ASSERT(!forceFlushVersions.empty());
@@ -2732,7 +2738,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				// change feed is considered complete.
 				Optional<std::pair<KeyRange, UID>> oldChangeFeedDataComplete;
 				if (startState.splitParentGranule.present() &&
-				    metadata->pendingDeltaVersion + 1 < startState.changeFeedStartVersion &&
+				    metadata->pendingDeltaVersion.get() + 1 < startState.changeFeedStartVersion &&
 				    lastDeltaVersion + 1 >= startState.changeFeedStartVersion) {
 					oldChangeFeedDataComplete = startState.splitParentGranule.get();
 				}
@@ -2755,7 +2761,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					                               startState.granuleID,
 					                               metadata->originalEpoch,
 					                               metadata->originalSeqno,
-					                               metadata->pendingDeltaVersion,
+					                               metadata->pendingDeltaVersion.get(),
 					                               lastDeltaVersion,
 					                               previousFuture,
 					                               waitVersionCommitted(bwData, metadata, lastDeltaVersion),
@@ -2782,8 +2788,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				    InFlightFile(dfFuture, lastDeltaVersion, metadata->bufferedDeltaBytes, false, emptyDeltaFile));
 
 				// add new pending delta file
-				ASSERT(metadata->pendingDeltaVersion < lastDeltaVersion);
-				metadata->pendingDeltaVersion = lastDeltaVersion;
+				ASSERT(metadata->pendingDeltaVersion.get() < lastDeltaVersion);
+				metadata->pendingDeltaVersion.set(lastDeltaVersion);
 				ASSERT(metadata->bufferedDeltaVersion <= lastDeltaVersion);
 				metadata->bufferedDeltaVersion = lastDeltaVersion; // In case flush was forced at non-mutation version
 				metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
@@ -2832,7 +2838,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           "waiting for outstanding {5} files to finish\n",
 					           metadata->keyRange.begin.printable(),
 					           metadata->keyRange.end.printable(),
-					           metadata->pendingDeltaVersion,
+					           metadata->pendingDeltaVersion.get(),
 					           metadata->bytesInNewDeltaFiles,
 					           metadata->writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
@@ -2852,9 +2858,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				} else {
 					previousFuture = Future<BlobFileIndex>(metadata->files.deltaFiles.back());
 				}
-				int64_t versionsSinceLastSnapshot = metadata->pendingDeltaVersion - metadata->pendingSnapshotVersion;
+				int64_t versionsSinceLastSnapshot =
+				    metadata->pendingDeltaVersion.get() - metadata->pendingSnapshotVersion;
 				Future<BlobFileIndex> inFlightBlobSnapshot;
-				if (metadata->pendingDeltaVersion >= startState.changeFeedStartVersion) {
+				if (metadata->pendingDeltaVersion.get() >= startState.changeFeedStartVersion) {
 					inFlightBlobSnapshot = checkSplitAndReSnapshot(bwData,
 					                                               bstore,
 					                                               metadata,
@@ -2868,10 +2875,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					metadata->writeAmpTarget.decrease(metadata->bytesInNewDeltaFiles);
 				}
 				inFlightFiles.push_back(
-				    InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion, 0, true, false));
+				    InFlightFile(inFlightBlobSnapshot, metadata->pendingDeltaVersion.get(), 0, true, false));
 				pendingSnapshots++;
 
-				metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion;
+				metadata->pendingSnapshotVersion = metadata->pendingDeltaVersion.get();
 
 				// reset metadata
 				metadata->bytesInNewDeltaFiles = 0;
@@ -3602,7 +3609,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 		fmt::print("WFV {0}) CF={1}, pendingD={2}, durableD={3}, pendingS={4}, durableS={5}\n",
 		           v,
 		           metadata->activeCFData.get()->getVersion(),
-		           metadata->pendingDeltaVersion,
+		           metadata->pendingDeltaVersion.get(),
 		           metadata->durableDeltaVersion.get(),
 		           metadata->pendingSnapshotVersion,
 		           metadata->durableSnapshotVersion.get());
@@ -3612,7 +3619,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 
 	if (v <= metadata->activeCFData.get()->getVersion() &&
 	    (v <= metadata->durableDeltaVersion.get() ||
-	     metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion) &&
+	     metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion.get()) &&
 	    (v <= metadata->durableSnapshotVersion.get() ||
 	     metadata->durableSnapshotVersion.get() == metadata->pendingSnapshotVersion)) {
 		CODE_PROBE(true, "Granule read not waiting");
@@ -3627,7 +3634,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	}
 
 	// wait for any pending delta and snapshot files as of the moment the change feed version caught up.
-	state Version pendingDeltaV = metadata->pendingDeltaVersion;
+	state Version pendingDeltaV = metadata->pendingDeltaVersion.get();
 	state Version pendingSnapshotV = metadata->pendingSnapshotVersion;
 
 	// If there are mutations that are no longer buffered but have not been
@@ -3650,10 +3657,10 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	// kick off another delta file and roll the mutations. In that case, we must return the new delta
 	// file instead of in memory mutations, so we wait for that delta file to complete
 
-	while (v > metadata->durableDeltaVersion.get() && metadata->pendingDeltaVersion > pendingDeltaV) {
+	while (v > metadata->durableDeltaVersion.get() && metadata->pendingDeltaVersion.get() > pendingDeltaV) {
 		CODE_PROBE(true, "Granule mutations flushed while waiting for files to complete");
-		Version waitVersion = std::min(v, metadata->pendingDeltaVersion);
-		pendingDeltaV = metadata->pendingDeltaVersion;
+		Version waitVersion = std::min(v, metadata->pendingDeltaVersion.get());
+		pendingDeltaV = metadata->pendingDeltaVersion.get();
 		wait(metadata->durableDeltaVersion.whenAtLeast(waitVersion));
 	}
 
@@ -3967,18 +3974,18 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 					// FIXME: do trivial key bounds here if key range is not fully contained in request key
 					// range
 					if (req.readVersion > metadata->durableDeltaVersion.get() && !metadata->currentDeltas.empty()) {
-						if (metadata->durableDeltaVersion.get() != metadata->pendingDeltaVersion) {
+						if (metadata->durableDeltaVersion.get() != metadata->pendingDeltaVersion.get()) {
 							fmt::print(
 							    "real-time read [{0} - {1}) @ {2} doesn't have mutations!! durable={3}, pending={4}\n",
 							    metadata->keyRange.begin.printable(),
 							    metadata->keyRange.end.printable(),
 							    req.readVersion,
 							    metadata->durableDeltaVersion.get(),
-							    metadata->pendingDeltaVersion);
+							    metadata->pendingDeltaVersion.get());
 						}
 
 						// prune mutations based on begin version, if possible
-						ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion);
+						ASSERT(metadata->durableDeltaVersion.get() == metadata->pendingDeltaVersion.get());
 						MutationsAndVersionRef* mutationIt = metadata->currentDeltas.begin();
 						if (granuleBeginVersion > metadata->currentDeltas.back().version) {
 							CODE_PROBE(true, "beginVersion pruning all in-memory mutations");
@@ -5066,7 +5073,7 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 		// if delta file is already written after flush version, but that delta file did not compact,
 		// we have to write another one to trigger compaction
 		if (req.compactAfter && metadata->pendingSnapshotVersion < req.flushVersion &&
-		    metadata->pendingDeltaVersion >= req.flushVersion) {
+		    metadata->pendingDeltaVersion.get() >= req.flushVersion) {
 			CODE_PROBE(true, "Bumping granule force flush version to guarantee re-snapshot");
 			if (BW_DEBUG) {
 				fmt::print("BW {0} granule flush version [{1} - {2}) @ {3} increased to {4}\n",
@@ -5074,10 +5081,10 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 				           req.granuleRange.begin.printable(),
 				           req.granuleRange.end.printable(),
 				           req.flushVersion,
-				           metadata->pendingDeltaVersion + 1);
+				           metadata->pendingDeltaVersion.get() + 1);
 			}
 
-			req.flushVersion = metadata->pendingDeltaVersion + 1;
+			req.flushVersion = metadata->pendingDeltaVersion.get() + 1;
 		}
 		if (req.compactAfter) {
 			metadata->forceCompactVersion = std::max(req.flushVersion, metadata->forceCompactVersion);
@@ -5085,7 +5092,7 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 
 		loop {
 			// force granule to flush at this version, and wait
-			if (req.flushVersion > metadata->pendingDeltaVersion) {
+			if (req.flushVersion > metadata->pendingDeltaVersion.get()) {
 				// first, wait for granule active
 				if (!metadata->activeCFData.get().isValid()) {
 					req.reply.sendError(wrong_shard_server());
@@ -5135,7 +5142,7 @@ ACTOR Future<Void> handleFlushGranuleReq(Reference<BlobWorkerData> self, FlushGr
 					}
 				}
 
-				if (req.flushVersion > metadata->pendingDeltaVersion &&
+				if (req.flushVersion > metadata->pendingDeltaVersion.get() &&
 				    req.flushVersion > metadata->forceFlushVersion.get()) {
 					if (BW_DEBUG) {
 						fmt::print("BW {0} flushing granule [{1} - {2}) @ {3}: setting force flush version\n",
@@ -5495,16 +5502,20 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+
+	TraceEvent("BlobWorkerInitStart", self->id).detail("Recovering", false).log();
+
 	try {
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 
 		if (self->storage) {
 			wait(self->storage->init());
 			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 			wait(self->storage->commit());
+			TraceEvent("BlobWorkerStorageInitComplete", self->id).log();
 		}
 
 		if (BW_DEBUG) {
@@ -5577,6 +5588,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	state Reference<BlobWorkerData> self(new BlobWorkerData(bwInterf.id(), dbInfo, cx, persistentData));
 	self->id = bwInterf.id();
 	self->locality = bwInterf.locality;
+	TraceEvent("BlobWorkerInitStart", self->id).detail("Recovering", true).log();
+
 	try {
 		wait(self->storage->init());
 		wait(self->storage->commit());
@@ -5589,7 +5602,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 		// Since the blob worker gets initalized through the blob manager it is more reliable to fetch the encryption
 		// state using the DB Config rather than passing it through the initalization request for the blob manager and
 		// blob worker
-		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx);
+		state Future<DatabaseConfiguration> configFuture = getDatabaseConfiguration(cx, true);
 
 		if (BW_DEBUG) {
 			printf("Initializing blob worker s3 stuff\n");
