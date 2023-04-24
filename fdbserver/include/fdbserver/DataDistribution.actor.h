@@ -196,15 +196,15 @@ private:
 public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
-	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
-	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
-	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minReadLoadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
+	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
 	}
 
@@ -220,8 +220,8 @@ private:
 	// larger read density means higher score
 	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
 	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
-		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
 
@@ -488,6 +488,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::set<std::vector<UID>> primaryTeams;
 	std::set<std::vector<UID>> remoteTeams;
 	std::vector<DDShardInfo> shards;
+	std::vector<UID> toCleanDataMoveTombstone;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;

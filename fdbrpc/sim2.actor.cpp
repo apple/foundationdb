@@ -1554,7 +1554,7 @@ public:
 			std::vector<LocalityData> badCombo;
 			std::set<Optional<Standalone<StringRef>>> uniqueMachines;
 
-			if (!primaryDcId.present()) {
+			if (!primaryDcId.present() || usableRegions == 1) {
 				for (auto processInfo : availableProcesses) {
 					primaryProcessesLeft.add(processInfo->locality);
 					primaryLocalitiesLeft.push_back(processInfo->locality);
@@ -1947,8 +1947,10 @@ public:
 		KillType originalKt = kt;
 		// Reboot if any of the processes are protected and count the number of processes not rebooting
 		for (auto& process : machines[machineId].processes) {
-			if (protectedAddresses.count(process->address))
+			if (protectedAddresses.count(process->address) && kt != KillType::RebootProcessAndSwitch) {
 				kt = KillType::Reboot;
+			}
+
 			if (!process->rebooting)
 				processesOnMachine++;
 			if (process->drProcess) {
