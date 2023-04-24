@@ -96,9 +96,7 @@ public: // workload functions
 
 	void getMetrics(std::vector<PerfMetric>& m) override { TraceEvent("SnapTestWorkloadGetMetrics"); }
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
-		out.insert("all");
-	}
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	ACTOR Future<Void> _create_keys(Database cx, std::string prefix, bool even = true) {
 		state Transaction tr(cx);
