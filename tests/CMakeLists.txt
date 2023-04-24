@@ -368,6 +368,18 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
     restarting/from_71.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.txt
+    restarting/from_71.3.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestAttrition-1.txt
+    restarting/from_71.3.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestSimpleRestart-1.txt
+    restarting/from_71.3.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestRestart-1.txt
+    restarting/from_71.3.0/SnapTestRestart-2.txt)
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
