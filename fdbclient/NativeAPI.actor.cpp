@@ -2878,8 +2878,12 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 	if (debugID.present())
 		g_traceBatch.addEvent("TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocation.Before");
 
-	try {
-		loop {
+	loop {
+		try {
+			double backoff = cx->getBackoff();
+			if (backoff > 0.0) {
+				wait(delay(backoff));
+			}
 			++cx->transactionKeyServerLocationRequests;
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
@@ -2906,20 +2910,26 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 					updateTssMappings(cx, rep);
 					updateTagMappings(cx, rep);
 
+					cx->updateBackoff(success());
 					return KeyRangeLocationInfo(
 					    rep.tenantEntry,
 					    KeyRange(toRelativeRange(rep.results[0].first, rep.tenantEntry.prefix), rep.arena),
 					    locationInfo);
 				}
 			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_tenant_not_found) {
-			ASSERT(tenant.present());
-			cx->invalidateCachedTenant(tenant.get());
-		}
+		} catch (Error& e) {
+			if (e.code() == error_code_proxy_memory_limit_exceeded) {
+				// Eats proxy_memory_limit_exceeded error from commit proxies
+				cx->updateBackoff(e);
+				continue;
+			}
+			if (e.code() == error_code_tenant_not_found) {
+				ASSERT(tenant.present());
+				cx->invalidateCachedTenant(tenant.get());
+			}
 
-		throw;
+			throw;
+		}
 	}
 }
 
@@ -3018,7 +3028,7 @@ void DatabaseContext::updateBackoff(const Error& err) {
 		backoffDelay = 0.0;
 		break;
 
-	case error_code_commit_proxy_memory_limit_exceeded:
+	case error_code_proxy_memory_limit_exceeded:
 		if (backoffDelay == 0.0) {
 			backoffDelay = CLIENT_KNOBS->DEFAULT_BACKOFF;
 		} else {
