@@ -182,7 +182,8 @@ struct RegisterClusterImpl {
 			ASSERT(dataClusterMetadata.get().entry.clusterState == DataClusterState::REGISTERING);
 			dataClusterMetadata.get().entry.clusterState = DataClusterState::READY;
 
-			if (dataClusterMetadata.get().entry.hasCapacity()) {
+			if (dataClusterMetadata.get().entry.hasCapacity() &&
+			    dataClusterMetadata.get().entry.disableAutoTenantAssignment != DisableAutoTenantAssignment::True) {
 				metadata::management::clusterCapacityIndex().insert(
 				    tr, Tuple::makeTuple(dataClusterMetadata.get().entry.allocated.numTenantGroups, self->clusterName));
 			}

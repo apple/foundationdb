@@ -97,12 +97,15 @@ private:
 		int numFoundInTenantGroupMap = 0;
 		for (auto const& [clusterName, clusterMetadata] : data.dataClusters) {
 			// If the cluster has capacity, it should be in the capacity index and have the correct count of
-			// allocated tenants stored there
+			// allocated tenants stored there.
+			// If the cluster has disabled auto tenant assignment, then it mustn't exist in the capacity index.
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
-			if (!clusterMetadata.entry.hasCapacity()) {
+			if (!clusterMetadata.entry.hasCapacity() ||
+			    clusterMetadata.entry.disableAutoTenantAssignment == DisableAutoTenantAssignment::True) {
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
 			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
+				ASSERT_EQ(DisableAutoTenantAssignment::False, clusterMetadata.entry.disableAutoTenantAssignment);
 				++numFoundInAllocatedMap;
 			} else {
 				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
