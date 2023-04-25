@@ -125,7 +125,7 @@ std::vector<const char*> rangeConfigGenerator(std::vector<StringRef> const& toke
 		return { "<show|set|update>", "[ARGS]" };
 	}
 	auto cmd = tokens[1];
-	if (cmd == "show"_sr) {
+	if (cmd == "show"_sr && tokens.size() == 2) {
 		return { "[includeDefault]" };
 	} else if (cmd == "set"_sr || cmd == "update"_sr) {
 		static std::vector<const char*> opts = {
@@ -145,23 +145,23 @@ CommandFactory rangeConfigFactory(
         "rangeconfig <show> [includeDefault] | <update|set> <BEGINKEY> <ENDKEY> [default] [replication <N>] [teamID "
         "<N>]",
         "Show or change the per-keyrange configuration options.",
-        "The 'show' command will print the range configuration in JSON.  By default, ranges with no configured "
-        "options are not shown, these are called 'default ranges' and can be shown with the 'includeDefault' flag.\n\n"
-        "The 'update' command will apply the given options to the given key range.  Any option not explicitly given "
-        "will remain at its present setting for the range in the configuration.\n"
-        "The 'set' command will change the given key range to be exactly given configuration, meaning that any option "
-        "not explicitly given will be changed to unset for the range.\n"
-        "Note that key range configuration options do not alter the shard map directly, rather they are hints which "
-        "DataDistribution should honor.\n"
+        "The `show' command will print the range configuration in JSON.  By default, ranges with no configured "
+        "options are not shown, these are called 'default ranges' and can be shown with the `includeDefault' flag.\n\n"
+        "The `update' command will apply the given options to the given key range.  Any option not explicitly given "
+        "will remain at its present setting for the range in the configuration.\n\n"
+        "The `set' command will change the given key range to be exactly given configuration, meaning that any option "
+        "not explicitly given will be changed to unset for the range.\n\n"
         "Range Options:\n"
-        "    default         - Resets the configuration to apply to have no options set.  This can be used with 'set'\n"
-        "                      to explicitly clear all configured options for a range.\n"
-        "    replication <N> - Set replication factor for the range.  Ranges set to a replication factor lower than\n"
-        "                      the cluster's configured replication level will be treated as the same as the\n"
-        "                      cluster's replication level.\n"
-        "    teamID <N> - This provides a way to indicate that shards should be on different teams.  Ranges with\n"
-        "                 different teamID settings should be assigned to different storage teams.  Shards with the\n"
-        "                 same team ID can be assigned to the same storage team, but nothing enforces this.\n"),
+        "  default - Resets the configuration to apply to have no options set.  This can be used with `set' to "
+        "explicitly clear all configured options for a range.\n\n"
+        "  replication <N> - Set replication factor for the range.  Ranges set to a replication factor lower than the "
+        "cluster's configured replication level will be treated as the same as the cluster's replication level.\n\n"
+        "  teamID <N> - This provides a way to indicate that shards should be on different teams.  Ranges with "
+        "different teamID settings should be assigned to different storage teams.  Shards with the same team ID can be "
+        "assigned to the same storage team, but nothing enforces this.\n\n"
+        "Note that key range configuration options do not alter the shard map directly, rather they are hints which "
+        "DataDistribution should honor.\n\n"
+        "For help with escaping BEGINKEY or ENDKEY, see `help escaping'.\n"),
     nullptr,
     &rangeConfigGenerator);
 } // namespace fdb_cli
