@@ -394,7 +394,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_LEVEL_STYLE_COMPACTION,                       true );
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
-	init( ROCKSDB_PREFIX_LEN,                                      0 );
+	init( ROCKSDB_PREFIX_LEN,                                      0 ); if( randomize && BUGGIFY )  ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 	// If rocksdb block cache size is 0, the default 8MB is used.
 	int64_t blockCacheSize = isSimulated ? 16 * 1024 * 1024 : 2147483648 /* 2GB */;
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize );
@@ -437,7 +437,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS knob.
 	// These knobs have contrary functionality.
 	init( ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE,              true );
-	init( ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT,               10000 ); // 10KB
 	init( ROCKSDB_SINGLEKEY_DELETES_MAX,                         200 ); // Max rocksdb::delete calls in a transaction
 	init( ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS,              false );
 	init( ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE,            false );
