@@ -1271,7 +1271,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 		// "tenants" exhausted to end. If tenantGroup was specified,
 		// continue iterating localItr until end to verify there are no matches
-		if (tenantGroup.present()) {
+		if (tenantGroup.present() && tenants.size() < limit) {
 			while (localItr != self->createdTenants.end() && localItr->first < endTenant) {
 				ASSERT(localItr->second.tenantGroup != tenantGroup);
 				++localItr;
