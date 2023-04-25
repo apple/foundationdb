@@ -1275,6 +1275,15 @@ public:
 		// The count of change feed reads that hit disk
 		Counter changeFeedDiskReads;
 
+		// The count of 'set' inserted to pTree. The actual ptree.insert() number could be higher, because of the range
+		// clear split, see metric pTreeClearSplits.
+		Counter pTreeSets;
+		// The count of clear range inserted to pTree
+		Counter pTreeClears;
+		// If set is within a range of clear, the clear is split. It's tracking the number of splits, the split could be
+		// expensive.
+		Counter pTreeClearSplits;
+
 		LatencySample readLatencySample;
 		LatencySample readKeyLatencySample;
 		LatencySample readValueLatencySample;
@@ -1322,6 +1331,7 @@ public:
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
+		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -6189,15 +6199,18 @@ void applyMutation(StorageServer* self,
 				// is a waste, but not asymptotic)
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
 			}
+			++self->counters.pTreeClearSplits;
 		}
 		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		self->watches.trigger(m.param1);
+		++self->counters.pTreeSets;
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
 		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
+		++self->counters.pTreeClears;
 	}
 }
 
