@@ -120,10 +120,30 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 	return true;
 }
 
+std::vector<const char*> rangeConfigGenerator(std::vector<StringRef> const& tokens, bool inArgument) {
+	if (tokens.size() == 1) {
+		return { "<show|set|update>", "[ARGS]" };
+	}
+	auto cmd = tokens[1];
+	if (cmd == "show"_sr) {
+		return { "[includeDefault]" };
+	} else if (cmd == "set"_sr || cmd == "update"_sr) {
+		static std::vector<const char*> opts = {
+			"<BEGINKEY>", "<ENDKEY>", "[default]", "[replication <N>]", "[teamID <N>]"
+		};
+		// Subtract the two known tokens, command and subcommand, and then possibly two more tokens for begin and end if
+		// present
+		return std::vector<const char*>(opts.begin() + std::min<size_t>(tokens.size(), 4) - 2, opts.end());
+	} else {
+		return {};
+	}
+}
+
 CommandFactory rangeConfigFactory(
     "rangeconfig",
     CommandHelp(
-        "rangeconfig show [includeDefault] | (update|set) <beginKey> <endKey> [default] [replication <N>] [teamID <N>]",
+        "rangeconfig <show> [includeDefault] | <update|set> <BEGINKEY> <ENDKEY> [default] [replication <N>] [teamID "
+        "<N>]",
         "Show or change the per-keyrange configuration options.",
         "The 'show' command will print the range configuration in JSON.  By default, ranges with no configured "
         "options are not shown, these are called 'default ranges' and can be shown with the 'includeDefault' flag.\n\n"
@@ -141,5 +161,7 @@ CommandFactory rangeConfigFactory(
         "                      cluster's replication level.\n"
         "    teamID <N> - This provides a way to indicate that shards should be on different teams.  Ranges with\n"
         "                 different teamID settings should be assigned to different storage teams.  Shards with the\n"
-        "                 same team ID can be assigned to the same storage team, but nothing enforces this.\n"));
+        "                 same team ID can be assigned to the same storage team, but nothing enforces this.\n"),
+    nullptr,
+    &rangeConfigGenerator);
 } // namespace fdb_cli
