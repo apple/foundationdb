@@ -3063,24 +3063,24 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 			wait(cx->getBackoff());
 			++cx->transactionKeyServerLocationRequests;
 			choose {
-				when(wait(cx->onProxiesChanged())) { }
+				when(wait(cx->onProxiesChanged())) {}
 				when(GetKeyServerLocationsReply _rep =
-							wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
-												&CommitProxyInterface::getKeyServersLocations,
-												GetKeyServerLocationsRequest(span.context,
-																			tenant.castTo<TenantNameRef>(),
-																			keys.begin,
-																			keys.end,
-																			limit,
-																			reverse,
-																			version,
-																			keys.arena()),
-												TaskPriority::DefaultPromiseEndpoint))) {
+				         wait(basicLoadBalance(cx->getCommitProxies(useProvisionalProxies),
+				                               &CommitProxyInterface::getKeyServersLocations,
+				                               GetKeyServerLocationsRequest(span.context,
+				                                                            tenant.castTo<TenantNameRef>(),
+				                                                            keys.begin,
+				                                                            keys.end,
+				                                                            limit,
+				                                                            reverse,
+				                                                            version,
+				                                                            keys.arena()),
+				                               TaskPriority::DefaultPromiseEndpoint))) {
 					++cx->transactionKeyServerLocationRequestsCompleted;
 					state GetKeyServerLocationsReply rep = _rep;
 					if (debugID.present())
 						g_traceBatch.addEvent(
-							"TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
+						    "TransactionDebug", debugID.get().first(), "NativeAPI.getKeyLocations.After");
 					ASSERT(rep.results.size());
 
 					state std::vector<KeyRangeLocationInfo> results;
@@ -3089,10 +3089,10 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 						// FIXME: these shards are being inserted into the map sequentially, it would be much more
 						// CPU efficient to save the map pairs and insert them all at once.
 						results.emplace_back(
-							rep.tenantEntry,
-							(toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
-							cx->setCachedLocation(
-								tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
+						    rep.tenantEntry,
+						    (toRelativeRange(rep.results[shard].first, rep.tenantEntry.prefix) & keys),
+						    cx->setCachedLocation(
+						        tenant, rep.tenantEntry, rep.results[shard].first, rep.results[shard].second));
 						wait(yield());
 					}
 					updateTssMappings(cx, rep);
