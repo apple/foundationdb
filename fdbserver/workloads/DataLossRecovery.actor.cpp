@@ -164,7 +164,7 @@ struct DataLossRecoveryWorkload : TestWorkload {
 		servers.push_back(AddressExclusion(addr.ip, addr.port));
 		loop {
 			try {
-				excludeServers(tr, servers, true);
+				wait(excludeServers(&tr, servers, true));
 				wait(tr.commit());
 				break;
 			} catch (Error& e) {

@@ -119,6 +119,8 @@ struct EncryptionOpsWorkload : TestWorkload {
 	int maxBufSize;
 	std::unique_ptr<uint8_t[]> buff;
 	int enableTTLTest;
+	int minBaseCipherLen;
+	int maxBaseCipherLen;
 
 	std::unique_ptr<WorkloadMetrics> metrics;
 
@@ -142,6 +144,11 @@ struct EncryptionOpsWorkload : TestWorkload {
 		headerBaseCipherId = wcx.clientId * 100 + 1;
 
 		metrics = std::make_unique<WorkloadMetrics>();
+
+		minBaseCipherLen = deterministicRandom()->randomInt(4, 11);
+		maxBaseCipherLen = deterministicRandom()->randomInt(AES_256_KEY_LENGTH, MAX_BASE_CIPHER_LEN + 1);
+
+		ASSERT_LT(minBaseCipherLen, maxBaseCipherLen);
 
 		if (wcx.clientId == 0 && mode == 1) {
 			enableTTLTest = true;
@@ -168,9 +175,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 		throw internal_error();
 	}
 
-	static void generateRandomBaseCipher(const int maxLen, uint8_t* buff, int* retLen) {
+	static void generateRandomBaseCipher(const int minLen, const int maxLen, uint8_t* buff, int* retLen) {
 		memset(buff, 0, maxLen);
-		*retLen = deterministicRandom()->randomInt(maxLen / 2, maxLen);
+		*retLen = deterministicRandom()->randomInt(minLen, maxLen);
 		deterministicRandom()->randomBytes(buff, *retLen);
 	}
 
@@ -179,19 +186,22 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		TraceEvent("SetupCipherEssentialsStart").detail("MinDomainId", minDomainId).detail("MaxDomainId", maxDomainId);
 
-		uint8_t buff[AES_256_KEY_LENGTH];
+		uint8_t buff[maxBaseCipherLen];
 		std::vector<Reference<BlobCipherKey>> cipherKeys;
 		int cipherLen = 0;
 		for (EncryptCipherDomainId id = minDomainId; id <= maxDomainId; id++) {
-			generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
+			generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, &buff[0], &cipherLen);
+			const EncryptCipherKeyCheckValue cipherKCV = Sha256KCV().computeKCV(&buff[0], cipherLen);
+
 			cipherKeyCache->insertCipherKey(id,
 			                                minBaseCipherId,
 			                                buff,
 			                                cipherLen,
+			                                cipherKCV,
 			                                std::numeric_limits<int64_t>::max(),
 			                                std::numeric_limits<int64_t>::max());
 
-			ASSERT(cipherLen > 0 && cipherLen <= AES_256_KEY_LENGTH);
+			ASSERT(cipherLen > 0 && cipherLen <= maxBaseCipherLen);
 
 			cipherKeys = cipherKeyCache->getAllCiphers(id);
 			ASSERT_EQ(cipherKeys.size(), 1);
@@ -199,11 +209,13 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		// insert the Encrypt Header cipherKey; record cipherDetails as getLatestCipher() may not work with multiple
 		// test clients
-		generateRandomBaseCipher(AES_256_KEY_LENGTH, &buff[0], &cipherLen);
+		generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, &buff[0], &cipherLen);
+		const EncryptCipherKeyCheckValue cipherKCV = Sha256KCV().computeKCV(&buff[0], cipherLen);
 		cipherKeyCache->insertCipherKey(ENCRYPT_HEADER_DOMAIN_ID,
 		                                headerBaseCipherId,
 		                                buff,
 		                                cipherLen,
+		                                cipherKCV,
 		                                std::numeric_limits<int64_t>::max(),
 		                                std::numeric_limits<int64_t>::max());
 		Reference<BlobCipherKey> latestCipher = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
@@ -241,10 +253,15 @@ struct EncryptionOpsWorkload : TestWorkload {
 		Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(encryptDomainId);
 		*nextBaseCipherId = cipherKey->getBaseCipherId() + 1;
 
-		generateRandomBaseCipher(AES_256_KEY_LENGTH, baseCipher, baseCipherLen);
+		generateRandomBaseCipher(minBaseCipherLen, maxBaseCipherLen, baseCipher, baseCipherLen);
 
-		ASSERT(*baseCipherLen > 0 && *baseCipherLen <= AES_256_KEY_LENGTH);
-		TraceEvent("UpdateBaseCipher").detail("DomainId", encryptDomainId).detail("BaseCipherId", *nextBaseCipherId);
+		ASSERT(*baseCipherLen > 0 && *baseCipherLen <= maxBaseCipherLen);
+		TraceEvent("UpdateBaseCipher")
+		    .detail("DomainId", encryptDomainId)
+		    .detail("BaseCipherId", *nextBaseCipherId)
+		    .detail("BaseCipherLen", *baseCipherLen)
+		    .detail("ExistingBaseCipherId", cipherKey->getBaseCipherId())
+		    .detail("ExistingBaseCipherLen", cipherKey->getBaseCipherLen());
 	}
 
 	Reference<BlobCipherKey> getEncryptionKey(const EncryptCipherDomainId& domainId,
@@ -431,7 +448,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 	}
 
 	void testBlobCipherKeyCacheOps() {
-		uint8_t baseCipher[AES_256_KEY_LENGTH];
+		uint8_t baseCipher[maxBaseCipherLen];
 		int baseCipherLen = 0;
 		EncryptCipherBaseKeyId nextBaseCipherId;
 
@@ -452,10 +469,12 @@ struct EncryptionOpsWorkload : TestWorkload {
 			if (updateBaseCipher) {
 				// simulate baseCipherId getting refreshed/updated
 				updateLatestBaseCipher(encryptDomainId, &baseCipher[0], &baseCipherLen, &nextBaseCipherId);
+				const EncryptCipherKeyCheckValue baseCipherKCV = Sha256KCV().computeKCV(&baseCipher[0], baseCipherLen);
 				cipherKeyCache->insertCipherKey(encryptDomainId,
 				                                nextBaseCipherId,
 				                                &baseCipher[0],
 				                                baseCipherLen,
+				                                baseCipherKCV,
 				                                std::numeric_limits<int64_t>::max(),
 				                                std::numeric_limits<int64_t>::max());
 			}
@@ -540,7 +559,9 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		state EncryptCipherDomainId domId = deterministicRandom()->randomInt(120000, 150000);
 		state EncryptCipherBaseKeyId baseCipherId = deterministicRandom()->randomInt(786, 1024);
-		state std::unique_ptr<uint8_t[]> baseCipher = std::make_unique<uint8_t[]>(AES_256_KEY_LENGTH);
+		state int baseCipherLen = deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1);
+		state std::unique_ptr<uint8_t[]> baseCipher = std::make_unique<uint8_t[]>(baseCipherLen);
+		state EncryptCipherKeyCheckValue baseCipherKCV;
 		state Reference<BlobCipherKey> cipherKey;
 		state EncryptCipherRandomSalt salt;
 		state int64_t refreshAt;
@@ -548,24 +569,27 @@ struct EncryptionOpsWorkload : TestWorkload {
 
 		TraceEvent("TestBlobCipherCacheTTLStart").detail("DomId", domId);
 
-		deterministicRandom()->randomBytes(baseCipher.get(), AES_256_KEY_LENGTH);
+		deterministicRandom()->randomBytes(baseCipher.get(), baseCipherLen);
+		baseCipherKCV = Sha256KCV().computeKCV(baseCipher.get(), baseCipherLen);
 
 		// Validate 'non-revocable' cipher with no expiration
 		refreshAt = std::numeric_limits<int64_t>::max();
 		expAt = std::numeric_limits<int64_t>::max();
-		cipherKeyCache->insertCipherKey(domId, baseCipherId, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		cipherKeyCache->insertCipherKey(
+		    domId, baseCipherId, baseCipher.get(), baseCipherLen, baseCipherKCV, refreshAt, expAt);
 		cipherKey = cipherKeyCache->getLatestCipherKey(domId);
-		compareCipherDetails(cipherKey, domId, baseCipherId, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		compareCipherDetails(cipherKey, domId, baseCipherId, baseCipher.get(), baseCipherLen, refreshAt, expAt);
 
 		TraceEvent("TestBlobCipherCacheTTLNonRevocableNoExpiry").detail("DomId", domId);
 
 		// Validate 'non-revocable' cipher with expiration
 		state EncryptCipherBaseKeyId baseCipherId_1 = baseCipherId + 1;
 		refreshAt = now() + 5;
-		cipherKeyCache->insertCipherKey(domId, baseCipherId_1, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		cipherKeyCache->insertCipherKey(
+		    domId, baseCipherId_1, baseCipher.get(), baseCipherLen, baseCipherKCV, refreshAt, expAt);
 		cipherKey = cipherKeyCache->getLatestCipherKey(domId);
 		ASSERT(cipherKey.isValid());
-		compareCipherDetails(cipherKey, domId, baseCipherId_1, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		compareCipherDetails(cipherKey, domId, baseCipherId_1, baseCipher.get(), baseCipherLen, refreshAt, expAt);
 		salt = cipherKey->getSalt();
 		wait(delayUntil(refreshAt));
 		// Ensure that latest cipherKey needs refresh, however, cipher lookup works (non-revocable)
@@ -573,7 +597,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(!cipherKey.isValid());
 		cipherKey = cipherKeyCache->getCipherKey(domId, baseCipherId_1, salt);
 		ASSERT(cipherKey.isValid());
-		compareCipherDetails(cipherKey, domId, baseCipherId_1, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		compareCipherDetails(cipherKey, domId, baseCipherId_1, baseCipher.get(), baseCipherLen, refreshAt, expAt);
 
 		TraceEvent("TestBlobCipherCacheTTLNonRevocableWithExpiry").detail("DomId", domId);
 
@@ -581,10 +605,11 @@ struct EncryptionOpsWorkload : TestWorkload {
 		state EncryptCipherBaseKeyId baseCipherId_2 = baseCipherId + 2;
 		refreshAt = now() + 5;
 		expAt = refreshAt + 5;
-		cipherKeyCache->insertCipherKey(domId, baseCipherId_2, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		cipherKeyCache->insertCipherKey(
+		    domId, baseCipherId_2, baseCipher.get(), baseCipherLen, baseCipherKCV, refreshAt, expAt);
 		cipherKey = cipherKeyCache->getLatestCipherKey(domId);
 		ASSERT(cipherKey.isValid());
-		compareCipherDetails(cipherKey, domId, baseCipherId_2, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		compareCipherDetails(cipherKey, domId, baseCipherId_2, baseCipher.get(), baseCipherLen, refreshAt, expAt);
 		salt = cipherKey->getSalt();
 		wait(delayUntil(refreshAt));
 		// Ensure that latest cipherKey needs refresh, however, cipher lookup works (non-revocable)
@@ -592,7 +617,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		ASSERT(!cipherKey.isValid());
 		cipherKey = cipherKeyCache->getCipherKey(domId, baseCipherId_2, salt);
 		ASSERT(cipherKey.isValid());
-		compareCipherDetails(cipherKey, domId, baseCipherId_2, baseCipher.get(), AES_256_KEY_LENGTH, refreshAt, expAt);
+		compareCipherDetails(cipherKey, domId, baseCipherId_2, baseCipher.get(), baseCipherLen, refreshAt, expAt);
 		wait(delayUntil(expAt));
 		// Ensure that cipherKey lookup doesn't work after expiry
 		cipherKey = cipherKeyCache->getLatestCipherKey(domId);

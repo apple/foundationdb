@@ -47,7 +47,7 @@
 	(getSBVar(__FILE__, __LINE__, BuggifyType::Client) && deterministicRandom()->random01() < (x))
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
-FDB_DECLARE_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseProvisionalProxies);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -266,8 +266,8 @@ struct Traceable<Tenant> : std::true_type {
 	static std::string toString(const Tenant& tenant) { return printable(tenant.description()); }
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(AllowInvalidTenantID);
-FDB_DECLARE_BOOLEAN_PARAM(ResolveDefaultTenant);
+FDB_BOOLEAN_PARAM(AllowInvalidTenantID);
+FDB_BOOLEAN_PARAM(ResolveDefaultTenant);
 
 struct TransactionState : ReferenceCounted<TransactionState> {
 	Database cx;
@@ -396,7 +396,6 @@ public:
 	                                                       const KeySelector& end,
 	                                                       const Key& mapper,
 	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
 	                                                       Snapshot = Snapshot::False,
 	                                                       Reverse = Reverse::False);
 
@@ -406,7 +405,6 @@ private:
 	                                           const KeySelector& end,
 	                                           const Key& mapper,
 	                                           GetRangeLimits limits,
-	                                           int matchIndex,
 	                                           Snapshot snapshot,
 	                                           Reverse reverse);
 

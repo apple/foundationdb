@@ -39,3 +39,7 @@ testTitle = 'BlobGranuleVerifyAtomicOps'
     machinesToLeave = 3
     reboot = true
     testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 30.0

@@ -234,7 +234,7 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(UntrustedMode);
+FDB_BOOLEAN_PARAM(UntrustedMode);
 
 template <class Workload>
 struct WorkloadFactory : IWorkloadFactory {

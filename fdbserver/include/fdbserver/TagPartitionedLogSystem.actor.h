@@ -93,6 +93,10 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	Future<Void> recoveryComplete;
 	Future<Void> remoteRecovery;
 	Future<Void> remoteRecoveryComplete;
+	Future<Void> trackTLogRecovery;
+	Future<Void> remoteTrackTLogRecovery;
+	Reference<AsyncVar<Version>> recoveredVersion;
+	Reference<AsyncVar<Version>> remoteRecoveredVersion;
 	std::vector<LogLockInfo> lockResults;
 	AsyncVar<bool> recoveryCompleteWrittenToCoreState;
 	bool remoteLogsWrittenToCoreState;
@@ -129,6 +133,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                        Optional<PromiseStream<Future<Void>>> addActor = Optional<PromiseStream<Future<Void>>>())
 	  : dbgid(dbgid), logSystemType(LogSystemType::empty), expectedLogSets(0), logRouterTags(0), txsTags(0),
 	    repopulateRegionAntiQuorum(0), stopped(false), epoch(e), oldestBackupEpoch(0),
+	    recoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
+	    remoteRecoveredVersion(makeReference<AsyncVar<Version>>(invalidVersion)),
 	    recoveryCompleteWrittenToCoreState(false), remoteLogsWrittenToCoreState(false), hasRemoteServers(false),
 	    locality(locality), addActor(addActor), popActors(false) {}
 
@@ -173,6 +179,9 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	void toCoreState(DBCoreState& newState) const final;
 
 	bool remoteStorageRecovered() const final;
+
+	// Checks older TLog generations and remove no longer needed generations from the log system.
+	void purgeOldRecoveredGenerations() final;
 
 	Future<Void> onCoreStateChanged() const final;
 
@@ -353,7 +362,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         LogEpoch recoveryCount,
 	                                         Version recoveryTransactionVersion,
 	                                         int8_t remoteLocality,
-	                                         std::vector<Tag> allTags);
+	                                         std::vector<Tag> allTags,
+	                                         std::vector<Version> oldGenerationStartVersions);
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                                    RecruitFromConfigurationReply recr,
@@ -371,6 +381,12 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	        logServers,
 	    FutureStream<struct TLogRejoinRequest> rejoinRequests);
+
+	// Keeps track of the recovered generations in all the TLogs in `tlogs` list and updates the latest
+	// `recoveredVersion`.
+	ACTOR static Future<Void> trackTLogRecoveryActor(
+	    std::vector<Reference<AsyncVar<OptionalInterface<TLogInterface>>>> tlogs,
+	    Reference<AsyncVar<Version>> recoveredVersion);
 
 	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 

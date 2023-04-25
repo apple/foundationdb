@@ -69,9 +69,9 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 7.7.3.
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 7 && ROCKSDB_PATCH == 3),
-              "Unsupported rocksdb version. Update the rocksdb to 7.7.3 version");
+// Enforcing rocksdb version to be 7.10.2
+static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 10 && ROCKSDB_PATCH == 2),
+              "Unsupported rocksdb version. Update the rocksdb to 7.10.2 version");
 
 namespace {
 using rocksdb::BackgroundErrorReason;
@@ -186,8 +186,7 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		options.prefix_extractor.reset(rocksdb::NewFixedPrefixTransform(SERVER_KNOBS->ROCKSDB_PREFIX_LEN));
 
 		// Also turn on bloom filters in the memtable.
-		// TODO: Make a knob for this as well.
-		options.memtable_prefix_bloom_size_ratio = 0.1;
+		options.memtable_prefix_bloom_size_ratio = SERVER_KNOBS->ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO;
 
 		// 5 -- Can be read by RocksDB's versions since 6.6.0. Full and partitioned
 		// filters use a generally faster and more accurate Bloom filter
@@ -198,11 +197,11 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 		// Create and apply a bloom filter using the 10 bits
 		// which should yield a ~1% false positive rate:
 		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#full-filters-new-format
-		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+		bbOpts.filter_policy.reset(rocksdb::NewBloomFilterPolicy(SERVER_KNOBS->ROCKSDB_BLOOM_BITS_PER_KEY));
 
 		// The whole key blooms are only used for point lookups.
 		// https://github.com/facebook/rocksdb/wiki/RocksDB-Bloom-Filter#prefix-vs-whole-key
-		bbOpts.whole_key_filtering = false;
+		bbOpts.whole_key_filtering = SERVER_KNOBS->ROCKSDB_BLOOM_WHOLE_KEY_FILTERING;
 	}
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_CACHE_SIZE > 0) {
@@ -211,6 +210,12 @@ rocksdb::ColumnFamilyOptions SharedRocksDBState::initialCfOptions() {
 
 	if (SERVER_KNOBS->ROCKSDB_BLOCK_SIZE > 0) {
 		bbOpts.block_size = SERVER_KNOBS->ROCKSDB_BLOCK_SIZE;
+	}
+
+	// The readahead size starts with 8KB and is exponentially increased on each additional sequential IO,
+	// up to a max of BlockBasedTableOptions.max_auto_readahead_size (default 256 KB)
+	if (SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE > 0) {
+		bbOpts.max_auto_readahead_size = SERVER_KNOBS->ROCKSDB_MAX_AUTO_READAHEAD_SIZE;
 	}
 
 	options.table_factory.reset(rocksdb::NewBlockBasedTableFactory(bbOpts));
@@ -355,10 +360,14 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 
 	for (const LiveFileMetaData& fileMetaData : rocksCF.sstFiles) {
 		rocksdb::LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+		liveFileMetaData.directory = fileMetaData.directory;
 		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.file_type = static_cast<rocksdb::FileType>(fileMetaData.file_type);
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
@@ -367,12 +376,12 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.temperature = static_cast<rocksdb::Temperature>(fileMetaData.temperature);
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		metaData.files.push_back(liveFileMetaData);
@@ -386,10 +395,14 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 	rocksCF.dbComparatorName = metaData.db_comparator_name;
 	for (const rocksdb::LiveFileMetaData& fileMetaData : metaData.files) {
 		LiveFileMetaData liveFileMetaData;
-		liveFileMetaData.size = fileMetaData.size;
-		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.relative_filename = fileMetaData.relative_filename;
+		liveFileMetaData.directory = fileMetaData.directory;
 		liveFileMetaData.file_number = fileMetaData.file_number;
-		liveFileMetaData.db_path = fileMetaData.db_path;
+		liveFileMetaData.file_type = static_cast<int>(fileMetaData.file_type);
+		liveFileMetaData.size = fileMetaData.size;
+		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
+		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
+		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
 		liveFileMetaData.smallest_seqno = fileMetaData.smallest_seqno;
 		liveFileMetaData.largest_seqno = fileMetaData.largest_seqno;
 		liveFileMetaData.smallestkey = fileMetaData.smallestkey;
@@ -398,12 +411,12 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 		liveFileMetaData.being_compacted = fileMetaData.being_compacted;
 		liveFileMetaData.num_entries = fileMetaData.num_entries;
 		liveFileMetaData.num_deletions = fileMetaData.num_deletions;
-		liveFileMetaData.temperature = static_cast<uint8_t>(fileMetaData.temperature);
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.file_checksum = fileMetaData.file_checksum;
-		liveFileMetaData.file_checksum_func_name = fileMetaData.file_checksum_func_name;
+		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
+		liveFileMetaData.name = fileMetaData.name;
+		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
 		rocksCF.sstFiles.push_back(liveFileMetaData);
@@ -429,13 +442,14 @@ struct Counters {
 	Counter convertedDeleteKeyReqs;
 	Counter convertedDeleteRangeReqs;
 	Counter rocksdbReadRangeQueries;
+	Counter commitDelayed;
 
 	Counters()
 	  : cc("RocksDBThrottle"), immediateThrottle("ImmediateThrottle", cc), failedToAcquire("FailedToAcquire", cc),
 	    deleteKeyReqs("DeleteKeyRequests", cc), deleteRangeReqs("DeleteRangeRequests", cc),
 	    convertedDeleteKeyReqs("ConvertedDeleteKeyRequests", cc),
 	    convertedDeleteRangeReqs("ConvertedDeleteRangeRequests", cc),
-	    rocksdbReadRangeQueries("RocksdbReadRangeQueries", cc) {}
+	    rocksdbReadRangeQueries("RocksdbReadRangeQueries", cc), commitDelayed("CommitDelayed", cc) {}
 };
 
 struct ReadIterator {
@@ -954,6 +968,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "RowCacheHit", rocksdb::ROW_CACHE_HIT, 0 },
 		{ "RowCacheMiss", rocksdb::ROW_CACHE_MISS, 0 },
 		{ "CountIterSkippedKeys", rocksdb::NUMBER_ITER_SKIP, 0 },
+		{ "NoIteratorCreated", rocksdb::NO_ITERATOR_CREATED, 0 },
+		{ "NoIteratorDeleted", rocksdb::NO_ITERATOR_DELETED, 0 },
 	};
 
 	// To control the rocksdb::StatsLevel, use ROCKSDB_STATS_LEVEL knob.
@@ -2007,6 +2023,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 			keysSet.clear();
+			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
 		ASSERT(defaultFdbCF != nullptr);
 		writeBatch->Put(defaultFdbCF, toSlice(kv.key), toSlice(kv.value));
@@ -2015,23 +2032,24 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	void clear(KeyRangeRef keyRange, const StorageServerMetrics* storageMetrics, const Arena*) override {
+	void clear(KeyRangeRef keyRange, const Arena*) override {
 		if (writeBatch == nullptr) {
 			writeBatch.reset(new rocksdb::WriteBatch());
 			keysSet.clear();
+			maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		}
 
 		ASSERT(defaultFdbCF != nullptr);
 		// Number of deletes to rocksdb = counters.deleteKeyReqs + convertedDeleteKeyReqs;
 		// Number of deleteRanges to rocksdb = counters.deleteRangeReqs - counters.convertedDeleteRangeReqs;
-		if (keyRange.singleKeyRange()) {
+		if (keyRange.singleKeyRange() && !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE) {
 			writeBatch->Delete(defaultFdbCF, toSlice(keyRange.begin));
 			++counters.deleteKeyReqs;
+			--maxDeletes;
 		} else {
 			++counters.deleteRangeReqs;
-			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE && storageMetrics != nullptr &&
-			    storageMetrics->byteSample.getEstimate(keyRange) <
-			        SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT) {
+			if (SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE &&
+			    !SERVER_KNOBS->ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE && maxDeletes > 0) {
 				++counters.convertedDeleteRangeReqs;
 				rocksdb::ReadOptions options = sharedState->getReadOptions();
 				auto beginSlice = toSlice(keyRange.begin);
@@ -2040,12 +2058,13 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 				options.iterate_upper_bound = &endSlice;
 				auto cursor = std::unique_ptr<rocksdb::Iterator>(db->NewIterator(options, defaultFdbCF));
 				cursor->Seek(toSlice(keyRange.begin));
-				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end) {
+				while (cursor->Valid() && toStringRef(cursor->key()) < keyRange.end && maxDeletes > 0) {
 					writeBatch->Delete(defaultFdbCF, cursor->key());
 					++counters.convertedDeleteKeyReqs;
+					--maxDeletes;
 					cursor->Next();
 				}
-				if (!cursor->status().ok()) {
+				if (!cursor->status().ok() || maxDeletes <= 0) {
 					// if readrange iteration fails, then do a deleteRange.
 					writeBatch->DeleteRange(defaultFdbCF, toSlice(keyRange.begin), toSlice(keyRange.end));
 				} else {
@@ -2053,6 +2072,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 					while (it != keysSet.end() && *it < keyRange.end) {
 						writeBatch->Delete(defaultFdbCF, toSlice(*it));
 						++counters.convertedDeleteKeyReqs;
+						--maxDeletes;
 						it++;
 					}
 				}
@@ -2070,9 +2090,12 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		                                   &estPendCompactBytes);
 		while (count && estPendCompactBytes > SERVER_KNOBS->ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT) {
 			wait(delay(SERVER_KNOBS->ROCKSDB_CAN_COMMIT_DELAY_ON_OVERLOAD));
+			++self->counters.commitDelayed;
 			count--;
 			self->db->GetAggregatedIntProperty(rocksdb::DB::Properties::kEstimatePendingCompactionBytes,
 			                                   &estPendCompactBytes);
+			if (deterministicRandom()->random01() < 0.001)
+				TraceEvent(SevWarn, "RocksDBCommitsDelayed1000x", self->id);
 		}
 
 		return Void();
@@ -2088,6 +2111,7 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Writer::CommitAction();
 		a->batchToCommit = std::move(writeBatch);
 		keysSet.clear();
+		maxDeletes = SERVER_KNOBS->ROCKSDB_SINGLEKEY_DELETES_MAX;
 		auto res = a->done.getFuture();
 		writeThread->post(a);
 		return res;
@@ -2286,6 +2310,8 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 	Future<Void> openFuture;
 	std::unique_ptr<rocksdb::WriteBatch> writeBatch;
 	std::set<Key> keysSet;
+	// maximum number of single key deletes in a commit, if ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled.
+	int maxDeletes;
 	Optional<Future<Void>> metrics;
 	FlowLock readSemaphore;
 	int numReadWaiters;

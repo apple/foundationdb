@@ -21,6 +21,7 @@
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/BlobManagerInterface.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -29,8 +30,8 @@
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -840,8 +841,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (db->get().encryptKeyProxy.present()) {
-		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
+	if (db->get().client.encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().client.encryptKeyProxy.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
@@ -2428,23 +2429,36 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
-    std::vector<BlobWorkerInterface> servers,
+ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
+    Optional<BlobManagerInterface> managerIntf,
+    std::vector<BlobWorkerInterface> workers,
     std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
     std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
 	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
-	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
-
+	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		for (auto& intf : servers) {
+		// Blob manager status
+		if (managerIntf.present()) {
+			Optional<TraceEventFields> fields = wait(timeoutError(
+			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
+			if (fields.present()) {
+				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
+				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
+				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
+				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+			}
+		}
+
+		// Blob workers status
+		for (auto& intf : workers) {
 			auto workerIntf = addressWorkersMap[intf.address()];
 			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
 		}
 
-		wait(waitForAll(futures));
+		wait(timeoutError(waitForAll(futures), 2.0));
 
 		state int totalRanges = 0;
 		for (auto future : futures) {
@@ -2467,6 +2481,20 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 			}
 		}
 		statusObj["number_of_key_ranges"] = totalRanges;
+
+		// Mutation log backup
+		state std::string mlogsUrl = wait(getMutationLogUrl());
+		statusObj["mutation_log_location"] = mlogsUrl;
+		if (mlogsUrl != "") {
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
+			if (desc.contiguousLogEnd.present()) {
+				statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();
+			}
+			if (desc.minLogBegin.present()) {
+				statusObj["mutation_log_begin_version"] = desc.minLogBegin.get();
+			}
+		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -2476,12 +2504,11 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 }
 
 ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
-
 	state JsonBuilderObject statusObj;
-
 	try {
 		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
-		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		Optional<BlobRestoreState> restoreState =
+		    wait(timeoutError(BlobRestoreController::getState(restoreController), 1.0));
 		if (restoreState.present()) {
 			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
 			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
@@ -2490,6 +2517,7 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 			Optional<StringRef> error = restoreState.get().error;
 			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
 		}
+
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3015,7 +3043,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
     Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
-    MetaclusterMetrics metaclusterMetrics) {
+    metacluster::MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -3166,6 +3194,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state std::vector<BlobWorkerInterface> blobWorkers;
+
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject tenants;
@@ -3479,9 +3508,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
 			JsonBuilderObject blobGranuelsStatus =
-			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
+			    wait(timeoutError(blobGranulesStatusFetcher(
+			                          db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
+			                      2.0));
 			statusObj["blob_granules"] = blobGranuelsStatus;
-			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			JsonBuilderObject blobRestoreStatus =
+			    wait(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0));
 			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 

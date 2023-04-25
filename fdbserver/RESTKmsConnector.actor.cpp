@@ -20,6 +20,7 @@
 
 #include "fdbserver/RESTKmsConnector.h"
 
+#include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RESTClient.h"
 
@@ -75,7 +76,7 @@ const char* VALIDATION_TOKEN_NAME_TAG = "token_name";
 const char* VALIDATION_TOKEN_VALUE_TAG = "token_value";
 const char* DEBUG_UID_TAG = "debug_uid";
 
-const char* TOKEN_NAME_FILE_SEP = "#";
+const char* TOKEN_NAME_FILE_SEP = "$";
 const char* TOKEN_TUPLE_SEP = ",";
 const char DISCOVER_URL_FILE_URL_SEP = '\n';
 
@@ -107,6 +108,12 @@ bool canReplyWith(Error e) {
 
 bool isKmsNotReachable(const int errCode) {
 	return errCode == error_code_timed_out || errCode == error_code_connection_failed;
+}
+
+void removeTrailingChar(std::string& str, char c) {
+	while (!str.empty() && str[str.length() - 1] == c) {
+		str.erase(str.length() - 1);
+	}
 }
 
 } // namespace
@@ -253,12 +260,16 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 	std::string url;
 	while (std::getline(ss, url, DISCOVER_URL_FILE_URL_SEP)) {
 		std::string trimedUrl = boost::trim_copy(url);
+		// Remove the trailing '/'(s)
+		while (!trimedUrl.empty() && trimedUrl.ends_with('/')) {
+			trimedUrl.pop_back();
+		}
 		if (trimedUrl.empty()) {
 			// Empty URL, ignore and continue
 			continue;
 		}
-		TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("Url", url);
-		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(url));
+		TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("OrgUrl", url).detail("TrimUrl", trimedUrl);
+		ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>(trimedUrl));
 	}
 
 	return Void();
@@ -382,13 +393,13 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	// 	  }
 	// }
 
-	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid).detail("Response", resp->toString());
-	}
-
-	if (resp->code != HTTP::HTTP_STATUS_CODE_OK) {
+	if (!resp.isValid() || resp->code != HTTP::HTTP_STATUS_CODE_OK) {
 		// STATUS_OK is gating factor for REST request success
 		throw http_request_failed();
+	}
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid).detail("Response", resp->toString());
 	}
 
 	rapidjson::Document doc;
@@ -441,10 +452,31 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 		EncryptCipherBaseKeyId baseCipherId = cipherDetail[BASE_CIPHER_ID_TAG].GetUint64();
 		StringRef cipher = StringRef(cipherKey.get(), cipherKeyLen);
 
+		// https://en.wikipedia.org/wiki/Key_checksum_value
+		// Key Check Value (KCV) is the checksum of a cryptographic key, it is used to validate integrity of the
+		// 'baseCipher' key supplied by the external KMS. The checksum computed is eventually persisted as part of
+		// EncryptionHeader and assists in following scenarios: a) 'baseCipher' corruption happen external to FDB b)
+		// 'baseCipher' corruption within FDB processes
+		//
+		// Approach compute KCV after reading it from the network buffer, HTTP checksum protects against potential
+		// on-wire corruption
+		if (cipher.size() > MAX_BASE_CIPHER_LEN) {
+			// HMAC_SHA digest generation accepts upto MAX_BASE_CIPHER_LEN key-buffer, longer keys are truncated and
+			// weakens the security guarantees.
+			TraceEvent(SevWarnAlways, "RESTKmsConnectorMaxBaseCipherKeyLimit")
+			    .detail("MaxAllowed", MAX_BASE_CIPHER_LEN)
+			    .detail("BaseCipherLen", cipher.size());
+			throw rest_max_base_cipher_len();
+		}
+
+		EncryptCipherKeyCheckValue cipherKCV = Sha256KCV().computeKCV(cipher.begin(), cipher.size());
+
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			TraceEvent event("RESTParseEncryptCipherResponse", ctx->uid);
 			event.detail("DomainId", domainId);
 			event.detail("BaseCipherId", baseCipherId);
+			event.detail("BaseCipherLen", cipher.size());
+			event.detail("BaseCipherKCV", cipherKCV);
 			if (refreshAfterSec.present()) {
 				event.detail("RefreshAt", refreshAfterSec.get());
 			}
@@ -453,7 +485,8 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 			}
 		}
 
-		result.emplace_back_deep(result.arena(), domainId, baseCipherId, cipher, refreshAfterSec, expireAfterSec);
+		result.emplace_back_deep(
+		    result.arena(), domainId, baseCipherId, cipher, cipherKCV, refreshAfterSec, expireAfterSec);
 	}
 
 	checkDocForNewKmsUrls(ctx, resp, doc);
@@ -820,10 +853,10 @@ ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ct
 		std::function<Standalone<VectorRef<EncryptCipherKeyDetailsRef>>(Reference<RESTKmsConnectorCtx>,
 		                                                                Reference<HTTP::Response>)>
 		    f = &parseEncryptCipherResponse;
-		Standalone<VectorRef<EncryptCipherKeyDetailsRef>> result = wait(kmsRequestImpl(
-		    ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f)));
-		reply.cipherKeyDetails = result;
-		reply.arena.dependsOn(result.arena());
+		wait(store(
+		    reply.cipherKeyDetails,
+		    kmsRequestImpl(
+		        ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f))));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent("RESTLookupEKsByKeyIdsFailed", ctx->uid).error(e);
@@ -903,10 +936,11 @@ ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx>
 		                                                                Reference<HTTP::Response>)>
 		    f = &parseEncryptCipherResponse;
 
-		Standalone<VectorRef<EncryptCipherKeyDetailsRef>> result = wait(kmsRequestImpl(
-		    ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f)));
-		reply.cipherKeyDetails = result;
-		reply.arena.dependsOn(result.arena());
+		wait(store(reply.cipherKeyDetails,
+		           kmsRequestImpl(ctx,
+		                          SERVER_KNOBS->REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,
+		                          requestBodyRef,
+		                          std::move(f))));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent("RESTLookupEKsByDomainIdsFailed", ctx->uid).error(e);
@@ -1011,7 +1045,7 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 	TraceEvent("RESTValidationToken", ctx->uid).detail("DetailsStr", details);
 
 	state std::unordered_map<std::string, std::string> tokenFilePathMap;
-	while (!details.empty()) {
+	loop {
 		StringRef name = detailsRef.eat(TOKEN_NAME_FILE_SEP);
 		if (name.empty()) {
 			break;
@@ -1078,6 +1112,10 @@ ACTOR Future<Void> procureValidationTokensFromFiles(Reference<RESTKmsConnectorCt
 		tokenCtx.value.resize(fSize);
 		memcpy(tokenCtx.value.data(), buff.begin(), fSize);
 		tokenCtx.filePath = tokenFile;
+
+		if (SERVER_KNOBS->REST_KMS_CONNECTOR_REMOVE_TRAILING_NEWLINE) {
+			removeTrailingChar(tokenCtx.value, '\n');
+		}
 
 		// NOTE: avoid logging token-value to prevent token leaks in log files..
 		TraceEvent("RESTValidationTokenReadFile", ctx->uid)
@@ -1182,7 +1220,7 @@ ACTOR Future<Void> testMalformedFileValidationTokenDetails(Reference<RESTKmsConn
 
 ACTOR Future<Void> testValidationTokenFileNotFound(Reference<RESTKmsConnectorCtx> ctx) {
 	try {
-		wait(procureValidationTokensFromFiles(ctx, "foo#/imaginary-dir/dream/phantom-file"));
+		wait(procureValidationTokensFromFiles(ctx, "foo$/imaginary-dir/dream/phantom-file"));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_invalid_kms_config);
@@ -1245,19 +1283,34 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 	state std::unordered_map<std::string, std::shared_ptr<platform::TmpFile>> tokenFiles;
 	state std::unordered_map<std::string, std::string> tokenNameValueMap;
 	state std::string tokenDetailsStr;
+	state bool newLineAppended = BUGGIFY ? true : false;
 
-	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
+	std::string token;
+	// Construct token-value buffer ensuring it doesn't have trailing new-line character.
+	loop {
+		deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
+		token = std::string((char*)buff.begin(), tokenLen);
+		removeTrailingChar(token, '\n');
+		if (token.size() > 0) {
+			break;
+		}
+	}
+	tokenLen = token.size();
+	std::string tokenWithNewLine(token);
+	tokenWithNewLine.push_back('\n');
 
 	for (int i = 1; i <= numFiles; i++) {
 		std::string tokenName = std::to_string(i);
-		std::shared_ptr<platform::TmpFile> tokenfile = prepareTokenFile(buff.begin(), tokenLen);
+		std::shared_ptr<platform::TmpFile> tokenfile =
+		    newLineAppended ? prepareTokenFile(reinterpret_cast<uint8_t*>(tokenWithNewLine.data()), tokenLen + 1)
+		                    : prepareTokenFile(reinterpret_cast<uint8_t*>(token.data()), tokenLen);
 
-		std::string token((char*)buff.begin(), tokenLen);
 		tokenFiles.emplace(tokenName, tokenfile);
-		tokenNameValueMap.emplace(std::to_string(i), token);
 		tokenDetailsStr.append(tokenName).append(TOKEN_NAME_FILE_SEP).append(tokenfile->getFileName());
 		if (i < numFiles)
 			tokenDetailsStr.append(TOKEN_TUPLE_SEP);
+
+		tokenNameValueMap.emplace(std::to_string(i), token);
 	}
 
 	wait(procureValidationTokensFromFiles(ctx, tokenDetailsStr));
@@ -1276,6 +1329,8 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 		ASSERT_EQ(tokenCtx.filePath.compare(tokenFiles[tokenCtx.name]->getFileName()), 0);
 		ASSERT_NE(tokenCtx.getReadTS(), 0);
 	}
+
+	CODE_PROBE(newLineAppended, "RESTKmsConnector remove trailing newline");
 
 	return Void();
 }
@@ -1375,6 +1430,7 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 	resDoc.Accept(writer);
 	httpResponse->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResponse->content.data(), sb.GetString(), sb.GetSize());
+	httpResponse->contentLen = sb.GetSize();
 }
 
 void getFakeBlobMetadataResponse(StringRef jsonReqRef,
@@ -1579,6 +1635,8 @@ void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCiph
 
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	httpResp->contentLen = 0;
+	httpResp->content = "";
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
@@ -1612,6 +1670,7 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1640,6 +1699,7 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1673,6 +1733,7 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1721,6 +1782,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.Accept(writer);
 	httpResp->content.resize(sb.GetSize(), '\0');
 	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1747,9 +1809,18 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 	ASSERT(fileExists(tmpFile->getFileName()));
 
 	state std::unordered_set<std::string> urls;
-	urls.emplace("https://127.0.0.1/foo");
-	urls.emplace("https://127.0.0.1/foo1");
-	urls.emplace("https://127.0.0.1/foo2");
+	urls.emplace("https://127.0.0.1/foo  ");
+	urls.emplace("  https://127.0.0.1/foo1");
+	urls.emplace("  https://127.0.0.1/foo2  ");
+	urls.emplace("https://127.0.0.1/foo3/");
+	urls.emplace("https://127.0.0.1/foo4///");
+
+	state std::unordered_set<std::string> compareUrls;
+	compareUrls.emplace("https://127.0.0.1/foo");
+	compareUrls.emplace("https://127.0.0.1/foo1");
+	compareUrls.emplace("https://127.0.0.1/foo2");
+	compareUrls.emplace("https://127.0.0.1/foo3");
+	compareUrls.emplace("https://127.0.0.1/foo4");
 
 	std::string content;
 	for (auto& url : urls) {
@@ -1764,7 +1835,7 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 		std::shared_ptr<KmsUrlCtx> urlCtx = ctx->kmsUrlHeap.top();
 		ctx->kmsUrlHeap.pop();
 
-		ASSERT(urls.find(urlCtx->url) != urls.end());
+		ASSERT(compareUrls.find(urlCtx->url) != compareUrls.end());
 		ASSERT_EQ(urlCtx->nFailedResponses, 0);
 		ASSERT_EQ(urlCtx->nRequests, 0);
 		ASSERT_EQ(urlCtx->nResponseParseFailures, 0);
@@ -1778,6 +1849,7 @@ void setKnobs() {
 	g_knobs.setKnob("rest_kms_current_cipher_request_version", KnobValueRef::create(int{ 1 }));
 	g_knobs.setKnob("rest_kms_current_blob_metadata_request_version", KnobValueRef::create(int{ 1 }));
 	g_knobs.setKnob("rest_log_level", KnobValueRef::create(int{ 3 }));
+	g_knobs.setKnob("rest_kms_connector_remove_trailing_newline", KnobValueRef::create(bool{ true }));
 }
 
 } // namespace

@@ -77,12 +77,11 @@ public:
 
 	template <bool reverse>
 	struct GetMappedRangeReq {
-		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, int matchIndex, GetRangeLimits limits)
-		  : begin(begin), end(end), mapper(mapper), limits(limits), matchIndex(matchIndex) {}
+		GetMappedRangeReq(KeySelector begin, KeySelector end, Key mapper, GetRangeLimits limits)
+		  : begin(begin), end(end), mapper(mapper), limits(limits) {}
 		KeySelector begin, end;
 		Key mapper;
 		GetRangeLimits limits;
-		int matchIndex;
 		using Result = MappedRangeResult;
 	};
 
@@ -1156,13 +1155,8 @@ public:
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
-		                                                  read.end,
-		                                                  read.mapper,
-		                                                  read.limits,
-		                                                  read.matchIndex,
-		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False));
+		MappedRangeResult v = wait(ryw->tr.getMappedRange(
+		    read.begin, read.end, read.mapper, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
 		return v;
 	}
 
@@ -1786,7 +1780,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
                                                                     KeySelector end,
                                                                     Key mapper,
                                                                     GetRangeLimits limits,
-                                                                    int matchIndex,
                                                                     Snapshot snapshot,
                                                                     Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1834,9 +1827,9 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	Future<MappedRangeResult> result =
 	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
+	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeForGetMappedRange(
-	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, matchIndex, limits), snapshot);
+	                  this, RYWImpl::GetMappedRangeReq<false>(begin, end, mapper, limits), snapshot);
 
 	return result;
 }

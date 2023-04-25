@@ -149,11 +149,6 @@ static const Tag invalidTag{ tagLocalitySpecial, 0 };
 static const Tag txsTag{ tagLocalitySpecial, 1 };
 static const Tag cacheTag{ tagLocalitySpecial, 2 };
 
-const int MATCH_INDEX_ALL = 0;
-const int MATCH_INDEX_NONE = 1;
-const int MATCH_INDEX_MATCHED_ONLY = 2;
-const int MATCH_INDEX_UNMATCHED_ONLY = 3;
-
 enum { txsTagOld = -1, invalidTagOld = -100 };
 
 struct TagsAndMessage {
@@ -209,6 +204,10 @@ inline std::string describe(const Tag item) {
 
 inline std::string describe(const int item) {
 	return format("%d", item);
+}
+
+inline std::string describe(const Version item) {
+	return format("%ld", item);
 }
 
 // Allows describeList to work on a vector of std::string
@@ -1643,7 +1642,7 @@ struct StorageWiggleValue {
 
 enum class ReadType { EAGER = 0, FETCH = 1, LOW = 2, NORMAL = 3, HIGH = 4, MIN = EAGER, MAX = HIGH };
 
-FDB_DECLARE_BOOLEAN_PARAM(CacheResult);
+FDB_BOOLEAN_PARAM(CacheResult);
 
 // store options for storage engine read
 // ReadType describes the usage and priority of the read

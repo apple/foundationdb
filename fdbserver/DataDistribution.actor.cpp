@@ -54,18 +54,31 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
+void RelocateShard::setParentRange(KeyRange const& parent) {
+	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
+	parent_range = parent;
+}
+
+Optional<KeyRange> RelocateShard::getParentRange() const {
+	return parent_range;
+}
+
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
-	return ShardSizeBounds{
-		.max = StorageMetrics{ .bytes = -1,
-		                       .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                       .iosPerKSecond = StorageMetrics::infinity,
-		                       .bytesReadPerKSecond = StorageMetrics::infinity },
-		.min = StorageMetrics{ .bytes = -1, .bytesWrittenPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
-		.permittedError = StorageMetrics{ .bytes = -1,
-		                                  .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                                  .iosPerKSecond = StorageMetrics::infinity,
-		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
-	};
+	return ShardSizeBounds{ .max = StorageMetrics{ .bytes = -1,
+		                                           .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                                           .iosPerKSecond = StorageMetrics::infinity,
+		                                           .bytesReadPerKSecond = StorageMetrics::infinity,
+		                                           .opsReadPerKSecond = StorageMetrics::infinity },
+		                    .min = StorageMetrics{ .bytes = -1,
+		                                           .bytesWrittenPerKSecond = 0,
+		                                           .iosPerKSecond = 0,
+		                                           .bytesReadPerKSecond = 0,
+		                                           .opsReadPerKSecond = 0 },
+		                    .permittedError = StorageMetrics{ .bytes = -1,
+		                                                      .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                                                      .iosPerKSecond = StorageMetrics::infinity,
+		                                                      .bytesReadPerKSecond = StorageMetrics::infinity,
+		                                                      .opsReadPerKSecond = StorageMetrics::infinity } };
 }
 
 struct DDAudit {
@@ -437,6 +450,39 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> removeDataMoveTombstoneBackground(Reference<DataDistributor> self) {
+		state UID currentID;
+		try {
+			state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+			state Transaction tr(cx);
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					for (UID& dataMoveID : self->initData->toCleanDataMoveTombstone) {
+						currentID = dataMoveID;
+						tr.clear(dataMoveKeyFor(currentID));
+						TraceEvent(SevDebug, "RemoveDataMoveTombstone", self->ddId).detail("DataMoveID", currentID);
+					}
+					wait(tr.commit());
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+			TraceEvent(SevWarn, "RemoveDataMoveTombstoneError", self->ddId)
+			    .errorUnsuppressed(e)
+			    .detail("CurrentDataMoveID", currentID);
+			// DD needs not restart when removing tombstone gets failed unless this actor gets cancelled
+			// So, do not throw error
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> resumeFromShards(Reference<DataDistributor> self, bool traceShard) {
 		// All physicalShard init must be completed before issuing data move
 		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
@@ -575,6 +621,10 @@ public:
 				wait(yield(TaskPriority::DataDistribution));
 			}
 		}
+
+		// Trigger background cleanup for datamove tombstones
+		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
+
 		return Void();
 	}
 
@@ -665,8 +715,10 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
+
 	loop {
 		trackerCancelled = false;
+		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
 
@@ -719,42 +771,47 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			actors.push_back(resumeStorageAudits(self));
 
 			actors.push_back(self->pollMoveKeysLock());
-			actors.push_back(reportErrorsExcept(dataDistributionTracker(self->initData,
-			                                                            self->txnProcessor,
-			                                                            self->relocationProducer,
-			                                                            self->shardsAffectedByTeamFailure,
-			                                                            self->physicalShardCollection,
-			                                                            getShardMetrics,
-			                                                            getTopKShardMetrics.getFuture(),
-			                                                            getShardMetricsList,
-			                                                            getAverageShardBytes.getFuture(),
-			                                                            self->initialized,
-			                                                            anyZeroHealthyTeams,
-			                                                            self->ddId,
-			                                                            &shards,
-			                                                            &trackerCancelled,
-			                                                            self->ddTenantCache,
-			                                                            self->initData->customReplication),
+
+			auto shardTracker = makeReference<DataDistributionTracker>(
+			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
+			                                       .distributorId = self->ddId,
+			                                       .readyToStart = self->initialized,
+			                                       .output = self->relocationProducer,
+			                                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                                       .physicalShardCollection = self->physicalShardCollection,
+			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
+			                                       .shards = &shards,
+			                                       .trackerCancelled = &trackerCancelled,
+			                                       .ddTenantCache = self->ddTenantCache });
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
+			                                                                 self->initData,
+			                                                                 getShardMetrics.getFuture(),
+			                                                                 getTopKShardMetrics.getFuture(),
+			                                                                 getShardMetricsList.getFuture(),
+			                                                                 getAverageShardBytes.getFuture()),
 			                                    "DDTracker",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
-			actors.push_back(reportErrorsExcept(dataDistributionQueue(self->txnProcessor,
-			                                                          self->relocationProducer,
-			                                                          self->relocationConsumer.getFuture(),
-			                                                          getShardMetrics,
-			                                                          getTopKShardMetrics,
-			                                                          processingUnhealthy,
-			                                                          processingWiggle,
-			                                                          tcis,
-			                                                          self->shardsAffectedByTeamFailure,
-			                                                          self->physicalShardCollection,
-			                                                          self->lock,
-			                                                          getAverageShardBytes,
-			                                                          getUnhealthyRelocationCount.getFuture(),
-			                                                          self->ddId,
-			                                                          replicaSize,
-			                                                          self->configuration.storageTeamSize,
-			                                                          self->context->ddEnabledState.get()),
+
+			auto ddQueue = makeReference<DDQueue>(
+			    DDQueueInitParams{ .id = self->ddId,
+			                       .lock = self->lock,
+			                       .db = self->txnProcessor,
+			                       .teamCollections = tcis,
+			                       .shardsAffectedByTeamFailure = self->shardsAffectedByTeamFailure,
+			                       .physicalShardCollection = self->physicalShardCollection,
+			                       .getAverageShardBytes = getAverageShardBytes,
+			                       .teamSize = replicaSize,
+			                       .singleRegionTeamSize = self->configuration.storageTeamSize,
+			                       .relocationProducer = self->relocationProducer,
+			                       .relocationConsumer = self->relocationConsumer.getFuture(),
+			                       .getShardMetrics = getShardMetrics,
+			                       .getTopKMetrics = getTopKShardMetrics });
+			actors.push_back(reportErrorsExcept(DDQueue::run(ddQueue,
+			                                                 processingUnhealthy,
+			                                                 processingWiggle,
+			                                                 getUnhealthyRelocationCount.getFuture(),
+			                                                 self->context->ddEnabledState.get()),
 			                                    "DDQueue",
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
