@@ -34,6 +34,7 @@
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 
 #include "flow/IRandom.h"

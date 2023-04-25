@@ -629,7 +629,7 @@ Future<REPLY_TYPE(Request)> loadBalance(
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed").detail("Alternatives", alternatives->description());
+					TraceEvent("AllAlternativesFailed3").detail("Alternatives", alternatives->description());
 				}
 				wait(allAlternativesFailedDelay(okFuture));
 			} else {

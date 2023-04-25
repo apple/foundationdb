@@ -3020,7 +3020,8 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		}
 		++bwData->stats.granuleUpdateErrors;
 
-		if (granuleCanRetry(e)) {
+		// TODO (Nim): What should be the proper fix for this?
+		if (granuleCanRetry(e) || (g_network && g_network->isSimulated() && isThrowableEncryptionError(e))) {
 			CODE_PROBE(true, "Granule close and re-open on error");
 			TraceEvent("GranuleFileUpdaterRetriableError", bwData->id)
 			    .error(e)

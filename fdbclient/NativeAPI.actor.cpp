@@ -5041,7 +5041,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 					// Making this SevWarn means a lot of clutter
 					if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 					    deterministicRandom()->random01() < 0.01) {
-						TraceEvent("AllAlternativesFailed")
+						TraceEvent("AllAlternativesFailed1")
 						    .detail("Alternatives", locations[shard].locations->description());
 					}
 
@@ -10477,7 +10477,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				// Making this SevWarn means a lot of clutter
 				if (now() - g_network->networkInfo.newestAlternativesFailure > 1 ||
 				    deterministicRandom()->random01() < 0.01) {
-					TraceEvent("AllAlternativesFailed").detail("Alternatives", locations[0].locations->description());
+					TraceEvent("AllAlternativesFailed2").detail("Alternatives", locations[0].locations->description());
 				}
 
 				wait(allAlternativesFailedDelay(quorum(ok, 1)));

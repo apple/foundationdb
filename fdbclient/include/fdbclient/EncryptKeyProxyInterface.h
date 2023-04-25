@@ -177,12 +177,13 @@ struct EKPGetBaseCipherKeysByIdsRequest {
 	std::vector<EKPGetBaseCipherKeysRequestInfo> baseCipherInfos;
 	Optional<UID> debugId;
 	ReplyPromise<EKPGetBaseCipherKeysByIdsReply> reply;
+	bool enableFailureInjection = true;
 
 	EKPGetBaseCipherKeysByIdsRequest() {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, baseCipherInfos, debugId, reply);
+		serializer(ar, baseCipherInfos, debugId, reply, enableFailureInjection);
 	}
 };
 

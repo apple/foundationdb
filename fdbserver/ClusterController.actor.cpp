@@ -69,6 +69,7 @@
 #include "fdbrpc/ReplicationUtils.h"
 #include "fdbrpc/sim_validation.h"
 #include "fdbclient/KeyBackedTypes.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
@@ -236,7 +237,7 @@ ACTOR Future<Void> clusterWatchDatabase(ClusterControllerData* cluster,
 			if (isNormalClusterRecoveryError(err)) {
 				TraceEvent(SevWarn, "ClusterRecoveryRetrying", cluster->id).error(err);
 			} else {
-				bool ok = err.code() == error_code_no_more_servers;
+				bool ok = err.code() == error_code_no_more_servers || isThrowableEncryptionError(err);
 				TraceEvent(ok ? SevWarn : SevError, "ClusterWatchDatabaseRetrying", cluster->id).error(err);
 				if (!ok)
 					throw err;
@@ -2940,7 +2941,8 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 
 	loop choose {
 		when(ErrorOr<Void> err = wait(error)) {
-			if (err.isError() && err.getError().code() != error_code_restart_cluster_controller) {
+			if (err.isError() && err.getError().code() != error_code_restart_cluster_controller &&
+			    !isThrowableEncryptionError(err.getError())) {
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Error", false, err.getError());
 			} else {
 				endRole(Role::CLUSTER_CONTROLLER, interf.id(), "Stop Received Signal", true);

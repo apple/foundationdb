@@ -136,3 +136,25 @@ bool isReservedEncryptDomain(EncryptCipherDomainId domainId) {
 bool isEncryptHeaderDomain(EncryptCipherDomainId domainId) {
 	return domainId == ENCRYPT_HEADER_DOMAIN_ID;
 }
+
+std::unordered_set<int> getThrowableEncryptionErrorCodes() {
+	return std::unordered_set<int>{ error_code_encrypt_key_not_found,
+		                            error_code_encrypt_keys_fetch_failed,
+		                            error_code_encrypt_key_ttl_expired };
+}
+
+std::vector<Error> getThrowableEncryptionErrors() {
+	std::vector<Error> errors =
+	    std::vector<Error>{ encrypt_key_not_found(), encrypt_keys_fetch_failed(), encrypt_key_ttl_expired() };
+	std::unordered_set<int> throwableEncryptionErrorCodes = getThrowableEncryptionErrorCodes();
+	ASSERT(throwableEncryptionErrorCodes.size() == errors.size());
+	for (Error e : errors) {
+		ASSERT(throwableEncryptionErrorCodes.find(e.code()) != throwableEncryptionErrorCodes.end());
+	}
+	return errors;
+}
+
+bool isThrowableEncryptionError(const Error& e) {
+	std::unordered_set<int> throwableErrors = getThrowableEncryptionErrorCodes();
+	return throwableErrors.find(e.code()) != throwableErrors.end();
+}

@@ -378,8 +378,8 @@ ACTOR static Future<MutationRef> _decryptMutation(MutationRef mutation, Database
 	std::unordered_set<BlobCipherDetails> cipherDetails;
 	mutation.updateEncryptCipherDetails(cipherDetails);
 	std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> getCipherKeysResult = wait(
-	    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::BACKUP));
-	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::BACKUP);
+	    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, cipherDetails, BlobCipherMetrics::RESTORE));
+	return mutation.decrypt(getCipherKeysResult, *arena, BlobCipherMetrics::RESTORE);
 }
 
 // Parse a data block in a partitioned mutation log file and store mutations

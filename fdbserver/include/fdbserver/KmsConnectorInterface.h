@@ -153,14 +153,17 @@ struct KmsConnLookupEKsByKeyIdsReq {
 	std::vector<KmsConnLookupKeyIdsReqInfo> encryptKeyInfos;
 	Optional<UID> debugId;
 	ReplyPromise<KmsConnLookupEKsByKeyIdsRep> reply;
+	bool enableFailureInjection = true;
 
 	KmsConnLookupEKsByKeyIdsReq() {}
-	explicit KmsConnLookupEKsByKeyIdsReq(const std::vector<KmsConnLookupKeyIdsReqInfo>& keyInfos, Optional<UID> dbgId)
-	  : encryptKeyInfos(keyInfos), debugId(dbgId) {}
+	explicit KmsConnLookupEKsByKeyIdsReq(const std::vector<KmsConnLookupKeyIdsReqInfo>& keyInfos,
+	                                     Optional<UID> dbgId,
+	                                     bool enableFailureInjection)
+	  : encryptKeyInfos(keyInfos), debugId(dbgId), enableFailureInjection(enableFailureInjection) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptKeyInfos, debugId, reply, arena);
+		serializer(ar, encryptKeyInfos, debugId, reply, enableFailureInjection, arena);
 	}
 };
 

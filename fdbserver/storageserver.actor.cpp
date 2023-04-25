@@ -29,6 +29,7 @@
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
+#include "flow/EncryptUtils.h"
 #include "flow/network.h"
 #include "fmt/format.h"
 #include "fdbclient/Audit.h"
@@ -9642,8 +9643,13 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		return Void(); // update will get called again ASAP
 	} catch (Error& err) {
 		state Error e = err;
-		if (e.code() == error_code_encrypt_keys_fetch_failed) {
+		if (isThrowableEncryptionError(err)) {
 			TraceEvent(SevWarn, "SSUpdateError", data->thisServerID).error(e).backtrace();
+			// TODO: What should be the correct fix for this?
+			if (g_network && g_network->isSimulated()) {
+				wait(data->durableInProgress);
+				throw please_reboot();
+			}
 		} else if (e.code() != error_code_worker_removed && e.code() != error_code_please_reboot) {
 			TraceEvent(SevError, "SSUpdateError", data->thisServerID).error(e).backtrace();
 		} else if (e.code() == error_code_please_reboot) {
@@ -12032,6 +12038,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		self.ssLock->halt();
 
 		state Error err = e;
+		if (g_network && g_network->isSimulated() && isThrowableEncryptionError(e)) {
+			err = please_reboot();
+		}
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
 			self.actors = ActorCollection(false);
@@ -12136,6 +12145,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// If the storage server dies while something that uses self is still on the stack,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 		state Error err = e;
+		if (g_network && g_network->isSimulated() && isThrowableEncryptionError(e)) {
+			err = please_reboot();
+		}
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
 			self.actors = ActorCollection(false);

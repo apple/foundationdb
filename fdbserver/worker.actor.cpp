@@ -27,6 +27,7 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
 #include "flow/CodeProbe.h"
+#include "flow/EncryptUtils.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GetEncryptCipherKeys_impl.actor.h"
@@ -271,6 +272,9 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			} else if (e.getError().code() == error_code_lock_file_failure) {
 				CODE_PROBE(true, "Unable to lock file", probe::context::net2, probe::assert::noSim);
 				throw please_reboot_kv_store();
+			} else if (g_network && g_network->isSimulated() && isThrowableEncryptionError(e.getError())) {
+				TraceEvent("RebootKVStoreEncryptionError");
+				throw please_reboot_kv_store();
 			}
 			throw e.getError();
 		}
@@ -285,7 +289,7 @@ ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
 			          err.error.code() == error_code_actor_cancelled ||
 			          err.error.code() == error_code_remote_kvs_cancelled ||
 			          err.error.code() == error_code_coordinators_changed || // The worker server was cancelled
-			          err.error.code() == error_code_shutdown_in_progress;
+			          err.error.code() == error_code_shutdown_in_progress || isThrowableEncryptionError(err.error);
 
 			if (!ok) {
 				err.error = checkIOTimeout(err.error); // Possibly convert error to io_timeout

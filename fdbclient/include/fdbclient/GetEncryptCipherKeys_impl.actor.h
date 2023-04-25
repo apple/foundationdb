@@ -229,6 +229,9 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> _getEncr
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeys;
 	state std::unordered_set<BaseCipherIndex, boost::hash<BaseCipherIndex>> uncachedBaseCipherIds;
 	state EKPGetBaseCipherKeysByIdsRequest request;
+	// For backup/restore failure injection can cause issues as it will attempt to skip restoring certain mutations
+	// TODO: Should we enable this for just backup?
+	request.enableFailureInjection = usageType != BlobCipherMetrics::RESTORE;
 
 	if (!db.isValid()) {
 		TraceEvent(SevError, "GetEncryptCipherKeysServerDBInfoNotAvailable");

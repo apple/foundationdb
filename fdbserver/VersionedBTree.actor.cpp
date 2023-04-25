@@ -30,6 +30,7 @@
 #include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/ActorCollection.h"
+#include "flow/EncryptUtils.h"
 #include "flow/Error.h"
 #include "flow/FastRef.h"
 #include "flow/flow.h"
@@ -40,6 +41,7 @@
 #include "flow/Knobs.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/PriorityMultiLock.actor.h"
+#include "flow/network.h"
 #include "flow/serialize.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
@@ -2845,7 +2847,8 @@ public:
 
 			// For header pages, event is a warning because the primary header could be read after an unsync'd write,
 			// but no other page can.
-			TraceEvent(header ? SevWarnAlways : SevError, "RedwoodPageError")
+			bool ok = header || (g_network && g_network->isSimulated() && isThrowableEncryptionError(e));
+			TraceEvent(ok ? SevWarnAlways : SevError, "RedwoodPageError")
 			    .error(err)
 			    .detail("Filename", self->filename.c_str())
 			    .detail("PageID", pageID)
@@ -2856,7 +2859,6 @@ public:
 			             self->filename.c_str(),
 			             toString(pageID).c_str(),
 			             err.what());
-
 			throw err;
 		}
 
@@ -2919,7 +2921,8 @@ public:
 			             pageIDs.size() * blockSize);
 		} catch (Error& e) {
 			// For header pages, error is a warning because recovery may still be possible
-			TraceEvent(SevError, "RedwoodPageError")
+			bool ok = g_network && g_network->isSimulated() && isThrowableEncryptionError(e);
+			TraceEvent(ok ? SevWarnAlways : SevError, "RedwoodPageError")
 			    .error(e)
 			    .detail("Filename", self->filename.c_str())
 			    .detail("PageIDs", pageIDs)

@@ -130,4 +130,8 @@ int getEncryptHeaderAuthTokenSize(int algo);
 bool isReservedEncryptDomain(EncryptCipherDomainId domainId);
 bool isEncryptHeaderDomain(EncryptCipherDomainId domainId);
 
+std::unordered_set<int> getThrowableEncryptionErrorCodes();
+std::vector<Error> getThrowableEncryptionErrors();
+bool isThrowableEncryptionError(const Error& e);
+
 #endif

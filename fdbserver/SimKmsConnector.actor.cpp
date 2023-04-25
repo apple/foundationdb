@@ -200,6 +200,15 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 		}
 	}
 
+	if (g_network && g_network->isSimulated() && SERVER_KNOBS->ENABLE_SIM_KMS_FAILURE_INJECTION &&
+	    req.enableFailureInjection && deterministicRandom()->random01() < 0.4) {
+		Error err = deterministicRandom()->randomChoice(getThrowableEncryptionErrors());
+		TraceEvent("SimKMSInjectErrorLookupByIds").errorUnsuppressed(err);
+		CODE_PROBE(true, "SimKms Injected Error LookupByIds");
+		req.reply.sendError(err);
+		return Void();
+	}
+
 	wait(delayJittered(1.0)); // simulate network delay
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
 	return Void();
@@ -257,6 +266,15 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 			break;
 		}
 	}
+
+	// if (g_network && g_network->isSimulated() && SERVER_KNOBS->ENABLE_SIM_KMS_FAILURE_INJECTION &&
+	//     deterministicRandom()->random01() < 0.4) {
+	// 	Error err = deterministicRandom()->randomChoice(getThrowableEncryptionErrors());
+	// 	TraceEvent("SimKMSInjectErrorLookupByDomainIds").errorUnsuppressed(err);
+	// 	CODE_PROBE(true, "SimKms Injected Error LookupByDomainIds");
+	// 	req.reply.sendError(err);
+	// 	return Void();
+	// }
 
 	wait(delayJittered(1.0)); // simulate network delay
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
