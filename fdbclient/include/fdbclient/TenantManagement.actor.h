@@ -547,6 +547,38 @@ Future<std::vector<std::pair<TenantName, int64_t>>> listTenants(Reference<DB> db
 }
 
 ACTOR template <class Transaction>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenantsTransaction(Transaction tr,
+                                                                                      TenantGroupName tenantGroup,
+                                                                                      TenantName begin,
+                                                                                      TenantName end,
+                                                                                      int limit) {
+	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+	KeyBackedSet<Tuple>::RangeResultType result = wait(TenantMetadata::tenantGroupTenantIndex().getRange(
+	    tr, Tuple::makeTuple(tenantGroup, begin), Tuple::makeTuple(tenantGroup, end), limit));
+	std::vector<std::pair<TenantName, int64_t>> returnResult;
+	if (!result.results.size()) {
+		return returnResult;
+	}
+	for (auto const& tupleEntry : result.results) {
+		returnResult.push_back(std::make_pair(tupleEntry.getString(1), tupleEntry.getInt(2)));
+	}
+	return returnResult;
+}
+
+template <class DB>
+Future<std::vector<std::pair<TenantName, int64_t>>> listTenantGroupTenants(Reference<DB> db,
+                                                                           TenantGroupName tenantGroup,
+                                                                           TenantName begin,
+                                                                           TenantName end,
+                                                                           int limit) {
+	return runTransaction(db, [=](Reference<typename DB::TransactionT> tr) {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		return listTenantGroupTenantsTransaction(tr, tenantGroup, begin, end, limit);
+	});
+}
+
+ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantName, TenantMapEntry>>> listTenantMetadataTransaction(Transaction tr,
                                                                                          TenantName begin,
                                                                                          TenantName end,

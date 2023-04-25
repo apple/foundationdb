@@ -145,7 +145,7 @@ void updateClientBlobRanges(int64_t epoch,
 				}
 				break;
 			}
-			bool active = dbBlobRanges[i].value == blobRangeActive;
+			bool active = isBlobRangeActive(dbBlobRanges[i].value);
 			if (active) {
 				if (BM_DEBUG) {
 					fmt::print("BM {0} sees client range [{1} - {2})\n",
@@ -531,9 +531,9 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	bool maybeInjectTargetedRestart() {
 		// inject a BW restart at most once per test
 		if (g_network->isSimulated() && !g_simulator->speedUpSimulation &&
-		    now() > g_simulator->injectTargetedBMRestartTime) {
+		    now() > g_simulator->injectTargetedBMRestartTime && iAmReplaced.canBeSet()) {
 			CODE_PROBE(true, "Injecting BM targeted restart");
-			TraceEvent("SimBMInjectTargetedRestart", id);
+			TraceEvent("SimBMInjectTargetedRestart", id).log();
 			g_simulator->injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 			iAmReplaced.send(Void());
 			return true;
@@ -1382,7 +1382,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 					needToCoalesce = false;
 
 					for (int i = 0; i < results.size() - 1; i++) {
-						bool active = results[i].value == blobRangeActive;
+						bool active = isBlobRangeActive(results[i].value);
 						bmData->knownBlobRanges.insert(KeyRangeRef(results[i].key, results[i + 1].key), active);
 					}
 				}
@@ -5650,7 +5650,10 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 
 		// we need to recover the old blob manager's state (e.g. granule assignments) before
 		// before the new blob manager does anything
-		wait(recoverBlobManager(self) || collection);
+		choose {
+			when(wait(recoverBlobManager(self) || collection)) {}
+			when(wait(self->iAmReplaced.getFuture())) {}
+		}
 
 		self->addActor.send(doLockChecks(self));
 		self->addActor.send(monitorClientRanges(self));

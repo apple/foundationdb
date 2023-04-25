@@ -3766,7 +3766,10 @@ thread_local bool profileThread = false;
 // to see if we are on the profiled thread. Can be used in the signal handler.
 volatile int64_t profileThreadId = -1;
 
+#ifdef __linux__
 struct sigaction chainedAction;
+#endif
+
 volatile bool profilingEnabled = 1;
 volatile thread_local bool flowProfilingEnabled = 1;
 
@@ -3833,8 +3836,14 @@ void profileHandler(int sig) {
 	// We can't get the time from a timer() call because it's not signal safe.
 	ps->timestamp = checkThreadTime.is_lock_free() ? checkThreadTime.load() : 0;
 
+#if defined(USE_SANITIZER)
+	// In sanitizer builds the workaround implemented in SignalSafeUnwind.cpp is disabled
+	// so calling backtrace may cause a deadlock
+	size_t size = 0;
+#else
 	// SOMEDAY: should we limit the maximum number of frames from backtrace beyond just available space?
 	size_t size = backtrace(ps->frames, net2backtraces_max - net2backtraces_offset - 2);
+#endif
 
 	ps->length = size;
 
