@@ -3255,7 +3255,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// the end
 		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
 		    remainingLimitBytes <= 0) {
-			CODE_PROBE(true, "Memory feed adding empty version after memory filtered");
+			CODE_PROBE(true, "Memory feed adding empty version after memory filtered", probe::decoration::rare);
 			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
 		}
 	}
@@ -12034,12 +12034,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}
@@ -12138,12 +12138,12 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
 			ssCore.cancel();
-			self.actors.clear(true);
+			self.actors = ActorCollection(false);
 			wait(delay(0));
 			return Void();
 		}
 		ssCore.cancel();
-		self.actors.clear(true);
+		self.actors = ActorCollection(false);
 		wait(delay(0));
 		throw err;
 	}

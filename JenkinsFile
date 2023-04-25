@@ -129,7 +129,8 @@ void trigger_job(jobName, profile) {
                          string(name: 'GIT_REMOTE', value: "${repo_url}"),
                          string(name: 'GIT_SPECIFIER', value: "${scmInfo.GIT_COMMIT}"),
                          string(name: 'SLACK_USER_NAME', value: "${user_id}"),
-                         string(name: 'PR_ID', value: "${env.BRANCH_NAME}")]
+                         string(name: 'PR_ID', value: "${env.BRANCH_NAME}"),
+                         booleanParam(name: 'ALWAYS_TEST', value: true)]
 
         def j = build job: 'FDB_BuildAndTest/FDB_Precommit',
                 parameters: job_params + [string('name': 'BUILD_TEST_PROFILE', value: profile)],
