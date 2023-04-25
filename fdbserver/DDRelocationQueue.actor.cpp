@@ -20,6 +20,7 @@
 
 #include <limits>
 #include <numeric>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -291,10 +292,6 @@ public:
 
 	bool hasHealthyAvailableSpace(double minRatio) const override {
 		return all([minRatio](IDataDistributionTeam const& team) { return team.hasHealthyAvailableSpace(minRatio); });
-	}
-
-	bool hasLowerCpu(double cpuThreshold) const override {
-		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
 	}
 
 	Future<Void> updateStorageMetrics() override {
@@ -1257,6 +1254,19 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
 	}
 }
+
+int nonOverlappedSrcCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
+	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
+	int count = 0;
+	for (int i = 0; i < destIds.size(); i++) {
+		if (srcSet.count(destIds[i]) == 0) {
+			count++;
+		}
+	}
+	TraceEvent("MUZHI DEBUG").detail("SrcIds", srcIds).detail("DestIds", destIds).detail("Count", count);
+	return count;
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1412,7 +1422,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
-						destTeamSelect.setForRelocateShard(ForRelocateShard::True);
 						state GetTeamRequest req =
 						    GetTeamRequest(destTeamSelect,
 						                   PreferLowerDiskUtil::True,
@@ -1454,7 +1463,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						if (tciIndex > 0 && !bestTeamReady) {
 							// self->shardsAffectedByTeamFailure->moveShard must be called without any waits after
 							// getting the destination team or we could miss failure notifications for the storage
-							// servers in the d:estination team
+							// servers in the destination team
 							TraceEvent("BestTeamNotReady");
 							self->retryFindDstReasonCount[DDQueue::RetryFindDstReason::RemoteBestTeamNotReady]++;
 							foundTeams = false;
@@ -1880,8 +1889,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						dataTransferComplete.send(rd);
 					}
 
+					int nonOverlappingCount = nonOverlappedSrcCount(rd.src, destIds);
+
 					self->bytesWritten += metrics.bytes;
-					self->moveBytesRate.addSample(metrics.bytes);
+					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 

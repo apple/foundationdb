@@ -21,6 +21,7 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/CompressionUtils.h"
 #include "flow/IRandom.h"
+#include "flow/Trace.h"
 #include "flow/flow.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)
@@ -174,7 +175,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// In order to make sure GetTeam has enough eligible destination team:
 	init( DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO,                 0.4 );
 	init( DD_STRICT_CPU_PIVOT_RATIO,                             0.8 );
-	init( DD_REEVALUATION_ENABLED,                              true );
+	init( DD_REEVALUATION_ENABLED,                              true ); if( randomize && BUGGIFY ) DD_REEVALUATION_ENABLED = false;
 	ASSERT_GT(AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.
 	// TODO: choose a meaning value for real cluster

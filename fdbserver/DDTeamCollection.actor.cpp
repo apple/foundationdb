@@ -23,6 +23,7 @@
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
 #include "fdbserver/Knobs.h"
+#include "flow/CodeProbe.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -287,22 +288,19 @@ public:
 
 			// When relocating shards, DD would evaluate the CPU & AvailabeSpace of sourceTeam. If
 			// both of metrics are below pivot values, we would return the source team to dataDistributionRelocator
-			if (req.teamSelect.isForRelocateShard()) {
+			if (req.teamSelect.isForRelocateShard() && SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
 				auto sourceTeam = self->evaluateSourceTeam(req.completeSources);
 				if (sourceTeam.present()) {
+					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevInfo, "GetTeamReturnSourceTeam", self->distributorId)
 					    .detail("CompleteSources", req.completeSources)
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
 					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
 					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
 					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
-					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAS)
-						.detail("DDREEVALUATIONENABLED", SERVER_KNOBS->DD_REEVALUATION_ENABLED);
-					// TODO@MUZHI: move to upper if-condition, leave it here for printing traces
-					if (SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-						req.reply.send(std::make_pair(sourceTeam, foundSrc));
-						return Void();
-					}
+					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAS);
+					req.reply.send(std::make_pair(sourceTeam, foundSrc));
+					return Void();
 				}
 			}
 
@@ -3392,7 +3390,6 @@ void DDTeamCollection::updateTeamPivotValues() {
 		updateCpuPivots();
 		updateTeamEligibility();
 		teamPivots.lastPivotValuesUpdate = now();
-		TraceEvent("MUZHI DEBUG").detail("TimeStamp", now());
 	}
 }
 
@@ -6437,19 +6434,15 @@ public:
 		TeamSelect sourceSelect(TeamSelect::WANT_TRUE_BEST);
 		sourceSelect.setForRelocateShard(ForRelocateShard::True);
 		state GetTeamRequest sourceReq(sourceSelect,
-		                             PreferLowerDiskUtil::True,
-		                             TeamMustHaveShards::False,
-		                             PreferLowerReadUtil::True,
-		                             ForReadBalance::True);
-		sourceReq.completeSources = std::vector{UID(1, 0)};
+		                               PreferLowerDiskUtil::True,
+		                               TeamMustHaveShards::False,
+		                               PreferLowerReadUtil::True,
+		                               ForReadBalance::True);
+		sourceReq.completeSources = std::vector{ UID(1, 0) };
 
 		wait(collection->getTeam(sourceReq));
 		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
-		fmt::print("PivotRatio: {}, teamPivotCPU: {}, teamPivotAS: {}\n",
-		           SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO,
-		           collection->teamPivots.pivotCPU,
-		           collection->teamPivots.pivotAvailableSpaceRatio);
-		fmt::print("PivotRatio: {}, teamPivotCPU: {}, teamPivotAS: {}\n",
+		fmt::print("StrictPivotRatio: {}, teamStrictPivotCPU: {}, teamStrictPivotAS: {}\n",
 		           SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO,
 		           collection->teamPivots.strictPivotCPU,
 		           collection->teamPivots.strictPivotAS);
@@ -6464,7 +6457,7 @@ public:
 		                             TeamMustHaveShards::False,
 		                             PreferLowerReadUtil::True,
 		                             ForReadBalance::True);
-		bestReq.completeSources = std::vector{UID(4, 0)};
+		bestReq.completeSources = std::vector{ UID(4, 0) };
 		wait(collection->getTeam(bestReq));
 		const auto [bestTeam, found2] = bestReq.reply.getFuture().get();
 		ASSERT(bestTeam.present());
@@ -6474,11 +6467,11 @@ public:
 		TeamSelect anySelect(TeamSelect::ANY);
 		anySelect.setForRelocateShard(ForRelocateShard::True);
 		state GetTeamRequest anyReq(anySelect,
-		                             PreferLowerDiskUtil::True,
-		                             TeamMustHaveShards::False,
-		                             PreferLowerReadUtil::True,
-		                             ForReadBalance::True);
-		anyReq.completeSources = std::vector{UID(3, 0)};
+		                            PreferLowerDiskUtil::True,
+		                            TeamMustHaveShards::False,
+		                            PreferLowerReadUtil::True,
+		                            ForReadBalance::True);
+		anyReq.completeSources = std::vector{ UID(3, 0) };
 		wait(collection->getTeam(anyReq));
 		const auto [anyTeam, found3] = anyReq.reply.getFuture().get();
 		ASSERT(anyTeam.present());

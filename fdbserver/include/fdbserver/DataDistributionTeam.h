@@ -69,7 +69,6 @@ struct IDataDistributionTeam {
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
-	virtual bool hasLowerCpu(double cpuThreshold) const = 0;
 	virtual Future<Void> updateStorageMetrics() = 0;
 	virtual void addref() const = 0;
 	virtual void delref() const = 0;
