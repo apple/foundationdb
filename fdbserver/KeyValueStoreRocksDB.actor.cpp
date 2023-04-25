@@ -2710,10 +2710,12 @@ TEST_CASE("noSim/RocksDB/RangeClear") {
 		state std::string key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
+
+	// TODO: flush memtable. The process is expected to OOM.
 
 	Future<Void> closed = kvStore->onClosed();
 	kvStore->dispose();

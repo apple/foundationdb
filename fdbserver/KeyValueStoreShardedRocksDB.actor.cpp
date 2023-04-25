@@ -2080,7 +2080,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 				for (auto shard : (*a.dirtyShards)) {
 					if (shard->shouldFlush()) {
-						TraceEvent("FlushCF").detail("PhysicalShardId", shard->id);
+						TraceEvent("FlushCF")
+						    .detail("PhysicalShardId", shard->id)
+						    .detail("NumRangeDeletions", shard->numRangeDeletions);
 						a.db->Flush(fOptions, shard->cf);
 						shard->numRangeDeletions = 0;
 					}
@@ -3285,7 +3287,6 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 		state std::string key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
@@ -3343,7 +3344,6 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 		state std::string key2 = format("prefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
-		// RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
 		wait(kvStore->commit(false));
 	}
