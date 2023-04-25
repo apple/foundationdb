@@ -99,6 +99,8 @@ json_spirit::mObject DataClusterEntry::toJson() const {
 	obj["capacity"] = capacity.toJson();
 	obj["allocated"] = allocated.toJson();
 	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
+	obj["disable_auto_tenant_assignment"] =
+	    disableAutoTenantAssignment == DisableAutoTenantAssignment::True ? "true" : "false";
 	return obj;
 }
 
