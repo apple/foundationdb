@@ -1310,42 +1310,53 @@ ACTOR static Future<Void> backgroundGrvUpdater(DatabaseContext* cx) {
 	}
 }
 
-ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed) {
-	if (now() - cx->healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
-		if (detailed) {
-			return cx->healthMetrics;
-		} else {
-			HealthMetrics result;
-			result.update(cx->healthMetrics, false, false);
-			return result;
-		}
+inline HealthMetrics populateHealthMetrics(const HealthMetrics& detailedMetrics, bool detailedOutput) {
+	if (detailedOutput) {
+		return detailedMetrics;
+	} else {
+		HealthMetrics result;
+		result.update(detailedMetrics, false, false);
+		return result;
 	}
-	state bool sendDetailedRequest =
-	    detailed && now() - cx->detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+}
+
+ACTOR static Future<HealthMetrics> getHealthMetricsActor(DatabaseContext* cx, bool detailed, bool sendDetailedRequest) {
 	loop {
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
 			when(GetHealthMetricsReply rep = wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
 			                                                       &GrvProxyInterface::getHealthMetrics,
 			                                                       GetHealthMetricsRequest(sendDetailedRequest)))) {
-				cx->healthMetrics.update(rep.healthMetrics, detailed, true);
-				if (detailed) {
-					cx->healthMetricsLastUpdated = now();
+				cx->healthMetrics.update(rep.healthMetrics, sendDetailedRequest, true);
+				cx->healthMetricsLastUpdated = now();
+				if (sendDetailedRequest) {
 					cx->detailedHealthMetricsLastUpdated = now();
-					return cx->healthMetrics;
-				} else {
-					cx->healthMetricsLastUpdated = now();
-					HealthMetrics result;
-					result.update(cx->healthMetrics, false, false);
-					return result;
 				}
+				return populateHealthMetrics(cx->healthMetrics, detailed);
 			}
 		}
 	}
 }
 
 Future<HealthMetrics> DatabaseContext::getHealthMetrics(bool detailed = false) {
-	return getHealthMetricsActor(this, detailed);
+	if (now() - healthMetricsLastUpdated < CLIENT_KNOBS->AGGREGATE_HEALTH_METRICS_MAX_STALENESS) {
+		return populateHealthMetrics(healthMetrics, detailed);
+	}
+	bool sendDetailedRequest =
+	    detailed && now() - detailedHealthMetricsLastUpdated > CLIENT_KNOBS->DETAILED_HEALTH_METRICS_MAX_STALENESS;
+	return getHealthMetricsActor(this, detailed, sendDetailedRequest);
+}
+
+Future<Optional<HealthMetrics::StorageStats>> DatabaseContext::getStorageStats(const UID& id, double maxStaleness) {
+	if (now() - detailedHealthMetricsLastUpdated < maxStaleness) {
+		auto it = healthMetrics.storageStats.find(id);
+		return it == healthMetrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	}
+
+	return map(getHealthMetricsActor(this, true, true), [&id](auto metrics) -> Optional<HealthMetrics::StorageStats> {
+		auto it = metrics.storageStats.find(id);
+		return it == metrics.storageStats.end() ? Optional<HealthMetrics::StorageStats>() : it->second;
+	});
 }
 
 // register a special key(s) implementation under the specified module
@@ -4213,14 +4224,14 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					g_traceBatch.addEvent("TransactionDebug",
 					                      trState->readOptions.get().debugID.get().first(),
 					                      "NativeAPI.getExactRange.Before");
-					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.debugID.get())
+					/*TraceEvent("TransactionDebugGetExactRangeInfo", trState->readOptions.get().debugID.get())
 					    .detail("ReqBeginKey", req.begin.getKey())
 					    .detail("ReqEndKey", req.end.getKey())
 					    .detail("ReqLimit", req.limit)
 					    .detail("ReqLimitBytes", req.limitBytes)
 					    .detail("ReqVersion", req.version)
 					    .detail("Reverse", reverse)
-					    .detail("Servers", locations[shard].second->description());*/
+					    .detail("Servers", locations[shard].locations->locations()->description());*/
 				}
 				++trState->cx->transactionPhysicalReads;
 				state GetKeyValuesFamilyReply rep;
@@ -4598,20 +4609,23 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 			try {
 				if (getRangeID.present()) {
 					g_traceBatch.addEvent("TransactionDebug", getRangeID.get().first(), "NativeAPI.getRange.Before");
-					/*TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.debugID.get())
-					    .detail("ReqBeginKey", req.begin.getKey())
-					    .detail("ReqEndKey", req.end.getKey())
-					    .detail("OriginalBegin", originalBegin.toString())
-					    .detail("OriginalEnd", originalEnd.toString())
-					    .detail("Begin", begin.toString())
-					    .detail("End", end.toString())
-					    .detail("Shard", shard)
-					    .detail("ReqLimit", req.limit)
-					    .detail("ReqLimitBytes", req.limitBytes)
-					    .detail("ReqVersion", req.version)
-					    .detail("Reverse", reverse)
-					    .detail("ModifiedSelectors", modifiedSelectors)
-					    .detail("Servers", beginServer.second->description());*/
+					/*
+					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					    TraceEvent("TransactionDebugGetRangeInfo", trState->readOptions.get().debugID.get())
+					        .detail("ReqBeginKey", req.begin.getKey())
+					        .detail("ReqEndKey", req.end.getKey())
+					        .detail("OriginalBegin", originalBegin.toString())
+					        .detail("OriginalEnd", originalEnd.toString())
+					        .detail("Begin", begin.toString())
+					        .detail("End", end.toString())
+					        .detail("Shard", shard)
+					        .detail("ReqLimit", req.limit)
+					        .detail("ReqLimitBytes", req.limitBytes)
+					        .detail("ReqVersion", req.version)
+					        .detail("Reverse", reverse)
+					        .detail("ModifiedSelectors", modifiedSelectors)
+					        .detail("Servers", beginServer.locations->locations()->description());
+					}*/
 				}
 
 				++trState->cx->transactionPhysicalReads;
@@ -4641,12 +4655,15 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					g_traceBatch.addEvent("TransactionDebug",
 					                      getRangeID.get().first(),
 					                      "NativeAPI.getRange.After"); //.detail("SizeOf", rep.data.size());
-					/*TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.debugID.get())
-					    .detail("ReqBeginKey", req.begin.getKey())
-					    .detail("ReqEndKey", req.end.getKey())
-					    .detail("RepIsMore", rep.more)
-					    .detail("VersionReturned", rep.version)
-					    .detail("RowsReturned", rep.data.size());*/
+					/*
+					if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
+					    TraceEvent("TransactionDebugGetRangeDone", trState->readOptions.get().debugID.get())
+					        .detail("ReqBeginKey", req.begin.getKey())
+					        .detail("ReqEndKey", req.end.getKey())
+					        .detail("RepIsMore", rep.more)
+					        .detail("VersionReturned", rep.version)
+					        .detail("RowsReturned", rep.data.size());
+					}*/
 				}
 
 				ASSERT(!rep.more || rep.data.size());
@@ -7722,7 +7739,7 @@ ACTOR Future<StorageMetrics> doGetStorageMetrics(Database cx,
 			wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
 		} else {
 			bool ok = e.code() == error_code_tenant_not_found;
-			TraceEvent(ok ? SevInfo : SevError, "WaitStorageMetricsError").error(e);
+			TraceEvent(ok ? SevInfo : SevError, "DoGetStorageMetricsError").error(e);
 			throw;
 		}
 
@@ -7984,7 +8001,7 @@ ACTOR Future<std::pair<Optional<StorageMetrics>, int>> waitStorageMetrics(
 				return std::make_pair(res, -1);
 			}
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "WaitStorageMetricsError").error(e);
+			TraceEvent(SevDebug, "WaitStorageMetricsHandleError").error(e);
 			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 				cx->invalidateCache(tenantInfo.prefix, keys);
 				wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
@@ -10874,7 +10891,7 @@ ACTOR Future<Standalone<VectorRef<KeyRangeRef>>> getBlobRanges(Transaction* tr, 
 
 		blobRanges.arena().dependsOn(results.arena());
 		for (int i = 0; i < results.size() - 1; i++) {
-			if (results[i].value == blobRangeActive) {
+			if (isBlobRangeActive(results[i].value)) {
 				blobRanges.push_back(blobRanges.arena(), KeyRangeRef(results[i].key, results[i + 1].key));
 			}
 			if (blobRanges.size() == batchLimit) {
@@ -11026,6 +11043,12 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 	}
 
 	state Value value = active ? blobRangeActive : blobRangeInactive;
+	if (active && (!g_network->isSimulated() || !g_simulator->willRestart) && BUGGIFY_WITH_PROB(0.1)) {
+		// buggify to arbitrary if test isn't a restarting test that could downgrade to an earlier version that doesn't
+		// support this
+		int randLen = deterministicRandom()->randomInt(2, 20);
+		value = StringRef(deterministicRandom()->randomAlphaNumeric(randLen));
+	}
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);

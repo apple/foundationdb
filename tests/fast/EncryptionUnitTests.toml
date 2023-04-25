@@ -1,0 +1,20 @@
+[[knobs]]
+enable_configurable_encryption = true
+
+[[test]]
+testTitle = 'BlobCipherUnitTest'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/blobCipher'
+
+[[test]]
+testTitle = 'EncryptKeyProxyUnitTest'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/EncryptKeyProxy'
