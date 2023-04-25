@@ -21,7 +21,6 @@
 #include "fdbclient/ServerKnobs.h"
 #include "flow/CompressionUtils.h"
 #include "flow/IRandom.h"
-#include "flow/Trace.h"
 #include "flow/flow.h"
 
 #define init(...) KNOB_FN(__VA_ARGS__, INIT_ATOMIC_KNOB, INIT_KNOB)(__VA_ARGS__)

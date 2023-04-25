@@ -1263,7 +1263,6 @@ int nonOverlappedSrcCount(const std::vector<UID>& srcIds, const std::vector<UID>
 			count++;
 		}
 	}
-	TraceEvent("MUZHI DEBUG").detail("SrcIds", srcIds).detail("DestIds", destIds).detail("Count", count);
 	return count;
 }
 
