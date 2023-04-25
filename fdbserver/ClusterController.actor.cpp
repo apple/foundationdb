@@ -2811,8 +2811,9 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 					wait(store(self->db.metaclusterMetrics,
 					           metacluster::MetaclusterMetrics::getMetaclusterMetrics(self->cx)));
 				} catch (Error& e) {
-					// Ignore errors about the cluster changing type
-					if (e.code() != error_code_invalid_metacluster_operation) {
+					// Ignore errors about the cluster changing type or unsupported metacluster versions
+					if (e.code() != error_code_invalid_metacluster_operation &&
+					    e.code() != error_code_unsupported_metacluster_version) {
 						throw;
 					}
 				}

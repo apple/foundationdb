@@ -3042,7 +3042,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
-    Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
+    Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
     metacluster::MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
