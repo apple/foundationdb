@@ -1814,18 +1814,21 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					CODE_PROBE(true, "Data distributor received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingDistributorSnapRequest").detail("SnapUID", snapUID);
 					ASSERT(snapReq.snapPayload == ddSnapReqMap[snapUID].snapPayload);
+					// Discard the old request if a duplicate new request is received
+					ddSnapReqMap[snapUID].reply.sendError(duplicate_snapshot_request());
 					ddSnapReqMap[snapUID] = snapReq;
 				} else {
 					ddSnapReqMap[snapUID] = snapReq;
-					actors.add(ddSnapCreate(
-					    snapReq, db, self->context->ddEnabledState.get(), &ddSnapReqMap, &ddSnapReqResultMap));
 					auto* ddSnapReqResultMapPtr = &ddSnapReqResultMap;
 					actors.add(fmap(
 					    [ddSnapReqResultMapPtr, snapUID](Void _) {
 						    ddSnapReqResultMapPtr->erase(snapUID);
 						    return Void();
 					    },
-					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					    delayed(
+					        ddSnapCreate(
+					            snapReq, db, self->context->ddEnabledState.get(), &ddSnapReqMap, &ddSnapReqResultMap),
+					        SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
 				}
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
