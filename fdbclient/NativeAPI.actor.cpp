@@ -2880,10 +2880,7 @@ ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
 
 	loop {
 		try {
-			double backoff = cx->getBackoff();
-			if (backoff > 0.0) {
-				wait(delay(backoff));
-			}
+			wait(cx->getBackoff());
 			++cx->transactionKeyServerLocationRequests;
 			choose {
 				when(wait(cx->onProxiesChanged())) {}
@@ -3063,10 +3060,7 @@ ACTOR Future<std::vector<KeyRangeLocationInfo>> getKeyRangeLocations_internal(
 
 	loop {
 		try {
-			double backoff = cx->getBackoff();
-			if (backoff > 0.0) {
-				wait(delay(backoff));
-			}
+			wait(cx->getBackoff());
 			++cx->transactionKeyServerLocationRequests;
 			choose {
 				when(wait(cx->onProxiesChanged())) { }

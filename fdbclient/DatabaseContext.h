@@ -656,8 +656,8 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
-	// Gets a database level backoff delay time in seconds.
-	double getBackoff() { return backoffDelay; }
+	// Gets a database level backoff delay future, time in seconds.
+	Future<Void> getBackoff() const { return backoffDelay > 0.0 ? delay(backoffDelay) : Future<Void>(Void()); }
 
 	// Updates internal Backoff state when a request fails or succeeds.
 	// E.g., commit_proxy_memory_limit_exceeded error means the database is overloaded
