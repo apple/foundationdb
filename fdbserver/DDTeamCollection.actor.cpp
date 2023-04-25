@@ -37,6 +37,35 @@ auto get(MapContainer& m, K const& k) -> decltype(m.at(k)) {
 
 } // namespace
 
+namespace data_distribution {
+int EligibilityCounter::fromGetTeamRequest(GetTeamRequest const& req) {
+	// equivalent to bit set operation
+	return req.preferLowerDiskUtil * EligibilityCounter::LOW_DISK_UTIL +
+	       // When preferLowerReadUtil, CPU stat is for admittance to eligible pool, and ReadLoad is for sorting inside
+	       // the pool.
+	       req.preferLowerReadUtil * EligibilityCounter::LOW_CPU;
+}
+
+void EligibilityCounter::increase(Type type) {
+	type_count[type]++;
+}
+
+void EligibilityCounter::reset(Type type) {
+	type_count[type] = 0;
+}
+
+int EligibilityCounter::getCount(int combinedType) const {
+	unsigned minCount = std::numeric_limits<unsigned>::max();
+	for (auto& [t, c] : type_count) {
+		if ((combinedType & t) > 0 && minCount > c) {
+			minCount = c;
+		}
+	}
+	return minCount;
+}
+
+} // namespace data_distribution
+
 class DDTeamCollectionImpl {
 	ACTOR static Future<Void> checkAndRemoveInvalidLocalityAddr(DDTeamCollection* self) {
 		state double start = now();
@@ -178,35 +207,8 @@ public:
 				return Void();
 			}
 
-			// report the median available space
-			if (now() - self->lastMedianAvailableSpaceUpdate > SERVER_KNOBS->AVAILABLE_SPACE_UPDATE_DELAY) {
-				self->lastMedianAvailableSpaceUpdate = now();
-				std::vector<double> teamAvailableSpace;
-				teamAvailableSpace.reserve(self->teams.size());
-				for (const auto& team : self->teams) {
-					if (team->isHealthy()) {
-						teamAvailableSpace.push_back(team->getMinAvailableSpaceRatio());
-					}
-				}
-
-				size_t pivot = teamAvailableSpace.size() / 2;
-				if (teamAvailableSpace.size() > 1) {
-					std::nth_element(
-					    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end());
-					self->medianAvailableSpace =
-					    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
-					             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
-				} else {
-					self->medianAvailableSpace = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
-				}
-				if (self->medianAvailableSpace < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
-					TraceEvent(SevWarn, "DDTeamMedianAvailableSpaceTooSmall", self->distributorId)
-					    .detail("MedianAvailableSpaceRatio", self->medianAvailableSpace)
-					    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
-					    .detail("Primary", self->primary);
-					self->printDetailedTeamsInfo.trigger();
-				}
-			}
+			// report the pivot values
+			self->updateTeamPivotValues();
 
 			bool foundSrc = false;
 			for (const auto& id : req.src) {
@@ -299,9 +301,13 @@ public:
 				int bestIndex = startIndex;
 				for (int i = 0; i < self->teams.size(); i++) {
 					int currentIndex = (startIndex + i) % self->teams.size();
-					if (self->teams[currentIndex]->isHealthy() &&
-					    (!req.preferLowerDiskUtil ||
-					     self->teams[currentIndex]->hasHealthyAvailableSpace(self->medianAvailableSpace))) {
+					if (self->teams[currentIndex]->isHealthy()) {
+						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
+						if (eligibilityType != data_distribution::EligibilityCounter::NONE &&
+						    self->teams[currentIndex]->getEligibilityCount(eligibilityType) <= 0) {
+							continue;
+						}
+
 						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
 						if ((!req.teamMustHaveShards ||
 						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
@@ -332,8 +338,12 @@ public:
 					// If unhealthy team is majority, we may not find an ok dest in this while loop
 					Reference<TCTeamInfo> dest = deterministicRandom()->randomChoice(self->teams);
 
-					bool ok = dest->isHealthy() &&
-					          (!req.preferLowerDiskUtil || dest->hasHealthyAvailableSpace(self->medianAvailableSpace));
+					bool ok = dest->isHealthy();
+					if (ok) {
+						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
+						ok = eligibilityType == data_distribution::EligibilityCounter::NONE ||
+						     dest->getEligibilityCount(eligibilityType) > 0;
+					}
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
@@ -355,9 +365,6 @@ public:
 				// Log BestTeamStuck reason when we have healthy teams but they do not have healthy free space
 				if (randomTeams.empty() && !self->zeroHealthyTeams->get()) {
 					self->bestTeamKeepStuckCount++;
-					if (g_network->isSimulated()) {
-						TraceEvent(SevWarn, "GetTeamReturnEmpty").detail("HealthyTeams", self->healthyTeamCount);
-					}
 				} else {
 					self->bestTeamKeepStuckCount = 0;
 				}
@@ -391,10 +398,14 @@ public:
 					return Void();
 				}
 			}
-			// if (!bestOption.present()) {
-			// 	TraceEvent("GetTeamRequest").detail("Request", req.getDesc());
-			// 	self->traceAllInfo(true);
-			// }
+			if (g_network->isSimulated() && !bestOption.present()) {
+				TraceEvent(SevDebug, "GetTeamReturnEmpty")
+				    .detail("Request", req.getDesc())
+				    .detail("HealthyTeams", self->healthyTeamCount)
+				    .detail("PivotCPU", self->teamPivots.pivotCPU)
+				    .detail("PivotDiskSpace", self->teamPivots.pivotAvailableSpaceRatio);
+				// self->traceAllInfo(true);
+			}
 
 			req.reply.send(std::make_pair(bestOption, foundSrc));
 			return Void();
@@ -1050,7 +1061,7 @@ public:
 		state Future<Void> failureTracker;
 		state ServerStatus status(server->getLastKnownInterface().locality);
 		state bool lastIsUnhealthy = false;
-		state Future<Void> metricsTracker = server->serverMetricsPolling();
+		state Future<Void> metricsTracker = server->serverMetricsPolling(self->db);
 
 		state Future<std::pair<StorageServerInterface, ProcessClass>> interfaceChanged = server->onInterfaceChanged;
 		state bool hasWrongDC = !self->isCorrectDC(*server);
@@ -3261,6 +3272,91 @@ public:
 	}
 }; // class DDTeamCollectionImpl
 
+void DDTeamCollection::updateAvailableSpacePivots() {
+	std::vector<double> teamAvailableSpace;
+	for (int i = 0; i < teams.size(); ++i) {
+		if (teams[i]->isHealthy()) {
+			teamAvailableSpace.push_back(teams[i]->getMinAvailableSpaceRatio());
+		}
+	}
+
+	if (!teamAvailableSpace.empty()) {
+		ASSERT_LT(SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO, 1.0);
+		size_t pivot = teamAvailableSpace.size() * SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO;
+		std::nth_element(
+		    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end(), std::greater{});
+		teamPivots.pivotAvailableSpaceRatio =
+		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+	} else {
+		teamPivots.pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+	}
+
+	if (teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
+		TraceEvent(SevWarn, "DDTeamPivotAvailableSpaceTooSmall", distributorId)
+		    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
+		    .detail("TargetAvailableSpaceRatio", SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO)
+		    .detail("Primary", primary);
+		printDetailedTeamsInfo.trigger();
+	}
+}
+
+void DDTeamCollection::updateCpuPivots() {
+	std::vector<double> teamAverageCPU;
+	for (int i = 0; i < teams.size(); ++i) {
+		if (teams[i]->isHealthy()) {
+			teamAverageCPU.emplace_back(teams[i]->getAverageCPU());
+			teamPivots.minTeamAvgCPU = std::min(teamPivots.minTeamAvgCPU, teamAverageCPU.back());
+		}
+	}
+
+	if (!teamAverageCPU.empty()) {
+		ASSERT_LT(SERVER_KNOBS->CPU_PIVOT_RATIO, 1.0);
+		size_t pivot = teamAverageCPU.size() * SERVER_KNOBS->CPU_PIVOT_RATIO;
+		std::nth_element(teamAverageCPU.begin(), teamAverageCPU.begin() + pivot, teamAverageCPU.end());
+		teamPivots.pivotCPU = teamAverageCPU[pivot];
+	} else {
+		teamPivots.pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
+	}
+
+	if (teamPivots.pivotCPU > SERVER_KNOBS->MAX_DEST_CPU_PERCENT) {
+		TraceEvent(SevWarnAlways, "DDTeamPivotCPUTooHigh", distributorId)
+		    .detail("PivotCPU", teamPivots.pivotCPU)
+		    .detail("MinTeamAvgCPU", teamPivots.minTeamAvgCPU)
+		    .detail("Primary", primary);
+	}
+}
+
+void DDTeamCollection::updateTeamEligibility() {
+	for (auto& team : teams) {
+		if (team->isHealthy()) {
+			if (team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio)) {
+				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
+			} else {
+				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
+			}
+
+			if (team->hasLowerCpu(teamPivots.pivotCPU)) {
+				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+			} else {
+				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+			}
+		} else {
+			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
+			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+		}
+	}
+}
+
+void DDTeamCollection::updateTeamPivotValues() {
+	if (now() - teamPivots.lastPivotValuesUpdate >= SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
+		updateAvailableSpacePivots();
+		updateCpuPivots();
+		updateTeamEligibility();
+		teamPivots.lastPivotValuesUpdate = now();
+	}
+}
+
 int32_t DDTeamCollection::getTargetTSSInDC() const {
 	int32_t targetTSSInDC = configuration.desiredTSSCount;
 	if (configuration.usableRegions > 1) {
@@ -3719,7 +3815,6 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
-    medianAvailableSpace(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO), lastMedianAvailableSpaceUpdate(0),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
     getUnhealthyRelocationCount(params.getUnhealthyRelocationCount), removeFailedServer(params.removeFailedServer),
     ddTrackerStartingEventHolder(makeReference<EventCacheHolder>("DDTrackerStarting")),
@@ -3734,6 +3829,10 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
 		    .detail("State", "Inactive")
 		    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 	}
+	teamPivots = { .lastPivotValuesUpdate = 0,
+		           .pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+		           .pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
+		           .minTeamAvgCPU = std::numeric_limits<double>::max() };
 }
 
 DDTeamCollection::~DDTeamCollection() {
