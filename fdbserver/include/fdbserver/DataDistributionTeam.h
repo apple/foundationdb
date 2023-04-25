@@ -121,8 +121,8 @@ struct GetTeamRequest {
 	GetTeamRequest(TeamSelect teamSelectRequest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               PreferLowerReadUtil preferLowerReadUtil,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
-	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0,
 	               Optional<KeyRange> keys = Optional<KeyRange>())
 	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
