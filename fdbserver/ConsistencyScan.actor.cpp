@@ -441,7 +441,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		sharedRandom.randomShuffle(shardOrder);
 	}
 
-	state DDConfiguration::RangeConfigMapSnapshot userRangeConfig =
+	state Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig =
 	    wait(DDConfiguration().userRangeConfig().getSnapshot(
 	        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
 
@@ -466,7 +466,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		if (ddLargeTeamEnabled()) {
 			// For every custom range that overlaps with this shard range, print it and update the replication count
 			// There should only be one custom range, possibly the default range with no custom configuration at all
-			for (auto it : userRangeConfig.intersectingRanges(range.begin, range.end)) {
+			for (auto it : userRangeConfig->intersectingRanges(range.begin, range.end)) {
 				KeyRangeRef configuredRange(it->range().begin, it->range().end);
 
 				CODE_PROBE(true, "Checked custom replication configuration.");

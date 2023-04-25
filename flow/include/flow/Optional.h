@@ -24,6 +24,7 @@
 #include <optional>
 #include <fmt/format.h>
 
+#include "flow/Traceable.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Error.h"
 
@@ -266,17 +267,14 @@ private:
 	std::optional<T> impl;
 };
 
-template <typename T>
-struct fmt::formatter<Optional<T>> : fmt::formatter<T> {
-
-	template <typename FormatContext>
-	auto format(const Optional<T>& opt, FormatContext& ctx) {
-		if (opt.present()) {
-			fmt::formatter<T>::format(opt.get(), ctx);
-			return ctx.out();
-		}
-		return fmt::format_to(ctx.out(), "<np>");
+template <class T>
+struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Optional<T>& value) {
+		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
 	}
 };
+
+template <typename T>
+struct fmt::formatter<Optional<T>> : FormatUsingTraceable<Optional<T>> {};
 
 #endif // FLOW_OPTIONAL_H

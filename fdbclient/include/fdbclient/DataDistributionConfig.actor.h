@@ -90,12 +90,7 @@ struct Traceable<DDRangeConfig> : std::true_type {
 };
 
 template <>
-struct fmt::formatter<DDRangeConfig> : formatter<std::string> {
-	template <typename FormatContext>
-	auto format(const DDRangeConfig& val, FormatContext& ctx) {
-		return fmt::formatter<std::string>::format(val.toString(), ctx);
-	}
-};
+struct fmt::formatter<DDRangeConfig> : FormatUsingTraceable<DDRangeConfig> {};
 
 struct DDConfiguration : public KeyBackedClass {
 	DDConfiguration(KeyRef prefix = SystemKey("\xff\x02/ddconfig/"_sr)) : KeyBackedClass(prefix) {}
@@ -110,7 +105,7 @@ struct DDConfiguration : public KeyBackedClass {
 	typedef RangeConfigMap::LocalSnapshot RangeConfigMapSnapshot;
 
 	// Range configuration options set by Users
-	RangeConfigMap userRangeConfig() const { return { subSpace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }
+	RangeConfigMap userRangeConfig() const { return { subspace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }
 
 	static json_spirit::mValue toJSON(RangeConfigMapSnapshot const& snapshot, bool includeDefaultRanges = false);
 };

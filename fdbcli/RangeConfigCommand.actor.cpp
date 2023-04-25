@@ -72,11 +72,12 @@ ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> t
 			}
 		}
 
-		DDConfiguration::RangeConfigMapSnapshot config = wait(DDConfiguration().userRangeConfig().getSnapshot(
-		    SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
+		Reference<DDConfiguration::RangeConfigMapSnapshot> config =
+		    wait(DDConfiguration().userRangeConfig().getSnapshot(
+		        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
 		fmt::print(
 		    "{}\n",
-		    json_spirit::write_string(DDConfiguration::toJSON(config, includeDefault), json_spirit::pretty_print));
+		    json_spirit::write_string(DDConfiguration::toJSON(*config, includeDefault), json_spirit::pretty_print));
 
 	} else if (cmd == "update"_sr || cmd == "set"_sr) {
 		if (args.size() < 3) {

@@ -2054,6 +2054,9 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 
+		// This block will randomly add custom configured key ranges to the test.
+		// TODO:  Move this to a workload which is randomly added to tests similar to FailureInjectionWorkload classes
+		// but the injected behavior should not be considered a failure for workload selection purposes.
 		if (deterministicRandom()->random01() < 0.25) {
 			state ReadYourWritesTransaction tr(cx);
 			state bool verbose = (KEYBACKEDTYPES_DEBUG != 0);
@@ -2108,12 +2111,12 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 							{ "b1"_sr, false, DDRangeConfig() }
 						};
 
-						state DDConfiguration::RangeConfigMapSnapshot snapshot =
+						state Reference<DDConfiguration::RangeConfigMapSnapshot> snapshot =
 						    wait(rangeConfig->getSnapshot(&tr, allKeys.begin, allKeys.end));
 
 						if (verbose) {
 							fmt::print("DD User Range Config:\n{}\n",
-							           json_spirit::write_string(DDConfiguration::toJSON(snapshot, true),
+							           json_spirit::write_string(DDConfiguration::toJSON(*snapshot, true),
 							                                     json_spirit::pretty_print));
 						}
 
@@ -2140,7 +2143,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 							DDRangeConfig rc = std::get<2>(rangeTests[i]);
 							ASSERT(!verify.present() || verify->value == rc);
 
-							auto snapshotRange = snapshot.rangeContaining(query);
+							auto snapshotRange = snapshot->rangeContaining(query);
 							ASSERT(snapshotRange.value() == rc);
 							// The snapshot has all ranges covered but the db may not
 							if (verify.present()) {

@@ -243,7 +243,7 @@ class DDTxnProcessorImpl {
 		state Transaction tr(cx);
 
 		if (ddLargeTeamEnabled()) {
-			wait(store(*result->userRangeConfig,
+			wait(store(result->userRangeConfig,
 			           DDConfiguration().userRangeConfig().getSnapshot(
 			               SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end)));
 		}

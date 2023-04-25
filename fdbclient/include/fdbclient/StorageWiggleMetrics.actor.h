@@ -162,7 +162,7 @@ public:
 		DataForDc(StringRef prefix) : KeyBackedClass(prefix) {}
 
 		auto storageWiggleDelay() const {
-			auto key = subSpace.pack("storageWiggleDelay"_sr);
+			auto key = subspace.pack("storageWiggleDelay"_sr);
 			return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
 		}
 	};
