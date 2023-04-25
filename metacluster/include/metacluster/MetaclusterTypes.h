@@ -128,7 +128,7 @@ struct DataClusterEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated, clusterState);
+		serializer(ar, id, capacity, allocated, clusterState, disableAutoTenantAssignment);
 	}
 };
 

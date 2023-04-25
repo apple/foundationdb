@@ -215,6 +215,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->totalTenantGroupCapacity += entry.capacity.numTenantGroups;
 			dataDb->registered = true;
 			dataDb->detached = false;
+			if (dataDb->disableAutoTenantAssignment == metacluster::DisableAutoTenantAssignment::True) {
+				TraceEvent("YanqinImpossible").backtrace();
+			}
+			ASSERT(dataDb->disableAutoTenantAssignment != metacluster::DisableAutoTenantAssignment::True);
 
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
@@ -278,6 +282,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    dataDb->tenantGroups.size() + dataDb->ungroupedTenants.size(), dataDb->tenantGroupCapacity);
 			dataDb->tenantGroupCapacity = 0;
 			dataDb->registered = false;
+			dataDb->disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::False;
 
 			if (detachCluster) {
 				dataDb->detached = true;
@@ -538,6 +543,13 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    wait(metacluster::getCluster(self->managementDb, clusterName));
 			ASSERT(dataDb->registered);
 			ASSERT(dataDb->db->getConnectionRecord()->getConnectionString() == clusterMetadata.connectionString);
+			if (dataDb->disableAutoTenantAssignment != clusterMetadata.entry.disableAutoTenantAssignment) {
+				TraceEvent(SevError, "YanqinError")
+				    .detail("DataDbdisable", dataDb->disableAutoTenantAssignment)
+				    .detail("Detached", dataDb->detached)
+				    .detail("Registered", dataDb->registered)
+				    .detail("ClusterMetadisable", clusterMetadata.entry.disableAutoTenantAssignment);
+			}
 			ASSERT_EQ(dataDb->disableAutoTenantAssignment, clusterMetadata.entry.disableAutoTenantAssignment);
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
@@ -569,7 +581,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				if (clusterMetadata.present()) {
 					// This check for numTenantGroups must come first because it sets `entry` unconditionally.
 					if (numTenantGroups.present()) {
-						entry = clusterMetadata.get().entry;
+						if (!entry.present()) {
+							entry = clusterMetadata.get().entry;
+						}
 						entry.get().capacity.numTenantGroups = numTenantGroups.get();
 					}
 					if (disableAutoTenantAssignment.present()) {
@@ -578,6 +592,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						}
 						entry.get().disableAutoTenantAssignment = disableAutoTenantAssignment.get();
 					}
+					ASSERT(disableAutoTenantAssignment.present());
+					ASSERT(disableAutoTenantAssignment.get() == metacluster::DisableAutoTenantAssignment::True);
 					metacluster::updateClusterMetadata(tr, clusterName, clusterMetadata.get(), connectionString, entry);
 
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
@@ -607,8 +623,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		{
 			int rnd = deterministicRandom()->randomInt(0, 3);
 			if (rnd == 0) {
-				disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::False;
-			} else if (rnd == 1) {
+				// disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::False;
+				disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::True;
+			} else {
 				disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::True;
 			}
 		}
@@ -794,7 +811,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				return Void();
 			} else if (e.code() == error_code_metacluster_no_capacity) {
-				ASSERT(!hasCapacity && !exists);
+				ASSERT(!exists);
+				if (metacluster::AssignClusterAutomatically::False == assignClusterAutomatically) {
+					ASSERT(!hasCapacity);
+				} else {
+					// It's possible that all the data clusters are excluded from the auto-assignment pool.
+					// Consequently, even if the the metacluster has capacity, the capacity index has no available data
+					// clusters. In this case, trying to assign a cluster to the tenant automatically will fail.
+				}
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
 				ASSERT(!assignClusterAutomatically);
