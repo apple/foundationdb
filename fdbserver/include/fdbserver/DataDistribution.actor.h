@@ -481,7 +481,7 @@ struct DDShardInfo {
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	InitialDataDistribution()
 	  : dataMoveMap(std::make_shared<DataMove>()),
-	    userRangeConfig(std::make_shared<DDConfiguration::RangeConfigMapSnapshot>(allKeys.begin, allKeys.end)) {}
+	    userRangeConfig(makeReference<DDConfiguration::RangeConfigMapSnapshot>(allKeys.begin, allKeys.end)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -494,7 +494,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
-	std::shared_ptr<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 
 // Holds the permitted size and IO Bounds for a shard

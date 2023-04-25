@@ -108,7 +108,7 @@ public:
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
-	std::shared_ptr<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 
 	DataDistributionTracker() = default;
 

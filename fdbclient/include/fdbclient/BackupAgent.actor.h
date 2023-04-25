@@ -684,7 +684,7 @@ public:
 		// restore uid. Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the
 		// validation key which TaskBucket will check, and its value must be this restore config's uid.
 		UID u = uid; // 'this' could be invalid in lambda
-		Key p = subSpace.key();
+		Key p = subspace.key();
 		return map(tag().get(tr), [u, p, task](Optional<std::string> const& tag) -> Void {
 			if (!tag.present())
 				throw restore_error();

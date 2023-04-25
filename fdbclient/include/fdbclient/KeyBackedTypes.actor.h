@@ -631,10 +631,9 @@ public:
 	}
 
 	// Find the closest key which is <, <=, >, or >= query
-	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
-	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
-	// located next to a shard which is currently unavailable or, more likely, an adjacent key has been modified by
-	// a VersionStamp atomic op so it is not allowed to be read in a range read operation.
+	// These operation can be accomplished using KeySelectors however they run the risk of touching keys outside of
+	// map subspace, which can cause problems if this touches an offline range or a key which is unreadable by range
+	// read operations due to having been modified with a version stamp operation in the current transaction.
 	ACTOR template <class Transaction>
 	static Future<Optional<KVType>> seek(KeyBackedMap self,
 	                                     Transaction tr,
@@ -937,10 +936,9 @@ public:
 	}
 
 	// Find the closest key which is <, <=, >, or >= query
-	// This is like resolving a KeySelector to a key but it will return not-present if the key is outside of the map
-	// subspace. It does this without visiting any range outside of the map subspace, so it succeeds if the map is
-	// located next to a shard which is currently unavailable or, more likely, an adjacent key has been modified by
-	// a VersionStamp atomic op so it is not allowed to be read in a range read operation.
+	// These operation can be accomplished using KeySelectors however they run the risk of touching keys outside of
+	// map subspace, which can cause problems if this touches an offline range or a key which is unreadable by range
+	// read operations due to having been modified with a version stamp operation in the current transaction.
 	ACTOR template <class Transaction>
 	static Future<Optional<ValueType>> seek(KeyBackedSet self,
 	                                        Transaction tr,
@@ -1072,9 +1070,9 @@ public:
 class KeyBackedClass {
 public:
 	KeyBackedClass(StringRef prefix, Optional<Key> triggerOverride = {})
-	  : subSpace(prefix), trigger(triggerOverride.orDefault(subSpace.pack("_changeTrigger"_sr))) {}
+	  : subspace(prefix), trigger(triggerOverride.orDefault(subspace.pack("_changeTrigger"_sr))) {}
 
-	Subspace subSpace;
+	Subspace subspace;
 	WatchableTrigger trigger;
 };
 

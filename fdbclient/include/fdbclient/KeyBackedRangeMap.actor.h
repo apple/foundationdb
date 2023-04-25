@@ -25,14 +25,17 @@
 #elif !defined(FDBCLIENT_KEYBACKEDRANGEMAP_ACTOR_H)
 #define FDBCLIENT_KEYBACKEDRANGEMAP_ACTOR_H
 
+#include "flow/FastRef.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // A local in-memory representation of a KeyBackedRangeMap snapshot
 // It is invalid to look up a range in this map which not within the range of
-// [first key of map, last key of map)
+// [first key of snapshot, last key of snapshot)
+// This is ReferenceCounted as it can be large and there is no reason to copy it as
+// it should not be modified locally.
 template <typename KeyType, typename ValueType>
-struct KeyRangeMapSnapshot {
+struct KeyRangeMapSnapshot : public ReferenceCounted<KeyRangeMapSnapshot<KeyType, ValueType>> {
 	typedef std::map<KeyType, ValueType> Map;
 
 	// A default constructed map snapshot can't be used to look anything up because no ranges are covered.
@@ -310,7 +313,10 @@ public:
 	}
 
 	ACTOR template <class Transaction>
-	static Future<LocalSnapshot> getSnapshotActor(KeyBackedRangeMap self, Transaction tr, KeyType begin, KeyType end) {
+	static Future<Reference<LocalSnapshot>> getSnapshotActor(KeyBackedRangeMap self,
+	                                                         Transaction tr,
+	                                                         KeyType begin,
+	                                                         KeyType end) {
 		kbt_debug("RANGEMAP snapshot start\n");
 
 		// The range read should start at KeySelector::lastLessOrEqual(begin) to get the range which covers begin.
@@ -326,12 +332,12 @@ public:
 		state Future<RangeResultType> boundariesFuture =
 		    self.kvMap.getRange(tr, rangeBegin, rangeEnd, GetRangeLimits(readSize));
 
-		state LocalSnapshot result;
+		state Reference<LocalSnapshot> result = makeReference<LocalSnapshot>();
 		loop {
 			kbt_debug("RANGEMAP snapshot loop\n");
 			RangeResultType boundaries = wait(boundariesFuture);
 			for (auto const& bv : boundaries.results) {
-				result.map[bv.first] = bv.second;
+				result->map[bv.first] = bv.second;
 			}
 			if (!boundaries.more) {
 				break;
@@ -345,12 +351,12 @@ public:
 
 		// LocalSnapshot requires initialization of the widest range it will be queried with, so we must ensure that has
 		// been done now. If the map does not start at or before begin then add begin with a default value type
-		if (result.map.empty() || result.map.begin()->first > begin) {
-			result.map[begin] = ValueType();
+		if (result->map.empty() || result->map.begin()->first > begin) {
+			result->map[begin] = ValueType();
 		}
 		// The map is no longer empty, so if the last key is not >= end then add end with a default value type
-		if (result.map.rbegin()->first < end) {
-			result.map[end] = ValueType();
+		if (result->map.rbegin()->first < end) {
+			result->map[end] = ValueType();
 		}
 
 		kbt_debug("RANGEMAP snapshot end\n");
@@ -361,7 +367,7 @@ public:
 	// If the map in the database does not have boundaries <=begin or >=end then these boundaries will be
 	// added to the returned snapshot with a default ValueType.
 	template <class Transaction>
-	Future<LocalSnapshot> getSnapshot(Transaction tr, KeyType const& begin, KeyType const& end) const {
+	Future<Reference<LocalSnapshot>> getSnapshot(Transaction tr, KeyType const& begin, KeyType const& end) const {
 		if constexpr (is_transaction_creator<Transaction>) {
 			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
 				return self.getSnapshot(tr, begin, end);
