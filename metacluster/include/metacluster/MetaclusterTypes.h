@@ -20,7 +20,6 @@
 
 #ifndef METACLUSTER_METACLUSTERTYPES_H
 #define METACLUSTER_METACLUSTERTYPES_H
-#include "flow/BooleanParam.h"
 #pragma once
 
 #include "fdbclient/CoordinationInterface.h"
@@ -86,7 +85,7 @@ struct ClusterUsage {
 //             created/updated/deleted.
 enum class DataClusterState { REGISTERING, READY, REMOVING, RESTORING };
 
-FDB_BOOLEAN_PARAM(DisableAutoTenantAssignment);
+enum class AutoTenantAssignment { ENABLED, DISABLED };
 
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
@@ -100,7 +99,7 @@ struct DataClusterEntry {
 
 	DataClusterState clusterState = DataClusterState::READY;
 
-	DisableAutoTenantAssignment disableAutoTenantAssignment = DisableAutoTenantAssignment::False;
+	AutoTenantAssignment autoTenantAssignment = AutoTenantAssignment::ENABLED;
 
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
@@ -128,7 +127,7 @@ struct DataClusterEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated, clusterState, disableAutoTenantAssignment);
+		serializer(ar, id, capacity, allocated, clusterState, autoTenantAssignment);
 	}
 };
 

@@ -45,7 +45,7 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
                           int endIndex) {
 	Optional<metacluster::DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
-	Optional<metacluster::DisableAutoTenantAssignment> disableAutoTenantAssignment;
+	Optional<metacluster::AutoTenantAssignment> autoTenantAssignment;
 
 	std::set<std::string> usedParams;
 	for (int tokenNum = startIndex; tokenNum < endIndex; ++tokenNum) {
@@ -77,23 +77,22 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
 			}
 		} else if (tokencmp(param, "connection_string")) {
 			connectionString = ClusterConnectionString(value);
-		} else if (tokencmp(param, "disable_auto_tenant_assignment")) {
+		} else if (tokencmp(param, "auto_tenant_assignment")) {
 			std::transform(
 			    value.begin(), value.end(), value.begin(), [](unsigned char ch) { return std::tolower(ch); });
-			if (value == "true") {
-				disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::True;
-			} else if (value == "false") {
-				disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::False;
+			if (value == "disabled") {
+				autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			} else if (value == "enabled") {
+				autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
 			} else {
-				fmt::print(
-				    stderr, "ERROR: invalid configuration `{}' for `disable_auto_tenant_assignment'.\n", value.c_str());
+				fmt::print(stderr, "ERROR: invalid configuration `{}' for `auto_tenant_assignment'.\n", value.c_str());
 				return {};
 			}
 			if (!entry.present()) {
 				entry = defaults;
 			}
-			if (disableAutoTenantAssignment.present()) {
-				entry.get().disableAutoTenantAssignment = disableAutoTenantAssignment.get();
+			if (autoTenantAssignment.present()) {
+				entry.get().autoTenantAssignment = autoTenantAssignment.get();
 			}
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
@@ -157,7 +156,7 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster register <NAME> connection_string=<CONNECTION_STRING>\n"
 		           "[max_tenant_groups=<NUM_GROUPS>]\n"
-		           "[disable_auto_tenant_assignment=<true|false>]\n\n");
+		           "[auto_tenant_assignment=<enabled|disabled>]\n\n");
 		fmt::print("Adds a data cluster to a metacluster.\n");
 		fmt::print("NAME is used to identify the cluster in future commands.\n");
 		printMetaclusterConfigureOptionsUsage();
@@ -368,7 +367,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster configure <NAME> <max_tenant_groups=<NUM_GROUPS>|\n"
 		           "connection_string=<CONNECTION_STRING>|\n"
-		           "disable_auto_tenant_assignment=<true|false>> ...\n\n");
+		           "auto_tenant_assignment=<enabled|disabled>> ...\n\n");
 		fmt::print("Updates the configuration of the metacluster.\n");
 		printMetaclusterConfigureOptionsUsage();
 		return false;

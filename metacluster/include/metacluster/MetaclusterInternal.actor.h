@@ -73,7 +73,7 @@ void updateClusterCapacityIndex(Transaction tr,
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));
 	}
-	if (updatedEntry.hasCapacity() && updatedEntry.disableAutoTenantAssignment != DisableAutoTenantAssignment::True) {
+	if (updatedEntry.hasCapacity() && updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED) {
 		metadata::management::clusterCapacityIndex().insert(
 		    tr, Tuple::makeTuple(updatedEntry.allocated.numTenantGroups, name));
 	}
