@@ -45,8 +45,6 @@ struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
 	AuditStorageState() : type(0), auditServerId(UID()), phase(0) {}
-	AuditStorageState(UID id, AuditType type)
-	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0) {}
 	AuditStorageState(UID id, UID auditServerId, AuditType type)
 	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0) {}
 	AuditStorageState(UID id, KeyRange range, AuditType type)
@@ -103,8 +101,6 @@ struct AuditStorageRequest {
 	// for audit user data
 	AuditStorageRequest(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
-	// for audit meta data
-	AuditStorageRequest(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }

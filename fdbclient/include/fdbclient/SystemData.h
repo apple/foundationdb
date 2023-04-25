@@ -106,7 +106,7 @@ const KeyRange auditKeyRange(const AuditType type);
 // Prefix for audit work progress by range
 const Key auditRangePrefixFor(const AuditType type, const UID& auditId);
 // Prefix for audit work progress by audit server id
-const Key auditServerPrefixFor(const AuditType type, const UID& auditId);
+const Key auditServerPrefixFor(const AuditType type, const UID& auditId, const UID& serverId);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);

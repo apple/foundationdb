@@ -729,7 +729,10 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
 ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
-ACTOR Future<Void> scheduleAuditPerServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
+ACTOR Future<Void> scheduleAuditOnServer(Reference<DataDistributor> self,
+                                         std::shared_ptr<DDAudit> audit,
+                                         KeyRange range,
+                                         StorageServerInterface ssi);
 ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
                                             std::shared_ptr<DDAudit> audit,
                                             KeyRange range);
@@ -1959,58 +1962,27 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Decide which SS to do the audit
+// Partition the job by servers
 ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
+	ASSERT(audit->coreState.getType() == AuditType::ValidateLocationMetadata ||
+	       audit->coreState.getType() == AuditType::ValidateStorageServerShard);
 	TraceEvent(SevInfo, "DDPartitionAuditJobByServerBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType());
 	state StorageServerInterface targetServer;
-	state int64_t completedCount = 0;
-	state int64_t totalCount = 0;
 	try {
 		state ServerWorkerInfos serverWorkers = wait(self->txnProcessor->getServerListAndProcessClasses());
-		if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-			// Randomly pick a storage server to compare KeyServers and ServerKeys
-			const int idx = deterministicRandom()->randomInt(0, serverWorkers.servers.size());
-			targetServer = serverWorkers.servers[idx].first;
-			AuditStorageRequest req(
-			    audit->coreState.id, systemKeys, audit->coreState.getType()); // use systemKeys to represent this goal
-			audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
-			totalCount++;
-			wait(delay(0.1));
-		} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-			// Pick every storage server to compare local shard and global assignment
-			state int i = 0;
-			for (; i < serverWorkers.servers.size(); ++i) {
-				targetServer = serverWorkers.servers[i].first;
-				// Currently, Tss server may not follow the auit consistency rule
-				// Thus, skip if the server is tss
-				if (targetServer.isTss()) {
-					continue;
-				}
-				AuditStorageState auditState = wait(getAuditStateByServer(self->txnProcessor->context(),
-				                                                          audit->coreState.getType(),
-				                                                          audit->coreState.id,
-				                                                          targetServer.uniqueID));
-				const AuditPhase phase = auditState.getPhase();
-				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
-				totalCount++;
-				if (phase == AuditPhase::Complete) {
-					completedCount++;
-				} else if (phase == AuditPhase::Error) {
-					completedCount++;
-					audit->foundError = true;
-				} else {
-					ASSERT(phase == AuditPhase::Invalid);
-					AuditStorageRequest req(audit->coreState.id, audit->coreState.getType());
-					audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
-				}
-				wait(delay(0.1));
+		state int i = 0;
+		for (; i < serverWorkers.servers.size(); ++i) {
+			targetServer = serverWorkers.servers[i].first;
+			// Currently, Tss server may not follow the auit consistency rule
+			// Thus, skip if the server is tss
+			if (targetServer.isTss()) {
+				continue;
 			}
-		} else {
-			UNREACHABLE();
+			audit->actors.add(scheduleAuditOnServer(self, audit, allKeys, targetServer));
+			wait(delay(0.1));
 		}
-
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "DDPartitionAuditJobByServerError", self->ddId)
 		    .errorUnsuppressed(e)
@@ -2020,15 +1992,70 @@ ACTOR Future<Void> partitionAuditJobByServer(Reference<DataDistributor> self, st
 	}
 	TraceEvent(SevInfo, "DDPartitionAuditJobByServerEnd", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
-	    .detail("AuditType", audit->coreState.getType())
-	    .detail("TotalServers", totalCount)
-	    .detail("TotalComplete", completedCount)
-	    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
+	    .detail("AuditType", audit->coreState.getType());
 
 	return Void();
 }
 
-// Manage the progress of range-based audit
+// Schedule tasks on a server
+ACTOR Future<Void> scheduleAuditOnServer(Reference<DataDistributor> self,
+                                         std::shared_ptr<DDAudit> audit,
+                                         KeyRange range,
+                                         StorageServerInterface ssi) {
+	ASSERT(audit->coreState.getType() == AuditType::ValidateLocationMetadata ||
+	       audit->coreState.getType() == AuditType::ValidateStorageServerShard);
+	state UID serverId = ssi.uniqueID;
+	TraceEvent(SevInfo, "DDScheduleAuditOnServerBegin", self->ddId)
+	    .detail("ServerID", serverId)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("Range", range)
+	    .detail("AuditType", audit->coreState.getType());
+	state Key begin = range.begin;
+	state KeyRange currentRange = range;
+	state int64_t completedCount = 0;
+	state int64_t totalCount = 0;
+	while (begin < range.end) {
+		currentRange = KeyRangeRef(begin, range.end);
+		std::vector<AuditStorageState> auditStates = wait(getAuditStateByServer(
+		    self->txnProcessor->context(), audit->coreState.getType(), audit->coreState.id, serverId, currentRange));
+		ASSERT(!auditStates.empty());
+		begin = auditStates.back().range.end;
+		TraceEvent(SevInfo, "DDScheduleAuditOnServerDispatch", self->ddId)
+		    .detail("ServerID", serverId)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("CurrentRange", currentRange)
+		    .detail("AuditType", audit->coreState.getType())
+		    .detail("NextBegin", begin)
+		    .detail("RangeEnd", range.end);
+		for (const auto& auditState : auditStates) {
+			const AuditPhase phase = auditState.getPhase();
+			ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+			totalCount++;
+			if (phase == AuditPhase::Complete) {
+				completedCount++;
+			} else if (phase == AuditPhase::Error) {
+				completedCount++;
+				audit->foundError = true;
+			} else {
+				ASSERT(phase == AuditPhase::Invalid);
+				AuditStorageRequest req(audit->coreState.id, auditState.range, audit->coreState.getType());
+				audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
+			}
+		}
+		wait(delay(0.1));
+	}
+	TraceEvent(SevInfo, "DDScheduleAuditOnServerEnd", self->ddId)
+	    .detail("ServerID", serverId)
+	    .detail("AuditID", audit->coreState.id)
+	    .detail("Range", range)
+	    .detail("AuditType", audit->coreState.getType())
+	    .detail("TotalRanges", totalCount)
+	    .detail("TotalComplete", completedCount)
+	    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
+	return Void();
+}
+
+// Partition the job by range
 ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
                                             std::shared_ptr<DDAudit> audit,
                                             KeyRange range) {
@@ -2080,7 +2107,7 @@ ACTOR Future<Void> partitionAuditJobByRange(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Decide which SS to do the audit based on the ownership of range
+// Schedule tasks on corresponding server
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range) {

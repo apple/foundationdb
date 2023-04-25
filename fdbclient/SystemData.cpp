@@ -319,12 +319,14 @@ const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
 	return wr.toValue();
 }
 
-const Key auditServerPrefixFor(const AuditType type, const UID& auditId) {
+const Key auditServerPrefixFor(const AuditType type, const UID& auditId, const UID& serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditServerPrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
 	wr << auditId;
+	wr.serializeBytes("/"_sr);
+	wr << serverId;
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
 }
