@@ -406,6 +406,28 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			case ';':
 				line.erase(i, 1);
 				break;
+			// Handle \uNNNN utf-8 characters from JSON strings but only as a single byte
+			// Return an error for a sequence out of range for a single byte
+			case 'u': {
+				if (i + 6 > line.length()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 6];
+				line[i + 6] = 0;
+				unsigned long val = strtoul(line.data() + i + 2, &pEnd, 16);
+				ent = char(val);
+				if (*pEnd || val > std::numeric_limits<unsigned char>::max()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				line[i + 6] = save;
+				line.replace(i, 6, 1, ent);
+				break;
+			}
 			case 'x':
 				if (i + 4 > line.length()) {
 					err = true;
