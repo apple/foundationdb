@@ -4010,11 +4010,11 @@ TEST_CASE("noSim/ShardedRocksDB/CheckpointRestore") {
 	try {
 		wait(testCheckpointRestore(kvStore, { rangeK }));
 	} catch (Error& e) {
-		TraceEvent("TestCheckpointRestoreError").errorUnsuppressed(e);
+		TraceEvent(SevError, "TestCheckpointRestoreError").errorUnsuppressed(e);
 		err = e;
 	}
 	// This will fail once RocksDB is upgraded to 8.1.
-	ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
+	// ASSERT(err.code() == error_code_failed_to_restore_checkpoint);
 
 	try {
 		wait(testCheckpointRestore(kvStore, { rangeKz }));
