@@ -95,7 +95,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		try {
 			state metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
-			if (deterministicRandom()->randomInt(0, 5) == 0) {
+			if (deterministicRandom()->random01() < 0.2) {
 				entry.autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
 			}
 			loop {
