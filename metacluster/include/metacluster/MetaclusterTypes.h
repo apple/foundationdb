@@ -25,7 +25,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "flow/flat_buffers.h"
 

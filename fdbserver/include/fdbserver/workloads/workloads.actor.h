@@ -389,6 +389,10 @@ Future<Void> testExpectedError(Future<Void> test,
 
 std::string getTestEncryptionFileName();
 
+// This should become a BehaviorInjectionWorkload or perhaps ConfigInjectionWorkload which should be a new class that
+// should represent non-failure behaviors that can be randomly injected into any test run.
+ACTOR Future<Void> customShardConfigWorkload(Database cx);
+
 #include "flow/unactorcompiler.h"
 
 #endif

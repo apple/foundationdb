@@ -26,7 +26,7 @@
 // Backup agent header
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -303,7 +303,7 @@ Future<std::string> RestoreConfigFR::getFullStatus(Reference<ReadYourWritesTrans
 
 std::string RestoreConfigFR::toString() {
 	std::stringstream ss;
-	ss << "uid:" << uid.toString() << " prefix:" << prefix.contents().toString();
+	ss << "uid:" << uid.toString() << " prefix:" << subspace.key().contents().toString();
 	return ss.str();
 }
 
