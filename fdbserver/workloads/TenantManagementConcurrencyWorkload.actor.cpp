@@ -149,6 +149,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			    wait(metacluster::util::createSimulatedMetacluster(cx, {}, entry, skipMetaclusterCreation));
 
 			self->managementDb = simMetacluster.managementDb;
+			ASSERT(!simMetacluster.dataDbs.empty());
 		} else {
 			self->standaloneDb = cx;
 		}

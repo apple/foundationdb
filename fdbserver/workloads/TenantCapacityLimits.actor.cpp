@@ -76,8 +76,6 @@ struct TenantCapacityLimits : TestWorkload {
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantCapacityLimits* self) {
 		if (self->useMetacluster) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-
 			metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
 
@@ -85,6 +83,7 @@ struct TenantCapacityLimits : TestWorkload {
 			    wait(metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry));
 
 			self->managementDb = simMetacluster.managementDb;
+			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
 			self->dataDb = simMetacluster.dataDbs.begin()->second;
 		} else {
 			self->dataDb = cx;

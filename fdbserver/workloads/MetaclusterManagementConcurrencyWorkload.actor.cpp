@@ -66,7 +66,6 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		               {},
 		               metacluster::util::SkipMetaclusterCreation(self->clientId != 0))));
 
-		ASSERT_EQ(self->simMetacluster.dataDbs.size(), g_simulator->extraDatabases.size());
 		ASSERT_GT(self->simMetacluster.dataDbs.size(), 0);
 		for (auto const& [name, db] : self->simMetacluster.dataDbs) {
 			self->dataDbIndex.push_back(name);

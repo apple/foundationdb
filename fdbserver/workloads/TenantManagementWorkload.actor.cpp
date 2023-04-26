@@ -260,8 +260,8 @@ struct TenantManagementWorkload : TestWorkload {
 		self->mvDb = simMetacluster.managementDb;
 
 		if (self->useMetacluster) {
-			ASSERT(g_simulator->extraDatabases.size() == 1);
 			self->dataClusterName = simMetacluster.dataDbs.begin()->first;
+			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
 			self->dataDb = simMetacluster.dataDbs.begin()->second;
 		} else {
 			self->dataDb = cx;

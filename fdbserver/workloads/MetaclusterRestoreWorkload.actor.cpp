@@ -181,8 +181,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterRestoreWorkload* self) {
-		ASSERT(g_simulator->extraDatabases.size() > 0);
-
 		metacluster::DataClusterEntry clusterEntry;
 		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
@@ -190,6 +188,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    wait(metacluster::util::createSimulatedMetacluster(cx, self->initialTenantIdPrefix, clusterEntry));
 
 		self->managementDb = simMetacluster.managementDb;
+		ASSERT(!simMetacluster.dataDbs.empty());
 		for (auto const& [name, db] : simMetacluster.dataDbs) {
 			self->dataDbs[name] = DataClusterData(db);
 			self->dataDbIndex.push_back(name);
