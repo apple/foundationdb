@@ -411,6 +411,7 @@ rocksdb::Options getOptions() {
 // Set some useful defaults desired for all reads.
 rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
+	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 	options.background_purge_on_iterator_cleanup = true;
 	return options;
 }
@@ -441,10 +442,11 @@ struct ReadIterator {
 	double creationTime;
 	KeyRange keyRange;
 	std::shared_ptr<rocksdb::Slice> beginSlice, endSlice;
-	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions& options)
-	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(options, cf)) {}
-	ReadIterator(CF& cf, uint64_t index, DB& db, rocksdb::ReadOptions options, KeyRange keyRange)
+	ReadIterator(CF& cf, uint64_t index, DB& db)
+	  : index(index), inUse(true), creationTime(now()), iter(db->NewIterator(getReadOptions(), cf)) {}
+	ReadIterator(CF& cf, uint64_t index, DB& db, KeyRange keyRange)
 	  : index(index), inUse(true), creationTime(now()), keyRange(keyRange) {
+		rocksdb::ReadOptions options = getReadOptions();
 		beginSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.begin)));
 		options.iterate_lower_bound = beginSlice.get();
 		endSlice = std::shared_ptr<rocksdb::Slice>(new rocksdb::Slice(toSlice(keyRange.end)));
@@ -468,10 +470,7 @@ gets deleted as the ref count becomes 0.
 */
 class ReadIteratorPool {
 public:
-	ReadIteratorPool(UID id, DB& db, CF& cf)
-	  : db(db), cf(cf), index(0), deletedUptoIndex(0), iteratorsReuseCount(0), readRangeOptions(getReadOptions()) {
-		readRangeOptions.background_purge_on_iterator_cleanup = true;
-		readRangeOptions.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
+	ReadIteratorPool(UID id, DB& db, CF& cf) : db(db), cf(cf), index(0), deletedUptoIndex(0), iteratorsReuseCount(0) {
 		TraceEvent("ReadIteratorPool", id)
 		    .detail("KnobRocksDBReadRangeReuseIterators", SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS)
 		    .detail("KnobRocksDBReadRangeReuseBoundedIterators",
@@ -515,7 +514,7 @@ public:
 			uint64_t readIteratorIndex = index;
 			mutex.unlock();
 
-			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions);
+			ReadIterator iter(cf, readIteratorIndex, db);
 			mutex.lock();
 			iteratorsMap.insert({ readIteratorIndex, iter });
 			mutex.unlock();
@@ -537,7 +536,7 @@ public:
 			uint64_t readIteratorIndex = index;
 			mutex.unlock();
 
-			ReadIterator iter(cf, readIteratorIndex, db, readRangeOptions, keyRange);
+			ReadIterator iter(cf, readIteratorIndex, db, keyRange);
 			if (iteratorsMap.size() < SERVER_KNOBS->ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT) {
 				// Not storing more than ROCKSDB_READ_RANGE_BOUNDED_ITERATORS_MAX_LIMIT of iterators
 				// to avoid 'out of memory' issues.
@@ -548,7 +547,7 @@ public:
 			return iter;
 		} else {
 			index++;
-			ReadIterator iter(cf, index, db, readRangeOptions, keyRange);
+			ReadIterator iter(cf, index, db, keyRange);
 			return iter;
 		}
 	}
@@ -594,7 +593,6 @@ private:
 	std::unordered_map<int, ReadIterator>::iterator it;
 	DB& db;
 	CF& cf;
-	rocksdb::ReadOptions readRangeOptions;
 	std::mutex mutex;
 	// incrementing counter for every new iterator creation, to uniquely identify the iterator in returnIterator().
 	uint64_t index;
