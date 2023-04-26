@@ -155,8 +155,7 @@ ACTOR Future<bool> metaclusterDecommissionCommand(Reference<IDatabase> db, std::
 ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster register <NAME> connection_string=<CONNECTION_STRING>\n"
-		           "[max_tenant_groups=<NUM_GROUPS>]\n"
-		           "[auto_tenant_assignment=<enabled|disabled>]\n\n");
+		           "[max_tenant_groups=<NUM_GROUPS> | auto_tenant_assignment=<enabled|disabled>] ...\n\n");
 		fmt::print("Adds a data cluster to a metacluster.\n");
 		fmt::print("NAME is used to identify the cluster in future commands.\n");
 		printMetaclusterConfigureOptionsUsage();
