@@ -268,37 +268,29 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		platform::eraseDirectoryRecursive(checkpointDir);
 		ASSERT(platform::createDirectory(checkpointDir));
 		state std::vector<CheckpointMetaData> fetchedCheckpoints;
-		state int i = 0;
-		for (; i < records.size(); ++i) {
-			loop {
-				TraceEvent(SevDebug, "TestFetchingCheckpoint").detail("Checkpoint", records[i].toString());
-				try {
-					state CheckpointMetaData record;
-					if (asKeyValues) {
-						std::vector<KeyRange> fetchRanges;
-						for (const auto& range : restoreRanges) {
-							for (const auto& cRange : records[i].ranges) {
-								if (cRange.contains(range)) {
-									fetchRanges.push_back(range);
-									break;
-								}
-							}
-						}
-						ASSERT(!fetchRanges.empty());
-						wait(store(record, fetchCheckpointRanges(cx, records[i], checkpointDir, fetchRanges)));
-						ASSERT(record.getFormat() == RocksDBKeyValues);
-					} else {
-						wait(store(record, fetchCheckpoint(cx, records[i], checkpointDir)));
-						ASSERT(record.getFormat() == format);
+		loop {
+			checkpointFutures.clear();
+			try {
+				if (asKeyValues) {
+					for (int i = 0; i < records.size(); ++i) {
+						TraceEvent(SevDebug, "TestFetchingCheckpoint")
+						    .detail("Checkpoint", records[i].second.toString());
+						const std::string currentDir =
+						    fetchedCheckpointDir(checkpointDir, records[i].second.checkpointID);
+						platform::eraseDirectoryRecursive(currentDir);
+						ASSERT(platform::createDirectory(currentDir));
+						checkpointFutures.push_back(
+						    fetchCheckpointRanges(cx, records[i].second, currentDir, { records[i].first }));
 					}
-					fetchedCheckpoints.push_back(record);
-					TraceEvent(SevDebug, "TestCheckpointFetched").detail("Checkpoint", record.toString());
-					break;
-				} catch (Error& e) {
-					TraceEvent(SevWarn, "TestFetchCheckpointError")
-					    .errorUnsuppressed(e)
-					    .detail("Checkpoint", records[i].toString());
-					wait(delay(1));
+				} else {
+					for (int i = 1; i < records.size(); ++i) {
+						ASSERT(records[i].second.checkpointID == records[i - 1].second.checkpointID);
+					}
+					const std::string currentDir =
+					    fetchedCheckpointDir(checkpointDir, records.front().second.checkpointID);
+					platform::eraseDirectoryRecursive(currentDir);
+					ASSERT(platform::createDirectory(currentDir));
+					checkpointFutures.push_back(fetchCheckpoint(cx, records.front().second, currentDir));
 				}
 			}
 		}
