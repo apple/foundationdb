@@ -15,8 +15,6 @@ list(APPEND CMAKE_MODULE_PATH "${LLVM_CMAKE_MODULE_PATH}/clang"
 include(AddLLVM)
 include(AddClang)
 
-include_directories(${CMAKE_SOURCE_DIR}/include)
-
 set(SOURCE_SCANNER_BINARY src/SourceScanner.cpp)
 add_clang_executable(source_scanner ${SOURCE_SCANNER_BINARY})
 target_include_directories(
