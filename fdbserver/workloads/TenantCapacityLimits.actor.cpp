@@ -76,36 +76,21 @@ struct TenantCapacityLimits : TestWorkload {
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantCapacityLimits* self) {
 		if (self->useMetacluster) {
-			Reference<IDatabase> threadSafeHandle =
-			    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-
-			wait(success(metacluster::createMetacluster(
-			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
+			ASSERT(g_simulator->extraDatabases.size() == 1);
 
 			metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
-			wait(metacluster::registerCluster(
-			    self->managementDb, "test_data_cluster"_sr, g_simulator->extraDatabases[0], entry));
 
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
-			// wait for tenant mode change on dataDB
-			wait(success(self->waitDataDbTenantModeChange()));
+			metacluster::util::SimulatedMetacluster simMetacluster =
+			    wait(metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry));
+
+			self->managementDb = simMetacluster.managementDb;
+			self->dataDb = simMetacluster.dataDbs.begin()->second;
 		} else {
 			self->dataDb = cx;
 		}
 
 		return Void();
-	}
-
-	Future<Optional<Key>> waitDataDbTenantModeChange() const {
-		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get("\xff"_sr); // just a meaningless read
-		});
 	}
 
 	Future<Void> start(Database const& cx) override {

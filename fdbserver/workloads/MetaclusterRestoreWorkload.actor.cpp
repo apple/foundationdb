@@ -181,30 +181,18 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 	}
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterRestoreWorkload* self) {
-		Reference<IDatabase> threadSafeHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-		wait(success(metacluster::createMetacluster(
-		    self->managementDb, "management_cluster"_sr, self->initialTenantIdPrefix, false)));
-
 		ASSERT(g_simulator->extraDatabases.size() > 0);
-		state std::vector<std::string>::iterator extraDatabasesItr;
-		for (extraDatabasesItr = g_simulator->extraDatabases.begin();
-		     extraDatabasesItr != g_simulator->extraDatabases.end();
-		     ++extraDatabasesItr) {
-			ClusterConnectionString ccs(*extraDatabasesItr);
-			auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ccs);
-			state ClusterName clusterName = ClusterName(format("cluster_%08d", self->dataDbs.size()));
-			Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
-			self->dataDbIndex.push_back(clusterName);
-			self->dataDbs[clusterName] = DataClusterData(db);
 
-			metacluster::DataClusterEntry clusterEntry;
-			clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
+		metacluster::DataClusterEntry clusterEntry;
+		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
-			wait(metacluster::registerCluster(self->managementDb, clusterName, ccs, clusterEntry));
+		metacluster::util::SimulatedMetacluster simMetacluster =
+		    wait(metacluster::util::createSimulatedMetacluster(cx, self->initialTenantIdPrefix, clusterEntry));
+
+		self->managementDb = simMetacluster.managementDb;
+		for (auto const& [name, db] : simMetacluster.dataDbs) {
+			self->dataDbs[name] = DataClusterData(db);
+			self->dataDbIndex.push_back(name);
 		}
 
 		TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreateTenants").detail("NumTenants", self->initialTenants);
@@ -555,6 +543,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		wait(success(
 		    metacluster::createMetacluster(self->managementDb, "management_cluster"_sr, newTenantIdPrefix, false)));
+
 		state std::map<ClusterName, DataClusterData>::iterator clusterItr;
 		for (clusterItr = self->dataDbs.begin(); clusterItr != self->dataDbs.end(); ++clusterItr) {
 			TraceEvent("MetaclusterRestoreWorkloadProcessDataCluster").detail("FromCluster", clusterItr->first);
