@@ -240,7 +240,7 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::oldest_ancester_time,
 		           SstFileMetaData::file_creation_time,
 		           SstFileMetaData::epoch_number,
-				   SstFileMetaData::name,
+		           SstFileMetaData::name,
 		           SstFileMetaData::db_path,
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,

@@ -9366,8 +9366,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						TraceEvent(SevError, "CSKConflictingMoveInShards", data->thisServerID)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Range", range)
-						    .detail("TargetShard", desiredId)
-						    .detail("CurrentShard", shard->desiredShardId)
+						    .detailf("TargetShard", "%016llx", desiredId)
+						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
 						    .detail("Version", cVer);
 						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
 						ASSERT(false);
