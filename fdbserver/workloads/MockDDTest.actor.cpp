@@ -85,7 +85,7 @@ void MockDDTestWorkload::populateFixedStrategy() {
 
 void MockDDTestWorkload::populateMgs() {
 	// Will the sampling structure become too large?
-	std::cout << "MGS Populating ...\n";
+	fmt::print("MGS Populating ...\n");
 	if (keySpaceStrategy == "linear") {
 		populateLinearStrategy();
 	} else if (keySpaceStrategy == "fixed") {
@@ -101,7 +101,7 @@ void MockDDTestWorkload::populateMgs() {
 	    .detail("Strategy", keySpaceStrategy)
 	    .detail("EstimatedDbSize", mockDbSize)
 	    .detail("MGSReportedTotalSize", totalSize);
-	std::cout << "MGS Populated.\n";
+	fmt::print("MGS Populated.\n");
 }
 
 Future<Void> MockDDTestWorkload::setup(Database const& cx) {
