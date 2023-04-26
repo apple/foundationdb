@@ -90,26 +90,40 @@ struct GranuleMaterializeStats {
 struct BlobGranuleCipherKeysMeta {
 	EncryptCipherDomainId textDomainId;
 	EncryptCipherBaseKeyId textBaseCipherId;
+	EncryptCipherKeyCheckValue textBaseCipherKCV;
 	EncryptCipherRandomSalt textSalt;
 	EncryptCipherDomainId headerDomainId;
 	EncryptCipherBaseKeyId headerBaseCipherId;
+	EncryptCipherKeyCheckValue headerBaseCipherKCV;
 	EncryptCipherRandomSalt headerSalt;
 	std::string ivStr;
 
 	BlobGranuleCipherKeysMeta() {}
 	BlobGranuleCipherKeysMeta(const EncryptCipherDomainId tDomainId,
 	                          const EncryptCipherBaseKeyId tBaseCipherId,
+	                          const EncryptCipherKeyCheckValue tBaseCipherKCV,
 	                          const EncryptCipherRandomSalt tSalt,
 	                          const EncryptCipherDomainId hDomainId,
 	                          const EncryptCipherBaseKeyId hBaseCipherId,
+	                          const EncryptCipherKeyCheckValue hBaseCipherKCV,
 	                          const EncryptCipherRandomSalt hSalt,
 	                          const std::string& iv)
-	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textSalt(tSalt), headerDomainId(hDomainId),
-	    headerBaseCipherId(hBaseCipherId), headerSalt(hSalt), ivStr(iv) {}
+	  : textDomainId(tDomainId), textBaseCipherId(tBaseCipherId), textBaseCipherKCV(tBaseCipherKCV), textSalt(tSalt),
+	    headerDomainId(hDomainId), headerBaseCipherId(hBaseCipherId), headerBaseCipherKCV(hBaseCipherKCV),
+	    headerSalt(hSalt), ivStr(iv) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, textDomainId, textBaseCipherId, textSalt, headerDomainId, headerBaseCipherId, headerSalt, ivStr);
+		serializer(ar,
+		           textDomainId,
+		           textBaseCipherId,
+		           textBaseCipherKCV,
+		           textSalt,
+		           headerDomainId,
+		           headerBaseCipherId,
+		           headerBaseCipherKCV,
+		           headerSalt,
+		           ivStr);
 	}
 };
 
@@ -119,6 +133,7 @@ struct BlobGranuleCipherKey {
 	constexpr static FileIdentifier file_identifier = 7274734;
 	EncryptCipherDomainId encryptDomainId;
 	EncryptCipherBaseKeyId baseCipherId;
+	EncryptCipherKeyCheckValue baseCipherKCV;
 	EncryptCipherRandomSalt salt;
 	StringRef baseCipher;
 
@@ -126,6 +141,7 @@ struct BlobGranuleCipherKey {
 		BlobGranuleCipherKey cipherKey;
 		cipherKey.encryptDomainId = keyRef->getDomainId();
 		cipherKey.baseCipherId = keyRef->getBaseCipherId();
+		cipherKey.baseCipherKCV = keyRef->getBaseCipherKCV();
 		cipherKey.salt = keyRef->getSalt();
 		cipherKey.baseCipher = makeString(keyRef->getBaseCipherLen(), arena);
 		memcpy(mutateString(cipherKey.baseCipher), keyRef->rawBaseCipher(), keyRef->getBaseCipherLen());
@@ -135,7 +151,7 @@ struct BlobGranuleCipherKey {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, baseCipherId, salt, baseCipher);
+		serializer(ar, encryptDomainId, baseCipherId, baseCipherKCV, salt, baseCipher);
 	}
 };
 
@@ -150,9 +166,11 @@ struct BlobGranuleCipherKeysCtx {
 	static BlobGranuleCipherKeysMeta toCipherKeysMeta(const BlobGranuleCipherKeysCtx& ctx) {
 		return BlobGranuleCipherKeysMeta(ctx.textCipherKey.encryptDomainId,
 		                                 ctx.textCipherKey.baseCipherId,
+		                                 ctx.textCipherKey.baseCipherKCV,
 		                                 ctx.textCipherKey.salt,
 		                                 ctx.headerCipherKey.encryptDomainId,
 		                                 ctx.headerCipherKey.baseCipherId,
+		                                 ctx.headerCipherKey.baseCipherKCV,
 		                                 ctx.headerCipherKey.salt,
 		                                 ctx.ivRef.toString());
 	}

@@ -69,7 +69,7 @@ public:
 		std::vector<StorageQueuingMetricsReply::TagInfo> result;
 		for (auto const& tagAndCounter : topTags) {
 			auto rate = (tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) / elapsed;
-			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE) {
+			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
 				result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalSampleCount);
 			}
 		}
@@ -172,7 +172,9 @@ TEST_CASE("/TransactionTagCounter/TopKTags") {
 
 	// Ensure that costs are larger enough to show up
 	auto const costMultiplier =
-	    std::max<double>(1.0, 2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	    std::max<double>(1.0,
+	                     2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+	                         CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 
 	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
 	topTags.incrementCount("a"_sr, 0, 1 * costMultiplier);

@@ -234,6 +234,7 @@ typedef struct bgtenantprefix {
 typedef struct bgencryptionkey {
 	int64_t domain_id;
 	uint64_t base_key_id;
+	uint32_t base_kcv;
 	uint64_t random_salt;
 	FDBKey base_key;
 } FDBBGEncryptionKey;
@@ -241,7 +242,9 @@ typedef struct bgencryptionkey {
 typedef struct bgencryptionctx {
 	fdb_bool_t present;
 	FDBBGEncryptionKey textKey;
+	uint32_t textKCV;
 	FDBBGEncryptionKey headerKey;
+	uint32_t headerKCV;
 	FDBKey iv;
 } FDBBGEncryptionCtx;
 
@@ -596,7 +599,6 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_get_mapped_range(FDBTran
                                                                          int target_bytes,
                                                                          FDBStreamingMode mode,
                                                                          int iteration,
-                                                                         int matchIndex,
                                                                          fdb_bool_t snapshot,
                                                                          fdb_bool_t reverse);
 

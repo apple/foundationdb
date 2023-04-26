@@ -61,11 +61,16 @@ struct SimEncryptKeyCtx {
 	EncryptCipherBaseKeyId id;
 	SimEncryptKey key;
 	int keyLen;
+	EncryptCipherKeyCheckValue kcv;
 
 	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data, const int dataLen)
 	  : id(kId), key(data, dataLen), keyLen(dataLen) {
+		kcv = Sha256KCV().computeKCV((const uint8_t*)data, dataLen);
 		if (DEBUG_SIM_KEY_CIPHER) {
-			TraceEvent(SevDebug, "SimKmsKeyCtxInit").detail("BaseCipherId", kId).detail("BaseCipherLen", dataLen);
+			TraceEvent(SevDebug, "SimKmsKeyCtxInit")
+			    .detail("BaseCipherId", kId)
+			    .detail("BaseCipherLen", dataLen)
+			    .detail("KCV", kcv);
 		}
 	}
 
@@ -74,7 +79,7 @@ struct SimEncryptKeyCtx {
 
 		int ret = AES_256_KEY_LENGTH;
 		if ((id % 2) == 0) {
-			ret += (id % AES_256_KEY_LENGTH);
+			ret += (id % (MAX_BASE_CIPHER_LEN - AES_256_KEY_LENGTH));
 		}
 		CODE_PROBE(ret == AES_256_KEY_LENGTH, "BaseCipherKeyLen AES_256_KEY_LENGTH");
 		CODE_PROBE(ret != AES_256_KEY_LENGTH, "BaseCipherKeyLen variable length");
@@ -164,8 +169,13 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 		if (itr != ctx->simEncryptKeyStore.end()) {
 			// TODO: Relax assert if EKP APIs are updated to make 'domain_id' optional for encryption keys point lookups
 			ASSERT(item.domainId.present());
-			rep.cipherKeyDetails.emplace_back_deep(
-			    rep.arena, item.domainId.get(), itr->first, StringRef(itr->second.get()->key), refAtTS, expAtTS);
+			rep.cipherKeyDetails.emplace_back_deep(rep.arena,
+			                                       item.domainId.get(),
+			                                       itr->first,
+			                                       StringRef(itr->second.get()->key),
+			                                       itr->second->kcv,
+			                                       refAtTS,
+			                                       expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
@@ -178,7 +188,8 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 				    .detail("DomId", item.domainId.get())
 				    .detail("BaseCipherId", item.baseCipherId)
 				    .detail("BaseCipherLen", itr->second->keyLen)
-				    .detail("BaseCipherKeyLen", itr->second->keyLen);
+				    .detail("BaseCipherKeyLen", itr->second->keyLen)
+				    .detail("BaseCipherKCV", itr->second->kcv);
 			}
 		} else {
 			TraceEvent("SimKmsEKLookupByIdsKeyNotFound")
@@ -226,7 +237,7 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
 		if (itr != ctx->simEncryptKeyStore.end()) {
 			rep.cipherKeyDetails.emplace_back_deep(
-			    req.arena, domainId, keyId, StringRef(itr->second.get()->key), refAtTS, expAtTS);
+			    req.arena, domainId, keyId, StringRef(itr->second.get()->key), itr->second->kcv, refAtTS, expAtTS);
 			if (dbgDIdTrace.present()) {
 				// {encryptId, baseCipherId} forms a unique tuple across encryption domains
 				dbgDIdTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, domainId, keyId), "");
@@ -236,7 +247,8 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 				    .detail("DomId", domainId)
 				    .detail("BaseCipherId", itr->second->id)
 				    .detail("BaseCipherLen", itr->second->keyLen)
-				    .detail("BaseCipherKeyLen", itr->second->keyLen);
+				    .detail("BaseCipherKeyLen", itr->second->keyLen)
+				    .detail("BaseCipherKCV", itr->second->kcv);
 			}
 
 		} else {
@@ -285,7 +297,7 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 				swapAndPop(&rep.metadataDetails, deterministicRandom()->randomInt(0, rep.metadataDetails.size()));
 			}
 		} else {
-			req.reply.sendError(operation_failed());
+			req.reply.sendError(connection_failed());
 			return Void();
 		}
 	}

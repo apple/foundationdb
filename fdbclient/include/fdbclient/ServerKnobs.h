@@ -188,12 +188,19 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
-	// DD won't move shard to teams that has availableSpaceRatio < max(0.05,  AllTeamAvailSpaceRatio[pivot]), where
-	// pivot = pivot percent * team count.
-	double AVAILABLE_SPACE_PIVOT_PERCENT;
-	// DD won't move shard to teams that has readLoad > AllTeamReadLoad[pivot], where pivot = pivot percent *
-	// team count.
-	double READ_LOAD_PIVOT_PERCENT;
+	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
+	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
+	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
+	// has available space ratio < pivotAvailableSpaceRatio.
+	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
+	// team count. DD won't move shard to teams that has CPU > pivot CPU.
+	double CPU_PIVOT_RATIO;
+	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
+	double MAX_DEST_CPU_PERCENT;
+	// The constant interval DD update pivot values for team selection. It should be >=
+	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
+	double DD_TEAM_PIVOT_UPDATE_DELAY;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
@@ -660,6 +667,7 @@ public:
 	double SMOOTHING_AMOUNT;
 	double SLOW_SMOOTHING_AMOUNT;
 	double METRIC_UPDATE_RATE;
+	// The interval of detailed HealthMetric is pushed to GRV proxies
 	double DETAILED_METRIC_UPDATE_RATE;
 	double LAST_LIMITED_RATIO;
 	double RATEKEEPER_DEFAULT_LIMIT;
@@ -734,14 +742,20 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below a certain threshold
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
+	// Interval at which ratekeeper logs statistics for each tag:
+	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// If this knob is set to true, the global tag throttler will still
+	// compute rates, but these rates won't be sent to GRV proxies for
+	// enforcement.
+	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
 	int64_t MIN_AVAILABLE_SPACE;
+	// DD won't move data to a team that has available space ratio < MIN_AVAILABLE_SPACE_RATIO
 	double MIN_AVAILABLE_SPACE_RATIO;
 	double MIN_AVAILABLE_SPACE_RATIO_SAFETY_BUFFER;
 	double TARGET_AVAILABLE_SPACE_RATIO;
-	double AVAILABLE_SPACE_UPDATE_DELAY;
 
 	double MAX_TL_SS_VERSION_DIFFERENCE; // spring starts at half this value
 	double MAX_TL_SS_VERSION_DIFFERENCE_BATCH;
@@ -841,7 +855,13 @@ public:
 	int BEHIND_CHECK_COUNT;
 	int64_t BEHIND_CHECK_VERSIONS;
 	double WAIT_METRICS_WRONG_SHARD_CHANCE;
+	// Minimum read throughput (in pages/second) that a tag must register
+	// on a storage server in order for tag throughput statistics to be
+	// emitted to ratekeeper.
 	int64_t MIN_TAG_READ_PAGES_RATE;
+	// Minimum write throughput (in pages/second, multiplied by fungibility ratio)
+	// that a tag must register on a storage server in order for ratekeeper to
+	// track the write throughput of this tag on the storage server.
 	int64_t MIN_TAG_WRITE_PAGES_RATE;
 	double TAG_MEASUREMENT_INTERVAL;
 	bool PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS;
@@ -1037,6 +1057,7 @@ public:
 	// Encryption
 	int SIM_KMS_MAX_KEYS;
 	int ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH;
+	double ENCRYPTION_LOGGING_INTERVAL;
 
 	// Compression
 	bool ENABLE_BLOB_GRANULE_COMPRESSION;

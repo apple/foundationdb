@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

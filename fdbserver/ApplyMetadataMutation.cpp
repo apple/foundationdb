@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
+#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
@@ -621,19 +621,22 @@ private:
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 			for (const auto& ssID : checkpoint.src) {
-				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
-				MutationRef privatized = m;
-				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-				    .detail("Original", m)
-				    .detail("Privatized", privatized)
-				    .detail("Server", ssID)
-				    .detail("TagKey", serverTagKeyFor(ssID))
-				    .detail("Tag", tag.toString())
-				    .detail("Checkpoint", checkpoint.toString());
+				Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+				if (tagV.present()) {
+					Tag tag = decodeServerTagValue(tagV.get());
+					MutationRef privatized = m;
+					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+					    .detail("Original", m)
+					    .detail("Privatized", privatized)
+					    .detail("Server", ssID)
+					    .detail("TagKey", serverTagKeyFor(ssID))
+					    .detail("Tag", tag.toString())
+					    .detail("Checkpoint", checkpoint.toString());
 
-				toCommit->addTag(tag);
-				writeMutation(privatized);
+					toCommit->addTag(tag);
+					writeMutation(privatized);
+				}
 			}
 		}
 	}

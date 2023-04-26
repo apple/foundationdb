@@ -29,7 +29,7 @@
 #define METACLUSTER_TENANTCONSISTENCY_ACTOR_H
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/BooleanParam.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantData.actor.h"

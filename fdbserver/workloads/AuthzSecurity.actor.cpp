@@ -518,7 +518,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		state Version v2 = wait(setAndCommitKeyValueAndGetVersion(
 		    self, cx, self->anotherTenant, self->signedTokenAnotherTenant, key, value));
 
-		{
+		try {
 			GetKeyServerLocationsReply rep =
 			    wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
 			                          &CommitProxyInterface::getKeyServersLocations,
@@ -542,8 +542,13 @@ struct AuthzSecurityWorkload : TestWorkload {
 					    .detail("LeakingRangeEnd", range.end.printable());
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			ASSERT(e.code() == error_code_commit_proxy_memory_limit_exceeded);
 		}
-		{
+		try {
 			GetKeyServerLocationsReply rep = wait(basicLoadBalance(
 			    cx->getCommitProxies(UseProvisionalProxies::False),
 			    &CommitProxyInterface::getKeyServersLocations,
@@ -567,6 +572,11 @@ struct AuthzSecurityWorkload : TestWorkload {
 					    .detail("LeakingRangeEnd", range.end.printable());
 				}
 			}
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw e;
+			}
+			ASSERT(e.code() == error_code_commit_proxy_memory_limit_exceeded);
 		}
 		++self->keyLocationLeakNegative;
 

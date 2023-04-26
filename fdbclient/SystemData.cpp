@@ -35,6 +35,24 @@ const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
 const KeyRef afterAllKeys = "\xff\xff\x00"_sr;
 const KeyRangeRef specialKeys = KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr);
 
+SystemKey::SystemKey(Key const& k) : Key(k) {
+	// In simulation, if k is not in the known key set then make sure no known key is a prefix of it, then add it to the
+	// known set.
+	if (g_network->isSimulated()) {
+		static std::unordered_set<Key> knownKeys;
+
+		if (!knownKeys.contains(k)) {
+			for (auto& known : knownKeys) {
+				if (!k.startsWith(known)) {
+					TraceEvent(SevError, "SystemKeyPrefixConflict").detail("NewKey", k).detail("ExistingKey", known);
+					UNSTOPPABLE_ASSERT(false);
+				}
+			}
+			knownKeys.insert(k);
+		}
+	}
+}
+
 // keyServersKeys.contains(k) iff k.startsWith(keyServersPrefix)
 const KeyRangeRef keyServersKeys("\xff/keyServers/"_sr, "\xff/keyServers0"_sr);
 const KeyRef keyServersPrefix = keyServersKeys.begin;
@@ -1397,6 +1415,13 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value) {
 // blob granule data
 const KeyRef blobRangeActive = "1"_sr;
 const KeyRef blobRangeInactive = StringRef();
+
+bool isBlobRangeActive(const ValueRef& blobRangeValue) {
+	// Empty or "0" is inactive
+	// "1" is active
+	// Support future change where serialized metadata struct is also active
+	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
+}
 
 const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);
 const KeyRangeRef blobGranuleMappingKeys("\xff\x02/bgm/"_sr, "\xff\x02/bgm0"_sr);

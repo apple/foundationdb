@@ -22,6 +22,38 @@
 
 #include "fdbclient/StorageServerInterface.h"
 
+struct GetTeamRequest;
+namespace data_distribution {
+// DD evaluate the metrics of server teams and will increase the count if corresponding metrics is within a eligible
+// range
+class EligibilityCounter {
+public:
+	// The type value are used to do bit operations to get combined type. Ex. combineType = LOW_CPU | LOW_DISK_UTIL .
+	// When adding more types, the value should be 2^n, like 4, 8, 16...
+	enum Type {
+		NONE = 0, // don't care about eligibility
+		LOW_CPU = 1,
+		LOW_DISK_UTIL = 2
+	};
+
+	// set the count of type to 0
+	void reset(Type type);
+
+	// return the minimal count of a combined eligible type
+	int getCount(int combinedType) const;
+
+	// increase the count of type
+	void increase(Type type);
+
+	// return combinedType that can be used as input to getCount().
+	static int fromGetTeamRequest(GetTeamRequest const&);
+
+private:
+	std::unordered_map<Type, int> type_count;
+};
+
+} // namespace data_distribution
+
 struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
@@ -31,7 +63,9 @@ struct IDataDistributionTeam {
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
-	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getAverageCPU() const = 0;
+	virtual bool hasLowerCpu(double cpuThreshold) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -124,8 +158,8 @@ struct GetTeamRequest {
 	GetTeamRequest(TeamSelect teamSelectRequest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               PreferLowerReadUtil preferLowerReadUtil,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
-	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0,
 	               Optional<KeyRange> keys = Optional<KeyRange>())
 	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
@@ -170,12 +204,12 @@ private:
 
 	// return -1 if a.readload > b.readload
 	static int greaterReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
+		auto r1 = a->getReadLoad(true), r2 = b->getReadLoad(true);
 		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 	}
 	// return -1 if a.readload < b.readload
 	static int lessReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
+		auto r1 = a->getReadLoad(false), r2 = b->getReadLoad(false);
 		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 	}
 };
