@@ -469,7 +469,7 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
 			fmt::print("  allocated tenant groups: {}\n", metadata.entry.allocated.numTenantGroups);
 			fmt::print(
-			    "  auto_tenant_assignment: {}\n",
+			    "  auto tenant assignment: {}\n",
 			    metacluster::DataClusterEntry::autoTenantAssignmentToString(metadata.entry.autoTenantAssignment));
 		}
 	} catch (Error& e) {
