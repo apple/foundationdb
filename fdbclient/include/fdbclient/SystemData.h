@@ -37,6 +37,12 @@
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 
+// SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
+// and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
+struct SystemKey : Key {
+	SystemKey(Key const& k);
+};
+
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
 struct RestoreMasterInterface;
