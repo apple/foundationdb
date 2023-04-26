@@ -368,6 +368,13 @@ def register_and_configure_data_clusters_test(logger, cluster_files):
         "auto_tenant_assignment=disabled",
     )
     assert 0 == rc
+    rc, out, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster get",
+        data_cluster_names[0],
+    )
+    assert rc == 0
+
     # Try creating a tenant without specifying data cluster
     out, err = create_tenant(management_cluster_file, "tenant1")
     assert (

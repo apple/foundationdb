@@ -92,6 +92,7 @@ struct DataClusterEntry {
 
 	static std::string clusterStateToString(DataClusterState clusterState);
 	static DataClusterState stringToClusterState(std::string stateStr);
+	static std::string autoTenantAssignmentToString(AutoTenantAssignment autoTenantAssignment);
 
 	UID id;
 	ClusterUsage capacity;
