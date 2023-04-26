@@ -224,6 +224,8 @@ protected:
 class MockGlobalStateImpl;
 
 namespace mock {
+// This struct is only used in mock DD. For convenience of tracking the cluster topology and generating correct process
+// locality
 struct TopologyObject {
 	enum Type { PROCESS, MACHINE, ZONE, DATA_HALL, DATA_CENTER } type;
 	// corresponding to LocalityData field for each type

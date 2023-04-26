@@ -48,6 +48,8 @@ protected:
 	// Data population setting
 	// Each key space is convert from an int N. [N, N+1) represent a key space. So at most we have 2G key spaces
 	int keySpaceCount = 1000;
+
+	// Here are the different options available for keySpaceStrategy which affect how the data is initially populated.
 	// 1. fixed -- each key space has fixed size. The size of each key space is calculated as minSpaceKeyCount *
 	// (minByteSize + 16) ;
 	// 2. linear -- from 0 to keySpaceCount the size of key space increase by size linearStride, from
@@ -63,6 +65,7 @@ protected:
 	virtual void populateRandomStrategy();
 	virtual void populateLinearStrategy();
 	virtual void populateFixedStrategy();
+	// populate data to MGS
 	virtual void populateMgs();
 };
 
