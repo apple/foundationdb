@@ -163,6 +163,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			state metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
+			if (deterministicRandom()->randomInt(0, 4) == 0) {
+				entry.autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			}
 
 			loop {
 				try {
@@ -214,6 +217,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->totalTenantGroupCapacity += entry.capacity.numTenantGroups;
 			dataDb->registered = true;
 			dataDb->detached = false;
+			dataDb->autoTenantAssignment = entry.autoTenantAssignment;
 
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
