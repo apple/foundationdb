@@ -30,7 +30,7 @@
 #include "fdbclient/TaskBucket.h"
 #include "fdbclient/Notified.h"
 #include "flow/IAsyncFile.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include <ctime>
 #include <climits>
 #include "fdbclient/BackupContainer.h"
@@ -636,7 +636,7 @@ public:
 	Key prefix;
 };
 
-class KeyBackedTaskConfig : public KeyBackedStruct {
+class KeyBackedTaskConfig : public KeyBackedClass {
 protected:
 	UID uid;
 	Subspace configSpace;
@@ -647,7 +647,7 @@ public:
 	} TaskParams;
 
 	KeyBackedTaskConfig(StringRef prefix, UID uid = UID())
-	  : KeyBackedStruct(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
+	  : KeyBackedClass(prefix), uid(uid), configSpace(uidPrefixKey("uid->config/"_sr.withPrefix(prefix), uid)) {}
 
 	KeyBackedTaskConfig(StringRef prefix, Reference<Task> task)
 	  : KeyBackedTaskConfig(prefix, TaskParams.uid().get(task)) {}
@@ -684,7 +684,7 @@ public:
 		// restore uid. Get this uid's tag, then get the KEY for the tag's uid but don't read it.  That becomes the
 		// validation key which TaskBucket will check, and its value must be this restore config's uid.
 		UID u = uid; // 'this' could be invalid in lambda
-		Key p = prefix;
+		Key p = subspace.key();
 		return map(tag().get(tr), [u, p, task](Optional<std::string> const& tag) -> Void {
 			if (!tag.present())
 				throw restore_error();

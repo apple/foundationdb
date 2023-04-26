@@ -29,7 +29,7 @@
 #define FDBCLIENT_TENANTDATA_ACTOR_H
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"

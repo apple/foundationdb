@@ -28,7 +28,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClientBooleanParams.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"

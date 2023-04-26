@@ -24,7 +24,7 @@
 #include <sstream>
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/SystemData.h"
@@ -311,7 +311,7 @@ protected:
 
 	LocalityMap<UID> machineLocalityMap; // locality info of machines
 
-	Reference<KeyRangeMap<int>> customReplication;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 	CoalescedKeyRangeMap<bool> underReplication;
 
 	// A mechanism to tell actors that reference a DDTeamCollection object through a direct
