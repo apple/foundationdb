@@ -656,7 +656,8 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "connection_string=<CONNECTION_STRING>",
-			                                     "[max_tenant_groups=<NUM_GROUPS>]" };
+			                                     "[max_tenant_groups=<NUM_GROUPS>]",
+			                                     "[auto_tenant_assignment=<enabled|disabled>]" };
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "[FORCE]", "<NAME>" };
@@ -682,9 +683,9 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			return {};
 		}
 	} else if (tokencmp(tokens[1], "configure")) {
-		static std::vector<const char*> opts = {
-			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
-		};
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>"
+			                                     "|auto_tenant_assignment=<enabled|disabled>>" };
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
