@@ -571,7 +571,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				state Optional<metacluster::DataClusterEntry> entry;
 
 				if (clusterMetadata.present()) {
-					// This check for numTenantGroups must come first because it sets `entry` unconditionally.
 					if (numTenantGroups.present()) {
 						if (!entry.present()) {
 							entry = clusterMetadata.get().entry;
@@ -613,7 +612,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		{
 			int rnd = deterministicRandom()->randomInt(0, 4);
 			if (rnd == 0) {
-				// disableAutoTenantAssignment = metacluster::DisableAutoTenantAssignment::False;
 				autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
 			} else if (rnd == 1) {
 				autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
