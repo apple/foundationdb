@@ -643,6 +643,9 @@ struct StorageMetrics {
 
 	static const int64_t infinity = 1LL << 60;
 
+	// the read load model coming from both read ops and read bytes
+	int64_t readLoadKSecond() const;
+
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
 		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
 		       iosPerKSecond <= rhs.iosPerKSecond && bytesReadPerKSecond <= rhs.bytesReadPerKSecond &&

@@ -177,6 +177,52 @@ void hugeArenaSample(int size);
 void releaseAllThreadMagazines();
 int64_t getTotalUnusedAllocatedMemory();
 
+// Allow temporary overriding of default allocators used by arena to let memory survive deallocation and test
+// correctness of memory policy (e.g. zeroing out sensitive contents after use)
+namespace keepalive_allocator {
+
+namespace detail {
+extern bool g_active;
+} // namespace detail
+
+inline bool isActive() noexcept {
+	return detail::g_active;
+}
+
+// While this scope is active, default allocate() and free() function is overridden for Arena and PacketBuffer to test
+// correct post-use memory policy: e.g. secure deletion of sensitive contents. Any (de)allocation of ArenaBlock and
+// PacketBuffer is tracked while this scope is active. To ensure correct state management, at most one instance of this
+// object may exist at any given time. Any tracked allocation during this scope must be freed BEFORE the scope
+// destructs. Any trackable (ArenaBlock, PacketBuffer) allocation before the scope must be freed AFTER the scope
+// destructs.
+class ActiveScope {
+public:
+	ActiveScope();
+	~ActiveScope();
+};
+
+void* allocate(size_t);
+void invalidate(void*);
+
+void trackWipedArea(const uint8_t* begin, int size);
+std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet();
+
+} // namespace keepalive_allocator
+
+force_inline uint8_t* allocateAndMaybeKeepalive(size_t size) {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		return static_cast<uint8_t*>(keepalive_allocator::allocate(size));
+	else
+		return new uint8_t[size];
+}
+
+force_inline void freeOrMaybeKeepalive(void* ptr) {
+	if (keepalive_allocator::isActive()) [[unlikely]]
+		keepalive_allocator::invalidate(ptr);
+	else
+		delete[] static_cast<uint8_t*>(ptr);
+}
+
 inline constexpr int nextFastAllocatedSize(int x) {
 	assert(x > 0 && x <= 16384);
 	if (x <= 16)
