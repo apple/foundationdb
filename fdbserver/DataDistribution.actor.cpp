@@ -771,12 +771,13 @@ void cancelAllAuditsInAuditMap(Reference<DataDistributor> self) {
 	return;
 }
 
-ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
+void resumeStorageAudits(Reference<DataDistributor> self) {
 	ASSERT(!self->auditInitialized.getFuture().isReady());
 	self->lastResumeAuditsSeriesNumber++;
 	if (self->initData->auditStates.empty()) {
 		self->auditInitialized.send(Void());
-		return Void();
+		TraceEvent(SevVerbose, "AuditStorageResumeEmptyDone", self->ddId);
+		return;
 	}
 	cancelAllAuditsInAuditMap(self); // cancel existing audits
 	// resume from disk
@@ -794,7 +795,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 	ASSERT(!self->auditInitialized.getFuture().isReady());
 	self->auditInitialized.send(Void());
 	TraceEvent(SevDebug, "AuditStorageResumeDone", self->ddId);
-	return Void();
+	return;
 }
 
 // Periodically check and log the physicalShard status; clean up empty physicalShard;
@@ -895,7 +896,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
 
-			actors.push_back(resumeStorageAudits(self));
+			resumeStorageAudits(self);
 
 			actors.push_back(self->pollMoveKeysLock());
 
@@ -1725,7 +1726,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			                        audit->coreState.getPhase(),
 			                        currentRetryCount); // remove audit
 			runAuditStorage(self, audit->coreState, audit->retryCount, "auditStorageCoreRetry");
-			// audit->setAuditRunActor(auditStorageCore(self, auditID, auditType, context, audit->retryCount));
 		} else {
 			try {
 				audit->coreState.setPhase(AuditPhase::Failed);
@@ -1849,6 +1849,11 @@ void runAuditStorage(Reference<DataDistributor> self,
 // Create/pick an audit for auditRange and auditType
 // Return audit ID if no error happens
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType) {
+	state MoveKeyLockInfo lockInfo;
+	lockInfo.myOwner = self->lock.myOwner;
+	lockInfo.prevOwner = self->lock.prevOwner;
+	lockInfo.prevWrite = self->lock.prevWrite;
+
 	state UID auditID;
 	state int64_t lastResumeAuditsSeriesNumber = self->lastResumeAuditsSeriesNumber;
 	try {
@@ -1898,7 +1903,8 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			TraceEvent(SevVerbose, "DDAuditStorageLaunchPersistNewAuditIDBefore", self->ddId)
 			    .detail("AuditType", auditType)
 			    .detail("Range", auditRange);
-			UID auditID_ = wait(persistNewAuditState(self->txnProcessor->context(), auditState)); // must succeed
+			UID auditID_ = wait(persistNewAuditState(
+			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled())); // must succeed
 			// data distribution could restart in the middle of persistNewAuditState
 			// It is possible that the auditState has been written to disk before data distribution restarts,
 			// hence a new audit resumption loads audits from disk and launch the audits
@@ -1908,6 +1914,9 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 				throw audit_storage_failed();
 			}
 			if (g_network->isSimulated() && deterministicRandom()->coinflip()) {
+				TraceEvent(SevVerbose, "DDAuditStorageLaunchInjectActorCancelWhenPersist", self->ddId)
+				    .detail("AuditType", auditType)
+				    .detail("Range", auditRange);
 				throw operation_failed(); // Simulate restarting
 			}
 			TraceEvent(SevInfo, "DDAuditStorageLaunchPersistNewAuditID", self->ddId)

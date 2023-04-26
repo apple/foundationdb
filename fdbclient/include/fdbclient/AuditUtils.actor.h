@@ -36,7 +36,7 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
-ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState);
+ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 ACTOR Future<Void> persistAuditState(Database cx,
                                      AuditStorageState auditState,
                                      std::string context,

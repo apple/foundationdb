@@ -45,32 +45,6 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Tra
 	return auditStates;
 }
 
-ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState) {
-	ASSERT(!auditState.id.isValid());
-	state Transaction tr(cx);
-	state UID auditId;
-
-	loop {
-		try {
-			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
-			uint64_t nextId = 1;
-			if (!auditStates.empty()) {
-				nextId = auditStates.front().id.first() + 1;
-			}
-			auditId = UID(nextId, 0LL);
-			auditState.id = auditId;
-			tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
-			wait(tr.commit());
-			TraceEvent("PersistedNewAuditState", auditId).detail("AuditKey", auditKey(auditState.getType(), auditId));
-			break;
-		} catch (Error& e) {
-			wait(tr.onError(e));
-		}
-	}
-
-	return auditId;
-}
-
 ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
                                             MoveKeyLockInfo lock,
                                             bool isDDEnabled,
@@ -89,6 +63,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
+			TraceEvent(SevDebug, "ConflictWithPreviousOwner");
 			throw movekeys_conflict(); // need a new name
 		}
 
@@ -122,8 +97,43 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
+		TraceEvent(SevDebug, "ConflictWithNewOwner");
 		throw movekeys_conflict(); // need a new name
 	}
+}
+
+ACTOR Future<UID> persistNewAuditState(Database cx,
+                                       AuditStorageState auditState,
+                                       MoveKeyLockInfo lock,
+                                       bool ddEnabled) {
+	ASSERT(!auditState.id.isValid());
+	state Transaction tr(cx);
+	state UID auditId;
+
+	loop {
+		try {
+			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
+			uint64_t nextId = 1;
+			if (!auditStates.empty()) {
+				nextId = auditStates.front().id.first() + 1;
+			}
+			auditId = UID(nextId, 0LL);
+			auditState.id = auditId;
+			tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
+			wait(tr.commit());
+			TraceEvent(SevDebug, "PersistedNewAuditState", auditId)
+			    .detail("AuditKey", auditKey(auditState.getType(), auditId));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "PersistedNewAuditStateError", auditId)
+			    .errorUnsuppressed(e)
+			    .detail("AuditKey", auditKey(auditState.getType(), auditId));
+			wait(tr.onError(e));
+		}
+	}
+
+	return auditId;
 }
 
 ACTOR Future<Void> persistAuditState(Database cx,
@@ -266,26 +276,6 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 	return res;
 }
 
-/*ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState) {
-    state Transaction tr(cx);
-
-    loop {
-        try {
-            tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-            tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-            Key prefix = auditServerPrefixFor(auditState.getType(), auditState.id);
-            Key key = KeyRef(auditState.auditServerId.toString());
-            tr.set(key.withPrefix(prefix), auditStorageStateValue(auditState));
-            wait(tr.commit());
-            break;
-        } catch (Error& e) {
-            wait(tr.onError(e));
-        }
-    }
-
-    return Void();
-}*/
-
 ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState auditState) {
 	state Transaction tr(cx);
 
@@ -305,36 +295,6 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 
 	return Void();
 }
-
-/*ACTOR Future<AuditStorageState> getAuditStateByServer(Database cx, AuditType type, UID auditId, UID auditServerId) {
-    state Transaction tr(cx);
-    state AuditStorageState res(auditId, auditServerId, type);
-    loop {
-        try {
-            tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-            tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-            Key prefix = auditServerPrefixFor(type, auditId);
-            Key key = KeyRef(auditServerId.toString());
-            Optional<Value> value = wait(tr.get(key.withPrefix(prefix)));
-            if (value.present()) {
-                AuditStorageState auditState = decodeAuditStorageState(value.get());
-                ASSERT(auditState.auditServerId.isValid());
-                ASSERT_WE_THINK(auditState.auditServerId == auditServerId);
-                res.setPhase(auditState.getPhase());
-                res.error = auditState.error;
-            }
-            break;
-        } catch (Error& e) {
-            TraceEvent(SevDebug, "GetAuditStateForRangeError")
-                .errorUnsuppressed(e)
-                .detail("AuditID", auditId)
-                .detail("AuditServerId", auditServerId);
-            wait(tr.onError(e));
-        }
-    }
-
-    return res;
-}*/
 
 ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
                                                                    AuditType type,
