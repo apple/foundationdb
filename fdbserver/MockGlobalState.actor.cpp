@@ -53,7 +53,8 @@ public:
 			// NOTE(xwang): in native API, there's code handling the non-equal situation, but in mock world it's
 			// possible for split shards stay in the same location
 			CODE_PROBE(expectedShardCount >= 0 && locations.size() != expectedShardCount,
-			           "Some shard is in the same location.");
+			           "Some shard is in the same location.",
+			           probe::decoration::rare);
 
 			Optional<StorageMetrics> res =
 			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
