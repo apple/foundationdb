@@ -542,13 +542,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    wait(metacluster::getCluster(self->managementDb, clusterName));
 			ASSERT(dataDb->registered);
 			ASSERT(dataDb->db->getConnectionRecord()->getConnectionString() == clusterMetadata.connectionString);
-			if (dataDb->autoTenantAssignment != clusterMetadata.entry.autoTenantAssignment) {
-				TraceEvent(SevError, "YanqinError")
-				    .detail("DataDbdisable", dataDb->autoTenantAssignment)
-				    .detail("Detached", dataDb->detached)
-				    .detail("Registered", dataDb->registered)
-				    .detail("ClusterMetadisable", clusterMetadata.entry.autoTenantAssignment);
-			}
 			ASSERT_EQ(dataDb->autoTenantAssignment, clusterMetadata.entry.autoTenantAssignment);
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
