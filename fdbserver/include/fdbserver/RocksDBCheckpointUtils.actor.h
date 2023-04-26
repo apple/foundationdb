@@ -198,14 +198,14 @@ struct SstFileMetaData {
 		           num_deletions,
 		           oldest_blob_file_number,
 		           oldest_ancester_time,
+		           epoch_number,
+		           name,
+		           db_path,
 		           file_creation_time,
 		           file_checksum,
 		           file_checksum_func_name,
 		           smallest,
-		           largest,
-		           directory,
-		           relative_filename,
-		           epoch_number);
+		           largest);
 	}
 };
 
@@ -239,11 +239,13 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::oldest_blob_file_number,
 		           SstFileMetaData::oldest_ancester_time,
 		           SstFileMetaData::file_creation_time,
+		           SstFileMetaData::epoch_number,
+				   SstFileMetaData::name,
+		           SstFileMetaData::db_path,
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,
 		           SstFileMetaData::smallest,
 		           SstFileMetaData::largest,
-		           SstFileMetaData::epoch_number,
 		           column_family_name,
 		           level,
 		           fetched);

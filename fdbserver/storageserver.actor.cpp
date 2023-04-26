@@ -9953,12 +9953,14 @@ private:
 	// 1. Registers a pending checkpoint request, it will be fullfilled when the desired version is durable.
 	// 2. Schedule deleting a checkpoint.
 	void handleCheckpointPrivateMutation(StorageServer* data, const MutationRef& m, Version ver) {
-		if (!data->shardAware || data->isTss()) {
-			return;
-		}
 		CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 		const CheckpointMetaData::CheckpointState cState = checkpoint.getState();
 		const UID checkpointID = decodeCheckpointKey(m.param1.substr(1));
+		TraceEvent(SevDebug, "HandleCheckpointPrivateMutation", data->thisServerID)
+		    .detail("Checkpoint", checkpoint.toString());
+		if (!data->shardAware || data->isTss()) {
+			return;
+		}
 		auto& mLV = data->addVersionToMutationLog(ver);
 		if (cState == CheckpointMetaData::Pending) {
 			checkpoint.version = ver;
