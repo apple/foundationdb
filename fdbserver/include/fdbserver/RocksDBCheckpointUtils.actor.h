@@ -202,8 +202,6 @@ struct SstFileMetaData {
 		           name,
 		           db_path,
 		           file_creation_time,
-		           file_checksum,
-		           file_checksum_func_name,
 		           smallest,
 		           largest);
 	}
@@ -248,7 +246,9 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::largest,
 		           column_family_name,
 		           level,
-		           fetched);
+		           fetched,
+		           SstFileMetaData::smallest,
+		           SstFileMetaData::largest);
 	}
 };
 

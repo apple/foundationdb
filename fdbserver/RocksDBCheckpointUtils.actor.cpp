@@ -93,6 +93,9 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
+		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.db_path = fileMetaData.db_path;
@@ -131,6 +134,7 @@ rocksdb::Options getOptions() {
 rocksdb::ReadOptions getReadOptions() {
 	rocksdb::ReadOptions options;
 	options.background_purge_on_iterator_cleanup = true;
+	options.auto_prefix_mode = (SERVER_KNOBS->ROCKSDB_PREFIX_LEN > 0);
 	return options;
 }
 
@@ -791,7 +795,7 @@ RocksDBCheckpointByteSampleReader::RocksDBCheckpointByteSampleReader(const Check
 	    .detail("Checkpoint", checkpoint.toString())
 	    .detail("Status", status.ToString());
 	if (status.ok()) {
-		iter.reset(sstReader->NewIterator(rocksdb::ReadOptions()));
+		iter.reset(sstReader->NewIterator(getReadOptions()));
 		iter->SeekToFirst();
 	} else {
 		TraceEvent(SevError, "RocksDBCheckpointByteSampleReaderInit")
