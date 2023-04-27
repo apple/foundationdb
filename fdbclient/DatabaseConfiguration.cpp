@@ -332,30 +332,27 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		result["regions"] = getRegionJSON();
 	}
 
+	result["logs"] = getDesiredLogs();
+
+	auto cpCount = getDesiredCommitProxies();
+	result["commit_proxies"] = cpCount;
 	// Add to the `proxies` count for backwards compatibility with tools built before 7.0.
-	int32_t proxyCount = -1;
-	if (desiredTLogCount != -1 || isOverridden("logs")) {
-		result["logs"] = desiredTLogCount;
+	int32_t proxyCount = cpCount;
+
+	auto grvCount = getDesiredGrvProxies();
+	result["grv_proxies"] = grvCount;
+	if (proxyCount != -1) {
+		proxyCount += grvCount;
+	} else {
+		proxyCount = grvCount;
 	}
-	if (commitProxyCount != -1 || isOverridden("commit_proxies")) {
-		result["commit_proxies"] = commitProxyCount;
-		if (proxyCount != -1) {
-			proxyCount += commitProxyCount;
-		} else {
-			proxyCount = commitProxyCount;
-		}
+
+	if (proxyCount != -1) {
+		result["proxies"] = proxyCount;
 	}
-	if (grvProxyCount != -1 || isOverridden("grv_proxies")) {
-		result["grv_proxies"] = grvProxyCount;
-		if (proxyCount != -1) {
-			proxyCount += grvProxyCount;
-		} else {
-			proxyCount = grvProxyCount;
-		}
-	}
-	if (resolverCount != -1 || isOverridden("resolvers")) {
-		result["resolvers"] = resolverCount;
-	}
+
+	result["resolvers"] = getDesiredResolvers();
+
 	if (desiredLogRouterCount != -1 || isOverridden("log_routers")) {
 		result["log_routers"] = desiredLogRouterCount;
 	}
@@ -365,6 +362,8 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	if (repopulateRegionAntiQuorum != 0 || isOverridden("repopulate_anti_quorum")) {
 		result["repopulate_anti_quorum"] = repopulateRegionAntiQuorum;
 	}
+
+	// only report the auto values when they're different from default
 	if (autoCommitProxyCount != CLIENT_KNOBS->DEFAULT_AUTO_COMMIT_PROXIES || isOverridden("auto_commit_proxies")) {
 		result["auto_commit_proxies"] = autoCommitProxyCount;
 	}
@@ -376,9 +375,6 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	}
 	if (autoDesiredTLogCount != CLIENT_KNOBS->DEFAULT_AUTO_LOGS || isOverridden("auto_logs")) {
 		result["auto_logs"] = autoDesiredTLogCount;
-	}
-	if (proxyCount != -1) {
-		result["proxies"] = proxyCount;
 	}
 
 	result["backup_worker_enabled"] = (int32_t)backupWorkerEnabled;
