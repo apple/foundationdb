@@ -5181,8 +5181,9 @@ ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServer
 
 // Given an input server, get ranges with in the input range via the input transaction
 // from the perspective of KeyServers system key space
-// Input: (1) SS ID; (2) transaction tr; (3) within range
-// Return: (1) complete range by a single read range; (2) verison of the read; (3) ranges of the SS
+// Input: (1) Audit Server ID (for logging); (2) transaction tr; (3) within range
+// Return: (1) complete range by a single read range; (2) verison of the read;
+// (3) map between SSes and their ranges
 ACTOR Future<std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>>>
 getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
 	state std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>> res;
@@ -8921,12 +8922,12 @@ void changeServerKeys(StorageServer* data,
                       ChangeServerKeysContext context) {
 	ASSERT(!keys.empty());
 
-	TraceEvent(SevVerbose, "ChangeServerKeys", data->thisServerID)
-	    .detail("KeyBegin", keys.begin)
-	    .detail("KeyEnd", keys.end)
-	    .detail("NowAssigned", nowAssigned)
-	    .detail("Version", version)
-	    .detail("Context", changeServerKeysContextName(context));
+	// TraceEvent("ChangeServerKeys", data->thisServerID)
+	//     .detail("KeyBegin", keys.begin)
+	//     .detail("KeyEnd", keys.end)
+	//     .detail("NowAssigned", nowAssigned)
+	//     .detail("Version", version)
+	//     .detail("Context", changeServerKeysContextName(context));
 	validate(data);
 	// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 	DEBUG_KEY_RANGE(nowAssigned ? "KeysAssigned" : "KeysUnassigned", version, keys, data->thisServerID);
@@ -8982,24 +8983,21 @@ void changeServerKeys(StorageServer* data,
 	for (auto r = vr.begin(); r != vr.end(); ++r) {
 		KeyRangeRef range = keys & r->range();
 		bool dataAvailable = r->value() == latestVersion || r->value() >= version;
-		TraceEvent(SevVerbose, "CSKRange", data->thisServerID)
-		    .detail("KeyBegin", range.begin)
-		    .detail("KeyEnd", range.end)
-		    .detail("Available", dataAvailable)
-		    .detail("NowAssigned", nowAssigned)
-		    .detail("NewestAvailable", r->value())
-		    .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
+		// TraceEvent("CSKRange", data->thisServerID)
+		//     .detail("KeyBegin", range.begin)
+		//     .detail("KeyEnd", range.end)
+		//     .detail("Available", dataAvailable)
+		//     .detail("NowAssigned", nowAssigned)
+		//     .detail("NewestAvailable", r->value())
+		//     .detail("ShardState0", data->shards[range.begin]->debugDescribeState());
 		if (context == CSK_ASSIGN_EMPTY && !dataAvailable) {
 			ASSERT(nowAssigned);
-			TraceEvent(SevVerbose, "ChangeServerKeysAddEmptyRange", data->thisServerID)
+			TraceEvent("ChangeServerKeysAddEmptyRange", data->thisServerID)
 			    .detail("Begin", range.begin)
 			    .detail("End", range.end);
 			newEmptyRanges.push_back(range);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		} else if (!nowAssigned) {
-			TraceEvent(SevVerbose, "ChangeServerKeysEnsureNotAssignedRange", data->thisServerID)
-			    .detail("Begin", range.begin)
-			    .detail("End", range.end);
 			if (dataAvailable) {
 				ASSERT(r->value() ==
 				       latestVersion); // Not that we care, but this used to be checked instead of dataAvailable
@@ -9013,7 +9011,7 @@ void changeServerKeys(StorageServer* data,
 			// SOMEDAY: Avoid restarting adding/transferred shards
 			// bypass fetchkeys; shard is known empty at initial cluster version
 			if (version == data->initialClusterVersion - 1) {
-				TraceEvent(SevVerbose, "ChangeServerKeysInitialRange", data->thisServerID)
+				TraceEvent("ChangeServerKeysInitialRange", data->thisServerID)
 				    .detail("Begin", range.begin)
 				    .detail("End", range.end);
 				changeNewestAvailable.emplace_back(range, latestVersion);
@@ -9021,17 +9019,10 @@ void changeServerKeys(StorageServer* data,
 				setAvailableStatus(data, range, true);
 			} else {
 				auto& shard = data->shards[range.begin];
-				TraceEvent(SevVerbose, "ChangeServerKeysAddNonEmptyRange", data->thisServerID)
-				    .detail("Begin", range.begin)
-				    .detail("End", range.end)
-				    .detail("TrueAdd", !shard->assigned() || shard->keys != range);
 				if (!shard->assigned() || shard->keys != range)
 					data->addShard(ShardInfo::newAdding(data, range));
 			}
 		} else {
-			TraceEvent(SevVerbose, "ChangeServerKeysNewReadWrite", data->thisServerID)
-			    .detail("Begin", range.begin)
-			    .detail("End", range.end);
 			changeNewestAvailable.emplace_back(range, latestVersion);
 			data->addShard(ShardInfo::newReadWrite(range, data));
 		}
@@ -9057,9 +9048,6 @@ void changeServerKeys(StorageServer* data,
 
 	// Clear the moving-in empty range, and set it available at the latestVersion.
 	for (const auto& range : newEmptyRanges) {
-		TraceEvent(SevDebug, "ClearForNewEmptyRanges", data->thisServerID)
-		    .detail("KeyBegin", range.begin)
-		    .detail("KeyEnd", range.end);
 		MutationRef clearRange(MutationRef::ClearRange, range.begin, range.end);
 		data->addMutation(data->data().getLatestVersion(),
 		                  true,
@@ -9333,10 +9321,6 @@ void rollback(StorageServer* data, Version rollbackVersion, Version nextVersion)
 	// approach would be to make the rollback range durable and, after reboot, skip over those versions if they appear
 	// in peek results.
 
-	TraceEvent(SevDebug, "PleaseRollBack", data->thisServerID)
-	    .detail("RollbackVersion", rollbackVersion)
-	    .detail("NextVersion", nextVersion);
-
 	throw please_reboot();
 }
 
@@ -9450,14 +9434,7 @@ private:
 	bool processedCacheStartKey;
 
 	void applyPrivateData(StorageServer* data, Version ver, MutationRef const& m) {
-		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID)
-		    .detail("Mutation", m)
-		    .detail("Version", ver)
-		    .detail("ServerKeysTrue", m.param2 == serverKeysTrue)
-		    .detail("ServerKeysTrueEmpty", m.param2 == serverKeysTrueEmptyRange)
-		    .detail("ServerKeysFalse", m.param2 == serverKeysFalse)
-		    .detail("TSSPresent", data->tssPairID.present())
-		    .detail("SK", data->tssPairID.present() ? data->tssPairID.get() : data->thisServerID);
+		TraceEvent(SevDebug, "SSPrivateMutation", data->thisServerID).detail("Mutation", m).detail("Version", ver);
 
 		if (processedStartKey) {
 			// Because of the implementation of the krm* functions, we expect changes in pairs, [begin,end)
@@ -9480,10 +9457,7 @@ private:
 				} else {
 					// add changes in shard assignment to the mutation log
 					setAssignedStatus(data, keys, nowAssigned);
-					TraceEvent(SevDebug, "SSSetAssignedStatus", data->thisServerID)
-					    .detail("Range", keys)
-					    .detail("NowAssigned", nowAssigned)
-					    .detail("Version", ver);
+
 					// The changes for version have already been received (and are being processed now).  We need to
 					// fetch the data for change.version-1 (changes from versions < change.version) If emptyRange, treat
 					// the shard as empty, see removeKeysFromFailedServer() for more details about this scenario.
@@ -11510,8 +11484,8 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 			                     : assigned[assignedLoc + 1].key.removePrefix(persistShardAssignedKeys.begin));
 			ASSERT(!keys.empty());
 			bool nowAssigned = assigned[assignedLoc].value != "0"_sr;
-			if (nowAssigned)
-				TraceEvent(SevDebug, "AssignedShardRestoreDurableState", data->thisServerID).detail("Range", keys);
+			/*if(nowAssigned)
+			TraceEvent("AssignedShard", data->thisServerID).detail("RangeBegin", keys.begin).detail("RangeEnd", keys.end);*/
 			changeServerKeys(data, keys, nowAssigned, version, CSK_RESTORE);
 
 			if (!nowAssigned)
