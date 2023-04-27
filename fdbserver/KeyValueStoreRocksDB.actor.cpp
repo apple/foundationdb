@@ -49,6 +49,7 @@
 #endif
 #include "fdbclient/SystemData.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/FDBRocksDBVersion.h"
 #include "fdbserver/RocksDBLogForwarder.h"
 #include "flow/ActorCollection.h"
 #include "flow/flow.h"
@@ -69,9 +70,10 @@
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
 
-// Enforcing rocksdb version to be 7.10.2
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 10 && ROCKSDB_PATCH == 2),
-              "Unsupported rocksdb version. Update the rocksdb to 7.10.2 version");
+// Enforcing rocksdb version.
+static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
+               ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
+              "Unsupported rocksdb version.");
 
 namespace {
 using rocksdb::BackgroundErrorReason;
@@ -937,7 +939,8 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "BloomFilterUseful", rocksdb::BLOOM_FILTER_USEFUL, 0 },
 		{ "BloomFilterFullPositive", rocksdb::BLOOM_FILTER_FULL_POSITIVE, 0 },
 		{ "BloomFilterTruePositive", rocksdb::BLOOM_FILTER_FULL_TRUE_POSITIVE, 0 },
-		{ "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
+		// Deprecated in RocksDB 8.0
+		// { "BloomFilterMicros", rocksdb::BLOOM_FILTER_MICROS, 0 },
 		{ "MemtableHit", rocksdb::MEMTABLE_HIT, 0 },
 		{ "MemtableMiss", rocksdb::MEMTABLE_MISS, 0 },
 		{ "GetHitL0", rocksdb::GET_HIT_L0, 0 },
@@ -950,8 +953,9 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		{ "CountDBPrev", rocksdb::NUMBER_DB_PREV, 0 },
 		{ "BloomFilterPrefixChecked", rocksdb::BLOOM_FILTER_PREFIX_CHECKED, 0 },
 		{ "BloomFilterPrefixUseful", rocksdb::BLOOM_FILTER_PREFIX_USEFUL, 0 },
-		{ "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
-		{ "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
+		// Deprecated in RocksDB 8.0
+		// { "BlockCacheCompressedMiss", rocksdb::BLOCK_CACHE_COMPRESSED_MISS, 0 },
+		// { "BlockCacheCompressedHit", rocksdb::BLOCK_CACHE_COMPRESSED_HIT, 0 },
 		{ "CountWalFileSyncs", rocksdb::WAL_FILE_SYNCED, 0 },
 		{ "CountWalFileBytes", rocksdb::WAL_FILE_BYTES, 0 },
 		{ "CompactReadBytes", rocksdb::COMPACT_READ_BYTES, 0 },
@@ -981,10 +985,11 @@ ACTOR Future<Void> rocksDBMetricLogger(UID id,
 		  rocksdb::COMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
 		{ "DecompressionTimeNanos",
 		  rocksdb::DECOMPRESSION_TIMES_NANOS }, // enabled if rocksdb::StatsLevel > kExceptDetailedTimers(3)
-		{ "HardRateLimitDelayCount",
-		  rocksdb::HARD_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
-		{ "SoftRateLimitDelayCount",
-		  rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		// Deprecated in RocksDB 8.0
+		// { "HardRateLimitDelayCount",
+		//   rocksdb::HARD_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
+		// { "SoftRateLimitDelayCount",
+		//   rocksdb::SOFT_RATE_LIMIT_DELAY_COUNT }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
 		{ "WriteStall", rocksdb::WRITE_STALL }, // enabled if rocksdb::StatsLevel > kExceptHistogramOrTimers(1)
 	};
 
