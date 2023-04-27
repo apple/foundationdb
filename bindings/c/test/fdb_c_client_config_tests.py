@@ -14,7 +14,7 @@ from threading import Thread
 import time
 from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
 from binary_download import FdbBinaryDownloader
-from local_cluster import LocalCluster, PortProvider
+from local_cluster import LocalCluster, PortProvider, TLSConfig
 from test_util import random_alphanum_string
 
 args = None
@@ -36,6 +36,9 @@ class TestCluster(LocalCluster):
     def __init__(
         self,
         version: str,
+        tls_config: TLSConfig = None,
+        mkcert_binary: str = None,
+        disable_server_side_tls: bool = False,
     ):
         self.client_config_tester_bin = Path(args.client_config_tester_bin).resolve()
         assert self.client_config_tester_bin.exists(), "{} does not exist".format(
@@ -47,6 +50,14 @@ class TestCluster(LocalCluster):
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
         self.tmp_dir.mkdir(parents=True)
+        if mkcert_binary:
+            self.mkcert_binary = Path(mkcert_binary).resolve()
+        else:
+            self.mkcert_binary = os.path.join(self.build_dir, "bin", "mkcert")
+
+        assert Path(self.mkcert_binary).exists(), "{} does not exist".format(
+            self.mkcert_binary
+        )
         self.version = version
         super().__init__(
             self.tmp_dir,
@@ -54,6 +65,9 @@ class TestCluster(LocalCluster):
             downloader.binary_path(version, "fdbmonitor"),
             downloader.binary_path(version, "fdbcli"),
             1,
+            tls_config=tls_config,
+            mkcert_binary=self.mkcert_binary,
+            disable_server_side_tls=disable_server_side_tls,
         )
         self.set_env_var("LD_LIBRARY_PATH", downloader.lib_dir(version))
 
@@ -97,7 +111,10 @@ class ClientConfigTest:
         self.status_json = None
 
         # Configuration parameters to be set directly as needed
-        self.tls_disable_plaintext_connection = False
+        self.tls_client_cert_file = None
+        self.tls_client_key_file = None
+        self.tls_client_ca_file = None
+        self.tls_disable_plaintext_connection = None
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -268,6 +285,15 @@ class ClientConfigTest:
         if self.disable_client_bypass:
             cmd_args += ["--network-option-disable_client_bypass", ""]
 
+        if self.tls_client_cert_file:
+            cmd_args += ["--network-option-tls_cert_path", self.tls_client_cert_file]
+
+        if self.tls_client_key_file:
+            cmd_args += ["--network-option-tls_key_path", self.tls_client_key_file]
+
+        if self.tls_client_ca_file:
+            cmd_args += ["--network-option-tls_ca_path", self.tls_client_ca_file]
+
         if self.tls_disable_plaintext_connection:
             cmd_args += ["--network-option-tls_disable_plaintext_connection", ""]
 
@@ -343,7 +369,7 @@ class ClientConfigTests(unittest.TestCase):
         cls.cluster.tear_down()
 
     def test_tls_disable_plaintext_connection(self):
-        # Local client only
+        # Local client only; Plaintext connections are disabled in a plaintext cluster; Timeout Expected
         test = ClientConfigTest(self)
         test.print_status = True
         test.tls_disable_plaintext_connection = True
