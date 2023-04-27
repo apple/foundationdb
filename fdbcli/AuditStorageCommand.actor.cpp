@@ -55,9 +55,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 
 	Key begin = allKeys.begin, end = allKeys.end;
 	if (tokens.size() == 3) {
-		// begin is empty, which means using allKeys.begin as begin
-		// and using tokens[2] as end
-		end = tokens[2];
+		begin = tokens[2];
 	} else if (tokens.size() == 4) {
 		begin = tokens[2];
 		end = tokens[3];

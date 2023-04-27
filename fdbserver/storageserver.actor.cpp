@@ -5335,7 +5335,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			    .detail("LocalShardInfoAtVersion", localShardInfoReadAtVersion)
 			    .detail("ShardAssignmentsCount", shardAssignments.size());
 			// Ideally, we revert ownRangesLocalView changes by shard assignment history
-			// Currently, we return failed if any update collected
+			// Currently, we give up if any update collected
 			if (!shardAssignments.empty()) {
 				failureReason = "Shard assignment history is not empty";
 				throw audit_storage_failed();
@@ -5368,10 +5368,10 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
 				KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
 				std::string error =
-				    format("Storage server shard info mismatch on Server(%s):\t ServerShardInfo: %s; ServerKey: %s",
+				    format("Storage server shard info mismatch on Server(%s):\t ServerKey: %s; ServerShardInfo: %s",
 				           thisServerID.toString().c_str(),
-				           mismatchedRangeByLocalView.toString().c_str(),
-				           mismatchedRangeByServerKey.toString().c_str());
+				           mismatchedRangeByServerKey.toString().c_str(),
+				           mismatchedRangeByLocalView.toString().c_str());
 				TraceEvent(SevError, "AuditStorageShardStorageServerShardError", thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
@@ -5554,7 +5554,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
 					std::string error =
 					    format("Storage server shard info mismatch on Server(%s):\t KeyServer: %s; ServerKey: %s",
-					           thisServerID.toString().c_str(),
+					           ssid.toString().c_str(),
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
 					errors.push_back(error);
