@@ -2016,7 +2016,8 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Partition the job by serverKey space
+// Partition the audit job by partitioning serverKey space into multiple ranges
+// For each range, randomly choose a server to start an audit on the range
 ACTOR Future<Void> partitionAuditJobByKeyServerSpace(Reference<DataDistributor> self,
                                                      std::shared_ptr<DDAudit> audit,
                                                      KeyRange range) {
@@ -2070,7 +2071,7 @@ ACTOR Future<Void> partitionAuditJobByKeyServerSpace(Reference<DataDistributor> 
 	return Void();
 }
 
-// Randomly pick a server to run the job
+// Randomly pick a server to run an audit on the input range
 ACTOR Future<Void> runAuditJobOnOneRandomServer(Reference<DataDistributor> self,
                                                 std::shared_ptr<DDAudit> audit,
                                                 KeyRange range) {
@@ -2097,7 +2098,7 @@ ACTOR Future<Void> runAuditJobOnOneRandomServer(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Partition the job by servers
+// For each of storage servers, run an audit on the input range
 ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor> self,
                                                       std::shared_ptr<DDAudit> audit,
                                                       KeyRange range) {
@@ -2134,7 +2135,8 @@ ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor>
 	return Void();
 }
 
-// Schedule tasks on a server
+// Schedule audit task on the input storage server (ssi)
+// Option makeProgressbyServer:
 // If we store the progress of complete range for each individual server,
 // we should set makeProgressbyServer == true. Then, we load the progress on each server
 // If we store the progress of complete range without distinguishing servers,
@@ -2211,7 +2213,7 @@ ACTOR Future<Void> auditMakeProgressOnServer(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Partition the job by range
+// Schedule audit task on the input range
 ACTOR Future<Void> auditMakeProgressOnRange(Reference<DataDistributor> self,
                                             std::shared_ptr<DDAudit> audit,
                                             KeyRange range) {
@@ -2264,7 +2266,8 @@ ACTOR Future<Void> auditMakeProgressOnRange(Reference<DataDistributor> self,
 	return Void();
 }
 
-// Schedule tasks on corresponding server
+// Partition the input range into multiple subranges according to the range ownership, and
+// schedule audit tasks of each subrange on the server which owns the subrange
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range) {
@@ -2290,6 +2293,9 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			for (i = 0; i < rangeLocations.size(); ++i) {
 				AuditStorageRequest req(audit->coreState.id, rangeLocations[i].range, audit->coreState.getType());
 				StorageServerInterface targetServer;
+				// Set req.targetServers and targetServer, which will be
+				// used to doAuditOnStorageServer
+				// Different audit types have different settings
 				if (audit->coreState.getType() == AuditType::ValidateHA) {
 					if (rangeLocations[i].servers.size() < 2) {
 						TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
@@ -2335,9 +2341,10 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 				} else {
 					UNREACHABLE();
 				}
+				// Set doAuditOnStorageServer
 				issueDoAuditCount++;
 				audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
-
+				// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 				begin = rangeLocations[i].range.end;
 				wait(delay(0.1));
 			}
@@ -2362,6 +2369,8 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 }
 
 // Request SS to do the audit
+// This actor is the only interface to SS to do the audit for
+// all audit types
 ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           std::shared_ptr<DDAudit> audit,
                                           StorageServerInterface ssi,

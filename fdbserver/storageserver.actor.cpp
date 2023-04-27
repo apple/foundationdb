@@ -5003,6 +5003,9 @@ bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
 	return true;
 }
 
+// Given a list of ranges, where ranges can overlap with each other
+// Return a list of exclusive ranges which covers the ranges exactly
+// the same as the input list of ranges
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 	std::sort(ranges.begin(), ranges.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	std::vector<KeyRange> res;
@@ -5011,7 +5014,7 @@ std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 			res.push_back(range);
 			continue;
 		}
-		if (range.begin <= res.back().end) {
+		if (range.begin <= res.back().end && range.end > res.back().end) {
 			KeyRange newBack = Standalone(KeyRangeRef(res.back().begin, range.end));
 			res.pop_back();
 			res.push_back(newBack);
@@ -5121,10 +5124,10 @@ std::pair<Version, std::vector<KeyRange>> getThisServerShardInfo(StorageServer* 
 	return res;
 }
 
-// Given an input server, get ranges with in the input range via the input transaction
+// Given an input server, get ranges within the input range via the input transaction
 // from the perspective of ServerKeys system key space
 // Input: (1) SS id; (2) transaction tr; (3) within range
-// Return: (1) complete range by a single read range; (2) verison of the read; (3) ranges of the SS
+// Return: (1) complete range by a single read range; (2) verison of the read; (3) ranges of the input SS
 ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServerKeysFromServerKeys(UID serverID,
                                                                                                    Transaction* tr,
                                                                                                    KeyRange range) {
@@ -5179,11 +5182,12 @@ ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServer
 	return res;
 }
 
-// Given an input server, get ranges with in the input range via the input transaction
+// Given an input server, get ranges within the input range via the input transaction
 // from the perspective of KeyServers system key space
 // Input: (1) Audit Server ID (for logging); (2) transaction tr; (3) within range
 // Return: (1) complete range by a single read range; (2) verison of the read;
-// (3) map between SSes and their ranges
+// (3) map between SSes and their ranges --- in KeyServers space, a range corresponds
+// to multiple SSes
 ACTOR Future<std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>>>
 getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
 	state std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>> res;
@@ -5278,6 +5282,9 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	state Key rangeToReadBegin = req.range.begin;
 	state KeyRangeRef rangeToRead;
 	state int retryCount = 0;
+	state int storageAutoProceedCount = 0;
+	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
+	// by itself without being notified by DD
 
 	try {
 		while (true) {
@@ -5288,7 +5295,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			// Read serverKeys and shardInfo
 			errors.clear();
-			retryCount = 0;
+			// We do not reset retryCount for each partial read range
 			ownRangesLocalView.clear();
 			ownRangesSeenByServerKey.clear();
 			rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
@@ -5406,7 +5413,11 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				    .detail("AuditServer", thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
+					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
+						throw audit_storage_failed();
+					}
 					rangeToReadBegin = claimRange.end;
+					storageAutoProceedCount++;
 				} else { // complete
 					req.reply.send(res);
 					break;
@@ -5439,7 +5450,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	TraceEvent(SevInfo, "AuditStorageShardLocMetadataBegin", thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
-	state AuditStorageState res(req.id, thisServerID, req.getType());
+	state AuditStorageState res(req.id, req.getType()); // we will set range of audit later
 	state std::vector<Future<Void>> actors;
 	state std::vector<std::string> errors;
 	state std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>> keyServerRes;
@@ -5460,6 +5471,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	state Transaction tr(data->cx);
 	state Key rangeToReadBegin = req.range.begin;
 	state KeyRangeRef rangeToRead;
+	state int storageAutoProceedCount = 0;
+	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
+	// by itself without being notified by DD
 
 	try {
 		while (true) {
@@ -5614,7 +5628,11 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				    .detail("AuditServerId", thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
+					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
+						throw audit_storage_failed();
+					}
 					rangeToReadBegin = claimRange.end;
+					storageAutoProceedCount++;
 				} else { // complete
 					req.reply.send(res);
 					break;
