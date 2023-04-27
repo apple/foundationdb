@@ -19,6 +19,7 @@ from test_util import random_alphanum_string
 
 args = None
 downloader = None
+test_prev_versions = False
 
 
 def version_from_str(ver_str):
@@ -29,7 +30,7 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
-    if (ver_tuple[0] > 70):
+    if ver_tuple[0] > 70:
         return ver_tuple[0] * 10000 + ver_tuple[1] * 100
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
@@ -40,7 +41,9 @@ class TestCluster(LocalCluster):
         version: str,
     ):
         self.client_config_tester_bin = Path(args.client_config_tester_bin).resolve()
-        assert self.client_config_tester_bin.exists(), "{} does not exist".format(self.client_config_tester_bin)
+        assert self.client_config_tester_bin.exists(), "{} does not exist".format(
+            self.client_config_tester_bin
+        )
         self.build_dir = Path(args.build_dir).resolve()
         assert self.build_dir.exists(), "{} does not exist".format(args.build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
@@ -70,7 +73,10 @@ class TestCluster(LocalCluster):
         self.fdbmonitor_binary = downloader.binary_path(version, "fdbmonitor")
         self.fdbserver_binary = downloader.binary_path(version, "fdbserver")
         self.fdbcli_binary = downloader.binary_path(version, "fdbcli")
-        self.set_env_var("LD_LIBRARY_PATH", "%s:%s" % (downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")))
+        self.set_env_var(
+            "LD_LIBRARY_PATH",
+            "%s:%s" % (downloader.lib_dir(version), os.getenv("LD_LIBRARY_PATH")),
+        )
         self.save_config()
         self.ensure_ports_released()
         self.start_cluster()
@@ -115,27 +121,43 @@ class ClientConfigTest:
         self.external_lib_dir.mkdir(parents=True)
         for version in versions:
             src_file_path = downloader.lib_path(version)
-            self.tc.assertTrue(src_file_path.exists(), "{} does not exist".format(src_file_path))
-            target_file_path = self.external_lib_dir.joinpath("libfdb_c.{}.so".format(version))
+            self.tc.assertTrue(
+                src_file_path.exists(), "{} does not exist".format(src_file_path)
+            )
+            target_file_path = self.external_lib_dir.joinpath(
+                "libfdb_c.{}.so".format(version)
+            )
             shutil.copyfile(src_file_path, target_file_path)
-            self.tc.assertTrue(target_file_path.exists(), "{} does not exist".format(target_file_path))
+            self.tc.assertTrue(
+                target_file_path.exists(), "{} does not exist".format(target_file_path)
+            )
 
     def create_external_lib_path(self, version):
         src_file_path = downloader.lib_path(version)
-        self.tc.assertTrue(src_file_path.exists(), "{} does not exist".format(src_file_path))
-        self.external_lib_path = self.test_dir.joinpath("libfdb_c.{}.so".format(version))
+        self.tc.assertTrue(
+            src_file_path.exists(), "{} does not exist".format(src_file_path)
+        )
+        self.external_lib_path = self.test_dir.joinpath(
+            "libfdb_c.{}.so".format(version)
+        )
         shutil.copyfile(src_file_path, self.external_lib_path)
-        self.tc.assertTrue(self.external_lib_path.exists(), "{} does not exist".format(self.external_lib_path))
+        self.tc.assertTrue(
+            self.external_lib_path.exists(),
+            "{} does not exist".format(self.external_lib_path),
+        )
 
     def create_cluster_file_with_wrong_port(self):
-        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_alphanum_string(16)))
+        self.test_cluster_file = self.test_dir.joinpath(
+            "{}.cluster".format(random_alphanum_string(16))
+        )
         port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@127.0.0.1:{}".format(port))
 
     def create_invalid_cluster_file(self):
-        self.test_cluster_file = self.test_dir.joinpath("{}.cluster".format(random_alphanum_string(16)))
-        port = self.cluster.port_provider.get_free_port()
+        self.test_cluster_file = self.test_dir.joinpath(
+            "{}.cluster".format(random_alphanum_string(16))
+        )
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
@@ -156,7 +178,9 @@ class ClientConfigTest:
     def check_available_clients(self, expected_clients):
         self.tc.assertIsNotNone(self.status_json)
         self.tc.assertTrue("AvailableClients" in self.status_json)
-        actual_clients = [client["ReleaseVersion"] for client in self.status_json["AvailableClients"]]
+        actual_clients = [
+            client["ReleaseVersion"] for client in self.status_json["AvailableClients"]
+        ]
         self.tc.assertEqual(set(expected_clients), set(actual_clients))
 
     def check_protocol_version_not_set(self):
@@ -227,7 +251,11 @@ class ClientConfigTest:
     # ----------------------------
 
     def exec(self):
-        cmd_args = [self.cluster.client_config_tester_bin, "--cluster-file", self.test_cluster_file]
+        cmd_args = [
+            self.cluster.client_config_tester_bin,
+            "--cluster-file",
+            self.test_cluster_file,
+        ]
 
         if self.tmp_dir is not None:
             cmd_args += ["--tmp-dir", self.tmp_dir]
@@ -254,7 +282,10 @@ class ClientConfigTest:
             cmd_args += ["--network-option-fail_incompatible_client", ""]
 
         if self.trace_file_identifier is not None:
-            cmd_args += ["--network-option-trace_file_identifier", self.trace_file_identifier]
+            cmd_args += [
+                "--network-option-trace_file_identifier",
+                self.trace_file_identifier,
+            ]
 
         if self.trace_initialize_on_setup:
             cmd_args += ["--network-option-trace_initialize_on_setup", ""]
@@ -274,8 +305,13 @@ class ClientConfigTest:
         if self.print_status:
             cmd_args += ["--print-status"]
 
-        print("\nExecuting test command: {}".format(" ".join([str(c) for c in cmd_args])), file=sys.stderr)
-        tester_proc = subprocess.Popen(cmd_args, stdout=subprocess.PIPE, stderr=sys.stderr)
+        print(
+            "\nExecuting test command: {}".format(" ".join([str(c) for c in cmd_args])),
+            file=sys.stderr,
+        )
+        tester_proc = subprocess.Popen(
+            cmd_args, stdout=subprocess.PIPE, stderr=sys.stderr
+        )
         out, _ = tester_proc.communicate()
         self.tc.assertEqual(0, tester_proc.returncode)
         if self.print_status:
@@ -283,7 +319,10 @@ class ClientConfigTest:
             try:
                 self.status_json = json.loads(out)
             except json.JSONDecodeError as e:
-                print("Error '{}' parsing output {}".format(e, out.decode()), file=sys.stderr)
+                print(
+                    "Error '{}' parsing output {}".format(e, out.decode()),
+                    file=sys.stderr,
+                )
             self.tc.assertIsNotNone(self.status_json)
             print("Status: ", self.status_json, file=sys.stderr)
         else:
@@ -339,18 +378,24 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
         test = ClientConfigTest(self)
         test.print_status = True
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.create_external_lib_dir(
+            [CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION]
+        )
         test.disable_local_client = True
         test.api_version = api_version_from_str(PREV2_RELEASE_VERSION)
         test.exec()
         test.check_healthy_status_report()
-        test.check_available_clients([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.check_available_clients(
+            [CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION]
+        )
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
         test = ClientConfigTest(self)
@@ -360,6 +405,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version_ignore(self):
         # Multiple external clients; API version supported by none of them; Ignore failures
         test = ClientConfigTest(self)
@@ -370,20 +416,26 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2124  # All external clients failed
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version(self):
         # Multiple external clients, API version unsupported by one of othem
         test = ClientConfigTest(self)
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.create_external_lib_dir(
+            [CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION]
+        )
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version_ignore(self):
         # Multiple external clients;  API version unsupported by one of them; Ignore failures
         test = ClientConfigTest(self)
         test.print_status = True
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.create_external_lib_dir(
+            [CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION]
+        )
         test.disable_local_client = True
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.ignore_external_client_failures = True
@@ -392,6 +444,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version
@@ -408,6 +461,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([PREV_RELEASE_VERSION])
         test.check_current_client(None)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version_ignore(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version;
@@ -465,6 +519,7 @@ class ClientConfigTests(unittest.TestCase):
 
 
 # Client configuration tests using a cluster of previous release version
+@unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
 class ClientConfigPrevVersionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -511,6 +566,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
 
 # Client configuration tests using a separate cluster for each test
 class ClientConfigSeparateCluster(unittest.TestCase):
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_wait_cluster_to_upgrade(self):
         # Test starting a client incompatible to a cluster and connecting
         # successfuly after cluster upgrade
@@ -549,6 +605,7 @@ class ClientTracingTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cluster.tear_down()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_normal_case(self):
         # Test trace files created with a default trace configuration
         # in a normal case
@@ -561,12 +618,18 @@ class ClientTracingTests(unittest.TestCase):
         self.assertEqual(3, len(self.trace_files))
         primary_trace = self.find_trace_file(with_ip=True)
         self.find_and_check_event(primary_trace, "ClientStart", ["Machine"], [])
-        cur_ver_trace = self.find_trace_file(with_ip=True, version=CURRENT_VERSION, thread_idx=0)
+        cur_ver_trace = self.find_trace_file(
+            with_ip=True, version=CURRENT_VERSION, thread_idx=0
+        )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
-        prev_ver_trace = self.find_trace_file(with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0)
+        prev_ver_trace = self.find_trace_file(
+            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        )
+        self.assertIsNotNone(prev_ver_trace)
         # disable because older version does not guarantee trace flush before network::stop() returns
-        #self.find_and_check_event(prev_ver_trace, "ClientStart", ["Machine"], [])
+        # self.find_and_check_event(prev_ver_trace, "ClientStart", ["Machine"], [])
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_error_case(self):
         # Test that no trace files are created with a default configuration
         # when an a client fails to initialize
@@ -593,11 +656,16 @@ class ClientTracingTests(unittest.TestCase):
         primary_trace = self.find_trace_file()
         # The machine address will be available only in the second ClientStart event
         self.find_and_check_event(primary_trace, "ClientStart", [], ["Machine"])
-        self.find_and_check_event(primary_trace, "ClientStart", ["Machine"], [], seqno=1)
+        self.find_and_check_event(
+            primary_trace, "ClientStart", ["Machine"], [], seqno=1
+        )
         cur_ver_trace = self.find_trace_file(version=CURRENT_VERSION, thread_idx=0)
         self.find_and_check_event(cur_ver_trace, "ClientStart", [], ["Machine"])
-        self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [], seqno=1)
+        self.find_and_check_event(
+            cur_ver_trace, "ClientStart", ["Machine"], [], seqno=1
+        )
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_init_on_setup_trace_error_case(self):
         # Test trace files created with trace_initialize_on_setup option
         # when an a client fails to initialize
@@ -624,7 +692,9 @@ class ClientTracingTests(unittest.TestCase):
         self.exec_test()
         self.assertEqual(2, len(self.trace_files))
         self.find_trace_file(with_ip=True, identifier="fdbclient")
-        self.find_trace_file(with_ip=True, identifier="fdbclient", version=CURRENT_VERSION, thread_idx=0)
+        self.find_trace_file(
+            with_ip=True, identifier="fdbclient", version=CURRENT_VERSION, thread_idx=0
+        )
 
     def test_init_on_setup_and_trace_identifier(self):
         # Test trace files created with trace_initialize_on_setup option
@@ -639,7 +709,9 @@ class ClientTracingTests(unittest.TestCase):
         self.exec_test()
         self.assertEqual(2, len(self.trace_files))
         self.find_trace_file(identifier="fdbclient")
-        self.find_trace_file(identifier="fdbclient", version=CURRENT_VERSION, thread_idx=0)
+        self.find_trace_file(
+            identifier="fdbclient", version=CURRENT_VERSION, thread_idx=0
+        )
 
     # ---------------
     # Helper methods
@@ -665,7 +737,9 @@ class ClientTracingTests(unittest.TestCase):
                     events.append(json.loads(line))
             self.trace_file_events[trace] = events
 
-    def find_trace_file(self, with_ip=False, identifier=None, version=None, thread_idx=None):
+    def find_trace_file(
+        self, with_ip=False, identifier=None, version=None, thread_idx=None
+    ):
         self.assertIsNotNone(self.trace_files)
         for trace_file in self.trace_files:
             name = os.path.basename(trace_file)
@@ -689,7 +763,9 @@ class ClientTracingTests(unittest.TestCase):
                 return trace_file
         self.fail("No maching trace file found")
 
-    def find_and_check_event(self, trace_file, event_type, attr_present, attr_missing, seqno=0):
+    def find_and_check_event(
+        self, trace_file, event_type, attr_present, attr_missing, seqno=0
+    ):
         self.assertTrue(trace_file in self.trace_file_events)
         for event in self.trace_file_events[trace_file]:
             if event["Type"] == event_type:
@@ -708,7 +784,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-        Unit tests for running FDB client with different configurations. 
+        Unit tests for running FDB client with different configurations.
         Also accepts python unit tests command line arguments.
         """,
     )
@@ -731,7 +807,9 @@ if __name__ == "__main__":
     sys.argv[1:] = args.unittest_args
 
     downloader = FdbBinaryDownloader(args.build_dir)
-    downloader.download_old_binaries(PREV_RELEASE_VERSION)
-    downloader.download_old_binaries(PREV2_RELEASE_VERSION)
+    test_prev_versions = downloader.old_binaries_available
+    if test_prev_versions:
+        downloader.download_old_binaries(PREV_RELEASE_VERSION)
+        downloader.download_old_binaries(PREV2_RELEASE_VERSION)
 
     unittest.main(verbosity=2)
