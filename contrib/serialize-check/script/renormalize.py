@@ -5,6 +5,7 @@ import collections
 import io
 import logging
 import json
+import multiprocessing
 import os
 import os.path
 import pathlib
@@ -39,6 +40,9 @@ def _setup_args():
         type=str,
         default=None,
         help="Path to compilation database",
+    )
+    parser.add_argument(
+        "--num-workers", type=int, default=8, help="Number of workers in parallel"
     )
 
     return parser.parse_args()
@@ -81,29 +85,22 @@ class CompilationDatabase:
     def base_directory(self) -> Union[pathlib.Path, None]:
         return self._base_directory
 
-    def iterate_files(self, callback):
-        num_processed: int = 0
+    def iterate_files(self):
         for key in self._compile_database.keys():
             if not any(
                 (prefix in key)
                 for prefix in [
-                    "flow/",
-                    "fdbcli/",
-                    "fdbserver/",
+                     "flow/",
+                     "fdbcli/",
+                     "fdbserver/",
                     "fdbclient/",
-                    "fdbrpc/",
+                     "fdbrpc/",
                 ]
             ):
                 continue
-
-            ext = os.path.splitext(key)[1]
-            if ext.lower() != ".cpp":
-                # Only process CXX file at this stage
+            if os.path.splitext(key)[1] != ".cpp":
                 continue
-            logger.debug(f"Processing file {key}")
-            callback(key)
-            num_processed += 1
-        logger.debug(f"Total {num_processed} files processed")
+            yield key
 
 
 class SerializableObjectLibrary:
@@ -144,16 +141,21 @@ class SourceScanner:
         self,
         source_scanner_path: pathlib.Path,
         extra_arg: str,
-        project_base_directory: pathlib.Path,
-        library: SerializableObjectLibrary,
+        compilation_database: CompilationDatabase,
     ):
         self._source_scanner_path = source_scanner_path
         self._extra_arg = extra_arg
-        self._project_base_directory = project_base_directory
-        self._library = library
+        self._project_base_directory = compilation_database.base_directory
+        self._compiliation_database_path = compilation_database.path
 
-    def scan(self, source_path: pathlib.Path, compilation_database: pathlib.Path):
-        command = [self._source_scanner_path, source_path, "-p", compilation_database]
+    def scan(self, source_path: pathlib.Path):
+        logger.debug(f"Scan file {source_path}")
+        command = [
+            self._source_scanner_path,
+            source_path,
+            "-p",
+            self._compiliation_database_path,
+        ]
         if self._extra_arg:
             command.extend(["--extra-arg", self._extra_arg])
 
@@ -164,17 +166,16 @@ class SourceScanner:
         stderr = parsed.stderr.decode("utf-8")
         if len(stderr) > 0:
             logger.warning(f"Error when parsing {source_path}: {stderr}")
+
+        result = []
         for row in parsed.stdout.splitlines():
             item = json.loads(row)
             item["sourceFilePath"] = os.path.relpath(
                 os.path.abspath(item["sourceFilePath"]), self._project_base_directory
             )
-            self._library.accept(
-                item["sourceFilePath"],
-                item["className"],
-                item["variables"],
-                item["raw"],
-            )
+            result.append(item)
+
+        return result
 
 
 def _main():
@@ -192,12 +193,19 @@ def _main():
     compilation_database = CompilationDatabase(compilation_database)
     assert compilation_database.base_directory is not None
     library = SerializableObjectLibrary()
-    source_scanner = SourceScanner(
-        source_scanner, args.extra_arg, compilation_database.base_directory, library
-    )
-    compilation_database.iterate_files(
-        lambda source_path: source_scanner.scan(source_path, compilation_database.path)
-    )
+    source_scanner = SourceScanner(source_scanner, args.extra_arg, compilation_database)
+    paths = compilation_database.iterate_files()
+
+    with multiprocessing.Pool(args.num_workers) as pool:
+        for items in pool.map(source_scanner.scan, paths):
+            for item in items:
+                library.accept(
+                    item["sourceFilePath"],
+                    item["className"],
+                    item["variables"],
+                    item["raw"],
+                )
+
     with open("SerialzedObjects.md", "w") as stream:
         library.generate_report(stream)
 
