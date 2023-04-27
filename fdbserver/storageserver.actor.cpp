@@ -5014,10 +5014,12 @@ std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 			res.push_back(range);
 			continue;
 		}
-		if (range.begin <= res.back().end && range.end > res.back().end) {
-			KeyRange newBack = Standalone(KeyRangeRef(res.back().begin, range.end));
-			res.pop_back();
-			res.push_back(newBack);
+		if (range.begin <= res.back().end) {
+			if (range.end > res.back().end) { // update res.back if current range extends the back range
+				KeyRange newBack = Standalone(KeyRangeRef(res.back().begin, range.end));
+				res.pop_back();
+				res.push_back(newBack);
+			}
 		} else {
 			res.push_back(range);
 		}
