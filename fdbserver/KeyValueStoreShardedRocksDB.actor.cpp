@@ -197,9 +197,6 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
-		liveFileMetaData.smallest = fileMetaData.smallest;
-		liveFileMetaData.largest = fileMetaData.largest;
-		liveFileMetaData.file_type = rocksdb::kTableFile;
 		metaData.files.push_back(liveFileMetaData);
 	}
 
@@ -238,8 +235,6 @@ void populateMetaData(CheckpointMetaData* checkpoint, const rocksdb::ExportImpor
 			liveFileMetaData.db_path = fileMetaData.db_path;
 			liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 			liveFileMetaData.level = fileMetaData.level;
-			liveFileMetaData.smallest = fileMetaData.smallest;
-			liveFileMetaData.largest = fileMetaData.largest;
 			rocksCF.sstFiles.push_back(liveFileMetaData);
 		}
 	}
@@ -702,10 +697,6 @@ struct PhysicalShard {
 	std::atomic<bool> isInitialized;
 	double deleteTimeSec;
 };
-
-bool DataShard::initialized() const {
-	return physicalShard != nullptr && physicalShard->initialized();
-}
 
 int readRangeInDb(PhysicalShard* shard, const KeyRangeRef range, int rowLimit, int byteLimit, RangeResult* result) {
 	if (rowLimit == 0 || byteLimit == 0) {
@@ -1232,7 +1223,7 @@ public:
 
 	void clear(KeyRef key) {
 		auto it = dataShardMap.rangeContaining(key);
-		if (!it.value() || !it.value()->initialized()) {
+		if (!it.value()) {
 			return;
 		}
 		writeBatch->Delete(it.value()->physicalShard->cf, toSlice(key));
@@ -1243,7 +1234,7 @@ public:
 		auto rangeIterator = dataShardMap.intersectingRanges(range);
 
 		for (auto it = rangeIterator.begin(); it != rangeIterator.end(); ++it) {
-			if (it.value() == nullptr || !it.value()->initialized()) {
+			if (it.value() == nullptr) {
 				TraceEvent(SevDebug, "ShardedRocksDB").detail("ClearNonExistentRange", it.range());
 				continue;
 			}

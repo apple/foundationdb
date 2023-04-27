@@ -242,8 +242,6 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::db_path,
 		           SstFileMetaData::file_checksum,
 		           SstFileMetaData::file_checksum_func_name,
-		           SstFileMetaData::smallest,
-		           SstFileMetaData::largest,
 		           column_family_name,
 		           level,
 		           fetched,
