@@ -80,6 +80,9 @@ private:
 		ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT(data.metaclusterRegistration.get().id == data.metaclusterRegistration.get().metaclusterId &&
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
+		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MinSupported);
+		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MaxSupported);
+
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
 		ASSERT(data.clusterTenantCounts.results.size() <= data.dataClusters.size() && !data.clusterTenantCounts.more);
@@ -198,6 +201,9 @@ private:
 			ASSERT(data.metaclusterRegistration.get().matches(managementData.metaclusterRegistration.get()));
 			ASSERT(data.metaclusterRegistration.get().name == clusterName);
 			ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
+			ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MinSupported);
+			ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MaxSupported);
+			ASSERT_EQ(data.metaclusterRegistration.get().version, managementData.metaclusterRegistration.get().version);
 
 			if (data.tenantData.lastTenantId >= 0) {
 				ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
