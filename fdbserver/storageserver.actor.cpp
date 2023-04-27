@@ -5258,7 +5258,6 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
 	state AuditStorageState res(req.id, thisServerID, req.getType());
-	state std::vector<std::pair<Version, KeyRangeRef>> shardAssignments;
 	state std::vector<std::string> errors;
 	state Transaction tr(data->cx);
 	state std::tuple<KeyRange, Version, std::vector<KeyRange>> serverKeyRes;
@@ -5296,10 +5295,10 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			// At this point, shard assignment history guarantees to contain assignments
 			// from localShardInfoReadAtVersion
-			data->registerAuditsForShardAssignmentHistoryCollection(req.id, serverKeyReadAtVersion);
 			ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
 			localShardInfoReadAtVersion = ownRangesLocalViewRes.first;
 			ASSERT(localShardInfoReadAtVersion == data->version.get());
+			data->registerAuditsForShardAssignmentHistoryCollection(req.id, localShardInfoReadAtVersion);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
 			serverKeyCompleteRange = std::get<0>(serverKeyRes);
@@ -5327,7 +5326,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
 
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
-			shardAssignments = data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
+			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
+			    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
 			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardGetHistory", thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
