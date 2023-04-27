@@ -9,7 +9,7 @@ To compile `source_scanner`, `Boost::JSON` and LLVM `libtooling` are required.
 Typical commands to build `source_scanner` is:
 
 ```bash
-CC=clang CXX=clang++ LD=lld cmake .. -GNinja
+CC=clang CXX=clang++ LD=lld BOOST_ROOT=/opt/boost_1_78_0 cmake .. -GNinja
 ninja
 ```
 
