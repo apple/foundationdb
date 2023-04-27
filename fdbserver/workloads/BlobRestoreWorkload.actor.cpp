@@ -191,11 +191,7 @@ struct BlobRestoreWorkload : TestWorkload {
 					if (!result.more) {
 						break;
 					}
-					if (result.readThrough.present()) {
-						begin = firstGreaterOrEqual(KeyRef(arena, result.readThrough.get()));
-					} else {
-						begin = firstGreaterThan(KeyRef(arena, result.back().key));
-					}
+					begin = result.nextBeginKeySelector();
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}
