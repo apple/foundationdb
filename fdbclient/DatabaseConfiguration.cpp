@@ -255,6 +255,9 @@ bool DatabaseConfiguration::isValid() const {
 	return true;
 }
 
+// The database configuration is what we desired state of the cluster, which may be different from ongoing cluster
+// states. For example, the real count of roles, which is reported in each process, can differ from the desired role
+// count.
 StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	StatusObject result;
 
