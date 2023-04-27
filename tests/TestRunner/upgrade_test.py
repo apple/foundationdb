@@ -485,11 +485,12 @@ if __name__ == "__main__":
         RUN_WITH_GDB = True
 
     errcode = 1
-    with UpgradeTest(args) as test:
-        if not test.necessary_binaries_available():
-            print("Skipping the test because necessary binaries are not available")
-            sys.exit(0)
+    test = UpgradeTest(args)
+    if not test.necessary_binaries_available():
+        print("Skipping the test because necessary binaries are not available")
+        sys.exit(0)
 
+    with test:
         print("log-dir: {}".format(test.log))
         print("etc-dir: {}".format(test.etc))
         print("data-dir: {}".format(test.data))
