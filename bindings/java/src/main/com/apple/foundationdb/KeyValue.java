@@ -30,18 +30,25 @@ import java.util.Arrays;
  *  the {@code Database}.
  *
  */
-public class KeyValue {
+public class KeyValue implements ReadMetrics {
 	private final byte[] key, value;
+	private final float serverBusyness;
+	private final float rangeBusyness;
 
 	/**
 	 * Constructs a new {@code KeyValue} from the specified key and value.
 	 *
 	 * @param key the key portion of the pair
 	 * @param value the value portion of the pair
+	 * @param serverBusyness the busyness of the storage server that responded to the
+	 *                       request, from 0 to 1
+	 * @param rangeBusyness the busyness of the range that a read accessed, from 0 to 1
 	 */
-	public KeyValue(byte[] key, byte[] value) {
+	public KeyValue(byte[] key, byte[] value, float serverBusyness, float rangeBusyness) {
 		this.key = key;
 		this.value = value;
+		this.serverBusyness = serverBusyness;
+		this.rangeBusyness = rangeBusyness;
 	}
 
 	/**
@@ -62,6 +69,23 @@ public class KeyValue {
 		return this.value;
 	}
 
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public float getServerBusyness() {
+		return serverBusyness;
+	}
+
+	/**
+	 * {@inheritDoc}
+	 */
+	@Override
+	public float getRangeBusyness() {
+		return rangeBusyness;
+	}
+
+	// TODO: should metrics impact equality/hash code/toString?
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == null)

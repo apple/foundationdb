@@ -32,6 +32,7 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
+  src/main/com/apple/foundationdb/FDBResultBytes.java
   src/main/com/apple/foundationdb/FDBTenant.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureBool.java
@@ -39,14 +40,20 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureKeyArray.java
   src/main/com/apple/foundationdb/FutureKeyRangeArray.java
+  src/main/com/apple/foundationdb/FutureKeyResult.java
   src/main/com/apple/foundationdb/FutureResult.java
   src/main/com/apple/foundationdb/FutureResults.java
   src/main/com/apple/foundationdb/FutureMappedResults.java
   src/main/com/apple/foundationdb/FutureStrings.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
+  src/main/com/apple/foundationdb/KeyArrayResult.java
+  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/KeySelector.java
   src/main/com/apple/foundationdb/KeyValue.java
+  src/main/com/apple/foundationdb/MappedRangeQuery.java
+  src/main/com/apple/foundationdb/MappedRangeResult.java
+  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/MappedKeyValue.java
   src/main/com/apple/foundationdb/LocalityUtil.java
   src/main/com/apple/foundationdb/NativeFuture.java
@@ -56,14 +63,11 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
-  src/main/com/apple/foundationdb/MappedRangeQuery.java
-  src/main/com/apple/foundationdb/KeyArrayResult.java
-  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
-  src/main/com/apple/foundationdb/MappedRangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
-  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
+  src/main/com/apple/foundationdb/ReadMetrics.java
+  src/main/com/apple/foundationdb/ResultBytes.java
   src/main/com/apple/foundationdb/ReadTransaction.java
   src/main/com/apple/foundationdb/ReadTransactionContext.java
   src/main/com/apple/foundationdb/subspace/package-info.java

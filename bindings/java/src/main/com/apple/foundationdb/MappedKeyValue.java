@@ -39,7 +39,7 @@ public class MappedKeyValue extends KeyValue {
 	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 4;
 
 	public MappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd, List<KeyValue> rangeResult) {
-		super(key, value);
+		super(key, value, 0.0f, 0.0f);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;
 		this.rangeResult = rangeResult;
@@ -73,7 +73,7 @@ public class MappedKeyValue extends KeyValue {
 		for (int i = 0; i < count; i++) {
 			byte[] k = takeBytes(offset, bytes, lengths);
 			byte[] v = takeBytes(offset, bytes, lengths);
-			rangeResult.add(new KeyValue(k, v));
+			rangeResult.add(new KeyValue(k, v, 0.0f, 0.0f));
 		}
 		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
 	}

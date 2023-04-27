@@ -57,6 +57,6 @@ class RangeResultDirectBufferIterator extends DirectBufferIterator implements It
 		byteBuffer.get(value);
 
 		current += 1;
-		return new KeyValue(key, value);
+		return new KeyValue(key, value, 0.0f, 0.0f);
 	}
 }
