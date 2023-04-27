@@ -622,6 +622,78 @@ class ClientConfigSeparateCluster(unittest.TestCase):
         finally:
             self.cluster.tear_down()
 
+    def test_tls_cluster_tls_client(self):
+        # Test connecting successfully to a TLS-enabled cluster
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=TLSConfig())
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_disable_plaintext_connection = True
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS client
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_tls_cluster_tls_client_plaintext_disabled(self):
+        # Test connecting successfully to a TLS-enabled cluster with plain-text connections
+        # disabled in a TLS-configured client
+        disable_plaintext_connection = True
+        tls_config = TLSConfig(
+            disable_plaintext_connection=disable_plaintext_connection
+        )
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=tls_config)
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_disable_plaintext_connection = disable_plaintext_connection
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client_plaintext_connection_disabled(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS-configured client with plaintext connections disabled
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = True
+            test.transaction_timeout = 100
+            test.expected_error = 1031  # Timeout
+            test.exec()
+        finally:
+            self.cluster.tear_down()
+
 
 # Test client-side tracing
 class ClientTracingTests(unittest.TestCase):
