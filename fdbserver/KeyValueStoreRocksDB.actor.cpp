@@ -1779,9 +1779,6 @@ struct RocksDBKeyValueStore : IKeyValueStore {
 			}
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			if (result.more) {
-				result.readThrough = result[result.size() - 1].key;
-			}
 			a.result.send(result);
 			// Temporarily not sampling to understand the pattern of readRange results.
 			if (metricPromiseStream) {

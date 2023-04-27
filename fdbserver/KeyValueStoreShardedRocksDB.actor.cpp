@@ -2942,9 +2942,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			if (result.more) {
-				result.readThrough = result[result.size() - 1].key;
-			}
 			a.result.send(result);
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
