@@ -92,7 +92,9 @@ class TestSidecar(unittest.TestCase):
         r = requests.get(f"{self.server_url }/check_hash/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(
-            r.text, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            r.text,
+            # pragma: allowlist nextline secret
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
         )
 
     def test_get_check_hash_nested(self):
@@ -103,7 +105,9 @@ class TestSidecar(unittest.TestCase):
         r = requests.get(f"{self.server_url }/check_hash/nested/foobar")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(
-            r.text, "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+            r.text,
+            # pragma: allowlist nextline secret
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9",
         )
 
     def test_get_is_present_no_found(self):
