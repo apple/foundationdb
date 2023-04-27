@@ -985,8 +985,10 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
+				// Fall back to use seed string if fdb.cluster not present
+				// It can happen when a process failed before it persisted the connection string to disk
 				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
+				    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
 				                : new ClusterConnectionFile(path));
 				const int listenPort = i * listenPerProcess + 1;
 				AgentMode agentMode =
