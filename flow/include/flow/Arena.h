@@ -32,6 +32,7 @@
 #include "flow/ObjectSerializerTraits.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Optional.h"
+#include "flow/Traceable.h"
 #include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <stdint.h>
@@ -260,13 +261,6 @@ inline void save(Archive& ar, const Optional<T>& value) {
 		ar << value.get();
 	}
 }
-
-template <class T>
-struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Optional<T>& value) {
-		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
-	}
-};
 
 template <class T>
 struct union_like_traits<Optional<T>> : std::true_type {
@@ -667,26 +661,21 @@ struct TraceableString<StringRef> {
 template <>
 struct Traceable<StringRef> : TraceableStringImpl<StringRef> {};
 
+template <>
+struct fmt::formatter<StringRef> : FormatUsingTraceable<StringRef> {};
+
 inline std::string StringRef::printable() const {
 	return Traceable<StringRef>::toString(*this);
 }
 
 template <class T>
-struct Traceable<Standalone<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
-	static std::string toString(const Standalone<T>& value) { return Traceable<T>::toString(value); }
-};
+struct Traceable<Standalone<T>> : Traceable<T> {};
+
+template <class T>
+struct fmt::formatter<Standalone<T>> : fmt::formatter<T> {};
 
 #define __FILE__sr StringRef(reinterpret_cast<const uint8_t*>(__FILE__), sizeof(__FILE__) - 1)
 #define __FUNCTION__sr StringRef(reinterpret_cast<const uint8_t*>(__FUNCTION__), sizeof(__FUNCTION__) - 1)
-
-template <>
-struct fmt::formatter<StringRef> : formatter<std::string_view> {
-	template <typename FormatContext>
-	auto format(const StringRef& str, FormatContext& ctx) -> decltype(ctx.out()) {
-		std::string_view view(reinterpret_cast<const char*>(str.begin()), str.size());
-		return formatter<string_view>::format(view, ctx);
-	}
-};
 
 inline StringRef operator"" _sr(const char* str, size_t size) {
 	return StringRef(reinterpret_cast<const uint8_t*>(str), size);

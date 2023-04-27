@@ -25,7 +25,7 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
@@ -2485,13 +2485,15 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 		// Mutation log backup
 		state std::string mlogsUrl = wait(getMutationLogUrl());
 		statusObj["mutation_log_location"] = mlogsUrl;
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-		BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
-		if (desc.contiguousLogEnd.present()) {
-			statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();
-		}
-		if (desc.minLogBegin.present()) {
-			statusObj["mutation_log_begin_version"] = desc.minLogBegin.get();
+		if (mlogsUrl != "") {
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
+			if (desc.contiguousLogEnd.present()) {
+				statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();
+			}
+			if (desc.minLogBegin.present()) {
+				statusObj["mutation_log_begin_version"] = desc.minLogBegin.get();
+			}
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)

@@ -25,7 +25,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -1271,7 +1271,7 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 		// "tenants" exhausted to end. If tenantGroup was specified,
 		// continue iterating localItr until end to verify there are no matches
-		if (tenantGroup.present()) {
+		if (tenantGroup.present() && tenants.size() < limit) {
 			while (localItr != self->createdTenants.end() && localItr->first < endTenant) {
 				ASSERT(localItr->second.tenantGroup != tenantGroup);
 				++localItr;
