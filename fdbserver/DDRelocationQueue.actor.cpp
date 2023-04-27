@@ -1421,6 +1421,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
+						destTeamSelect.setForRelocateShard(ForRelocateShard::True);
 						state GetTeamRequest req =
 						    GetTeamRequest(destTeamSelect,
 						                   PreferLowerDiskUtil::True,
