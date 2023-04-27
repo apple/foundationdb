@@ -336,20 +336,12 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 
 	auto cpCount = getDesiredCommitProxies();
 	result["commit_proxies"] = cpCount;
-	// Add to the `proxies` count for backwards compatibility with tools built before 7.0.
-	int32_t proxyCount = cpCount;
 
 	auto grvCount = getDesiredGrvProxies();
 	result["grv_proxies"] = grvCount;
-	if (proxyCount != -1) {
-		proxyCount += grvCount;
-	} else {
-		proxyCount = grvCount;
-	}
 
-	if (proxyCount != -1) {
-		result["proxies"] = proxyCount;
-	}
+	// Add to the `proxies` count for backwards compatibility with tools built before 7.0.
+	result["proxies"] = cpCount + grvCount;
 
 	result["resolvers"] = getDesiredResolvers();
 
