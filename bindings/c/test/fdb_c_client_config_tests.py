@@ -114,7 +114,7 @@ class ClientConfigTest:
         self.tls_client_cert_file = None
         self.tls_client_key_file = None
         self.tls_client_ca_file = None
-        self.tls_disable_plaintext_connection = None
+        self.tls_client_disable_plaintext_connection = None
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -294,7 +294,7 @@ class ClientConfigTest:
         if self.tls_client_ca_file:
             cmd_args += ["--network-option-tls_ca_path", self.tls_client_ca_file]
 
-        if self.tls_disable_plaintext_connection:
+        if self.tls_client_disable_plaintext_connection:
             cmd_args += ["--network-option-tls_disable_plaintext_connection", ""]
 
         if self.external_lib_path is not None:
@@ -368,11 +368,11 @@ class ClientConfigTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cluster.tear_down()
 
-    def test_tls_disable_plaintext_connection(self):
+    def test_disable_plaintext_connection(self):
         # Local client only; Plaintext connections are disabled in a plaintext cluster; Timeout Expected
         test = ClientConfigTest(self)
         test.print_status = True
-        test.tls_disable_plaintext_connection = True
+        test.tls_client_disable_plaintext_connection = True
         test.transaction_timeout = 100
         test.expected_error = 1031  # Timeout
         test.exec()
@@ -632,7 +632,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             test.tls_client_cert_file = self.cluster.client_cert_file
             test.tls_client_key_file = self.cluster.client_key_file
             test.tls_client_ca_file = self.cluster.client_ca_file
-            test.tls_disable_plaintext_connection = True
+            test.tls_client_disable_plaintext_connection = True
             test.exec()
             test.check_healthy_status(True)
         finally:
@@ -660,7 +660,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
         # disabled in a TLS-configured client
         disable_plaintext_connection = True
         tls_config = TLSConfig(
-            disable_plaintext_connection=disable_plaintext_connection
+            client_disable_plaintext_connection=disable_plaintext_connection
         )
         self.cluster = TestCluster(CURRENT_VERSION, tls_config=tls_config)
         self.cluster.setup()
@@ -670,7 +670,7 @@ class ClientConfigSeparateCluster(unittest.TestCase):
             test.tls_client_cert_file = self.cluster.client_cert_file
             test.tls_client_key_file = self.cluster.client_key_file
             test.tls_client_ca_file = self.cluster.client_ca_file
-            test.tls_disable_plaintext_connection = disable_plaintext_connection
+            test.tls_client_disable_plaintext_connection = disable_plaintext_connection
             test.exec()
             test.check_healthy_status(True)
         finally:
