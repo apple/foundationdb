@@ -834,7 +834,7 @@ public:
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	Future<Void> auditStorageActor;
+	Future<Void> auditSSShardInfoActor;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -12454,19 +12454,20 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				if (self->auditStorageActor.isValid() && !self->auditStorageActor.isReady()) {
-					TraceEvent(SevWarn, "ExistRunningAuditStorage")
-					    .detail("NewAuditId", req.id)
-					    .detail("NewAuditType", req.getType());
-					self->auditStorageActor.cancel();
-				} // New audit immediately starts and existing one gets cancelled
-				// invariant: at any time, only one audit storage is running at a SS
-				if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->auditStorageActor = auditStorageLocationMetadataQ(self, req);
-				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->auditStorageActor = auditStorageStorageServerShardQ(self, req);
+				// A SS can run one ValidateStorageServerShard at a time
+				// We do not have this limitation on other audit types
+				if (req.getType() == AuditType::ValidateStorageServerShard) {
+					if (self->auditSSShardInfoActor.isValid() && !self->auditSSShardInfoActor.isReady()) {
+						TraceEvent(SevWarn, "ExistRunningAuditStorageForServerShard")
+						    .detail("NewAuditId", req.id)
+						    .detail("NewAuditType", req.getType());
+						self->auditSSShardInfoActor.cancel();
+					} // New audit immediately starts and existing one gets cancelled
+					self->auditSSShardInfoActor = auditStorageStorageServerShardQ(self, req);
+				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
+					self->actors.add(auditStorageLocationMetadataQ(self, req));
 				} else {
-					self->auditStorageActor = auditStorageQ(self, req);
+					self->actors.add(auditStorageQ(self, req));
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {
