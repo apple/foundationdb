@@ -834,6 +834,7 @@ public:
 	    pendingRemoveRanges; // Pending requests to remove ranges from physical shards
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
+	Future<Void> auditStorageActor;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1459,9 +1460,9 @@ public:
 	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
 	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
 	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
-	    byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0), numWatches(0),
-	    noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
-	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
+	    trackShardAssignmentMinVersion(invalidVersion), byteSampleClears(false, "\xff\xff\xff"_sr),
+	    durableInProgress(Void()), watchBytes(0), numWatches(0), noRecentUpdates(false), lastUpdate(now()),
+	    updateEagerReads(nullptr), fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismChangeFeedLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_CHANGE_FEED),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
 	    serveFetchCheckpointParallelismLock(SERVER_KNOBS->SERVE_FETCH_CHECKPOINT_PARALLELISM),
@@ -1753,7 +1754,7 @@ public:
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
-	std::unordered_map<UID, Version> shardAssignmentRecordRequests;
+	Version trackShardAssignmentMinVersion; // == invalidVersion means tracking stopped
 
 	std::string printShardAssignmentHistory() {
 		std::string toPrint = "";
@@ -1763,13 +1764,14 @@ public:
 		return toPrint;
 	}
 
-	bool needRecordShardAssignment(Version currentVersion) {
-		Version minRecordVersion = MAX_VERSION;
-		for (const auto& [auditID, startRecordVersion] : shardAssignmentRecordRequests) {
-			minRecordVersion = std::min(minRecordVersion, startRecordVersion);
-		}
-		return currentVersion >= minRecordVersion;
+	void startTrackShardAssignment(Version startVersion) {
+		ASSERT(startVersion != invalidVersion);
+		ASSERT(trackShardAssignmentMinVersion == invalidVersion);
+		trackShardAssignmentMinVersion = startVersion;
+		return;
 	}
+
+	void stopTrackShardAssignment() { trackShardAssignmentMinVersion = invalidVersion; }
 
 	std::vector<std::pair<Version, KeyRangeRef>> getShardAssignmentHistory(Version early, Version later) {
 		std::vector<std::pair<Version, KeyRangeRef>> res;
@@ -5080,7 +5082,6 @@ struct AuditGetShardInfoRes {
 // Return AuditGetShardInfoRes including: (1) version of the read; (2) ranges of the SS
 AuditGetShardInfoRes getThisServerShardInfo(StorageServer* data, KeyRange range) {
 	std::vector<KeyRange> ownRange;
-	UID serverID = data->thisServerID;
 	for (auto& t : data->shards.intersectingRanges(range)) {
 		KeyRange alignedRange = t.value()->keys & range;
 		ASSERT(!alignedRange.empty());
@@ -5088,14 +5089,14 @@ AuditGetShardInfoRes getThisServerShardInfo(StorageServer* data, KeyRange range)
 		    .detail("AlignedRange", alignedRange)
 		    .detail("Range", t.value()->keys)
 		    .detail("AtVersion", data->version.get())
-		    .detail("AuditServer", serverID)
+		    .detail("AuditServer", data->thisServerID)
 		    .detail("ReadWrite", t.value()->readWrite ? "True" : "False")
 		    .detail("Adding", t.value()->adding ? "True" : "False");
 		if (t.value()->assigned()) {
 			ownRange.push_back(alignedRange);
 		}
 	}
-	return AuditGetShardInfoRes(data->version.get(), serverID, ownRange);
+	return AuditGetShardInfoRes(data->version.get(), data->thisServerID, ownRange);
 }
 
 struct AuditGetServerKeysRes {
@@ -5142,10 +5143,10 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 				ownRanges.push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
-		KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
+		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		Future<Version> getGrvF = tr->getReadVersion();
 		ASSERT(getGrvF.isReady());
-		Version readAtVersion = getGrvF.get();
+		const Version readAtVersion = getGrvF.get();
 		TraceEvent(SevVerbose, "AuditStorageGetThisServerKeysFromServerKeysEnd", serverID)
 		    .detail("AduitServerID", serverID)
 		    .detail("Range", range)
@@ -5223,10 +5224,10 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 				serverOwnRanges[ssid].push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
-		KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
+		const KeyRange completeRange = Standalone(KeyRangeRef(range.begin, readResult.back().key));
 		Future<Version> getGrvF = tr->getReadVersion();
 		ASSERT(getGrvF.isReady());
-		Version readAtVersion = getGrvF.get();
+		const Version readAtVersion = getGrvF.get();
 		TraceEvent(SevInfo, "AuditStorageGetThisServerKeysFromKeyServersEnd", auditServerId)
 		    .detail("Range", range)
 		    .detail("CompleteRange", completeRange)
@@ -5246,14 +5247,13 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 }
 
 ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditStorageRequest req) {
-	state UID thisServerID = data->thisServerID;
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", thisServerID)
+	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
-	state AuditStorageState res(req.id, thisServerID, req.getType());
+	state AuditStorageState res(req.id, data->thisServerID, req.getType());
 	state std::vector<std::string> errors;
 	state Transaction tr(data->cx);
 	state AuditGetServerKeysRes serverKeyRes;
@@ -5299,8 +5299,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			ASSERT(localShardInfoReadAtVersion == data->version.get());
 
 			// Request to record shard assignment history at least localShardInfoReadAtVersion
-			ASSERT(!data->shardAssignmentRecordRequests.contains(req.id));
-			data->shardAssignmentRecordRequests[req.id] = localShardInfoReadAtVersion;
+			data->startTrackShardAssignment(localShardInfoReadAtVersion);
 			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStart", data->thisServerID).detail("AuditID", req.id);
 
 			// Transactional read of serverKeys
@@ -5330,14 +5329,13 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// upto serverKeyReadAtVersion
 
 			// Stop requesting to record shard assignment history
-			ASSERT(data->shardAssignmentRecordRequests.contains(req.id));
+			data->stopTrackShardAssignment();
 			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStop", data->thisServerID).detail("AuditID", req.id);
-			data->shardAssignmentRecordRequests.erase(req.id);
 
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
 			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
 			    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardGetHistory", thisServerID)
+			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
@@ -5363,7 +5361,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				}
 				ownRangesLocalView.push_back(overlappingRange);
 			}
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", thisServerID)
+			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ClaimRange", claimRange)
@@ -5378,26 +5376,26 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
 				std::string error =
 				    format("Storage server shard info mismatch on Server(%s): ServerKey: %s; ServerShardInfo: %s",
-				           thisServerID.toString().c_str(),
+				           data->thisServerID.toString().c_str(),
 				           mismatchedRangeByServerKey.toString().c_str(),
 				           mismatchedRangeByLocalView.toString().c_str());
-				TraceEvent(SevError, "AuditStorageShardStorageServerShardError", thisServerID)
+				TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("ClaimRange", claimRange)
 				    .detail("ErrorMessage", error)
 				    .detail("MismatchedRangeByLocalView", mismatchedRangeByLocalView)
 				    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
-				    .detail("AuditServer", thisServerID);
+				    .detail("AuditServer", data->thisServerID);
 				errors.push_back(error);
 			}
 
 			// Return result
 			if (!errors.empty()) {
-				TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardErrorEnd", thisServerID)
+				TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardErrorEnd", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
-				    .detail("AuditServer", thisServerID);
+				    .detail("AuditServer", data->thisServerID);
 				res.range = claimRange;
 				res.setPhase(AuditPhase::Error);
 				wait(persistAuditStateByServer(data->cx, res));
@@ -5408,10 +5406,10 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
 				wait(persistAuditStateByServer(data->cx, res));
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardDone", thisServerID)
+				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardDone", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
-				    .detail("AuditServer", thisServerID)
+				    .detail("AuditServer", data->thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
 					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
@@ -5426,16 +5424,18 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", thisServerID)
+		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
-		    .detail("AuditServer", thisServerID)
+		    .detail("AuditServer", data->thisServerID)
 		    .detail("Reason", failureReason);
+
 		// Make sure the history collection is not open due to this audit
+		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
 		    .detail("AuditID", req.id);
-		data->shardAssignmentRecordRequests.erase(req.id);
+
 		req.reply.sendError(audit_storage_failed());
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -5449,8 +5449,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	ASSERT(req.getType() == AuditType::ValidateLocationMetadata);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	state UID thisServerID = data->thisServerID;
-	TraceEvent(SevInfo, "AuditStorageShardLocMetadataBegin", thisServerID)
+	TraceEvent(SevInfo, "AuditStorageShardLocMetadataBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
 	state AuditStorageState res(req.id, req.getType()); // we will set range of audit later
@@ -5556,12 +5555,12 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					                           claimRange.toString().c_str(),
 					                           ssid.toString().c_str());
 					errors.push_back(error);
-					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", thisServerID)
+					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", data->thisServerID)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
-					    .detail("AuditServerID", thisServerID);
+					    .detail("AuditServerID", data->thisServerID);
 				}
 				std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
 				Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
@@ -5574,14 +5573,14 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
 					errors.push_back(error);
-					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", thisServerID)
+					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", data->thisServerID)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
 					    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
 					    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
-					    .detail("AuditServerID", thisServerID);
+					    .detail("AuditServerID", data->thisServerID);
 				}
 			}
 			// 2. check mapFromServerKeys => mapFromKeyServers
@@ -5593,23 +5592,23 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					                           claimRange.toString().c_str(),
 					                           ssid.toString().c_str());
 					errors.push_back(error);
-					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", thisServerID)
+					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", data->thisServerID)
 					    .detail("AuditId", req.id)
 					    .detail("AuditRange", req.range)
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
-					    .detail("AuditServerID", thisServerID);
+					    .detail("AuditServerID", data->thisServerID);
 				}
 			}
 
 			// Return result
 			if (!errors.empty()) {
-				TraceEvent(SevError, "AuditStorageShardLocMetadataError", thisServerID)
+				TraceEvent(SevError, "AuditStorageShardLocMetadataError", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("NumErrors", errors.size())
 				    .detail("Version", readAtVersion)
-				    .detail("AuditServerId", thisServerID)
+				    .detail("AuditServerId", data->thisServerID)
 				    .detail("ClaimRange", claimRange);
 				res.range = claimRange;
 				res.setPhase(AuditPhase::Error);
@@ -5621,11 +5620,11 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
 				wait(persistAuditStateByRange(data->cx, res));
-				TraceEvent(SevInfo, "AuditStorageShardLocMetadataDone", thisServerID)
+				TraceEvent(SevInfo, "AuditStorageShardLocMetadataDone", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("Version", readAtVersion)
-				    .detail("AuditServerId", thisServerID)
+				    .detail("AuditServerId", data->thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
 					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
@@ -5641,11 +5640,11 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		}
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", thisServerID)
+		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
-		    .detail("AuditServer", thisServerID);
+		    .detail("AuditServer", data->thisServerID);
 		req.reply.sendError(audit_storage_failed());
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -9083,7 +9082,8 @@ void changeServerKeys(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->needRecordShardAssignment(version)) {
+	if (data->trackShardAssignmentMinVersion != invalidVersion && version >= data->trackShardAssignmentMinVersion) {
+		// data->trackShardAssignmentMinVersion==invalidVersion means trackAssignment stops
 		data->shardAssignmentHistory.push_back(std::make_pair(version, keys));
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", data->thisServerID)
 		    .detail("Version", version)
@@ -9324,7 +9324,8 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->needRecordShardAssignment(version)) {
+	if (data->trackShardAssignmentMinVersion != invalidVersion && version >= data->trackShardAssignmentMinVersion) {
+		// data->trackShardAssignmentMinVersion==invalidVersion means trackAssignment stops
 		data->shardAssignmentHistory.push_back(std::make_pair(version, keys));
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", data->thisServerID)
 		    .detail("Version", version)
@@ -12453,12 +12454,19 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
+				if (self->auditStorageActor.isValid() && !self->auditStorageActor.isReady()) {
+					TraceEvent(SevWarn, "ExistRunningAuditStorage")
+					    .detail("NewAuditId", req.id)
+					    .detail("NewAuditType", req.getType());
+					self->auditStorageActor.cancel();
+				} // New audit immediately starts and existing one gets cancelled
+				// invariant: at any time, only one audit storage is running at a SS
 				if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->actors.add(auditStorageLocationMetadataQ(self, req));
+					self->auditStorageActor = auditStorageLocationMetadataQ(self, req);
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->actors.add(auditStorageStorageServerShardQ(self, req));
+					self->auditStorageActor = auditStorageStorageServerShardQ(self, req);
 				} else {
-					self->actors.add(auditStorageQ(self, req));
+					self->auditStorageActor = auditStorageQ(self, req);
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {
