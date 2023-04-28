@@ -998,10 +998,12 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				    .detail("NumSampledKeys", sampledKeys)
 				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
+				// NOTE: Shard sampling is known to be biased.
+				// Downgrade this to a warning until we have a proper solution.
 				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
 				            performQuiescentChecks,
 				            success,
-				            failureIsError);
+				            /*failureIsError*/ false);
 			}
 
 			// Check if the storage server returns split point for the shard. There are cases where
