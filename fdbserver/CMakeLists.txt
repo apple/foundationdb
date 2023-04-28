@@ -157,6 +157,7 @@ target_link_libraries(fdbserver PRIVATE toml11_target rapidjson)
 if(WITH_ROCKSDB_EXPERIMENTAL)
   target_compile_definitions(fdbserver PRIVATE SSD_ROCKSDB_EXPERIMENTAL)
 endif()
+target_link_libraries(fdbserver PRIVATE swiftCxx swiftCxxStdlib)
 # target_compile_definitions(fdbserver PRIVATE -DENABLE_SAMPLING)
 
 if(GPERFTOOLS_FOUND)

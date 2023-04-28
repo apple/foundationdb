@@ -3,6 +3,7 @@ import flow_swift
 @preconcurrency import FDBServer
 import FDBClient
 import fdbclient_swift
+import CxxStdlib
 
 func clamp(_ v: Version, lowerBound: Version, upperBound: Version) -> Version {
     return max(min(v, upperBound), lowerBound)
@@ -293,11 +294,6 @@ public actor MasterDataActor {
         reply.minKnownCommittedVersion = myself.minKnownCommittedVersion
 
         if (getServerKnobs().ENABLE_VERSION_VECTOR) {
-             // myself.ssVersionVector.getDelta(req.maxVersion, &reply.ssVersionVectorDelta) // FIXME: help!
-            // FIXME:
-            //     /root/build/fdbserver/CMakeFiles/fdbserver_swift.dir/./masterserver.swift.o: In function `VersionVector::getDelta(long, VersionVector&) const':
-            //     masterserver.swift.o:(.text._ZNK13VersionVector8getDeltaElRS_[_ZNK13VersionVector8getDeltaElRS_]+0xc7): undefined reference to `std::tuple_element<0ul, std::pair<Tag, long> >::type const& std::get<0ul, Tag, long>(std::pair<Tag, long> const&)'
-            //     masterserver.swift.o:(.text._ZNK13VersionVector8getDeltaElRS_[_ZNK13VersionVector8getDeltaElRS_]+0xd2): undefined reference to `std::tuple_element<1ul, std::pair<Tag, long> >::type const& std::get<1ul, Tag, long>(std::pair<Tag, long> const&)'
             myself.versionVectorSizeOnCVReply.addMeasurement(Double(reply.ssVersionVectorDelta.size()))
         }
 
@@ -354,15 +350,14 @@ public actor MasterDataActor {
     }
 
     func updateRecoveryData(myself: MasterData, req: UpdateRecoveryDataRequest) async -> Flow.Void {
-        // TODO: trace event here
-        //        TraceEvent("UpdateRecoveryData", myself.dbgid)
-        //                .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
-        //                .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
-        //                .detail("CurrentRecoveryTxnVersion", myself.recoveryTransactionVersion)
-        //                .detail("CurrentLastEpochEnd", myself.lastEpochEnd)
-        //                .detail("NumCommitProxies", req.commitProxies.size())
-        //                .detail("VersionEpoch", req.versionEpoch)
-        //                .detail("PrimaryLocality", req.primaryLocality)
+        STraceEvent("UpdateRecoveryData", myself.dbgid)
+            .detail("ReceivedRecoveryTxnVersion", req.recoveryTransactionVersion)
+            .detail("ReceivedLastEpochEnd", req.lastEpochEnd)
+            .detail("CurrentRecoveryTxnVersion", myself.recoveryTransactionVersion)
+            .detail("CurrentLastEpochEnd", myself.lastEpochEnd)
+            .detail("NumCommitProxies", req.commitProxies.size())
+            .detail("VersionEpoch", req.versionEpoch)
+            .detail("PrimaryLocality", Int(req.primaryLocality)) // TODO: seems we have trouble with Int8->char mapping, so wrap in Int for now
 
         myself.recoveryTransactionVersion = req.recoveryTransactionVersion
         myself.lastEpochEnd = req.lastEpochEnd
@@ -469,7 +464,9 @@ public func masterServerSwift(
 
 //                CODE_PROBE(!lifetime.isStillValid(db->get().masterLifetime, mi.id() == db->get().master.id()),
 //                        "Master born doomed");
-//                TraceEvent("MasterLifetime", self->dbgid).detail("LifetimeToken", lifetime.toString());
+
+                STraceEvent("MasterLifetime", masterData.dbgid)
+//                    .detail("LifetimeToken", lifetime.toString())
 
                 while true {
                     guard (try? await db.onChange().value()) != nil else {
@@ -488,7 +485,7 @@ public func masterServerSwift(
                 }
             }
         } catch {
-            // TODO: WIP
+            print("Failure: \(error)")
         }
 
         var void = Void()

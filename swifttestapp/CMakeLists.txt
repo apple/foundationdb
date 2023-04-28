@@ -30,7 +30,7 @@ target_include_directories(swifttestapp PRIVATE
 )
 
 target_link_directories(swifttestapp PRIVATE
-  "/opt/rh/devtoolset-8/root/usr/lib/gcc/x86_64-redhat-linux/8"
+  "/opt/rh/devtoolset-11/root/usr/lib/gcc/x86_64-redhat-linux/8"
 )
 
 # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?

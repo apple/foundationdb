@@ -42,7 +42,7 @@
 template class ReplyPromise<MasterInterface>;
 template struct NetSAV<MasterInterface>;
 
-// Instantiate ServerDBInfo related tempates
+// Instantiate ServerDBInfo related templates
 template class GetEncryptCipherKeys<struct ServerDBInfo>;
 
 //struct MasterData : NonCopyable, ReferenceCounted<MasterData> {

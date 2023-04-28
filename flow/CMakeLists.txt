@@ -134,6 +134,7 @@ add_library(flow_swift STATIC
     SwiftBridging.swift
     SwiftFileB.swift
     future_support.swift # general support types
+    trace_support.swift # general support types
     flow_future_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
     reply_support.swift
     clock_support.swift
@@ -213,3 +214,7 @@ add_dependencies(flow_swift boost_target)
 # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)
+
+if (USE_SWIFT)
+    add_definitions(-DUSE_SWIFT)
+endif()
