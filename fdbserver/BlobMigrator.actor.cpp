@@ -61,7 +61,7 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
 public:
 	BlobMigrator(Database db, BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
-	  : interf_(interf), actors_(false), db_(db), dbInfo(dbInfo) {
+	  : interf_(interf), actors_(false), db_(db), dbInfo_(dbInfo) {
 		blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 	}
 	~BlobMigrator() {}
@@ -110,7 +110,8 @@ private:
 			ASSERT(restoreState.present());
 			state BlobRestorePhase phase = restoreState.get().phase;
 			if (phase == BlobRestorePhase::LOADED_MANIFEST) {
-				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
+				BlobGranuleRestoreVersionVector granules =
+				    wait(listBlobGranules(self->db_, self->dbInfo_, self->blobConn_));
 				if (!granules.empty()) {
 					self->blobGranules_ = granules;
 					for (BlobGranuleRestoreVersion granule : granules) {
@@ -151,10 +152,10 @@ private:
 		loop {
 			choose {
 				when(wait(dbInfoChange)) {
-					if (self->dbInfo->get().distributor.present()) {
+					if (self->dbInfo_->get().distributor.present()) {
 						requestId = deterministicRandom()->randomUniqueID();
 						replyFuture =
-						    errorOr(timeoutError(self->dbInfo->get().distributor.get().prepareBlobRestoreReq.getReply(
+						    errorOr(timeoutError(self->dbInfo_->get().distributor.get().prepareBlobRestoreReq.getReply(
 						                             PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)),
 						                         SERVER_KNOBS->BLOB_MIGRATOR_PREPARE_TIMEOUT));
 						dbInfoChange = Never();
@@ -163,7 +164,7 @@ private:
 						    .detail("ReqId", requestId);
 					} else {
 						replyFuture = Never();
-						dbInfoChange = self->dbInfo->onChange();
+						dbInfoChange = self->dbInfo_->onChange();
 						TraceEvent(SevWarn, "BlobRestorePrepare", self->interf_.id()).detail("State", "WaitDD");
 					}
 				}
@@ -639,7 +640,7 @@ private:
 	BlobMigratorInterface interf_;
 	ActorCollection actors_;
 	FileBackupAgent backupAgent_;
-	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo_;
 };
 
 // Main entry point
