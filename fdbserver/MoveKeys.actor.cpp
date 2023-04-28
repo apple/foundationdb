@@ -168,8 +168,8 @@ bool DDEnabledState::isEnabled() const {
 	return stateValue == ENABLED;
 }
 
-bool DDEnabledState::isRestorePreparing() const {
-	return stateValue == RESTORE_PREPARING;
+bool DDEnabledState::isBlobRestorePreparing() const {
+	return stateValue == BLOB_RESTORE_PREPARING;
 }
 
 bool DDEnabledState::setDDSnapshot(UID requesterId) {
@@ -207,8 +207,8 @@ bool DDEnabledState::setDDRestorePreparing(UID requesterId) {
 		return false;
 	}
 	ddEnabledStatusUID = requesterId;
-	stateValue = RESTORE_PREPARING;
-	TraceEvent("SetDDRestorePreparing").detail("RequesterUID", requesterId);
+	stateValue = BLOB_RESTORE_PREPARING;
+	TraceEvent("SetDDBlobRestorePreparing").detail("RequesterUID", requesterId);
 	return true;
 }
 
@@ -1890,6 +1890,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// FIXME: don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
 			state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
@@ -2759,7 +2760,7 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
                                       UID reqId) {
 	state int retries = 0;
 	state Transaction tr = Transaction(occ);
-	ASSERT(ddEnabledState->isRestorePreparing());
+	ASSERT(ddEnabledState->isBlobRestorePreparing());
 	loop {
 		tr.debugTransaction(reqId);
 		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);

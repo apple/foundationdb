@@ -200,31 +200,6 @@ private:
 		}
 	}
 
-	// Wait until all pending data moving is done before doing full restore.
-	ACTOR static Future<Void> waitForDataMover(Reference<BlobMigrator> self) {
-		state int retries = 0;
-		loop {
-			state Transaction tr(self->db_);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-				if (dms.size() == 0) {
-					return Void();
-				} else {
-					dprint("Wait pending data moving {}\n", dms.size());
-					wait(delay(2));
-					if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
-						throw restore_error();
-					}
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Print migration progress periodically
 	ACTOR static Future<Void> logProgress(Reference<BlobMigrator> self) {
 		state Reference<BlobRestoreController> restoreController =

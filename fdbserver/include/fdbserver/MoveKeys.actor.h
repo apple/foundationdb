@@ -46,7 +46,7 @@ class DDEnabledState {
 	enum Value {
 		ENABLED, // DD is enabled
 		SNAPSHOT, // disabled for snapshot
-		RESTORE_PREPARING // disabled for hybrid restore
+		BLOB_RESTORE_PREPARING // disabled for hybrid restore
 	};
 
 	// in-memory flag to disable DD
@@ -58,7 +58,7 @@ public:
 
 	bool isEnabled() const;
 
-	bool isRestorePreparing() const;
+	bool isBlobRestorePreparing() const;
 
 	// transiently enable the DD. If the process
 	// restarts, the state will be forgotten.
