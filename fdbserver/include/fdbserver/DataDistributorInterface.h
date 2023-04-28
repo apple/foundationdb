@@ -72,7 +72,7 @@ struct DataDistributorInterface {
 struct PrepareBlobRestoreReply {
 	constexpr static FileIdentifier file_identifier = 1024888;
 
-	enum Type : int8_t { SUCCESS = 0, CONFLICT_SNAPSHOT, CONFLICT_HYBRID_RESTORE, PROCESSING_RELOCATION };
+	enum Type : int8_t { SUCCESS = 0, CONFLICT_SNAPSHOT, CONFLICT_BLOB_RESTORE, PROCESSING_RELOCATION };
 	int8_t res;
 
 	PrepareBlobRestoreReply() = default;
