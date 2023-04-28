@@ -976,8 +976,14 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	                                   DatabaseConfiguration configuration,
 	                                   std::map<UID, StorageServerInterface> tssMapping,
 	                                   ConsistencyCheckWorkload* self) {
+
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
 		state std::vector<WorkerDetails> workers = wait(getWorkers(self->dbInfo));
 		state std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+		state KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
+		    wait(metadataMap.getRange({}, {}, CLIENT_KNOBS->TOO_MANY, cx.getReference()));
+
 		std::vector<Optional<Key>> missingStorage; // vector instead of a set to get the count
 
 		for (int i = 0; i < workers.size(); i++) {
@@ -1040,6 +1046,13 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			} else {
 				TraceEvent(SevWarn, "ConsistencyCheck_TSSMissing").log();
 			}
+		}
+
+		ASSERT(!metadata.more);
+		ASSERT_EQ(metadata.results.size(), storageServers.size());
+		std::unordered_map<UID, StorageMetadataType> id_ssi(metadata.results.begin(), metadata.results.end());
+		for (auto& ssi : storageServers) {
+			ASSERT(id_ssi.count(ssi.id()));
 		}
 
 		return true;
