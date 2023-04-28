@@ -2918,6 +2918,9 @@ public:
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
+		TraceEvent("UpdateStorageMetadata", self->getDistributorId())
+		    .detail("Server", server->getId())
+		    .detail("IsTss", isTss);
 
 		// wrong store type handler
 		if (!isTss) {
