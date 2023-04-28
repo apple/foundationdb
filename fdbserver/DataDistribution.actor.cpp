@@ -2004,7 +2004,6 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 		audit->actors.add(auditInputRangeOnAllStorageServers(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(auditMakeProgressOnRange(self, audit, allKeys));
-		// audit->actors.add(partitionAuditJobByKeyServerSpace(self, audit, allKeys));
 		// audit->actors.add(runAuditJobOnOneRandomServer(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateHA ||
 	           audit->coreState.getType() == AuditType::ValidateReplica) {
@@ -2013,61 +2012,6 @@ ACTOR Future<Void> loadAndDispatchAudit(Reference<DataDistributor> self,
 		UNREACHABLE();
 	}
 	wait(delay(0.1));
-	return Void();
-}
-
-// Partition the audit job by partitioning serverKey space into multiple ranges
-// For each range, randomly choose a server to start an audit on the range
-ACTOR Future<Void> partitionAuditJobByKeyServerSpace(Reference<DataDistributor> self,
-                                                     std::shared_ptr<DDAudit> audit,
-                                                     KeyRange range) {
-	ASSERT(audit->coreState.getType() == AuditType::ValidateLocationMetadata);
-	TraceEvent(SevInfo, "DDPartitionAuditJobByServerBegin", self->ddId)
-	    .detail("AuditID", audit->coreState.id)
-	    .detail("AuditType", audit->coreState.getType());
-	state RangeResult readResult;
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistribution, LockAware::True);
-	state Transaction tr(cx);
-	state KeyRange rangeToRead;
-	state Key readBegin;
-	state int i = 0;
-
-	while (true) {
-		try {
-			rangeToRead = Standalone(KeyRangeRef(readBegin, range.end));
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			wait(store(readResult,
-			           krmGetRanges(&tr,
-			                        keyServersPrefix,
-			                        rangeToRead,
-			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-			                        CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-			for (i = 0; i < readResult.size() - 1; ++i) {
-				KeyRange todoRange = Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key));
-				audit->actors.add(runAuditJobOnOneRandomServer(self, audit, todoRange));
-				wait(delay(0.1));
-			}
-			KeyRange completeRange = Standalone(KeyRangeRef(rangeToRead.begin, readResult.back().key));
-			if (completeRange.end < range.end) {
-				readBegin = completeRange.end;
-				continue;
-			} else {
-				break;
-			}
-
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "DDPartitionAuditJobByKeyServerSpaceError", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("AuditID", audit->coreState.id)
-			    .detail("AuditType", audit->coreState.getType());
-			throw e;
-		}
-	}
-
-	TraceEvent(SevInfo, "DDPartitionAuditJobByKeyServerSpaceEnd", self->ddId)
-	    .detail("AuditID", audit->coreState.id)
-	    .detail("AuditType", audit->coreState.getType());
-
 	return Void();
 }
 

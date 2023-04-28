@@ -4982,6 +4982,8 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 }
 
 // Check if any pair of ranges are exclusive with each other
+// This is not a part in consistency check of audit metadata
+// This is used for checking the validity of inputs to rangesSame()
 bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
 	ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 	for (int i = 0; i < ranges.size() - 1; ++i) {
@@ -4994,8 +4996,10 @@ bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
 }
 
 // Check if any range is empty in the given list of ranges
+// This is not a part in consistency check of audit metadata
+// This is used for checking the validity of inputs to rangesSame()
 bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
-	for (auto& range : ranges) {
+	for (const auto& range : ranges) {
 		if (range.empty()) {
 			return false;
 		}
@@ -5009,7 +5013,7 @@ bool noEmptyRangeInRanges(std::vector<KeyRange> ranges) {
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 	std::sort(ranges.begin(), ranges.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	std::vector<KeyRange> res;
-	for (auto range : ranges) {
+	for (const auto& range : ranges) {
 		if (res.empty()) {
 			res.push_back(range);
 			continue;
@@ -5028,16 +5032,18 @@ std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges) {
 }
 
 // Given two lists of ranges --- rangesA and rangesB, check if two lists are identical
-// If not, return the mismatch ranges of the two ranges
+// If not, return the mismatched two ranges of rangeA and rangeB respectively
 Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB) {
-	ASSERT(noEmptyRangeInRanges(rangesA));
-	ASSERT(noEmptyRangeInRanges(rangesB));
+	if (g_network->isSimulated()) {
+		ASSERT(noEmptyRangeInRanges(rangesA));
+		ASSERT(noEmptyRangeInRanges(rangesB));
+	}
 	KeyRange emptyRange;
 	if (rangesA.empty() && rangesB.empty()) { // no mismatch
 		return Optional<std::pair<KeyRange, KeyRange>>();
-	} else if (rangesA.empty() && !rangesB.empty()) { // rangesA is empty while rangesB has range
+	} else if (rangesA.empty() && !rangesB.empty()) { // rangesA is empty while rangesB has a range
 		return std::make_pair(emptyRange, rangesB.front());
-	} else if (!rangesA.empty() && rangesB.empty()) { // rangesB is empty while rangesA has range
+	} else if (!rangesA.empty() && rangesB.empty()) { // rangesB is empty while rangesA has a range
 		return std::make_pair(rangesA.front(), emptyRange);
 	}
 	TraceEvent(SevVerbose, "RangesSameBeforeSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
@@ -5045,8 +5051,10 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 	std::sort(rangesA.begin(), rangesA.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	std::sort(rangesB.begin(), rangesB.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	TraceEvent(SevVerbose, "RangesSameAfterSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
-	ASSERT(elementsAreExclusiveWithEachOther(rangesA));
-	ASSERT(elementsAreExclusiveWithEachOther(rangesB));
+	if (g_network->isSimulated()) {
+		ASSERT(elementsAreExclusiveWithEachOther(rangesA));
+		ASSERT(elementsAreExclusiveWithEachOther(rangesB));
+	}
 	if (rangesA.front().begin != rangesB.front().begin) { // rangeList heads mismatch
 		return std::make_pair(rangesA.front(), rangesB.front());
 	} else if (rangesA.back().end != rangesB.back().end) { // rangeList backs mismatch
@@ -5088,53 +5096,57 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 	return Optional<std::pair<KeyRange, KeyRange>>();
 }
 
-// Given two ranges --- rangeA and rangeB
-// Return the overlapping range of rangeA and rangeB
-// Return empty if no overlapping range
-Optional<KeyRange> getOverlappingRange(KeyRange rangeA, KeyRange rangeB) {
-	if (rangeA.begin >= rangeB.end || rangeA.end <= rangeB.begin) {
-		return Optional<KeyRange>();
-	}
-	Key resBegin = rangeB.begin >= rangeA.begin ? rangeB.begin : rangeA.begin;
-	Key resEnd = rangeB.end <= rangeA.end ? rangeB.end : rangeA.end;
-	return Standalone(KeyRangeRef(resBegin, resEnd));
-}
+struct AuditGetShardInfoRes {
+	Version readAtVersion;
+	UID serverId;
+	std::vector<KeyRange> ownRanges;
+	AuditGetShardInfoRes() = default;
+	AuditGetShardInfoRes(Version readAtVersion, UID serverId, std::vector<KeyRange> ownRanges)
+	  : readAtVersion(readAtVersion), serverId(serverId), ownRanges(ownRanges) {}
+};
 
 // Given an input server, get ranges with in the input range
 // from the perspective of SS->shardInfo
 // Input: (1) SS ID; (2) within range
-// Return (1) version of the read; (2) ranges of the SS
-std::pair<Version, std::vector<KeyRange>> getThisServerShardInfo(StorageServer* data, KeyRange range) {
-	std::pair<Version, std::vector<KeyRange>> res;
+// Return AuditGetShardInfoRes including: (1) version of the read; (2) ranges of the SS
+AuditGetShardInfoRes getThisServerShardInfo(StorageServer* data, KeyRange range) {
 	std::vector<KeyRange> ownRange;
 	UID serverID = data->thisServerID;
-	for (auto t : data->shards.intersectingRanges(range)) {
-		Optional<KeyRange> alignedRange = getOverlappingRange(t.value()->keys, range);
-		ASSERT(alignedRange.present());
+	for (auto& t : data->shards.intersectingRanges(range)) {
+		KeyRange alignedRange = t.value()->keys & range;
+		ASSERT(!alignedRange.empty());
 		TraceEvent(SevVerbose, "AuditStorageGetThisServerShardInfo", data->thisServerID)
-		    .detail("AlignedRange", alignedRange.get())
+		    .detail("AlignedRange", alignedRange)
 		    .detail("Range", t.value()->keys)
 		    .detail("AtVersion", data->version.get())
 		    .detail("AuditServer", serverID)
 		    .detail("ReadWrite", t.value()->readWrite ? "True" : "False")
 		    .detail("Adding", t.value()->adding ? "True" : "False");
 		if (t.value()->assigned()) {
-			ownRange.push_back(alignedRange.get());
+			ownRange.push_back(alignedRange);
 		}
 	}
-	res = std::make_pair(data->version.get(), ownRange);
-	return res;
+	return AuditGetShardInfoRes(data->version.get(), serverID, ownRange);
 }
+
+struct AuditGetServerKeysRes {
+	KeyRange completeRange;
+	Version readAtVersion;
+	UID serverId;
+	std::vector<KeyRange> ownRanges;
+	AuditGetServerKeysRes() = default;
+	AuditGetServerKeysRes(KeyRange completeRange, Version readAtVersion, UID serverId, std::vector<KeyRange> ownRanges)
+	  : completeRange(completeRange), readAtVersion(readAtVersion), serverId(serverId), ownRanges(ownRanges) {}
+};
 
 // Given an input server, get ranges within the input range via the input transaction
 // from the perspective of ServerKeys system key space
 // Input: (1) SS id; (2) transaction tr; (3) within range
-// Return: (1) complete range by a single read range; (2) verison of the read; (3) ranges of the input SS
-ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServerKeysFromServerKeys(UID serverID,
-                                                                                                   Transaction* tr,
-                                                                                                   KeyRange range) {
-	state std::tuple<KeyRange, Version, std::vector<KeyRange>> res;
+// Return AuditGetServerKeysRes, including: (1) complete range by a single read range;
+// (2) verison of the read; (3) ranges of the input SS
+ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range) {
 	state RangeResult readResult;
+	state AuditGetServerKeysRes res;
 
 	try {
 		wait(store(readResult,
@@ -5172,7 +5184,7 @@ ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServer
 		    .detail("ReadAtVersion", readAtVersion)
 		    .detail("CompleteRange", completeRange)
 		    .detail("ResultSize", ownRanges.size());
-		res = std::make_tuple(completeRange, readAtVersion, ownRanges);
+		res = AuditGetServerKeysRes(completeRange, readAtVersion, serverID, ownRanges);
 
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditStorageGetThisServerKeysError", serverID)
@@ -5184,15 +5196,24 @@ ACTOR Future<std::tuple<KeyRange, Version, std::vector<KeyRange>>> getThisServer
 	return res;
 }
 
+struct AuditGetKeyServersRes {
+	KeyRange completeRange;
+	Version readAtVersion;
+	std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
+	AuditGetKeyServersRes() = default;
+	AuditGetKeyServersRes(KeyRange completeRange,
+	                      Version readAtVersion,
+	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap)
+	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap) {}
+};
+
 // Given an input server, get ranges within the input range via the input transaction
 // from the perspective of KeyServers system key space
 // Input: (1) Audit Server ID (for logging); (2) transaction tr; (3) within range
-// Return: (1) complete range by a single read range; (2) verison of the read;
-// (3) map between SSes and their ranges --- in KeyServers space, a range corresponds
-// to multiple SSes
-ACTOR Future<std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>>>
-getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
-	state std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>> res;
+// Return AuditGetKeyServersRes, including : (1) complete range by a single read range; (2) verison of the read;
+// (3) map between SSes and their ranges --- in KeyServers space, a range corresponds to multiple SSes
+ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
+	state AuditGetKeyServersRes res;
 	state std::vector<Future<Void>> actors;
 	state RangeResult readResult;
 	state RangeResult UIDtoTagMap;
@@ -5237,13 +5258,13 @@ getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range) {
 		Future<Version> getGrvF = tr->getReadVersion();
 		ASSERT(getGrvF.isReady());
 		Version readAtVersion = getGrvF.get();
-		res = std::make_tuple(completeRange, readAtVersion, serverOwnRanges);
 		TraceEvent(SevInfo, "AuditStorageGetThisServerKeysFromKeyServersEnd", auditServerId)
 		    .detail("Range", range)
 		    .detail("CompleteRange", completeRange)
 		    .detail("AtVersion", readAtVersion)
 		    .detail("ShardsInAnonymousPhysicalShardCount", shardsInAnonymousPhysicalShardCount)
 		    .detail("TotalShardsCount", totalShardsCount);
+		res = AuditGetKeyServersRes(completeRange, readAtVersion, serverOwnRanges);
 
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditStorageGetThisServerKeysFromKeyServersError", auditServerId)
@@ -5266,10 +5287,10 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	state AuditStorageState res(req.id, thisServerID, req.getType());
 	state std::vector<std::string> errors;
 	state Transaction tr(data->cx);
-	state std::tuple<KeyRange, Version, std::vector<KeyRange>> serverKeyRes;
+	state AuditGetServerKeysRes serverKeyRes;
 	state Version serverKeyReadAtVersion;
 	state KeyRange serverKeyCompleteRange;
-	state std::pair<Version, std::vector<KeyRange>> ownRangesLocalViewRes;
+	state AuditGetShardInfoRes ownRangesLocalViewRes;
 	state Version localShardInfoReadAtVersion;
 	// We want to find out any mismatch between ownRangesSeenByServerKey and ownRangesLocalView
 	state std::vector<KeyRange> ownRangesSeenByServerKey;
@@ -5305,14 +5326,14 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// At this point, shard assignment history guarantees to contain assignments
 			// from localShardInfoReadAtVersion
 			ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
-			localShardInfoReadAtVersion = ownRangesLocalViewRes.first;
+			localShardInfoReadAtVersion = ownRangesLocalViewRes.readAtVersion;
 			ASSERT(localShardInfoReadAtVersion == data->version.get());
 			data->registerAuditsForShardAssignmentHistoryCollection(req.id, localShardInfoReadAtVersion);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
-			serverKeyCompleteRange = std::get<0>(serverKeyRes);
-			serverKeyReadAtVersion = std::get<1>(serverKeyRes);
-			ownRangesSeenByServerKey = std::get<2>(serverKeyRes);
+			serverKeyCompleteRange = serverKeyRes.completeRange;
+			serverKeyReadAtVersion = serverKeyRes.readAtVersion;
+			ownRangesSeenByServerKey = serverKeyRes.ownRanges;
 			// We want to do transactional read at a version newer than data->version
 			while (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
 				if (retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
@@ -5324,9 +5345,9 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				tr.reset();
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
-				serverKeyCompleteRange = std::get<0>(serverKeyRes);
-				serverKeyReadAtVersion = std::get<1>(serverKeyRes);
-				ownRangesSeenByServerKey = std::get<2>(serverKeyRes);
+				serverKeyCompleteRange = serverKeyRes.completeRange;
+				serverKeyReadAtVersion = serverKeyRes.readAtVersion;
+				ownRangesSeenByServerKey = serverKeyRes.ownRanges;
 			} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
 			ASSERT(serverKeyReadAtVersion >= localShardInfoReadAtVersion);
 			wait(data->version.whenAtLeast(serverKeyReadAtVersion));
@@ -5350,18 +5371,18 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				throw audit_storage_failed();
 			}
 
-			Optional<KeyRange> overlappingRange = getOverlappingRange(rangeToRead, serverKeyCompleteRange);
-			ASSERT(overlappingRange.present());
-			claimRange = overlappingRange.get();
+			KeyRange overlappingRange = rangeToRead & serverKeyCompleteRange;
+			ASSERT(!overlappingRange.empty());
+			claimRange = overlappingRange;
 
 			// We only compare ownRangesLocalView and ownRangesSeenByServerKey within claimRange
 			// Get ownRangesLocalView within claimRange
-			for (auto& range : ownRangesLocalViewRes.second) {
-				Optional<KeyRange> overlappingRange = getOverlappingRange(range, claimRange);
-				if (!overlappingRange.present()) {
+			for (auto& range : ownRangesLocalViewRes.ownRanges) {
+				KeyRange overlappingRange = range & claimRange;
+				if (overlappingRange.empty()) {
 					continue;
 				}
-				ownRangesLocalView.push_back(overlappingRange.get());
+				ownRangesLocalView.push_back(overlappingRange);
 			}
 			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", thisServerID)
 			    .detail("AuditId", req.id)
@@ -5377,7 +5398,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				KeyRange mismatchedRangeByServerKey = anyMismatch.get().first;
 				KeyRange mismatchedRangeByLocalView = anyMismatch.get().second;
 				std::string error =
-				    format("Storage server shard info mismatch on Server(%s):\t ServerKey: %s; ServerShardInfo: %s",
+				    format("Storage server shard info mismatch on Server(%s): ServerKey: %s; ServerShardInfo: %s",
 				           thisServerID.toString().c_str(),
 				           mismatchedRangeByServerKey.toString().c_str(),
 				           mismatchedRangeByLocalView.toString().c_str());
@@ -5390,7 +5411,6 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
 				    .detail("AuditServer", thisServerID);
 				errors.push_back(error);
-				std::cout << error << "\n";
 			}
 
 			// Return result
@@ -5455,8 +5475,8 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	state AuditStorageState res(req.id, req.getType()); // we will set range of audit later
 	state std::vector<Future<Void>> actors;
 	state std::vector<std::string> errors;
-	state std::tuple<KeyRange, Version, std::unordered_map<UID, std::vector<KeyRange>>> keyServerRes;
-	state std::unordered_map<UID, std::tuple<KeyRange, Version, std::vector<KeyRange>>> serverKeyResMap;
+	state AuditGetKeyServersRes keyServerRes;
+	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
 	state Version readAtVersion;
 	state std::unordered_map<UID, std::vector<KeyRange>> mapFromKeyServersRaw;
 	// Note that since krmReadRange may not return the value of the entire range at a time
@@ -5491,9 +5511,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			// Read KeyServers
 			wait(store(keyServerRes, getShardMapFromKeyServers(data->thisServerID, &tr, rangeToRead)));
-			completeRangeByKeyServer = std::get<0>(keyServerRes);
-			readAtVersion = std::get<1>(keyServerRes);
-			mapFromKeyServersRaw = std::get<2>(keyServerRes);
+			completeRangeByKeyServer = keyServerRes.completeRange;
+			readAtVersion = keyServerRes.readAtVersion;
+			mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
 			// Use ssid of mapFromKeyServersRaw to read ServerKeys
 			for (auto& [ssid, _] : mapFromKeyServersRaw) {
 				actors.push_back(store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, &tr, rangeToRead)));
@@ -5503,45 +5523,45 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			// Decide claimRange and check readAtVersion
 			claimRange = completeRangeByKeyServer;
 			for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-				KeyRange serverKeyCompleteRange = std::get<0>(serverKeyRes);
+				KeyRange serverKeyCompleteRange = serverKeyRes.completeRange;
 				TraceEvent(SevVerbose, "AuditStorageShardLocMetadataGetClaimRange")
 				    .detail("ServerId", ssid)
 				    .detail("ServerKeyCompleteRange", serverKeyCompleteRange)
 				    .detail("CurrentClaimRange", claimRange);
-				Optional<KeyRange> overlappingRange = getOverlappingRange(serverKeyCompleteRange, claimRange);
+				KeyRange overlappingRange = serverKeyCompleteRange & claimRange;
 				ASSERT(serverKeyCompleteRange.begin == claimRange.begin);
-				ASSERT(overlappingRange.present());
-				claimRange = overlappingRange.get();
-				ASSERT(readAtVersion == std::get<1>(serverKeyRes));
+				ASSERT(!overlappingRange.empty());
+				claimRange = overlappingRange;
+				ASSERT(readAtVersion == serverKeyRes.readAtVersion);
 			}
 			// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
 			for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
-				for (auto& range : std::get<2>(serverKeyRes)) {
-					Optional<KeyRange> overlappingRange = getOverlappingRange(range, claimRange);
-					if (!overlappingRange.present()) {
+				for (auto& range : serverKeyRes.ownRanges) {
+					KeyRange overlappingRange = range & claimRange;
+					if (overlappingRange.empty()) {
 						continue;
 					}
 					TraceEvent(SevVerbose, "AuditStorageShardLocMetadataAddToServerKeyMap")
 					    .detail("RawRange", range)
 					    .detail("ClaimRange", claimRange)
-					    .detail("Range", overlappingRange.get())
+					    .detail("Range", overlappingRange)
 					    .detail("SSID", ssid);
-					mapFromServerKeys[ssid].push_back(overlappingRange.get());
+					mapFromServerKeys[ssid].push_back(overlappingRange);
 				}
 			}
 			for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
 				std::vector mergedRanges = coalesceRangeList(ranges);
 				for (auto& range : mergedRanges) {
-					Optional<KeyRange> overlappingRange = getOverlappingRange(range, claimRange);
-					if (!overlappingRange.present()) {
+					KeyRange overlappingRange = range & claimRange;
+					if (overlappingRange.empty()) {
 						continue;
 					}
 					TraceEvent(SevVerbose, "AuditStorageShardLocMetadataAddToKeyServerMap")
 					    .detail("RawRange", range)
 					    .detail("ClaimRange", claimRange)
-					    .detail("Range", overlappingRange.get())
+					    .detail("Range", overlappingRange)
 					    .detail("SSID", ssid);
-					mapFromKeyServers[ssid].push_back(overlappingRange.get());
+					mapFromKeyServers[ssid].push_back(overlappingRange);
 				}
 			}
 
@@ -5549,7 +5569,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			// 1. check mapFromKeyServers => mapFromServerKeys
 			for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
 				if (!mapFromServerKeys.contains(ssid)) {
-					std::string error = format("KeyServers and serverKeys mismatch:\t Some key in range(%s, %s) exists "
+					std::string error = format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
 					                           "on Server(%s) in KeyServers but not ServerKeys",
 					                           claimRange.toString().c_str(),
 					                           claimRange.toString().c_str(),
@@ -5561,7 +5581,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
 					    .detail("AuditServerID", thisServerID);
-					std::cout << error << "\n";
 				}
 				std::vector<KeyRange> serverKeyRanges = mapFromServerKeys[ssid];
 				Optional<std::pair<KeyRange, KeyRange>> anyMismatch = rangesSame(keyServerRanges, serverKeyRanges);
@@ -5569,7 +5588,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
 					std::string error =
-					    format("Storage server shard info mismatch on Server(%s):\t KeyServer: %s; ServerKey: %s",
+					    format("Storage server shard info mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
 					           ssid.toString().c_str(),
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
@@ -5582,13 +5601,12 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
 					    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey)
 					    .detail("AuditServerID", thisServerID);
-					std::cout << error << "\n";
 				}
 			}
 			// 2. check mapFromServerKeys => mapFromKeyServers
 			for (auto& [ssid, serverKeyRanges] : mapFromServerKeys) {
 				if (!mapFromKeyServers.contains(ssid)) {
-					std::string error = format("KeyServers and serverKeys mismatch:\t Some key of range(%s, %s) exists "
+					std::string error = format("KeyServers and serverKeys mismatch: Some key of range(%s, %s) exists "
 					                           "on Server(%s) in ServerKeys but not KeyServers",
 					                           claimRange.toString().c_str(),
 					                           claimRange.toString().c_str(),
@@ -5600,7 +5618,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
 					    .detail("AuditServerID", thisServerID);
-					std::cout << error << "\n";
 				}
 			}
 
