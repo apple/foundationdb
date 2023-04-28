@@ -29,7 +29,7 @@
 #define METACLUSTER_TENANTCONSISTENCY_ACTOR_H
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/BooleanParam.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantData.actor.h"
@@ -91,7 +91,7 @@ private:
 
 	// Specialization for MetaclusterTenantMapEntry, used on management clusters
 	void validateTenantMetadata(TenantData<DB, MetaclusterTenantTypes> tenantData) {
-		ASSERT(tenantData.clusterType == ClusterType::METACLUSTER_MANAGEMENT);
+		ASSERT_EQ(tenantData.clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT_LE(tenantData.tenantMap.size(), metaclusterMaxTenants);
 
 		// Check metacluster specific properties

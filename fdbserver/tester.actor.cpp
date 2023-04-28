@@ -46,6 +46,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/KnobProtectiveGroups.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -875,11 +876,11 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 
 ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterClearingDatabaseStart", tr.trState->readOptions.get().debugID.get()).log();
 			// This transaction needs to be self-conflicting, but not conflict consistently with
 			// any other transactions
@@ -894,16 +895,14 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingDatabaseError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 
 	tr = Transaction(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
-
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
 			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
 			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
@@ -935,15 +934,13 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 
 	tr = Transaction(cx);
-	tr.debugTransaction(debugRandom()->randomUniqueID());
-	ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
 			state Optional<Key> tenantPrefix;
@@ -969,13 +966,13 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 
 				ASSERT(false);
 			}
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
 			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get());
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError", tr.trState->readOptions.get().debugID.get())
 			    .error(e);
 			wait(tr.onError(e));
-			tr.debugTransaction(debugRandom()->randomUniqueID());
 		}
 	}
 	return Void();
@@ -2057,12 +2054,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		ASSERT(g_simulator->storagePolicy && g_simulator->tLogPolicy);
 		ASSERT(!g_simulator->hasSatelliteReplication || g_simulator->satelliteTLogPolicy);
 
-		if (deterministicRandom()->random01() < 1 && (g_simulator->storagePolicy->info() == "zoneid^1 x 1" ||
-		                                              g_simulator->storagePolicy->info() == "zoneid^2 x 1")) {
-			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x03", "\xff\x04", 3));
-			g_simulator->customReplicas.push_back(std::make_tuple("\xff\x04", "\xff\x05", 3));
-			TraceEvent("SettingCustomReplicas");
-			MoveKeysLock lock = wait(takeMoveKeysLock(cx, UID()));
+		// Randomly inject custom shard configuration
+		// TOOO:  Move this to a workload representing non-failure behaviors which can be randomly added to any test
+		// run.
+		if (deterministicRandom()->random01() < 0.25) {
+			wait(customShardConfigWorkload(cx));
 		}
 	}
 
