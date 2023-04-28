@@ -1138,7 +1138,7 @@ public:
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
 				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
@@ -1458,8 +1458,7 @@ public:
 						recordTeamCollectionInfo = true;
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
-						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+						storageMetadataTracker = self->updateStorageMetadata(server);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -3083,6 +3082,7 @@ public:
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
+		state bool isTss = server->getLastKnownInterface().isTss();
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
 		if (server->getStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
@@ -3091,9 +3091,11 @@ public:
 			    .detail("StorageServer", server->getId());
 			throw internal_error();
 		}
-		state StorageMetadataType data(StorageMetadataType::currentTime(),
-		                               server->getStoreType(),
-		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+		state StorageMetadataType data(
+		    StorageMetadataType::currentTime(),
+		    server->getStoreType(),
+		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                      : self->configuration.storageServerStoreType));
 
 		// read storage metadata
 		loop {
@@ -3122,18 +3124,23 @@ public:
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
+		TraceEvent("UpdateStorageMetadata", self->getDistributorId())
+		    .detail("Server", server->getId())
+		    .detail("IsTss", isTss);
 
 		// wrong store type handler
-		if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
-		    self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
-		// add server to wiggler
-		if (self->storageWiggler->contains(server->getId())) {
-			self->storageWiggler->updateMetadata(server->getId(), data);
-		} else {
-			self->storageWiggler->addServer(server->getId(), data);
+		if (!isTss) {
+			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			    self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = removeWrongStoreType(self);
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
+			// add server to wiggler
+			if (self->storageWiggler->contains(server->getId())) {
+				self->storageWiggler->updateMetadata(server->getId(), data);
+			} else {
+				self->storageWiggler->addServer(server->getId(), data);
+			}
 		}
 
 		return Never();
@@ -4069,8 +4076,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
-	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
+	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
 void DDTeamCollection::resetLocalitySet() {

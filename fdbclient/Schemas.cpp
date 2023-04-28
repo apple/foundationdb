@@ -143,6 +143,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "coordinator"
                      ]
                   },
+                  "tss":false,
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,

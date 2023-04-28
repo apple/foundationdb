@@ -322,6 +322,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
+					wait(::success(self->checkStorageMetadata(cx, self)));
 
 					// Check blob workers are operating as expected
 					if (configuration.blobGranulesEnabled) {
@@ -993,6 +994,42 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		}
 
 		return false;
+	}
+
+	// Every storage server should have it metadata populated and no metadata leak when the database reach the quiescent
+	// state
+	ACTOR Future<bool> checkStorageMetadata(Database cx, ConsistencyCheckWorkload* self) {
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
+		state std::vector<StorageServerInterface> servers;
+		state std::unordered_map<UID, StorageMetadataType> id_ssi;
+		state Transaction tr(cx);
+		loop {
+			servers.clear();
+			id_ssi.clear();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
+				    wait(metadataMap.getRange(&tr, {}, {}, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!metadata.more && metadata.results.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+				ASSERT_EQ(metadata.results.size(), serverList.size());
+				id_ssi = std::unordered_map<UID, StorageMetadataType>(metadata.results.begin(), metadata.results.end());
+				servers.reserve(serverList.size());
+				for (int i = 0; i < serverList.size(); i++)
+					servers.push_back(decodeServerListValue(serverList[i].value));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		for (auto& ssi : servers) {
+			ASSERT(id_ssi.count(ssi.id()));
+		}
+		return true;
 	}
 
 	// Returns false if any worker that should have a storage server does not have one
