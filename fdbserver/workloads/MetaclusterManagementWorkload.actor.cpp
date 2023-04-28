@@ -609,13 +609,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		if (deterministicRandom()->coinflip()) {
 			connectionString = dataDb->db->getConnectionRecord()->getConnectionString();
 		}
-		{
-			int rnd = deterministicRandom()->randomInt(0, 4);
-			if (rnd == 0) {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
-			} else if (rnd == 1) {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
-			}
+		if (deterministicRandom()->coinflip()) {
+			autoTenantAssignment = deterministicRandom()->coinflip() ? metacluster::AutoTenantAssignment::DISABLED
+			                                                         : metacluster::AutoTenantAssignment::ENABLED;
 		}
 
 		try {
@@ -778,18 +774,29 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second->tenants.try_emplace(tenant, tenantData).second);
 
+			Optional<ClusterName> clusterAssignedToTenantGroup;
 			if (tenantGroup.present()) {
 				auto tenantGroupData =
 				    self->tenantGroups
 				        .try_emplace(tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
 				        .first;
 				ASSERT(tenantGroupData->second->cluster == entry.assignedCluster);
+				clusterAssignedToTenantGroup = tenantGroupData->second->cluster;
 				tenantGroupData->second->tenants.insert(tenant);
 				assignedCluster->second->tenantGroups[tenantGroup.get()] = tenantGroupData->second;
 			} else {
 				self->ungroupedTenants.insert(tenant);
 				assignedCluster->second->ungroupedTenants.insert(tenant);
 			}
+
+			// In two cases, we bypass the search on capacity index:
+			// i. assignClusterAutomatically is false. This indicates that the user explicitly specifies which cluster
+			//    to assign to a tenant
+			// ii. the tenant belongs to a tenant group to which a cluster has already been assigned.
+			// Except for these two cases, any chosen cluster must have autoTenantAssignment enabled.
+			ASSERT(!assignClusterAutomatically ||
+			       (clusterAssignedToTenantGroup.present() && !clusterAssignedToTenantGroup.get().empty()) ||
+			       assignedCluster->second->autoTenantAssignment == metacluster::AutoTenantAssignment::ENABLED);
 
 			ASSERT(tenantGroupExists ||
 			       assignedCluster->second->tenantGroupCapacity >=

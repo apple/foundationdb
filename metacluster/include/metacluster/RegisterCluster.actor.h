@@ -83,7 +83,9 @@ struct RegisterClusterImpl {
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
 		    .detail("Capacity", self->clusterEntry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
+		    .detail("ConnectionString", self->connectionString.toString())
+		    .detail("AutoTenantAssignment",
+		            DataClusterEntry::autoTenantAssignmentToString(self->clusterEntry.autoTenantAssignment));
 
 		return Void();
 	}
@@ -195,7 +197,9 @@ struct RegisterClusterImpl {
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
 		    .detail("Capacity", dataClusterMetadata.get().entry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
+		    .detail("ConnectionString", self->connectionString.toString())
+		    .detail("AutoTenantAssignment",
+		            DataClusterEntry::autoTenantAssignmentToString(self->clusterEntry.autoTenantAssignment));
 
 		return Void();
 	}

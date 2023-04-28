@@ -300,13 +300,9 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		if (deterministicRandom()->coinflip()) {
 			connectionString = dataDb.getReference()->getConnectionRecord()->getConnectionString();
 		}
-		{
-			int rnd = deterministicRandom()->randomInt(0, 5);
-			if (rnd == 0) {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
-			} else if (rnd == 1) {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
-			}
+		if (deterministicRandom()->coinflip()) {
+			autoTenantAssignment = deterministicRandom()->coinflip() ? metacluster::AutoTenantAssignment::DISABLED
+			                                                         : metacluster::AutoTenantAssignment::ENABLED;
 		}
 
 		try {

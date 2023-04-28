@@ -69,7 +69,7 @@ void updateClusterCapacityIndex(Transaction tr,
                                 DataClusterEntry const& previousEntry,
                                 DataClusterEntry const& updatedEntry) {
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
-	if (previousEntry.hasCapacity()) {
+	if (previousEntry.hasCapacity() || updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));
 	}

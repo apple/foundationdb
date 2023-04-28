@@ -45,7 +45,6 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
                           int endIndex) {
 	Optional<metacluster::DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
-	Optional<metacluster::AutoTenantAssignment> autoTenantAssignment;
 
 	std::set<std::string> usedParams;
 	for (int tokenNum = startIndex; tokenNum < endIndex; ++tokenNum) {
@@ -80,19 +79,16 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
 		} else if (tokencmp(param, "auto_tenant_assignment")) {
 			std::transform(
 			    value.begin(), value.end(), value.begin(), [](unsigned char ch) { return std::tolower(ch); });
-			if (value == "disabled") {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
-			} else if (value == "enabled") {
-				autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
-			} else {
-				fmt::print(stderr, "ERROR: invalid configuration `{}' for `auto_tenant_assignment'.\n", value.c_str());
-				return {};
-			}
 			if (!entry.present()) {
 				entry = defaults;
 			}
-			if (autoTenantAssignment.present()) {
-				entry.get().autoTenantAssignment = autoTenantAssignment.get();
+			if (value == "disabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			} else if (value == "enabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
+			} else {
+				fmt::print(stderr, "ERROR: invalid configuration `{}' for `auto_tenant_assignment'.\n", value.c_str());
+				return {};
 			}
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
