@@ -740,7 +740,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 				continue;
 			}
 			if (self->context->ddEnabledState->sameId(req.requesterID) &&
-			    self->context->ddEnabledState->isRestorePreparing()) {
+			    self->context->ddEnabledState->isBlobRestorePreparing()) {
 				// the sender use at-least once model, so we need to guarantee the idempotence
 				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
 				continue;
@@ -751,8 +751,8 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 				// force reloading initData and restarting DD components
 				throw dd_config_changed();
 			} else {
-				auto reason = self->context->ddEnabledState->isRestorePreparing()
-				                  ? PrepareBlobRestoreReply::CONFLICT_HYBRID_RESTORE
+				auto reason = self->context->ddEnabledState->isBlobRestorePreparing()
+				                  ? PrepareBlobRestoreReply::CONFLICT_BLOB_RESTORE
 				                  : PrepareBlobRestoreReply::CONFLICT_SNAPSHOT;
 				req.reply.send(PrepareBlobRestoreReply(reason));
 				continue;
