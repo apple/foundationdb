@@ -20,6 +20,7 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/RandomKeyValueUtils.h"
 #include "fdbclient/Tuple.h"
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/simulator.h"
@@ -10090,13 +10091,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                                                     : deterministicRandom()->randomInt(4096, 32768));
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
-	state int maxKeySize = params.getInt("maxKeySize").orDefault(deterministicRandom()->randomInt(1, pageSize * 2));
-	state int maxValueSize = params.getInt("maxValueSize").orDefault(randomSize(pageSize * 25));
 	state int maxCommitSize =
 	    params.getInt("maxCommitSize")
 	        .orDefault(shortTest
 	                       ? 1000
-	                       : randomSize((int)std::min<int64_t>((maxKeySize + maxValueSize) * int64_t(20000), 10e6)));
+	                       : randomSize(10e6));
 	state double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearProbability =
@@ -10132,6 +10131,14 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
+	state std::string keyGenerator = params.get("keyGenerator").orDefault("1000000::10::3..5/^a..d,100::5..10/^a..f,10000::20..30/^a..z");
+
+	state std::string valueGenerator = params.get("valueGenerator").orDefault("10..1000/a..z");
+
+	state std::unique_ptr<RandomKeyTupleSetGenerator> keyGen = std::make_unique<RandomKeyTupleSetGenerator>(keyGenerator);
+
+	state std::unique_ptr<RandomValueGenerator> valGen = std::make_unique<RandomValueGenerator>(valueGenerator);
+
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =
 	    !isEncodingTypeAESEncrypted(encodingType)
@@ -10166,8 +10173,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("domainMode: %d\n", encryptionDomainMode);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
-	printf("maxKeySize: %d\n", maxKeySize);
-	printf("maxValueSize: %d\n", maxValueSize);
+	printf("keyGenerator: %s\n", keyGenerator.c_str());
+	printf("valueGenerator: %s\n", valueGenerator.c_str());
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
 	printf("clearProbability: %f\n", clearProbability);
@@ -10240,8 +10247,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 		// Sometimes do a clear range
 		if (deterministicRandom()->random01() < clearProbability) {
-			Key start = randomKV(maxKeySize, 1).key;
-			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : randomKV(maxKeySize, 1).key;
+			Key start = keyGen->next();
+			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : keyGen->next();
 
 			// Sometimes replace start and/or end with a close actual (previously used) value
 			if (deterministicRandom()->random01() < clearExistingBoundaryProbability) {
@@ -10318,14 +10325,17 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 			// Sometimes set the range start after the clear
 			if (deterministicRandom()->random01() < clearPostSetProbability) {
-				KeyValue kv = randomKV(0, maxValueSize);
+				KeyValue kv;
 				kv.key = range.begin;
+				kv.value = valGen->next();
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			}
 		} else {
 			// Set a key
-			KeyValue kv = randomKV(maxKeySize, maxValueSize);
+			KeyValue kv;
+			kv.key = keyGen->next();
+			kv.value = valGen->next();
 			// Sometimes change key to a close previously used key
 			if (deterministicRandom()->random01() < setExistingKeyProbability) {
 				auto i = keys.upper_bound(kv.key);
