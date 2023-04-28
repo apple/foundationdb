@@ -166,20 +166,14 @@ def print_errors(ensemble_id: str):
         ensemble_id, errors_only=(not config.success), compressed=compressed
     ):
         if len(rec) == 5:
-            version_stamp, result_code, host, seed, output = rec
+            versionstamp, result_code, host, seed, output = rec
         elif len(rec) == 4:
-            version_stamp, result_code, host, output = rec
-            seed = None
+            versionstamp, result_code, host, output = rec
         elif len(rec) == 3:
-            version_stamp, result_code, output = rec
-            host = None
-            seed = None
+            versionstamp, result_code, output = rec
         elif len(rec) == 2:
-            version_stamp, seed = rec
+            versionstamp, seed = rec
             output = str(joshua_model.fdb.tuple.unpack(seed)[0]) + "\n"
-            result_code = None
-            host = None
-            seed = None
         else:
             raise Exception("Unknown result format")
         lines = output.splitlines()

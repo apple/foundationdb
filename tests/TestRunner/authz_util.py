@@ -1,7 +1,16 @@
 from authlib.jose import JsonWebKey, KeySet, jwt
-from typing import List
+from typing import List, Union
+import base64
 import json
 import time
+
+from test_util import random_alphanum_str
+
+
+def to_str(s: Union[str, bytes]):
+    if isinstance(s, bytes):
+        s = s.decode("utf8")
+    return s
 
 
 def private_key_gen(kty: str, kid: str):

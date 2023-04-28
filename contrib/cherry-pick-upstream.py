@@ -117,7 +117,7 @@ def _main():
                 pr_info["merge_commit"]
             )
         else:
-            print(f"Using pull request branch")
+            print("Using pull request branch")
             # Might be a fast-forward merge without merge hash, need to cherry-pick from the original owner's repository
             _prepare_pull_request(pr)
             commits_to_be_cherry_picked = pr_info["commits"]

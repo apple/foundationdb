@@ -75,7 +75,7 @@ def wait_until_tenant_tr_fails(
         )
         try:
             if not read_blocked:
-                value = tr[b"abc"].value
+                tr[b"abc"].wait()
         except fdb.FDBError as e:
             assert e.code == 6000, f"expected permission_denied, got {e} instead"
             read_blocked = True
@@ -109,7 +109,7 @@ def wait_until_tenant_tr_succeeds(
             time.sleep(delay)
             tr = tenant_tr_gen(tenant)
             tr.options.set_authorization_token(token)
-            value = tr[b"abc"].value
+            tr[b"abc"].wait()
             tr[b"abc"] = b"qwe"
             tr.commit().wait()
             break
