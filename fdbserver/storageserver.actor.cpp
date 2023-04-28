@@ -1753,7 +1753,7 @@ public:
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
-	std::map<UID, Version> requestsToRecordShardAssignmentHistory;
+	std::unordered_map<UID, Version> shardAssignmentRecordRequests;
 
 	std::string printShardAssignmentHistory() {
 		std::string toPrint = "";
@@ -1765,7 +1765,7 @@ public:
 
 	bool needRecordShardAssignment(Version currentVersion) {
 		Version minRecordVersion = MAX_VERSION;
-		for (const auto& [auditID, startRecordVersion] : requestsToRecordShardAssignmentHistory) {
+		for (const auto& [auditID, startRecordVersion] : shardAssignmentRecordRequests) {
 			minRecordVersion = std::min(minRecordVersion, startRecordVersion);
 		}
 		return currentVersion >= minRecordVersion;
@@ -5299,8 +5299,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			ASSERT(localShardInfoReadAtVersion == data->version.get());
 
 			// Request to record shard assignment history at least localShardInfoReadAtVersion
-			ASSERT(!data->requestsToRecordShardAssignmentHistory.contains(req.id));
-			data->requestsToRecordShardAssignmentHistory[req.id] = localShardInfoReadAtVersion;
+			ASSERT(!data->shardAssignmentRecordRequests.contains(req.id));
+			data->shardAssignmentRecordRequests[req.id] = localShardInfoReadAtVersion;
 			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStart", data->thisServerID).detail("AuditID", req.id);
 
 			// Transactional read of serverKeys
@@ -5330,9 +5330,9 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// upto serverKeyReadAtVersion
 
 			// Stop requesting to record shard assignment history
-			ASSERT(data->requestsToRecordShardAssignmentHistory.contains(req.id));
+			ASSERT(data->shardAssignmentRecordRequests.contains(req.id));
 			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStop", data->thisServerID).detail("AuditID", req.id);
-			data->requestsToRecordShardAssignmentHistory.erase(req.id);
+			data->shardAssignmentRecordRequests.erase(req.id);
 
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
 			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
@@ -5435,7 +5435,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		// Make sure the history collection is not open due to this audit
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
 		    .detail("AuditID", req.id);
-		data->requestsToRecordShardAssignmentHistory.erase(req.id);
+		data->shardAssignmentRecordRequests.erase(req.id);
 		req.reply.sendError(audit_storage_failed());
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
