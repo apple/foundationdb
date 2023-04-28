@@ -1753,7 +1753,8 @@ public:
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
-	std::map<UID, Version> ongoingAuditsForShardAssignment;
+	std::map<UID, Version> requestsToRecordShardAssignmentHistory;
+
 	std::string printShardAssignmentHistory() {
 		std::string toPrint = "";
 		for (const auto& [version, range] : shardAssignmentHistory) {
@@ -1762,49 +1763,17 @@ public:
 		return toPrint;
 	}
 
-	void registerAuditsForShardAssignmentHistoryCollection(UID auditID, Version beginVersion) {
-		ASSERT_WE_THINK(!ongoingAuditsForShardAssignment.contains(auditID));
-		ongoingAuditsForShardAssignment[auditID] = beginVersion;
-		TraceEvent(SevVerbose, "ShardAssignmentHistoryRegisterAudit", thisServerID).detail("AuditID", auditID);
-		return;
-	}
-
-	void unregisterAuditsForShardAssignmentHistoryCollection(UID auditID, bool check = true) {
-		if (check)
-			ASSERT_WE_THINK(ongoingAuditsForShardAssignment.contains(auditID));
-		TraceEvent(SevVerbose, "ShardAssignmentHistoryUnRegisterAudit", thisServerID).detail("AuditID", auditID);
-		ongoingAuditsForShardAssignment.erase(auditID);
-		return;
-	}
-
-	bool needCollectShardAssignment(Version currentVersion) {
+	bool needRecordShardAssignment(Version currentVersion) {
 		Version minRecordVersion = MAX_VERSION;
-		for (auto& [auditID, startRecordVersion] : ongoingAuditsForShardAssignment) {
-			if (startRecordVersion < minRecordVersion) {
-				minRecordVersion = startRecordVersion;
-			}
+		for (const auto& [auditID, startRecordVersion] : requestsToRecordShardAssignmentHistory) {
+			minRecordVersion = std::min(minRecordVersion, startRecordVersion);
 		}
 		return currentVersion >= minRecordVersion;
 	}
 
-	void addShardAssignmentToHistory(Version version, const KeyRange keys, Version ssVersion) {
-		shardAssignmentHistory.push_back(std::make_pair(version, keys));
-		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", thisServerID)
-		    .detail("Version", version)
-		    .detail("Keys", keys)
-		    .detail("SSVersion", ssVersion);
-		return;
-	}
-
-	void clearShardAssignmentHistory() {
-		TraceEvent(SevVerbose, "ShardAssignmentHistoryClear", thisServerID);
-		shardAssignmentHistory.clear();
-		return;
-	}
-
 	std::vector<std::pair<Version, KeyRangeRef>> getShardAssignmentHistory(Version early, Version later) {
 		std::vector<std::pair<Version, KeyRangeRef>> res;
-		for (auto shardAssignment : shardAssignmentHistory) {
+		for (const auto& shardAssignment : shardAssignmentHistory) {
 			if (shardAssignment.first >= early && shardAssignment.first <= later) {
 				TraceEvent(SevVerbose, "ShardAssignmentHistoryGetOne", thisServerID)
 				    .detail("Keys", shardAssignment.second)
@@ -5328,7 +5297,13 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			ownRangesLocalViewRes = getThisServerShardInfo(data, rangeToRead);
 			localShardInfoReadAtVersion = ownRangesLocalViewRes.readAtVersion;
 			ASSERT(localShardInfoReadAtVersion == data->version.get());
-			data->registerAuditsForShardAssignmentHistoryCollection(req.id, localShardInfoReadAtVersion);
+
+			// Request to record shard assignment history at least localShardInfoReadAtVersion
+			ASSERT(!data->requestsToRecordShardAssignmentHistory.contains(req.id));
+			data->requestsToRecordShardAssignmentHistory[req.id] = localShardInfoReadAtVersion;
+			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStart", data->thisServerID).detail("AuditID", req.id);
+
+			// Transactional read of serverKeys
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			wait(store(serverKeyRes, getThisServerKeysFromServerKeys(data->thisServerID, &tr, rangeToRead)));
 			serverKeyCompleteRange = serverKeyRes.completeRange;
@@ -5353,7 +5328,11 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			wait(data->version.whenAtLeast(serverKeyReadAtVersion));
 			// At this point, shard assignment history guarantees to contain assignments
 			// upto serverKeyReadAtVersion
-			data->unregisterAuditsForShardAssignmentHistoryCollection(req.id);
+
+			// Stop requesting to record shard assignment history
+			ASSERT(data->requestsToRecordShardAssignmentHistory.contains(req.id));
+			TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStop", data->thisServerID).detail("AuditID", req.id);
+			data->requestsToRecordShardAssignmentHistory.erase(req.id);
 
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
 			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
@@ -5454,7 +5433,9 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		    .detail("AuditServer", thisServerID)
 		    .detail("Reason", failureReason);
 		// Make sure the history collection is not open due to this audit
-		data->unregisterAuditsForShardAssignmentHistoryCollection(req.id, false);
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
+		    .detail("AuditID", req.id);
+		data->requestsToRecordShardAssignmentHistory.erase(req.id);
 		req.reply.sendError(audit_storage_failed());
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
@@ -9102,10 +9083,15 @@ void changeServerKeys(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->needCollectShardAssignment(version)) {
-		data->addShardAssignmentToHistory(version, Standalone(keys), data->version.get());
+	if (data->needRecordShardAssignment(version)) {
+		data->shardAssignmentHistory.push_back(std::make_pair(version, keys));
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("Keys", keys)
+		    .detail("SSVersion", data->version.get());
 	} else {
-		data->clearShardAssignmentHistory();
+		data->shardAssignmentHistory.clear();
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryClear", data->thisServerID);
 	}
 }
 
@@ -9338,10 +9324,15 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 		cleanUpChangeFeeds(data, keys, version);
 	}
 
-	if (data->needCollectShardAssignment(version)) {
-		data->addShardAssignmentToHistory(version, Standalone(keys), data->version.get());
+	if (data->needRecordShardAssignment(version)) {
+		data->shardAssignmentHistory.push_back(std::make_pair(version, keys));
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryAdd", data->thisServerID)
+		    .detail("Version", version)
+		    .detail("Keys", keys)
+		    .detail("SSVersion", data->version.get());
 	} else {
-		data->clearShardAssignmentHistory();
+		data->shardAssignmentHistory.clear();
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryClear", data->thisServerID);
 	}
 }
 
