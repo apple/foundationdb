@@ -992,10 +992,12 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				    .detail("NumSampledKeys", sampledKeys)
 				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
+				// NOTE: Shard sampling is known to be biased.
+				// Downgrade this to a warning until we have a proper solution.
 				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
 				            performQuiescentChecks,
 				            success,
-				            failureIsError);
+				            /*failureIsError*/ false);
 			}
 
 			// In a quiescent database, check that the (estimated) size of the shard is within permitted bounds
