@@ -49,15 +49,16 @@ class TestCluster(LocalCluster):
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
+
         self.tmp_dir.mkdir(parents=True)
         if mkcert_binary:
             self.mkcert_binary = Path(mkcert_binary).resolve()
         else:
             self.mkcert_binary = os.path.join(self.build_dir, "bin", "mkcert")
-
         assert Path(self.mkcert_binary).exists(), "{} does not exist".format(
             self.mkcert_binary
         )
+
         self.version = version
         super().__init__(
             self.tmp_dir,
