@@ -287,7 +287,7 @@ public:
 	"                 The constraints by which to validate TLS peers. The contents\n"                                  \
 	"                 and format of CONSTRAINTS are plugin-specific.\n"                                                \
 	"  " TLS_DISABLE_PLAINTEXT_CONNECTION_FLAG "\n"                                                                    \
-	"                 Disable non-TLS connections. All plaintext connection attempts will result in an error\n"
+	"                 Disable non-TLS connections. All plaintext connection attempts will timeout.\n"
 
 #include "flow/unactorcompiler.h"
 #endif
