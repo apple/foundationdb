@@ -91,7 +91,7 @@ private:
 
 	// Specialization for MetaclusterTenantMapEntry, used on management clusters
 	void validateTenantMetadata(TenantData<DB, MetaclusterTenantTypes> tenantData) {
-		ASSERT(tenantData.clusterType == ClusterType::METACLUSTER_MANAGEMENT);
+		ASSERT_EQ(tenantData.clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT_LE(tenantData.tenantMap.size(), metaclusterMaxTenants);
 
 		// Check metacluster specific properties

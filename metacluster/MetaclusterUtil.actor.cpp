@@ -22,9 +22,12 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MultiVersionTransaction.h"
+#include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 
+#include "metacluster/CreateMetacluster.actor.h"
 #include "metacluster/MetaclusterUtil.actor.h"
+#include "metacluster/RegisterCluster.actor.h"
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -53,6 +56,55 @@ ACTOR Future<Reference<IDatabase>> openDatabase(ClusterConnectionString connecti
 	} else {
 		return MultiVersionApi::api->createDatabaseFromConnectionString(connectionString.toString().c_str());
 	}
+}
+
+ACTOR Future<SimulatedMetacluster> createSimulatedMetacluster(Database db,
+                                                              Optional<int64_t> tenantIdPrefix,
+                                                              Optional<DataClusterEntry> dataClusterConfig,
+                                                              SkipMetaclusterCreation skipMetaclusterCreation) {
+	ASSERT(g_network->isSimulated());
+	state SimulatedMetacluster simMetacluster;
+
+	Reference<IDatabase> threadSafeHandle =
+	    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(db)));
+
+	MultiVersionApi::api->selectApiVersion(db->apiVersion.version());
+	simMetacluster.managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
+
+	if (!skipMetaclusterCreation) {
+		if (!tenantIdPrefix.present()) {
+			tenantIdPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+			                                                  TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
+		}
+		wait(success(createMetacluster(db.getReference(), "management_cluster"_sr, tenantIdPrefix.get(), false)));
+	}
+
+	metacluster::DataClusterEntry entry;
+	entry.capacity.numTenantGroups = 1e9;
+
+	state int clusterIndex;
+	for (clusterIndex = 0; clusterIndex < g_simulator->extraDatabases.size(); ++clusterIndex) {
+		state ClusterName clusterName = ClusterNameRef(fmt::format("data_cluster_{}", clusterIndex));
+
+		simMetacluster.dataDbs[clusterName] =
+		    Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[clusterIndex], db->defaultTenant);
+
+		if (dataClusterConfig.present()) {
+			wait(metacluster::registerCluster(simMetacluster.managementDb,
+			                                  clusterName,
+			                                  g_simulator->extraDatabases[clusterIndex],
+			                                  dataClusterConfig.get()));
+
+			// Run a transaction to verify that the data cluster has recovered
+			wait(
+			    runRYWTransactionVoid(simMetacluster.dataDbs[clusterName], [](Reference<ReadYourWritesTransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				    return success(tr->get("\xff"_sr));
+			    }));
+		}
+	}
+
+	return simMetacluster;
 }
 
 }; // namespace metacluster::util

@@ -990,6 +990,17 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 			throw;
 		}
 
+		if (e.code() == error_code_no_more_servers && assignment.isAssign &&
+		    assignment.assign.get().type == AssignRequestType::Continue) {
+			// If the BW the BM was telling to continue is already dead, just drop this as we already reassigned the
+			// granule
+			TraceEvent("BMDroppingContinueAssignment", bmData->id)
+			    .detail("Epoch", bmData->epoch)
+			    .detail("Seqno", seqNo);
+			CODE_PROBE(true, "BM no more servers on continue", probe::decoration::rare);
+			return Void();
+		}
+
 		// this assign failed and we will retry, consider it blocked until it successfully retries
 		if (assignment.isAssign) {
 			++bmData->stats.blockedAssignments;
