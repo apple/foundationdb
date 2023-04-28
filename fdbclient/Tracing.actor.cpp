@@ -687,17 +687,17 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	// Test message pack encoding for string >= 256 && <= 65535 chars
 	// pragma: allowlist nextline secret
 	const char* longString = "yGUtj42gSKfdqib3f0Ri4OVhD7eWyTbKsH/g9+x4UWyXry7NIBFIapPV9f1qdTRl"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "2jXcZI8Ua/Gp8k9EBn7peaEN1uj4w9kf4FQ2Lalu0VrA4oquQoaKYr+wPsLBak9i"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "uyZDF9sX/HW4pVvQhPQdXQWME5E7m58XFMpZ3H8HNXuytWInEuh97SRLlI0RhrvG"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "ixNpYtYlvghsLCrEdZMMGnS2gXgGufIdg1xKJd30fUbZLHcYIC4DTnL5RBpkbQCR"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "SGKKUrpIb/7zePhBDi+gzUzyAcbQ2zUbFWI1KNi3zQk58uUG6wWJZkw+GCs7Cc3V"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "OUxOljwCJkC4QTgdsbbFhxUC+rtoHV5xAqoTQwR0FXnWigUjP7NtdL6huJUr3qRv"
-	// pragma: allowlist nextline secret
+	                         // pragma: allowlist nextline secret
 	                         "40c4yUI1a4+P5vJa";
 	Span span4;
 	auto location = Location();
