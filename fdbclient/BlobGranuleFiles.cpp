@@ -201,6 +201,7 @@ BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKey
 	                                                   cipherKeysCtx.textCipherKey.baseCipherId,
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.begin(),
 	                                                   cipherKeysCtx.textCipherKey.baseCipher.size(),
+	                                                   cipherKeysCtx.textCipherKey.baseCipherKCV,
 	                                                   cipherKeysCtx.textCipherKey.salt,
 	                                                   std::numeric_limits<int64_t>::max(),
 	                                                   std::numeric_limits<int64_t>::max());
@@ -208,6 +209,7 @@ BlobGranuleFileEncryptionKeys getEncryptBlobCipherKey(const BlobGranuleCipherKey
 	                                                     cipherKeysCtx.headerCipherKey.baseCipherId,
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.begin(),
 	                                                     cipherKeysCtx.headerCipherKey.baseCipher.size(),
+	                                                     cipherKeysCtx.headerCipherKey.baseCipherKCV,
 	                                                     cipherKeysCtx.headerCipherKey.salt,
 	                                                     std::numeric_limits<int64_t>::max(),
 	                                                     std::numeric_limits<int64_t>::max());
@@ -253,9 +255,16 @@ void validateEncryptionHeaderDetails(const BlobGranuleFileEncryptionKeys& eKeys,
                                      const BlobCipherEncryptHeaderRef& headerRef,
                                      const StringRef& ivRef) {
 	ASSERT(eKeys.textCipherKey.isValid());
+	EncryptHeaderCipherKCVs kcvs;
+
+	kcvs.textKCV = eKeys.textCipherKey->getBaseCipherKCV();
+	if (eKeys.headerCipherKey.isValid()) {
+		kcvs.headerKCV = eKeys.headerCipherKey->getBaseCipherKCV();
+	}
 	headerRef.validateEncryptionHeaderDetails(eKeys.textCipherKey->details(),
 	                                          eKeys.headerCipherKey.isValid() ? eKeys.headerCipherKey->details()
 	                                                                          : BlobCipherDetails(),
+	                                          kcvs,
 	                                          ivRef);
 }
 
@@ -1877,23 +1886,27 @@ const EncryptCipherBaseKeyId encryptBaseCipherId = deterministicRandom()->random
 const EncryptCipherRandomSalt encryptSalt = deterministicRandom()->randomUInt64();
 
 Standalone<StringRef> getBaseCipher() {
-	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, 256));
+	Standalone<StringRef> baseCipher = makeString(deterministicRandom()->randomInt(4, MAX_BASE_CIPHER_LEN + 1));
 	deterministicRandom()->randomBytes(mutateString(baseCipher), baseCipher.size());
 	return baseCipher;
 }
 
-Standalone<StringRef> encryptBaseCipher = getBaseCipher();
+const Standalone<StringRef> encryptBaseCipher = getBaseCipher();
 
 BlobGranuleCipherKeysCtx getCipherKeysCtx(Arena& arena) {
 	BlobGranuleCipherKeysCtx cipherKeysCtx;
+	const EncryptCipherKeyCheckValue cipherKCV =
+	    Sha256KCV().computeKCV(encryptBaseCipher.begin(), encryptBaseCipher.size());
 
 	cipherKeysCtx.textCipherKey.encryptDomainId = encryptDomainId;
 	cipherKeysCtx.textCipherKey.baseCipherId = encryptBaseCipherId;
+	cipherKeysCtx.textCipherKey.baseCipherKCV = cipherKCV;
 	cipherKeysCtx.textCipherKey.salt = encryptSalt;
 	cipherKeysCtx.textCipherKey.baseCipher = StringRef(arena, encryptBaseCipher);
 
 	cipherKeysCtx.headerCipherKey.encryptDomainId = SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID;
 	cipherKeysCtx.headerCipherKey.baseCipherId = encryptBaseCipherId;
+	cipherKeysCtx.headerCipherKey.baseCipherKCV = cipherKCV;
 	cipherKeysCtx.headerCipherKey.salt = encryptSalt;
 	cipherKeysCtx.headerCipherKey.baseCipher = StringRef(arena, encryptBaseCipher);
 

@@ -54,18 +54,31 @@
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 
+void RelocateShard::setParentRange(KeyRange const& parent) {
+	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
+	parent_range = parent;
+}
+
+Optional<KeyRange> RelocateShard::getParentRange() const {
+	return parent_range;
+}
+
 ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
-	return ShardSizeBounds{
-		.max = StorageMetrics{ .bytes = -1,
-		                       .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                       .iosPerKSecond = StorageMetrics::infinity,
-		                       .bytesReadPerKSecond = StorageMetrics::infinity },
-		.min = StorageMetrics{ .bytes = -1, .bytesWrittenPerKSecond = 0, .iosPerKSecond = 0, .bytesReadPerKSecond = 0 },
-		.permittedError = StorageMetrics{ .bytes = -1,
-		                                  .bytesWrittenPerKSecond = StorageMetrics::infinity,
-		                                  .iosPerKSecond = StorageMetrics::infinity,
-		                                  .bytesReadPerKSecond = StorageMetrics::infinity }
-	};
+	return ShardSizeBounds{ .max = StorageMetrics{ .bytes = -1,
+		                                           .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                                           .iosPerKSecond = StorageMetrics::infinity,
+		                                           .bytesReadPerKSecond = StorageMetrics::infinity,
+		                                           .opsReadPerKSecond = StorageMetrics::infinity },
+		                    .min = StorageMetrics{ .bytes = -1,
+		                                           .bytesWrittenPerKSecond = 0,
+		                                           .iosPerKSecond = 0,
+		                                           .bytesReadPerKSecond = 0,
+		                                           .opsReadPerKSecond = 0 },
+		                    .permittedError = StorageMetrics{ .bytes = -1,
+		                                                      .bytesWrittenPerKSecond = StorageMetrics::infinity,
+		                                                      .iosPerKSecond = StorageMetrics::infinity,
+		                                                      .bytesReadPerKSecond = StorageMetrics::infinity,
+		                                                      .opsReadPerKSecond = StorageMetrics::infinity } };
 }
 
 struct DDAudit {
