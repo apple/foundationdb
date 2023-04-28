@@ -1252,6 +1252,18 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
 	}
 }
+
+int nonOverlappedSrcCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
+	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
+	int count = 0;
+	for (int i = 0; i < destIds.size(); i++) {
+		if (srcSet.count(destIds[i]) == 0) {
+			count++;
+		}
+	}
+	return count;
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1875,8 +1887,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						dataTransferComplete.send(rd);
 					}
 
+					int nonOverlappingCount = nonOverlappedSrcCount(rd.completeSources, destIds);
 					self->bytesWritten += metrics.bytes;
-					self->moveBytesRate.addSample(metrics.bytes);
+					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
