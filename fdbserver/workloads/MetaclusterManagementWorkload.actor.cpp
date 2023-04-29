@@ -692,6 +692,24 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state bool tenantGroupExists = tenantGroup.present() && self->tenantGroups.count(tenantGroup.get());
 		state bool hasCapacity = tenantGroupExists || self->ungroupedTenants.size() + self->tenantGroups.size() <
 		                                                  self->totalTenantGroupCapacity;
+
+		if (assignClusterAutomatically && !tenantGroupExists && hasCapacity) {
+			// In this case, the condition of `hasCapacity` will be further tightened since we will exclude those
+			// data clusters with autoTenantAssignment being false.
+			bool emptyCapacityIndex = true;
+			for (auto dataDb : self->dataDbs) {
+				if (metacluster::AutoTenantAssignment::DISABLED == dataDb.second->autoTenantAssignment ||
+				    !dataDb.second->registered || dataDb.second->detached) {
+					continue;
+				}
+				if (dataDb.second->ungroupedTenants.size() + dataDb.second->tenantGroups.size() <
+				    dataDb.second->tenantGroupCapacity) {
+					emptyCapacityIndex = false;
+					break;
+				}
+			}
+			hasCapacity = !emptyCapacityIndex;
+		}
 		state bool retried = false;
 
 		state metacluster::MetaclusterTenantMapEntry tenantMapEntry;
@@ -806,14 +824,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				return Void();
 			} else if (e.code() == error_code_metacluster_no_capacity) {
-				ASSERT(!exists);
-				if (metacluster::AssignClusterAutomatically::False == assignClusterAutomatically) {
-					ASSERT(!hasCapacity);
-				} else {
-					// It's possible that all the data clusters are excluded from the auto-assignment pool.
-					// Consequently, even if the the metacluster has capacity, the capacity index has no available data
-					// clusters. In this case, trying to assign a cluster to the tenant automatically will fail.
-				}
+				ASSERT(!exists && !hasCapacity);
+				// It's possible that all the data clusters are excluded from the auto-assignment pool.
+				// Consequently, even if the the metacluster has capacity, the capacity index has no available data
+				// clusters. In this case, trying to assign a cluster to the tenant automatically will fail.
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
 				ASSERT(!assignClusterAutomatically);
