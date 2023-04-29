@@ -56,7 +56,6 @@ bindings/go/godoc
 bindings/java/.classstamp*
 bindings/java/classes*/
 bindings/java/javadoc*/
-packaging/docker/website
 
 # Testing and logging
 packaging/msi/*.log
