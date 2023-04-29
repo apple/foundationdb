@@ -22,7 +22,9 @@
 #define FLOW_OPTIONAL_H
 
 #include <optional>
+#include <fmt/format.h>
 
+#include "flow/Traceable.h"
 #include "flow/FileIdentifier.h"
 #include "flow/Error.h"
 
@@ -251,6 +253,12 @@ public:
 	// Ordering: If T is ordered, then Optional() < Optional(t) and (Optional(u)<Optional(v))==(u<v)
 	bool operator<(Optional const& o) const { return impl < o.impl; }
 
+	const T* operator->() const { return &get(); }
+	T* operator->() { return &get(); }
+	const T& operator*() const& { return get(); }
+	T& operator*() & { return get(); }
+	T&& operator*() && { return get(); }
+
 	void reset() { impl.reset(); }
 	size_t hash() const { return hashFunc(impl); }
 
@@ -258,5 +266,15 @@ private:
 	static inline std::hash<std::optional<T>> hashFunc{};
 	std::optional<T> impl;
 };
+
+template <class T>
+struct Traceable<Optional<T>> : std::conditional<Traceable<T>::value, std::true_type, std::false_type>::type {
+	static std::string toString(const Optional<T>& value) {
+		return value.present() ? Traceable<T>::toString(value.get()) : "[not set]";
+	}
+};
+
+template <typename T>
+struct fmt::formatter<Optional<T>> : FormatUsingTraceable<Optional<T>> {};
 
 #endif // FLOW_OPTIONAL_H

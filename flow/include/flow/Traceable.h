@@ -27,6 +27,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <fmt/format.h>
 
 #define PRINTABLE_COMPRESS_NULLS 0
 
@@ -242,6 +243,15 @@ struct Traceable<std::string_view> : TraceableStringImpl<std::string_view> {};
 template <class T>
 struct Traceable<std::atomic<T>> : std::true_type {
 	static std::string toString(const std::atomic<T>& value) { return Traceable<T>::toString(value.load()); }
+};
+
+// Adapter to redirect fmt::formatter calls to Traceable for a supported type
+template <typename T>
+struct FormatUsingTraceable : fmt::formatter<std::string> {
+	template <typename FormatContext>
+	auto format(const T& val, FormatContext& ctx) {
+		return fmt::formatter<std::string>::format(Traceable<T>::toString(val), ctx);
+	}
 };
 
 #endif
