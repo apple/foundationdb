@@ -151,8 +151,8 @@ public:
 	  : isWiggling(isWiggling), isFailed(isFailed), isUndesired(isUndesired), isWrongConfiguration(false),
 	    initialized(true), locality(locality) {}
 	bool isUnhealthy() const { return isFailed || isUndesired; }
-	const char* toString() const {
-		return isFailed ? "Failed" : isUndesired ? "Undesired" : isWiggling ? "Wiggling" : "Healthy";
+	std::string toString() const {
+		return fmt::format("Failed: {}, Undesired: {}, Wiggling: {}", isFailed, isUndesired, isWiggling);
 	}
 
 	bool operator==(ServerStatus const& r) const {
