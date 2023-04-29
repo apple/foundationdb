@@ -1201,12 +1201,11 @@ public:
 
 	Optional<EncryptionAtRestMode> encryptionMode;
 
-	struct Counters {
-		CounterCollection cc;
+	struct Counters : CommonStorageCounters {
+
 		Counter allQueries, systemKeyQueries, getKeyQueries, getValueQueries, getRangeQueries, getRangeSystemKeyQueries,
-		    getRangeStreamQueries, finishedQueries, lowPriorityQueries, rowsQueried, bytesQueried, watchQueries,
-		    emptyQueries, feedRowsQueried, feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries,
-		    feedVersionQueries;
+		    getRangeStreamQueries, lowPriorityQueries, rowsQueried, watchQueries, emptyQueries, feedRowsQueried,
+		    feedBytesQueried, feedStreamQueries, rejectedFeedStreamQueries, feedVersionQueries;
 
 		// counters related to getMappedRange queries
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
@@ -1234,21 +1233,12 @@ public:
 		// bytesInput, instead of the actual bytes taken in the storages, so that (bytesInput - bytesDurable) can
 		// reflect the current memory footprint of MVCC.
 		Counter bytesDurable;
-		// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
-		Counter bytesFetched;
-		// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
-		// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
-		// and the lengths of both parameters.
-		Counter mutationBytes;
 
 		// Bytes fetched by fetchChangeFeed for data movements.
 		Counter feedBytesFetched;
 
 		Counter sampledBytesCleared;
-		// The number of key-value pairs fetched by fetchKeys()
-		Counter kvFetched;
-		Counter mutations, setMutations, clearRangeMutations, atomicMutations, changeFeedMutations,
-		    changeFeedMutationsDurable;
+		Counter atomicMutations, changeFeedMutations, changeFeedMutationsDurable;
 		Counter updateBatches, updateVersions;
 		Counter loops;
 		Counter fetchWaitingMS, fetchWaitingCount, fetchExecutingMS, fetchExecutingCount;
@@ -1276,6 +1266,15 @@ public:
 		// The count of change feed reads that hit disk
 		Counter changeFeedDiskReads;
 
+		// The count of 'set' inserted to pTree. The actual ptree.insert() number could be higher, because of the range
+		// clear split, see metric pTreeClearSplits.
+		Counter pTreeSets;
+		// The count of clear range inserted to pTree
+		Counter pTreeClears;
+		// If set is within a range of clear, the clear is split. It's tracking the number of splits, the split could be
+		// expensive.
+		Counter pTreeClearSplits;
+
 		LatencySample readLatencySample;
 		LatencySample readKeyLatencySample;
 		LatencySample readValueLatencySample;
@@ -1290,25 +1289,22 @@ public:
 		LatencySample mappedRangeRemoteSample; // Samples getMappedRange remote subquery latency
 		LatencySample mappedRangeLocalSample; // Samples getMappedRange local subquery latency
 
-		Counters(StorageServer* self)
-		  : cc("StorageServer", self->thisServerID.toString()), allQueries("QueryQueue", cc),
-		    systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
+		explicit Counters(StorageServer* self)
+		  : CommonStorageCounters("StorageServer", self->thisServerID.toString(), &self->metrics),
+		    allQueries("QueryQueue", cc), systemKeyQueries("SystemKeyQueries", cc), getKeyQueries("GetKeyQueries", cc),
 		    getValueQueries("GetValueQueries", cc), getRangeQueries("GetRangeQueries", cc),
 		    getRangeSystemKeyQueries("GetRangeSystemKeyQueries", cc),
 		    getMappedRangeQueries("GetMappedRangeQueries", cc), getRangeStreamQueries("GetRangeStreamQueries", cc),
-		    finishedQueries("FinishedQueries", cc), lowPriorityQueries("LowPriorityQueries", cc),
-		    rowsQueried("RowsQueried", cc), bytesQueried("BytesQueried", cc), watchQueries("WatchQueries", cc),
-		    emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
+		    lowPriorityQueries("LowPriorityQueries", cc), rowsQueried("RowsQueried", cc),
+		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
 		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
 		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
-		    bytesDurable("BytesDurable", cc), bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc),
-		    feedBytesFetched("FeedBytesFetched", cc), sampledBytesCleared("SampledBytesCleared", cc),
-		    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
-		    clearRangeMutations("ClearRangeMutations", cc), atomicMutations("AtomicMutations", cc),
+		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
+		    sampledBytesCleared("SampledBytesCleared", cc), atomicMutations("AtomicMutations", cc),
 		    changeFeedMutations("ChangeFeedMutations", cc),
 		    changeFeedMutationsDurable("ChangeFeedMutationsDurable", cc), updateBatches("UpdateBatches", cc),
 		    updateVersions("UpdateVersions", cc), loops("Loops", cc), fetchWaitingMS("FetchWaitingMS", cc),
@@ -1323,6 +1319,7 @@ public:
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
+		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -1376,7 +1373,6 @@ public:
 			specialCounter(cc, "VersionLag", [self]() { return self->versionLag; });
 			specialCounter(cc, "LocalRate", [self] { return int64_t(self->currentRate() * 100); });
 
-			specialCounter(cc, "BytesReadSampleCount", [self]() { return self->metrics.bytesReadSample.queue.size(); });
 			specialCounter(
 			    cc, "FetchKeysFetchActive", [self]() { return self->fetchKeysParallelismLock.activePermits(); });
 			specialCounter(cc, "FetchKeysWaiting", [self]() { return self->fetchKeysParallelismLock.waiters(); });
@@ -1399,7 +1395,6 @@ public:
 				return self->serveAuditStorageParallelismLock.waiters();
 			});
 			specialCounter(cc, "QueryQueueMax", [self]() { return self->getAndResetMaxQueryQueueSize(); });
-			specialCounter(cc, "BytesStored", [self]() { return self->metrics.byteSample.getEstimate(allKeys); });
 			specialCounter(cc, "ActiveWatches", [self]() { return self->numWatches; });
 			specialCounter(cc, "WatchBytes", [self]() { return self->watchBytes; });
 			specialCounter(cc, "KvstoreSizeTotal", [self]() { return std::get<0>(self->storage.getSize()); });
@@ -6937,15 +6932,18 @@ void applyMutation(StorageServer* self,
 				// is a waste, but not asymptotic)
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
 			}
+			++self->counters.pTreeClearSplits;
 		}
 		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		self->watches.trigger(m.param1);
+		++self->counters.pTreeSets;
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
 		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
+		++self->counters.pTreeClears;
 	}
 }
 
@@ -7301,9 +7299,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
-			if (!rep.more) {
-				rep.readThrough = keys.end;
-			}
 			results.send(rep);
 
 			if (!rep.more) {
@@ -7311,11 +7306,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 				return Void();
 			}
 
-			if (rep.readThrough.present()) {
-				begin = firstGreaterOrEqual(rep.readThrough.get());
-			} else {
-				begin = firstGreaterThan(rep.end()[-1].key);
-			}
+			begin = rep.nextBeginKeySelector();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -7376,12 +7367,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 			    .detail("Rows", rows.size())
 			    .detail("ChunkRange", chunkRange)
 			    .detail("FetchVersion", fetchVersion);
-			if (rows.size() == 0) {
-				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
-			}
+			// It should read all the data from that chunk
+			ASSERT(!rows.more);
 			if (i == chunks.size() - 1) {
-				rows.readThrough = KeyRef(rows.arena(), keys.end);
+				// set more to false when it's the last chunk
+				rows.more = false;
+			} else {
+				rows.more = true;
+				// no need to set readThrough, as the next read key range has to be the next chunkRange
 			}
+			ASSERT(!rows.readThrough.present());
 			results.send(rows);
 		}
 		results.sendError(end_of_stream()); // end of range read
@@ -8321,6 +8316,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
+			state KeyRef rangeEnd;
 			if (isFullRestore) {
 				state BlobRestoreRangeState rangeStatus = wait(BlobRestoreController::getRangeState(restoreController));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
@@ -8329,11 +8325,14 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
 					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, version, data->blobConn);
+					rangeEnd = rangeStatus.first.end;
 				} else {
 					hold = tryGetRange(results, &tr, keys);
+					rangeEnd = keys.end;
 				}
 			} else {
 				hold = tryGetRange(results, &tr, keys);
+				rangeEnd = keys.end;
 			}
 
 			state Key blockBegin = keys.begin;
@@ -8381,9 +8380,12 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					for (; kvItr != this_block.end(); ++kvItr) {
 						data->byteSampleApplySet(*kvItr, invalidVersion);
 					}
-					ASSERT(this_block.readThrough.present() || this_block.size());
-					blockBegin = this_block.readThrough.present() ? this_block.readThrough.get()
-					                                              : keyAfter(this_block.end()[-1].key);
+					if (this_block.more) {
+						blockBegin = this_block.getReadThrough();
+					} else {
+						ASSERT(!this_block.readThrough.present());
+						blockBegin = rangeEnd;
+					}
 					this_block = RangeResult();
 
 					data->fetchKeysBytesBudget -= expectedBlockSize;
@@ -10498,8 +10500,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							numSampledKeys++;
 						}
 						if (readResult.more) {
-							ASSERT(readResult.readThrough.present());
-							readBegin = keyAfter(readResult.readThrough.get());
+							readBegin = readResult.getReadThrough();
 							ASSERT(readBegin <= readEnd);
 						} else {
 							break; // finish for current metaDataRangesIter
@@ -11761,6 +11762,12 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 	state Error error = success();
 	state bool timedout = false;
 
+	// state UID metricReqId = deterministicRandom()->randomUniqueID();
+	DisabledTraceEvent(SevDebug, "WaitMetrics", metricReqId)
+	    .detail("Keys", req.keys)
+	    .detail("Metrics", metrics.toString())
+	    .detail("ReqMin", req.min.toString())
+	    .detail("ReqMax", req.max.toString());
 	if (!req.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(req.max)) {
 		CODE_PROBE(true, "ShardWaitMetrics return case 1 (quickly)");
 		req.reply.send(metrics);

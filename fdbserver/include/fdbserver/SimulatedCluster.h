@@ -42,6 +42,16 @@ public:
 	Optional<int> asanMachineCount;
 };
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
+struct BasicSimulationConfig {
+	// simulation machine layout
+	int datacenters;
+	int replication_type;
+	int machine_count; // Total, not per DC.
+	int processes_per_machine;
 
+	DatabaseConfiguration db;
+};
+
+DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
+BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig);
 #endif

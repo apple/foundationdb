@@ -8257,10 +8257,6 @@ public:
 		}
 
 		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		g_redwoodMetrics.kvSizeReadByGetRange->sample(accumulatedBytes);
 		return result;
 	}
