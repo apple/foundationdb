@@ -21,6 +21,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -1076,7 +1077,9 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
+				status.isUndesired =
+				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) ||
+				    BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
 				status.isWrongConfiguration = false;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
