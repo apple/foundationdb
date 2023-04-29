@@ -108,7 +108,7 @@ public:
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
-	Reference<KeyRangeMap<int>> customReplication;
+	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 
 	DataDistributionTracker() = default;
 

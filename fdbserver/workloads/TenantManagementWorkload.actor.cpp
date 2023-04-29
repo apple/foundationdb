@@ -25,7 +25,7 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
@@ -82,7 +82,7 @@ struct TenantManagementWorkload : TestWorkload {
 	const Key testParametersKey = nonMetadataSystemKeys.begin.withSuffix("/tenant_test/test_parameters"_sr);
 	const Value noTenantValue = "no_tenant"_sr;
 	const TenantName tenantNamePrefix = "tenant_management_workload_"_sr;
-	const ClusterName dataClusterName = "cluster1"_sr;
+	ClusterName dataClusterName;
 	TenantName localTenantNamePrefix;
 	TenantName localTenantGroupNamePrefix;
 
@@ -182,13 +182,6 @@ struct TenantManagementWorkload : TestWorkload {
 		}
 	}
 
-	Future<Optional<Key>> waitDataDbTenantModeChange() const {
-		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get("\xff"_sr); // just a meaningless read
-		});
-	}
-
 	// Set a key outside of all tenants to make sure that our tenants aren't writing to the regular key-space
 	Future<Void> writeNonTenantKey() const {
 		return runRYWTransaction(dataDb, [this](Reference<ReadYourWritesTransaction> tr) {
@@ -239,24 +232,6 @@ struct TenantManagementWorkload : TestWorkload {
 
 	// only the first client will do this setup
 	ACTOR static Future<Void> firstClientSetup(Database cx, TenantManagementWorkload* self) {
-		if (self->useMetacluster) {
-			fmt::print("Create metacluster and register data cluster ... \n");
-			// Configure the metacluster (this changes the tenant mode)
-			wait(success(metacluster::createMetacluster(
-			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
-
-			metacluster::DataClusterEntry entry;
-			entry.capacity.numTenantGroups = 1e9;
-			wait(
-			    metacluster::registerCluster(self->mvDb, self->dataClusterName, g_simulator->extraDatabases[0], entry));
-
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
-			// wait for tenant mode change on dataDB
-			wait(success(self->waitDataDbTenantModeChange()));
-		} else {
-			self->dataDb = cx;
-		}
 		wait(sendTestParameters(cx, self));
 
 		if (self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
@@ -267,23 +242,33 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, TenantManagementWorkload* self) {
-		Reference<IDatabase> threadSafeHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		if (self->clientId != 0) {
+			wait(loadTestParameters(cx, self));
+		}
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-		self->mvDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
+		metacluster::util::SkipMetaclusterCreation skipMetaclusterCreation(!self->useMetacluster ||
+		                                                                   self->clientId != 0);
+		Optional<metacluster::DataClusterEntry> entry;
+		if (!skipMetaclusterCreation) {
+			entry = metacluster::DataClusterEntry();
+			entry.get().capacity.numTenantGroups = 1e9;
+		}
+
+		state metacluster::util::SimulatedMetacluster simMetacluster = wait(
+		    metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry, skipMetaclusterCreation));
+
+		self->mvDb = simMetacluster.managementDb;
+
+		if (self->useMetacluster) {
+			self->dataClusterName = simMetacluster.dataDbs.begin()->first;
+			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
+			self->dataDb = simMetacluster.dataDbs.begin()->second;
+		} else {
+			self->dataDb = cx;
+		}
 
 		if (self->clientId == 0) {
 			wait(firstClientSetup(cx, self));
-		} else {
-			wait(loadTestParameters(cx, self));
-			if (self->useMetacluster) {
-				ASSERT(g_simulator->extraDatabases.size() == 1);
-				self->dataDb =
-				    Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
-			} else {
-				self->dataDb = cx;
-			}
 		}
 
 		return Void();
