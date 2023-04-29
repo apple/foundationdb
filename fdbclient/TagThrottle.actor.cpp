@@ -139,12 +139,11 @@ bool ThrottleApi::TagQuotaValue::isValid() const {
 	return reservedQuota <= totalQuota && reservedQuota >= 0;
 }
 
-Value ThrottleApi::TagQuotaValue::toValue() const {
-	return Tuple::makeTuple(reservedQuota, totalQuota).pack();
+Tuple ThrottleApi::TagQuotaValue::pack() {
+	return Tuple::makeTuple(reservedQuota, totalQuota);
 }
 
-ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value) {
-	auto tuple = Tuple::unpack(value);
+ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::unpack(Tuple const& tuple) {
 	if (tuple.size() != 2) {
 		throw invalid_throttle_quota_value();
 	}
@@ -163,6 +162,10 @@ ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::fromValue(ValueRef value)
 		throw invalid_throttle_quota_value();
 	}
 	return result;
+}
+
+bool ThrottleApi::TagQuotaValue::operator==(ThrottleApi::TagQuotaValue const& rhs) const {
+	return reservedQuota == rhs.reservedQuota && totalQuota == rhs.totalQuota;
 }
 
 TEST_CASE("TagSet/toString") {

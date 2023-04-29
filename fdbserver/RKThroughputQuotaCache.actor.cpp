@@ -25,7 +25,7 @@ public:
 					self->quotas.clear();
 					for (auto const kv : currentQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
-						self->quotas[tag] = ThrottleApi::TagQuotaValue::fromValue(kv.value);
+						self->quotas[tag] = ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(kv.value));
 					}
 					wait(delay(5.0));
 					break;
