@@ -759,10 +759,11 @@ bool SSPhysicalShard::hasRange(Reference<ShardInfo> shard) const {
 struct TenantSSInfo {
 	constexpr static FileIdentifier file_identifier = 3253114;
 	TenantAPI::TenantLockState lockState;
+	Optional<TenantGroupName> group;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, lockState);
+		serializer(ar, lockState, group);
 	}
 };
 
@@ -805,6 +806,10 @@ private:
 	using WatchMapValue = Reference<ServerWatchMetadata>;
 	using WatchMap_t = std::unordered_map<WatchMapKey, WatchMapValue, WatchMapKeyHasher>;
 	WatchMap_t watchMap; // keep track of server watches
+
+	VersionedMap<int64_t, TenantSSInfo>::iterator findTenantEntry(Version version,
+	                                                              int64_t tenantId,
+	                                                              bool lockAware) const;
 
 public:
 	struct PendingNewShard {
@@ -872,7 +877,8 @@ public:
 	void insertTenant(TenantMapEntry const& tenant, Version version, bool persist);
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
-	void checkTenantEntry(Version version, TenantInfo tenant, bool lockAware);
+	void checkTenantEntry(Version version, TenantInfo tenant, bool lockAware) const;
+	Optional<TenantGroupName> getTenantGroup(Version version, TenantInfo tenant, bool lockAware) const;
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 
@@ -2100,19 +2106,32 @@ ACTOR Future<Version> waitForMinVersion(StorageServer* data, Version version) {
 	}
 }
 
-void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo, bool lockAware) {
+VersionedMap<int64_t, TenantSSInfo>::iterator StorageServer::findTenantEntry(Version version,
+                                                                             int64_t tenantId,
+                                                                             bool lockAware) const {
+	ASSERT(version == latestVersion || (version >= tenantMap.oldestVersion && version <= this->version.get()));
+	auto view = tenantMap.at(version);
+	auto itr = view.find(tenantId);
+	if (itr == view.end()) {
+		TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID).detail("Tenant", tenantId).backtrace();
+		throw tenant_not_found();
+	} else if (!lockAware && itr->lockState == TenantAPI::TenantLockState::LOCKED) {
+		throw tenant_locked();
+	}
+	return itr;
+}
+
+void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo, bool lockAware) const {
 	if (tenantInfo.hasTenant()) {
-		ASSERT(version == latestVersion || (version >= tenantMap.oldestVersion && version <= this->version.get()));
-		auto view = tenantMap.at(version);
-		auto itr = view.find(tenantInfo.tenantId);
-		if (itr == view.end()) {
-			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
-			    .detail("Tenant", tenantInfo.tenantId)
-			    .backtrace();
-			throw tenant_not_found();
-		} else if (!lockAware && itr->lockState == TenantAPI::TenantLockState::LOCKED) {
-			throw tenant_locked();
-		}
+		findTenantEntry(version, tenantInfo.tenantId, lockAware);
+	}
+}
+
+Optional<TenantGroupName> StorageServer::getTenantGroup(Version version, TenantInfo tenantInfo, bool lockAware) const {
+	if (tenantInfo.hasTenant()) {
+		return findTenantEntry(version, tenantInfo.tenantId, lockAware)->group;
+	} else {
+		return {};
 	}
 }
 
@@ -5257,7 +5276,7 @@ TEST_CASE("/fdbserver/storageserver/rangeIntersectsAnyTenant") {
 	VersionedMap<int64_t, TenantSSInfo> tenantMap;
 	tenantMap.createNewVersion(1);
 	for (auto entry : entries) {
-		tenantMap.insert(entry, TenantSSInfo{ TenantAPI::TenantLockState::UNLOCKED });
+		tenantMap.insert(entry, TenantSSInfo{ TenantAPI::TenantLockState::UNLOCKED, Optional<TenantGroupName>{} });
 	}
 
 	// Before all tenants
@@ -5348,7 +5367,7 @@ TEST_CASE("/fdbserver/storageserver/randomRangeIntersectsAnyTenant") {
 	int numEntries = deterministicRandom()->randomInt(0, 20);
 	for (int i = 0; i < numEntries; ++i) {
 		int64_t tenantId = deterministicRandom()->randomInt64(0, std::numeric_limits<int64_t>::max());
-		tenantMap.insert(tenantId, TenantSSInfo{ TenantAPI::TenantLockState::UNLOCKED });
+		tenantMap.insert(tenantId, TenantSSInfo{ TenantAPI::TenantLockState::UNLOCKED, Optional<TenantGroupName>{} });
 		tenantPrefixes.insert(TenantAPI::idToPrefix(tenantId));
 	}
 
@@ -9114,7 +9133,7 @@ private:
 
 void StorageServer::insertTenant(TenantMapEntry const& tenant, Version version, bool persist) {
 	if (version >= tenantMap.getLatestVersion()) {
-		TenantSSInfo tenantSSInfo{ tenant.tenantLockState };
+		TenantSSInfo tenantSSInfo{ tenant.tenantLockState, tenant.tenantGroup };
 		int64_t tenantId = TenantAPI::prefixToId(tenant.prefix);
 		tenantMap.createNewVersion(version);
 		tenantMap.insert(tenant.id, tenantSSInfo);
