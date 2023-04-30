@@ -2106,7 +2106,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
-			TraceEvent("RemoveStorageServerLocked")
+			TraceEvent("RemoveStorageServer")
+			    .detail("State", "Locked")
 			    .detail("ServerID", serverID)
 			    .detail("Version", tr->getReadVersion().get());
 
@@ -2115,10 +2116,12 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 				CODE_PROBE(true,
 				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to "
 				           "reverse its mistake.");
-				TraceEvent(SevWarn, "NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
+				TraceEvent(SevWarn, "RemoveStorageServer")
+				    .detail("State", "CanRemoveFailed")
+				    .detail("ServerID", serverID)
+				    .detail("Count", noCanRemoveCount++);
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch));
 				tr->reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
 				state Future<Optional<Value>> fListKey = tr->get(serverListKeyFor(serverID));
 				state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
@@ -2195,12 +2198,13 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				wait(tr->commit());
+				TraceEvent("RemoveStorageServer").detail("State", "Success").detail("ServerID", serverID);
 				return Void();
 			}
 		} catch (Error& e) {
 			state Error err = e;
 			wait(tr->onError(e));
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			TraceEvent("RemoveStorageServer").error(err).detail("State", "Retry").detail("ServerID", serverID);
 		}
 	}
 }
