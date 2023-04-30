@@ -139,7 +139,7 @@ bool ThrottleApi::TagQuotaValue::isValid() const {
 	return reservedQuota <= totalQuota && reservedQuota >= 0;
 }
 
-Tuple ThrottleApi::TagQuotaValue::pack() {
+Tuple ThrottleApi::TagQuotaValue::pack() const {
 	return Tuple::makeTuple(reservedQuota, totalQuota);
 }
 

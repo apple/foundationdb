@@ -601,7 +601,7 @@ public:
 	int64_t reservedQuota{ 0 };
 	int64_t totalQuota{ 0 };
 	bool isValid() const;
-	Tuple pack();
+	Tuple pack() const;
 	static TagQuotaValue unpack(Tuple const& val);
 	bool operator==(TagQuotaValue const&) const;
 };

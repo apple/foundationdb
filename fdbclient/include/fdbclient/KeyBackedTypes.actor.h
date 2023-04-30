@@ -57,8 +57,8 @@
 // key parts and values from various types to Value strings and back.
 // New types can be supported either by writing a new specialization or adding these
 // methods to the type so that the default specialization can be used:
-//   static T T::unpack(Standalone<StringRef> const& val)
-//   Standalone<StringRef> T::pack(T const& val) const
+//   static T T::unpack(Tuple const& tuple);
+//   Tuple T::pack() const;
 // Since TupleCodec is a struct, partial specialization can be used, such as the std::pair
 // partial specialization below allowing any std::pair<T1,T2> where T1 and T2 are already
 // supported by TupleCodec.
