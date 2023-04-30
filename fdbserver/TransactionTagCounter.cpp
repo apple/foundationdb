@@ -29,9 +29,9 @@ class TopKTags {
 public:
 	struct TagAndCount {
 		TransactionTag tag;
-		int64_t count;
+		double count;
 		bool operator<(TagAndCount const& other) const { return count < other.count; }
-		explicit TagAndCount(TransactionTag tag, int64_t count) : tag(tag), count(count) {}
+		explicit TagAndCount(TransactionTag tag, double count) : tag(tag), count(count) {}
 	};
 
 private:
@@ -47,7 +47,7 @@ public:
 		topTags.reserve(limit);
 	}
 
-	void incrementCount(TransactionTag tag, int previousCount, int increase) {
+	void incrementCount(TransactionTag tag, double previousCount, double increase) {
 		auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
 		if (iter != topTags.end()) {
 			ASSERT_EQ(previousCount, iter->count);
@@ -65,12 +65,12 @@ public:
 		}
 	}
 
-	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalSampleCount) const {
+	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalCount) const {
 		std::vector<StorageQueuingMetricsReply::TagInfo> result;
 		for (auto const& tagAndCounter : topTags) {
-			auto rate = (tagAndCounter.count / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE) / elapsed;
+			auto rate = tagAndCounter.count / elapsed;
 			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
-				result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalSampleCount);
+				result.emplace_back(tagAndCounter.tag, rate, tagAndCounter.count / totalCount);
 			}
 		}
 		return result;
@@ -83,8 +83,8 @@ public:
 
 class TransactionTagCounterImpl {
 	UID thisServerID;
-	TransactionTagMap<int64_t> intervalCounts;
-	int64_t intervalTotalSampledCount = 0;
+	TransactionTagMap<double> intervalCounts;
+	double intervalTotalCost = 0;
 	TopKTags topTags;
 	double intervalStart = 0;
 
@@ -99,14 +99,13 @@ public:
 	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
 		if (tags.present()) {
 			CODE_PROBE(true, "Tracking transaction tag in counter");
-			auto const cost = getReadOperationCost(bytes);
-			for (auto& tag : tags.get()) {
-				int64_t& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
+			auto const cost = getReadOperationCost(bytes) / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
+			for (auto const& tag : tags.get()) {
+				double& count = intervalCounts[TransactionTag(tag, tags.get().getArena())];
 				topTags.incrementCount(tag, count, cost);
 				count += cost;
 			}
-
-			intervalTotalSampledCount += cost;
+			intervalTotalCost += cost;
 		}
 	}
 
@@ -114,7 +113,7 @@ public:
 		double elapsed = now() - intervalStart;
 		previousBusiestTags.clear();
 		if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-			previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalSampledCount);
+			previousBusiestTags = topTags.getBusiestTags(elapsed, intervalTotalCost);
 
 			// For status, report the busiest tag:
 			if (previousBusiestTags.empty()) {
@@ -142,7 +141,7 @@ public:
 		}
 
 		intervalCounts.clear();
-		intervalTotalSampledCount = 0;
+		intervalTotalCost = 0;
 		topTags.clear();
 		intervalStart = now();
 	}
@@ -174,9 +173,7 @@ TEST_CASE("/TransactionTagCounter/TopKTags") {
 
 	// Ensure that costs are larger enough to show up
 	auto const costMultiplier =
-	    std::max<double>(1.0,
-	                     2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
-	                         CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
+	    std::max<double>(1.0, 2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 
 	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
 	topTags.incrementCount("a"_sr, 0, 1 * costMultiplier);
