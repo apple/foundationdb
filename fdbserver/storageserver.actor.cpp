@@ -2268,9 +2268,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
-	auto const group =
+	auto const tenantGroup =
 	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
-	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
+	data->transactionTagCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -4413,9 +4413,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	auto const group =
+	auto const tenantGroup =
 	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
 	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -5901,9 +5901,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
-	auto const group =
+	auto const tenantGroup =
 	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
+	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
 
 	++data->counters.finishedQueries;
 

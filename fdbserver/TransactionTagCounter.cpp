@@ -96,7 +96,7 @@ public:
 	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
 	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
-	void addRequest(Optional<TagSet> const& tags, int64_t bytes) {
+	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
 		if (tags.present()) {
 			CODE_PROBE(true, "Tracking transaction tag in counter");
 			auto const cost = getReadOperationCost(bytes);
@@ -155,8 +155,10 @@ TransactionTagCounter::TransactionTagCounter(UID thisServerID)
 
 TransactionTagCounter::~TransactionTagCounter() = default;
 
-void TransactionTagCounter::addRequest(Optional<TagSet> const& tags, int64_t bytes) {
-	return impl->addRequest(tags, bytes);
+void TransactionTagCounter::addRequest(Optional<TagSet> const& tags,
+                                       Optional<TenantGroupName> const& tenantGroup,
+                                       int64_t bytes) {
+	return impl->addRequest(tags, tenantGroup, bytes);
 }
 
 void TransactionTagCounter::startNewInterval() {
