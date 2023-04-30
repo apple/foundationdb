@@ -12,26 +12,36 @@ public:
 		state std::unordered_set<TransactionTag> tagsWithQuota;
 
 		loop {
-			state ReadYourWritesTransaction tr(self->db);
+			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
 			loop {
 				try {
-					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+					tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 					tagsWithQuota.clear();
-					state RangeResult currentQuotas = wait(tr.getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id).detail("Size", currentQuotas.size());
+					state RangeResult tagQuotas = wait(tr->getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+					state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::TagQuotaValue>>
+					    tenantGroupQuotas = wait(TenantMetadata::throughputQuota().getRange(
+					        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
+					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id)
+					    .detail("TagQuotasSize", tagQuotas.size())
+					    .detail("TenantGroupQuotasSize", tenantGroupQuotas.results.size());
 					self->quotas.clear();
-					for (auto const kv : currentQuotas) {
+					for (auto const kv : tagQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						self->quotas[tag] = ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(kv.value));
+					}
+					for (auto const& [groupName, quota] : tenantGroupQuotas.results) {
+						// For now tenant group quotas override tag quotas.
+						// TODO: In the future, these two types of quotas should not conflict.
+						self->quotas[groupName] = quota;
 					}
 					wait(delay(5.0));
 					break;
 				} catch (Error& e) {
 					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
-					wait(tr.onError(e));
+					wait(tr->onError(e));
 				}
 			}
 		}
