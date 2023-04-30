@@ -91,6 +91,12 @@ class TransactionTagCounterImpl {
 	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
+	void updateTagCost(TransactionTag tag, double additionalCost) {
+		double& tagCost = intervalCosts[tag];
+		topTags.incrementCost(tag, tagCost, additionalCost);
+		tagCost += additionalCost;
+	}
+
 public:
 	TransactionTagCounterImpl(UID thisServerID)
 	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
@@ -100,12 +106,14 @@ public:
 		auto const cost = getReadOperationCost(bytes);
 		intervalTotalCost += cost;
 		if (tags.present()) {
-			CODE_PROBE(true, "Tracking transaction tag in counter");
 			for (auto const& tag : tags.get()) {
-				double& tagCost = intervalCosts[TransactionTag(tag, tags.get().getArena())];
-				topTags.incrementCost(tag, tagCost, cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
-				tagCost += cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
+				CODE_PROBE(true, "Tracking transaction tag in TransactionTagCounter");
+				updateTagCost(TransactionTag(tag, tags.get().getArena()), cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 			}
+		}
+		if (tenantGroup.present()) {
+			CODE_PROBE(true, "Tracking tenant group in TransactionTagCounter");
+			updateTagCost(tenantGroup.get(), cost);
 		}
 	}
 
