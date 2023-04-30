@@ -2145,6 +2145,7 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
+	state Optional<TenantGroupName> tenantGroup;
 	Span span("SS:getValue"_loc, req.spanContext);
 	// Temporarily disabled -- this path is hit a lot
 	// getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.first();
@@ -2182,7 +2183,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterVersion"); //.detail("TaskID", g_network->getCurrentTask());
 
-		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
+		tenantGroup =
+		    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.key = req.key.withPrefix(req.tenantInfo.prefix.get());
 		}
@@ -2268,8 +2270,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
-	auto const tenantGroup =
-	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
@@ -4234,6 +4234,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getKeyValues"_loc, req.spanContext);
+	state Optional<TenantGroupName> tenantGroup;
 	state int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
@@ -4273,7 +4274,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		                                                                         : UID());
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
+		tenantGroup =
+		    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 		if (req.tenantInfo.hasTenant()) {
 			req.begin.setKeyUnlimited(req.begin.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 			req.end.setKeyUnlimited(req.end.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
@@ -4413,8 +4415,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	auto const tenantGroup =
-	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
 	++data->counters.finishedQueries;
 
@@ -5822,6 +5822,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 
 ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	state Span span("SS:getKey"_loc, req.spanContext);
+	state Optional<TenantGroupName> tenantGroup;
 	state int64_t resultSize = 0;
 
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
@@ -5845,7 +5846,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		state Version version = wait(waitForVersion(data, commitVersion, req.version, req.spanContext));
 		data->counters.readVersionWaitSample.addMeasurement(g_network->timer() - queueWaitEnd);
 
-		data->checkTenantEntry(version, req.tenantInfo, req.options.map(&ReadOptions::lockAware).orDefault(false));
+		tenantGroup =
+		    data->getTenantGroup(version, req.tenantInfo, req.options.map(&ReadOptions::lockAware).orDefault(false));
 		if (req.tenantInfo.hasTenant()) {
 			req.sel.setKeyUnlimited(req.sel.getKey().withPrefix(req.tenantInfo.prefix.get(), req.arena));
 		}
@@ -5901,8 +5903,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
-	auto const tenantGroup =
-	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
 
 	++data->counters.finishedQueries;
