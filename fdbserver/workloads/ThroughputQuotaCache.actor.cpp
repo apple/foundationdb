@@ -79,36 +79,47 @@ class ThroughputQuotaCacheWorkload : public TestWorkload {
 		}
 	}
 
+	ACTOR static Future<Void> testTagQuota(Database cx, TransactionTag tag, RKThroughputQuotaCache const* quotaCache) {
+		ASSERT_EQ(quotaCache->size(), 0);
+		wait(setTagQuota(cx, tag, testReservedQuota(), testTotalQuota()));
+		while (quotaCache->size() != 1) {
+			wait(delay(1.0));
+		}
+		ASSERT_EQ(quotaCache->getReservedQuota(tag).get(), testReservedQuota());
+		ASSERT_EQ(quotaCache->getTotalQuota(tag).get(), testTotalQuota());
+		wait(removeTagQuota(cx, tag));
+		while (quotaCache->size() != 0) {
+			wait(delay(1.0));
+		}
+		ASSERT(!quotaCache->getReservedQuota(tag).present());
+		ASSERT(!quotaCache->getTotalQuota(tag).present());
+		return Void();
+	}
+
+	ACTOR static Future<Void> testTenantGroupQuota(Database cx,
+	                                               TenantGroupName tenantGroup,
+	                                               RKThroughputQuotaCache const* quotaCache) {
+		ASSERT_EQ(quotaCache->size(), 0);
+		wait(setTenantGroupQuota(cx, tenantGroup, testReservedQuota(), testTotalQuota()));
+		while (quotaCache->size() != 1) {
+			wait(delay(1.0));
+		}
+		ASSERT_EQ(quotaCache->getReservedQuota(tenantGroup).get(), testReservedQuota());
+		ASSERT_EQ(quotaCache->getTotalQuota(tenantGroup).get(), testTotalQuota());
+		wait(removeTenantGroupQuota(cx, tenantGroup));
+		while (quotaCache->size() != 0) {
+			wait(delay(1.0));
+		}
+		ASSERT(!quotaCache->getReservedQuota(tenantGroup).present());
+		ASSERT(!quotaCache->getTotalQuota(tenantGroup).present());
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx) {
 		state RKThroughputQuotaCache quotaCache(deterministicRandom()->randomUniqueID(), cx);
 		state Future<Void> runFuture = quotaCache.run();
-		ASSERT_EQ(quotaCache.size(), 0);
-		wait(setTagQuota(cx, "testTag"_sr, testReservedQuota(), testTotalQuota()));
-		while (quotaCache.size() != 1) {
-			wait(delay(1.0));
-		}
-		ASSERT_EQ(quotaCache.getReservedQuota("testTag"_sr).get(), testReservedQuota());
-		ASSERT_EQ(quotaCache.getTotalQuota("testTag"_sr).get(), testTotalQuota());
-		wait(removeTagQuota(cx, "testTag"_sr));
-		while (quotaCache.size() != 0) {
-			wait(delay(1.0));
-		}
-		ASSERT(!quotaCache.getReservedQuota("testTag"_sr).present());
-		ASSERT(!quotaCache.getTotalQuota("testTag"_sr).present());
-
-		wait(setTenantGroupQuota(cx, "testTenantGroup"_sr, testReservedQuota(), testTotalQuota()));
-		while (quotaCache.size() != 1) {
-			wait(delay(1.0));
-		}
-		ASSERT_EQ(quotaCache.getReservedQuota("testTenantGroup"_sr).get(), testReservedQuota());
-		ASSERT_EQ(quotaCache.getTotalQuota("testTenantGroup"_sr).get(), testTotalQuota());
-		wait(removeTenantGroupQuota(cx, "testTenantGroup"_sr));
-		while (quotaCache.size() != 0) {
-			wait(delay(1.0));
-		}
-		ASSERT(!quotaCache.getReservedQuota("testTenantGroup"_sr).present());
-		ASSERT(!quotaCache.getTotalQuota("testTenantGroup"_sr).present());
-
+		wait(testTagQuota(cx, "testTag"_sr, &quotaCache));
+		wait(testTenantGroupQuota(cx, "testTenantGroup"_sr, &quotaCache));
 		return Void();
 	}
 
