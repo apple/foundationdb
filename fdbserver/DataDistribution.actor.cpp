@@ -705,23 +705,15 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 // This actor must be a singleton
 ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
                                         Reference<DDSharedContext> context,
-                                        Database cx,
-                                        Reference<TCServerInfo> server) {
-
+                                        Database cx) {
 	try {
-		if (!server.isValid() || server->removed.isSet()) {
-			// Register as a storage server, so that DataDistributor could start data movement after
-			std::pair<Version, Tag> verAndTag = wait(addStorageServer(cx, req.ssi));
-			TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
-			    .detail("State", "BMAdded")
-			    .detail("ReqId", req.requesterID)
-			    .detail("Version", verAndTag.first)
-			    .detail("Tag", verAndTag.second);
-		} else {
-			TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
-			    .detail("State", "BMExisted")
-			    .detail("ReqId", req.requesterID);
-		}
+		// Register as a storage server, so that DataDistributor could start data movement after
+		std::pair<Version, Tag> verAndTag = wait(addStorageServer(cx, req.ssi));
+		TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
+		    .detail("State", "BMAdded")
+		    .detail("ReqId", req.requesterID)
+		    .detail("Version", verAndTag.first)
+		    .detail("Tag", verAndTag.second);
 
 		wait(prepareBlobRestore(
 		    cx, context->lock, context->ddEnabledState.get(), context->id(), req.keys, req.ssi.id(), req.requesterID));
@@ -754,14 +746,8 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 				continue;
 			}
 			if (self->context->ddEnabledState->setDDRestorePreparing(req.requesterID)) {
-				Reference<TCServerInfo> serverInfo;
-				if (self->teamCollection && self->teamCollection->server_info.contains(req.ssi.id())) {
-					serverInfo = self->teamCollection->server_info.at(req.ssi.id());
-				}
-
 				// setDDRestorePreparing won't destroy DataDistributor, but will destroy tracker and queue
-				self->addActor.send(
-				    prepareDataMigration(req, self->context, self->txnProcessor->context(), serverInfo));
+				self->addActor.send(prepareDataMigration(req, self->context, self->txnProcessor->context()));
 				// force reloading initData and restarting DD components
 				throw dd_config_changed();
 			} else {
