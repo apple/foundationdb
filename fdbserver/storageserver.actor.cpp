@@ -877,8 +877,8 @@ public:
 	void insertTenant(TenantMapEntry const& tenant, Version version, bool persist);
 	void clearTenants(StringRef startTenant, StringRef endTenant, Version version);
 
-	void checkTenantEntry(Version version, TenantInfo tenant, bool lockAware) const;
-	Optional<TenantGroupName> getTenantGroup(Version version, TenantInfo tenant, bool lockAware) const;
+	void checkTenantEntry(Version, TenantInfo, bool lockAware) const;
+	Optional<TenantGroupName> getTenantGroup(Version, TenantInfo, bool lockAware) const;
 
 	std::vector<StorageServerShard> getStorageServerShards(KeyRangeRef range);
 
@@ -2268,6 +2268,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
+	auto const group =
+	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
@@ -4411,6 +4413,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
+	auto const group =
+	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
 
@@ -5901,6 +5905,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
+	auto const group =
+	    data->getTenantGroup(version, req.tenantInfo, req.options.present() ? req.options.get().lockAware : false);
 	data->transactionTagCounter.addRequest(req.tags, resultSize);
 
 	++data->counters.finishedQueries;
