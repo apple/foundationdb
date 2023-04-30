@@ -2,6 +2,7 @@
  * RKThroughputQuotaCache.actor.cpp
  */
 
+#include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
 #include "flow/actorcompiler.h" // must be last include
@@ -12,7 +13,7 @@ public:
 		state std::unordered_set<TransactionTag> tagsWithQuota;
 
 		loop {
-			state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
+			state Reference<ReadYourWritesTransaction> tr = self->db->createTransaction();
 			loop {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
