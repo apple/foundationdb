@@ -5591,7 +5591,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedGetMappedRangeQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -5617,7 +5616,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 // selector offset prevents all data from being read in one range read
 {
 	state Span span("SS:getKeyValuesStream"_loc, req.spanContext);
-	state int64_t resultSize = 0;
 
 	req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
 	++data->counters.getRangeStreamQueries;
@@ -5806,7 +5804,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 					end = lastKey;
 				}
 
-				data->transactionTagCounter.addRequest(req.tags, resultSize);
 				// lock.release();
 			}
 		}
@@ -5818,7 +5815,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 		}
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, resultSize);
 	++data->counters.finishedQueries;
 
 	return Void();
