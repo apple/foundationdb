@@ -115,11 +115,39 @@ class ThroughputQuotaCacheWorkload : public TestWorkload {
 		return Void();
 	}
 
+	// When tenant groups and tags have conflicting names, tenant groups take priority
+	// TODO: Change this behaviour in the future, to allow for complete separation of
+	// tenant group quotas and tag quotas.
+	ACTOR static Future<Void> testConflictingNames(Database cx,
+	                                               Standalone<StringRef> sharedName,
+	                                               RKThroughputQuotaCache const* quotaCache) {
+		ASSERT_EQ(quotaCache->size(), 0);
+		wait(setTenantGroupQuota(cx, sharedName, testReservedQuota(), testTotalQuota()));
+		wait(setTagQuota(cx, sharedName, testReservedQuota() * 2, testTotalQuota() * 2));
+		while (quotaCache->size() != 1) {
+			wait(delay(1.0));
+		}
+		ASSERT_EQ(quotaCache->getReservedQuota(sharedName).get(), testReservedQuota());
+		ASSERT_EQ(quotaCache->getTotalQuota(sharedName).get(), testTotalQuota());
+		wait(removeTenantGroupQuota(cx, sharedName));
+		while (quotaCache->getReservedQuota(sharedName).get() != testReservedQuota() * 2) {
+			wait(delay(1.0));
+		}
+		ASSERT_EQ(quotaCache->size(), 1);
+		ASSERT_EQ(quotaCache->getTotalQuota(sharedName).get(), testTotalQuota() * 2);
+		wait(removeTagQuota(cx, sharedName));
+		while (quotaCache->size() != 0) {
+			wait(delay(1.0));
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx) {
 		state RKThroughputQuotaCache quotaCache(deterministicRandom()->randomUniqueID(), cx);
 		state Future<Void> runFuture = quotaCache.run();
 		wait(testTagQuota(cx, "testTag"_sr, &quotaCache));
 		wait(testTenantGroupQuota(cx, "testTenantGroup"_sr, &quotaCache));
+		wait(testConflictingNames(cx, "testConflictingName"_sr, &quotaCache));
 		return Void();
 	}
 
