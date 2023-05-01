@@ -2481,20 +2481,6 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 			}
 		}
 		statusObj["number_of_key_ranges"] = totalRanges;
-
-		// Mutation log backup
-		state std::string mlogsUrl = wait(getMutationLogUrl());
-		statusObj["mutation_log_location"] = mlogsUrl;
-		if (mlogsUrl != "") {
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-			BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
-			if (desc.contiguousLogEnd.present()) {
-				statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();
-			}
-			if (desc.minLogBegin.present()) {
-				statusObj["mutation_log_begin_version"] = desc.minLogBegin.get();
-			}
-		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
