@@ -340,7 +340,6 @@ struct KeyRangeRef {
 	bool isCovered(std::vector<KeyRangeRef>& ranges) {
 		ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 		KeyRangeRef clone(begin, end);
-
 		for (auto r : ranges) {
 			if (clone.begin < r.begin)
 				return false; // uncovered gap between clone.begin and r.begin

@@ -4161,12 +4161,6 @@ struct ServerPriority {
 
 Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	cleanupLargeTeams();
-	if (largeTeams.size() >= SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS) {
-		TraceEvent(SevWarnAlways, "TooManyLargeTeams", distributorId)
-		    .suppressFor(1.0)
-		    .detail("TeamCount", largeTeams.size());
-		return Reference<TCTeamInfo>();
-	}
 
 	std::map<UID, ServerPriority> server_priority;
 	for (auto& [serverID, server] : server_info) {
@@ -4180,10 +4174,12 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 	}
 
+	int totalShardCount = 0;
 	for (auto& team : largeTeams) {
 		const auto servers = team->getServerIDs();
 		const int shardCount =
 		    shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(servers, primary));
+		totalShardCount += shardCount;
 		if (team->isHealthy()) {
 			for (auto& it : servers) {
 				auto f = server_priority.find(it);
@@ -4199,6 +4195,14 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 				}
 			}
 		}
+	}
+
+	if (totalShardCount >= SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+		TraceEvent(SevWarnAlways, "TooManyShardsOnLargeTeams", distributorId)
+		    .suppressFor(1.0)
+		    .detail("TeamCount", largeTeams.size())
+		    .detail("ShardCount", totalShardCount);
+		return Reference<TCTeamInfo>();
 	}
 
 	// The set of all healthy servers sorted so the most desirable option is first in the list
