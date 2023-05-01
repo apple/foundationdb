@@ -2830,7 +2830,6 @@ void disableConnectionFailures(std::string const& context) {
 	}
 }
 
-
 // Opens a file for asynchronous I/O
 Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& filename, int64_t flags, int64_t mode) {
 	ASSERT((flags & IAsyncFile::OPEN_ATOMIC_WRITE_AND_CREATE) || !(flags & IAsyncFile::OPEN_CREATE) ||

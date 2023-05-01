@@ -1220,9 +1220,9 @@ static bool largePagesPrivilegeEnabled = false;
 static void enableLargePages() {
 	if (largePagesPrivilegeEnabled)
 		return;
-		// SOMEDAY: can/should we teach the client how to enable large pages
-		// on Linux? Or just rely on the system to have been configured as
-		// desired?
+	// SOMEDAY: can/should we teach the client how to enable large pages
+	// on Linux? Or just rely on the system to have been configured as
+	// desired?
 }
 
 static void* mmapSafe(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {
@@ -2299,40 +2299,40 @@ platform::ImageInfo getCachedImageInfo() {
 #include <execinfo.h>
 
 namespace platform {
-	ImageInfo getImageInfo() {
-		return getCachedImageInfo();
-	}
+ImageInfo getImageInfo() {
+	return getCachedImageInfo();
+}
 
-	size_t raw_backtrace(void** addresses, int maxStackDepth) {
+size_t raw_backtrace(void** addresses, int maxStackDepth) {
 #if !defined(__APPLE__)
-		// absl::GetStackTrace doesn't have an implementation for MacOS.
-		return absl::GetStackTrace(addresses, maxStackDepth, 0);
+	// absl::GetStackTrace doesn't have an implementation for MacOS.
+	return absl::GetStackTrace(addresses, maxStackDepth, 0);
 #else
-		return backtrace(addresses, maxStackDepth);
+	return backtrace(addresses, maxStackDepth);
 #endif
-	}
+}
 
-	std::string format_backtrace(void** addresses, int numAddresses) {
-		ImageInfo const& imageInfo = getCachedImageInfo();
+std::string format_backtrace(void** addresses, int numAddresses) {
+	ImageInfo const& imageInfo = getCachedImageInfo();
 #ifdef __APPLE__
-		std::string s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
-		for (int i = 1; i < numAddresses; i++) {
-			s += format(" %p", addresses[i]);
-		}
+	std::string s = format("atos -o %s -arch x86_64 -l %p", imageInfo.symbolFileName.c_str(), imageInfo.offset);
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", addresses[i]);
+	}
 #else
-		std::string s = format("addr2line -e %s -p -C -f -i", imageInfo.symbolFileName.c_str());
-		for (int i = 1; i < numAddresses; i++) {
-			s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
-		}
+	std::string s = format("addr2line -e %s -p -C -f -i", imageInfo.symbolFileName.c_str());
+	for (int i = 1; i < numAddresses; i++) {
+		s += format(" %p", (char*)addresses[i] - (char*)imageInfo.offset);
+	}
 #endif
-		return s;
-	}
+	return s;
+}
 
-	std::string get_backtrace() {
-		void* addresses[50];
-		size_t size = raw_backtrace(addresses, 50);
-		return format_backtrace(addresses, size);
-	}
+std::string get_backtrace() {
+	void* addresses[50];
+	size_t size = raw_backtrace(addresses, 50);
+	return format_backtrace(addresses, size);
+}
 } // namespace platform
 
 bool isLibraryLoaded(const char* lib_path) {

@@ -243,9 +243,9 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 		fullPath = uniquePath;
 	}
-// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
-// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
-// by the same process that failed the first task execution anyway, which is a very rare case.
+	// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
+	// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
+	// by the same process that failed the first task execution anyway, which is a very rare case.
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 
 	if (g_network->isSimulated()) {
