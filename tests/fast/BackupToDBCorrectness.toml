@@ -8,7 +8,7 @@ storageEngineType = 5
 
 [[knobs]]
 shard_encode_location_metadata = true
-enable_dd_physical_shard_move = false
+enable_dd_physical_shard_move = true
 
 [[test]]
 testTitle = 'BackupAndRestore'

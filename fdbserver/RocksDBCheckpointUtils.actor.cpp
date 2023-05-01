@@ -93,9 +93,6 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.smallest = fileMetaData.smallest;
-		liveFileMetaData.largest = fileMetaData.largest;
-		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.db_path = fileMetaData.db_path;
@@ -215,7 +212,9 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			} else if (e.code() != error_code_end_of_stream) {
 				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)

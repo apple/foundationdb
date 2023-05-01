@@ -24,7 +24,7 @@
 
 namespace {
 const KeyRangeRef persistMoveInShardKeys =
-    KeyRangeRef(PERSIST_PREFIX "MoveInShard/"_sr, PERSIST_PREFIX "MoveInShard0"_sr);
+    KeyRangeRef(PERSIST_PREFIX "MoveInShards/"_sr, PERSIST_PREFIX "MoveInShards0"_sr);
 const KeyRef persistMoveInUpdatesPrefix = PERSIST_PREFIX "MoveInShardUpdates/"_sr;
 } // namespace
 
