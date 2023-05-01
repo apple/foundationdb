@@ -1918,9 +1918,6 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 }
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
-	    .detail("Range", req.range)
-	    .detail("AuditType", req.type);
 	state UID auditId;
 
 	try {
@@ -1928,24 +1925,27 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
+		    .detail("Range", req.range)
+		    .detail("AuditType", req.type)
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		TriggerAuditRequest fReq(req.getType(), req.range);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
-		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.send(auditId);
-		}
+		req.reply.send(auditId);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
+		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
+		if (e.code() == error_code_broken_promise) {
+			req.reply.sendError(request_maybe_delivered()); // we do not know whether the result is persist
+		} else {
 			req.reply.sendError(audit_storage_failed());
 		}
 	}
@@ -1956,7 +1956,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
-		TraceEvent(SevDebug, "TriggerAuditStorageReceived", self->id)
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
@@ -2801,12 +2801,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
+	state Future<Void> updaterDelay = Void();
 	loop {
-		state Future<Void> updaterDelay =
-		    self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? delay(60.0) : Never();
 		choose {
-			when(wait(self->db.serverInfo->onChange())) {}
-			when(wait(updaterDelay)) {
+			when(wait(self->db.serverInfo->onChange())) {
+				updaterDelay = Void();
+			}
+			when(wait(self->db.clusterType == ClusterType::METACLUSTER_MANAGEMENT ? updaterDelay : Never())) {
 				try {
 					wait(store(self->db.metaclusterMetrics,
 					           metacluster::MetaclusterMetrics::getMetaclusterMetrics(self->cx)));
@@ -2816,6 +2817,8 @@ ACTOR Future<Void> metaclusterMetricsUpdater(ClusterControllerData* self) {
 						throw;
 					}
 				}
+
+				updaterDelay = delay(60.0);
 			}
 		}
 	}

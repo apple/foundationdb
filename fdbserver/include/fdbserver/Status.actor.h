@@ -53,7 +53,7 @@ Future<StatusReply> clusterGetStatus(
     std::vector<NetworkAddress> const& incompatibleConnections,
     Version const& datacenterVersionDifference,
     ConfigBroadcaster const* const& conifgBroadcaster,
-    Optional<MetaclusterRegistrationEntry> const& metaclusterRegistration,
+    Optional<UnversionedMetaclusterRegistrationEntry> const& metaclusterRegistration,
     metacluster::MetaclusterMetrics const& metaclusterMetrics);
 
 struct WorkerEvents : std::map<NetworkAddress, TraceEventFields> {};

@@ -330,7 +330,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
 
 	// Large teams are disabled when SHARD_ENCODE_LOCATION_METADATA is enabled
-	init( DD_MAXIMUM_LARGE_TEAMS,                                100 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAMS = 0;
+	init( DD_MAX_SHARDS_ON_LARGE_TEAMS,                          100 ); if( randomize && BUGGIFY ) DD_MAX_SHARDS_ON_LARGE_TEAMS = 0;
 	init( DD_MAXIMUM_LARGE_TEAM_CLEANUP,                       10000 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAM_CLEANUP = 10;
 	init( DD_LARGE_TEAM_DELAY,                                  60.0 );
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
@@ -850,6 +850,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
+	init( AUDIT_RETRY_COUNT_MAX,                                  10 );
+	init( SS_AUDIT_AUTO_PROCEED_COUNT_MAX,                         5 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
