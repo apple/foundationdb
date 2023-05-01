@@ -103,6 +103,8 @@ void printMetaclusterConfigureOptionsUsage() {
 	fmt::print("max_tenant_groups sets the maximum number of tenant groups that can be assigned\n"
 	           "to the named data cluster.\n");
 	fmt::print("connection_string sets the connection string for the named data cluster.\n");
+	fmt::print("auto_tenant_assignment determines whether this data cluster is added to the auto-assignment pool, i.e. "
+	           "whether tenants may be automatically assigned to this data cluster.\n");
 }
 
 // metacluster create command
@@ -614,7 +616,7 @@ void metaclusterGenerator(const char* text,
 			                   "configure",           "list",         "get",      "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
-		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
+		const char* opts[] = { "max_tenant_groups=", "connection_string=", "auto_tenant_assignment=", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if ((tokens.size() == 2 && tokencmp(tokens[1], "status")) ||
 	           (tokens.size() == 3 && tokencmp(tokens[1], "get"))) {
@@ -652,11 +654,12 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "<NAME>",
-			                                     "connection_string=<CONNECTION_STRING>",
-			                                     "[max_tenant_groups=<NUM_GROUPS>]",
-			                                     "[auto_tenant_assignment=<enabled|disabled>]" };
-		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		static std::vector<const char*> opts = {
+			"<NAME>",
+			"connection_string=<CONNECTION_STRING>",
+			"[max_tenant_groups=<NUM_GROUPS>|auto_tenant_assignment=<enabled|disabled>]"
+		};
+		return std::vector<const char*>(opts.begin() + std::min<int>(2, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "[FORCE]", "<NAME>" };
 		if (tokens.size() == 2) {
