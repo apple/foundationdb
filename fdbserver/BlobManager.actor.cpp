@@ -46,6 +46,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
@@ -452,7 +453,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
 		}
-
 		if (SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL != "") {
 			manifestStore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 		}
@@ -3565,10 +3565,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		if (!bmData->manifestStore.isValid()) {
-			TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-			throw blob_restore_invalid_manifest_url();
-		}
 		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
 		ASSERT(restoreState.present());
 		state BlobRestorePhase phase = restoreState.get().phase;
@@ -5510,8 +5506,9 @@ ACTOR Future<int64_t> getLastFlushTs(Database db) {
 	}
 }
 
-bool shouldBackupManifest(Reference<BlobManagerData> bmData) {
-	if (!SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
+ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
+	bool enabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	if (!enabled) {
 		return false;
 	}
 
@@ -5531,12 +5528,12 @@ bool shouldBackupManifest(Reference<BlobManagerData> bmData) {
 ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	loop {
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
-
-		if (!shouldBackupManifest(bmData)) {
-			continue;
-		}
-
 		try {
+			bool shouldBackup = wait(shouldBackupManifest(bmData));
+			if (!shouldBackup) {
+				continue;
+			}
+
 			int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
 			bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
 			if (!shouldFlush) {
@@ -5589,6 +5586,12 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	}
 }
 
+ACTOR Future<Reference<BlobConnectionProvider>> initManifestStore(Reference<BlobManagerData> bmData) {
+	auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+	std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
+	return BlobConnectionProvider::newBlobConnectionProvider(url);
+}
+
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
@@ -5596,22 +5599,25 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->enableManifestEncryption = config.encryptionAtRestMode.isEncryptionEnabled();
 
 	loop {
-		// Skip backup if no active blob ranges
-		if (shouldBackupManifest(bmData)) {
-			if (bmData->manifestStore.isValid()) {
-				int64_t bytes = wait(dumpManifest(bmData->db,
-				                                  bmData->dbInfo,
-				                                  bmData->manifestStore,
-				                                  bmData->epoch,
-				                                  bmData->manifestDumperSeqNo,
-				                                  bmData->enableManifestEncryption));
-				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
-				bmData->stats.manifestSizeInBytes += bytes;
-				bmData->stats.lastManifestDumpTs = now();
-				bmData->manifestDumperSeqNo++;
-			} else {
-				TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
+		try {
+			// Skip backup if no active blob ranges
+			bool shouldBackup = wait(shouldBackupManifest(bmData));
+			if (shouldBackup) {
+				if (bmData->manifestStore.isValid()) {
+					int64_t bytes = wait(dumpManifest(bmData->db,
+					                                  bmData->dbInfo,
+					                                  bmData->manifestStore,
+					                                  bmData->epoch,
+					                                  bmData->manifestDumperSeqNo,
+					                                  bmData->enableManifestEncryption));
+					bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
+					bmData->stats.manifestSizeInBytes += bytes;
+					bmData->stats.lastManifestDumpTs = now();
+					bmData->manifestDumperSeqNo++;
+				}
 			}
+		} catch (Error& e) {
+			TraceEvent("BackupManifestError").error(e);
 		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
@@ -5706,10 +5712,8 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
 		}
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
-			self->addActor.send(backupManifest(self));
-			self->addActor.send(truncateMutationLogs(self));
-		}
+		self->addActor.send(backupManifest(self));
+		self->addActor.send(truncateMutationLogs(self));
 
 		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));

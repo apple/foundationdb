@@ -193,6 +193,9 @@ enum {
 	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
+
+	// blob granules backup/restore
+	OPT_BLOB_MANIFEST_URL,
 };
 
 // Top level binary commands.
@@ -280,6 +283,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
+	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1131,6 +1135,10 @@ static void printBackupUsage(bool devhelp) {
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
 	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
 	       "Generally, these two options should not be used together.\n");
+	printf("  --blob-manifest-url URL\n"
+	       "                 Perform blob manifest backup. Manifest files are stored to the destination URL.\n"
+	       "                 Blob granules should be enabled first for manifest backup.\n");
+
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -1965,7 +1973,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 WaitForComplete waitForCompletion,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
-                                IncrementalBackupOnly incrementalBackupOnly) {
+                                IncrementalBackupOnly incrementalBackupOnly,
+                                Optional<std::string> blobManifestUrl) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2018,7 +2027,9 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
-			                              incrementalBackupOnly));
+			                              incrementalBackupOnly,
+			                              {},
+			                              blobManifestUrl));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -3531,6 +3542,7 @@ int main(int argc, char* argv[]) {
 		bool jsonOutput = false;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
+		Optional<std::string> blobManifestUrl;
 
 		BackupModifyOptions modifyOptions;
 
@@ -3953,6 +3965,10 @@ int main(int argc, char* argv[]) {
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
+			case OPT_BLOB_MANIFEST_URL: {
+				blobManifestUrl = args->OptionArg();
+				break;
+			}
 			}
 		}
 
@@ -4185,7 +4201,8 @@ int main(int argc, char* argv[]) {
 				                           waitForDone,
 				                           stopWhenDone,
 				                           usePartitionedLog,
-				                           incrementalBackupOnly));
+				                           incrementalBackupOnly,
+				                           blobManifestUrl));
 				break;
 			}
 
@@ -4371,6 +4388,7 @@ int main(int argc, char* argv[]) {
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
 				                         encryptionKeyFile));
+
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::True)));
