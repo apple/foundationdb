@@ -1058,9 +1058,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 	// Retrieves a vector of the storage servers' estimates for the size of a particular shard
 	// If a storage server can't be reached, its estimate will be -1
 	// If there is an error, then the returned vector will have 0 size
-	ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageServerInterface> storageServers,
-	                                                          KeyRangeRef shard) {
+	ACTOR Future<std::pair<std::vector<int64_t>, StorageMetrics>> getStorageSizeEstimate(
+	    std::vector<StorageServerInterface> storageServers,
+	    KeyRangeRef shard) {
 		state std::vector<int64_t> estimatedBytes;
+		state StorageMetrics metrics;
 
 		state WaitMetricsRequest req;
 		req.keys = shard;
@@ -1100,9 +1102,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				else if (reply.present()) {
 					int64_t numBytes = reply.get().bytes;
 					estimatedBytes.push_back(numBytes);
-					if (firstValidStorageServer < 0)
+					if (firstValidStorageServer < 0) {
 						firstValidStorageServer = i;
-					else if (estimatedBytes[firstValidStorageServer] != numBytes) {
+						metrics = reply.get();
+					} else if (estimatedBytes[firstValidStorageServer] != numBytes) {
 						TraceEvent("ConsistencyCheck_InconsistentStorageMetrics")
 						    .detail("ByteEstimate1", estimatedBytes[firstValidStorageServer])
 						    .detail("ByteEstimate2", numBytes)
@@ -1125,7 +1128,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			estimatedBytes.clear();
 		}
 
-		return estimatedBytes;
+		return std::make_pair(estimatedBytes, metrics);
 	}
 
 	// Comparison function used to compare map elements by value
@@ -1290,8 +1293,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				}
 			}
 
-			state std::vector<int64_t> estimatedBytes =
+			std::pair<std::vector<int64_t>, StorageMetrics> estimatedBytesAndMetrics =
 			    wait(self->getStorageSizeEstimate(storageServerInterfaces, range));
+			state std::vector<int64_t> estimatedBytes = estimatedBytesAndMetrics.first;
+			state StorageMetrics estimated = estimatedBytesAndMetrics.second;
 
 			// Gets permitted size range of shard
 			int64_t maxShardSize = getMaxShardSize(dbSize);
@@ -1680,6 +1685,27 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					self->testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev));
 				}
 
+				// Check if the storage server returns split point for the shard. There are cases where
+				// the split point returned by storage server is discarded because it's an unfair split.
+				// See splitStorageMetrics() in NativeAPI.actor.cpp.
+				if (canSplit && sampledKeys > 5 && self->performQuiescentChecks) {
+					StorageMetrics splitMetrics;
+					splitMetrics.bytes = shardBounds.max.bytes / 2;
+					splitMetrics.bytesPerKSecond = range.begin >= keyServersKeys.begin
+					                                   ? splitMetrics.infinity
+					                                   : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+					splitMetrics.iosPerKSecond = splitMetrics.infinity;
+					splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+
+					Standalone<VectorRef<KeyRef>> splits =
+					    wait(cx->splitStorageMetrics(range, splitMetrics, estimated));
+					if (splits.size() <= 2) {
+						// Because the range's begin and end is included in splits, so this is the case
+						// the returned split is unfair and is discarded.
+						TraceEvent("ConsistencyCheck_DiscardSplits").detail("Range", range);
+						canSplit = false;
+					}
+				}
 				// In a quiescent database, check that the (estimated) size of the shard is within permitted bounds
 				// Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard
 				// sizes are not precise Shard splits ignore the first key in a shard, so its size shouldn't be
