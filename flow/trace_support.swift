@@ -7,10 +7,20 @@ import Flow
 /// We need this because the C++ type actually mutates the struct, which in Swift would need to be
 /// expressed as mutating functions on a variable, and cannot be done in a "fluent" style.
 /// Instead, this wrapper returns a new struct when a detail is added allowing for the same style of use.
-public struct STraceEvent {
+public final class STraceEvent {
+    private var keepAlive: [std.string] = []
+
     public var event: Flow.TraceEvent
-    public init(_ type: String, _ id: Flow.UID) {
-        event = .init(type, id)
+    public init(_ type: std.string, _ id: Flow.UID) {
+        keepAlive.append(type)
+        event = .init(type.__c_strUnsafe(), id)
+    }
+
+    /// This function allows ignoring the returned value, i.e. emitting just a plain event
+    /// without any extra `detail()` attached to it.
+    @discardableResult
+    public static func make(_ type: std.string, _ id: Flow.UID) -> Self {
+        .init(type, id)
     }
 
     // Due to a limitation of passing a generic `T` to a C++ template, we cannot just use
@@ -19,75 +29,75 @@ public struct STraceEvent {
 
     @discardableResult
     public func detail(_ type: std.string, _ value: OptionalStdString) -> Self {
-        var copy = self
-        copy.event.addDetail(type, value)
-        return copy
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 
     @discardableResult
     public func detail(_ type: std.string, _ value: std.string) -> Self {
-        var copy = self
-        copy.event.addDetail(type, value)
-        return copy
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 
     @discardableResult
     public func detail(_ type: std.string, _ value: Float) -> Self {
-        var copy = self
-        copy.event.addDetail(type, value)
-        return copy
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 
     @discardableResult
-    public func detail(_ type: String, _ value: Double) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: Double) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 
     @discardableResult
-    public func detail(_ type: String, _ value: Int) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: Int) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
     @discardableResult
-    public func detail(_ type: String, _ value: OptionalInt64) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: OptionalInt64) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 
     // TODO(swift): we seem to have a problem when mapping Int8 -> char
 //        @discardableResult
-//        public func detail(_ type: String, _ value: Int8) -> Self {
-//            var copy = self
-//            copy.event.addDetail(std.string(type), value)
-//            return copy
+//        public func detail(_ type: std.string, _ value: Int8) -> Self {
+//            // var copy = self
+//            /*copy*/event.addDetail(type, value)
+//            return self
 //        }
 
     @discardableResult
-    public func detail(_ type: String, _ value: UInt32) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: UInt32) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
     @discardableResult
-    public func detail(_ type: String, _ value: Int32) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: Int32) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
     @discardableResult
-    public func detail(_ type: String, _ value: Int64) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: Int64) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
     @discardableResult
-    public func detail(_ type: String, _ value: UInt64) -> Self {
-        var copy = self
-        copy.event.addDetail(std.string(type), value)
-        return copy
+    public func detail(_ type: std.string, _ value: UInt64) -> Self {
+        /*copy*/keepAlive.append(type)
+        /*copy*/event.addDetail(type, value)
+        return self
     }
 }

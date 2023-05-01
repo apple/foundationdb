@@ -364,6 +364,7 @@ public actor MasterDataActor {
 
         if (req.commitProxies.size() > 0) {
             var registeredUIDs = [UID]()
+            registeredUIDs.reserveCapacity(req.commitProxies.size())
             for j in 0..<req.commitProxies.size() { // TODO(swift): can we make this be a Sequence?
                 registeredUIDs.append(req.commitProxies[j].id())
             }
@@ -466,7 +467,7 @@ public func masterServerSwift(
 //                        "Master born doomed");
 
                 STraceEvent("MasterLifetime", masterData.dbgid)
-//                    .detail("LifetimeToken", lifetime.toString())
+                    .detail("LifetimeToken", lifetime.toString())
 
                 while true {
                     guard (try? await db.onChange().value()) != nil else {
