@@ -798,7 +798,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 				continue;
 			}
 
-			if (!localityIsInPrimaryDc(tlog.interf().filteredLocality)) {
+			if (dbi.logSystemConfig.tLogs.size() > 1 && !localityIsInPrimaryDc(tlog.interf().filteredLocality)) {
 				continue;
 			}
 
@@ -1039,7 +1039,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
                                  Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
+		if (dbInfo->get().recoveryState >= RecoveryState::RECRUITING && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
 			UpdateWorkerHealthRequest req;
@@ -1051,8 +1051,13 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
 				workerLocation = Remote;
 			}
+			state bool skipTxnSystemCheck = dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS;
 
-			if (workerLocation != None) {
+			TraceEvent("WorkerHealthMonitorCheckerStart")
+			    .detail("WorkerLocation", workerLocation)
+			    .detail("Delay", SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
+
+			if (workerLocation != None || skipTxnSystemCheck) {
 				for (const auto& [address, peer] : allPeers) {
 					if (peer->connectFailedCount == 0 &&
 					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
@@ -1068,10 +1073,17 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					bool degradedPeer = false;
 					bool disconnectedPeer = false;
 
+					TraceEvent("WorkerHealthMonitorChecker")
+					    .detail("Percentage", peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()))
+					    .detail("PeerAddr", address)
+						.detail("SkipTxnSystemCheck", skipTxnSystemCheck)
+					    .detail("WorkerLocation", workerLocation)
+					    .detail("AddressInDB", addressInDbAndPrimaryDc(address, dbInfo));
+
 					// If peer->lastLoggedTime == 0, we just started monitor this peer and haven't logged it once yet.
 					double lastLoggedTime = peer->lastLoggedTime <= 0.0 ? peer->lastConnectTime : peer->lastLoggedTime;
 					if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
-					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo))) {
+					    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) || skipTxnSystemCheck) {
 						// Monitors intra DC latencies between servers that in the primary or remote DC's transaction
 						// systems. Note that currently we are not monitor storage servers, since lagging in storage
 						// servers today already can trigger server exclusion by data distributor.
@@ -1166,6 +1178,8 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty()) {
 				req.address = FlowTransport::transport().getLocalAddress();
+				TraceEvent("WorkerSendDegradedPeer").detail("DegradedPeers", describe(req.degradedPeers))
+					.detail("DisconnectedPeers", req.disconnectedPeers);
 				ccInterface->get().get().updateWorkerHealth.send(req);
 			}
 		}
