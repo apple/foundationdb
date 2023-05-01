@@ -43,10 +43,6 @@ on 1 byte), but shoehorning those bytes into integers efficiently is messy.
  * My best guess at if you are big-endian or little-endian.  This may
  * need adjustment.
  */
-#ifdef WIN32
-#define HASH_LITTLE_ENDIAN 1
-#define HASH_BIG_ENDIAN 0
-#else
 #include <sys/param.h> /* attempt to define endianness */
 #ifdef linux
 #include <endian.h> /* attempt to define endianness */
@@ -64,7 +60,6 @@ on 1 byte), but shoehorning those bytes into integers efficiently is messy.
 #else
 #define HASH_LITTLE_ENDIAN 0
 #define HASH_BIG_ENDIAN 0
-#endif
 #endif
 
 #define hashsize(n) ((uint32_t)1 << (n))

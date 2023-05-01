@@ -34,12 +34,8 @@
 
 #include "flow/ThreadHelper.actor.h"
 
-#if __unixish__
 #define HAVE_LINENOISE 1
 #include "linenoise/linenoise.h"
-#else
-#define HAVE_LINENOISE 0
-#endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LineNoiseReader final : IThreadPoolReceiver {

@@ -49,16 +49,6 @@ u32 sqlite3VdbeSerialGet(const unsigned char*, u32, Mem*);
 
 void hexdump(FILE* fout, StringRef val);
 
-/*#undef state
-#include <Windows.h>*/
-
-/*uint64_t getFileSize( const char* filename ) {
-    HANDLE f = CreateFile( filename, GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE, nullptr,
-OPEN_EXISTING, 0, nullptr); if (f == INVALID_HANDLE_VALUE) return 0; DWORD hi,lo; lo = GetFileSize(f, &hi);
-    CloseHandle(f);
-    return (uint64_t(hi)<<32) + lo;
-}*/
-
 struct SpringCleaningStats {
 	int64_t springCleaningCount;
 	int64_t lazyDeletePages;

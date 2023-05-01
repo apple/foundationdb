@@ -27,9 +27,7 @@
 #include <memory>
 
 #ifndef DLLEXPORT
-#if defined(_MSC_VER)
-#define DLLEXPORT __declspec(dllexport)
-#elif defined(__GNUG__)
+#if defined(__GNUG__)
 #define DLLEXPORT __attribute__((visibility("default")))
 #else
 #error Missing symbol export

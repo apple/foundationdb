@@ -28,9 +28,7 @@
 #include "flow/Trace.h"
 #include "flow/flow.h"
 #include <cstddef>
-#ifndef WIN32
 #include <sys/socket.h>
-#endif
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/IConnection.h"
@@ -46,12 +44,8 @@ UDPMetricClient::UDPMetricClient()
 	model = knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL);
 }
 
-// Since MSG_DONTWAIT isn't defined for Windows, we need to add a
-// ifndef guard here to avoid any compilation issues
 void UDPMetricClient::send_packet(int fd, const void* data, size_t len) {
-#ifndef WIN32
 	::send(fd, data, len, MSG_DONTWAIT);
-#endif
 }
 
 void UDPMetricClient::send(MetricCollection* metrics) {

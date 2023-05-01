@@ -51,11 +51,7 @@
 #include <utility>
 #include <variant>
 
-#ifndef _WIN32
 #include <unistd.h>
-#else
-#include <io.h>
-#endif
 
 #define BLOB_CIPHER_DEBUG DEBUG_ENCRYPT_KEY_CIPHER
 

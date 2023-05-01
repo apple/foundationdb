@@ -44,12 +44,6 @@
 #include "flow/network.h"
 #include "flow/SimBugInjector.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#undef max
-#undef min
-#endif
-
 // Allocations can only be logged when this value is 0.
 // Anybody that needs to disable tracing should increment this by 1 for the duration
 // that they need the disabling to be in effect.
@@ -1285,11 +1279,7 @@ int BaseTraceEvent::getMaxEventLength() const {
 }
 
 BaseTraceEvent& BaseTraceEvent::GetLastError() {
-#ifdef _WIN32
-	return detailf("WinErrorCode", "%x", ::GetLastError());
-#elif defined(__unixish__)
 	return detailf("UnixErrorCode", "%x", errno).detail("UnixError", strerror(errno));
-#endif
 }
 
 unsigned long BaseTraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = { 0, 0, 0, 0, 0 };
@@ -1422,14 +1412,10 @@ std::string BaseTraceEvent::printRealTime(double time) {
 		ts = Clock::to_time_t(Clock::now());
 	}
 	std::stringstream ss;
-#ifdef _WIN32
-	// MSVC gmtime is threadsafe
-	ss << std::put_time(::gmtime(&ts), "%Y-%m-%dT%H:%M:%SZ");
-#else
 	// use threadsafe gmt
 	struct tm result;
 	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
-#endif
+
 	return ss.str();
 }
 

@@ -34,13 +34,8 @@ struct ActorFuzzWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return Void(); }
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
-			// Only include this test outside of Windows because of MSVC compiler bug
 			fuzzResults.second = 0;
 
-			// Only include this test outside of Windows because of MSVC compiler bug
-#ifndef WIN32
-			fuzzResults = actorFuzzTests();
-#endif
 			if (fuzzResults.second == 0)
 				// if there are no total tests, then mark this as "non-passing"
 				fuzzResults.first = 1;

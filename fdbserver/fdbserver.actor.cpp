@@ -18,10 +18,6 @@
  * limitations under the License.
  */
 
-// There's something in one of the files below that defines a macros
-// a macro that makes boost interprocess break on Windows.
-#define BOOST_DATE_TIME_NO_LIB
-
 #include <algorithm>
 #include <cctype>
 #include <fstream>
@@ -86,23 +82,15 @@
 #include "flow/flow.h"
 #include "flow/network.h"
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #include <execinfo.h>
 #include <signal.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
-#elif defined(__FreeBSD__)
-#include <sys/procctl.h>
 #endif
 #ifdef ALLOC_INSTRUMENTATION
 #include <cxxabi.h>
 #endif
-#endif
-
-#ifdef WIN32
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
 #endif
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -147,12 +135,6 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_LOGGROUP,              "--loggroup",                  SO_REQ_SEP },
 	{ OPT_PARENTPID,             "--parentpid",                 SO_REQ_SEP },
 	{ OPT_TRACER,                "--tracer",                    SO_REQ_SEP },
-#ifdef _WIN32
-	{ OPT_NEWCONSOLE,            "-n",                          SO_NONE },
-	{ OPT_NEWCONSOLE,            "--newconsole",                SO_NONE },
-	{ OPT_NOBOX,                 "-q",                          SO_NONE },
-	{ OPT_NOBOX,                 "--no-dialog",                 SO_NONE },
-#endif
 	{ OPT_KVFILE,                "--kvfile",                    SO_REQ_SEP },
 	{ OPT_TESTFILE,              "-f",                          SO_REQ_SEP },
 	{ OPT_TESTFILE,              "--testfile",                  SO_REQ_SEP },
@@ -253,40 +235,10 @@ bool enableFailures = true;
 		return false;                                                                                                  \
 	}
 
-#ifdef _WIN32
-#include <sddl.h>
-
-// It is your
-//    responsibility to properly initialize the
-//    structure and to free the structure's
-//    lpSecurityDescriptor member when you have
-//    finished using it. To free the structure's
-//    lpSecurityDescriptor member, call the
-//    LocalFree function.
-BOOL CreatePermissiveReadWriteDACL(SECURITY_ATTRIBUTES* pSA) {
-	UNSTOPPABLE_ASSERT(pSA != nullptr);
-
-	TCHAR* szSD = TEXT("D:") // Discretionary ACL
-	    TEXT("(A;OICI;GR;;;AU)") // Allow read/write/execute to authenticated users
-	    TEXT("(A;OICI;GA;;;BA)"); // Allow full control to administrators
-
-	return ConvertStringSecurityDescriptorToSecurityDescriptor(
-	    szSD, SDDL_REVISION_1, &(pSA->lpSecurityDescriptor), nullptr);
-}
-#endif
-
 class WorldReadablePermissions {
 public:
 	WorldReadablePermissions() {
-#ifdef _WIN32
-		sa.nLength = sizeof(SECURITY_ATTRIBUTES);
-		sa.bInheritHandle = FALSE;
-		if (!CreatePermissiveReadWriteDACL(&sa)) {
-			TraceEvent("Win32DACLCreationFail").GetLastError();
-			throw platform_error();
-		}
-		permission.set_permissions(&sa);
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 #error Port me!
@@ -294,9 +246,7 @@ public:
 	}
 
 	virtual ~WorldReadablePermissions() {
-#ifdef _WIN32
-		LocalFree(sa.lpSecurityDescriptor);
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 		// There is nothing to do here, since the default permissions are fine
 #else
 #error Port me!
@@ -307,9 +257,6 @@ public:
 
 private:
 	WorldReadablePermissions(const WorldReadablePermissions& rhs) {}
-#ifdef _WIN32
-	SECURITY_ATTRIBUTES sa;
-#endif
 };
 
 UID getSharedMemoryMachineId() {
@@ -323,8 +270,7 @@ UID getSharedMemoryMachineId() {
 	UID* machineId = nullptr;
 	int numTries = 0;
 
-	// Permissions object defaults to 0644 on *nix, but on windows defaults to allowing access to only the creator.
-	// On windows, this means that we have to create an elaborate workaround for DACLs
+	// Permissions object defaults to 0644 on *nix
 	WorldReadablePermissions p;
 	std::string sharedMemoryIdentifier = "fdbserver_shared_memory_id";
 	loop {
@@ -520,16 +466,6 @@ Future<Void> startSystemMonitor(std::string dataFolder,
 
 void testIndexedSet();
 
-#ifdef _WIN32
-void parentWatcher(void* parentHandle) {
-	HANDLE parent = (HANDLE)parentHandle;
-	int signal = WaitForSingleObject(parent, INFINITE);
-	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
-	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
-}
-#else
 void* parentWatcher(void* arg) {
 	int* parent_pid = (int*)arg;
 	while (1) {
@@ -538,7 +474,6 @@ void* parentWatcher(void* arg) {
 			criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
 	}
 }
-#endif
 
 static void printBuildInformation() {
 	printf("%s", jsonBuildInformation().c_str());
@@ -684,11 +619,6 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " simulation, networktestclient, networktestserver, restore"
 		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
 		                 " The default is `fdbd'.");
-#ifdef _WIN32
-		printOptionUsage("-n, --newconsole", " Create a new console.");
-		printOptionUsage("-q, --no-dialog", " Disable error dialog on crash.");
-		printOptionUsage("--parentpid PID", " Specify a process after whose termination to exit.");
-#endif
 		printOptionUsage("-f TESTFILE, --testfile",
 		                 " Testfile to run, defaults to `tests/default.txt'.  If role is `unittests', specifies which "
 		                 "unit tests to run as a search prefix.");
@@ -1422,30 +1352,6 @@ private:
 				maxLogsSet = true;
 				break;
 			}
-#ifdef _WIN32
-			case OPT_PARENTPID: {
-				auto pid_str = args.OptionArg();
-				int parent_pid = atoi(pid_str);
-				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-				if (!pHandle) {
-					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-					throw platform_error();
-				}
-				startThread(&parentWatcher, pHandle, 0, "fdb-parentwatch");
-				break;
-			}
-			case OPT_NEWCONSOLE:
-				FreeConsole();
-				AllocConsole();
-				freopen("CONIN$", "rb", stdin);
-				freopen("CONOUT$", "wb", stdout);
-				freopen("CONOUT$", "wb", stderr);
-				break;
-			case OPT_NOBOX:
-				SetErrorMode(SetErrorMode(0) | SEM_NOGPFAULTERRORBOX);
-				break;
-#else
 			case OPT_PARENTPID: {
 				auto pid_str = args.OptionArg();
 				int* parent_pid = new (int);
@@ -1453,7 +1359,6 @@ private:
 				startThread(&parentWatcher, parent_pid, 0, "fdb-parentwatch");
 				break;
 			}
-#endif
 			case OPT_TRACER: {
 				std::string arg = args.OptionArg();
 				std::string tracer;
@@ -1935,11 +1840,6 @@ int main(int argc, char* argv[]) {
 		// Enables profiling on this thread (but does not start it)
 		registerThreadForProfiling();
 
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
-
 		auto opts = CLIOptions::parseArgs(argc, argv);
 		const auto role = opts.role;
 
@@ -2418,11 +2318,6 @@ int main(int argc, char* argv[]) {
 #if defined(__linux__)
 			prctl(PR_SET_PDEATHSIG, SIGTERM);
 			if (getppid() == 1) /* parent already died before prctl */
-				flushAndExit(FDB_EXIT_SUCCESS);
-#elif defined(__FreeBSD__)
-			const int sig = SIGTERM;
-			procctl(P_PID, 0, PROC_PDEATHSIG_CTL, (void*)&sig);
-			if (getppid() == 1) /* parent already died before procctl */
 				flushAndExit(FDB_EXIT_SUCCESS);
 #endif
 

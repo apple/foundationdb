@@ -301,11 +301,6 @@ _moved_attributes = [
     MovedModule("xmlrpc_client", "xmlrpclib", "xmlrpc.client"),
     MovedModule("xmlrpc_server", "SimpleXMLRPCServer", "xmlrpc.server"),
 ]
-# Add windows specific modules.
-if sys.platform == "win32":
-    _moved_attributes += [
-        MovedModule("winreg", "_winreg"),
-    ]
 
 for attr in _moved_attributes:
     setattr(_MovedItems, attr.name, attr)

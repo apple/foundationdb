@@ -80,12 +80,8 @@ Future<bool> AsyncFileWorkload::check(Database const& cx) {
 // Allocates a buffer of a given size.  If necessary, the buffer will be aligned to 4K
 AsyncFileBuffer::AsyncFileBuffer(size_t size, bool aligned) {
 	if (aligned) {
-#ifdef WIN32
-		buffer = (unsigned char*)_aligned_malloc(size, AsyncFileWorkload::_PAGE_SIZE);
-#else
 		if (posix_memalign((void**)&buffer, AsyncFileWorkload::_PAGE_SIZE, size) != 0)
 			buffer = nullptr;
-#endif
 	} else
 		buffer = (unsigned char*)malloc(size);
 
@@ -98,15 +94,7 @@ AsyncFileBuffer::AsyncFileBuffer(size_t size, bool aligned) {
 	this->aligned = aligned;
 }
 
-// Special logic needed here to work with _aligned_malloc on windows
 AsyncFileBuffer::~AsyncFileBuffer() {
-#ifdef WIN32
-	if (aligned) {
-		_aligned_free(buffer);
-		return;
-	}
-#endif
-
 	free(buffer);
 }
 

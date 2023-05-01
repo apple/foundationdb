@@ -32,10 +32,6 @@
 #include <assert.h>
 #include <string.h>
 
-#ifdef WIN32
-#include <Windows.h>
-#endif
-
 #ifdef __unixish__
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -436,11 +432,7 @@ static int asyncShmLock(sqlite3_file* fd, /* Database file holding the shared me
 ** any load or store begun after the barrier.
 */
 static void asyncShmBarrier(sqlite3_file*) {
-#if WIN32
-	_ReadWriteBarrier();
-#else
 	__sync_synchronize();
-#endif
 }
 
 /*
@@ -634,20 +626,7 @@ static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pRe
 	}
 	return SQLITE_OK;
 #else
-	WIN32_FILE_ATTRIBUTE_DATA data;
-	DWORD attr = INVALID_FILE_ATTRIBUTES;
-	memset(&data, 0, sizeof(data));
-	if (GetFileAttributesEx(zPath, GetFileExInfoStandard, &data)) {
-		if (!(flags == SQLITE_ACCESS_EXISTS && data.nFileSizeHigh == 0 && data.nFileSizeLow == 0))
-			attr = data.dwFileAttributes;
-	} else if (GetLastError() != ERROR_FILE_NOT_FOUND)
-		return SQLITE_IOERR_ACCESS;
-
-	if (flags == SQLITE_ACCESS_READWRITE)
-		*pResOut = (attr & FILE_ATTRIBUTE_READONLY) == 0;
-	else
-		*pResOut = attr != INVALID_FILE_ATTRIBUTES;
-	return SQLITE_OK;
+#error Port me!
 #endif
 }
 
@@ -763,11 +742,6 @@ static int asyncCurrentTimeInt64(sqlite3_vfs* NotUsed, sqlite3_int64* piNow) {
 	struct timeval sNow;
 	gettimeofday(&sNow, nullptr);
 	*piNow = unixEpoch + 1000 * (sqlite3_int64)sNow.tv_sec + sNow.tv_usec / 1000;
-#elif defined(_WIN32)
-	static const sqlite3_int64 winFiletimeEpoch = 23058135 * (sqlite3_int64)8640000;
-	int64_t ft = 0;
-	GetSystemTimeAsFileTime((FILETIME*)&ft);
-	*piNow = winFiletimeEpoch + ft / 10000;
 #else
 #error Port me!
 #endif

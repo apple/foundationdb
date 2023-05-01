@@ -222,7 +222,6 @@ private:
 	}
 };
 
-#ifndef WIN32
 ACTOR Future<Void> fastTraceLogger(int* unreadyMessages, int* failedMessages, int* totalMessages, bool* sendError) {
 	state bool sendErrorReset = false;
 
@@ -318,7 +317,6 @@ private:
 	Future<Void> log_actor_;
 	Future<Void> udp_server_actor_;
 };
-#endif
 
 ITracer* g_tracer = new NoopTracer();
 
@@ -339,9 +337,7 @@ void openTracer(TracerType type) {
 		g_tracer = new LogfileTracer{};
 		break;
 	case TracerType::NETWORK_LOSSY:
-#ifndef WIN32
 		g_tracer = new FastUDPTracer{};
-#endif
 		break;
 	case TracerType::SIM_END:
 		ASSERT(false);
@@ -564,8 +560,6 @@ std::string readMPString(uint8_t* index) {
 	return reinterpret_cast<char*>(data);
 }
 
-// Windows doesn't like lack of header and declaration of constructor for FastUDPTracer
-#ifndef WIN32
 TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	Span span1("encoded_span"_loc);
 	auto request = MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(kTraceBufferSize),
@@ -705,4 +699,3 @@ TEST_CASE("/flow/Tracing/FastUDPMessagePackEncoding") {
 	ASSERT(readMPString(&data[37]) == longString);
 	return Void();
 };
-#endif

@@ -60,11 +60,6 @@
 #include <iostream>
 #include <ctime>
 
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
-#endif
 #include <time.h>
 
 #ifdef __linux__
@@ -206,9 +201,6 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_KNOB, "--knob-", SO_REQ_SEP },
@@ -236,9 +228,6 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_WAITFORDONE, "-w", SO_NONE },
@@ -285,9 +274,6 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_TRACE, "--log", SO_NONE },
 	{ OPT_TRACE_DIR, "--logdir", SO_REQ_SEP },
 	{ OPT_TRACE_LOG_GROUP, "--loggroup", SO_REQ_SEP },
@@ -319,9 +305,6 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_ERRORLIMIT, "-e", SO_REQ_SEP },
@@ -349,9 +332,6 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
@@ -376,9 +356,6 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -403,9 +380,6 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
@@ -432,9 +406,6 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TAGNAME, "-t", SO_REQ_SEP },
@@ -461,9 +432,6 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -486,9 +454,6 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
@@ -523,9 +488,6 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
@@ -550,9 +512,6 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
@@ -582,9 +541,6 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
@@ -612,9 +568,6 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
 	{ OPT_CLUSTERFILE, "--cluster-file", SO_REQ_SEP },
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -628,9 +581,6 @@ CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
 	{ OPT_BASEURL, "--base-url", SO_REQ_SEP },
 	{ OPT_PROXY, "--proxy", SO_REQ_SEP },
@@ -655,9 +605,6 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
 	{ OPT_DESTCONTAINER, "--destcontainer", SO_REQ_SEP },
@@ -691,9 +638,6 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 
 // g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_CLUSTERFILE_ORIG, "--orig-cluster-file", SO_REQ_SEP },
 	{ OPT_RESTORE_TIMESTAMP, "--timestamp", SO_REQ_SEP },
@@ -740,9 +684,6 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBAgentOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -771,9 +712,6 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -803,9 +741,6 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStatusOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -834,9 +769,6 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -864,9 +796,6 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBAbortOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -895,9 +824,6 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBPauseOptions[] = {
-#ifdef _WIN32
-	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
-#endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
 	{ OPT_SOURCE_CLUSTER, "--source", SO_REQ_SEP },
 	{ OPT_DEST_CLUSTER, "-d", SO_REQ_SEP },
@@ -929,18 +855,6 @@ const KeyRef exeDatabaseAgent = "dr_agent"_sr;
 const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
-
-#ifdef _WIN32
-void parentWatcher(void* parentHandle) {
-	HANDLE parent = (HANDLE)parentHandle;
-	int signal = WaitForSingleObject(parent, INFINITE);
-	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
-	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
-}
-
-#endif
 
 static void printVersion() {
 	printf("FoundationDB " FDB_VT_PACKAGE_NAME " (v" FDB_VT_VERSION ")\n");
@@ -996,15 +910,6 @@ static void printAgentUsage(bool devhelp) {
 	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
-
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
 
 	printf("\n");
 	puts(BlobCredentialInfo);
@@ -1138,12 +1043,6 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
 		printf("  --deep         For describe operations, do not use cached metadata.  Warning: Very slow\n");
 	}
 	printf("\n"
@@ -1224,14 +1123,6 @@ static void printRestoreUsage(bool devhelp) {
 	    "                 Restore only the relevant system keyspace. This option "
 	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
 	printf("\n"
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 	printf("\n");
@@ -1274,14 +1165,6 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  --build-flags  Print build information and exit.\n");
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
 
 	return;
 }
@@ -1326,15 +1209,6 @@ static void printDBBackupUsage(bool devhelp) {
 	printf("\n"
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 
-	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
-		printf("  --parentpid PID\n");
-		printf("                 Specify a process after whose termination to exit.\n");
-#endif
-	}
-
 	return;
 }
 
@@ -1376,18 +1250,6 @@ ProgramExe getProgramType(std::string programExe) {
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
 
-	// Remove the extension, if Windows
-#ifdef _WIN32
-	size_t lastDot = programExe.find_last_of(".");
-	if (lastDot != std::string::npos) {
-		size_t lastSlash = programExe.find_last_of("\\");
-
-		// Ensure last dot is after last slash, if present
-		if ((lastSlash == std::string::npos) || (lastSlash < lastDot)) {
-			programExe = programExe.substr(0, lastDot);
-		}
-	}
-#endif
 	// For debugging convenience, remove .debug suffix if present.
 	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
@@ -3539,11 +3401,6 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
-
 		while (args->Next()) {
 			lastError = args->LastError();
 
@@ -3884,20 +3741,6 @@ int main(int argc, char* argv[]) {
 				inconsistentSnapshotOnly.set(true);
 				break;
 			}
-#ifdef _WIN32
-			case OPT_PARENTPID: {
-				auto pid_str = args->OptionArg();
-				int parent_pid = atoi(pid_str);
-				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-				if (!pHandle) {
-					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-					throw platform_error();
-				}
-				startThread(&parentWatcher, pHandle);
-				break;
-			}
-#endif
 			case OPT_TAGNAME:
 				tagName = args->OptionArg();
 				tagProvided = true;

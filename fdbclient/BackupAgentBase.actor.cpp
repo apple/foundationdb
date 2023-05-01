@@ -57,18 +57,9 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 	// It would be nice to read the timezone using %z, but it seems not all get_time()
 	// or strptime() implementations handle it correctly in all environments so we
 	// will read the date and time independent of timezone at first and then adjust it.
-#ifdef _WIN32
-	std::istringstream s(timeOnly);
-	s.imbue(std::locale(setlocale(LC_TIME, nullptr)));
-	s >> std::get_time(&out, "%Y/%m/%d.%H:%M:%S");
-	if (s.fail()) {
-		return -1;
-	}
-#else
 	if (strptime(timeOnly.c_str(), "%Y/%m/%d.%H:%M:%S", &out) == nullptr) {
 		return -1;
 	}
-#endif
 
 	// Read timezone offset in +/-HHMM format then convert to seconds
 	int tzHH;
@@ -89,17 +80,8 @@ int64_t BackupAgentBase::parseTime(std::string timestamp) {
 
 	// localTZOffset is the number of seconds EAST of GMT
 	long localTZOffset;
-#ifdef _WIN32
-	// _get_timezone() returns the number of seconds WEST of GMT
-	if (_get_timezone(&localTZOffset) != 0) {
-		return -1;
-	}
-	// Negate offset to match the orientation of tzOffset
-	localTZOffset = -localTZOffset;
-#else
 	// tm.tm_gmtoff is the number of seconds EAST of GMT
 	localTZOffset = out.tm_gmtoff;
-#endif
 
 	// Add back the difference between the local timezone assumed by mktime() and the intended timezone from the input
 	// string
