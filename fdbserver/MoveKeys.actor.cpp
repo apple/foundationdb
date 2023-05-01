@@ -214,7 +214,7 @@ bool DDEnabledState::trySetSnapshot(UID requesterId) {
 bool DDEnabledState::trySetEnabled(UID requesterId) {
 	ASSERT(requesterId != UID());
 	// enabling DD
-	if (sameId(requesterId)) {
+	if (!sameId(requesterId)) {
 		// enabling DD not allowed if UID does not match with the previous request
 		return false;
 	}
