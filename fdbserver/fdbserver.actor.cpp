@@ -2048,7 +2048,7 @@ int main(int argc, char* argv[]) {
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
 
-			if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 				printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
 				       __FILE_NAME__,
 				       __LINE__,
@@ -2062,7 +2062,7 @@ int main(int argc, char* argv[]) {
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
 
-			if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
 				printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
 				       __FILE_NAME__,
@@ -2071,7 +2071,7 @@ int main(int argc, char* argv[]) {
 			}
 
 			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
-			if (SERVER_KNOBS->FLOW_USE_SWIFT && getenv("FDBSWIFTTEST")) {
+			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
 				swiftTestRunner(); // spawns actor that will call Swift functions
 
 				g_network->run();

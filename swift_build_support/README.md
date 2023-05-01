@@ -7,10 +7,10 @@ Invoke cmake as follows in order to use clang (which is required for Swift):
 ```
 cd
 mkdir build && cd build 
-cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -DUSE_SWIFT -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr ../src/foundationdb/
+cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -DWITH_SWIFT -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr ../src/foundationdb/
 ```
 
-We also pass the `-DUSE_SWIFT` flag to set the `SERVER_KNOBS->FLOW_USE_SWIFT` knob to `true` by default.
+We also pass the `-DWITH_SWIFT` flag to set the `SERVER_KNOBS->FLOW_WITH_SWIFT` knob to `true` by default.
 
 Build `fdbserver` or the entire project like usual
 
@@ -18,7 +18,7 @@ Build `fdbserver` or the entire project like usual
 ninja fdbserver
 ```
 
-Some functions may use the `FLOW_USE_SWIFT` knob to determine if they should invoke Swift or C++/Flow implementation of logic.
+Some functions may use the `FLOW_WITH_SWIFT` knob to determine if they should invoke Swift or C++/Flow implementation of logic.
 This is done for the purpose of making sure the ports are correct. Once we gained enough confidence we can remove
 the C++ implementations.
 

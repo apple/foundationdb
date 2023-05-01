@@ -80,8 +80,8 @@ add_library(fdbclient_swift STATIC
         notified_support.swift
         )
 
-if (USE_SWIFT)
-  add_definitions(-DUSE_SWIFT)
+if (WITH_SWIFT)
+  add_definitions(-DWITH_SWIFT)
 endif()
 
 target_include_directories(fdbclient_swift PUBLIC

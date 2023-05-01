@@ -24,8 +24,8 @@ add_flow_target(EXECUTABLE NAME fdbserver SRCS ${FDBSERVER_SRCS})
 # Setup the Swift sources in FDBServer.
 include(FindSwiftLibs)
 
-if (USE_SWIFT)
-  add_definitions(-DUSE_SWIFT)
+if (WITH_SWIFT)
+  add_definitions(-DWITH_SWIFT)
 endif()
 
 add_library(fdbserver_swift STATIC

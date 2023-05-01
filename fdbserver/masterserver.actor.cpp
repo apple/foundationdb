@@ -164,7 +164,7 @@ Version figureVersion(Version current,
                       int64_t toAdd,
                       double maxVersionRateModifier,
                       int64_t maxVersionRateOffset) {
-	auto impl = USE_SWIFT ? fdbserver_swift::figureVersion : figureVersionCxx;
+	auto impl = SERVER_KNOBS->FLOW_WITH_SWIFT ? fdbserver_swift::figureVersion : figureVersionCxx;
 
 	return impl(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
 }
@@ -270,7 +270,7 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 }
 
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(getVersionSwift(self, req));
 		return Void();
 	} else {
@@ -360,7 +360,7 @@ SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(provideVersionsSwift(self));
 	} else {
 		wait(provideVersionsCxx(self));
@@ -453,7 +453,7 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 }
 
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(serveLiveCommittedVersionSwift(self));
 	} else {
 		wait(serveLiveCommittedVersionCxx(self));
@@ -511,7 +511,7 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 
 
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(updateRecoveryDataSwift(self));
 	} else {
 		wait(updateRecoveryDataCxx(self));

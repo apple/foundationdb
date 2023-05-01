@@ -1162,13 +1162,15 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
 
 
-	init( FLOW_USE_SWIFT,                                       false);
-	#ifdef USE_SWIFT
-	fprintf(stderr, "Enabled Swift support knob default via build configuration: FLOW_USE_SWIFT=true\n");
-	FLOW_USE_SWIFT = true;
+	init( FLOW_WITH_SWIFT,                                       false);
+	#ifdef WITH_SWIFT
+	fprintf(stderr, "Enabled Swift support knob default via build configuration: FLOW_WITH_SWIFT=%s\n",
+		FLOW_WITH_SWIFT ? "ON" : "OFF");
+	FLOW_WITH_SWIFT = true;
 	#else
-	fprintf(stderr, "Swift support knob disabled by default (build with -DUSE_SWIFT to enable): FLOW_USW_SWIFT=false\n");
-	#endif // USE_SWIFT
+	fprintf(stderr, "Swift support knob disabled by default (build with -DWITH_SWIFT to enable): FLOW_WITH_SWIFT=%s\n",
+		FLOW_WITH_SWIFT ? "ON" : "OFF");
+	#endif // WITH_SWIFT
 
 
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
