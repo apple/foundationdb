@@ -104,6 +104,8 @@ ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
+ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
+ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -283,6 +285,7 @@ ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no recor
 ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
 ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
 ERROR( invalid_metacluster_configuration, 2174, "Metacluster configuration is invalid" )
+ERROR( unsupported_metacluster_version, 2175, "Client is not compatible with the metacluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )

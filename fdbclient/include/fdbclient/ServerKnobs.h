@@ -319,7 +319,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
-	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
 	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
@@ -428,7 +428,6 @@ public:
 	int ROCKSDB_CAN_COMMIT_DELAY_TIMES_ON_OVERLOAD;
 	bool ROCKSDB_DISABLE_WAL_EXPERIMENTAL;
 	bool ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE;
-	int64_t ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT;
 	int ROCKSDB_SINGLEKEY_DELETES_MAX;
 	bool ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS;
 	bool ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE;
@@ -448,6 +447,11 @@ public:
 	double ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY;
 	bool ROCKSDB_EMPTY_RANGE_CHECK;
 	int ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX;
+	bool ROCKSDB_ATOMIC_FLUSH;
+	bool ROCKSDB_IMPORT_MOVE_FILES;
+	bool ROCKSDB_CHECKPOINT_REPLAY_MARKER;
+	bool ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE;
+	bool ROCKSDB_ENABLE_CHECKPOINT_VALIDATION;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
@@ -744,6 +748,10 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 	// Interval at which ratekeeper logs statistics for each tag:
 	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// If this knob is set to true, the global tag throttler will still
+	// compute rates, but these rates won't be sent to GRV proxies for
+	// enforcement.
+	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -829,6 +837,8 @@ public:
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
+	int AUDIT_RETRY_COUNT_MAX;
+	int SS_AUDIT_AUTO_PROCEED_COUNT_MAX;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;

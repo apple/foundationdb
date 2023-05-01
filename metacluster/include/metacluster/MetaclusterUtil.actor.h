@@ -27,6 +27,8 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/IClientApi.h"
+#include "fdbclient/NativeAPI.actor.h"
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Platform.h"
@@ -37,6 +39,8 @@
 
 // This provide metacluster utility functions that may be used both internally and externally to the metacluster project
 namespace metacluster::util {
+
+FDB_BOOLEAN_PARAM(SkipMetaclusterCreation);
 
 // Helper function to compute metacluster capacity by passing the result of metacluster::listClusters
 std::pair<ClusterUsage, ClusterUsage> metaclusterCapacity(std::map<ClusterName, DataClusterMetadata> const& clusters);
@@ -49,6 +53,17 @@ Future<Reference<IDatabase>> getAndOpenDatabase(Transaction managementTr, Cluste
 	Reference<IDatabase> db = wait(openDatabase(clusterMetadata.connectionString));
 	return db;
 }
+
+struct SimulatedMetacluster {
+	Reference<IDatabase> managementDb;
+	std::map<ClusterName, Database> dataDbs;
+};
+
+ACTOR Future<SimulatedMetacluster> createSimulatedMetacluster(
+    Database db,
+    Optional<int64_t> tenantIdPrefix = Optional<int64_t>(),
+    Optional<DataClusterEntry> dataClusterConfig = DataClusterEntry(),
+    SkipMetaclusterCreation skipMetaclusterCreation = SkipMetaclusterCreation::False);
 
 } // namespace metacluster::util
 

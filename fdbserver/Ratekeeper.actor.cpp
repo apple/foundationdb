@@ -520,13 +520,17 @@ public:
 
 						bool returningTagsToProxy{ false };
 						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							reply.proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
-							returningTagsToProxy =
-							    reply.proxyThrottledTags.present() && reply.proxyThrottledTags.get().size() > 0;
+							auto proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = proxyThrottledTags.size() > 0;
+								reply.proxyThrottledTags = std::move(proxyThrottledTags);
+							}
 						} else {
-							reply.clientThrottledTags = self.tagThrottler->getClientRates();
-							returningTagsToProxy =
-							    reply.clientThrottledTags.present() && reply.clientThrottledTags.get().size() > 0;
+							auto clientThrottledTags = self.tagThrottler->getClientRates();
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = clientThrottledTags.size() > 0;
+								reply.clientThrottledTags = std::move(clientThrottledTags);
+							}
 						}
 						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}

@@ -239,8 +239,8 @@ public:
 
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
-				for (auto& it : self->customReplication->intersectingRanges(req.keys.get())) {
-					customReplicas = std::max(customReplicas, it.value());
+				for (auto it : self->userRangeConfig->intersectingRanges(req.keys->begin, req.keys->end)) {
+					customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
@@ -511,7 +511,7 @@ public:
 	                               Reference<InitialDataDistribution> initTeams,
 	                               const DDEnabledState* ddEnabledState) {
 
-		self->customReplication = initTeams->customReplication;
+		self->userRangeConfig = initTeams->userRangeConfig;
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
@@ -708,7 +708,7 @@ public:
 		state bool lastHealthy;
 		state bool lastOptimal;
 		state bool lastWrongConfiguration = team->isWrongConfiguration();
-
+		state bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		state bool firstCheck = true;
 
@@ -797,7 +797,7 @@ public:
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
 
-				if (firstCheck) {
+				if (firstCheck && trackHealthyTeam) {
 					firstCheck = false;
 					if (healthy) {
 						self->healthyTeamCount++;
@@ -828,35 +828,37 @@ public:
 
 					team->setWrongConfiguration(anyWrongConfiguration);
 
-					if (optimal != lastOptimal) {
-						lastOptimal = optimal;
-						self->optimalTeamCount += optimal ? 1 : -1;
+					if (trackHealthyTeam) {
+						if (optimal != lastOptimal) {
+							lastOptimal = optimal;
+							self->optimalTeamCount += optimal ? 1 : -1;
 
-						ASSERT_GE(self->optimalTeamCount, 0);
-						self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
-					}
-
-					if (lastHealthy != healthy) {
-						lastHealthy = healthy;
-						// Update healthy team count when the team healthy changes
-						self->healthyTeamCount += healthy ? 1 : -1;
-
-						ASSERT_GE(self->healthyTeamCount, 0);
-						self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
-
-						if (self->healthyTeamCount == 0) {
-							TraceEvent(SevWarn, "ZeroServerTeamsHealthySignalling", self->distributorId)
-							    .detail("SignallingTeam", team->getDesc())
-							    .detail("Primary", self->primary);
+							ASSERT_GE(self->optimalTeamCount, 0);
+							self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 						}
 
-						if (logTeamEvents) {
-							TraceEvent("ServerTeamHealthDifference", self->distributorId)
-							    .detail("ServerTeam", team->getDesc())
-							    .detail("LastOptimal", lastOptimal)
-							    .detail("LastHealthy", lastHealthy)
-							    .detail("Optimal", optimal)
-							    .detail("OptimalTeamCount", self->optimalTeamCount);
+						if (lastHealthy != healthy) {
+							lastHealthy = healthy;
+							// Update healthy team count when the team healthy changes
+							self->healthyTeamCount += healthy ? 1 : -1;
+
+							ASSERT_GE(self->healthyTeamCount, 0);
+							self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
+
+							if (self->healthyTeamCount == 0) {
+								TraceEvent(SevWarn, "ZeroServerTeamsHealthySignalling", self->distributorId)
+								    .detail("SignallingTeam", team->getDesc())
+								    .detail("Primary", self->primary);
+							}
+
+							if (logTeamEvents) {
+								TraceEvent("ServerTeamHealthDifference", self->distributorId)
+								    .detail("ServerTeam", team->getDesc())
+								    .detail("LastOptimal", lastOptimal)
+								    .detail("LastHealthy", lastHealthy)
+								    .detail("Optimal", optimal)
+								    .detail("OptimalTeamCount", self->optimalTeamCount);
+							}
 						}
 					}
 
@@ -1031,21 +1033,23 @@ public:
 				    .detail("Priority", team->getPriority());
 			}
 			self->priority_teams[team->getPriority()]--;
-			if (team->isHealthy()) {
-				self->healthyTeamCount--;
-				ASSERT_GE(self->healthyTeamCount, 0);
+			if (trackHealthyTeam) {
+				if (team->isHealthy()) {
+					self->healthyTeamCount--;
+					ASSERT_GE(self->healthyTeamCount, 0);
 
-				if (self->healthyTeamCount == 0) {
-					TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
-					    .detail("ServerPrimary", self->primary)
-					    .detail("SignallingServerTeam", team->getDesc());
-					self->zeroHealthyTeams->set(true);
+					if (self->healthyTeamCount == 0) {
+						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+						    .detail("ServerPrimary", self->primary)
+						    .detail("SignallingServerTeam", team->getDesc());
+						self->zeroHealthyTeams->set(true);
+					}
 				}
-			}
-			if (lastOptimal) {
-				self->optimalTeamCount--;
-				ASSERT_GE(self->optimalTeamCount, 0);
-				self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+				if (lastOptimal) {
+					self->optimalTeamCount--;
+					ASSERT_GE(self->optimalTeamCount, 0);
+					self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+				}
 			}
 			throw;
 		}
@@ -2899,8 +2903,7 @@ public:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto property = metadataMap.getProperty(server->getId());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
@@ -3328,24 +3331,43 @@ void DDTeamCollection::updateCpuPivots() {
 }
 
 void DDTeamCollection::updateTeamEligibility() {
+	int healthyCount = 0, lowDiskUtilTotal = 0, lowCpuTotal = 0, allMetricsLow = 0;
 	for (auto& team : teams) {
 		if (team->isHealthy()) {
-			if (team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio)) {
+			bool lowDiskUtil = team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
+			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
+			healthyCount++;
+
+			if (lowDiskUtil) {
+				lowDiskUtilTotal++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			}
 
-			if (team->hasLowerCpu(teamPivots.pivotCPU)) {
+			if (lowCPU) {
+				lowCpuTotal++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+			}
+
+			if (lowDiskUtil && lowCPU) {
+				allMetricsLow++;
 			}
 		} else {
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 		}
 	}
+	TraceEvent("TeamEligibilityCount", distributorId)
+	    .detail("TotalTeam", teams.size())
+	    .detail("HealthyTeam", healthyCount)
+	    .detail("AllMetricsLowTeam", allMetricsLow)
+	    .detail("LowDiskUtilTeam", lowDiskUtilTotal)
+	    .detail("LowCPUTeam", lowCpuTotal)
+	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
+	    .detail("PivotCpuRatio", teamPivots.pivotCPU);
 }
 
 void DDTeamCollection::updateTeamPivotValues() {
@@ -3646,8 +3668,8 @@ void DDTeamCollection::fixUnderReplication() {
 			}
 
 			int customReplicas = configuration.storageTeamSize;
-			for (auto& c : customReplication->intersectingRanges(r.range())) {
-				customReplicas = std::max(customReplicas, c.value());
+			for (auto it : userRangeConfig->intersectingRanges(r.range().begin, r.range().end)) {
+				customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 			}
 
 			int currentSize = 0;
@@ -4135,12 +4157,6 @@ struct ServerPriority {
 
 Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	cleanupLargeTeams();
-	if (largeTeams.size() >= SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS) {
-		TraceEvent(SevWarnAlways, "TooManyLargeTeams", distributorId)
-		    .suppressFor(1.0)
-		    .detail("TeamCount", largeTeams.size());
-		return Reference<TCTeamInfo>();
-	}
 
 	std::map<UID, ServerPriority> server_priority;
 	for (auto& [serverID, server] : server_info) {
@@ -4154,10 +4170,12 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 	}
 
+	int totalShardCount = 0;
 	for (auto& team : largeTeams) {
 		const auto servers = team->getServerIDs();
 		const int shardCount =
 		    shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(servers, primary));
+		totalShardCount += shardCount;
 		if (team->isHealthy()) {
 			for (auto& it : servers) {
 				auto f = server_priority.find(it);
@@ -4173,6 +4191,14 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 				}
 			}
 		}
+	}
+
+	if (totalShardCount >= SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+		TraceEvent(SevWarnAlways, "TooManyShardsOnLargeTeams", distributorId)
+		    .suppressFor(1.0)
+		    .detail("TeamCount", largeTeams.size())
+		    .detail("ShardCount", totalShardCount);
+		return Reference<TCTeamInfo>();
 	}
 
 	// The set of all healthy servers sorted so the most desirable option is first in the list
@@ -4192,7 +4218,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 		candidateTeam.push_back(sortedServers[i].info);
 	}
-	if (!satisfiesPolicy(candidateTeam)) {
+	if (candidateTeam.size() <= configuration.storageTeamSize || !satisfiesPolicy(candidateTeam)) {
 		TraceEvent(SevWarnAlways, "TooFewServersForLargeTeam", distributorId)
 		    .suppressFor(1.0)
 		    .detail("TeamSize", candidateTeam.size())
