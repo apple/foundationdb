@@ -868,11 +868,19 @@ std::string getTraceFormatExtension() {
 BaseTraceEvent::State::State(Severity severity) noexcept
   : value((g_network == nullptr || FLOW_KNOBS->MIN_TRACE_SEVERITY <= severity) ? Type::ENABLED : Type::DISABLED) {}
 
-BaseTraceEvent::BaseTraceEvent() : enabled(), initialized(true), logged(true) {}
+BaseTraceEvent::BaseTraceEvent() : enabled(), initialized(true), logged(true) {
+//  fprintf(stderr, "[%s:%d](%s) init BaseTraceEvent [%p] \n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//          this);
+}
 BaseTraceEvent::BaseTraceEvent(Severity severity, const char* type, UID id)
-  : enabled(severity), initialized(false), logged(false), severity(severity), type(type), id(id) {}
+  : enabled(severity), initialized(false), logged(false), severity(severity), type(type), id(id) {
+//  fprintf(stderr, "[%s:%d](%s) init BaseTraceEvent [%p] type: %s \n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//          this, type);
+}
 
 BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
+//  fprintf(stderr, "[%s:%d](%s) move BaseTraceEvent [%p] type: %s \n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//          this, ev.type);
 	enabled = std::move(ev.enabled);
 	err = ev.err;
 	fields = std::move(ev.fields);
@@ -898,7 +906,9 @@ BaseTraceEvent::BaseTraceEvent(BaseTraceEvent&& ev) {
 }
 
 BaseTraceEvent& BaseTraceEvent::operator=(BaseTraceEvent&& ev) {
-	// Note: still broken if ev and this are the same memory address.
+//  fprintf(stderr, "[%s:%d](%s) operator= BaseTraceEvent [%p] type: %s \n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//          this, ev.type);
+  // Note: still broken if ev and this are the same memory address.
 	enabled = std::move(ev.enabled);
 	err = ev.err;
 	fields = std::move(ev.fields);
@@ -1019,6 +1029,8 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 	}
 
 	if (enabled) {
+//    fprintf(stderr, "[%s:%d](%s) [%p] enabled tmpEventMetric [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//            this, type);
 		tmpEventMetric = std::make_unique<DynamicEventMetric>(MetricNameRef());
 
 		if (err.isValid() && err.isInjectedFault() && severity == SevError) {
@@ -1051,6 +1063,7 @@ BaseTraceEvent::State BaseTraceEvent::init() {
 			detail("ErrorCode", err.code());
 		}
 	} else {
+//    fprintf(stderr, "[%s:%d](%s) not enabled tmpEventMetric\n", __FILE_NAME__, __LINE__, __FUNCTION__);
 		tmpEventMetric = nullptr;
 	}
 
@@ -1357,6 +1370,7 @@ void BaseTraceEvent::log() {
 		} catch (Error& e) {
 			TraceEvent(SevError, "TraceEventLoggingError").errorUnsuppressed(e);
 		}
+//    fprintf(stderr, "[%s:%d](%s) [%p] reset [%s]\n", __FILE_NAME__, __LINE__, __FUNCTION__, this, type);
 		tmpEventMetric.reset();
 		logged = true;
 		--g_allocation_tracing_disabled;
@@ -1364,6 +1378,8 @@ void BaseTraceEvent::log() {
 }
 
 BaseTraceEvent::~BaseTraceEvent() {
+//  fprintf(stderr, "[%s:%d](%s) ~BaseTraceEvent [%p] \n", __FILE_NAME__, __LINE__, __FUNCTION__,
+//          this);
 	log();
 	if (failedLineOverflow == 1) {
 		failedLineOverflow = 2;
