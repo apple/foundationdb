@@ -114,8 +114,10 @@ Future<Void> ILogSystem::recoverAndEndEpoch(Reference<AsyncVar<Reference<ILogSys
                                             DBCoreState const& oldState,
                                             FutureStream<TLogRejoinRequest> const& rejoins,
                                             LocalityData const& locality,
-                                            bool* forceRecovery) {
-	return TagPartitionedLogSystem::recoverAndEndEpoch(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
+                                            bool* forceRecovery,
+                                            std::unordered_set<NetworkAddress>* degradedServers) {
+	return TagPartitionedLogSystem::recoverAndEndEpoch(
+	    outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery, degradedServers);
 }
 
 Reference<ILogSystem> ILogSystem::fromLogSystemConfig(UID const& dbgid,
@@ -234,8 +236,9 @@ Future<Void> TagPartitionedLogSystem::recoverAndEndEpoch(Reference<AsyncVar<Refe
                                                          DBCoreState const& oldState,
                                                          FutureStream<TLogRejoinRequest> const& rejoins,
                                                          LocalityData const& locality,
-                                                         bool* forceRecovery) {
-	return epochEnd(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery);
+                                                         bool* forceRecovery,
+                                                         std::unordered_set<NetworkAddress>* degradedServers) {
+	return epochEnd(outLogSystem, dbgid, oldState, rejoins, locality, forceRecovery, degradedServers);
 }
 
 Reference<ILogSystem> TagPartitionedLogSystem::fromLogSystemConfig(UID const& dbgid,
@@ -2039,7 +2042,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
                                                      DBCoreState prevState,
                                                      FutureStream<TLogRejoinRequest> rejoinRequests,
                                                      LocalityData locality,
-                                                     bool* forceRecovery) {
+                                                     bool* forceRecovery,
+                                                     std::unordered_set<NetworkAddress>* degradedServers) {
 	// Stops a co-quorum of tlogs so that no further versions can be committed until the DBCoreState coordination
 	// state is changed Creates a new logSystem representing the (now frozen) epoch No other important side effects.
 	// The writeQuorum in the master info is from the previous configuration
@@ -2197,7 +2201,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::epochEnd(Reference<AsyncVar<Referenc
 			}
 		}
 	}
-	state Future<Void> rejoins = TagPartitionedLogSystem::trackRejoins(dbgid, allLogServers, rejoinRequests);
+	state Future<Void> rejoins =
+	    TagPartitionedLogSystem::trackRejoins(dbgid, allLogServers, rejoinRequests, degradedServers);
 
 	lockResults.resize(logServers.size());
 	std::set<int8_t> lockedLocalities;
@@ -3113,7 +3118,8 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
     UID dbgid,
     std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
         logServers,
-    FutureStream<struct TLogRejoinRequest> rejoinRequests) {
+    FutureStream<struct TLogRejoinRequest> rejoinRequests,
+    std::unordered_set<NetworkAddress>* degradedServers) {
 	state std::map<UID, ReplyPromise<TLogRejoinReply>> lastReply;
 	state std::set<UID> logsWaiting;
 	state double startTime = now();
@@ -3127,6 +3133,12 @@ ACTOR Future<Void> TagPartitionedLogSystem::trackRejoins(
 		loop choose {
 			when(TLogRejoinRequest req = waitNext(rejoinRequests)) {
 				int pos = -1;
+				if (degradedServers->contains(req.myInterface.address()) ||
+				    (req.myInterface.secondaryAddress().present() &&
+				     degradedServers->contains(req.myInterface.secondaryAddress().get()))) {
+					TraceEvent("DegradedTLogJoinedMe").detail("TLog", req.myInterface.addresses().toString());
+					continue;
+				}
 				for (int i = 0; i < logServers.size(); i++) {
 					if (logServers[i].first->get().id() == req.myInterface.id()) {
 						pos = i;

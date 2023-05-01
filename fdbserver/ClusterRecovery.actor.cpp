@@ -778,6 +778,13 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 	}
 }
 
+Future<Void> sendMasterNewTxnSystemInfo(ClusterRecoveryData* self, bool clear, RecruitFromConfigurationReply rep) {
+	RegisterNewInfoRequest req;
+	req.rep = rep;
+	req.clear = clear;
+	return brokenPromiseToNever(self->clusterController.registerNewInfo.getReply(req));
+}
+
 // TODO(ahusain): ClusterController orchestrating recovery, self message can be avoided.
 Future<Void> sendMasterRegistration(ClusterRecoveryData* self,
                                     LogSystemConfig const& logSystemConfig,
@@ -1027,13 +1034,22 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
+	std::string tlogAddresses;
+	for (int i = 0; i < recruits.tLogs.size(); i++) {
+		tlogAddresses += recruits.tLogs[i].addresses().toString();
+		tlogAddresses += " ";
+	}
+	TraceEvent("RecruitNewTlogsDebug").detail("Tlogs", tlogAddresses);
+
+	state Future<Void> updateTxnSystemInfoF = sendMasterNewTxnSystemInfo(self.getPtr(), false, recruits);
+
 	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
 	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
 	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
 	wait(newSeedServers(self, recruits, seedServers));
 	state std::vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
+	wait(updateTxnSystemInfoF && newCommitProxies(self, recruits) && newGrvProxies(self, recruits) &&
+	     newResolvers(self, recruits) && newTLogServers(self, recruits, oldLogSystem, &confChanges));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
 	wait(brokenPromiseToNever(
@@ -1546,7 +1562,8 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	                                   self->cstate.prevDBState,
 	                                   self->clusterController.tlogRejoin.getFuture(),
 	                                   self->controllerData->db.serverInfo->get().myLocality,
-	                                   std::addressof(self->forceRecovery));
+	                                   std::addressof(self->forceRecovery),
+	                                   &self->controllerData->excludedDegradedServers);
 
 	DBCoreState newState = self->cstate.myDBState;
 	newState.recoveryCount++;
@@ -1564,6 +1581,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	    .detail("LowestCompatibleProtocolVersion", self->cstate.myDBState.lowestCompatibleProtocolVersion)
 	    .trackLatest(self->swVersionCheckedEventHolder->trackingKey);
 
+	sendMasterNewTxnSystemInfo(self.getPtr(), true, RecruitFromConfigurationReply());
 	self->recoveryState = RecoveryState::RECRUITING;
 
 	state std::vector<StorageServerInterface> seedServers;
@@ -1580,6 +1598,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 				minRecoveryDuration = delay(SERVER_KNOBS->ENFORCED_MIN_RECOVERY_DURATION);
 				poppedTxsVersion = oldLogSystem->getTxsPoppedVersion();
 			}
+			TraceEvent("OldLogSystemPresent").detail("MinRecoveryDuration", minRecoveryDuration.isValid());
 		}
 
 		state Future<Void> reg = oldLogSystem ? updateRegistration(self, oldLogSystem) : Never();

@@ -613,7 +613,8 @@ struct ILogSystem {
 	                                       DBCoreState const& oldState,
 	                                       FutureStream<TLogRejoinRequest> const& rejoins,
 	                                       LocalityData const& locality,
-	                                       bool* forceRecovery);
+	                                       bool* forceRecovery,
+	                                       std::unordered_set<NetworkAddress>* degradedServers = nullptr);
 	// Constructs a new ILogSystem implementation based on the given oldState and rejoining log servers
 	// Ensures that any calls to push or confirmEpochLive in the current epoch but strictly later than change_epoch will
 	// not return Whenever changes in the set of available log servers require restarting recovery with a different end

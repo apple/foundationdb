@@ -874,6 +874,27 @@ void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequ
 	}
 }
 
+void clusterUpdateTxnSystem(ClusterControllerData* self, RegisterNewInfoRequest const& req) {
+	req.reply.send(Void());
+	if (req.clear) {
+		TraceEvent("MasterNewInfoClearReceived", self->id).log();
+		self->recruitingCommitProxies.clear();
+		self->recruitingGrvProxies.clear();
+		self->recruitingResolvers.clear();
+		self->recruitingTlogs.clear();
+	} else {
+		TraceEvent("MasterNewInfoUpdateReceived", self->id)
+		    .detail("CPs", req.rep.commitProxies.size())
+		    .detail("Grvs", req.rep.grvProxies.size())
+		    .detail("RVs", req.rep.resolvers.size())
+		    .detail("Tlogs", req.rep.tLogs.size());
+		self->recruitingCommitProxies = req.rep.commitProxies;
+		self->recruitingGrvProxies = req.rep.grvProxies;
+		self->recruitingResolvers = req.rep.resolvers;
+		self->recruitingTlogs = req.rep.tLogs;
+	}
+}
+
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
 	req.reply.send(Void());
 
@@ -2717,6 +2738,7 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 				if (self->degradationInfo.degradedServers.find(*it) == self->degradationInfo.degradedServers.end() &&
 				    self->degradationInfo.disconnectedServers.find(*it) ==
 				        self->degradationInfo.disconnectedServers.end()) {
+					TraceEvent("ClusterControllerRemoveRecoveredServers").detail("ServerAddress", it->toString());
 					self->excludedDegradedServers.erase(it++);
 				} else {
 					++it;
@@ -2748,8 +2770,13 @@ ACTOR Future<Void> workerHealthMonitor(ClusterControllerData* self) {
 							self->excludedDegradedServers.insert(self->degradationInfo.disconnectedServers.begin(),
 							                                     self->degradationInfo.disconnectedServers.end());
 							TraceEvent("DegradedServerDetectedAndTriggerRecovery")
-							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth());
+							    .detail("RecentRecoveryCountDueToHealth", self->recentRecoveryCountDueToHealth())
+							    .detail("ExcludedDegradedServers", describe(self->excludedDegradedServers));
 							self->db.forceMasterFailure.trigger();
+							// test, also restart the DD
+							// const auto& distributor = self->db.serverInfo->get().distributor;
+							// DataDistributorSingleton(distributor).halt(*self,
+							// distributor.get().locality.processId());
 						}
 					} else {
 						self->excludedDegradedServers.clear();
@@ -3022,6 +3049,9 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 		when(RegisterMasterRequest req = waitNext(interf.registerMaster.getFuture())) {
 			++self.registerMasterRequests;
 			clusterRegisterMaster(&self, req);
+		}
+		when(RegisterNewInfoRequest req = waitNext(interf.registerNewInfo.getFuture())) {
+			clusterUpdateTxnSystem(&self, req);
 		}
 		when(UpdateWorkerHealthRequest req = waitNext(interf.updateWorkerHealth.getFuture())) {
 			if (SERVER_KNOBS->CC_ENABLE_WORKER_HEALTH_MONITOR) {

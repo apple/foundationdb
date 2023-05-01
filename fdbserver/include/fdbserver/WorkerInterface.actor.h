@@ -176,6 +176,7 @@ struct ClusterControllerFullInterface {
 	RequestStream<struct BackupWorkerDoneRequest> notifyBackupWorkerDone;
 	RequestStream<struct ChangeCoordinatorsRequest> changeCoordinators;
 	RequestStream<struct GetEncryptionAtRestModeRequest> getEncryptionAtRestMode;
+	RequestStream<struct RegisterNewInfoRequest> registerNewInfo;
 
 	UID id() const { return clientInterface.id(); }
 	bool operator==(ClusterControllerFullInterface const& r) const { return id() == r.id(); }
@@ -190,7 +191,8 @@ struct ClusterControllerFullInterface {
 		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
 		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
 		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady() ||
+		       registerNewInfo.getFuture().isReady();
 	}
 
 	void initEndpoints() {
@@ -208,6 +210,7 @@ struct ClusterControllerFullInterface {
 		notifyBackupWorkerDone.getEndpoint(TaskPriority::ClusterController);
 		changeCoordinators.getEndpoint(TaskPriority::DefaultEndpoint);
 		getEncryptionAtRestMode.getEndpoint(TaskPriority::ClusterController);
+		registerNewInfo.getEndpoint(TaskPriority::ClusterControllerRegister);
 	}
 
 	template <class Ar>
@@ -229,7 +232,8 @@ struct ClusterControllerFullInterface {
 		           tlogRejoin,
 		           notifyBackupWorkerDone,
 		           changeCoordinators,
-		           getEncryptionAtRestMode);
+		           getEncryptionAtRestMode,
+		           registerNewInfo);
 	}
 };
 
@@ -324,6 +328,24 @@ struct RecruitFromConfigurationReply {
 		           dcId,
 		           satelliteFallback,
 		           backupWorkers);
+	}
+};
+
+struct RegisterNewInfoRequest {
+	constexpr static FileIdentifier file_identifier = 10773446;
+	bool clear;
+	RecruitFromConfigurationReply rep;
+	ReplyPromise<Void> reply;
+
+	RegisterNewInfoRequest() : clear(true) {}
+	RegisterNewInfoRequest(const RecruitFromConfigurationReply& reply) : clear(false), rep(reply) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		if constexpr (!is_fb_function<Ar>) {
+			ASSERT(ar.protocolVersion().isValid());
+		}
+		serializer(ar, clear, rep, reply);
 	}
 };
 

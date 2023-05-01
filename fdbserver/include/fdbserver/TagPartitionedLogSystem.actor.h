@@ -156,7 +156,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                       DBCoreState const& oldState,
 	                                       FutureStream<TLogRejoinRequest> const& rejoins,
 	                                       LocalityData const& locality,
-	                                       bool* forceRecovery);
+	                                       bool* forceRecovery,
+	                                       std::unordered_set<NetworkAddress>* degradedServers = nullptr);
 
 	static Reference<ILogSystem> fromLogSystemConfig(UID const& dbgid,
 	                                                 LocalityData const& locality,
@@ -331,7 +332,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                   DBCoreState prevState,
 	                                   FutureStream<TLogRejoinRequest> rejoinRequests,
 	                                   LocalityData locality,
-	                                   bool* forceRecovery);
+	                                   bool* forceRecovery,
+	                                   std::unordered_set<NetworkAddress>* degradedServers = nullptr);
 
 	ACTOR static Future<Void> recruitOldLogRouters(TagPartitionedLogSystem* self,
 	                                               std::vector<WorkerInterface> workers,
@@ -370,7 +372,8 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	    UID dbgid,
 	    std::vector<std::pair<Reference<AsyncVar<OptionalInterface<TLogInterface>>>, Reference<IReplicationPolicy>>>
 	        logServers,
-	    FutureStream<struct TLogRejoinRequest> rejoinRequests);
+	    FutureStream<struct TLogRejoinRequest> rejoinRequests,
+	    std::unordered_set<NetworkAddress>* degradedServers = nullptr);
 
 	ACTOR static Future<TLogLockResult> lockTLog(UID myID, Reference<AsyncVar<OptionalInterface<TLogInterface>>> tlog);
 

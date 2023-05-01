@@ -375,6 +375,18 @@ public:
 			}
 		}
 
+		// auto filterOptinal = [](const std::set<Optional<Standalone<StringRef>>>& l) -> std::set<Standalone<StringRef>> {
+		// 	std::set<Standalone<StringRef>> res;
+		// 	for (const auto& s : l) {
+		// 		res.insert(s.present() ? s.get() : Key());
+		// 	}
+		// 	return res;
+		// };
+
+		// TraceEvent("GetStorageWorkerNoMoreServers")
+		//     .detail("ExcludedAddresses", describe(excludedAddresses))
+		//     .detail("IncludeDCs", describe(filterOptinal(includeDCs)))
+		//     .detail("ExcludedMachines", describe(filterOptinal(excludedMachines)));
 		throw no_more_servers();
 	}
 
@@ -1497,6 +1509,9 @@ public:
 			    isExcludedDegradedServer(it.second.details.interf.addresses())) {
 				fitness = std::max(fitness, ProcessClass::ExcludeFit);
 			}
+			// if (isExcludedDegradedServer(it.second.details.interf.addresses()) && role ==
+			// ProcessClass::DataDistributor) { 	fitness = std::max(fitness, ProcessClass::NeverAssign);
+			// }
 			if (workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
 			    it.second.details.interf.locality.dcId() == dcId) {
 				auto sharing = preferredSharing.find(it.first);
@@ -1982,10 +1997,12 @@ public:
 			auto reply =
 			    findWorkersForConfigurationFromDC(req, req.configuration.regions[0].dcId, checkGoodRecruitment);
 			if (reply.isError()) {
+				TraceEvent("FindWorkersForConfigurationDispatchNoMoreServers").detail("Error", reply.getError().code());
 				throw reply.getError();
 			} else if (req.configuration.regions[0].dcId == clusterControllerDcId.get()) {
 				return reply.get();
 			}
+			TraceEvent("FindWorkersForConfigurationDispatchNoMoreServers").log();
 			throw no_more_servers();
 		} else {
 			RecruitFromConfigurationReply result;
@@ -3120,6 +3137,9 @@ public:
 			for (const auto& complainer : degradedLinkDst2Src[badServer]) {
 				if (currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
 					currentDegradedServers.insert(badServer);
+					TraceEvent("CCInsertDegradedServer")
+					    .detail("Complainer", complainer)
+					    .detail("BadServer", badServer.toString());
 					break;
 				}
 			}
@@ -3135,7 +3155,11 @@ public:
 		for (const auto& [complainerCount, badServer] : count2DisconnectedPeer) {
 			for (const auto& complainer : disconnectedLinkDst2Src[badServer]) {
 				if (currentDegradationInfo.disconnectedServers.find(complainer) ==
-				    currentDegradationInfo.disconnectedServers.end()) {
+				        currentDegradationInfo.disconnectedServers.end() &&
+				    currentDegradedServers.find(complainer) == currentDegradedServers.end()) {
+					TraceEvent("CCInsertDisconnectedServer")
+					    .detail("Complainer", complainer)
+					    .detail("BadServer", badServer.toString());
 					currentDegradationInfo.disconnectedServers.insert(badServer);
 					break;
 				}
@@ -3153,6 +3177,10 @@ public:
 		for (const auto& badServer : currentDegradedServers) {
 			if (degradedLinkDst2Src[badServer].size() <= SERVER_KNOBS->CC_DEGRADED_PEER_DEGREE_TO_EXCLUDE) {
 				currentDegradationInfo.degradedServers.insert(badServer);
+			} else {
+				TraceEvent("ComplainedByTooManyServers")
+				    .detail("BadServer", badServer.toString())
+				    .detail("Complainers", describe(degradedLinkDst2Src[badServer]));
 			}
 		}
 
@@ -3168,44 +3196,71 @@ public:
 	// Whether the transaction system (in primary DC if in HA setting) contains degraded servers.
 	bool transactionSystemContainsDegradedServers() {
 		const ServerDBInfo& dbi = db.serverInfo->get();
-		auto transactionWorkerInList = [&dbi](const std::unordered_set<NetworkAddress>& serverList,
-		                                      bool skipSatellite) -> bool {
+		auto transactionWorkerInList = [this, &dbi](const std::unordered_set<NetworkAddress>& serverList,
+		                                            bool skipSatellite,
+		                                            bool useLocalTxnInfo) -> bool {
 			for (const auto& server : serverList) {
 				if (dbi.master.addresses().contains(server)) {
 					return true;
 				}
 
-				for (const auto& logSet : dbi.logSystemConfig.tLogs) {
-					if (!logSet.isLocal) {
-						// We don't check server degradation for remote TLogs since it is not on the transaction system
-						// critical path.
-						continue;
-					}
-					if (skipSatellite && logSet.locality == tagLocalitySatellite) {
-						continue;
-					}
-					for (const auto& tlog : logSet.tLogs) {
-						if (tlog.present() && tlog.interf().addresses().contains(server)) {
+				if (useLocalTxnInfo) {
+					for (const auto& tlog : recruitingTlogs) {
+						if (tlog.addresses().contains(server)) {
 							return true;
 						}
 					}
-				}
 
-				for (const auto& proxy : dbi.client.grvProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
+					for (const auto& proxy : recruitingCommitProxies) {
+						if (proxy.addresses().contains(server)) {
+							return true;
+						}
 					}
-				}
 
-				for (const auto& proxy : dbi.client.commitProxies) {
-					if (proxy.addresses().contains(server)) {
-						return true;
+					for (const auto& proxy : recruitingGrvProxies) {
+						if (proxy.addresses().contains(server)) {
+							return true;
+						}
 					}
-				}
 
-				for (const auto& resolver : dbi.resolvers) {
-					if (resolver.addresses().contains(server)) {
-						return true;
+					for (const auto& resolver : recruitingResolvers) {
+						if (resolver.addresses().contains(server)) {
+							return true;
+						}
+					}
+				} else {
+					for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+						if (!logSet.isLocal) {
+							// We don't check server degradation for remote TLogs since it is not on the transaction
+							// system critical path.
+							continue;
+						}
+						if (skipSatellite && logSet.locality == tagLocalitySatellite) {
+							continue;
+						}
+						for (const auto& tlog : logSet.tLogs) {
+							if (tlog.present() && tlog.interf().addresses().contains(server)) {
+								return true;
+							}
+						}
+					}
+
+					for (const auto& proxy : dbi.client.grvProxies) {
+						if (proxy.addresses().contains(server)) {
+							return true;
+						}
+					}
+
+					for (const auto& proxy : dbi.client.commitProxies) {
+						if (proxy.addresses().contains(server)) {
+							return true;
+						}
+					}
+
+					for (const auto& resolver : dbi.resolvers) {
+						if (resolver.addresses().contains(server)) {
+							return true;
+						}
 					}
 				}
 			}
@@ -3215,8 +3270,10 @@ public:
 
 		// Check if transaction system contains degraded/disconnected servers. For satellite, we only check for
 		// disconnection since the latency between prmary and satellite is across WAN and may not be very stable.
-		return transactionWorkerInList(degradationInfo.degradedServers, /*skipSatellite=*/true) ||
-		       transactionWorkerInList(degradationInfo.disconnectedServers, /*skipSatellite=*/false);
+		return transactionWorkerInList(degradationInfo.degradedServers,
+		                               /*skipSatellite=*/true,
+		                               db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) ||
+		       transactionWorkerInList(degradationInfo.disconnectedServers, /*skipSatellite=*/false, false);
 	}
 
 	// Whether transaction system in the remote DC, e.g. log router and tlogs in the remote DC, contains degraded
@@ -3270,13 +3327,28 @@ public:
 	// Returns true when the cluster controller should trigger a recovery due to degraded servers used in the
 	// transaction system in the primary data center.
 	bool shouldTriggerRecoveryDueToDegradedServers() {
+
 		if (degradationInfo.degradedServers.size() + degradationInfo.disconnectedServers.size() >
 		    SERVER_KNOBS->CC_MAX_EXCLUSION_DUE_TO_HEALTH) {
 			return false;
 		}
 
-		if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+		if (db.serverInfo->get().recoveryState < RecoveryState::RECRUITING) {
 			return false;
+		} else if (db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS) {
+			TraceEvent("ShouldTriggerRecoveryDueToDegradedServersDebug")
+			    .detail("DegradedServers", describe(degradationInfo.degradedServers))
+			    .detail("CPs", recruitingCommitProxies.size())
+			    .detail("Grvs", recruitingGrvProxies.size())
+			    .detail("RVs", recruitingResolvers.size())
+			    .detail("RecoveryState", db.serverInfo->get().recoveryState);
+		} else {
+			TraceEvent("ShouldTriggerRecoveryDueToDegradedServers")
+			    .detail("DegradedServers", describe(degradationInfo.degradedServers))
+			    .detail("CPs", recruitingCommitProxies.size())
+			    .detail("Grvs", recruitingGrvProxies.size())
+			    .detail("RVs", recruitingResolvers.size())
+			    .detail("RecoveryState", db.serverInfo->get().recoveryState);
 		}
 
 		// Do not trigger recovery if the cluster controller is excluded, since the master will change
@@ -3284,6 +3356,17 @@ public:
 		if (id_worker[clusterControllerProcessId].priorityInfo.isExcluded) {
 			return false;
 		}
+
+		bool newDegraded = false;
+		for (const auto& server : degradationInfo.degradedServers) {
+			if (!isExcludedDegradedServer(server)) {
+				TraceEvent("ShouldTriggerRecoveryDueToDegradedServers").detail("NewServer", server.toString());
+				newDegraded = true;
+				break;
+			}
+		}
+		if (!newDegraded)
+			return false;
 
 		return transactionSystemContainsDegradedServers();
 	}
@@ -3341,6 +3424,8 @@ public:
 		return false;
 	}
 
+	bool isExcludedDegradedServer(const NetworkAddress& a) const { return excludedDegradedServers.contains(a); }
+
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
@@ -3369,6 +3454,12 @@ public:
 	AsyncTrigger updateDBInfo;
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
+
+	// gray failure detection
+	std::vector<WorkerInterface> recruitingCommitProxies;
+	std::vector<WorkerInterface> recruitingGrvProxies;
+	std::vector<WorkerInterface> recruitingResolvers;
+	std::vector<WorkerInterface> recruitingTlogs;
 
 	DBInfo db;
 	Database cx;

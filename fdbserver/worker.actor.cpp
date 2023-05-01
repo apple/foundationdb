@@ -1076,7 +1076,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					TraceEvent("WorkerHealthMonitorChecker")
 					    .detail("Percentage", peer->timeoutCount / (double)(peer->pingLatencies.getPopulationSize()))
 					    .detail("PeerAddr", address)
-						.detail("SkipTxnSystemCheck", skipTxnSystemCheck)
+					    .detail("SkipTxnSystemCheck", skipTxnSystemCheck)
 					    .detail("WorkerLocation", workerLocation)
 					    .detail("AddressInDB", addressInDbAndPrimaryDc(address, dbInfo));
 
@@ -1178,8 +1178,9 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty()) {
 				req.address = FlowTransport::transport().getLocalAddress();
-				TraceEvent("WorkerSendDegradedPeer").detail("DegradedPeers", describe(req.degradedPeers))
-					.detail("DisconnectedPeers", req.disconnectedPeers);
+				TraceEvent("WorkerSendDegradedPeer")
+				    .detail("DegradedPeers", describe(req.degradedPeers))
+				    .detail("DisconnectedPeers", req.disconnectedPeers);
 				ccInterface->get().get().updateWorkerHealth.send(req);
 			}
 		}
