@@ -941,13 +941,15 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
 	state int64_t bytesRead = 0;
+	state bool canStopEarly =
+	    (SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET == 0 || SERVER_KNOBS->BG_ENABLE_SPLIT_TRUNCATED);
 	state bool injectTooBig = initialSnapshot && g_network->isSimulated() && BUGGIFY_WITH_PROB(0.1);
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	loop {
 		try {
-			if (initialSnapshot && snapshot.size() > 1 &&
+			if (initialSnapshot && snapshot.size() > 1 && canStopEarly &&
 			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();

@@ -578,12 +578,14 @@ static void alignKeyBoundary(Reference<BlobManagerData> bmData,
 		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, keys.arena());
 	}
 
-	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
+	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split if not allowed.
 	if (alignedKey <= keys.back()) {
-		// Set split boundary.
-		BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
-		boundaries[key] = boundary;
-		keys.push_back_deep(keys.arena(), key);
+		if (SERVER_KNOBS->BG_ENABLE_SPLIT_TRUNCATED) {
+			// Set split boundary.
+			BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
+			boundaries[key] = boundary;
+			keys.push_back_deep(keys.arena(), key);
+		} // else drop the split
 	} else {
 		keys.push_back_deep(keys.arena(), alignedKey);
 	}
@@ -1585,14 +1587,14 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// FIXME: only need to align propsedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
-	ASSERT(finalSplit.keys.size() > 2);
-
 	if (BM_DEBUG) {
 		fmt::print("Aligned split ({0}):\n", finalSplit.keys.size());
 		for (auto& it : finalSplit.keys) {
 			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
 		}
 	}
+
+	ASSERT(finalSplit.keys.size() > 2);
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
