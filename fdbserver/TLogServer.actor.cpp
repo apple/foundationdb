@@ -2298,7 +2298,7 @@ ACTOR Future<Void> commitQueue(TLogData* self) {
 		loop {
 			// Insert enough of a delay to allow this tlog to be stopped and a new one registered
 			// before the commit is issued. These are the conditions which trigger a missingFinalCommit.
-			if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY) {
+			if (BUGGIFY_WITH_PROB(0.0001) && !g_simulator->speedUpSimulation) {
 				wait(delay(1.0));
 			}
 
