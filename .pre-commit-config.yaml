@@ -8,6 +8,6 @@ repos:
     hooks:
     - id: flake8
 -   repo: git@github.com:snowflakedb/casec_precommit.git
-    rev: 9861e31ff3ba599242336dd8bbefc53a6e9f069e # pragma: allowlist secret
+    rev: 30374abd7e4cfcd07a03794bb706812ac9fa8da2
     hooks:
-    - id: snowflake-secret-scanner
+    - id: fdb-secret-scanner
