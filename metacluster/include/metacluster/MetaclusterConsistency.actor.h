@@ -80,8 +80,8 @@ private:
 		ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT(data.metaclusterRegistration.get().id == data.metaclusterRegistration.get().metaclusterId &&
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
-		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MinSupported);
-		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MaxSupported);
+		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
 
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
@@ -201,8 +201,8 @@ private:
 			ASSERT(data.metaclusterRegistration.get().matches(managementData.metaclusterRegistration.get()));
 			ASSERT(data.metaclusterRegistration.get().name == clusterName);
 			ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
-			ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MinSupported);
-			ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MaxSupported);
+			ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+			ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
 			ASSERT_EQ(data.metaclusterRegistration.get().version, managementData.metaclusterRegistration.get().version);
 
 			if (data.tenantData.lastTenantId >= 0) {

@@ -3389,12 +3389,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
 					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
 					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
-				} else { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
+				} else if (!metaclusterMetrics.error.present()) { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
 					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
 					tenants["num_tenants"] = metaclusterMetrics.numTenants;
 					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
 					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
+				} else {
+					messages.push_back(JsonString::makeMessage(
+					    "metacluster_metrics_missing",
+					    fmt::format("Failed to fetch metacluster metrics: {}.", metaclusterMetrics.error.get())
+					        .c_str()));
 				}
+
 			} else {
 				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
 			}

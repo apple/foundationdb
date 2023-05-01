@@ -181,11 +181,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	}
 
 	bool isValidVersion(Optional<Reference<DataClusterData>> dataDb = {}) {
-		bool managementValid = managementVersion >= MetaclusterVersion::MinSupported &&
-		                       managementVersion <= MetaclusterVersion::MaxSupported;
+		bool managementValid = managementVersion >= MetaclusterVersion::MIN_SUPPORTED &&
+		                       managementVersion <= MetaclusterVersion::MAX_SUPPORTED;
 
-		bool dataValid = !dataDb.present() || (dataDb.get()->version >= MetaclusterVersion::MinSupported &&
-		                                       dataDb.get()->version <= MetaclusterVersion::MaxSupported);
+		bool dataValid = !dataDb.present() || (dataDb.get()->version >= MetaclusterVersion::MIN_SUPPORTED &&
+		                                       dataDb.get()->version <= MetaclusterVersion::MAX_SUPPORTED);
 
 		return managementValid && dataValid;
 	}
@@ -224,7 +224,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		ASSERT(!isValidVersion(dataDbItr->second));
 
 		dataDbItr->second->version = (MetaclusterVersion)deterministicRandom()->randomInt(
-		    (int)MetaclusterVersion::MinSupported, (int)MetaclusterVersion::MaxSupported + 1);
+		    (int)MetaclusterVersion::MIN_SUPPORTED, (int)MetaclusterVersion::MAX_SUPPORTED + 1);
 
 		return setMetaclusterVersion(dataDbItr->second->db.getReference(), dataDbItr->second->version);
 	}
@@ -1469,7 +1469,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	ACTOR static Future<Void> changeClusterVersion(MetaclusterManagementWorkload* self) {
 		state MetaclusterVersion newVersion = (MetaclusterVersion)deterministicRandom()->randomInt(
-		    (int)MetaclusterVersion::Begin, (int)MetaclusterVersion::End + 1);
+		    (int)MetaclusterVersion::BEGIN, (int)MetaclusterVersion::END + 1);
 
 		if (deterministicRandom()->coinflip()) {
 			if (self->metaclusterCreated) {
@@ -1630,12 +1630,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(MetaclusterManagementWorkload* self) {
 		std::vector<Future<Void>> setVersionFutures;
 		if (self->metaclusterCreated) {
-			self->managementVersion = MetaclusterVersion::MaxSupported;
+			self->managementVersion = MetaclusterVersion::MAX_SUPPORTED;
 			setVersionFutures.push_back(self->setMetaclusterVersion(self->managementDb, self->managementVersion));
 		}
 		for (auto& [name, dataDb] : self->dataDbs) {
 			if (dataDb->registered) {
-				dataDb->version = MetaclusterVersion::MaxSupported;
+				dataDb->version = MetaclusterVersion::MAX_SUPPORTED;
 				setVersionFutures.push_back(self->setMetaclusterVersion(dataDb->db.getReference(), dataDb->version));
 			}
 		}

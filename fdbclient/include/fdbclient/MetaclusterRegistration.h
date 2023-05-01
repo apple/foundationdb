@@ -30,22 +30,22 @@ std::string clusterTypeToString(const ClusterType& clusterType);
 
 enum class MetaclusterVersion {
 	// Smaller than any legal version; used for testing
-	Begin = 0,
+	BEGIN = 0,
 
 	// This is the smallest version of metacluster metadata understood by this version of FDB. It should be updated any
 	// time support for older versions is dropped. Our contract is that we will support at least one older version, but
 	// likely we will stop supporting versions older than that.
-	MinSupported = 1,
+	MIN_SUPPORTED = 1,
 
 	// The initial version used for metacluster metadata
 	V1 = 1,
 
 	// This is the largest version of metacluster metadata understood by this version of FDB. It should be increased any
 	// time an FDB version adds a new metacluster version.
-	MaxSupported = 1,
+	MAX_SUPPORTED = 1,
 
 	// Larger than any legal version; used for testing
-	End
+	END
 };
 
 template <bool Versioned>
@@ -147,7 +147,7 @@ struct MetaclusterRegistrationEntryImpl {
 	void serialize(Ar& ar) {
 		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id, version);
 		if constexpr (Ar::isDeserializing && Versioned) {
-			if (version < MetaclusterVersion::MinSupported || version > MetaclusterVersion::MaxSupported) {
+			if (version < MetaclusterVersion::MIN_SUPPORTED || version > MetaclusterVersion::MAX_SUPPORTED) {
 				throw unsupported_metacluster_version();
 			}
 		}
