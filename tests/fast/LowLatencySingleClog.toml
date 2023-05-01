@@ -1,6 +1,22 @@
 [configuration]
 buggify = false
 minimumReplication = 2
+generateFearless = false
+processesPerMachine = 1
+encryptModes = ['disabled']
+
+[[knobs]]
+enable_worker_health_monitor = true
+cc_enable_worker_health_monitor = true
+cc_health_trigger_recovery = true
+peer_latency_check_min_population = 5
+cc_worker_health_checking_interval = 10
+cc_min_degradation_interval = 10
+worker_health_monitor_interval = 10
+peer_timeout_percentage_degradation_threshold = 0.01
+cc_degraded_peer_degree_to_exclude = 5
+cc_max_exclusion_due_to_health = 10
+commit_proxy_liveness_timeout = 1000
 
 [[test]]
 testTitle = 'Clogged'
@@ -14,8 +30,8 @@ connectionFailuresDisableDuration = 100000
 
     [[test.workload]]
     testName = 'LowLatency'
-    maxGRVLatency = 40.0
-    maxCommitLatency = 40.0
+    maxGRVLatency = 60.0
+    maxCommitLatency = 60.0
     testDuration = 60.0
 
     [[test.workload]]

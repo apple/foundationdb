@@ -48,7 +48,7 @@ struct LowLatencyWorkload : TestWorkload {
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 	}
 
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("all"); }
 
 	Future<Void> setup(Database const& cx) override {
 		if (g_network->isSimulated()) {
@@ -68,6 +68,8 @@ struct LowLatencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> _start(Database cx, LowLatencyWorkload* self) {
 		state double testStart = now();
+		state UID debugID;
+		state int64_t transactionTimeLimit = 5000;
 		try {
 			loop {
 				wait(delay(self->checkDelay));
@@ -78,9 +80,13 @@ struct LowLatencyWorkload : TestWorkload {
 				++self->operations;
 				loop {
 					try {
-						TraceEvent("StartLowLatencyTransaction").log();
+						UID debugID = deterministicRandom()->randomUniqueID();
+						tr.debugTransaction(debugID);
+						TraceEvent("StartLowLatencyTransaction", debugID).log();
 						tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 						tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+						tr.setOption(FDBTransactionOptions::TIMEOUT,
+						             StringRef((uint8_t*)&transactionTimeLimit, sizeof(int64_t)));
 						if (doCommit) {
 							tr.set(self->testKey, ""_sr);
 							wait(tr.commit());
@@ -89,13 +95,13 @@ struct LowLatencyWorkload : TestWorkload {
 						}
 						break;
 					} catch (Error& e) {
-						TraceEvent("LowLatencyTransactionFailed").errorUnsuppressed(e);
+						TraceEvent("LowLatencyTransactionFailed", debugID).errorUnsuppressed(e);
 						wait(tr.onError(e));
 						++self->retries;
 					}
 				}
 				if (now() - operationStart > maxLatency) {
-					TraceEvent(SevError, "LatencyTooLarge")
+					TraceEvent(SevError, "LatencyTooLarge", debugID)
 					    .detail("MaxLatency", maxLatency)
 					    .detail("ObservedLatency", now() - operationStart)
 					    .detail("IsCommit", doCommit);

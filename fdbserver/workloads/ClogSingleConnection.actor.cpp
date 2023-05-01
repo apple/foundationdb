@@ -58,10 +58,36 @@ public:
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	void clogRandomPair() {
-		auto m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
-		auto m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		IPAddress cc = dbInfo->get().clusterInterface.address().ip;
+		simulator::ProcessInfo *m1, *m2;
+		m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		while (m1->address.ip == cc || m1->startingClass == ProcessClass::TesterClass) {
+			m1 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		}
+		while (m2->address.ip == cc || m2->startingClass == ProcessClass::TesterClass) {
+			m2 = deterministicRandom()->randomChoice(g_simulator->getAllProcesses());
+		}
+		std::vector<simulator::ProcessInfo*> availableProcesses;
+		std::vector<simulator::ProcessInfo*> deadProcesses;
 		if (m1->address.ip != m2->address.ip) {
-			g_simulator->clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
+			// check if it's okay to clog
+			auto ip1 = m1->address.ip < m2->address.ip ? m1->address.ip : m2->address.ip;
+			for (auto processInfo : g_simulator->getAllProcesses()) {
+				if (processInfo->startingClass == ProcessClass::TesterClass ||
+				    processInfo->startingClass == ProcessClass::StorageCacheClass)
+					continue;
+				if (processInfo->address.ip == ip1)
+					deadProcesses.push_back(processInfo);
+				else
+					availableProcesses.push_back(processInfo);
+			}
+			bool canClog = g_simulator->canKillProcesses(
+			    availableProcesses, deadProcesses, simulator::KillType::FailDisk, nullptr);
+			if (canClog)
+				g_simulator->clogPair(m1->address.ip, m2->address.ip, clogDuration.orDefault(10000));
+			else
+				TraceEvent("SkipClogSingleConnection").detail("Address", m1->address).detail("Address2", m2->address);
 		}
 	}
 };
