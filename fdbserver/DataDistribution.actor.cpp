@@ -829,7 +829,7 @@ ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
 		req.reply.sendError(e);
 	}
 
-	ASSERT(context->ddEnabledState->setDDEnabled(req.requesterID));
+	ASSERT(context->ddEnabledState->trySetEnabled(req.requesterID));
 	return Void();
 }
 
@@ -850,8 +850,8 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
 				continue;
 			}
-			if (self->context->ddEnabledState->setDDRestorePreparing(req.requesterID)) {
-				// setDDRestorePreparing won't destroy DataDistributor, but will destroy tracker and queue
+			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
+				// trySetBlobRestorePreparing won't destroy DataDistributor, but will destroy tracker and queue
 				self->addActor.send(prepareDataMigration(req, self->context, self->txnProcessor->context()));
 				// force reloading initData and restarting DD components
 				throw dd_config_changed();
@@ -1488,7 +1488,7 @@ ACTOR Future<Void> ddSnapCreate(
     std::map<UID, ErrorOr<Void>>*
         ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
-	if (!ddEnabledState->setDDSnapshot(snapReq.snapUID)) {
+	if (!ddEnabledState->trySetSnapshot(snapReq.snapUID)) {
 		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
 		// here
 		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
@@ -1535,13 +1535,13 @@ ACTOR Future<Void> ddSnapCreate(
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
 			// enable DD should always succeed
-			bool success = ddEnabledState->setDDEnabled(snapReq.snapUID);
+			bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 			ASSERT(success);
 			throw e;
 		}
 	}
 	// enable DD should always succeed
-	bool success = ddEnabledState->setDDEnabled(snapReq.snapUID);
+	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
 	return Void();
 }

@@ -119,7 +119,7 @@ struct DDQueueInitParams {
 
 // DDQueue receives RelocateShard from any other DD components and schedules the actual movements
 class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
-	const DDEnabledState* ddState = nullptr;
+	const DDEnabledState* ddEnabledState = nullptr;
 
 public:
 	friend struct DDQueueImpl;

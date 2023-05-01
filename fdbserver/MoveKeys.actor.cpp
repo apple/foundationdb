@@ -197,11 +197,11 @@ bool DDEnabledState::isBlobRestorePreparing() const {
 	return stateValue == BLOB_RESTORE_PREPARING;
 }
 
-bool DDEnabledState::setDDSnapshot(UID requesterId) {
+bool DDEnabledState::trySetSnapshot(UID requesterId) {
 	ASSERT(requesterId != UID());
 	// disabling DD
-	if (ddEnabledStatusUID != UID()) {
-		// only allow state modification to disabled when the state is not modified by others
+	if (isEnabled()) {
+		// only allow state modification to snapshot when DD is enabled.
 		return false;
 	}
 	ddEnabledStatusUID = requesterId;
@@ -211,10 +211,10 @@ bool DDEnabledState::setDDSnapshot(UID requesterId) {
 	return true;
 }
 
-bool DDEnabledState::setDDEnabled(UID requesterId) {
+bool DDEnabledState::trySetEnabled(UID requesterId) {
 	ASSERT(requesterId != UID());
 	// enabling DD
-	if (requesterId != ddEnabledStatusUID) {
+	if (sameId(requesterId)) {
 		// enabling DD not allowed if UID does not match with the previous request
 		return false;
 	}
@@ -225,10 +225,10 @@ bool DDEnabledState::setDDEnabled(UID requesterId) {
 	return true;
 }
 
-bool DDEnabledState::setDDRestorePreparing(UID requesterId) {
+bool DDEnabledState::trySetBlobRestorePreparing(UID requesterId) {
 	ASSERT(requesterId != UID());
-	if (ddEnabledStatusUID != UID()) {
-		// only allow state modification to restore preparing when the state is not modified by others
+	if (!isEnabled()) {
+		// only allow state modification to RestorePreparing when DD is enabled.
 		return false;
 	}
 	ddEnabledStatusUID = requesterId;
