@@ -510,6 +510,10 @@ public:
 		return 0;
 	}
 
+	// A collection of custom shard boundaries (begin, end, replication factor) that will be removed once this feature
+	// is integrated with a way to set these boundaries in the database
+	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
+
 	static thread_local ProcessInfo* currentProcess;
 
 	bool checkInjectedCorruption() {

@@ -93,6 +93,7 @@ struct DataDistributionTracker {
 	// because by the time (trackerCancelled == true) this memory cannot
 	// be accessed
 	bool& trackerCancelled;
+	Reference<KeyRangeMap<int>> customReplication;
 
 	// This class extracts the trackerCancelled reference from a DataDistributionTracker object
 	// Because some actors spawned by the dataDistributionTracker outlive the DataDistributionTracker
@@ -124,11 +125,12 @@ struct DataDistributionTracker {
 	                        Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure,
 	                        Reference<AsyncVar<bool>> anyZeroHealthyTeams,
 	                        KeyRangeMap<ShardTrackedData>& shards,
-	                        bool& trackerCancelled)
+	                        bool& trackerCancelled,
+							Reference<KeyRangeMap<int>> customReplication)
 	  : cx(cx), distributorId(distributorId), shards(shards), sizeChanges(false), systemSizeEstimate(0),
 	    dbSizeEstimate(new AsyncVar<int64_t>()), maxShardSize(new AsyncVar<Optional<int64_t>>()), output(output),
 	    shardsAffectedByTeamFailure(shardsAffectedByTeamFailure), readyToStart(readyToStart),
-	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled) {}
+	    anyZeroHealthyTeams(anyZeroHealthyTeams), trackerCancelled(trackerCancelled), customReplication(customReplication) {}
 
 	~DataDistributionTracker() {
 		trackerCancelled = true;
@@ -182,6 +184,10 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 	                                                     SERVER_KNOBS->SHARD_BYTES_PER_SQRT_BYTES) *
 	                    SERVER_KNOBS->SHARD_BYTES_RATIO,
 	                (int64_t)SERVER_KNOBS->MAX_SHARD_BYTES);
+}
+
+bool ddLargeTeamEnabled() {
+	return SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
 }
 
 ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
@@ -1014,7 +1020,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<AsyncVar<bool>> anyZeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled) {
+                                           bool* trackerCancelled,
+										   Reference<KeyRangeMap<int>> customReplication) {
 	state DataDistributionTracker self(cx,
 	                                   distributorId,
 	                                   readyToStart,
@@ -1022,7 +1029,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
 	                                   shardsAffectedByTeamFailure,
 	                                   anyZeroHealthyTeams,
 	                                   *shards,
-	                                   *trackerCancelled);
+	                                   *trackerCancelled,
+									   customReplication);
 	state Future<Void> loggingTrigger = Void();
 	state Future<Void> readHotDetect = readHotDetector(&self);
 	state Reference<EventCacheHolder> ddTrackerStatsEventHolder = makeReference<EventCacheHolder>("DDTrackerStats");

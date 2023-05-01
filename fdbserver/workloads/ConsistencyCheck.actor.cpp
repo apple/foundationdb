@@ -1169,10 +1169,18 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state int64_t bytesReadInthisRound = 0;
 
 		state double dbSize = 100e12;
+		state int ssCount = 1e6;
 		if (g_network->isSimulated()) {
 			// This call will get all shard ranges in the database, which is too expensive on real clusters.
 			int64_t _dbSize = wait(self->getDatabaseSize(cx));
 			dbSize = _dbSize;
+			std::vector<StorageServerInterface> storageServers = wait(getStorageServers(cx));
+			ssCount = 0;
+			for (auto& it : storageServers) {
+				if (!it.isTss()) {
+					++ssCount;
+				}
+			}
 		}
 
 		state std::vector<KeyRangeRef> ranges;
@@ -1221,9 +1229,36 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			    return false;
 			}*/
 
+			state int customReplication = configuration.storageTeamSize;
+			if (g_network->isSimulated() && ddLargeTeamEnabled()) {
+				for (auto& it : g_simulator.customReplicas) {
+					KeyRangeRef replicaRange(std::get<0>(it), std::get<1>(it));
+					if (range.intersects(replicaRange)) {
+						TraceEvent("ConsistencyCheck_CheckCustomReplica")
+							.detail("ShardBegin", printable(range.begin))
+							.detail("ShardEnd", printable(range.end))
+							.detail("SourceTeamSize", sourceStorageServers.size())
+							.detail("DestServerSize", destStorageServers.size())
+							.detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+							.detail("CustomBegin", std::get<0>(it))
+							.detail("CustomEnd", std::get<1>(it))
+							.detail("CustomReplicas", std::get<2>(it))
+							.detail("UsableRegions", configuration.usableRegions);
+						if (!replicaRange.contains(range)) {
+							self->testFailure("Custom shard boundary violated");
+							return false;
+						}
+						customReplication = std::max(customReplication, std::get<2>(it));
+					}
+				}
+			}
+
 			// In a quiescent database, check that the team size is the same as the desired team size
 			if (self->firstClient && self->performQuiescentChecks &&
-			    sourceStorageServers.size() != configuration.usableRegions * configuration.storageTeamSize) {
+		    ((configuration.usableRegions == 1 &&
+		      sourceStorageServers.size() != std::min(ssCount, customReplication)) ||
+		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
+		     sourceStorageServers.size() > configuration.usableRegions * customReplication)) {
 				TraceEvent("ConsistencyCheck_InvalidTeamSize")
 				    .detail("ShardBegin", printable(range.begin))
 				    .detail("ShardEnd", printable(range.end))

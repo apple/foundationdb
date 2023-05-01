@@ -67,6 +67,7 @@ public:
 	//       intersecting shards.
 
 	int getNumberOfShards(UID ssID) const;
+	int getNumberOfShards(Team team) const;
 	std::vector<KeyRange> getShardsFor(Team team) const;
 	bool hasShards(Team team) const;
 
@@ -103,6 +104,9 @@ private:
 
 	void erase(Team team, KeyRange const& range);
 	void insert(Team team, KeyRange const& range);
+
+public:
+	auto intersectingRanges(KeyRangeRef keyRange) const -> decltype(shard_teams)::ConstRanges;
 };
 
 #endif // FOUNDATIONDB_SHARDSAFFECTEDBYTEAMFAILURE_H

@@ -204,6 +204,7 @@ struct GetTeamRequest {
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
 	double inflightPenalty;
 	bool findTeamByServers;
+	Optional<KeyRange> keys;
 	std::vector<UID> completeSources;
 	std::vector<UID> src;
 	Promise<std::pair<Optional<Reference<IDataDistributionTeam>>, bool>> reply;
@@ -217,11 +218,12 @@ struct GetTeamRequest {
 	               TeamMustHaveShards teamMustHaveShards,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
-	               double inflightPenalty = 1.0)
+	               double inflightPenalty = 1.0,
+				   Optional<KeyRange> keys = Optional<KeyRange>())
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
 	    preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
-	    findTeamByServers(FindTeamByServers::False) {}
+	    findTeamByServers(FindTeamByServers::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
 	  : wantsNewServers(WantNewServers::False), wantsTrueBest(WantTrueBest::False),
 	    preferLowerDiskUtil(PreferLowerDiskUtil::False), teamMustHaveShards(TeamMustHaveShards::False),
@@ -356,7 +358,8 @@ struct DDShardInfo {
 };
 
 struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
-	InitialDataDistribution() : dataMoveMap(std::make_shared<DataMove>()) {}
+	InitialDataDistribution()
+	  : dataMoveMap(std::make_shared<DataMove>()), customReplication(makeReference<KeyRangeMap<int>>(-1)) {}
 
 	// Read from dataDistributionModeKey. Whether DD is disabled. DD can be disabled persistently (mode = 0). Set mode
 	// to 1 will enable all disabled parts
@@ -367,6 +370,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	std::vector<DDShardInfo> shards;
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
+	Reference<KeyRangeMap<int>> customReplication;
 };
 
 struct ShardMetrics {
@@ -401,7 +405,8 @@ ACTOR Future<Void> dataDistributionTracker(Reference<InitialDataDistribution> in
                                            Reference<AsyncVar<bool>> zeroHealthyTeams,
                                            UID distributorId,
                                            KeyRangeMap<ShardTrackedData>* shards,
-                                           bool* trackerCancelled);
+                                           bool* trackerCancelled,
+										   Reference<KeyRangeMap<int>> customReplication);
 
 ACTOR Future<Void> dataDistributionQueue(Database cx,
                                          PromiseStream<RelocateShard> output,
@@ -436,6 +441,8 @@ ShardSizeBounds getShardSizeBounds(KeyRangeRef shard, int64_t maxShardSize);
 
 // Determines the maximum shard size based on the size of the database
 int64_t getMaxShardSize(double dbSizeEstimate);
+
+bool ddLargeTeamEnabled();
 
 struct DDTeamCollectionInitParams;
 class DDTeamCollection;
