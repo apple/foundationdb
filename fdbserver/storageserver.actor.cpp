@@ -1410,8 +1410,8 @@ public:
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
-	// Connection to blob store for fetchKeys()
-	Reference<BlobConnectionProvider> blobConn;
+	// Tenant metadata to manage connection to blob store for fetchKeys()
+	BGTenantMap tenantData;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
@@ -1468,7 +1468,8 @@ public:
 	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
-	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")) {
+	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
+	    tenantData(db) {
 		readPriorityRanks = parseStringToVector<int>(SERVER_KNOBS->STORAGESERVER_READTYPE_PRIORITY_MAP, ',');
 		ASSERT(readPriorityRanks.size() > (int)ReadType::MAX);
 		version.initMetric("StorageServer.Version"_sr, counters.cc.getId());
@@ -1492,14 +1493,6 @@ public:
 		this->storage.kvGets = &counters.kvGets;
 		this->storage.kvScans = &counters.kvScans;
 		this->storage.kvCommits = &counters.kvCommits;
-
-		if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-			try {
-				blobConn = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
-			} catch (Error& e) {
-				// Skip any error when establishing blob connection
-			}
-		}
 	}
 
 	//~StorageServer() { fclose(log); }
@@ -6569,11 +6562,12 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 	}
 }
 
-// Read blob granules mapping from system keyspace. It keeps retrying until reaching maxRetryCount.
-ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Transaction* tr,
-                                                                             KeyRange keys,
-                                                                             Version fetchVersion,
-                                                                             int maxRetryCount = 10) {
+// Read blob granules metadata. It keeps retrying until reaching maxRetryCount.
+// The key range should not cross tenant boundary.
+ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranuleChunks(Transaction* tr,
+                                                                                  KeyRange keys,
+                                                                                  Version fetchVersion,
+                                                                                  int maxRetryCount = 10) {
 	state int retryCount = 0;
 	state Version readVersion = fetchVersion;
 	loop {
@@ -6594,27 +6588,48 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> tryReadBlobGranules(Tra
 	}
 }
 
-// Read keys from blob storage if they exist. Fail back to tryGetRange, which reads keys
-// from storage servers with locally attached disks
+// Read blob granules metadata. The key range can cross tenant bundary.
+ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(Transaction* tr,
+                                                                               Database cx,
+                                                                               KeyRangeRef keys,
+                                                                               Version fetchVersion) {
+	loop {
+		state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+		try {
+			state Standalone<VectorRef<KeyRangeRef>> ranges =
+			    wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
+			for (auto& range : ranges) {
+				KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
+				Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+				    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
+				results.append(results.arena(), chunks.begin(), chunks.size());
+				results.arena().dependsOn(chunks.arena());
+			}
+			return results;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
 
+// Read keys from blob storage
 ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
                                        Transaction* tr,
+                                       Database cx,
                                        KeyRange keys,
                                        Version fetchVersion,
-                                       Reference<BlobConnectionProvider> blobConn) {
-	ASSERT(blobConn.isValid());
+                                       BGTenantMap* tenantData) {
 	try {
-		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks = wait(tryReadBlobGranules(tr, keys, fetchVersion));
-		if (chunks.size() == 0) {
-			throw blob_granule_transaction_too_old(); // no data on blob
-		}
-		if (!isRangeFullyCovered(keys, chunks)) {
-			throw blob_granule_transaction_too_old();
-		}
+		state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+		    wait(readBlobGranuleChunks(tr, cx, keys, fetchVersion));
+		TraceEvent("ReadBlobGranules").detail("Keys", keys).detail("Chunks", chunks.size());
+
 		state int i;
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			state Reference<BlobConnectionProvider> blobConn = wait(loadBStoreForTenant(tenantData, chunkRange));
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
+
 			TraceEvent(SevDebug, "ReadBlobData")
 			    .detail("Rows", rows.size())
 			    .detail("ChunkRange", chunkRange)
@@ -6626,9 +6641,8 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = false;
 			} else {
 				rows.more = true;
-				// no need to set readThrough, as the next read key range has to be the next chunkRange
+				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
 			}
-			ASSERT(!rows.readThrough.present());
 			results.send(rows);
 		}
 		results.sendError(end_of_stream()); // end of range read
@@ -7575,8 +7589,9 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
 				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
+					wait(loadBGTenantMap(&data->tenantData, &tr));
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
-					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, version, data->blobConn);
+					hold = tryGetRangeFromBlob(results, &tr, data->cx, rangeStatus.first, version, &data->tenantData);
 					rangeEnd = rangeStatus.first.end;
 				} else {
 					hold = tryGetRange(results, &tr, keys);
