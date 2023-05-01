@@ -42,6 +42,8 @@ struct MoveKeysLock {
 	}
 };
 
+// An transient state of DD. Some functionality of DD maybe disabled depends on the enabled state.
+// If the process restarts, the state will be forgotten and become the default value.
 class DDEnabledState {
 	enum Value {
 		ENABLED, // DD is enabled
@@ -60,14 +62,12 @@ public:
 
 	bool isBlobRestorePreparing() const;
 
-	// transiently enable the DD. If the process
-	// restarts, the state will be forgotten.
-	bool setDDEnabled(UID requesterId);
+	// All tryXXX() methods return true if the in-memory state change succeed.
+	bool trySetEnabled(UID requesterId);
 
-	// transiently disable the DD
-	bool setDDSnapshot(UID requesterId);
+	bool trySetSnapshot(UID requesterId);
 
-	bool setDDRestorePreparing(UID requesterId);
+	bool trySetBlobRestorePreparing(UID requesterId);
 };
 
 struct MoveKeysParams {
