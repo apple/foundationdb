@@ -126,25 +126,25 @@ function(build_go_package)
   endif()
 endfunction()
 
-#build_go_package(LIBRARY NAME fdb_go PATH fdb INCLUDE_TEST)
-#add_dependencies(fdb_go fdb_c go_options_file)
+build_go_package(LIBRARY NAME fdb_go PATH fdb INCLUDE_TEST)
+add_dependencies(fdb_go fdb_c go_options_file)
 
-#build_go_package(LIBRARY NAME tuple_go PATH fdb/tuple INCLUDE_TEST)
-#add_dependencies(tuple_go fdb_go)
-#
-#build_go_package(LIBRARY NAME subspace_go PATH fdb/subspace)
-#add_dependencies(subspace_go tuple_go)
-#
-#build_go_package(LIBRARY NAME directory_go PATH fdb/directory)
-#add_dependencies(directory_go tuple_go)
-#
-#build_go_package(EXECUTABLE NAME fdb_go_tester PATH _stacktester)
-#add_dependencies(fdb_go_tester directory_go)
+build_go_package(LIBRARY NAME tuple_go PATH fdb/tuple INCLUDE_TEST)
+add_dependencies(tuple_go fdb_go)
+
+build_go_package(LIBRARY NAME subspace_go PATH fdb/subspace)
+add_dependencies(subspace_go tuple_go)
+
+build_go_package(LIBRARY NAME directory_go PATH fdb/directory)
+add_dependencies(directory_go tuple_go)
+
+build_go_package(EXECUTABLE NAME fdb_go_tester PATH _stacktester)
+add_dependencies(fdb_go_tester directory_go)
 
 # If this fails, then you need to update bindings/go/src/fdb/generated.go
 # Ideally this wouldn't be necessary, but it looks like we distribute the go
 # bindings directly from the source on github.
-#add_test(
-#  NAME update_bindings_go_src_fdb_generated_go
-#  COMMAND ${CMAKE_COMMAND} -E compare_files ${go_options_file} ${CMAKE_CURRENT_SOURCE_DIR}/src/fdb/generated.go
-#)
+add_test(
+  NAME update_bindings_go_src_fdb_generated_go
+  COMMAND ${CMAKE_COMMAND} -E compare_files ${go_options_file} ${CMAKE_CURRENT_SOURCE_DIR}/src/fdb/generated.go
+)
