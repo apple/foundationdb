@@ -136,8 +136,6 @@ template class GetEncryptCipherKeys<struct ServerDBInfo>;
 //	~MasterData() = default;
 //};
 
-using fdbserver_swift::figureVersion;
-
 Version figureVersionCxx(Version current,
                       double now,
                       Version reference,
@@ -160,105 +158,126 @@ Version figureVersionCxx(Version current,
 	return std::clamp(expected, current + toAdd - maxOffset, current + toAdd + maxOffset);
 }
 
+Version figureVersion(Version current,
+                      double now,
+                      Version reference,
+                      int64_t toAdd,
+                      double maxVersionRateModifier,
+                      int64_t maxVersionRateOffset) {
+	auto impl = USE_SWIFT ? fdbserver_swift::figureVersion : figureVersionCxx;
+
+	return impl(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
+}
+
+
 SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
 	wait(future);
 	return Void();
 }
 
-SWIFT_ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
   auto future = self->swiftImpl->getVersion(self.getPtr(), req);
   wait(future);
   return Void();
 }
 
-// TODO: restore the Cxx impl so we can have them side by side
-//ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
-//	state Span span("M:getVersion"_loc, req.spanContext);
-//	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
-//	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
-//
-//	++self->getCommitVersionRequests;
-//
-//	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
-//		// Request from invalid proxy (e.g. from duplicate recruitment request)
-//		req.reply.send(Never());
-//		return Void();
-//	}
-//
-//	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1,
-//	           "Commit version request queued up",
-//	           probe::decoration::rare);
-//	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
-//
-//	auto itr = proxyItr->second.replies.find(req.requestNum);
-//	if (itr != proxyItr->second.replies.end()) {
-//		CODE_PROBE(true, "Duplicate request for sequence");
-//		req.reply.send(itr->second);
-//	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
-//		CODE_PROBE(true,
-//		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport",
-//		           probe::decoration::rare);
-//		ASSERT(req.requestNum <
-//		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
-//		req.reply.send(Never());
-//	} else {
-//		GetCommitVersionReply rep;
-//
-//		if (self->version == invalidVersion) {
-//			self->lastVersionTime = now();
-//			self->version = self->recoveryTransactionVersion;
-//			rep.prevVersion = self->lastEpochEnd;
-//
-//		} else {
-//			double t1 = now();
-//			if (BUGGIFY) {
-//				t1 = self->lastVersionTime;
-//			}
-//
-//			Version toAdd =
-//			    std::max<Version>(1,
-//			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
-//			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
-//
-//			rep.prevVersion = self->version;
-//			if (self->referenceVersion.present()) {
-//				self->version = figureVersion(self->version,
-//				                              g_network->timer(),
-//				                              self->referenceVersion.get(),
-//				                              toAdd,
-//				                              SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
-//				                              SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
-//				ASSERT_GT(self->version, rep.prevVersion);
-//			} else {
-//				self->version = self->version + toAdd;
-//			}
-//
-//			CODE_PROBE(self->version - rep.prevVersion == 1, "Minimum possible version gap");
-//
-//			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
-//			CODE_PROBE(maxVersionGap, "Maximum possible version gap");
-//			self->lastVersionTime = t1;
-//
-//			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
-//		}
-//
-//		rep.version = self->version;
-//		rep.requestNum = req.requestNum;
-//
-//		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
-//		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
-//		proxyItr->second.replies[req.requestNum] = rep;
-//		ASSERT(rep.prevVersion >= 0);
-//
-//		req.reply.send(rep);
-//
-//		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
-//		proxyItr->second.latestRequestNum.set(req.requestNum);
-//	}
-//
-//	return Void();
-//}
+ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
+	state Span span("M:getVersion"_loc, req.spanContext);
+	state std::map<UID, CommitProxyVersionReplies>::iterator proxyItr =
+	    self->lastCommitProxyVersionReplies.find(req.requestingProxy); // lastCommitProxyVersionReplies never changes
+
+	++self->getCommitVersionRequests;
+
+	if (proxyItr == self->lastCommitProxyVersionReplies.end()) {
+		// Request from invalid proxy (e.g. from duplicate recruitment request)
+		req.reply.send(Never());
+		return Void();
+	}
+
+	CODE_PROBE(proxyItr->second.latestRequestNum.get() < req.requestNum - 1,
+	           "Commit version request queued up",
+	           probe::decoration::rare);
+	wait(proxyItr->second.latestRequestNum.whenAtLeast(req.requestNum - 1));
+
+	auto itr = proxyItr->second.replies.find(req.requestNum);
+	if (itr != proxyItr->second.replies.end()) {
+		CODE_PROBE(true, "Duplicate request for sequence");
+		req.reply.send(itr->second);
+	} else if (req.requestNum <= proxyItr->second.latestRequestNum.get()) {
+		CODE_PROBE(true,
+		           "Old request for previously acknowledged sequence - may be impossible with current FlowTransport",
+		           probe::decoration::rare);
+		ASSERT(req.requestNum <
+		       proxyItr->second.latestRequestNum.get()); // The latest request can never be acknowledged
+		req.reply.send(Never());
+	} else {
+		GetCommitVersionReply rep;
+
+		if (self->version == invalidVersion) {
+			self->lastVersionTime = now();
+			self->version = self->recoveryTransactionVersion;
+			rep.prevVersion = self->lastEpochEnd;
+
+		} else {
+			double t1 = now();
+			if (BUGGIFY) {
+				t1 = self->lastVersionTime;
+			}
+
+			Version toAdd =
+			    std::max<Version>(1,
+			                      std::min<Version>(SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS,
+			                                        SERVER_KNOBS->VERSIONS_PER_SECOND * (t1 - self->lastVersionTime)));
+
+			rep.prevVersion = self->version;
+			if (self->referenceVersion.present()) {
+				self->version = figureVersion(self->version,
+				                              g_network->timer(),
+				                              self->referenceVersion.get(),
+				                              toAdd,
+				                              SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER,
+				                              SERVER_KNOBS->MAX_VERSION_RATE_OFFSET);
+				ASSERT_GT(self->version, rep.prevVersion);
+			} else {
+				self->version = self->version + toAdd;
+			}
+
+			CODE_PROBE(self->version - rep.prevVersion == 1, "Minimum possible version gap");
+
+			bool maxVersionGap = self->version - rep.prevVersion == SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS;
+			CODE_PROBE(maxVersionGap, "Maximum possible version gap");
+			self->lastVersionTime = t1;
+
+			self->resolutionBalancer.setChangesInReply(req.requestingProxy, rep);
+		}
+
+		rep.version = self->version;
+		rep.requestNum = req.requestNum;
+
+		proxyItr->second.replies.erase(proxyItr->second.replies.begin(),
+		                               proxyItr->second.replies.upper_bound(req.mostRecentProcessedRequestNum));
+		proxyItr->second.replies[req.requestNum] = rep;
+		ASSERT(rep.prevVersion >= 0);
+
+		req.reply.send(rep);
+
+		ASSERT(proxyItr->second.latestRequestNum.get() == req.requestNum - 1);
+		proxyItr->second.latestRequestNum.set(req.requestNum);
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+		wait(getVersionSwift(self, req));
+		return Void();
+	} else {
+		wait(getVersionCxx(self, req));
+		return Void();
+	}
+}
 
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection) :
     value(std::make_shared<Counter>(name, collection)) {}
@@ -282,18 +301,10 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
            PromiseStream<Future<Void>> addActor,
            bool forceRecovery)
   : dbgid(myInterface.id()),
-  lastEpochEnd(invalidVersion),
-  recoveryTransactionVersion(invalidVersion),
-    liveCommittedVersion(invalidVersion),
-  databaseLocked(false),
-  minKnownCommittedVersion(invalidVersion),
-    coordinators(coordinators),
-  version(invalidVersion),
-  lastVersionTime(0),
-  myInterface(myInterface),
-    resolutionBalancer(&version),
-  forceRecovery(forceRecovery),
-  cc("Master", dbgid.toString()),
+  lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
+    liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
+    coordinators(coordinators), version(invalidVersion), lastVersionTime(0), myInterface(myInterface),
+    resolutionBalancer(&version), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
     getCommitVersionRequests("GetCommitVersionRequests", cc),
     getLiveCommittedVersionRequests("GetLiveCommittedVersionRequests", cc),
     reportLiveCommittedVersionRequests("ReportLiveCommittedVersionRequests", cc),
@@ -312,12 +323,12 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                          SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
                          SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
     addActor(addActor) {
-    logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
-    if (forceRecovery && !myInterface.locality.dcId().present()) {
-        TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
-        forceRecovery = false;
-    }
-    balancer = resolutionBalancer.resolutionBalancing();
+	logger = cc.traceCounters("MasterMetrics", dbgid, SERVER_KNOBS->WORKER_LOGGING_INTERVAL, "MasterMetrics");
+	if (forceRecovery && !myInterface.locality.dcId().present()) {
+		TraceEvent(SevError, "ForcedRecoveryRequiresDcID").log();
+		forceRecovery = false;
+	}
+	balancer = resolutionBalancer.resolutionBalancing();
     locality = tagLocalityInvalid;
 
 	using namespace fdbserver_swift;
@@ -331,7 +342,6 @@ void MasterData::setSwiftImpl(fdbserver_swift::MasterDataActor* impl) {
 
 MasterData::~MasterData() {}
 
-// Old C++ implementation
 ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	state ActorCollection versionActors(false);
 
@@ -343,14 +353,24 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-SWIFT_ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
+SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->provideVersions(self.getPtr());
 	wait(future);
 	return Void();
 }
 
+ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
+	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+		wait(provideVersionsSwift(self));
+	} else {
+		wait(provideVersionsCxx(self));
+	}
 
-void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	return Void();
+}
+
+
+void updateLiveCommittedVersionSwift(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	fdbserver_swift::updateLiveCommittedVersion(self.getPtr(), req);
 }
 
@@ -378,7 +398,15 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 	++self->reportLiveCommittedVersionRequests;
 }
 
-SWIFT_ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
+	if (SERVER_KNOBS) {
+		return updateLiveCommittedVersionSwift(self, req);
+	} else {
+		return updateLiveCommittedVersionCxx(self, req);
+	}
+}
+
+SWIFT_ACTOR Future<Void> serveLiveCommittedVersionSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
 	wait(future);
 	return Void();
@@ -424,7 +452,16 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 	}
 }
 
-SWIFT_ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
+	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+		wait(serveLiveCommittedVersionSwift(self));
+	} else {
+		wait(serveLiveCommittedVersionCxx(self));
+	}
+	return Void();
+}
+
+SWIFT_ACTOR Future<Void> updateRecoveryDataSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
 	wait(future);
 	return Void();
@@ -470,6 +507,16 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 
 		req.reply.send(Void());
 	}
+}
+
+
+ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
+	if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+		wait(updateRecoveryDataSwift(self));
+	} else {
+		wait(updateRecoveryDataCxx(self));
+	}
+	return Void();
 }
 
 static std::set<int> const& normalMasterErrors() {

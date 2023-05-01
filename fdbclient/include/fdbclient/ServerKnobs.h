@@ -1159,6 +1159,9 @@ public:
 	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
 	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
 
+	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
+	bool FLOW_USE_SWIFT;
+
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);
 };

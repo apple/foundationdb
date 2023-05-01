@@ -389,24 +389,6 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 		failAfter(trigger, g_simulator->getProcess(e));
 }
 
-ACTOR Future<Void> swiftCallsActor() {
-  loop {
-    printf("[c++][%s:%d](%s) [act] entered Flow actor ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
-
-    auto promise = Promise<int>();
-    printf("[c++][%s:%d](%s) [act] calling swiftCallMeFuture ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
-    swiftCallMeFuture(/*result=*/&promise);
-    printf("[c++][%s:%d](%s) [act] returned from swiftCallMeFuture ....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
-
-
-    printf("[c++][%s:%d](%s) [act] waiting on future....\n", __FILE_NAME__, __LINE__, __FUNCTION__);
-    int i = wait(promise.getFuture());
-    printf("[c++][%s:%d](%s) [act] returned from future: %d\n", __FILE_NAME__, __LINE__, __FUNCTION__, i);
-
-    wait(delay(SERVER_KNOBS->HISTOGRAM_REPORT_INTERVAL));
-  }
-}
-
 ACTOR void swiftTestRunner() {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
@@ -2066,29 +2048,30 @@ int main(int argc, char* argv[]) {
 			opts.buildNetwork(argv[0]);
 			startNewSimulator(opts.printSimTime);
 
-			printf("[c++][sim2:%p][%s:%d](%s) USING SIMULATOR! g_network = %p\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__, g_network);
-			installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+			if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+				printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
+				       __FILE_NAME__,
+				       __LINE__,
+				       __FUNCTION__);
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+			}
 
 			openTraceFile({}, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			openTracer(TracerType(deterministicRandom()->randomInt(static_cast<int>(TracerType::DISABLED),
 			                                                       static_cast<int>(TracerType::SIM_END))));
 		} else {
 			g_network = newNet2(opts.tlsConfig, opts.useThreadPool, true);
-			installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
-			printf("[c++][net2:%p][%s:%d](%s) USING NET2!\n", g_network, __FILE_NAME__, __LINE__, __FUNCTION__);
 
-			// FIXME(swift): This is test code, remove.
-			if (getenv("FDBSWIFTTEST")) {
-				printf("[c++][main] setting up Swift Concurrency hooks\n");
+			if (SERVER_KNOBS->FLOW_USE_SWIFT) {
+				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
+				printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
+				       __FILE_NAME__,
+				       __LINE__,
+				       __FUNCTION__);
+			}
 
-				// Test calling into Swift's fdbserver module.
-				using namespace fdbserver_swift;
-				int val = swiftFunctionCalledFromCpp(42);
-				if (val != 42)
-					abort();
-
-				auto swiftCallingFlowActor = swiftCallsActor(); // spawns actor that will call Swift functions
-
+			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
+			if (SERVER_KNOBS->FLOW_USE_SWIFT && getenv("FDBSWIFTTEST")) {
 				swiftTestRunner(); // spawns actor that will call Swift functions
 
 				g_network->run();

@@ -101,10 +101,10 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
     double lastVersionTime;
     Optional<Version> referenceVersion;
 
-	// When using Swift master server impl this is declared in Swift.
-	std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
+    // When using Swift master server impl this is declared in Swift.
+    std::map<UID, CommitProxyVersionReplies> lastCommitProxyVersionReplies;
 
-	MasterInterface myInterface;
+    MasterInterface myInterface;
 
     ResolutionBalancer resolutionBalancer;
 

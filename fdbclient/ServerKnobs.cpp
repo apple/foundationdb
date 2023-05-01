@@ -1161,6 +1161,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
 	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
 
+
+	init( FLOW_USE_SWIFT,                                       false);
+	#ifdef USE_SWIFT
+	fprintf(stderr, "Enabled Swift support knob default via build configuration: FLOW_USE_SWIFT=true\n");
+	FLOW_USE_SWIFT = true;
+	#else
+	fprintf(stderr, "Swift support knob disabled by default (build with -DUSE_SWIFT to enable): FLOW_USW_SWIFT=false\n");
+	#endif // USE_SWIFT
+
+
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
 	init( IDEMPOTENCY_ID_IN_MEMORY_LIFETIME,                       10);

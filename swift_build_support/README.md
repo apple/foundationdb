@@ -1,36 +1,36 @@
 # Swift in FoundationDB
 
-## Running FDB with Swift `getVersion` impl
+## Building with Swift
+
+Invoke cmake as follows in order to use clang (which is required for Swift):
 
 ```
-../src/foundationdb/tests/loopback_cluster/run_cluster.sh . 1 cat | grep "\[swift"
+cd
+mkdir build && cd build 
+cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -DUSE_SWIFT -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr ../src/foundationdb/
 ```
 
-Will show the `MasterServerActor` implemented in Swift.
+We also pass the `-DUSE_SWIFT` flag to set the `SERVER_KNOBS->FLOW_USE_SWIFT` knob to `true` by default.
 
-## Running Swift experiments
-
-To build you have to currently:
+Build `fdbserver` or the entire project like usual
 
 ```
-cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -D USE_CCACHE=ON ../src/foundationdb/
+ninja fdbserver
 ```
 
-and the ninja invocation currently has to first build `fdbserver_swift` before `fdbserver` we're working to fix this though:
+Some functions may use the `FLOW_USE_SWIFT` knob to determine if they should invoke Swift or C++/Flow implementation of logic.
+This is done for the purpose of making sure the ports are correct. Once we gained enough confidence we can remove
+the C++ implementations.
 
-```
-ninja fdbserver_swift fdbserver
-```
+### Simple Swift unit tests
 
-Then you can run the binary with executing the "swift test" examples:
+Since we're not depending on Swift's testing framework, we have a simple alternative way to run a few simple unit tests.
 
 ```
 FDBSWIFTTEST=1 ./bin/fdbserver -p AUTO
 ```
 
-This runs a bunch of "show it works" examples.
-
-We're working towards executing a complete `getVersion` in `masterserver` in Swift along side the real implementation. 
+Otherwise, running the usual test suite of fdb should work as usual.
 
 ## Running Simulator test-case
 
