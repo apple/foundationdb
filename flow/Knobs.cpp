@@ -145,7 +145,6 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( PUBLIC_KEY_FILE_REFRESH_INTERVAL_SECONDS,            300 );
 	init( AUDIT_TIME_WINDOW,                                   5.0 );
 	init( TOKEN_CACHE_SIZE,                                   2000 );
-	init( WIPE_SENSITIVE_DATA_FROM_PACKET_BUFFER,             true );
 
 	//AsyncFileCached
 	init( PAGE_CACHE_4K,                                   2LL<<30 );

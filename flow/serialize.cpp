@@ -42,6 +42,10 @@ const void* BinaryReader::readBytes(int bytes) {
 	return b;
 }
 
+uint8_t* PacketWriter::packetWriterAlloc(const size_t size, void* self) {
+	return static_cast<PacketWriter*>(self)->writeBytes(size);
+}
+
 namespace {
 
 struct _Struct {

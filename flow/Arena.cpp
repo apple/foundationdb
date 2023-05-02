@@ -344,6 +344,22 @@ void* ArenaBlock::allocate(Reference<ArenaBlock>& self, int bytes, IsSecureMem i
 	return result;
 }
 
+force_inline ArenaBlock* newBigArenaBlock(int size) {
+	if (keepalive_allocator::isActive()) [[unlikely]] {
+		return (ArenaBlock*)keepalive_allocator::allocate(size);
+	} else {
+		return (ArenaBlock*)new uint8_t[size];
+	}
+}
+
+force_inline void deleteBigArenaBlock(ArenaBlock* block) {
+	if (keepalive_allocator::isActive()) [[unlikely]] {
+		return keepalive_allocator::invalidate(block);
+	} else {
+		return delete[] reinterpret_cast<uint8_t*>(block);
+	}
+}
+
 // Return an appropriately-sized ArenaBlock to store the given data
 ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 	ArenaBlock* b;
@@ -386,23 +402,23 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 				b->bigSize = 256;
 				INSTRUMENT_ALLOCATE("Arena256");
 			} else if (reqSize <= 512) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(512);
+				b = newBigArenaBlock(512);
 				b->bigSize = 512;
 				INSTRUMENT_ALLOCATE("Arena512");
 			} else if (reqSize <= 1024) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(1024);
+				b = newBigArenaBlock(1024);
 				b->bigSize = 1024;
 				INSTRUMENT_ALLOCATE("Arena1024");
 			} else if (reqSize <= 2048) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(2048);
+				b = newBigArenaBlock(2048);
 				b->bigSize = 2048;
 				INSTRUMENT_ALLOCATE("Arena2048");
 			} else if (reqSize <= 4096) {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(4096);
+				b = newBigArenaBlock(4096);
 				b->bigSize = 4096;
 				INSTRUMENT_ALLOCATE("Arena4096");
 			} else {
-				b = (ArenaBlock*)allocateAndMaybeKeepalive(8192);
+				b = newBigArenaBlock(8192);
 				b->bigSize = 8192;
 				INSTRUMENT_ALLOCATE("Arena8192");
 			}
@@ -414,7 +430,7 @@ ArenaBlock* ArenaBlock::create(int dataSize, Reference<ArenaBlock>& next) {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].alloc((reqSize + 1023) >> 10);
 #endif
-			b = (ArenaBlock*)allocateAndMaybeKeepalive(reqSize);
+			b = newBigArenaBlock(reqSize);
 			b->tinySize = b->tinyUsed = NOT_TINY;
 			b->bigSize = reqSize;
 			b->totalSizeEstimate = b->bigSize;
@@ -506,26 +522,26 @@ void ArenaBlock::destroyLeaf() {
 			FastAllocator<256>::release(this);
 			INSTRUMENT_RELEASE("Arena256");
 		} else if (bigSize <= 512) {
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 			INSTRUMENT_RELEASE("Arena512");
 		} else if (bigSize <= 1024) {
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 			INSTRUMENT_RELEASE("Arena1024");
 		} else if (bigSize <= 2048) {
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 			INSTRUMENT_RELEASE("Arena2048");
 		} else if (bigSize <= 4096) {
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 			INSTRUMENT_RELEASE("Arena4096");
 		} else if (bigSize <= 8192) {
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 			INSTRUMENT_RELEASE("Arena8192");
 		} else {
 #ifdef ALLOC_INSTRUMENTATION
 			allocInstr["ArenaHugeKB"].dealloc((bigSize + 1023) >> 10);
 #endif
 			g_hugeArenaMemory.fetch_sub(bigSize);
-			freeOrMaybeKeepalive(this);
+			deleteBigArenaBlock(this);
 		}
 	}
 }
