@@ -4714,9 +4714,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
 					TraceEvent(SevWarn, "SSValidateRangeKeyOutOfRange", data->thisServerID)
 					    .detail("Range", range)
-					    .detail("RemoteServer", remoteServer.toString().c_str())
-					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key).c_str())
-					    .detail("RemoteKey", Traceable<StringRef>::toString(remoteKV.key).c_str());
+					    .detail("RemoteServer", remoteServer.toString())
+					    .detail("LocalKey", localKV.key)
+					    .detail("RemoteKey", remoteKV.key);
 					throw wrong_shard_server();
 				}
 
