@@ -214,12 +214,3 @@ add_dependencies(flow_swift boost_target)
 # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
 # target_link_libraries(flow PRIVATE flow_swift)
 add_dependencies(flow flow_swift)
-
-if (WITH_SWIFT)
-    message(DEBUG "Building Swift")
-    add_definitions(-DWITH_SWIFT)
-    set(WITH_SWIFT ON)
-else()
-    message(DEBUG "Not building Swift")
-    set(WITH_SWIFT OFF)
-endif()

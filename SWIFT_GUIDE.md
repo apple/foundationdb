@@ -1,6 +1,39 @@
 # Swift in FoundationDB
 
-## Build
+The optional Swift support allows piecewise adoption of Swift in implementing FoundationDB.
+
+Swift offers a unique modern type-safe low-ceremony approach taking the best of both worlds that scales from mobile 
+apps to high-performance systems where previously memory-unsafe languages would be used. It also interoperates 
+seamlessly with C and C++.
+
+Since FoundationDB is largely implemented in C++ and Flow, large pieces of 
+
+## Building with Swift
+
+Swift is built using the same CMake build as the rest of the project.
+
+To configure the build such that `clang` and `swiftc` are used, use the following:
+
+```swift
+cd build
+
+cmake -G 'Ninja' \
+  -DCMAKE_C_COMPILER=clang \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DCMAKE_Swift_COMPILER=swiftc \
+  -DWITH_SWIFT=ON \
+  -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr \
+  ../src/foundationdb/
+```
+
+Then, build using `ninja` as usual.
+
+## IDE Integration
+
+A full guide on setting up IDEs with FoundationDB, including cross language autocomplete support and code navigation
+is available here: [SWIFT_IDE_SETUP.md](SWIFT_IDE_SETUP.md)
+
+## How Swift interoperates with C++
 
 The CMake build has been prepared with Swift interop in the following modules: 
 
@@ -274,12 +307,3 @@ We have prepared a ver simple test suite runner since we cannot use the usual Sw
 ```
 
 you can also `--filter-test future` etc.
-
-## Limitations, TODOs
-
-- We want to simplify the modules naming and exposing etc.
-  - Currently we have `fdbserver` and `fdbserver_swift` and you might have to import both sometimes. 
-    - Instead, we'd like to have `fdbserver_cxx` and `fdbserver_swift` and also have a module `fdbserver` which exports both of those, so when _most of the time_ working with this module, you'd just `import fdbserver` and only use the specific ones if really necessary.
-- Simplify the boilerplate surrounding calling async functions
-  - currently there is a dance on the C++ side to create a Promise and flow-`wait()`  on its future in order to come back from an exposed function etc. We can likely simplify this with either some macros, or something else so we don't have to write this repetetive pattern
-  - Simplify the exposing of actor functions with a Swift macro `#expose(flow)` or something like that, that exposes an async function as a Promise/Future Flow compatible `nonisolated` function

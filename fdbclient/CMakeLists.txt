@@ -80,10 +80,6 @@ add_library(fdbclient_swift STATIC
         notified_support.swift
         )
 
-if (WITH_SWIFT)
-  add_definitions(-DWITH_SWIFT)
-endif()
-
 target_include_directories(fdbclient_swift PUBLIC
         "${CMAKE_BINARY_DIR}/flow/include"
         "${CMAKE_BINARY_DIR}/flow/"
