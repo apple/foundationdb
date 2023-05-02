@@ -143,6 +143,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                         "coordinator"
                      ]
                   },
+                  "tss":false,
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,
@@ -583,7 +584,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
                   "fetch_storage_wiggler_stats_timeout",
-                  "fetch_consistency_scan_info_timeout"
+                  "fetch_consistency_scan_info_timeout",
+                  "metacluster_metrics_missing"
                ]
             },
             "issues":[
