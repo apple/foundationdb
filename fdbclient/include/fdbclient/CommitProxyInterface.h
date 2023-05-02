@@ -378,13 +378,15 @@ struct GetReadVersionRequest : TimedRequest {
 struct GetTenantIdReply {
 	constexpr static FileIdentifier file_identifier = 11441284;
 	int64_t tenantId = TenantInfo::INVALID_TENANT;
+	Optional<TenantGroupName> tenantGroup;
 
 	GetTenantIdReply() {}
-	GetTenantIdReply(int64_t tenantId) : tenantId(tenantId) {}
+	GetTenantIdReply(int64_t tenantId, Optional<TenantGroupName> const& tenantGroup)
+	  : tenantId(tenantId), tenantGroup(tenantGroup) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantId);
+		serializer(ar, tenantId, tenantGroup);
 	}
 };
 

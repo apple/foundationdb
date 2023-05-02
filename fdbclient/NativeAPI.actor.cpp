@@ -2867,31 +2867,36 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 	}
 }
 
-Tenant::Tenant(Database cx, TenantName name) : idFuture(cx->lookupTenant(name)), name(name) {}
-Tenant::Tenant(int64_t id) : idFuture(id) {}
-Tenant::Tenant(Future<int64_t> id, Optional<TenantName> name) : idFuture(id), name(name) {}
+Tenant::Tenant(Database cx, TenantName name) : lookupFuture(cx->lookupTenant(name)), name(name) {}
+Tenant::Tenant(int64_t id) : lookupFuture(std::make_pair(id, Optional<TenantGroupName>{})) {}
+Tenant::Tenant(Future<std::pair<int64_t, Optional<TenantGroupName>>> tenantIdAndGroupFuture, Optional<TenantName> name)
+  : lookupFuture(tenantIdAndGroupFuture), name(name) {}
 
 int64_t Tenant::id() const {
-	ASSERT(idFuture.isReady());
-	return idFuture.get();
+	ASSERT(lookupFuture.isReady());
+	return lookupFuture.get().first;
 }
 
-Future<int64_t> Tenant::getIdFuture() const {
-	return idFuture;
+Optional<TenantGroupName> Tenant::tenantGroup() const {
+	return lookupFuture.get().second;
+}
+
+Future<std::pair<int64_t, Optional<TenantGroupName>>> Tenant::getLookupFuture() const {
+	return lookupFuture;
 }
 
 KeyRef Tenant::prefix() const {
-	ASSERT(idFuture.isReady());
+	ASSERT(lookupFuture.isReady());
 	if (bigEndianId == -1) {
-		bigEndianId = bigEndian64(idFuture.get());
+		bigEndianId = bigEndian64(id());
 	}
 	return StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), TenantAPI::PREFIX_SIZE);
 }
 
 std::string Tenant::description() const {
 	StringRef nameStr = name.castTo<TenantNameRef>().orDefault("<unspecified>"_sr);
-	if (idFuture.canGet()) {
-		return format("%.*s (%lld)", nameStr.size(), nameStr.begin(), idFuture.get());
+	if (lookupFuture.canGet()) {
+		return format("%.*s (%lld)", nameStr.size(), nameStr.begin(), id());
 	} else {
 		return format("%.*s", nameStr.size(), nameStr.begin());
 	}
@@ -3385,7 +3390,7 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 }
 
-ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
+ACTOR Future<std::pair<int64_t, Optional<TenantGroupName>>> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 	loop {
 		++cx->transactionTenantLookupRequests;
 		choose {
@@ -3395,13 +3400,13 @@ ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 			                                                  GetTenantIdRequest(tenant, latestVersion),
 			                                                  TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionTenantLookupRequestsCompleted;
-				return rep.tenantId;
+				return std::make_pair(rep.tenantId, rep.tenantGroup);
 			}
 		}
 	}
 }
 
-Future<int64_t> DatabaseContext::lookupTenant(TenantName tenant) {
+Future<std::pair<int64_t, Optional<TenantGroupName>>> DatabaseContext::lookupTenant(TenantName tenant) {
 	return lookupTenantImpl(this, tenant);
 }
 

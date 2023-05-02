@@ -729,7 +729,7 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
-	Future<int64_t> lookupTenant(TenantName tenant);
+	Future<std::pair<int64_t, Optional<TenantGroupName>>> lookupTenant(TenantName tenant);
 
 	// Get client-side status information as a JSON string with the following schema:
 	// { "Healthy" : <overall health status: true or false>,

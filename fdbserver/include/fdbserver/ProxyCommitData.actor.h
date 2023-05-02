@@ -190,7 +190,7 @@ struct ExpectedIdempotencyIdCountForKey {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::unordered_map<TenantName, int64_t> tenantNameIndex;
+	std::unordered_map<TenantName, std::pair<int64_t, Optional<TenantGroupName>>> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
 	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;

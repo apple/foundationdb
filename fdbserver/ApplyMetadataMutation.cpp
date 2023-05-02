@@ -154,7 +154,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
-	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::unordered_map<TenantName, std::pair<int64_t, Optional<TenantGroupName>>>* tenantNameIndex = nullptr;
 	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
@@ -712,7 +712,8 @@ private:
 
 				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
+					(*tenantNameIndex)[tenantEntry.tenantName] =
+					    std::make_pair(tenantEntry.id, tenantEntry.tenantGroup);
 				}
 			}
 			if (lockedTenants) {
