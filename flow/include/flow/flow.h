@@ -996,7 +996,9 @@ public:
 template <class T>
 class
 SWIFT_SENDABLE
+#ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 SWIFT_CONFORMS_TO(flow_swift, FlowFutureOps)
+#endif
 Future {
 public:
 	using Element = T;
