@@ -2614,8 +2614,7 @@ ACTOR static Future<Void> doTenantIdRequest(GetTenantIdRequest req, ProxyCommitD
 
 	auto itr = commitData->tenantNameIndex.find(req.tenantName);
 	if (itr != commitData->tenantNameIndex.end()) {
-		auto const& [tenantId, tenantGroup] = itr->second;
-		req.reply.send(GetTenantIdReply(tenantId, tenantGroup));
+		req.reply.send(GetTenantIdReply(itr->second));
 	} else {
 		TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("TenantName", req.tenantName);
 		++commitData->stats.tenantIdRequestErrors;

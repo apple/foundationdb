@@ -244,14 +244,14 @@ class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, No
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
-	Tenant(Future<std::pair<int64_t, Optional<TenantGroupName>>> tenantIdAndGroupFuture, Optional<TenantName> name);
+	Tenant(Future<TenantLookupInfo> tenantIdAndGroupFuture, Optional<TenantName> name);
 
 	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
 
 	Future<Void> ready() const { return success(lookupFuture); }
 	int64_t id() const;
 	Optional<TenantGroupName> tenantGroup() const;
-	Future<std::pair<int64_t, Optional<TenantGroupName>>> getLookupFuture() const;
+	Future<TenantLookupInfo> getLookupFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 
@@ -259,7 +259,7 @@ public:
 
 private:
 	mutable int64_t bigEndianId = -1;
-	Future<std::pair<int64_t, Optional<TenantGroupName>>> lookupFuture;
+	Future<TenantLookupInfo> lookupFuture;
 };
 
 template <>

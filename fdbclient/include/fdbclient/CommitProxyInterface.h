@@ -375,18 +375,31 @@ struct GetReadVersionRequest : TimedRequest {
 	}
 };
 
-struct GetTenantIdReply {
-	constexpr static FileIdentifier file_identifier = 11441284;
-	int64_t tenantId = TenantInfo::INVALID_TENANT;
-	Optional<TenantGroupName> tenantGroup;
+struct TenantLookupInfo {
+	constexpr static FileIdentifier file_identifier = 80148317;
 
-	GetTenantIdReply() {}
-	GetTenantIdReply(int64_t tenantId, Optional<TenantGroupName> const& tenantGroup)
-	  : tenantId(tenantId), tenantGroup(tenantGroup) {}
+	int64_t id = TenantInfo::INVALID_TENANT;
+	Optional<TenantGroupName> group;
+
+	TenantLookupInfo() = default;
+	TenantLookupInfo(int64_t id, Optional<TenantGroupName> const& group = {}) : id(id), group(group) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tenantId, tenantGroup);
+		serializer(ar, id, group);
+	}
+};
+
+struct GetTenantIdReply {
+	constexpr static FileIdentifier file_identifier = 11441284;
+	TenantLookupInfo tenantLookupInfo;
+
+	GetTenantIdReply() {}
+	GetTenantIdReply(TenantLookupInfo const& tenantLookupInfo) : tenantLookupInfo(tenantLookupInfo) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tenantLookupInfo);
 	}
 };
 

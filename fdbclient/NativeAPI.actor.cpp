@@ -2868,20 +2868,21 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 }
 
 Tenant::Tenant(Database cx, TenantName name) : lookupFuture(cx->lookupTenant(name)), name(name) {}
-Tenant::Tenant(int64_t id) : lookupFuture(std::make_pair(id, Optional<TenantGroupName>{})) {}
-Tenant::Tenant(Future<std::pair<int64_t, Optional<TenantGroupName>>> tenantIdAndGroupFuture, Optional<TenantName> name)
-  : lookupFuture(tenantIdAndGroupFuture), name(name) {}
+Tenant::Tenant(int64_t id) : lookupFuture(id) {}
+Tenant::Tenant(Future<TenantLookupInfo> tenantLookupInfo, Optional<TenantName> name)
+  : lookupFuture(tenantLookupInfo), name(name) {}
 
 int64_t Tenant::id() const {
 	ASSERT(lookupFuture.isReady());
-	return lookupFuture.get().first;
+	return lookupFuture.get().id;
 }
 
 Optional<TenantGroupName> Tenant::tenantGroup() const {
-	return lookupFuture.get().second;
+	ASSERT(lookupFuture.isReady());
+	return lookupFuture.get().group;
 }
 
-Future<std::pair<int64_t, Optional<TenantGroupName>>> Tenant::getLookupFuture() const {
+Future<TenantLookupInfo> Tenant::getLookupFuture() const {
 	return lookupFuture;
 }
 
@@ -3390,7 +3391,7 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 }
 
-ACTOR Future<std::pair<int64_t, Optional<TenantGroupName>>> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
+ACTOR Future<TenantLookupInfo> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 	loop {
 		++cx->transactionTenantLookupRequests;
 		choose {
@@ -3400,13 +3401,13 @@ ACTOR Future<std::pair<int64_t, Optional<TenantGroupName>>> lookupTenantImpl(Dat
 			                                                  GetTenantIdRequest(tenant, latestVersion),
 			                                                  TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionTenantLookupRequestsCompleted;
-				return std::make_pair(rep.tenantId, rep.tenantGroup);
+				return rep.tenantLookupInfo;
 			}
 		}
 	}
 }
 
-Future<std::pair<int64_t, Optional<TenantGroupName>>> DatabaseContext::lookupTenant(TenantName tenant) {
+Future<TenantLookupInfo> DatabaseContext::lookupTenant(TenantName tenant) {
 	return lookupTenantImpl(this, tenant);
 }
 

@@ -266,7 +266,7 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
 	return onMainThread([tenant]() -> Future<int64_t> {
-		return map(tenant->getLookupFuture(), [](auto const& pair) { return pair.first; });
+		return map(tenant->getLookupFuture(), [](auto const& info) { return info.id; });
 	});
 }
 
