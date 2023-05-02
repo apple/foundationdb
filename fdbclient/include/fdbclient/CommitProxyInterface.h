@@ -359,7 +359,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
-	bool isTagged() const { return !tags.empty(); }
+	bool isTagged() const { return !tags.empty() || tenantGroup.present(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {

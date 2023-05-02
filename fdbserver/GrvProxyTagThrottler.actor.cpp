@@ -101,20 +101,27 @@ void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates
 	}
 }
 
+// First look at the tenant group for a request. If a tenant group exists,
+// use this to determine throttling. If no tenant group exists, use the
+// first transaction tag.
 void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
 	ASSERT(req.isTagged());
-	auto const& tag = req.tags.begin()->first;
-	if (req.tags.size() > 1) {
-		// The GrvProxyTagThrottler assumes that each GetReadVersionRequest
-		// has at most one tag. If a transaction uses multiple tags and
-		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
-		// unexpected behaviour, because only one tag is used for throttling.
-		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
-		    .suppressFor(60.0)
-		    .detail("NumTags", req.tags.size())
-		    .detail("UsingTag", printable(tag));
+	if (req.tenantGroup.present()) {
+		queues[req.tenantGroup.get()].requests.emplace_back(req);
+	} else {
+		auto const& tag = req.tags.begin()->first;
+		if (req.tags.size() > 1) {
+			// The GrvProxyTagThrottler assumes that each GetReadVersionRequest
+			// has at most one tag. If a transaction uses multiple tags and
+			// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
+			// unexpected behaviour, because only one tag is used for throttling.
+			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
+			    .suppressFor(60.0)
+			    .detail("NumTags", req.tags.size())
+			    .detail("UsingTag", printable(tag));
+		}
+		queues[tag].requests.emplace_back(req);
 	}
-	queues[tag].requests.emplace_back(req);
 }
 
 void GrvProxyTagThrottler::releaseTransactions(double elapsed,
