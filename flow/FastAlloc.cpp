@@ -310,6 +310,7 @@ namespace detail {
 
 std::set<void*> g_allocatedSet;
 std::set<void*> g_freedSet;
+std::vector<std::pair<const uint8_t*, int>> g_wipedSet;
 bool g_active = false;
 
 } // namespace detail
@@ -319,31 +320,50 @@ ActiveScope::ActiveScope() {
 	ASSERT(!detail::g_active);
 	ASSERT(detail::g_allocatedSet.empty());
 	ASSERT(detail::g_freedSet.empty());
+	ASSERT(detail::g_wipedSet.empty());
 	detail::g_active = true;
+	// As of writing, TraceEvent uses eventname-based throttling keyed by Standalone<StringRef>,
+	// which uses Arena and stays allocated after scope.
+	// Therefore, we disable allocation tracing (e.g. hugeArenaSample()) while this scope is active.
+	g_allocation_tracing_disabled++;
 }
 
 ActiveScope::~ActiveScope() {
 	ASSERT_ABORT(detail::g_active);
 	ASSERT_ABORT(detail::g_allocatedSet == detail::g_freedSet);
+	g_allocation_tracing_disabled--;
 	for (auto memory : detail::g_allocatedSet) {
-		delete[] reinterpret_cast<uint8_t*>(memory);
+		delete[] static_cast<uint8_t*>(memory);
 	}
 	detail::g_allocatedSet.clear();
 	detail::g_freedSet.clear();
+	detail::g_wipedSet.clear();
 	detail::g_active = false;
 }
 
 void* allocate(size_t size) {
+	ASSERT_ABORT(detail::g_active);
 	auto ptr = new uint8_t[size];
 	auto [_, inserted] = detail::g_allocatedSet.insert(ptr);
-	ASSERT(inserted); // no duplicates
+	ASSERT_ABORT(inserted); // no duplicates
 	return ptr;
 }
 
 void invalidate(void* ptr) {
-	ASSERT(detail::g_allocatedSet.contains(ptr));
-	ASSERT(!detail::g_freedSet.contains(ptr));
+	ASSERT_ABORT(detail::g_active);
+	ASSERT_ABORT(detail::g_allocatedSet.contains(ptr));
+	ASSERT_ABORT(!detail::g_freedSet.contains(ptr));
 	detail::g_freedSet.insert(ptr);
+}
+
+void trackWipedArea(const uint8_t* begin, int size) {
+	ASSERT_ABORT(detail::g_active);
+	detail::g_wipedSet.emplace_back(begin, size);
+}
+
+std::vector<std::pair<const uint8_t*, int>> const& getWipedAreaSet() {
+	ASSERT_ABORT(detail::g_active);
+	return detail::g_wipedSet;
 }
 
 } // namespace keepalive_allocator

@@ -372,7 +372,6 @@ struct IndexBlockRef {
 
 	void init(Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx, Arena& arena) {
 		if (encryptHeaderRef.present()) {
-			CODE_PROBE(true, "reading encrypted chunked file");
 			ASSERT(cipherKeysCtx.present());
 
 			decrypt(cipherKeysCtx.get(), *this, arena);
@@ -576,7 +575,6 @@ struct IndexBlobGranuleFileChunkRef {
 		dataReader.deserialize(FileIdentifierFor<IndexBlobGranuleFileChunkRef>::value, chunkRef, arena);
 
 		if (chunkRef.encryptHeaderRef.present()) {
-			CODE_PROBE(true, "reading encrypted file chunk");
 			ASSERT(cipherKeysCtx.present());
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decrypt(cipherKeysCtx.get(), chunkRef, arena);
 		} else {
@@ -584,7 +582,6 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		if (chunkRef.compressionFilter.present()) {
-			CODE_PROBE(true, "reading compressed file chunk");
 			chunkRef.chunkBytes = IndexBlobGranuleFileChunkRef::decompress(chunkRef, arena);
 		} else if (!chunkRef.chunkBytes.present()) {
 			// 'Encryption' & 'Compression' aren't enabled.

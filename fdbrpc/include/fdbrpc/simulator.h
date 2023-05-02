@@ -354,10 +354,6 @@ public:
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
 
-	// A collection of custom shard boundaries (begin, end, replication factor) that will be removed once this feature
-	// is integrated with a way to set these boundaries in the database
-	std::vector<std::tuple<std::string, std::string, int>> customReplicas;
-
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
 

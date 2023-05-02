@@ -132,19 +132,32 @@ const std::string BackupContainerS3BlobStoreImpl::DATAFOLDER = "data";
 const std::string BackupContainerS3BlobStoreImpl::INDEXFOLDER = "backups";
 
 std::string BackupContainerS3BlobStore::dataPath(const std::string& path) {
-	return BackupContainerS3BlobStoreImpl::DATAFOLDER + "/" + m_name + "/" + path;
+	// if backup, include the backup data prefix.
+	// if m_name ends in a trailing slash, don't add another
+	std::string dataPath = "";
+	if (isBackup) {
+		dataPath = BackupContainerS3BlobStoreImpl::DATAFOLDER + "/";
+	}
+	if (!m_name.empty() && m_name.back() == '/') {
+		dataPath += m_name + path;
+	} else {
+		dataPath += m_name + "/" + path;
+	}
+	return dataPath;
 }
 
 // Get the path of the backups's index entry
 std::string BackupContainerS3BlobStore::indexEntry() {
+	ASSERT(isBackup);
 	return BackupContainerS3BlobStoreImpl::INDEXFOLDER + "/" + m_name;
 }
 
 BackupContainerS3BlobStore::BackupContainerS3BlobStore(Reference<S3BlobStoreEndpoint> bstore,
                                                        const std::string& name,
                                                        const S3BlobStoreEndpoint::ParametersT& params,
-                                                       const Optional<std::string>& encryptionKeyFileName)
-  : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2") {
+                                                       const Optional<std::string>& encryptionKeyFileName,
+                                                       bool isBackup)
+  : m_bstore(bstore), m_name(name), m_bucket("FDB_BACKUPS_V2"), isBackup(isBackup) {
 	setEncryptionKey(encryptionKeyFileName);
 	// Currently only one parameter is supported, "bucket"
 	for (const auto& [name, value] : params) {

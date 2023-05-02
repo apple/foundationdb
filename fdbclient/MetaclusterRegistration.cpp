@@ -32,9 +32,17 @@ std::string clusterTypeToString(const ClusterType& clusterType) {
 		return "unknown";
 	}
 }
+
 KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())>&
 metacluster::metadata::metaclusterRegistration() {
 	static KeyBackedObjectProperty<MetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
+	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
+	return instance;
+}
+
+KeyBackedObjectProperty<UnversionedMetaclusterRegistrationEntry, decltype(IncludeVersion())>&
+metacluster::metadata::unversionedMetaclusterRegistration() {
+	static KeyBackedObjectProperty<UnversionedMetaclusterRegistrationEntry, decltype(IncludeVersion())> instance(
 	    "\xff/metacluster/clusterRegistration"_sr, IncludeVersion());
 	return instance;
 }

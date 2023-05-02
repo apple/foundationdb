@@ -43,7 +43,7 @@
 #include "fdbclient/Status.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClusterConnectionFile.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/IKnobCollection.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/S3BlobStore.h"

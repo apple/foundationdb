@@ -26,7 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
@@ -406,6 +406,28 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			case ';':
 				line.erase(i, 1);
 				break;
+			// Handle \uNNNN utf-8 characters from JSON strings but only as a single byte
+			// Return an error for a sequence out of range for a single byte
+			case 'u': {
+				if (i + 6 > line.length()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 6];
+				line[i + 6] = 0;
+				unsigned long val = strtoul(line.data() + i + 2, &pEnd, 16);
+				ent = char(val);
+				if (*pEnd || val > std::numeric_limits<unsigned char>::max()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				line[i + 6] = save;
+				line.replace(i, 6, 1, ent);
+				break;
+			}
 			case 'x':
 				if (i + 4 > line.length()) {
 					err = true;
@@ -1274,9 +1296,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							       "To include a literal quotation mark in a token, precede it with a backslash\n"
 							       "(\\\"hello\\ world\\\").\n"
 							       "\n"
-							       "To express a binary value, encode each byte as a two-digit hex byte, preceded\n"
-							       "by \\x (e.g. \\x20 for a space character, or \\x0a\\x00\\x00\\x00 for a\n"
-							       "32-bit, little-endian representation of the integer 10).\n"
+							       "To express a binary value, encode each byte as either\n"
+							       "   a) a two-digit hex byte preceded by \\x\n"
+							       "   b) a four-digit hex byte in the range of 0x0000-0x00FF preceded by \\u\n"
+							       "(e.g. \\x20 or \\u0020 for a space character, or \\x0a\\x00\\x00\\x00 or\n"
+							       "\\u000a\\u0000\\u0000\\u0000 for a 32-bit, little-endian representation of\n"
+							       "the integer 10.  Any byte can use either syntax, so \\u000a\\x00\\x00\\x00\n"
+							       "is also a valid representation of a little-endian value of 10).\n"
 							       "\n"
 							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
 							       "and spaces encoded as two-digit hex bytes.\n\n");
@@ -2153,6 +2179,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!_result) {
 						is_error = true;
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "rangeconfig")) {
+					bool _result = wait(makeInterruptable(rangeConfigCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 

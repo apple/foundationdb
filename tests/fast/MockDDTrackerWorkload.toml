@@ -1,0 +1,13 @@
+[[knobs]]
+enable_dd_physical_shard = false
+shard_encode_location_metadata = false
+
+[[test]]
+testTitle = 'MockDDReadWrite'
+useDB = false
+
+    [[test.workload]]
+    testName = 'MockDDTrackerShardEvaluator'
+    keySpaceCount = 1000
+    testDuration = 50.0
+    checkMinShardCount = 2
