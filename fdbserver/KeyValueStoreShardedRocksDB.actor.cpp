@@ -3384,7 +3384,7 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 
 	std::cout << "Restarted.\n";
 	i = 0;
-	for (; i < 20000; ++i) {
+	for (; i < deleteCount; ++i) {
 		key1 = format("prefix/%d", i);
 		key2 = format("prefix/%d", i + 1);
 
