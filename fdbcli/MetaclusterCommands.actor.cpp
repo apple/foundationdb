@@ -64,7 +64,9 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
 			return {};
 		}
 		if (tokencmp(param, "max_tenant_groups")) {
-			entry = defaults;
+			if (!entry.present()) {
+				entry = defaults;
+			}
 
 			int n;
 			if (sscanf(value.c_str(), "%d%n", &entry.get().capacity.numTenantGroups, &n) != 1 || n != value.size() ||
@@ -74,6 +76,20 @@ parseClusterConfiguration(std::vector<StringRef> const& tokens,
 			}
 		} else if (tokencmp(param, "connection_string")) {
 			connectionString = ClusterConnectionString(value);
+		} else if (tokencmp(param, "auto_tenant_assignment")) {
+			std::transform(
+			    value.begin(), value.end(), value.begin(), [](unsigned char ch) { return std::tolower(ch); });
+			if (!entry.present()) {
+				entry = defaults;
+			}
+			if (value == "disabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			} else if (value == "enabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
+			} else {
+				fmt::print(stderr, "ERROR: invalid configuration `{}' for `auto_tenant_assignment'.\n", value.c_str());
+				return {};
+			}
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
@@ -87,6 +103,8 @@ void printMetaclusterConfigureOptionsUsage() {
 	fmt::print("max_tenant_groups sets the maximum number of tenant groups that can be assigned\n"
 	           "to the named data cluster.\n");
 	fmt::print("connection_string sets the connection string for the named data cluster.\n");
+	fmt::print("auto_tenant_assignment determines whether this data cluster is added to the auto-assignment pool, i.e. "
+	           "whether tenants may be automatically assigned to this data cluster.\n");
 }
 
 // metacluster create command
@@ -135,7 +153,7 @@ ACTOR Future<bool> metaclusterDecommissionCommand(Reference<IDatabase> db, std::
 ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster register <NAME> connection_string=<CONNECTION_STRING>\n"
-		           "[max_tenant_groups=<NUM_GROUPS>]\n\n");
+		           "[max_tenant_groups=<NUM_GROUPS> | auto_tenant_assignment=<enabled|disabled>] ...\n\n");
 		fmt::print("Adds a data cluster to a metacluster.\n");
 		fmt::print("NAME is used to identify the cluster in future commands.\n");
 		printMetaclusterConfigureOptionsUsage();
@@ -345,7 +363,8 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster configure <NAME> <max_tenant_groups=<NUM_GROUPS>|\n"
-		           "connection_string=<CONNECTION_STRING>> ...\n\n");
+		           "connection_string=<CONNECTION_STRING>|\n"
+		           "auto_tenant_assignment=<enabled|disabled>> ...\n\n");
 		fmt::print("Updates the configuration of the metacluster.\n");
 		printMetaclusterConfigureOptionsUsage();
 		return false;
@@ -446,6 +465,9 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 			           metacluster::DataClusterEntry::clusterStateToString(metadata.entry.clusterState));
 			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
 			fmt::print("  allocated tenant groups: {}\n", metadata.entry.allocated.numTenantGroups);
+			fmt::print(
+			    "  auto tenant assignment: {}\n",
+			    metacluster::DataClusterEntry::autoTenantAssignmentToString(metadata.entry.autoTenantAssignment));
 		}
 	} catch (Error& e) {
 		if (useJson) {
@@ -594,7 +616,7 @@ void metaclusterGenerator(const char* text,
 			                   "configure",           "list",         "get",      "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
-		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
+		const char* opts[] = { "max_tenant_groups=", "connection_string=", "auto_tenant_assignment=", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if ((tokens.size() == 2 && tokencmp(tokens[1], "status")) ||
 	           (tokens.size() == 3 && tokencmp(tokens[1], "get"))) {
@@ -632,10 +654,12 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "<NAME>",
-			                                     "connection_string=<CONNECTION_STRING>",
-			                                     "[max_tenant_groups=<NUM_GROUPS>]" };
-		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		static std::vector<const char*> opts = {
+			"<NAME>",
+			"connection_string=<CONNECTION_STRING>",
+			"[max_tenant_groups=<NUM_GROUPS>|auto_tenant_assignment=<enabled|disabled>]"
+		};
+		return std::vector<const char*>(opts.begin() + std::min<int>(2, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "[FORCE]", "<NAME>" };
 		if (tokens.size() == 2) {
@@ -660,9 +684,9 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 			return {};
 		}
 	} else if (tokencmp(tokens[1], "configure")) {
-		static std::vector<const char*> opts = {
-			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
-		};
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>"
+			                                     "|auto_tenant_assignment=<enabled|disabled>>" };
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };
