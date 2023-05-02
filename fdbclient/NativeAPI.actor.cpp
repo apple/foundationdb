@@ -2878,7 +2878,9 @@ int64_t Tenant::id() const {
 }
 
 Optional<TenantGroupName> Tenant::tenantGroup() const {
-	ASSERT(lookupFuture.isReady());
+	if (!lookupFuture.isReady()) {
+		return {};
+	}
 	return lookupFuture.get().group;
 }
 
