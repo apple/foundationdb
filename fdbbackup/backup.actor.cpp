@@ -929,15 +929,15 @@ extern const char* getSourceVersion();
 
 #ifdef _HAVE_PARENTPID
 void parentWatcher(void* parentHandle) {
-        // Stub for parentWatcher()
-        /*
-	HANDLE parent = (HANDLE)parentHandle;
-	int signal = WaitForSingleObject(parent, INFINITE);
-	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
-	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
-        */
+	// Stub for parentWatcher()
+	/*
+HANDLE parent = (HANDLE)parentHandle;
+int signal = WaitForSingleObject(parent, INFINITE);
+CloseHandle(parentHandle);
+if (signal == WAIT_OBJECT_0)
+	criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+	*/
 }
 
 #endif
@@ -3862,16 +3862,16 @@ int main(int argc, char* argv[]) {
 			case OPT_PARENTPID: {
 				auto pid_str = args->OptionArg();
 				int parent_pid = atoi(pid_str);
-                                // Stub for PARENTPID
-                                /*
-				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-				if (!pHandle) {
-					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-					throw platform_error();
-				}
-				startThread(&parentWatcher, pHandle);
-                                */
+				// Stub for PARENTPID
+				/*
+auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+if (!pHandle) {
+	TraceEvent("ParentProcessOpenError").GetLastError();
+	fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+	throw platform_error();
+}
+startThread(&parentWatcher, pHandle);
+				*/
 				break;
 			}
 #endif
