@@ -8257,7 +8257,6 @@ ACTOR Future<Void> fetchShardCheckpoint(StorageServer* data, MoveInShard* moveIn
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Fetching);
 
 	state std::vector<std::pair<KeyRange, CheckpointMetaData>> records;
-	state int idx = 0;
 	state std::vector<CheckpointMetaData> localRecords;
 	state int attempt = 0; // TODO(heliu): use shard->meta->checkpoints to continue the fetch.
 	state double fetchStartTime = now();
@@ -8653,10 +8652,10 @@ MoveInShard::MoveInShard(StorageServer* server,
                          const UID& id,
                          const UID& dataMoveId,
                          const Version version,
-                         MoveInPhase state)
-  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, state)),
+                         MoveInPhase phase)
+  : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, phase)),
     server(server), updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())) {
-	if (state != MoveInPhase::Pending) {
+	if (phase != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
 		fetchClient = Void();
