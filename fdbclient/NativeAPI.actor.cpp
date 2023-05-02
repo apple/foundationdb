@@ -7181,6 +7181,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			                                cx->ssVersionVectorCache.getMaxVersion(),
 			                                flags,
 			                                tags,
+			                                Optional<TenantGroupName>(),
 			                                debugID);
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 

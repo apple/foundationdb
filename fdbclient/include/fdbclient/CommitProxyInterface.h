@@ -316,9 +316,11 @@ struct GetReadVersionRequest : TimedRequest {
 	TransactionPriority priority;
 
 	TransactionTagMap<uint32_t> tags;
+	Optional<TenantGroupName> tenantGroup;
+
 	// Not serialized, because this field does not need to be sent to master.
 	// It is used for reporting to clients the amount of time spent delayed by
-	// the TagQueue
+	// the TagQueue:
 	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
@@ -333,9 +335,10 @@ struct GetReadVersionRequest : TimedRequest {
 	                      Version maxVersion,
 	                      uint32_t flags = 0,
 	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
+	                      Optional<TenantGroupName> const& tenantGroup = Optional<TenantGroupName>(),
 	                      Optional<UID> debugID = Optional<UID>())
 	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    debugID(debugID), maxVersion(maxVersion) {
+	    tenantGroup(tenantGroup), debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -360,7 +363,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion);
+		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion, tenantGroup);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
