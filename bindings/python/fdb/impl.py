@@ -1348,14 +1348,10 @@ class Tenant(_TransactionCreator):
     def list_blobbified_ranges(self, begin, end, limit):
         return FutureKeyValueArray(
             self.capi.fdb_tenant_list_blobbified_ranges(
-                self.tpointer,
-                begin,
-                len(begin),
-                end,
-                len(end),
-                limit
+                self.tpointer, begin, len(begin), end, len(end), limit
             )
         )
+
 
 fill_operations()
 

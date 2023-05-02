@@ -4,8 +4,10 @@ import time
 
 alphanum_letters = string.ascii_letters + string.digits
 
+
 def random_alphanum_string(length):
     return "".join(random.choice(alphanum_letters) for _ in range(length))
+
 
 # attach a post-run trace checker to cluster that runs for events between the time of scope entry and exit
 class ScopedTraceChecker:
@@ -20,4 +22,6 @@ class ScopedTraceChecker:
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        self.cluster.add_trace_check_from_to(self.checker_func, self.begin, time.time(), self.filename_substr)
+        self.cluster.add_trace_check_from_to(
+            self.checker_func, self.begin, time.time(), self.filename_substr
+        )

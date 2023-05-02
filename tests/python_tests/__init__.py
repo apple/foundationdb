@@ -27,7 +27,7 @@ import argparse
 
 class Result(object):
     def __init__(self):
-        self.id = random.randint(0, 2 ** 63)
+        self.id = random.randint(0, 2**63)
         self.kpis = {}
         self.errors = []
 
