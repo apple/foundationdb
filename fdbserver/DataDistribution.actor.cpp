@@ -342,6 +342,10 @@ public:
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
+	// monitor DD configuration change
+	Promise<Version> configChangeWatching;
+	Future<Void> onConfigChange;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
@@ -683,7 +687,29 @@ public:
 	Future<Void> removeStorageServer(const UID& serverID, const Optional<UID>& tssPairID = Optional<UID>()) const {
 		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
 	}
+
+	Future<Void> initDDConfigWatch();
+
+	Future<Void> initTenantCache();
 };
+
+Future<Void> DataDistributor::initDDConfigWatch() {
+	onConfigChange = map(DDConfiguration().trigger.onChange(
+	                         SystemDBWriteLockedNow(txnProcessor->context().getReference()), {}, configChangeWatching),
+	                     [](Version v) {
+		                     CODE_PROBE(true, "DataDistribution change detected");
+		                     TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
+		                     throw dd_config_changed();
+		                     return Void();
+	                     });
+
+	return success(configChangeWatching.getFuture());
+}
+
+Future<Void> DataDistributor::initTenantCache() {
+	ddTenantCache = makeReference<TenantCache>(txnProcessor->context(), ddId);
+	return ddTenantCache.get()->build();
+}
 
 inline void addAuditToAuditMap(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
 	AuditType auditType = audit->coreState.getType();
@@ -951,36 +977,30 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
-                                    PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-	self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+                                    PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                    IsMocked isMocked) {
 
-	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
-	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
-	// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
-	// );
+	if (!isMocked) {
+		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
+		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+		// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
+		// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
+		// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
+		// );
 
-	// wait(debugCheckCoalescing(cx));
-	// FIXME: wrap the bootstrap process into class DataDistributor
+		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+		// wait(debugCheckCoalescing(self->txnProcessor->context()));
+
+		// Make sure that the watcher has established a baseline before init() below so the watcher will
+		// see any changes that occur after init() has read the config state.
+		wait(self->initDDConfigWatch());
+	} else {
+		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
+	}
+
 	state Reference<DDTeamCollection> primaryTeamCollection;
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
-
-	// Start watching for changes before reading the config in init() below
-	state Promise<Version> configChangeWatching;
-	state Future<Void> onConfigChange =
-	    map(DDConfiguration().trigger.onChange(SystemDBWriteLockedNow(cx.getReference()), {}, configChangeWatching),
-	        [](Version v) {
-		        CODE_PROBE(true, "DataDistribution change detected");
-		        TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
-		        throw dd_config_changed();
-		        return Void();
-	        });
-
-	// Make sure that the watcher has established a baseline before init() below so the watcher will
-	// see any changes that occur after init() has read the config state.
-	wait(success(configChangeWatching.getFuture()));
 
 	loop {
 		trackerCancelled = false;
@@ -1006,8 +1026,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
 			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-				self->ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(self->ddTenantCache.get()->build());
+				wait(self->initTenantCache());
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
@@ -1023,7 +1042,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
-			actors.push_back(onConfigChange);
+			actors.push_back(self->onConfigChange);
 
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
@@ -2610,25 +2629,31 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	return Void();
 }
 
-ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<DDSharedContext> context(new DDSharedContext(di));
-	state Reference<DataDistributor> self(new DataDistributor(db, di.id(), context));
+ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
+                                        Reference<DataDistributor> self,
+                                        IsMocked isMocked) {
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+	state Database cx;
 	state ActorCollection actors(false);
 	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
+
+	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
+	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
+	if (!isMocked) {
+		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
+		self->addActor.send(cacheServerWatcher(&cx));
+	}
+
+	state Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),
+	                                                    "DataDistribution",
+	                                                    di.id(),
+	                                                    &normalDataDistributorErrors());
 
 	try {
-		TraceEvent("DataDistributorRunning", di.id());
-		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
-		self->addActor.send(cacheServerWatcher(&cx));
-		state Future<Void> distributor = reportErrorsExcept(
-		    dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors());
-
 		loop choose {
 			when(wait(distributor || collection)) {
 				ASSERT(false);
@@ -2668,10 +2693,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 						    ddSnapReqResultMapPtr->erase(snapUID);
 						    return Void();
 					    },
-					    delayed(
-					        ddSnapCreate(
-					            snapReq, db, self->context->ddEnabledState.get(), &ddSnapReqMap, &ddSnapReqResultMap),
-					        SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					    delayed(ddSnapCreate(snapReq,
+					                         self->dbInfo,
+					                         self->context->ddEnabledState.get(),
+					                         &ddSnapReqMap,
+					                         &ddSnapReqResultMap),
+					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
 				}
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
@@ -2707,6 +2734,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 
 	return Void();
+}
+
+Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
+	return dataDistributor_impl(
+	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di)), IsMocked::False);
 }
 
 namespace data_distribution_test {
