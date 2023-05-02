@@ -3327,7 +3327,7 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 
 	std::cout << "Restarted.\n";
 	i = 0;
-	for (; i < 20000; ++i) {
+	for (; i < deleteCount; ++i) {
 		key1 = format("\xffprefix/%d", i);
 		key2 = format("\xffprefix/%d", i + 1);
 
