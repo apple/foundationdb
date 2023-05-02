@@ -2556,7 +2556,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 	}
 
-	void clear(KeyRangeRef range, const StorageServerMetrics*, const Arena*) override {
+	void clear(KeyRangeRef range, const Arena*) override {
 		if (range.singleKeyRange()) {
 			shardManager.clear(range.begin);
 			keysSet.erase(range.begin);
