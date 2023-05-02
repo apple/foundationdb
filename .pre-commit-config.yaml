@@ -4,11 +4,11 @@ repos:
     hooks:
     - id: black
       exclude: |
-      (?x)^(
-          bindings/python/fdb/six.py|
-          contrib/Implib.so/implib-gen.py|
-          documentation/sphinx/extensions/rubydomain.py
-      )$
+          (?x)^(
+              bindings/python/fdb/six.py|
+              contrib/Implib.so/implib-gen.py|
+              documentation/sphinx/extensions/rubydomain.py
+          )$
 -   repo: https://github.com/pycqa/flake8
     rev: f8e1b317742036ff11ff86356fd2b68147e169f7  # frozen: 5.0.4
     hooks:
