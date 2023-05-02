@@ -1,19 +1,22 @@
 [[test]]
-title = 'Blob Granule API Tenant Correctness Multi Threaded'
+title = 'Blob Granule Errors Multi Threaded'
 multiThreaded = true
 buggify = true
 minFdbThreads = 2
 maxFdbThreads = 8
-minClients = 1
+databasePerTransaction = true
+minDatabases = 2
+maxDatabases = 8
+minClientThreads = 2
+maxClientThreads = 8
+minClients = 2
 maxClients = 8
-minTenants = 1
-maxTenants = 5
 
 [[server]]
 blob_granules_enabled = true
 
 [[test.workload]]
-name = 'ApiBlobGranuleCorrectness'
+name = 'BlobGranuleErrors'
 minKeyLength = 1
 maxKeyLength = 64
 minValueLength = 1
