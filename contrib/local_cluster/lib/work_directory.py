@@ -68,25 +68,27 @@ class WorkDirectory:
         return self._log_directory
 
     def setup(self):
-        """Set up the directories
-        """
+        """Set up the directories"""
         if self._base_directory is None:
             self._base_directory = tempfile.mkdtemp()
         logger.debug(f"Work directory {self.base_directory}")
 
-        self._data_directory = os.path.join(self._base_directory, self._data_directory_rel)
+        self._data_directory = os.path.join(
+            self._base_directory, self._data_directory_rel
+        )
         os.makedirs(self.data_directory, exist_ok=True)
         logger.debug(f"Created data directory {self.data_directory}")
 
-        self._log_directory = os.path.join(self._base_directory, self._log_directory_rel)
+        self._log_directory = os.path.join(
+            self._base_directory, self._log_directory_rel
+        )
         os.makedirs(self.log_directory, exist_ok=True)
 
         os.chdir(self.base_directory)
         logger.debug(f"Created log directory {self.log_directory}")
 
     def teardown(self):
-        """Tear down the directories
-        """
+        """Tear down the directories"""
         shutil.rmtree(self.base_directory)
         self._logger.debug(f"Cleaned up directory {self.base_directory}")
 
