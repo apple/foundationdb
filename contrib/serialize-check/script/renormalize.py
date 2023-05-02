@@ -90,11 +90,11 @@ class CompilationDatabase:
             if not any(
                 (prefix in key)
                 for prefix in [
-                     "flow/",
-                     "fdbcli/",
-                     "fdbserver/",
+                    "flow/",
+                    "fdbcli/",
+                    "fdbserver/",
                     "fdbclient/",
-                     "fdbrpc/",
+                    "fdbrpc/",
                 ]
             ):
                 continue

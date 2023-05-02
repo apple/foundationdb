@@ -28,11 +28,12 @@ import math as m
 
 # This class has methods that use cubic interpolation to quickly compute log
 # and inverse log. The coefficients A,B,C as well as correctingFactor are
-# all constants used for interpolating. 
+# all constants used for interpolating.
 
 # The implementation for interpolation was originally seen here in:
 # https://github.com/DataDog/sketches-java/
 # in the file CubicallyInterpolatedMapping.java
+
 
 class DDSketch(object):
     A = 6.0 / 35.0
@@ -59,14 +60,21 @@ class DDSketch(object):
     def reverseLog(self, index):
         exponent = m.floor(index)
         d0 = self.B * self.B - 3 * self.A * self.C
-        d1 = 2 * self.B * self.B * self.B - 9 * self.A * self.B * self.C - 27 * self.A * self.A * (index - exponent)
+        d1 = (
+            2 * self.B * self.B * self.B
+            - 9 * self.A * self.B * self.C
+            - 27 * self.A * self.A * (index - exponent)
+        )
         p = np.cbrt((d1 - np.sqrt(d1 * d1 - 4 * d0 * d0 * d0)) / 2)
-        significandPlusOne = - (self.B + p + d0 / p) / (3 * self.A) + 1
+        significandPlusOne = -(self.B + p + d0 / p) / (3 * self.A) + 1
         return np.ldexp(significandPlusOne / 2, exponent + 1)
 
     def getIndex(self, sample):
         return m.ceil(self.fastlog(sample) * self.multiplier) + self.offset
 
     def getValue(self, idx):
-        return self.reverseLog((idx - self.offset) / self.multiplier) * 2.0 / (1 + self.gamma)
-
+        return (
+            self.reverseLog((idx - self.offset) / self.multiplier)
+            * 2.0
+            / (1 + self.gamma)
+        )
