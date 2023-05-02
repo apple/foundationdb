@@ -3,12 +3,7 @@ testClass = "Backup"
 [configuration]
 extraDatabaseMode = 'LocalOrSingle'
 # DR is not currently supported in required tenant mode
-tenantModes = ['disabled']
-storageEngineType = 5
-
-[[knobs]]
-shard_encode_location_metadata = true
-enable_dd_physical_shard_move = true
+tenantModes = ['disabled', 'optional']
 
 [[test]]
 testTitle = 'BackupAndRestore'

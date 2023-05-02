@@ -8900,6 +8900,7 @@ ACTOR Future<Void> restoreShards(StorageServer* data,
 			data->storage.clearRange(shardRange);
 			++data->counters.kvSystemClearRanges;
 			data->byteSampleApplyClear(shardRange, invalidVersion);
+			data->newestDirtyVersion.insert(shardRange, version);
 		}
 
 		wait(yield());
