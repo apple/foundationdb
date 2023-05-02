@@ -83,6 +83,11 @@ struct BlobRestoreWorkload : TestWorkload {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
 
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
+			if (self->restoreTargetVersion_ == invalidVersion) {
+				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs");
+				return Void();
+			}
+			CODE_PROBE(true, "Perform blob restore");
 			fmt::print("Restore target version {}\n", self->restoreTargetVersion_);
 
 			// Only need to pass the version if we are trying to restore to a previous version
@@ -106,13 +111,15 @@ struct BlobRestoreWorkload : TestWorkload {
 		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
 		if (containers.size() == 0) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of missing log backups");
+			return invalidVersion;
 		}
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
-			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			fmt::print("invalid mutation log backup {}\n", baseUrl);
+			CODE_PROBE(true, "Skip blob restore test because of invalid log backup");
+			return invalidVersion;
 		}
 		targetVersion = desc.contiguousLogEnd.get() - 1;
 		if (self->restoreToVersion_) {
