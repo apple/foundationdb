@@ -887,7 +887,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
-	if (self->customReplication->rangeContaining(keys.begin).range().end < nextRange.end) {
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().end < nextRange.end) {
 		return false;
 	}
 
@@ -899,7 +899,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	if (self->customReplication->rangeContaining(keys.begin).range().begin > prevRange.begin) {
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().begin > prevRange.begin) {
 		return false;
 	}
 
@@ -1210,7 +1210,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
 	state std::vector<Key> customBoundaries;
-	for (auto& it : self->customReplication->ranges()) {
+	for (auto it : self->userRangeConfig->ranges()) {
 		customBoundaries.push_back(it->range().begin);
 	}
 
@@ -1489,7 +1489,7 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
-	self->customReplication = initData->customReplication;
+	self->userRangeConfig = initData->userRangeConfig;
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

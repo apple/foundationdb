@@ -31,7 +31,7 @@
 #include "flow/Hash3.h"
 #include <numeric>
 #include "fdbclient/ManagementAPI.actor.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include <inttypes.h>
 #include <map>
 
@@ -1886,6 +1886,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 		state Reference<TaskFuture> onDone = futureBucket->unpack(task->params[Task::reservedTaskParamKeyDone]);
 
 		if (task->params[BackupAgentBase::destUid].size() == 0) {
+			// pragma: allowlist nextline secret
 			TraceEvent("DBA_CopyDiffLogsUpgradeTaskFuncAbortInUpgrade").log();
 			wait(success(AbortOldBackupTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::signal(onDone))));
 		} else {
@@ -2415,6 +2416,7 @@ void checkAtomicSwitchOverConfig(StatusObjectReader srcStatus, StatusObjectReade
 			throw backup_error();
 		}
 	} catch (std::runtime_error& e) {
+		// pragma: allowlist nextline secret
 		TraceEvent(SevWarn, "DBA_UnableToCheckAtomicSwitchOverConfig").detail("RunTimeError", e.what());
 		throw backup_error();
 	}

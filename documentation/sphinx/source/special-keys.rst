@@ -113,8 +113,8 @@ Some of this information is also available in ``\xff\xff/status/json``, but thes
   ...     print(k, v)
   ...
   ('\xff\xff/metrics/health/aggregate', '{"batch_limited":false,"limiting_storage_durability_lag":5000000,"limiting_storage_queue":1000,"tps_limit":483988.66315011407,"worst_storage_durability_lag":5000001,"worst_storage_queue":2036,"worst_log_queue":300}')
-  ('\xff\xff/metrics/health/log/abc00000000000000000000000000001', '{"log_queue":300}')
-  ('\xff\xff/metrics/health/storage/def00000000000000000000000000002', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
+  ('\xff\xff/metrics/health/log/e639a9ad0373367784cc550c615c469b', '{"log_queue":300}')
+  ('\xff\xff/metrics/health/storage/ab2ce4caf743c9c1ae57063629c6678a', '{"cpu_usage":2.398696781487125,"disk_usage":0.059995917598039405,"storage_durability_lag":5000001,"storage_queue":2036}')
 
 ``\xff\xff/metrics/health/aggregate``
 

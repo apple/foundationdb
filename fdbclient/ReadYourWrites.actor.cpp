@@ -1226,7 +1226,6 @@ public:
 		// isolation support. But it is not default and is rarely used. So we disallow it until we have thorough test
 		// coverage for it.)
 		if (snapshot) {
-			CODE_PROBE(true, "getMappedRange not supported for snapshot.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 		// For now, getMappedRange requires read-your-writes being NOT disabled. But the support of RYW is limited
@@ -1235,7 +1234,6 @@ public:
 		// which returns the written value transparently. In another word, it makes sure not break RYW semantics without
 		// actually implementing reading from the writes.
 		if (ryw->options.readYourWritesDisabled) {
-			CODE_PROBE(true, "getMappedRange not supported for read-your-writes disabled.", probe::decoration::rare);
 			throw unsupported_operation();
 		}
 
@@ -1792,7 +1790,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
-			CODE_PROBE(true, "Special key space get range (getMappedRange)", probe::decoration::rare);
 			throw client_invalid_operation(); // Not support special keys.
 		}
 	} else {
@@ -1814,7 +1811,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		CODE_PROBE(true, "RYW range read limit 0 (getMappedRange)", probe::decoration::rare);
 		return MappedRangeResult();
 	}
 
@@ -1828,7 +1824,6 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		CODE_PROBE(true, "RYW range inverted (getMappedRange)", probe::decoration::rare);
 		return MappedRangeResult();
 	}
 
