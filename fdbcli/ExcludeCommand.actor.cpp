@@ -289,9 +289,13 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		for (const auto& e : excludedLocalities)
 			printf("  %s\n", e.c_str());
 
-		printf("To find out whether it is safe to remove one or more of these\n"
-		       "servers from the cluster, type `exclude <addresses>'.\n"
-		       "To return one of these servers to the cluster, type `include <addresses>'.\n");
+		if (excludedAddresses.size() || excludedLocalities.size()) {
+			printf("To find out whether it is safe to remove one or more of these\n"
+			       "servers from the cluster, type `exclude <addresses>'.\n"
+			       "To return one of these servers to the cluster, type `include <addresses>'.\n");
+		}
+
+		printf("\n");
 
 		printf("There are currently %zu servers or localities marked as failed in the database:\n",
 		       failedAddresses.size() + failedLocalities.size());
@@ -300,7 +304,9 @@ ACTOR Future<bool> excludeCommandActor(Reference<IDatabase> db, std::vector<Stri
 		for (const auto& f : failedLocalities)
 			printf("  %s\n", f.c_str());
 
-		printf("To return one of these servers to the cluster, type `include failed <addresses>'.\n");
+		if (failedAddresses.size() || failedLocalities.size()) {
+			printf("To return one of these servers to the cluster, type `include failed <addresses>'.\n");
+		}
 
 		return true;
 	} else {
