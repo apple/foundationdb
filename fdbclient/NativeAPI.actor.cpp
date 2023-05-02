@@ -3396,12 +3396,12 @@ ACTOR Future<TenantLookupInfo> lookupTenantImpl(DatabaseContext* cx, TenantName 
 		++cx->transactionTenantLookupRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetTenantIdReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                                  &CommitProxyInterface::getTenantId,
-			                                                  GetTenantIdRequest(tenant, latestVersion),
+			when(TenantLookupInfo rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                                                  &CommitProxyInterface::tenantLookup,
+			                                                  TenantLookupRequest(tenant, latestVersion),
 			                                                  TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionTenantLookupRequestsCompleted;
-				return rep.tenantLookupInfo;
+				return rep;
 			}
 		}
 	}

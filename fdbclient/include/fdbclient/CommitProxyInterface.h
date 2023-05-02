@@ -64,7 +64,7 @@ struct CommitProxyInterface {
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
-	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
+	PublicRequestStream<struct TenantLookupRequest> tenantLookup;
 	PublicRequestStream<struct GetBlobGranuleLocationsRequest> getBlobGranuleLocations;
 
 	UID id() const { return commit.getEndpoint().token; }
@@ -94,7 +94,8 @@ struct CommitProxyInterface {
 			getDDMetrics = RequestStream<struct GetDDMetricsRequest>(commit.getEndpoint().getAdjustedEndpoint(9));
 			expireIdempotencyId =
 			    PublicRequestStream<struct ExpireIdempotencyIdRequest>(commit.getEndpoint().getAdjustedEndpoint(10));
-			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
+			tenantLookup =
+			    PublicRequestStream<struct TenantLookupRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
 			    commit.getEndpoint().getAdjustedEndpoint(12));
 		}
@@ -114,7 +115,7 @@ struct CommitProxyInterface {
 		streams.push_back(exclusionSafetyCheckReq.getReceiver());
 		streams.push_back(getDDMetrics.getReceiver());
 		streams.push_back(expireIdempotencyId.getReceiver());
-		streams.push_back(getTenantId.getReceiver());
+		streams.push_back(tenantLookup.getReceiver());
 		streams.push_back(getBlobGranuleLocations.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
@@ -376,7 +377,7 @@ struct GetReadVersionRequest : TimedRequest {
 };
 
 struct TenantLookupInfo {
-	constexpr static FileIdentifier file_identifier = 80148317;
+	constexpr static FileIdentifier file_identifier = 8018317;
 
 	int64_t id = TenantInfo::INVALID_TENANT;
 	Optional<TenantGroupName> group;
@@ -390,23 +391,10 @@ struct TenantLookupInfo {
 	}
 };
 
-struct GetTenantIdReply {
-	constexpr static FileIdentifier file_identifier = 11441284;
-	TenantLookupInfo tenantLookupInfo;
-
-	GetTenantIdReply() {}
-	GetTenantIdReply(TenantLookupInfo const& tenantLookupInfo) : tenantLookupInfo(tenantLookupInfo) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, tenantLookupInfo);
-	}
-};
-
-struct GetTenantIdRequest {
+struct TenantLookupRequest {
 	constexpr static FileIdentifier file_identifier = 11299717;
 	TenantName tenantName;
-	ReplyPromise<GetTenantIdReply> reply;
+	ReplyPromise<TenantLookupInfo> reply;
 
 	// This version is used to specify the minimum metadata version a proxy must have in order to declare that
 	// a tenant is not present. If the metadata version is lower, the proxy must wait in case the tenant gets
@@ -414,8 +402,8 @@ struct GetTenantIdRequest {
 	// updates from other proxies before answering.
 	Version minTenantVersion;
 
-	GetTenantIdRequest() : minTenantVersion(latestVersion) {}
-	GetTenantIdRequest(TenantNameRef const& tenantName, Version minTenantVersion)
+	TenantLookupRequest() : minTenantVersion(latestVersion) {}
+	TenantLookupRequest(TenantNameRef const& tenantName, Version minTenantVersion)
 	  : tenantName(tenantName), minTenantVersion(minTenantVersion) {}
 
 	bool verify() const { return true; }
