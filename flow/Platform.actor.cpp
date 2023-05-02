@@ -139,13 +139,8 @@ std::string removeWhitespace(const std::string& t) {
 	return str;
 }
 
-#if defined(__unixish__)
 #define ALLOC_FAIL MAP_FAILED
-#else
-#error What platform is this?
-#endif
 
-#ifdef __unixish__
 static double getProcessorTimeGeneric(int who) {
 	struct rusage r_usage;
 
@@ -157,9 +152,6 @@ static double getProcessorTimeGeneric(int who) {
 	return (r_usage.ru_utime.tv_sec + (r_usage.ru_utime.tv_usec / double(1e6)) + r_usage.ru_stime.tv_sec +
 	        (r_usage.ru_stime.tv_usec / double(1e6)));
 }
-#else
-#error Port me!
-#endif
 
 double getProcessorTimeThread() {
 	INJECT_FAULT(platform_error, "getProcessorTimeThread"); // Get Thread CPU Time failed
@@ -183,12 +175,7 @@ double getProcessorTimeThread() {
 
 double getProcessorTimeProcess() {
 	INJECT_FAULT(platform_error, "getProcessorTimeProcess"); // Get CPU Process Time failed
-#if defined(__unixish__)
 	return getProcessorTimeGeneric(RUSAGE_SELF);
-#else
-#warning getProcessorTimeProcess unimplemented on this platform
-	return 0.0;
-#endif
 }
 
 uint64_t getResidentMemoryUsage() {
@@ -383,20 +370,14 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 }
 
 Error systemErrorCodeToError() {
-#if defined(__unixish__)
 	if (errno == EIO || errno == EROFS) {
 		return io_error();
 	}
-#else
-#error Port me!
-#endif
-
 	return platform_error();
 }
 
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT(platform_error, "getDiskBytes"); // Get disk bytes failed
-#if defined(__unixish__)
 #if defined(__linux__)
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
@@ -425,15 +406,8 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	// so that amount will be subtracted from the reported total since FDB can't use it.
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(),
 	                 (buf.f_blocks - (buf.f_bfree - buf.f_bavail)) * blockSize);
-
-#else
-#warning getDiskBytes unimplemented on this platform
-	free = 1LL << 50;
-	total = 1LL << 50;
-#endif
 }
 
-#ifdef __unixish__
 const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT(platform_error, "getInterfaceName"); // Get interface name failed
 	static char iname[20];
@@ -476,9 +450,6 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	else
 		return nullptr;
 }
-#else
-#error Unknown unix
-#endif
 
 #if defined(__linux__)
 void getNetworkTraffic(const IPAddress& ip,
@@ -922,7 +893,6 @@ struct SystemStatisticsState {
 	double lastClockProcess;
 	uint64_t processLastSent;
 	uint64_t processLastReceived;
-#if defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
 	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
@@ -933,9 +903,6 @@ struct SystemStatisticsState {
 	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
 	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
 	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
-#else
-#error Port me!
-#endif
 };
 
 SystemStatistics getSystemStatistics(std::string const& dataFolder,
@@ -973,7 +940,6 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 		returnStats.processDiskFreeBytes = diskFree;
 	}
 
-#if defined(__unixish__)
 	uint64_t machineNowSent = (*statState)->machineLastSent;
 	uint64_t machineNowReceived = (*statState)->machineLastReceived;
 	uint64_t machineOutSegs = (*statState)->machineLastOutSegs;
@@ -1047,7 +1013,6 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	                                    : 0;
 	(*statState)->lastClockIdleTime = clockIdleTime;
 	(*statState)->lastClockTotalTime = clockTotalTime;
-#endif
 	(*statState)->lastTime = nowTime;
 	(*statState)->lastClockProcess = nowClockProcess;
 	(*statState)->lastClockThread = nowClockThread;
@@ -1143,14 +1108,10 @@ uint64_t timer_int() {
 };
 
 void getLocalTime(const time_t* timep, struct tm* result) {
-#if defined(__unixish__)
 	if (localtime_r(timep, result) == nullptr) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
 		throw platform_error();
 	}
-#else
-#error Port me!
-#endif
 }
 
 // Outputs a GMT time string for the given epoch seconds, which looks like
@@ -1382,7 +1343,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		f = textmode ? fopen(tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE) : fopen(tempfilename.c_str(), "wb");
 		if (!f)
 			throw io_error();
-#if defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
 		bool exists = true;
@@ -1411,9 +1371,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 			deleteFile(tempfilename);
 			throw io_error();
 		}
-#else
-#error Port me!
-#endif
 
 		if (textmode && fprintf(f, "%s", content.c_str()) < 0)
 			throw io_error();
@@ -1424,7 +1381,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		if (fflush(f) != 0)
 			throw io_error();
 
-#if defined(__unixish__)
 		if (!g_network->isSimulated()) {
 			if (fsync(fileno(f)) != 0)
 				throw io_error();
@@ -1438,9 +1394,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 
 		if (rename(tempfilename.c_str(), path.c_str()) != 0)
 			throw io_error();
-#else
-#error Port me!
-#endif
 
 		INJECT_FAULT(io_error, "atomicReplace"); // io_error after atomic rename
 	} catch (Error& e) {
@@ -1458,14 +1411,10 @@ static bool deletedFile() {
 
 bool deleteFile(std::string const& filename) {
 	INJECT_FAULT(platform_error, "deleteFile"); // file deletion failed
-#if defined(__unixish__)
 	if (!unlink(filename.c_str()))
 		return deletedFile();
 	if (errno == ENOENT)
 		return false;
-#else
-#error Port me!
-#endif
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", filename).GetLastError();
 	throw e;
@@ -1604,6 +1553,8 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
 	INJECT_FAULT(platform_error, "abspath"); // abspath failed
 
 	if (!resolveLinks) {
+		// TODO:  Not resolving symbolic links does not yet behave well on Windows because of drive letters
+		// and network names, so it's not currently allowed here (but it is allowed in fdbmonitor which is unix-only)
 		ASSERT(false);
 		// Treat paths starting with ~ or separator as absolute, meaning they shouldn't be appended to the current
 		// working dir
@@ -1659,7 +1610,6 @@ std::string basename(std::string const& filename) {
 }
 
 std::string getUserHomeDirectory() {
-#if defined(__unixish__)
 	const char* ret = getenv("HOME");
 	if (!ret) {
 		if (struct passwd* pw = getpwuid(getuid())) {
@@ -1667,9 +1617,6 @@ std::string getUserHomeDirectory() {
 		}
 	}
 	return ret;
-#else
-#error Port me!
-#endif
 }
 
 #if (defined(__linux__) || defined(__APPLE__))
@@ -1801,17 +1748,12 @@ void threadSleep(double seconds) {
 }
 
 void threadYield() {
-#if defined(__unixish__)
 	sched_yield();
-#else
-#error Port me!
-#endif
 }
 
 namespace platform {
 
 void setCloseOnExec(int fd) {
-#if defined(__unixish__)
 	int options = fcntl(fd, F_GETFD);
 	if (options != -1) {
 		options = fcntl(fd, F_SETFD, options | FD_CLOEXEC);
@@ -1819,7 +1761,6 @@ void setCloseOnExec(int fd) {
 	if (options == -1) {
 		TraceEvent(SevWarnAlways, "PlatformSetCloseOnExecError").suppressFor(60).GetLastError();
 	}
-#endif
 }
 
 } // namespace platform
@@ -1968,16 +1909,12 @@ void writeFile(std::string const& filename, std::string const& content) {
 namespace platform {
 
 bool getEnvironmentVar(const char* name, std::string& value) {
-#if defined(__unixish__)
 	char* val = getenv(name);
 	if (val) {
 		value = std::string(val);
 		return true;
 	}
 	return false;
-#else
-#error Port me!
-#endif
 }
 
 int setEnvironmentVar(const char* name, const char* value, int overwrite) {

@@ -35,7 +35,7 @@ struct ActorFuzzWorkload : TestWorkload {
 	Future<Void> start(Database const& cx) override {
 		if (enabled) {
 			fuzzResults.second = 0;
-
+			fuzzResults = actorFuzzTests();
 			if (fuzzResults.second == 0)
 				// if there are no total tests, then mark this as "non-passing"
 				fuzzResults.first = 1;

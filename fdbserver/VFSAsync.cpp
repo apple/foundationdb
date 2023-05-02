@@ -32,7 +32,6 @@
 #include <assert.h>
 #include <string.h>
 
-#ifdef __unixish__
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/file.h>
@@ -41,7 +40,6 @@
 #include <unistd.h>
 #include <errno.h>
 #include <fcntl.h>
-#endif
 
 #include "fdbserver/VFSAsync.h"
 
@@ -592,7 +590,6 @@ static int asyncDelete(sqlite3_vfs* pVfs, const char* zPath, int dirSync) {
 ** as if it does not exist.
 */
 static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pResOut) {
-#ifdef __unixish__
 #ifndef F_OK
 #define F_OK 0
 #endif
@@ -625,9 +622,6 @@ static int asyncAccess(sqlite3_vfs* pVfs, const char* zPath, int flags, int* pRe
 		}
 	}
 	return SQLITE_OK;
-#else
-#error Port me!
-#endif
 }
 
 /*
@@ -737,14 +731,10 @@ static int asyncSleep(sqlite3_vfs* pVfs, int microseconds) {
 ** On success, return 0.  Return 1 if the time and date cannot be found.
 */
 static int asyncCurrentTimeInt64(sqlite3_vfs* NotUsed, sqlite3_int64* piNow) {
-#if __unixish__
 	static const sqlite3_int64 unixEpoch = 24405875 * (sqlite3_int64)8640000;
 	struct timeval sNow;
 	gettimeofday(&sNow, nullptr);
 	*piNow = unixEpoch + 1000 * (sqlite3_int64)sNow.tv_sec + sNow.tv_usec / 1000;
-#else
-#error Port me!
-#endif
 	return 0;
 }
 

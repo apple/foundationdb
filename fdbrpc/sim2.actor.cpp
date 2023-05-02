@@ -583,7 +583,6 @@ private:
 
 int sf_open(const char* filename, int flags, int convFlags, int mode);
 
-#if defined(__unixish__)
 #define _open ::open
 #define _read ::read
 #define _write ::write
@@ -596,10 +595,6 @@ int sf_open(const char* filename, int flags, int convFlags, int mode);
 int sf_open(const char* filename, int flags, int convFlags, int mode) {
 	return _open(filename, convFlags, mode);
 }
-
-#else
-#error How do i open a file on a new platform?
-#endif
 
 class SimpleFile : public IAsyncFile, public ReferenceCounted<SimpleFile> {
 public:
