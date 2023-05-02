@@ -176,6 +176,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 		loop {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE); // dr_agent
 
 			try {
 				state Optional<Value> migrated = wait(tr->get(migratedKey));
@@ -239,6 +240,7 @@ ACTOR Future<Void> GlobalConfig::refresh(GlobalConfig* self) {
 		try {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult result = wait(tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY));
 			for (const auto& kv : result) {
 				KeyRef systemKey = kv.key.removePrefix(globalConfigKeysPrefix);
