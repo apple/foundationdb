@@ -1,8 +1,8 @@
 [[test]]
-testTitle = 'MockDDReadWrite'
+testTitle = 'MockDDReadWriteTest'
 useDB = false
 
 [[test.workload]]
-testName = 'MockDDTrackerShardEvaluator'
+testName = 'MockDDReadWrite'
 keySpaceCount = 1000
-testDuration = 50.0
+testDuration = 500.0

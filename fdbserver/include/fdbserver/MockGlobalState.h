@@ -279,14 +279,14 @@ public:
 	// check methods
 	/* Shard status contract:
 	 * Shard is static.
-	 * * In mgs.shardMapping, the destination teams is empty for the given shard;
+	 * * In sharedMgs.shardMapping, the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
 	 * Shard is in-flight.
-	 * * In mgs.shardMapping,the destination teams is non-empty for a given shard;
+	 * * In sharedMgs.shardMapping,the destination teams is non-empty for a given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Completed
 	 * * For each MSS belonging to the destination teams, mss.serverKeys[shard] = InFlight | Fetched | Completed
 	 * Shard is lost.
-	 * * In mgs.shardMapping,  the destination teams is empty for the given shard;
+	 * * In sharedMgs.shardMapping,  the destination teams is empty for the given shard;
 	 * * For each MSS belonging to the source teams, mss.serverKeys[shard] = Empty
 	 */
 	bool serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard = false);
@@ -294,13 +294,13 @@ public:
 
 	/* Server status contract:
 	 * Server X  is removed
-	 * * mgs.shardMapping doesn’t have any information about X
-	 * * mgs.allServer doesn’t contain X
+	 * * sharedMgs.shardMapping doesn’t have any information about X
+	 * * sharedMgs.allServer doesn’t contain X
 	 * Server X is healthy
-	 * * mgs.allServer[X] is existed
+	 * * sharedMgs.allServer[X] is existed
 	 * Server X is failed but haven’t been removed (a temporary status between healthy and removed)
-	 * * mgs.shardMapping doesn’t have any information about X
-	 * * mgs.allServer[X] is existed
+	 * * sharedMgs.shardMapping doesn’t have any information about X
+	 * * sharedMgs.allServer[X] is existed
 	 */
 	bool allShardsRemovedFromServer(const UID& serverId);
 

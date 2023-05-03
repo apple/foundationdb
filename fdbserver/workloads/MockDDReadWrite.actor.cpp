@@ -19,26 +19,32 @@
  */
 
 #include "fdbserver/workloads/MockDDTest.h"
+#include "fdbserver/MockDataDistributor.h"
+#include "fdbserver/DDTxnProcessor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 class MockDDReadWriteWorkload : public MockDDTestWorkload {
 public:
-	static constexpr auto NAME = "MockDDReadWriteEvaluator";
-	DDSharedContext ddcx;
-	DataDistributorInterface ddi;
+	static constexpr auto NAME = "MockDDReadWrite";
+	Reference<DDSharedContext> ddcx;
+	Reference<DDMockTxnProcessor> mock;
+	MockDataDistributor dataDistributor;
 	ActorCollection actors;
 
 	// --- test configs ---
 
 	explicit MockDDReadWriteWorkload(WorkloadContext const& wcx)
-	  : MockDDTestWorkload(wcx), ddcx(deterministicRandom()->randomUniqueID()), ddi(LocalityData(), ddcx.id()) {}
+	  : MockDDTestWorkload(wcx),
+	    ddcx(makeReference<DDSharedContext>(
+	        DataDistributorInterface(LocalityData(), deterministicRandom()->randomUniqueID()))) {}
 
 	Future<Void> setup(Database const& cx) override {
 		if (!enabled)
 			return Void();
 		MockDDTestWorkload::setup(cx);
-		// populate mgs before run tracker
+		// populate sharedMgs before run DD
 		populateMgs();
+		mock = makeReference<DDMockTxnProcessor>(sharedMgs);
 		return Void();
 	}
 
@@ -47,7 +53,11 @@ public:
 			return Void();
 
 		// start mock servers
-		actors.add(waitForAll(mgs->runAllMockServers()));
+		actors.add(waitForAll(sharedMgs->runAllMockServers()));
+		// start data distributor
+		actors.add(dataDistributor.run(ddcx, mock));
+
+		return delay(testDuration);
 	}
 
 	Future<bool> check(Database const& cx) override {
