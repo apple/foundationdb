@@ -1744,7 +1744,7 @@ void testMalformedDetailNotObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher
 
 	addVersionToDoc(doc, 1);
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
