@@ -35,7 +35,12 @@ public:
 		// Lambda must hold a reference to this to keep it alive until after the read
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
 		return map(m_f->read(data, length, offset), [self, data, offset](int r) {
-			self->updateChecksumHistory(false, offset, r, (uint8_t*)data);
+			// Do not check the checksum if self is the sole owner of the reference because the end user has dropped the
+			// file handle and may already have re-opened the file and written to it before this read completed so our
+			// stored checksum can be wrong.
+			if (!self->isSoleOwner()) {
+				self->updateChecksumHistory(false, offset, r, (uint8_t*)data);
+			}
 			return r;
 		});
 	}
@@ -43,7 +48,12 @@ public:
 		// Lambda must hold a reference to this to keep it alive until after the read
 		auto self = Reference<AsyncFileWriteChecker>::addRef(this);
 		return map(m_f->readZeroCopy(data, length, offset), [self, data, length, offset](Void r) {
-			self->updateChecksumHistory(false, offset, *length, (uint8_t*)data);
+			// Do not check the checksum if self is the sole owner of the reference because the end user has dropped the
+			// file handle and may already have re-opened the file and written to it before this read completed so our
+			// stored checksum can be wrong.
+			if (!self->isSoleOwner()) {
+				self->updateChecksumHistory(false, offset, *length, (uint8_t*)data);
+			}
 			return r;
 		});
 	}
