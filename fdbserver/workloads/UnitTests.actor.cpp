@@ -84,7 +84,6 @@ struct UnitTestWorkload : TestWorkload {
 		// Consume all remaining options as testParams which the unit test can access
 		for (auto& kv : options) {
 			if (kv.value.size() != 0) {
-				TraceEvent("YanqinParamValueSize").detail("ValueSize", kv.value.size());
 				testParams.set(kv.key.toString(), getOption(options, kv.key, StringRef()).toString());
 			}
 		}

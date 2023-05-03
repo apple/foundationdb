@@ -1,6 +1,3 @@
-[configuration]
-maxRunTimeWallClock = 100.0
-
 [[test]]
 testTitle = 'UnitTests'
 useDB = false
