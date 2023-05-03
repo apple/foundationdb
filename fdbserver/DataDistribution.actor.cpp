@@ -645,8 +645,9 @@ public:
 		}
 
 		// Trigger background cleanup for datamove tombstones
-		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
-
+		if (!self->txnProcessor->isMocked()) {
+			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
+		}
 		return Void();
 	}
 
@@ -683,6 +684,10 @@ public:
 };
 
 Future<Void> DataDistributor::initDDConfigWatch() {
+	if (txnProcessor->isMocked()) {
+		onConfigChange = Never();
+		return Void();
+	}
 	onConfigChange = map(DDConfiguration().trigger.onChange(
 	                         SystemDBWriteLockedNow(txnProcessor->context().getReference()), {}, configChangeWatching),
 	                     [](Version v) {
@@ -907,16 +912,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
 		// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
 		// );
-
 		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
 		// wait(debugCheckCoalescing(self->txnProcessor->context()));
-
-		// Make sure that the watcher has established a baseline before init() below so the watcher will
-		// see any changes that occur after init() has read the config state.
-		wait(self->initDDConfigWatch());
 	} else {
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
+
+	// Make sure that the watcher has established a baseline before init() below so the watcher will
+	// see any changes that occur after init() has read the config state.
+	wait(self->initDDConfigWatch());
 
 	loop {
 		self->context->trackerCancelled = false;
@@ -929,6 +933,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		state KeyRangeMap<ShardTrackedData> shards;
 		state Promise<UID> removeFailedServer;
 		try {
+
 			wait(DataDistributor::init(self));
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
@@ -942,6 +947,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
 			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
+				ASSERT(!isMocked);
 				wait(self->initTenantCache());
 			}
 
@@ -1056,8 +1062,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes });
 			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
-			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
-			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
+			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
+			if (!isMocked) {
+				recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+				    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
+			}
 			if (self->configuration.usableRegions > 1) {
 				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
 				    DDTeamCollectionInitParams{ self->txnProcessor,

@@ -1070,3 +1070,7 @@ Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStat
 	}
 	return Optional<HealthMetrics::StorageStats>(it->second->getStorageStats());
 }
+
+Future<DatabaseConfiguration> DDMockTxnProcessor::getDatabaseConfiguration() const {
+	return mgs->configuration;
+}
