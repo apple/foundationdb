@@ -1172,8 +1172,7 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 	loop {
 		try {
 			TriggerAuditRequest req(auditType, allKeys);
-			UID auditId_ =
-			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 300));
+			UID auditId_ = wait(timeoutError(dbInfo->get().distributor.get().triggerAudit.getReply(req), 300));
 			auditId = auditId_;
 			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered")
 			    .detail("AuditID", auditId)

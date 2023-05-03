@@ -112,6 +112,8 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
 			uint64_t nextId = 1;
@@ -120,6 +122,8 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			}
 			auditId = UID(nextId, 0LL);
 			auditState.id = auditId;
+			TraceEvent(SevVerbose, "PersistedNewAuditStateIdSelected", auditId)
+			    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 			tr.set(auditKey(auditState.getType(), auditId), auditStorageStateValue(auditState));
 			wait(tr.commit());
 			TraceEvent(SevDebug, "PersistedNewAuditState", auditId)
@@ -142,22 +146,29 @@ ACTOR Future<Void> persistAuditState(Database cx,
                                      MoveKeyLockInfo lock,
                                      bool ddEnabled) {
 	state Transaction tr(cx);
+	state AuditPhase auditPhase = auditState.getPhase();
 
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			auto auditPhase = auditState.getPhase();
-			if (auditPhase == AuditPhase::Complete || auditPhase == AuditPhase::Failed ||
-			    auditPhase == AuditPhase::Error) {
-				wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
-			}
-
+			ASSERT(auditPhase == AuditPhase::Complete || auditPhase == AuditPhase::Failed ||
+			       auditPhase == AuditPhase::Error);
+			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			// Clear persistent progress data of the new audit if complete
+			if (auditPhase == AuditPhase::Complete) {
+				// Here, we do not distinguish which range exactly used by an audit
+				// Simply clear any possible place of storing the progress of the audit
+				tr.clear(auditServerBasedProgressRangeFor(auditState.getType(), auditState.id));
+				tr.clear(auditRangeBasedProgressRangeFor(auditState.getType(), auditState.id));
+			} // We keep the progess metadata of Failed and Error audits for further investigations
+			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
 			TraceEvent(SevDebug, "PersistAuditState", auditState.id)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditPhase)
 			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id))
 			    .detail("Context", context);
 			break;
@@ -166,6 +177,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			    .errorUnsuppressed(e)
 			    .detail("AuditID", auditState.id)
 			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditPhase)
 			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id))
 			    .detail("Context", context);
 			wait(tr.onError(e));
@@ -221,7 +233,7 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(krmSetRange(&tr,
-			                 auditRangePrefixFor(auditState.getType(), auditState.id),
+			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
 			                 auditStorageStateValue(auditState)));
 			break;
@@ -245,7 +257,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult res_ = wait(krmGetRanges(&tr,
-			                                     auditRangePrefixFor(type, auditId),
+			                                     auditRangeBasedProgressPrefixFor(type, auditId),
 			                                     range,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
@@ -257,9 +269,9 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 		}
 	}
 
-	// For a range of state that have value read from auditRangePrefixFor
+	// For a range of state that have value read from auditRangeBasedProgressPrefixFor
 	// add the state with the same range to res (these states are persisted by auditServers)
-	// For a range of state that does not have value read from auditRangePrefixFor
+	// For a range of state that does not have value read from auditRangeBasedProgressPrefixFor
 	// add an default (Invalid phase) state with the same range to res (DD will start audit for these ranges)
 	std::vector<AuditStorageState> res;
 	for (int i = 0; i < auditStates.size() - 1; ++i) {
@@ -283,10 +295,11 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			wait(krmSetRange(&tr,
-			                 auditServerPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
-			                 auditState.range,
-			                 auditStorageStateValue(auditState)));
+			wait(krmSetRange(
+			    &tr,
+			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
+			    auditState.range,
+			    auditStorageStateValue(auditState)));
 			break;
 		} catch (Error& e) {
 			wait(tr.onError(e));
@@ -309,7 +322,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			RangeResult res_ = wait(krmGetRanges(&tr,
-			                                     auditServerPrefixFor(type, auditId, auditServerId),
+			                                     auditServerBasedProgressPrefixFor(type, auditId, auditServerId),
 			                                     range,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
@@ -321,9 +334,9 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 		}
 	}
 
-	// For a range of state that have value read from auditServerPrefixFor
+	// For a range of state that have value read from auditServerBasedProgressPrefixFor
 	// add the state with the same range to res (these states are persisted by auditServers)
-	// For a range of state that does not have value read from auditServerPrefixFor
+	// For a range of state that does not have value read from auditServerBasedProgressPrefixFor
 	// add an default (Invalid phase) state with the same range to res (DD will start audit for these ranges)
 	std::vector<AuditStorageState> res;
 	for (int i = 0; i < auditStates.size() - 1; ++i) {
