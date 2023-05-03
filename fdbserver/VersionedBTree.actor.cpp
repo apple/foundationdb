@@ -8846,6 +8846,9 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 		                                               { "", 0 } };
 
 	double elapsed = now() - startTime;
+	if (elapsed == 0) {
+		return;
+	}
 
 	if (e != nullptr) {
 		for (auto& m : metrics) {
