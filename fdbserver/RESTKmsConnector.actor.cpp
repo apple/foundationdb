@@ -310,6 +310,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 	// check version tag sanity
 	if (!doc.HasMember(REQUEST_VERSION_TAG) || !doc[REQUEST_VERSION_TAG].IsInt()) {
 		TraceEvent(SevWarnAlways, "RESTKMSResponseMissingVersion", ctx->uid).log();
+		CODE_PROBE(true, "KMS response missing version");
 		throw rest_malformed_response();
 	}
 
@@ -320,6 +321,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 		TraceEvent(SevWarnAlways, "RESTKMSResponseInvalidVersion", ctx->uid)
 		    .detail("Version", version)
 		    .detail("MaxSupportedVersion", maxSupportedVersion);
+		CODE_PROBE(true, "KMS response invalid version");
 		throw rest_malformed_response();
 	}
 
@@ -413,14 +415,16 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	if (!doc.HasMember(CIPHER_KEY_DETAILS_TAG) || !doc[CIPHER_KEY_DETAILS_TAG].IsArray()) {
 		TraceEvent(SevWarn, "RESTParseEncryptCipherResponseFailed", ctx->uid)
 		    .detail("Reason", "MissingCipherKeyDetails");
+		CODE_PROBE(true, "REST CipherKeyDetails not array");
 		throw rest_malformed_response();
 	}
 
 	for (const auto& cipherDetail : doc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
 		if (!cipherDetail.IsObject()) {
 			TraceEvent(SevWarn, "RESTParseEncryptCipherResponseFailed", ctx->uid)
-			    .detail("Type", cipherDetail.GetType())
+			    .detail("CipherDetailType", cipherDetail.GetType())
 			    .detail("Reason", "EncryptKeyDetailsNotObject");
+			CODE_PROBE(true, "REST CipherKeyDetail not object");
 			throw rest_malformed_response();
 		}
 
@@ -433,6 +437,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 			    .detail("BaseCipherIdPresent", isBaseCipherIdPresent)
 			    .detail("BaseCipherPresent", isBaseCipherPresent)
 			    .detail("EncryptDomainIdPresent", isEncryptDomainIdPresent);
+			CODE_PROBE(true, "REST CipherKeyDetail malformed");
 			throw rest_malformed_response();
 		}
 
@@ -540,14 +545,16 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(BLOB_METADATA_DETAILS_TAG) || !doc[BLOB_METADATA_DETAILS_TAG].IsArray()) {
 		TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureMissingDetails", ctx->uid).log();
-		throw operation_failed();
+		CODE_PROBE(true, "REST BlobMedata details missing or not-array");
+		throw rest_malformed_response();
 	}
 
 	for (const auto& detail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
 		if (!detail.IsObject()) {
 			TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureDetailsNotObject", ctx->uid)
-			    .detail("Type", detail.GetType());
-			throw operation_failed();
+			    .detail("CipherDetailType", detail.GetType());
+			CODE_PROBE(true, "REST BlobMedata detail not-object");
+			throw rest_malformed_response();
 		}
 
 		const bool isDomainIdPresent = detail.HasMember(BLOB_METADATA_DOMAIN_ID_TAG);
@@ -558,7 +565,8 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			    .detail("DomainIdPresent", isDomainIdPresent)
 			    .detail("BaseLocationPresent", isBasePresent)
 			    .detail("PartitionsPresent", isPartitionsPresent);
-			throw operation_failed();
+			CODE_PROBE(true, "REST BlobMedata detail malformed");
+			throw rest_malformed_response();
 		}
 
 		std::unique_ptr<uint8_t[]> baseStr;
@@ -576,7 +584,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
 					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
-					    .detail("Type", partition.GetType());
+					    .detail("PartitionType", partition.GetType());
 					throw operation_failed();
 				}
 				const int partitionLen = partition.GetStringLength();
@@ -1678,12 +1686,14 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
 void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailsStart");
 	rapidjson::Document doc;
 	doc.SetObject();
 
@@ -1691,6 +1701,8 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	rapidjson::Value details;
 	details.SetBool(true);
 	doc.AddMember(key, details, doc.GetAllocator());
+
+	addVersionToDoc(doc, 1);
 
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
@@ -1707,12 +1719,54 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
+	TraceEvent("TestMalformedDetailsEnd");
+}
+
+void testMalformedDetailNotObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailNotObjStart");
+	rapidjson::Document doc;
+	doc.SetObject();
+
+	rapidjson::Value cDetails(rapidjson::kArrayType);
+	rapidjson::Value detail;
+	rapidjson::Value key(isCipher ? BASE_CIPHER_ID_TAG : BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
+	rapidjson::Value id;
+	id.SetUint(12345);
+	detail.AddMember(key, id, doc.GetAllocator());
+	cDetails.PushBack(detail, doc.GetAllocator());
+	key.SetString(isCipher ? CIPHER_KEY_DETAILS_TAG : BLOB_METADATA_DETAILS_TAG, doc.GetAllocator());
+	doc.AddMember(key, cDetails, doc.GetAllocator());
+
+	addVersionToDoc(doc, 1);
+
+	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	rapidjson::StringBuffer sb;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+	doc.Accept(writer);
+	httpResp->content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->contentLen = sb.GetSize();
+
+	try {
+		if (isCipher) {
+			parseEncryptCipherResponse(ctx, httpResp);
+		} else {
+			parseBlobMetadataResponse(ctx, httpResp);
+		}
+		ASSERT(false); // error expected
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
+	}
+	TraceEvent("TestMalformedDetailNotObjEnd");
 }
 
 void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailObjStart");
 	rapidjson::Document doc;
 	doc.SetObject();
 
@@ -1726,6 +1780,8 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	key.SetString(isCipher ? CIPHER_KEY_DETAILS_TAG : BLOB_METADATA_DETAILS_TAG, doc.GetAllocator());
 	doc.AddMember(key, cDetails, doc.GetAllocator());
 
+	addVersionToDoc(doc, 1);
+
 	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
@@ -1741,9 +1797,11 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
+	TraceEvent("TestMalformedDetailObjEnd");
 }
 
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
@@ -1790,6 +1848,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_keys_fetch_failed);
 	}
@@ -1798,6 +1857,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 ACTOR Future<Void> testParseDiscoverKmsUrlFileNotFound(Reference<RESTKmsConnectorCtx> ctx) {
 	try {
 		wait(parseDiscoverKmsUrlFile(ctx, "/imaginary-dir/dream/phantom-file"));
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_invalid_kms_config);
 	}
@@ -1900,6 +1960,7 @@ TEST_CASE("/KmsConnector/REST/ParseEncryptCipherResponse") {
 	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, true);
 	testMalformedDetails(ctx, true);
+	testMalformedDetailNotObj(ctx, true);
 	testMalformedDetailObj(ctx, true);
 	testKMSErrorResponse(ctx, true);
 	return Void();
@@ -1914,6 +1975,7 @@ TEST_CASE("/KmsConnector/REST/ParseBlobMetadataResponse") {
 	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, false);
 	testMalformedDetails(ctx, false);
+	testMalformedDetailNotObj(ctx, false);
 	testMalformedDetailObj(ctx, true);
 	testKMSErrorResponse(ctx, false);
 	return Void();

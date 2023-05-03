@@ -7,14 +7,14 @@ from typing import List
 
 class ValgrindWhat:
     def __init__(self):
-        self.what: str = ''
-        self.backtrace: str = ''
+        self.what: str = ""
+        self.backtrace: str = ""
 
 
 class ValgrindError:
     def __init__(self):
         self.what: ValgrindWhat = ValgrindWhat()
-        self.kind: str = ''
+        self.kind: str = ""
         self.aux: List[ValgrindWhat] = []
 
 
@@ -73,62 +73,72 @@ class ValgrindHandler(xml.sax.handler.ContentHandler):
 
     def startElement(self, name, attrs):
         # pdb.set_trace()
-        if name == 'error':
+        if name == "error":
             self.stack.append(ValgrindError())
             self.state_stack.append(ValgrindParseState.ERROR)
         if len(self.stack) == 0:
             return
-        if name == 'kind':
+        if name == "kind":
             self.state_stack.append(ValgrindParseState.KIND)
-        elif name == 'what':
+        elif name == "what":
             self.state_stack.append(ValgrindParseState.WHAT)
-        elif name == 'auxwhat':
-            assert self.state() in [ValgrindParseState.ERROR, ValgrindParseState.ERROR_AUX]
+        elif name == "auxwhat":
+            assert self.state() in [
+                ValgrindParseState.ERROR,
+                ValgrindParseState.ERROR_AUX,
+            ]
             self.state_stack.pop()
             self.state_stack.append(ValgrindParseState.ERROR_AUX)
             self.state_stack.append(ValgrindParseState.AUX_WHAT)
             self.stack[-1].aux.append(ValgrindWhat())
-        elif name == 'stack':
+        elif name == "stack":
             state = self.state()
             assert state in [ValgrindParseState.ERROR, ValgrindParseState.ERROR_AUX]
             if state == ValgrindParseState.ERROR:
                 self.state_stack.append(ValgrindParseState.STACK)
             else:
                 self.state_stack.append(ValgrindParseState.STACK_AUX)
-        elif name == 'ip':
+        elif name == "ip":
             state = self.state()
             assert state in [ValgrindParseState.STACK, ValgrindParseState.STACK_AUX]
             if state == ValgrindParseState.STACK:
                 self.state_stack.append(ValgrindParseState.STACK_IP)
                 if len(self.stack[-1].what.backtrace) == 0:
-                    self.stack[-1].what.backtrace = 'addr2line -e fdbserver.debug -p -C -f -i '
+                    self.stack[
+                        -1
+                    ].what.backtrace = "addr2line -e fdbserver.debug -p -C -f -i "
                 else:
-                    self.stack[-1].what.backtrace += ' '
+                    self.stack[-1].what.backtrace += " "
             else:
                 self.state_stack.append(ValgrindParseState.STACK_IP_AUX)
                 if len(self.stack[-1].aux[-1].backtrace) == 0:
-                    self.stack[-1].aux[-1].backtrace = 'addr2line -e fdbserver.debug -p -C -f -i '
+                    self.stack[-1].aux[
+                        -1
+                    ].backtrace = "addr2line -e fdbserver.debug -p -C -f -i "
                 else:
-                    self.stack[-1].aux[-1].backtrace += ' '
+                    self.stack[-1].aux[-1].backtrace += " "
 
     def endElement(self, name):
         # pdb.set_trace()
-        if name == 'error':
+        if name == "error":
             self.result.append(self.stack.pop())
             self.state_stack.pop()
-        elif name == 'kind':
+        elif name == "kind":
             assert self.state() == ValgrindParseState.KIND
             self.state_stack.pop()
-        elif name == 'what':
+        elif name == "what":
             assert self.state() == ValgrindParseState.WHAT
             self.state_stack.pop()
-        elif name == 'auxwhat':
+        elif name == "auxwhat":
             assert self.state() == ValgrindParseState.AUX_WHAT
             self.state_stack.pop()
-        elif name == 'stack':
-            assert self.state() in [ValgrindParseState.STACK, ValgrindParseState.STACK_AUX]
+        elif name == "stack":
+            assert self.state() in [
+                ValgrindParseState.STACK,
+                ValgrindParseState.STACK_AUX,
+            ]
             self.state_stack.pop()
-        elif name == 'ip':
+        elif name == "ip":
             self.state_stack.pop()
             state = self.state()
             assert state in [ValgrindParseState.STACK, ValgrindParseState.STACK_AUX]
@@ -136,6 +146,6 @@ class ValgrindHandler(xml.sax.handler.ContentHandler):
 
 def parse_valgrind_output(valgrind_out_file: Path) -> List[ValgrindError]:
     handler = ValgrindHandler()
-    with valgrind_out_file.open('r') as f:
+    with valgrind_out_file.open("r") as f:
         xml.sax.parse(f, handler)
         return handler.result

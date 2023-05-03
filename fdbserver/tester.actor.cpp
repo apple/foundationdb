@@ -1164,40 +1164,74 @@ ACTOR Future<Void> changeConfiguration(Database cx, std::vector<TesterInterface>
 	return Void();
 }
 
-ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbInfo, AuditType auditType) {
+	TraceEvent(SevDebug, "AuditStorageCorrectnessBegin").detail("AuditType", auditType);
+	state Database cx;
 	state UID auditId;
-	TraceEvent("AuditStorageCorrectnessBegin");
-
+	state AuditStorageState auditState;
 	loop {
 		try {
-			TriggerAuditRequest req(AuditType::ValidateHA, allKeys);
-			req.async = true;
-			UID auditId_ = wait(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req));
+			while (dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+			       !dbInfo->get().distributor.present()) {
+				wait(dbInfo->onChange());
+			}
+			TriggerAuditRequest req(auditType, allKeys);
+			UID auditId_ = wait(timeoutError(dbInfo->get().distributor.get().triggerAudit.getReply(req), 300));
 			auditId = auditId_;
+			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered")
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType);
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "StartAuditStorageError").errorUnsuppressed(e);
+			TraceEvent(SevWarn, "AuditStorageCorrectnessTriggerError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType);
 			wait(delay(1));
 		}
 	}
-
-	state Database cx = openDBOnServer(dbInfo);
+	state int retryCount = 0;
 	loop {
 		try {
-			AuditStorageState auditState = wait(getAuditState(cx, AuditType::ValidateHA, auditId));
-			if (auditState.getPhase() != AuditPhase::Complete) {
-				ASSERT(auditState.getPhase() == AuditPhase::Running);
-				wait(delay(30));
-			} else {
-				TraceEvent(SevInfo, "AuditStorageResult").detail("AuditStorageState", auditState.toString());
-				ASSERT(auditState.getPhase() == AuditPhase::Complete);
+			cx = openDBOnServer(dbInfo);
+			AuditStorageState auditState_ = wait(getAuditState(cx, auditType, auditId));
+			auditState = auditState_;
+			if (auditState.getPhase() == AuditPhase::Complete) {
 				break;
+			} else if (auditState.getPhase() == AuditPhase::Running) {
+				TraceEvent("AuditStorageCorrectnessWait")
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", auditType)
+				    .detail("RetryCount", retryCount);
+				wait(delay(30));
+				if (retryCount > 30) {
+					TraceEvent("AuditStorageCorrectnessWaitFailed")
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", auditType);
+					break;
+				}
+				retryCount++;
+				continue;
+			} else if (auditState.getPhase() == AuditPhase::Error) {
+				break;
+			} else if (auditState.getPhase() == AuditPhase::Failed) {
+				break;
+			} else {
+				UNREACHABLE();
 			}
 		} catch (Error& e) {
-			TraceEvent("WaitAuditStorageError").errorUnsuppressed(e).detail("AuditID", auditId);
+			TraceEvent("AuditStorageCorrectnessWaitError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditId)
+			    .detail("AuditType", auditType)
+			    .detail("AuditState", auditState.toString());
 			wait(delay(1));
 		}
 	}
+	TraceEvent("AuditStorageCorrectnessWaitEnd")
+	    .detail("AuditID", auditId)
+	    .detail("AuditType", auditType)
+	    .detail("AuditState", auditState.toString());
 
 	return Void();
 }
@@ -1322,8 +1356,8 @@ ACTOR Future<bool> runTest(Database cx,
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
+			state bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 			try {
-				bool quiescent = g_network->isSimulated() ? !BUGGIFY : spec.waitForQuiescenceEnd;
 				wait(timeoutError(checkConsistency(cx,
 				                                   testers,
 				                                   quiescent,
@@ -1337,6 +1371,26 @@ ACTOR Future<bool> runTest(Database cx,
 			} catch (Error& e) {
 				TraceEvent(SevError, "TestFailure").error(e).detail("Reason", "Unable to perform consistency check");
 				ok = false;
+			}
+
+			// Run auditStorage
+			if (quiescent) {
+				try {
+					TraceEvent("AuditStorageStart");
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 5000.0));
+					TraceEvent("AuditStorageCorrectnessHADone");
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 5000.0));
+					TraceEvent("AuditStorageCorrectnessReplicaDone");
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 5000.0));
+					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 5000.0));
+					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
+				} catch (Error& e) {
+					ok = false;
+					TraceEvent(SevError, "TestFailure")
+					    .error(e)
+					    .detail("Reason", "Unable to perform auditStorage check.");
+				}
 			}
 		}
 	}

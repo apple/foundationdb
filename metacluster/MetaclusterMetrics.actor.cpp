@@ -57,6 +57,13 @@ ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 			return metrics;
 		} catch (Error& e) {
 			TraceEvent("MetaclusterUpdaterError").error(e);
+			if (e.code() == error_code_unsupported_metacluster_version) {
+				TraceEvent(SevWarnAlways, "MetaclusterMetricsFailure").error(e);
+				MetaclusterMetrics metrics;
+				metrics.error = e.what();
+				return metrics;
+			}
+
 			wait(tr->onError(e));
 		}
 	}

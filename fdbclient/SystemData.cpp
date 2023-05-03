@@ -307,6 +307,8 @@ const KeyRangeRef auditKeys = KeyRangeRef("\xff/audits/"_sr, "\xff/audits0"_sr);
 const KeyRef auditPrefix = auditKeys.begin;
 const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditRanges0"_sr);
 const KeyRef auditRangePrefix = auditRanges.begin;
+const KeyRangeRef auditServers = KeyRangeRef("\xff/auditServers/"_sr, "\xff/auditServers0"_sr);
+const KeyRef auditServerPrefix = auditServers.begin;
 
 const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
@@ -325,21 +327,46 @@ const KeyRange auditKeyRange(const AuditType type) {
 	return prefixRange(wr.toValue());
 }
 
-const Key auditRangeKey(const UID& auditId, const KeyRef& key) {
+const Key auditRangeBasedProgressPrefixFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditRangePrefix);
-	wr << auditId;
+	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
-	wr.serializeBytes(key);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
 	return wr.toValue();
 }
 
-const Key auditRangePrefixFor(const UID& auditId) {
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
-	wr.serializeBytes(auditPrefix);
-	wr << auditId;
+	wr.serializeBytes(auditRangePrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const Key auditServerBasedProgressPrefixFor(const AuditType type, const UID& auditId, const UID& serverId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditServerPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(serverId.first());
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
+}
+
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type, const UID& auditId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditServerPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
 }
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState) {

@@ -319,7 +319,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
-	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
 	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
@@ -837,6 +837,8 @@ public:
 	int FETCH_KEYS_LOWER_PRIORITY;
 	int SERVE_FETCH_CHECKPOINT_PARALLELISM;
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
+	int AUDIT_RETRY_COUNT_MAX;
+	int SS_AUDIT_AUTO_PROCEED_COUNT_MAX;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
 	double STORAGE_DURABILITY_LAG_REJECT_THRESHOLD;
@@ -1090,6 +1092,7 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_SPLIT_TRUNCATED;
 	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
@@ -1134,6 +1137,7 @@ public:
 	int BLOB_MANIFEST_RW_ROWS;
 	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
+	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
 	std::string BLOB_RESTORE_MANIFEST_URL;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;

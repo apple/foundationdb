@@ -2,6 +2,19 @@
 Release Notes
 #############
 
+7.1.33
+======
+* Same as 7.1.32 release with AVX enabled.
+
+7.1.32
+======
+* Released with AVX disabled.
+* Increased MAX_STORAGE_COMMIT_TIME to reduce storage server IO timeout errors. `(PR #10116) <https://github.com/apple/foundationdb/pull/10116>`_
+* Fixed a CPU spinning issue on DR destination clusters. `(PR #10114) <https://github.com/apple/foundationdb/pull/10114>`_
+* Fixed a inconsistent read issue when using RocksDB engine. `(PR #10060) <https://github.com/apple/foundationdb/pull/10060>`_
+* Fixed a storage server failure issue and added client backoff when commit proxy is overloaded for key location requests. `(PR #10007) <https://github.com/apple/foundationdb/pull/10007>`_
+* Added gray failure detection of disconnected remote log routers. `(PR #9933) <https://github.com/apple/foundationdb/pull/9933>`_
+
 7.1.31
 ======
 * Same as 7.1.30 release with AVX enabled.

@@ -105,10 +105,18 @@ extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
 
+// Key for a particular audit
 const Key auditKey(const AuditType type, const UID& auditId);
+// KeyRange for whole audit
 const KeyRange auditKeyRange(const AuditType type);
-const Key auditRangeKey(const UID& auditId, const KeyRef& key);
-const Key auditRangePrefixFor(const UID& auditId);
+// Prefix for audit work progress by range
+const Key auditRangeBasedProgressPrefixFor(const AuditType type, const UID& auditId);
+// Range for audit work progress by range
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type, const UID& auditId);
+// Prefix for audit work progress by audit server id
+const Key auditServerBasedProgressPrefixFor(const AuditType type, const UID& auditId, const UID& serverId);
+// Range for audit work progress by audit server id
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type, const UID& auditId);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
