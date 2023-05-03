@@ -83,7 +83,9 @@ struct RegisterClusterImpl {
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
 		    .detail("Capacity", self->clusterEntry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
+		    .detail("ConnectionString", self->connectionString.toString())
+		    .detail("AutoTenantAssignment",
+		            DataClusterEntry::autoTenantAssignmentToString(self->clusterEntry.autoTenantAssignment));
 
 		return Void();
 	}
@@ -182,7 +184,8 @@ struct RegisterClusterImpl {
 			ASSERT(dataClusterMetadata.get().entry.clusterState == DataClusterState::REGISTERING);
 			dataClusterMetadata.get().entry.clusterState = DataClusterState::READY;
 
-			if (dataClusterMetadata.get().entry.hasCapacity()) {
+			if (dataClusterMetadata.get().entry.hasCapacity() &&
+			    dataClusterMetadata.get().entry.autoTenantAssignment == AutoTenantAssignment::ENABLED) {
 				metadata::management::clusterCapacityIndex().insert(
 				    tr, Tuple::makeTuple(dataClusterMetadata.get().entry.allocated.numTenantGroups, self->clusterName));
 			}
@@ -194,7 +197,9 @@ struct RegisterClusterImpl {
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
 		    .detail("Capacity", dataClusterMetadata.get().entry.capacity)
-		    .detail("ConnectionString", self->connectionString.toString());
+		    .detail("ConnectionString", self->connectionString.toString())
+		    .detail("AutoTenantAssignment",
+		            DataClusterEntry::autoTenantAssignmentToString(self->clusterEntry.autoTenantAssignment));
 
 		return Void();
 	}
