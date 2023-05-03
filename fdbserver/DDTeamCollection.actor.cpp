@@ -3085,6 +3085,7 @@ public:
 				// std::map is ordered, so futures are matched with the server
 				iter = self->server_info.begin();
 				for (int i = 0; i < fs.size(); i++, iter++) {
+					ASSERT(fs[i].canGet());
 					auto metadataOptional = fs[i].get();
 					if (metadataOptional.present() && metadataOptional.get().paramsNeedTobeReplaced.size()) {
 						result[iter->first] = metadataOptional.get().paramsNeedTobeReplaced;

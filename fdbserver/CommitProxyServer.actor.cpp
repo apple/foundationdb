@@ -2981,14 +2981,14 @@ ACTOR static Future<Void> rejoinServer(CommitProxyInterface proxy, ProxyCommitDa
 			}
 			rep.encryptMode = commitData->encryptMode;
 			if (req.checkStorageEngineParams) {
-				rep.params = StorageEngineParamSet();
+				rep.storageEngineParams = StorageEngineParamSet();
 				// This is now only enabled for redwood, all other storage engines are disabled
 				auto paramKeys = commitData->txnStateStore->readRange(storageEngineParamsKeys).get();
 				for (auto& kv : paramKeys) {
-					// send back all storage engine parameters saved in txnStateStore when existing storage servers
+					// send back storage engine parameters persisted in txnStateStore when existing storage servers
 					// rejoin
-					rep.params.get().set(kv.key.removePrefix(storageEngineParamsPrefix).toString(),
-					                     kv.value.toString());
+					rep.storageEngineParams.get().set(kv.key.removePrefix(storageEngineParamsPrefix).toString(),
+					                                  kv.value.toString());
 				}
 			}
 			req.reply.send(rep);

@@ -12768,9 +12768,9 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 				// If a "needReboot" parameter mismatches, it will reboot the kv store
 				if (self->isUsingStorageEngineParams()) {
 					TraceEvent(SevInfo, "ReplaceInterfaceCheckStorageEngineParams")
-					    .detail("Params", describe(rep.params.get().getParams()))
+					    .detail("Params", describe(rep.storageEngineParams.get().getParams()))
 					    .detail("IsTss", self->isTss());
-					wait(self->checkStorageEngineParams(rep.params.get(), false));
+					wait(self->checkStorageEngineParams(rep.storageEngineParams.get(), false));
 				}
 
 				try {

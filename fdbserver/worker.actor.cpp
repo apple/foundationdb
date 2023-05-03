@@ -246,6 +246,7 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
 			} else if (e.isError() && e.getError().code() == error_code_please_reboot_kv_store) {
+				// the error means to close and reopen the kv store
 				store->close();
 			} else {
 				wait(onClosed);
@@ -1486,7 +1487,6 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Optional<EncryptionAtRestMode> encryptionMode,
                                                  Reference<StorageEngineParamSet> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	loop {
@@ -1520,7 +1520,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			                deterministicRandom()->coinflip())
 			             : true),
 			    db,
-			    encryptionMode,
+			    {},
 			    storageEngineParams ? *storageEngineParams : Optional<StorageEngineParamSet>());
 			filesClosed->add(store->onClosed());
 		}
@@ -2169,7 +2169,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  {},
 				                                  paramsPtr);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
@@ -2906,7 +2905,6 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  req.encryptMode,
 					                                  paramsPtr);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {

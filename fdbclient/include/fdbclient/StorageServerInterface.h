@@ -125,7 +125,6 @@ struct StorageServerInterface {
 	RequestStream<struct AuditStorageRequest> auditStorage;
 	RequestStream<struct GetStorageEngineParamsRequest> getStorageEngineParams;
 	RequestStream<struct SetStorageEngineParamsRequest> setStorageEngineParams;
-	RequestStream<struct CheckStorageEngineParamsCompatibilityRequest> checkStorageEngineParamsCompatibility;
 
 private:
 	bool acceptingRequests;
@@ -205,9 +204,6 @@ public:
 				    RequestStream<struct GetStorageEngineParamsRequest>(getValue.getEndpoint().getAdjustedEndpoint(24));
 				setStorageEngineParams =
 				    RequestStream<struct SetStorageEngineParamsRequest>(getValue.getEndpoint().getAdjustedEndpoint(25));
-				checkStorageEngineParamsCompatibility =
-				    RequestStream<struct CheckStorageEngineParamsCompatibilityRequest>(
-				        getValue.getEndpoint().getAdjustedEndpoint(26));
 			}
 		} else {
 			ASSERT(Ar::isDeserializing);
@@ -262,7 +258,6 @@ public:
 		streams.push_back(auditStorage.getReceiver());
 		streams.push_back(getStorageEngineParams.getReceiver());
 		streams.push_back(setStorageEngineParams.getReceiver());
-		streams.push_back(checkStorageEngineParamsCompatibility.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -1251,16 +1246,6 @@ struct SetStorageEngineParamsRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, params, reply);
-	}
-};
-
-struct CheckStorageEngineParamsCompatibilityRequest {
-	constexpr static FileIdentifier file_identifier = 13292001;
-	ReplyPromise<SetStorageEngineParamsReply> reply;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, reply);
 	}
 };
 

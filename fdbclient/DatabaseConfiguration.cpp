@@ -457,6 +457,9 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			          json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
 			                                    json_spirit::Output_options::none);
 		} else {
+			static std::set<std::string> directSet = { "storage_engine_params", "tss_storage_engine_params" };
+			if (directSet.contains(kv.first))
+				continue;
 			throw invalid_config_db_key();
 		}
 	}
