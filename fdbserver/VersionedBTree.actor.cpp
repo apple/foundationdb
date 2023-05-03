@@ -8014,7 +8014,7 @@ public:
 
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
-		            : params.get("default_page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
+		            : params.get("page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
@@ -8319,7 +8319,7 @@ public:
 		// how to get the default page size from m_tree,
 		// what's the general way to get it
 		result.set("kvstore_range_prefetch", prefetch ? "true" : "false");
-		result.set("default_page_size", std::to_string(m_tree->getPageSize()));
+		result.set("page_size", std::to_string(m_tree->getPageSize()));
 		result.set("metrics_interval", std::to_string(metrics_interval));
 		result.set("histogram_interval", std::to_string(histogram_interval));
 		return result;
@@ -8362,7 +8362,7 @@ public:
 			} else if (k == "histogram_interval") {
 				params.getDouble(k) == histogram_interval ? result.unchanged.push_back(k)
 				                                          : result.needReboot.push_back(k);
-			} else if (k == "default_page_size") {
+			} else if (k == "page_size") {
 				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
 				                                          : result.needReplacement.push_back(k);
 			} else if (k == StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY) {

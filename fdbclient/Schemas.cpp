@@ -149,7 +149,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                      "created_time_timestamp": 0,
                      "need_replacement":false,
                      "params_need_to_be_replaced":[
-                        "default_page_size"
+                        "page_size"
                      ],
                      "storage_engine":{
                      "$enum":[
@@ -825,7 +825,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
              "memory-radixtree-beta"
          ]},
          "storage_engine_params":{
-            "default_page_size":"8192",
+            "page_size":"8192",
             "histogram_interval":"30.0",
             "kvstore_range_prefetch":"true",
             "metrics_interval":"5.0",

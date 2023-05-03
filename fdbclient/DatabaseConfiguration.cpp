@@ -29,7 +29,7 @@
 
 StorageEngineParamsFactory redwoodFactory(
     KeyValueStoreType::SSD_REDWOOD_V1,
-    { { "default_page_size", { StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
+    { { "page_size", { StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
       { "kvstore_range_prefetch", { StorageEngineParamSet::CHANGETYPE::RUNTIME, "true" } },
       { "metrics_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "5.0" } },
       { "histogram_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "30.0" } },
