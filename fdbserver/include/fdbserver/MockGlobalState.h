@@ -61,11 +61,13 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 }
 
 class MockStorageServerImpl;
-class MockStorageServer : public IStorageMetricsService {
+class MockStorageServer : public IStorageMetricsService, public ReferenceCounted<MockStorageServer> {
 	friend struct MockGlobalStateTester;
 	friend class MockStorageServerImpl;
 
 	ActorCollection actors;
+
+	CommonStorageCounters counters{ /*name=*/"", /*id=*/"", &metrics };
 
 public:
 	struct ShardInfo {
@@ -82,6 +84,22 @@ public:
 	};
 
 	static constexpr uint64_t DEFAULT_DISK_SPACE = 1000LL * 1024 * 1024 * 1024;
+
+	// 100k/s small reads = 100% CPU
+	// 500MB/s of read throughput = 100% CPU
+	// 50k/s random small writes = 100% CPU
+	// 100MB/s write throughput = 100% CPU
+	// assume above operation will saturate the CPU linearly. We can change the model to a better one in the future.
+	static constexpr double DEFAULT_READ_OP_CPU_MULTIPLIER = 100.0 / 100000;
+	static constexpr double DEFAULT_WRITE_OP_CPU_MULTIPLIER = 100.0 / 50000;
+	static constexpr double DEFAULT_READ_BYTE_CPU_MULTIPLIER = 100.0 / 500000000;
+	static constexpr double DEFAULT_WRITE_BYTE_CPU_MULTIPLIER = 100.0 / 100000000;
+
+	// can be set by workloads
+	double read_op_cpu_multiplier = DEFAULT_READ_OP_CPU_MULTIPLIER;
+	double write_op_cpu_multiplier = DEFAULT_WRITE_OP_CPU_MULTIPLIER;
+	double read_byte_cpu_multiplier = DEFAULT_READ_BYTE_CPU_MULTIPLIER;
+	double write_byte_cpu_multiplier = DEFAULT_WRITE_BYTE_CPU_MULTIPLIER;
 
 	// control plane statistics associated with a real storage server
 	uint64_t totalDiskSpace = DEFAULT_DISK_SPACE, usedDiskSpace = DEFAULT_DISK_SPACE;
@@ -100,7 +118,8 @@ public:
 	MockStorageServer() = default;
 
 	MockStorageServer(StorageServerInterface ssi, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
-	  : totalDiskSpace(usedDiskSpace + availableDiskSpace), usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
+	  : counters("MockStorageServer", ssi.id().toString()), totalDiskSpace(usedDiskSpace + availableDiskSpace),
+	    usedDiskSpace(usedDiskSpace), ssi(ssi), id(ssi.id()) {}
 
 	MockStorageServer(const UID& id, uint64_t availableDiskSpace, uint64_t usedDiskSpace = 0)
 	  : MockStorageServer(StorageServerInterface(id), availableDiskSpace, usedDiskSpace) {}
@@ -170,6 +189,8 @@ public:
 	// trigger the asynchronous fetch keys operation
 	void signalFetchKeys(const KeyRangeRef& range, int64_t rangeTotalBytes);
 
+	HealthMetrics::StorageStats getStorageStats() const;
+
 protected:
 	PromiseStream<FetchKeysParams> fetchKeysRequests;
 
@@ -196,13 +217,40 @@ protected:
 
 	// Update byte sample as if clear a whole range
 	void byteSampleApplyClear(KeyRangeRef const& range);
+
+	double calculateCpuUsage() const;
 };
 
 class MockGlobalStateImpl;
 
+namespace mock {
+// This struct is only used in mock DD. For convenience of tracking the cluster topology and generating correct process
+// locality
+struct TopologyObject {
+	enum Type { PROCESS, MACHINE, ZONE, DATA_HALL, DATA_CENTER } type;
+	// corresponding to LocalityData field for each type
+	Standalone<StringRef> topoId;
+	std::shared_ptr<TopologyObject> parent;
+	std::vector<std::shared_ptr<TopologyObject>> children;
+	TopologyObject(Type type, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : type(type), topoId(id), parent(parent) {}
+};
+
+struct Process : public TopologyObject {
+	LocalityData locality;
+	std::vector<StorageServerInterface> ssInterfaces;
+	Process(LocalityData locality, Standalone<StringRef> id, std::shared_ptr<TopologyObject> parent = nullptr)
+	  : TopologyObject(PROCESS, id, parent), locality(locality) {}
+};
+} // namespace mock
+
 class MockGlobalState : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
+
+	std::vector<std::shared_ptr<mock::TopologyObject>> clusterLayout;
+	std::vector<std::shared_ptr<mock::Process>> processes;
+	std::vector<std::shared_ptr<mock::Process>> seedProcesses;
 
 	std::vector<StorageServerInterface> extractStorageServerInterfaces(const std::vector<UID>& ids) const;
 
@@ -211,7 +259,7 @@ public:
 	// In-memory counterpart of the `keyServers` in system keyspace
 	Reference<ShardsAffectedByTeamFailure> shardMapping;
 	// In-memory counterpart of the `serverListKeys` in system keyspace
-	std::map<UID, MockStorageServer> allServers;
+	std::map<UID, Reference<MockStorageServer>> allServers;
 	DatabaseConfiguration configuration;
 
 	// user defined parameters for mock workload purpose
@@ -222,6 +270,7 @@ public:
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
+	void initializeClusterLayout(const BasicSimulationConfig&);
 	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 

@@ -50,9 +50,9 @@ class RangeCounterTest(unittest.TestCase):
         rc._insert_range("a", "b")
         rc._insert_range("b", "c")
         assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 1)}), rc.ranges
-        assert rc.get_count_for_key('a') == 1
-        assert rc.get_count_for_key('b') == 1
-        assert rc.get_count_for_key('c') == 0
+        assert rc.get_count_for_key("a") == 1
+        assert rc.get_count_for_key("b") == 1
+        assert rc.get_count_for_key("c") == 0
 
     def test_two_duplicates(self):
         rc = RangeCounter(1)
@@ -64,25 +64,33 @@ class RangeCounterTest(unittest.TestCase):
         rc = RangeCounter(1)
         rc._insert_range("b", "c")
         rc._insert_range("a", "d")
-        assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}), rc.ranges
+        assert rc.ranges == SortedDict(
+            {"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}
+        ), rc.ranges
 
     def test_wholly_inside(self):
         rc = RangeCounter(1)
         rc._insert_range("a", "d")
         rc._insert_range("b", "c")
-        assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}), rc.ranges
+        assert rc.ranges == SortedDict(
+            {"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}
+        ), rc.ranges
 
     def test_intersect_before(self):
         rc = RangeCounter(1)
         rc._insert_range("b", "d")
         rc._insert_range("a", "c")
-        assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}), rc.ranges
+        assert rc.ranges == SortedDict(
+            {"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}
+        ), rc.ranges
 
     def test_intersect_after(self):
         rc = RangeCounter(1)
         rc._insert_range("a", "c")
         rc._insert_range("b", "d")
-        assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}), rc.ranges
+        assert rc.ranges == SortedDict(
+            {"a": ("b", 1), "b": ("c", 2), "c": ("d", 1)}
+        ), rc.ranges
 
     def test_wide(self):
         rc = RangeCounter(1)
@@ -90,7 +98,17 @@ class RangeCounterTest(unittest.TestCase):
         rc._insert_range("e", "g")
         rc._insert_range("i", "k")
         rc._insert_range("b", "j")
-        assert rc.ranges == SortedDict({"a": ("b", 1), "b": ("c", 2), "c": ("e", 1), "e": ("g", 2), "g": ("i", 1), "i": ("j", 2), "j": ("k", 1)}), rc.ranges
+        assert rc.ranges == SortedDict(
+            {
+                "a": ("b", 1),
+                "b": ("c", 2),
+                "c": ("e", 1),
+                "e": ("g", 2),
+                "g": ("i", 1),
+                "i": ("j", 2),
+                "j": ("k", 1),
+            }
+        ), rc.ranges
 
     def test_random(self):
         letters = string.ascii_lowercase
@@ -102,7 +120,11 @@ class RangeCounterTest(unittest.TestCase):
             def test_correct():
                 for (k, v) in count_dict.items():
                     rc_count = rc.get_count_for_key(k)
-                assert rc_count == v, "Counts for %s mismatch. Expected %d got %d" % (k, v, rc_count)
+                assert rc_count == v, "Counts for %s mismatch. Expected %d got %d" % (
+                    k,
+                    v,
+                    rc_count,
+                )
 
             for _ in range(0, 100):
                 i = random.randint(0, len(letters) - 1)

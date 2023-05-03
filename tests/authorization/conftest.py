@@ -310,7 +310,11 @@ def tenant_id_from_name(db):
                 tenant = db.open_tenant(to_bytes(tenant_name))
                 return tenant.get_id().wait()  # returns int
             except fdb.FDBError as e:
-                print("retrying tenant id fetch after 0.5 second backoff due to {}".format(e))
+                print(
+                    "retrying tenant id fetch after 0.5 second backoff due to {}".format(
+                        e
+                    )
+                )
                 time.sleep(0.5)
 
     return fn
@@ -325,7 +329,9 @@ def token_claim_1h(tenant_id_from_name):
         return {
             "iss": "fdb-authz-tester",
             "sub": "authz-test",
-            "aud": ["tmp-cluster"] if random.choice([True, False]) else "tmp-cluster", # too expensive to parameterize just for this
+            "aud": ["tmp-cluster"]
+            if random.choice([True, False])
+            else "tmp-cluster",  # too expensive to parameterize just for this
             "iat": now,
             "nbf": now - 1,
             "exp": now + 60 * 60,

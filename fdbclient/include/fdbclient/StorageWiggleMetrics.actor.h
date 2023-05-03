@@ -29,7 +29,7 @@
 #include "flow/ObjectSerializer.h"
 #include "flow/serialize.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "flow/actorcompiler.h"
 
@@ -158,11 +158,11 @@ protected:
 	Key prefix;
 
 public:
-	struct DataForDc : public KeyBackedStruct {
-		DataForDc(StringRef prefix) : KeyBackedStruct(prefix) {}
+	struct DataForDc : public KeyBackedClass {
+		DataForDc(StringRef prefix) : KeyBackedClass(prefix) {}
 
 		auto storageWiggleDelay() const {
-			auto key = rootSpace.pack("storageWiggleDelay"_sr);
+			auto key = subspace.pack("storageWiggleDelay"_sr);
 			return KeyBackedObjectProperty<StorageWiggleDelay, decltype(IncludeVersion())>(key, IncludeVersion());
 		}
 	};

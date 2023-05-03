@@ -126,7 +126,7 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 }
 
 bool ddLargeTeamEnabled() {
-	return SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	return SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
 }
 
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
@@ -196,12 +196,10 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 	state bool initWithNewMetrics = whenDDInit;
 	wait(delay(0, TaskPriority::DataDistribution));
 
-	/*TraceEvent("TrackShardMetricsStarting")
-	    .detail("TrackerID", trackerID)
+	DisabledTraceEvent(SevDebug, "TrackShardMetricsStarting", self()->distributorId)
 	    .detail("Keys", keys)
 	    .detail("TrackedBytesInitiallyPresent", shardMetrics->get().present())
-	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0)
-	    .detail("StartingMerges", shardMetrics->get().present() ? shardMetrics->get().get().merges : 0);*/
+	    .detail("StartingMetrics", shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 	try {
 		loop {
@@ -232,18 +230,18 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
-					/*TraceEvent("ShardSizeUpdate")
+					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
-					    .detail("UpdatedSize", metrics.metrics.bytes)
-					    .detail("WriteBandwidth", metrics.metrics.bytesWrittenPerKSecond)
-					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
+					    .detail("UpdatedSize", metrics.first.get().bytes)
+					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
+					    .detail("BandwidthStatus", bandwidthStatus)
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
 					    .detail("WriteBandwidthLower", bounds.min.bytesWrittenPerKSecond)
 					    .detail("WriteBandwidthUpper", bounds.max.bytesWrittenPerKSecond)
-					    .detail("ShardSizePresent", shardSize->get().present())
-					    .detail("OldShardSize", shardSize->get().present() ? shardSize->get().get().metrics.bytes : 0)
-					    .detail("TrackerID", trackerID);*/
+					    .detail("ShardSizePresent", shardMetrics->get().present())
+					    .detail("OldShardSize",
+					            shardMetrics->get().present() ? shardMetrics->get().get().metrics.bytes : 0);
 
 					if (shardMetrics->get().present()) {
 						self()->dbSizeEstimate->set(self()->dbSizeEstimate->get() + metrics.first.get().bytes -
@@ -286,6 +284,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled && e.code() != error_code_dd_tracker_cancelled) {
+			DisabledTraceEvent(SevDebug, "TrackShardError", self()->distributorId).detail("Keys", keys);
 			// The above loop use Database cx, but those error should only be thrown in a code using transaction.
 			ASSERT(transactionRetryableErrors.count(e.code()) == 0);
 			self()->output.sendError(e); // Propagate failure to dataDistributionTracker
@@ -887,7 +886,7 @@ static bool shardForwardMergeFeasible(DataDistributionTracker* self, KeyRange co
 		return false;
 	}
 
-	if (self->customReplication->rangeContaining(keys.begin).range().end < nextRange.end) {
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().end < nextRange.end) {
 		return false;
 	}
 
@@ -899,7 +898,7 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 		return false;
 	}
 
-	if (self->customReplication->rangeContaining(keys.begin).range().begin > prevRange.begin) {
+	if (self->userRangeConfig->rangeContaining(keys.begin)->range().begin > prevRange.begin) {
 		return false;
 	}
 
@@ -1210,7 +1209,7 @@ ACTOR Future<Void> trackInitialShards(DataDistributionTracker* self, Reference<I
 	wait(delay(0.0, TaskPriority::DataDistribution));
 
 	state std::vector<Key> customBoundaries;
-	for (auto& it : self->customReplication->ranges()) {
+	for (auto it : self->userRangeConfig->ranges()) {
 		customBoundaries.push_back(it->range().begin);
 	}
 
@@ -1489,7 +1488,7 @@ Future<Void> DataDistributionTracker::run(Reference<DataDistributionTracker> sel
 	self->getTopKMetrics = getTopKMetrics;
 	self->getShardMetricsList = getShardMetricsList;
 	self->averageShardBytes = getAverageShardBytes;
-	self->customReplication = initData->customReplication;
+	self->userRangeConfig = initData->userRangeConfig;
 	return holdWhile(self, DataDistributionTrackerImpl::run(self.getPtr(), initData));
 }
 

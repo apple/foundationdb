@@ -49,7 +49,9 @@ class FdbBinaryDownloader:
         assert self.build_dir.exists(), "{} does not exist".format(build_dir)
         assert self.build_dir.is_dir(), "{} is not a directory".format(build_dir)
         self.platform = platform.machine()
-        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(self.platform)
+        assert self.platform in SUPPORTED_PLATFORMS, "Unsupported platform {}".format(
+            self.platform
+        )
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
         self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
         if not self.local_binary_repo.exists():
@@ -57,13 +59,17 @@ class FdbBinaryDownloader:
 
     # Check if the binaries for the given version are available in the local old binaries repository
     def version_in_local_repo(self, version):
-        return (self.local_binary_repo is not None) and (self.local_binary_repo.joinpath(version).exists())
+        return (self.local_binary_repo is not None) and (
+            self.local_binary_repo.joinpath(version).exists()
+        )
 
     def binary_path(self, version, bin_name):
         if is_local_build_version(version):
             return self.build_dir.joinpath("bin", bin_name)
         elif self.version_in_local_repo(version):
-            return self.local_binary_repo.joinpath(version, "bin", "{}-{}".format(bin_name, version))
+            return self.local_binary_repo.joinpath(
+                version, "bin", "{}-{}".format(bin_name, version)
+            )
         else:
             return self.download_dir.joinpath(version, bin_name)
 
@@ -77,7 +83,9 @@ class FdbBinaryDownloader:
         return self.lib_dir(version).joinpath("libfdb_c.so")
 
     # Download an old binary of a given version from a remote repository
-    def download_old_binary(self, version, target_bin_name, remote_bin_name, make_executable):
+    def download_old_binary(
+        self, version, target_bin_name, remote_bin_name, make_executable
+    ):
         local_file = self.download_dir.joinpath(version, target_bin_name)
         if local_file.exists():
             return
@@ -85,7 +93,9 @@ class FdbBinaryDownloader:
         # Download to a temporary file and then replace the target file atomically
         # to avoid consistency errors in case of multiple tests are downloading the
         # same file in parallel
-        local_file_tmp = Path("{}.{}".format(str(local_file), random_alphanum_string(8)))
+        local_file_tmp = Path(
+            "{}.{}".format(str(local_file), random_alphanum_string(8))
+        )
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         remote_file = "{}{}/{}".format(FDB_DOWNLOAD_ROOT, version, remote_bin_name)
         remote_sha256 = "{}.sha256".format(remote_file)
@@ -93,7 +103,9 @@ class FdbBinaryDownloader:
 
         for attempt_cnt in range(MAX_DOWNLOAD_ATTEMPTS + 1):
             if attempt_cnt == MAX_DOWNLOAD_ATTEMPTS:
-                assert False, "Failed to download {} after {} attempts".format(local_file_tmp, MAX_DOWNLOAD_ATTEMPTS)
+                assert False, "Failed to download {} after {} attempts".format(
+                    local_file_tmp, MAX_DOWNLOAD_ATTEMPTS
+                )
             try:
                 print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
                 request.urlretrieve(remote_file, local_file_tmp)
@@ -111,7 +123,11 @@ class FdbBinaryDownloader:
             if expected_checksum == actual_checkum:
                 print("Checksum OK")
                 break
-            print("Checksum mismatch. Expected: {} Actual: {}".format(expected_checksum, actual_checkum))
+            print(
+                "Checksum mismatch. Expected: {} Actual: {}".format(
+                    expected_checksum, actual_checkum
+                )
+            )
 
         os.rename(local_file_tmp, local_file)
         os.remove(local_sha256)
@@ -127,9 +143,15 @@ class FdbBinaryDownloader:
             return
         # Avoid race conditions in case of parallel test execution by first copying to a temporary file
         # and then renaming it atomically
-        dest_file_tmp = Path("{}.{}".format(str(dest_lib_file), random_alphanum_string(8)))
-        src_lib_file = self.local_binary_repo.joinpath(version, "lib", "libfdb_c-{}.so".format(version))
-        assert src_lib_file.exists(), "Missing file {} in the local old binaries repository".format(src_lib_file)
+        dest_file_tmp = Path(
+            "{}.{}".format(str(dest_lib_file), random_alphanum_string(8))
+        )
+        src_lib_file = self.local_binary_repo.joinpath(
+            version, "lib", "libfdb_c-{}.so".format(version)
+        )
+        assert (
+            src_lib_file.exists()
+        ), "Missing file {} in the local old binaries repository".format(src_lib_file)
         self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src_lib_file, dest_file_tmp)
         os.rename(dest_file_tmp, dest_lib_file)
@@ -144,7 +166,15 @@ class FdbBinaryDownloader:
             self.copy_clientlib_from_local_repo(version)
             return
 
-        self.download_old_binary(version, "fdbserver", "fdbserver.{}".format(self.platform), True)
-        self.download_old_binary(version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True)
-        self.download_old_binary(version, "fdbcli", "fdbcli.{}".format(self.platform), True)
-        self.download_old_binary(version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False)
+        self.download_old_binary(
+            version, "fdbserver", "fdbserver.{}".format(self.platform), True
+        )
+        self.download_old_binary(
+            version, "fdbmonitor", "fdbmonitor.{}".format(self.platform), True
+        )
+        self.download_old_binary(
+            version, "fdbcli", "fdbcli.{}".format(self.platform), True
+        )
+        self.download_old_binary(
+            version, "libfdb_c.so", "libfdb_c.{}.so".format(self.platform), False
+        )

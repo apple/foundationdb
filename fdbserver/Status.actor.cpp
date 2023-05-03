@@ -25,7 +25,7 @@
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
@@ -508,6 +508,7 @@ struct RolesInfo {
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		obj["tss"] = iface.isTss();
 		if (iface.metadata.present()) {
 			obj["storage_metadata"] = iface.metadata.get().toJSON();
 			// printf("%s\n", metadataObj.getJson().c_str());
@@ -2481,18 +2482,6 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 			}
 		}
 		statusObj["number_of_key_ranges"] = totalRanges;
-
-		// Mutation log backup
-		state std::string mlogsUrl = wait(getMutationLogUrl());
-		statusObj["mutation_log_location"] = mlogsUrl;
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-		BackupDescription desc = wait(timeoutError(bc->describeBackup(), 2.0));
-		if (desc.contiguousLogEnd.present()) {
-			statusObj["mutation_log_end_version"] = desc.contiguousLogEnd.get();
-		}
-		if (desc.minLogBegin.present()) {
-			statusObj["mutation_log_begin_version"] = desc.minLogBegin.get();
-		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3040,7 +3029,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
-    Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
+    Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
     metacluster::MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
@@ -3387,12 +3376,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
 					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
 					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
-				} else { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
+				} else if (!metaclusterMetrics.error.present()) { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
 					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
 					tenants["num_tenants"] = metaclusterMetrics.numTenants;
 					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
 					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
+				} else {
+					messages.push_back(JsonString::makeMessage(
+					    "metacluster_metrics_missing",
+					    fmt::format("Failed to fetch metacluster metrics: {}.", metaclusterMetrics.error.get())
+					        .c_str()));
 				}
+
 			} else {
 				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
 			}

@@ -405,7 +405,7 @@ class TestRun:
             str(self.uid),
             "--log-directory",
             str(self.temp_path),
-            "--check-rocksdb"
+            "--check-rocksdb",
         ]
         subprocess.run(command, check=True)
 
@@ -579,7 +579,12 @@ class TestRunner:
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
-            if count == 0 and unseed_check and run.summary.unseed is not None and run.summary.unseed >= 0:
+            if (
+                count == 0
+                and unseed_check
+                and run.summary.unseed is not None
+                and run.summary.unseed >= 0
+            ):
                 run2 = TestRun(
                     binary,
                     file.absolute(),

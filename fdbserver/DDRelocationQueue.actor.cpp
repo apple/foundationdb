@@ -942,7 +942,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
-	std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
+	auto it = combined.begin();
 	for (; it != combined.end(); it++) {
 		RelocateData rd(*it);
 
@@ -1023,6 +1023,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 		std::vector<KeyRange> ranges;
 		inFlightActors.getRangesAffectedByInsertion(rd.keys, ranges);
 		inFlightActors.cancel(KeyRangeRef(ranges.front().begin, ranges.back().end));
+		// The cancelDataMove feature assumes inFlightActors are immediately cancelled.
+		// If this is not true, multiple inflightActors can have overlapped range,
+		// which leads to conflicts of moving keys
+
 		Future<Void> fCleanup =
 		    SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA ? cancelDataMove(this, rd.keys, ddEnabledState) : Void();
 
@@ -1149,70 +1153,65 @@ int DDQueue::getUnhealthyRelocationCount() const {
 	return unhealthyRelocations;
 }
 
+// Cancel existing relocation if exists, and serialize all concurrent relocations
 ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDEnabledState* ddEnabledState) {
 	state std::vector<Future<Void>> cleanup;
 	state std::vector<std::pair<KeyRange, UID>> lastObservedDataMoves;
 
-	loop {
-		try {
-			cleanup.clear();
-			lastObservedDataMoves.clear();
-			auto f = self->dataMoves.intersectingRanges(range);
+	try {
+		lastObservedDataMoves.clear();
+		auto f = self->dataMoves.intersectingRanges(range);
+		for (auto it = f.begin(); it != f.end(); ++it) {
+			if (!it->value().isValid()) {
+				continue;
+			}
+			KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
+			TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
+			    .detail("DataMoveID", it->value().id)
+			    .detail("DataMoveRange", keys)
+			    .detail("Range", range);
+			if (!it->value().cancel.isValid()) {
+				it->value().cancel = cleanUpDataMove(self->cx,
+				                                     it->value().id,
+				                                     self->lock,
+				                                     &self->cleanUpDataMoveParallelismLock,
+				                                     keys,
+				                                     ddEnabledState,
+				                                     self->addBackgroundCleanUpDataMoveActor);
+			}
+			lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
+			cleanup.push_back(it->value().cancel);
+		}
+
+		wait(waitForAll(cleanup));
+
+		// Since self->dataMoves can only be updated by relocator,
+		// and any old relocator has been cancelled (by overwrite inflightActors)
+		// Thus, any update of self->dataMoves during the wait must come from
+		// a newer relocator.
+		// This cancelDataMove should be transparent to the new relocator
+		std::vector<KeyRange> toResetRanges;
+		for (auto observedDataMove : lastObservedDataMoves) {
+			auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
 			for (auto it = f.begin(); it != f.end(); ++it) {
-				if (!it->value().isValid()) {
-					continue;
+				if (it->value().id != observedDataMove.second) {
+					TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
+					    .detail("Range", range)
+					    .detail("OldRange", observedDataMove.first)
+					    .detail("LastObservedDataMoveID", observedDataMove.second)
+					    .detail("CurrentDataMoveID", it->value().id);
+				} else {
+					ASSERT(!it->value().isValid() || (it->value().cancel.isValid() && it->value().cancel.isReady()));
+					toResetRanges.push_back(Standalone(it->range()));
 				}
-				KeyRange keys = KeyRangeRef(it->range().begin, it->range().end);
-				TraceEvent(SevInfo, "DDQueueCancelDataMove", self->distributorId)
-				    .detail("DataMoveID", it->value().id)
-				    .detail("DataMoveRange", keys)
-				    .detail("Range", range);
-				if (!it->value().cancel.isValid()) {
-					it->value().cancel = cleanUpDataMove(self->cx,
-					                                     it->value().id,
-					                                     self->lock,
-					                                     &self->cleanUpDataMoveParallelismLock,
-					                                     keys,
-					                                     ddEnabledState,
-					                                     self->addBackgroundCleanUpDataMoveActor);
-				}
-				lastObservedDataMoves.push_back(std::make_pair(keys, it->value().id));
-				cleanup.push_back(it->value().cancel);
-			}
-
-			wait(waitForAll(cleanup));
-
-			for (auto observedDataMove : lastObservedDataMoves) {
-				auto f = self->dataMoves.intersectingRanges(observedDataMove.first);
-				for (auto it = f.begin(); it != f.end(); ++it) {
-					if (it->value().id != observedDataMove.second) {
-						// Invariant: When two concurrent cleanups/relocations try to modify on the same range,
-						// the one who set ddQueue->dataMoves at first win the race
-						// the other one does backoff and retry cleanup later
-						// In this case, someone else of the overlapping range has changed the ddQueue->dataMoves
-						// Thus, the cleanup retries later
-						TraceEvent(SevInfo, "DataMoveWrittenByConcurrentDataMove", self->distributorId)
-						    .detail("Range", range)
-						    .detail("OldRange", observedDataMove.first)
-						    .detail("LastObservedDataMoveID", observedDataMove.second)
-						    .detail("CurrentDataMoveID", it->value().id);
-						throw retry();
-					}
-				}
-			}
-			auto ranges = self->dataMoves.getAffectedRangesAfterInsertion(range);
-			if (!ranges.empty()) {
-				self->dataMoves.insert(KeyRangeRef(ranges.front().begin, ranges.back().end), DDQueue::DDDataMove());
-			}
-			break;
-
-		} catch (Error& e) {
-			if (e.code() == error_code_retry) {
-				wait(delay(1));
-			} else {
-				throw e;
 			}
 		}
+		for (auto& toResetRange : toResetRanges) {
+			self->dataMoves.insert(toResetRange, DDQueue::DDDataMove());
+		}
+
+	} catch (Error& e) {
+		throw e;
 	}
 
 	return Void();
@@ -2281,8 +2280,7 @@ struct DDQueueImpl {
 	ACTOR static Future<Void> run(Reference<DDQueue> self,
 	                              Reference<AsyncVar<bool>> processingUnhealthy,
 	                              Reference<AsyncVar<bool>> processingWiggle,
-	                              FutureStream<Promise<int>> getUnhealthyRelocationCount,
-	                              const DDEnabledState* ddEnabledState) {
+	                              FutureStream<Promise<int>> getUnhealthyRelocationCount) {
 
 		state std::set<UID> serversToLaunchFrom;
 		state KeyRange keysToLaunchFrom;
@@ -2320,10 +2318,10 @@ struct DDQueueImpl {
 				// launched.
 				if (launchData.startTime != -1) {
 					// Launch dataDistributionRelocator actor to relocate the launchData
-					self->launchQueuedWork(launchData, ddEnabledState);
+					self->launchQueuedWork(launchData, self->ddEnabledState);
 					launchData = RelocateData();
 				} else if (!keysToLaunchFrom.empty()) {
-					self->launchQueuedWork(keysToLaunchFrom, ddEnabledState);
+					self->launchQueuedWork(keysToLaunchFrom, self->ddEnabledState);
 					keysToLaunchFrom = KeyRangeRef();
 				}
 
@@ -2334,9 +2332,9 @@ struct DDQueueImpl {
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
-							self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
 						} else if (rs.cancelled) {
-							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
+							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
 						} else {
 							bool wasEmpty = serversToLaunchFrom.empty();
 							self->queueRelocation(rs, serversToLaunchFrom);
@@ -2345,7 +2343,7 @@ struct DDQueueImpl {
 						}
 					}
 					when(wait(launchQueuedWorkTimeout)) {
-						self->launchQueuedWork(serversToLaunchFrom, ddEnabledState);
+						self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
 						serversToLaunchFrom = std::set<UID>();
 						launchQueuedWorkTimeout = Never();
 					}
@@ -2489,9 +2487,9 @@ Future<Void> DDQueue::run(Reference<DDQueue> self,
                           Reference<AsyncVar<bool>> processingWiggle,
                           FutureStream<Promise<int>> getUnhealthyRelocationCount,
                           const DDEnabledState* ddEnabledState) {
-	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount, ddEnabledState);
+	self->ddEnabledState = ddEnabledState;
+	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
 }
-
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	state DDQueue self;

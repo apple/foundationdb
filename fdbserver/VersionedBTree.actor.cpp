@@ -3672,8 +3672,9 @@ public:
 			}
 		}
 
-		self->closedPromise.send(Void());
+		Promise<Void> closedPromise = self->closedPromise;
 		delete self;
+		closedPromise.send(Void());
 	}
 
 	void dispose() override { shutdown(this, true); }
@@ -5361,8 +5362,9 @@ public:
 		// This probably shouldn't be called directly (meaning deleting an instance directly) but it should be safe,
 		// it will cancel init and commit and leave the pager alive but with potentially an incomplete set of
 		// uncommitted writes so it should not be committed.
-		m_init.cancel();
 		m_latestCommit.cancel();
+		m_lazyClearActor.cancel();
+		m_init.cancel();
 	}
 
 	Future<Void> commit(Version v) {
@@ -8075,9 +8077,11 @@ public:
 		else
 			self->m_tree->close();
 		wait(closedFuture);
-		self->m_closed.send(Void());
+
+		Promise<Void> closedPromise = self->m_closed;
 		TraceEvent(SevInfo, "RedwoodShutdownComplete").detail("Filename", self->m_filename).detail("Dispose", dispose);
 		delete self;
+		closedPromise.send(Void());
 	}
 
 	void close() override { shutdown(this, false); }
@@ -8257,10 +8261,6 @@ public:
 		}
 
 		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		g_redwoodMetrics.kvSizeReadByGetRange->sample(accumulatedBytes);
 		return result;
 	}
@@ -8846,6 +8846,9 @@ void RedwoodMetrics::getFields(TraceEvent* e, std::string* s, bool skipZeroes) {
 		                                               { "", 0 } };
 
 	double elapsed = now() - startTime;
+	if (elapsed == 0) {
+		return;
+	}
 
 	if (e != nullptr) {
 		for (auto& m : metrics) {
