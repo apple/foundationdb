@@ -10064,12 +10064,11 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 }
 
 namespace {
-double getExternalTimeout(const UnitTestParameters& params) {
-	double ret = 0;
+double getExternalTimeoutThreshold(const UnitTestParameters& params) {
 #if defined(USE_SANITIZER)
-	ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(40 * 60);
+	double ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(3600);
 #else
-	ret = params.getDouble("maxRunTimeWallTime").orDefault(20 * 60);
+	double ret = params.getDouble("maxRunTimeWallTime").orDefault(1800);
 #endif
 
 #if VALGRIND
@@ -10146,11 +10145,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 	// Max test runtime (in seconds). After the test runs for this amount of time, the next iteration of the test
 	// loop will terminate.
-	state double maxRuntimeWallTime = getExternalTimeout(params);
-	double tmp = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(100.0);
-
-	TraceEvent("YanqinRedwoodPrint").detail("Walltime", maxRuntimeWallTime).log();
-	TraceEvent("YanqinRedwoodPrint").detail("WalltimeSan", tmp).log();
+	state double maxRunTimeWallTime = getExternalTimeoutThreshold(params);
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =
@@ -10250,7 +10245,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 	// Check test op limits and wall time
 	state std::function<bool()> testFinished = [=]() {
-		if (timer() - testStartWallTime >= maxRuntimeWallTime) {
+		if (timer() - testStartWallTime >= maxRunTimeWallTime) {
 			noUnseed = true;
 		}
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
