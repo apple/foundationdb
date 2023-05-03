@@ -450,6 +450,8 @@ public:
 	int simulationNormalRunTestsTimeoutSeconds = 5400;
 	int simulationBuggifyRunTestsTimeoutSeconds = 36000;
 
+	Optional<double> maxRunTimeWallClock;
+
 	ConfigDBType getConfigDBType() const { return configDBType; }
 
 	bool tomlKeyPresent(const toml::value& data, std::string key) {
@@ -470,10 +472,12 @@ public:
 	}
 
 	void readFromConfig(const char* testFile) {
+		TraceEvent("YanqinReadFromConfig0").log();
 		if (isIniFile(testFile)) {
 			loadIniFile(testFile);
 			return;
 		}
+		TraceEvent("YanqinReadFromConfig1").log();
 		std::string extraDatabaseModeStr;
 		ConfigBuilder builder;
 		builder.add("testClass", &testClass)
@@ -520,9 +524,11 @@ public:
 		    .add("defaultTenant", &defaultTenant)
 		    .add("longRunningTest", &longRunningTest)
 		    .add("simulationNormalRunTestsTimeoutSeconds", &simulationNormalRunTestsTimeoutSeconds)
-		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds);
+		    .add("simulationBuggifyRunTestsTimeoutSeconds", &simulationBuggifyRunTestsTimeoutSeconds)
+		    .add("maxRunTimeWallClock", &maxRunTimeWallClock);
 		try {
 			auto file = toml::parse(testFile);
+			TraceEvent("YanqinReadFromConfig2").detail("IsTable", toml::find(file, "configuration").is_table()).log();
 			if (file.contains("configuration") && toml::find(file, "configuration").is_table()) {
 				auto conf = toml::find(file, "configuration").as_table();
 				for (const auto& [key, value] : conf) {
@@ -532,6 +538,9 @@ public:
 						isFirstTestInRestart = true;
 					} else {
 						builder.set(key, value);
+					}
+					if (key == "maxRunTimeWallClock") {
+						TraceEvent("YanqinSetTime").detail("WallClock", maxRunTimeWallClock.get()).log();
 					}
 				}
 				if (stderrSeverity.present()) {

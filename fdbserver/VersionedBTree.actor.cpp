@@ -10063,6 +10063,22 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	return Void();
 }
 
+namespace {
+double getExternalTimeout(const UnitTestParameters& params) {
+	double ret = 0;
+#if defined(USE_SANITIZER)
+	ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(40 * 60);
+#else
+	ret = params.getDouble("maxRunTimeWallTime").orDefault(20 * 60);
+#endif
+
+#if VALGRIND
+	ret *= 20;
+#endif
+	return ret;
+}
+} // namespace
+
 TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
@@ -10130,7 +10146,11 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 	// Max test runtime (in seconds). After the test runs for this amount of time, the next iteration of the test
 	// loop will terminate.
-	state double maxRuntimeWallTime = params.getDouble("maxRuntimeWallTime").orDefault(20 * 60);
+	state double maxRuntimeWallTime = getExternalTimeout(params);
+	double tmp = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(100.0);
+
+	TraceEvent("YanqinRedwoodPrint").detail("Walltime", maxRuntimeWallTime).log();
+	TraceEvent("YanqinRedwoodPrint").detail("WalltimeSan", tmp).log();
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =

@@ -2277,6 +2277,7 @@ int main(int argc, char* argv[]) {
 				    "shard_encode_location_metadata",
 				    KnobValue::create(ini.GetBoolValue("META", "enableShardEncodeLocationMetadata", false)));
 			}
+			TraceEvent("YanqinStart").log();
 			setupAndRun(dataFolder, opts.testFile, opts.restarting, (isRestoring >= 1), opts.whitelistBinPaths);
 			g_simulator->run();
 		} else if (role == ServerRole::FDBD) {
@@ -2368,6 +2369,9 @@ int main(int argc, char* argv[]) {
 			setupRunLoopProfiler();
 			auto m =
 			    startSystemMonitor(opts.dataFolder, opts.dcId, opts.zoneId, opts.zoneId, opts.localities.dataHallId());
+			fprintf(stderr, "Yanqin\n");
+			test_assert(false);
+			ASSERT(false);
 			f = stopAfter(runTests(opts.connectionFile,
 			                       TEST_TYPE_UNIT_TESTS,
 			                       TEST_HERE,

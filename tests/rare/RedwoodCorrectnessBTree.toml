@@ -1,3 +1,6 @@
+[configuration]
+maxRunTimeWallClock = 100.0
+
 [[test]]
 testTitle = 'UnitTests'
 useDB = false
@@ -7,3 +10,5 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = 'Lredwood/correctness/btree'
+    maxRunTimeWallTime = 1680.0
+    maxRunTimeSanitizerModeWallTime = 3480.0
