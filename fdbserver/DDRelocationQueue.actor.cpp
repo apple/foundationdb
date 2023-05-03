@@ -543,7 +543,7 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 }
 
 DDQueue::DDQueue(DDQueueInitParams const& params)
-  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), cx(params.db->context()),
+  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock),
     txnProcessor(params.db), teamCollections(params.teamCollections),
     shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), getAverageShardBytes(params.getAverageShardBytes),
@@ -1139,7 +1139,7 @@ void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDE
 
 	DDQueue::DDDataMove dataMove(dataMoveId);
 	dataMove.cancel =
-	    cleanUpDataMove(this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
+	    cleanUpDataMove(txnProcessor->context(), dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
 	this->dataMoves.insert(range, dataMove);
 	TraceEvent(SevInfo, "DDEnqueuedCancelledDataMove", this->distributorId)
 	    .detail("DataMoveID", dataMoveId)
@@ -1172,7 +1172,7 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 		    .detail("Range", range);
 		if (!it->value().cancel.isValid()) {
 			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
+			    self->txnProcessor->context(), it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
 		}
 		cleanup.push_back(it->value().cancel);
 	}
