@@ -32,6 +32,12 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+template <typename... T>
+static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
+	if (g_network->isSimulated())
+		fmt::print(fmt, std::forward<T>(args)...);
+}
+
 namespace {
 struct Shard {
 	Shard() = default;
@@ -183,31 +189,54 @@ ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointId
 }
 } // namespace
 
-bool DDEnabledState::isDDEnabled() const {
-	return ddEnabled;
+bool DDEnabledState::sameId(const UID& id) const {
+	return ddEnabledStatusUID == id;
+}
+bool DDEnabledState::isEnabled() const {
+	return stateValue == ENABLED;
 }
 
-bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
-	TraceEvent("SetDDEnabled").detail("Status", status).detail("SnapUID", snapUID);
-	ASSERT(snapUID != UID());
-	if (!status) {
-		// disabling DD
-		if (ddEnabledStatusUID != UID()) {
-			// disable DD when a disable is already in progress not allowed
-			return false;
-		}
-		ddEnabled = status;
-		ddEnabledStatusUID = snapUID;
-		return true;
+bool DDEnabledState::isBlobRestorePreparing() const {
+	return stateValue == BLOB_RESTORE_PREPARING;
+}
+
+bool DDEnabledState::trySetSnapshot(UID requesterId) {
+	ASSERT(requesterId != UID());
+	// disabling DD
+	if (isEnabled()) {
+		// only allow state modification to snapshot when DD is enabled.
+		return false;
 	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = SNAPSHOT;
+	TraceEvent("SetDDSnapshot").detail("RequesterUID", requesterId);
+
+	return true;
+}
+
+bool DDEnabledState::trySetEnabled(UID requesterId) {
+	ASSERT(requesterId != UID());
 	// enabling DD
-	if (snapUID != ddEnabledStatusUID) {
-		// enabling DD not allowed if UID does not match with the disable request
+	if (!sameId(requesterId)) {
+		// enabling DD not allowed if UID does not match with the previous request
 		return false;
 	}
 	// reset to default status
-	ddEnabled = status;
 	ddEnabledStatusUID = UID();
+	stateValue = ENABLED;
+	TraceEvent("SetDDEnabled").detail("RequesterUID", requesterId);
+	return true;
+}
+
+bool DDEnabledState::trySetBlobRestorePreparing(UID requesterId) {
+	ASSERT(requesterId != UID());
+	if (!isEnabled()) {
+		// only allow state modification to RestorePreparing when DD is enabled.
+		return false;
+	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = BLOB_RESTORE_PREPARING;
+	TraceEvent("SetDDBlobRestorePreparing").detail("RequesterUID", requesterId);
 	return true;
 }
 
@@ -269,15 +298,9 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
-                                            MoveKeysLock lock,
-                                            const DDEnabledState* ddEnabledState,
-                                            bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	if (!ddEnabledState->isDDEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
-		throw movekeys_conflict();
-	}
+
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
@@ -322,6 +345,17 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		throw movekeys_conflict();
 	}
+}
+
+Future<Void> checkMoveKeysLock(Transaction* tr,
+                               MoveKeysLock const& lock,
+                               const DDEnabledState* ddEnabledState,
+                               bool isWrite = true) {
+	if (!ddEnabledState->isEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
+		throw movekeys_conflict();
+	}
+	return checkPersistentMoveKeysLock(tr, lock, isWrite);
 }
 
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
@@ -1979,6 +2013,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// FIXME: don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
 			state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
@@ -2121,15 +2156,15 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
-				StorageMetadataType metadata(StorageMetadataType::currentTime());
-				metadataMap.set(tr, server.id(), metadata);
-
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.set(tr, server.id(), server.id());
 				}
 			}
+
+			StorageMetadataType metadata(StorageMetadataType::currentTime());
+			metadataMap.set(tr, server.id(), metadata);
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
@@ -2195,7 +2230,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
-			TraceEvent("RemoveStorageServerLocked")
+			TraceEvent("RemoveStorageServer")
+			    .detail("State", "Locked")
 			    .detail("ServerID", serverID)
 			    .detail("Version", tr->getReadVersion().get());
 
@@ -2204,10 +2240,12 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 				CODE_PROBE(true,
 				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to "
 				           "reverse its mistake.");
-				TraceEvent(SevWarn, "NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
+				TraceEvent(SevWarn, "RemoveStorageServer")
+				    .detail("State", "CanRemoveFailed")
+				    .detail("ServerID", serverID)
+				    .detail("Count", noCanRemoveCount++);
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch));
 				tr->reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
 				state Future<Optional<Value>> fListKey = tr->get(serverListKeyFor(serverID));
 				state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
@@ -2284,12 +2322,13 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				wait(tr->commit());
+				TraceEvent("RemoveStorageServer").detail("State", "Success").detail("ServerID", serverID);
 				return Void();
 			}
 		} catch (Error& e) {
 			state Error err = e;
 			wait(tr->onError(e));
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			TraceEvent("RemoveStorageServer").error(err).detail("State", "Retry").detail("ServerID", serverID);
 		}
 	}
 }
@@ -2903,6 +2942,87 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+	}
+}
+
+// Unassign given key range from its current storage servers
+ACTOR template <typename TrType = Transaction*>
+Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::set<UID> ignoreServers) {
+	state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
+	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+	for (auto& server : serverList) {
+		state UID id = decodeServerListValue(server.value).id();
+		Optional<Value> tag = wait(tr->get(serverTagKeyFor(id)));
+		if (!tag.present()) {
+			dprint("Server {} no tag\n", id.shortString());
+			continue;
+		}
+
+		if (ignoreServers.count(id)) {
+			dprint("Ignore un-assignment from {} .\n", id.toString());
+			continue;
+		}
+		RangeResult ranges = wait(krmGetRanges(tr, serverKeysPrefixFor(id), keys));
+
+		bool owning = false;
+		for (auto& r : ranges) {
+			if (r.value != serverKeysFalse) {
+				owning = true;
+				break;
+			}
+		}
+		if (owning) {
+			wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
+			dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
+			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
+		}
+	}
+	return Void();
+}
+
+// Assign given key range to specified storage server.
+ACTOR template <typename TrType = Transaction*>
+Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID serverUID) {
+	state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
+	wait(krmSetRangeCoalescing(tr, keyServersPrefix, keys, allKeys, value));
+	wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
+	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
+	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
+	return Void();
+}
+
+ACTOR Future<Void> prepareBlobRestore(Database occ,
+                                      MoveKeysLock lock,
+                                      const DDEnabledState* ddEnabledState,
+                                      UID traceId,
+                                      KeyRangeRef keys,
+                                      UID bmId,
+                                      UID reqId) {
+	state int retries = 0;
+	state Transaction tr = Transaction(occ);
+	ASSERT(ddEnabledState->isBlobRestorePreparing());
+	loop {
+		tr.debugTransaction(reqId);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			wait(checkPersistentMoveKeysLock(&tr, lock));
+			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
+			wait(assignKeysToServer(traceId, &tr, keys, bmId));
+			wait(tr.commit());
+			TraceEvent("BlobRestorePrepare", traceId)
+			    .detail("State", "PrepareTxnCommitted")
+			    .detail("ReqId", reqId)
+			    .detail("BM", bmId);
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+
+			if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
+				throw restore_error();
+			}
 		}
 	}
 }

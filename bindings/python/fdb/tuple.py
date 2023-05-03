@@ -364,7 +364,6 @@ if sys.version_info < (2, 7):
         s = s.lstrip("-0b")  # remove leading zeros and minus sign
         return len(s)
 
-
 else:
 
     def _bit_length(x):

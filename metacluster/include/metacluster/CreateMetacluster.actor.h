@@ -99,7 +99,8 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 				metaclusterUid = deterministicRandom()->randomUniqueID();
 			}
 
-			metadata::metaclusterRegistration().set(tr, MetaclusterRegistrationEntry(name, metaclusterUid.get()));
+			metadata::metaclusterRegistration().set(
+			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get(), MetaclusterVersion::V1));
 
 			TenantMetadata::tenantIdPrefix().set(tr, tenantIdPrefix);
 

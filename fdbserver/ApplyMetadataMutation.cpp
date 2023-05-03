@@ -751,19 +751,30 @@ private:
 		}
 	}
 
+	template <bool Versioned>
+	void reportMetaclusterRegistration(ValueRef value) {
+		MetaclusterRegistrationEntryImpl<Versioned> entry = MetaclusterRegistrationEntryImpl<Versioned>::decode(value);
+
+		TraceEvent("SetMetaclusterRegistration", dbgid)
+		    .detail("ClusterType", entry.clusterType)
+		    .detail("MetaclusterID", entry.metaclusterId)
+		    .detail("MetaclusterName", entry.metaclusterName)
+		    .detail("ClusterID", entry.id)
+		    .detail("ClusterName", entry.name)
+		    .detail("MetaclusterVersion", entry.version);
+	}
+
 	void checkSetMetaclusterRegistration(MutationRef m) {
 		if (m.param1 == metacluster::metadata::metaclusterRegistration().key) {
-			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
-
-			TraceEvent("SetMetaclusterRegistration", dbgid)
-			    .detail("ClusterType", entry.clusterType)
-			    .detail("MetaclusterID", entry.metaclusterId)
-			    .detail("MetaclusterName", entry.metaclusterName)
-			    .detail("ClusterID", entry.id)
-			    .detail("ClusterName", entry.name);
+			if (MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites) {
+				reportMetaclusterRegistration<false>(m.param2);
+			} else {
+				CODE_PROBE(true, "Writing metacluster registration with version validation");
+				reportMetaclusterRegistration<true>(m.param2);
+			}
 
 			Optional<Value> value =
-			    txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key).get();
+			    txnStateStore->readValue(metacluster::metadata::unversionedMetaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}

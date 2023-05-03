@@ -53,9 +53,7 @@ def run_fdbcli_command(*args):
         string: Console output from fdbcli
     """
     commands = command_template + ["{}".format(" ".join(args))]
-    process = subprocess.run(
-        commands, stdout=subprocess.PIPE, env=fdbcli_env
-    )
+    process = subprocess.run(commands, stdout=subprocess.PIPE, env=fdbcli_env)
     return process.stdout.decode("utf-8").strip()
 
 
@@ -1081,8 +1079,8 @@ def tenant_get(logger):
     assert lines[3].strip() == "lock state: unlocked"
     # id = lines[0].strip().removeprefix("id: ")
     # Workaround until Python 3.9+ for removeprefix
-    id = lines[0].strip()[len("id: "):]
-    
+    id = lines[0].strip()[len("id: ") :]
+
     id_output = run_fdbcli_command("tenant getId {}".format(id))
     assert id_output == output
 
@@ -1117,7 +1115,7 @@ def tenant_get(logger):
     assert lines[4].strip() == "tenant group: tenant_group2"
     # id2 = lines[0].strip().removeprefix("id: ")
     # Workaround until Python 3.9+ for removeprefix
-    id2 = lines[0].strip()[len("id: "):]
+    id2 = lines[0].strip()[len("id: ") :]
 
     id_output = run_fdbcli_command("tenant getId {}".format(id2))
     assert id_output == output
@@ -1143,6 +1141,7 @@ def tenant_get(logger):
 
     id_output = run_fdbcli_command("tenant getId {} JSON".format(id2))
     assert id_output == output
+
 
 @enable_logging()
 def tenant_configure(logger):
