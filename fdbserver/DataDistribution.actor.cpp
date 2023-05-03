@@ -779,12 +779,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
 	}
 
-	state Reference<DDTeamCollection> primaryTeamCollection;
-	state Reference<DDTeamCollection> remoteTeamCollection;
-	state bool trackerCancelled;
-
 	loop {
-		trackerCancelled = false;
+		self->context->trackerCancelled = false;
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
@@ -840,7 +836,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			auto shardTracker = makeReference<DataDistributionTracker>(
+			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
 			                                       .distributorId = self->ddId,
 			                                       .readyToStart = self->initialized,
@@ -849,9 +845,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .physicalShardCollection = self->physicalShardCollection,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
-			                                       .trackerCancelled = &trackerCancelled,
+			                                       .trackerCancelled = &self->context->trackerCancelled,
 			                                       .ddTenantCache = self->ddTenantCache });
-			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
 			                                                                 getTopKShardMetrics.getFuture(),
@@ -861,7 +857,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			auto ddQueue = makeReference<DDQueue>(
+			self->context->ddQueue = makeReference<DDQueue>(
 			    DDQueueInitParams{ .id = self->ddId,
 			                       .lock = self->lock,
 			                       .db = self->txnProcessor,
@@ -875,7 +871,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                       .relocationConsumer = self->relocationConsumer.getFuture(),
 			                       .getShardMetrics = getShardMetrics,
 			                       .getTopKMetrics = getTopKShardMetrics });
-			actors.push_back(reportErrorsExcept(DDQueue::run(ddQueue,
+			actors.push_back(reportErrorsExcept(DDQueue::run(self->context->ddQueue,
 			                                                 processingUnhealthy,
 			                                                 processingWiggle,
 			                                                 getUnhealthyRelocationCount.getFuture(),
@@ -902,7 +898,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
+			self->context->primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
 			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
@@ -920,11 +916,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes });
-			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
+			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
 			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
 			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection = makeReference<DDTeamCollection>(
+				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
 				    DDTeamCollectionInitParams{ self->txnProcessor,
 				                                self->ddId,
 				                                self->lock,
@@ -942,9 +938,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                removeFailedServer,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes });
-				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
-				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
-				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,
+				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
+				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
+				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
 				                                                          self->initData,
 				                                                          tcis[1],
 				                                                          recruitStorage,
@@ -952,11 +948,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    "DDTeamCollectionSecondary",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(remoteTeamCollection));
+				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->remoteTeamCollection));
 			}
-			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
-			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(reportErrorsExcept(DDTeamCollection::run(primaryTeamCollection,
+			self->context->primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			self->teamCollection = self->context->primaryTeamCollection.getPtr();
+			actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->primaryTeamCollection,
 			                                                          self->initData,
 			                                                          tcis[0],
 			                                                          recruitStorage,
@@ -965,35 +961,37 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
+			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			actors.push_back(serveBlobMigratorRequests(self, shardTracker, ddQueue));
+			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
 			return Void();
 		} catch (Error& e) {
-			trackerCancelled = true;
+			self->context->tracker.clear();
+			self->context->ddQueue.clear();
+			self->context->markTrackerCancelled();
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
 				const UID serverID = removeFailedServer.getFuture().get();
-				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
+				std::vector<UID> pTeam = self->context->primaryTeamCollection->getRandomHealthyTeam(serverID);
 				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
 				if (self->configuration.usableRegions > 1) {
-					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
+					std::vector<UID> rTeam = self->context->remoteTeamCollection->getRandomHealthyTeam(serverID);
 					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
 				}
 			}
 			self->teamCollection = nullptr;
-			primaryTeamCollection = Reference<DDTeamCollection>();
-			remoteTeamCollection = Reference<DDTeamCollection>();
+			self->context->primaryTeamCollection = Reference<DDTeamCollection>();
+			self->context->remoteTeamCollection = Reference<DDTeamCollection>();
 			if (err.code() == error_code_actor_cancelled) {
 				// When cancelled, we cannot clear asyncronously because
 				// this will result in invalid memory access. This should only
