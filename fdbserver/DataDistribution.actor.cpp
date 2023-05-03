@@ -1914,10 +1914,10 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	return Void();
 }
 
-Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, std::shared_ptr<MockGlobalState> mgs) {
+Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
 	Reference<DataDistributor> dd =
 	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context);
-	dd->txnProcessor = makeReference<DDMockTxnProcessor>(mgs);
+	dd->txnProcessor = txnProcessor;
 	return dataDistributor_impl(context->interface, dd, IsMocked::True);
 }
 
