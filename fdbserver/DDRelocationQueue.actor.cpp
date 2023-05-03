@@ -1253,7 +1253,7 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 	}
 }
 
-int nonOverlappedSrcCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
+static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
 	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
 	int count = 0;
 	for (int i = 0; i < destIds.size(); i++) {
@@ -1887,7 +1887,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						dataTransferComplete.send(rd);
 					}
 
-					int nonOverlappingCount = nonOverlappedSrcCount(rd.completeSources, destIds);
+					// In the case of merge, rd.completeSources would be the intersection set of two source server
+					// lists, while rd.src would be the union set.
+					// FIXME. It is a bit over-estimated here with rd.completeSources.
+					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
 					self->bytesWritten += metrics.bytes;
 					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
