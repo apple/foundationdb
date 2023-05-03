@@ -79,7 +79,7 @@ public:
 
 	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(const UID& ddId) const { return MoveKeysLock(); }
 
-	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const = 0;
 
 	virtual Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
 	                                       const std::vector<Optional<Key>>& remoteIds,
@@ -133,7 +133,7 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return Optional<Value>(); }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -300,6 +300,8 @@ public:
 	}
 
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
