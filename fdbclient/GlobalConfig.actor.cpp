@@ -176,7 +176,7 @@ ACTOR Future<Void> GlobalConfig::migrate(GlobalConfig* self) {
 		loop {
 			tr = makeReference<ReadYourWritesTransaction>(Database(Reference<DatabaseContext>::addRef(self->cx)));
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE); // dr_agent
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 			try {
 				state Optional<Value> migrated = wait(tr->get(migratedKey));
