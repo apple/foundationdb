@@ -133,7 +133,10 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange);
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
+                                       const std::string& engine_type,
+                                       KeyRef engine_prefix,
+                                       bool& paramsChange);
 
 bool isEncryptionAtRestModeConfigValid(Optional<DatabaseConfiguration> oldConfiguration,
                                        std::map<std::string, std::string> newConfig,
@@ -279,8 +282,14 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 		}
 	}
 	state bool storageEngineParamsChange = false;
-	if (!checkForStorageEngineParamsChange(m, storageEngineParamsChange)) {
+	if (!checkForStorageEngineParamsChange(m, "storage_engine", storageEngineParamsPrefix, storageEngineParamsChange)) {
 		fmt::print("Error: Invalid configuration for storage engine params\n");
+		return ConfigurationResult::INVALID_CONFIGURATION;
+	}
+	state bool tssStorageEngineParamsChange = false;
+	if (!checkForStorageEngineParamsChange(
+	        m, "tss_storage_engine", tssStorageEngineParamsPrefix, tssStorageEngineParamsChange)) {
+		fmt::print("Error: Invalid configuration for tss storage engine params\n");
 		return ConfigurationResult::INVALID_CONFIGURATION;
 	}
 
@@ -532,10 +541,13 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 			}
 
 			// the storage engine param change is stateless
-			// everytime storage engine or parameter changes, it will reset
-			// make sure we clear before setting the new values
+			// everytime storage engine or parameter changes, it will reset all params to default.
+			// Thus we clear before setting the new values
 			if (storageEngineParamsChange) {
 				tr->clear(storageEngineParamsKeys);
+			}
+			if (tssStorageEngineParamsChange) {
+				tr->clear(tssStorageEngineParamsKeys);
 			}
 
 			for (auto i = m.begin(); i != m.end(); ++i) {

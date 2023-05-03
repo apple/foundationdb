@@ -65,6 +65,7 @@ void DatabaseConfiguration::resetInternal() {
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
 	storageEngineParams = StorageEngineParamSet();
+	tssStorageEngineParams = StorageEngineParamSet();
 }
 
 int toInt(ValueRef const& v) {
@@ -407,6 +408,14 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 		}
 		result["storage_engine_params"] = params;
 	}
+	if (tssStorageEngineParams.getParams().size()) {
+		ASSERT(StorageEngineParamsFactory::isSupported(testingStorageServerStoreType));
+		StatusObject params;
+		for (auto const& [k, v] : tssStorageEngineParams.getParams()) {
+			params[k] = v;
+		}
+		result["tss_storage_engine_params"] = params;
+	}
 	return result;
 }
 
@@ -700,6 +709,9 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		// TODO : should we hardcode the above condition like others?
 		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
 		storageEngineParams.set(paramName, value.toString());
+	} else if (ck.startsWith(tssStorageEngineParamsPrefix.removePrefix(configKeysPrefix))) {
+		auto paramName = ck.removePrefix(tssStorageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
+		tssStorageEngineParams.set(paramName, value.toString());
 	} else if (ck.startsWith("excluded/"_sr)) {
 		// excluded servers: don't keep the state internally
 	} else {

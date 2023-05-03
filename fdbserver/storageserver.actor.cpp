@@ -1048,15 +1048,16 @@ public:
 		tssInQuarantine = true;
 	}
 
-	Future<Void> checkStorageEngineParams(StorageEngineParamSet& params) {
+	Future<Void> checkStorageEngineParams(StorageEngineParamSet& params, bool isTss) {
 		return fmap(
-		    [this, &params](StorageEngineParamResult res) {
+		    [this, &params, &isTss](StorageEngineParamResult res) {
 			    // all changed params are those not written into the storage files
 			    for (const auto& k : res.applied) {
 				    // TODO : need to remove this logging
 				    std::string currV =
 				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
 				    TraceEvent("ApplyRuntimeStorageEngineParamChangeAfterRejoin")
+				        .detail("IsTss", isTss)
 				        .detail("Param", k)
 				        .detail("Expected", params.getParams().at(k))
 				        .detail("Used", currV);
@@ -1065,14 +1066,21 @@ public:
 				    std::string currV =
 				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
 				    TraceEvent("MismatchedStorageEngineParamNeedReboot")
+				        .detail("IsTss", isTss)
 				        .detail("Param", k)
 				        .detail("Expected", params.getParams().at(k))
 				        .detail("Used", currV);
 				    params.getParams().contains(k) ? storageEngineParams->set(k, params.getParams().at(k))
 				                                   : storageEngineParams->clear(k);
 			    }
+			    if (isTss && res.needReplacement.size()) {
+				    TraceEvent("ReplacementParamsTssRemoved").detail("Params", describe(res.needReplacement));
+				    throw worker_removed();
+			    }
 			    if (res.needReboot.size()) {
-				    TraceEvent("RebootKVSAfterStorageRejoin").detail("Params", describe(res.needReboot));
+				    TraceEvent("RebootKVSAfterStorageRejoin")
+				        .detail("Params", describe(res.needReboot))
+				        .detail("IsTss", isTss);
 				    throw please_reboot_kv_store();
 			    }
 			    return Void();
@@ -5032,11 +5040,16 @@ ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEn
 		StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
 		SetStorageEngineParamsReply _reply(res);
 		req.reply.send(_reply);
-		// runtime already finished,
-		// reboot are thrown here
-		// replacement will be handled by DD wiggler
+		if (self->isTss() && _reply.result.needReplacement.size()) {
+			// needReplacement changes will destroy the TSS
+			TraceEvent("TssReplacementParamChange").detail("Params", describe(_reply.result.needReplacement));
+			throw worker_removed();
+		}
+		// runtime already finished, reboot are thrown here, replacement will be handled by DD wiggler
 		if (_reply.result.needReboot.size()) {
-			TraceEvent("RebootKVSForParamChange").detail("Params", describe(_reply.result.needReboot));
+			TraceEvent("RebootKVSForParamChange")
+			    .detail("Params", describe(_reply.result.needReboot))
+			    .detail("IsTss", self->isTss());
 			// is it okay to do the reboot at once or better do it together
 			for (const auto& k : _reply.result.needReboot)
 				req.params.getParams().contains(k) ? self->storageEngineParams->set(k, req.params.getParams().at(k))
@@ -11855,8 +11868,9 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 				// If a "needReboot" parameter mismatches, it will reboot the kv store
 				if (self->isUsingStorageEngineParams()) {
 					TraceEvent(SevInfo, "ReplaceInterfaceCheckStorageEngineParams")
-					    .detail("Params", describe(rep.params.get().getParams()));
-					wait(self->checkStorageEngineParams(rep.params.get()));
+					    .detail("Params", describe(rep.params.get().getParams()))
+					    .detail("IsTss", self->isTss());
+					wait(self->checkStorageEngineParams(rep.params.get(), false));
 				}
 
 				try {
@@ -11949,6 +11963,19 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			// storage engine params
+			if (self->isUsingStorageEngineParams()) {
+				RangeResult paramKVs = wait(tr->getRange(tssStorageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!paramKVs.more && paramKVs.size() < CLIENT_KNOBS->TOO_MANY);
+				StorageEngineParamSet params;
+				for (const auto& [k, v] : paramKVs) {
+					params.set(k.removePrefix(tssStorageEngineParamsPrefix).toString(), v.toString());
+				}
+				TraceEvent(SevInfo, "ReplaceTssInterfaceCheckStorageEngineParams")
+				    .detail("Params", describe(params.getParams()));
+				wait(self->checkStorageEngineParams(params, true));
+			}
 
 			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
 

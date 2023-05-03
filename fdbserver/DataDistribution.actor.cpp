@@ -1402,7 +1402,6 @@ ACTOR Future<Void> getStorageEngineParams(Reference<DataDistributor> self, GetSt
 		GetStorageEngineParamsReply _reply(res);
 		req.reply.send(_reply);
 	} else {
-		// do some logging here
 		TraceEvent("GetStorageEngineParamsDDNotFound").log();
 		req.reply.sendError(dd_not_found());
 	}

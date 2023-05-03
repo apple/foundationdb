@@ -565,6 +565,8 @@ protected:
 	// This is a call started everytime DD initiates and after storage wiggler initialized
 	// It is safe to run as there won't be any changes if parameters are matched on storages and DatabaseConfiguration
 	Future<Void> storageParamsUpdater(Future<Void> wigglerInitialized);
+	// Same concept as above but for TSS
+	Future<Void> tssStorageParamsUpdater();
 
 	Future<Void> waitHealthyZoneChange();
 

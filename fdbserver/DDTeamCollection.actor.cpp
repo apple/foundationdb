@@ -2316,17 +2316,86 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> tssStorageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
+		// always set the params from database configuration when DD starts
+		// the API has no change if the storage servers already have the expected config
+		TraceEvent("DDTCTSSStorageEngineParamsUpdaterStart")
+		    .detail("StoreType", self->configuration.testingStorageServerStoreType.toString())
+		    .detail("NewParams", describe(newParams.getParams()));
+		// send update requests to all storages interfaces
+		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
+		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
+		for (const auto& [serverId, ss] : self->tss_info_by_pair) {
+			StorageServerInterface si = ss->getLastKnownInterface();
+			Future<ErrorOr<SetStorageEngineParamsReply>> f =
+			    si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams));
+			fs.push_back(f);
+			fmap[serverId] = f;
+		}
+		wait(waitForAll(fs));
+		state std::vector<Future<Void>> collection;
+		for (const auto& [serverId, f] : fmap) {
+			if (!f.isReady() || f.get().isError()) {
+				TraceEvent(SevWarnAlways, "DDTCTSSSetStorageEngineParamsFailed")
+				    .detail("ServerId", serverId)
+				    .detail("Error", f.get().getError().code());
+				continue;
+			}
+			if (!self->tss_info_by_pair.contains(serverId)) {
+				TraceEvent(SevWarnAlways, "DDTCTSSSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				continue;
+			}
+			SetStorageEngineParamsReply reply = f.get().get();
+			for (const auto& k : reply.result.applied) {
+				newParams.getParams().contains(k)
+				    ? self->configuration.tssStorageEngineParams.set(k, newParams.getParams().at(k))
+				    : self->configuration.tssStorageEngineParams.clear(k);
+				TraceEvent(SevInfo, "TSSStorageEngineParamApplied")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+			}
+			for (const auto& k : reply.result.needReplacement) {
+				TraceEvent(SevInfo, "TSSStorageEngineParamUpdaterNeedReplacement")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+			}
+			for (const auto& k : reply.result.unknown) {
+				TraceEvent(SevWarnAlways, "TSSUnknownStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+			}
+			for (const auto& k : reply.result.unchanged) {
+				TraceEvent(SevWarnAlways, "TSSUnchangedStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+			}
+		}
+
+		wait(waitForAll(collection));
+
+		TraceEvent("DDTCTSSStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
+		return Void();
+	}
+
 	ACTOR static Future<StorageEngineParamSet> getStorageEngineParams(DDTeamCollection* self) {
 		// TODO : should wait for any pending changes for storages to apply and return
 		state std::vector<Future<ErrorOr<GetStorageEngineParamsReply>>> fs;
-		for (const auto& [_, ss] : self->server_info) {
+		for (const auto& [_, ss] : self->server_and_tss_info) {
 			StorageServerInterface si = ss->getLastKnownInterface();
 			fs.push_back(si.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
 		}
+		// for (const auto& [_, ss] : self->tss_info_by_pair) {
+		// 	StorageServerInterface si = ss->getLastKnownInterface();
+		// 	fs.push_back(si.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
+		// }
 		wait(waitForAll(fs));
 		int index = 0;
 		StorageEngineParamSet result;
-		for (const auto& [serverId, ss] : self->server_info) {
+		for (const auto& [serverId, ss] : self->server_and_tss_info) {
 			const std::string addr = ss->getLastKnownInterface().address().toString();
 			Future<ErrorOr<GetStorageEngineParamsReply>> f = fs[index++];
 			if (!f.isReady() || f.get().isError()) {
@@ -2475,8 +2544,11 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.encryptMode = self->configuration.encryptionAtRestMode;
-			if (StorageEngineParamsFactory::isSupported(self->configuration.storageServerStoreType.storeType()))
-				isr.storageEngineParams = self->configuration.storageEngineParams;
+			if (StorageEngineParamsFactory::isSupported(
+			        recruitTss ? self->configuration.testingStorageServerStoreType.storeType()
+			                   : self->configuration.storageServerStoreType.storeType()))
+				isr.storageEngineParams =
+				    recruitTss ? self->configuration.tssStorageEngineParams : self->configuration.storageEngineParams;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -3157,6 +3229,7 @@ public:
 				self->addActor.send(self->waitHealthyZoneChange());
 				self->addActor.send(self->monitorPerpetualStorageWiggle(storageWigglerInitialized));
 				self->addActor.send(self->storageParamsUpdater(storageWigglerInitialized.getFuture()));
+				self->addActor.send(self->tssStorageParamsUpdater());
 			}
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
@@ -3744,6 +3817,15 @@ Future<Void> DDTeamCollection::storageParamsUpdater(Future<Void> wigglerInitiali
 	// Thus, DD will start again with the new type and reevaluate here
 	return StorageEngineParamsFactory::isSupported(configuration.storageServerStoreType)
 	           ? DDTeamCollectionImpl::storageParamsUpdater(this, configuration.storageEngineParams, wigglerInitialized)
+	           : Never();
+}
+
+Future<Void> DDTeamCollection::tssStorageParamsUpdater() {
+	ASSERT(!db->isMocked());
+	// Storage type change is through storage migration and will reboot DD
+	// Thus, DD will start again with the new type and reevaluate here
+	return StorageEngineParamsFactory::isSupported(configuration.testingStorageServerStoreType)
+	           ? DDTeamCollectionImpl::tssStorageParamsUpdater(this, configuration.tssStorageEngineParams)
 	           : Never();
 }
 

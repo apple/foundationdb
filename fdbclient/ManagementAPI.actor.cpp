@@ -95,20 +95,24 @@ bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
 // storage engine params changes always set the storage_engine explicitly even it's not changed.
 // When there's no params specified, it will clear any existing params
 // return false if not supported params are found
-bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m, bool& paramsChange) {
-	if (m.contains(configKeysPrefix.toString() + "storage_engine")) {
+bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
+                                       const std::string& engine_type,
+                                       KeyRef engine_prefix,
+                                       bool& paramsChange) {
+	if (m.contains(configKeysPrefix.toString() + engine_type)) {
 		paramsChange = true;
 		auto storeType =
-		    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + "storage_engine"]));
+		    static_cast<KeyValueStoreType::StoreType>(std::stoi(m[configKeysPrefix.toString() + engine_type]));
 		auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
 
 		for (const auto& [k, v] : m) {
-			if (!KeyRef(k).startsWith(storageEngineParamsPrefix))
+			if (!KeyRef(k).startsWith(engine_prefix))
 				continue;
-			std::string paramKeyStr = KeyRef(k).removePrefix(storageEngineParamsPrefix).toString();
+			std::string paramKeyStr = KeyRef(k).removePrefix(engine_prefix).toString();
 			if (!paramsInitMap.contains(paramKeyStr)) {
-				fmt::print("Warning: {} is not a supported parameter for storage engine {}.\n",
+				fmt::print("Warning: {} is not a supported parameter for {} {}.\n",
 				           paramKeyStr,
+				           engine_type,
 				           KeyValueStoreType::getStoreTypeStr(storeType));
 				return false;
 			}
@@ -298,10 +302,8 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			}
 		}
 
-		if (key == "storage_engine" || key == "log_engine") {
+		if (key == "storage_engine" || key == "log_engine" || key == "tss_storage_engine") {
 			StringRef s = value;
-
-			
 			Value engine = s.eat(":");
 
 			try {
@@ -314,6 +316,7 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			while (!s.empty()) {
 				auto k = s.eat("=");
 				auto v = s.eat(":");
+				// TODO : check empty values here
 				out[p + fmt::format("{}_params/{}", key, k.toString())] = v.toString();
 			}
 
