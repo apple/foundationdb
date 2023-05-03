@@ -5363,6 +5363,7 @@ public:
 		// uncommitted writes so it should not be committed.
 		m_init.cancel();
 		m_latestCommit.cancel();
+		m_lazyClearActor.cancel();
 	}
 
 	Future<Void> commit(Version v) {
