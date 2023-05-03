@@ -32,10 +32,7 @@ public:
 	                    class IRKConfigurationMonitor const&,
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
-	                    bool anyBlobRanges,
-	                    Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	                    double& blobWorkerTime,
-	                    double& unblockedAssignmentTime) = 0;
+	                    class IRKBlobMonitor&) = 0;
 };
 
 class RKRateUpdater : public IRKRateUpdater {
@@ -43,6 +40,7 @@ class RKRateUpdater : public IRKRateUpdater {
 	HealthMetrics healthMetrics;
 	std::map<Version, RKVersionInfo> version_transactions;
 	double lastWarning;
+	double blobWorkerTime;
 	UID ratekeeperId;
 
 	// Returns the actual rate at which transactions being released,
@@ -74,10 +72,7 @@ public:
 	            class IRKConfigurationMonitor const&,
 	            class IRKRecoveryTracker const&,
 	            Deque<double> const& actualTpsHistory,
-	            bool anyBlobRanges,
-	            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	            double& blobWorkerTime,
-	            double& unblockedAssignmentTime) override;
+	            class IRKBlobMonitor&) override;
 
 	HealthMetrics const& getHealthMetrics() const& override;
 };

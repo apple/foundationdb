@@ -96,4 +96,6 @@ public:
 	                 class IRKRecoveryTracker&) override {
 		return Never();
 	}
+
+	void updateProxy(UID proxyId, Version v, int newTotalTransactions);
 };

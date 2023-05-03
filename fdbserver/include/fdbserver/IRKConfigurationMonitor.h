@@ -41,11 +41,13 @@ public:
 
 class MockRKConfigurationMonitor : public IRKConfigurationMonitor {
 	int storageTeamSize;
+	bool blobGranulesEnabled{ false };
 
 public:
 	explicit MockRKConfigurationMonitor(int storageTeamSize) : storageTeamSize(storageTeamSize) {}
-	bool areBlobGranulesEnabled() const override { return false; }
+	bool areBlobGranulesEnabled() const override { return blobGranulesEnabled; }
 	int getStorageTeamSize() const override { return storageTeamSize; }
 	Optional<Key> getRemoteDC() const override { return {}; }
 	Future<Void> run() override { return Never(); }
+	void enableBlobGranules() { blobGranulesEnabled = true; }
 };
