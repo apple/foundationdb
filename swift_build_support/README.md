@@ -7,7 +7,14 @@ Invoke cmake as follows in order to use clang (which is required for Swift):
 ```
 cd
 mkdir build && cd build 
-cmake -G 'Ninja' -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_Swift_COMPILER=swiftc -DWITH_SWIFT -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr ../src/foundationdb/
+cmake -G 'Ninja' \
+    -DCMAKE_C_COMPILER=clang \
+    -DCMAKE_CXX_COMPILER=clang++ \
+    -DUSE_LIBCXX=OFF \
+    -DCMAKE_Swift_COMPILER=swiftc \
+    -DWITH_SWIFT=ON \
+    -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr \
+    ../src/foundationdb/
 ```
 
 We also pass the `-DWITH_SWIFT` flag to set the `SERVER_KNOBS->FLOW_WITH_SWIFT` knob to `true` by default.
