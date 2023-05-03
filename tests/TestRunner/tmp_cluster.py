@@ -70,6 +70,7 @@ class TempCluster(LocalCluster):
         if self.remove_at_exit:
             shutil.rmtree(self.tmp_dir)
 
+
 if __name__ == "__main__":
     script_desc = """
     This script automatically configures a temporary local cluster on the machine
