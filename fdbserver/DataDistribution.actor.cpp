@@ -698,10 +698,6 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 	loop {
 		PrepareBlobRestoreRequest req = waitNext(self->context->interface.prepareBlobRestoreReq.getFuture());
 		if (BlobMigratorInterface::isBlobMigrator(req.ssi.id())) {
-			if (queue->activeRelocations + queue->queuedRelocations > 0) {
-				req.reply.send(PrepareBlobRestoreReply(PrepareBlobRestoreReply::PROCESSING_RELOCATION));
-				continue;
-			}
 			if (self->context->ddEnabledState->sameId(req.requesterID) &&
 			    self->context->ddEnabledState->isBlobRestorePreparing()) {
 				// the sender use at-least once model, so we need to guarantee the idempotence
