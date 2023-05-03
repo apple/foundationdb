@@ -474,6 +474,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS,            false ); if (isSimulated) ROCKSDB_USE_POINT_DELETE_FOR_SYSTEM_KEYS = deterministicRandom()->coinflip();
 	init( ROCKSDB_CF_RANGE_DELETION_LIMIT,                      1000 );
 	init (ROCKSDB_WAIT_ON_CF_FLUSH,                             true ); if (isSimulated) ROCKSDB_WAIT_ON_CF_FLUSH = deterministicRandom()->coinflip();
+	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
