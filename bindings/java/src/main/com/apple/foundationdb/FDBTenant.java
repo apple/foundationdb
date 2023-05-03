@@ -127,6 +127,10 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 		Transaction tr = null;
 		try {
 			tr = new FDBTransaction(Tenant_createTransaction(getPtr()), database, e, eventKeeper);
+			// In newer versions, this option is set as a default option on the database
+			if (FDB.instance().getAPIVersion() < 730) {
+				tr.options().setUsedDuringCommitProtectionDisable();
+			}
 			return tr;
 		} catch (RuntimeException err) {
 			if (tr != null) {
