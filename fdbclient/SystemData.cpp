@@ -1832,65 +1832,6 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
 	return id;
 }
 
-const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
-
-const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreCommandKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreCommandKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreCommandValueFor(BlobRestoreState restoreState) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << restoreState;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value) {
-	Standalone<BlobRestoreState> restoreState;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> restoreState;
-	return restoreState;
-}
-
-const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
-
-const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreArgKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreArgValueFor(BlobRestoreArg args) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << args;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
-	Standalone<BlobRestoreArg> args;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> args;
-	return args;
-}
-
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
 const Key blobGranulesLastFlushKey = "\xff\x02/blobGranulesLastFlushTs"_sr;
 
