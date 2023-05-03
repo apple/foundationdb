@@ -173,7 +173,6 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
                                                               const KeySelectorRef& end,
                                                               const StringRef& mapper,
                                                               GetRangeLimits limits,
-                                                              int matchIndex,
                                                               bool snapshot,
                                                               bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
@@ -191,7 +190,6 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       limits.bytes,
 	                                                       FDB_STREAMING_MODE_EXACT,
 	                                                       0,
-	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
 	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
@@ -1530,7 +1528,6 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
                                                                         const KeySelectorRef& end,
                                                                         const StringRef& mapper,
                                                                         GetRangeLimits limits,
-                                                                        int matchIndex,
                                                                         bool snapshot,
                                                                         bool reverse) {
 	return executeOperation(&ITransaction::getMappedRange,
@@ -1538,7 +1535,6 @@ ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const Ke
 	                        end,
 	                        mapper,
 	                        std::forward<GetRangeLimits>(limits),
-	                        std::forward<int>(matchIndex),
 	                        std::forward<bool>(snapshot),
 	                        std::forward<bool>(reverse));
 }
@@ -2165,10 +2161,10 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 
 template <class T, class... Args>
 ThreadFuture<T> MultiVersionDatabase::executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args) {
-	auto db = dbState->db;
-	if (db) {
-		auto f = (db.getPtr()->*func)(std::forward<Args>(args)...);
-		return abortableFuture(f, dbState->dbVar->get().onChange);
+	auto db = dbState->dbVar->get();
+	if (db.value) {
+		auto f = (db.value.getPtr()->*func)(std::forward<Args>(args)...);
+		return abortableFuture(f, db.onChange);
 	}
 
 	// If database initialization failed, return the initialization error
@@ -2178,7 +2174,7 @@ ThreadFuture<T> MultiVersionDatabase::executeOperation(ThreadFuture<T> (IDatabas
 	}
 
 	// Wait for the database to be initialized
-	return abortableFuture(ThreadFuture<T>(Never()), dbState->dbVar->get().onChange);
+	return abortableFuture(ThreadFuture<T>(Never()), db.onChange);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
@@ -2261,16 +2257,16 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 
 ThreadFuture<Standalone<StringRef>> MultiVersionDatabase::getClientStatus() {
 	auto stateRef = dbState;
-	auto db = stateRef->db;
-	if (!db.isValid()) {
-		db = stateRef->versionMonitorDb;
+	auto db = stateRef->dbVar->get();
+	if (!db.value.isValid()) {
+		db.value = stateRef->versionMonitorDb;
 	}
-	if (!db.isValid()) {
+	if (!db.value.isValid()) {
 		return onMainThread([stateRef] { return Future<Standalone<StringRef>>(stateRef->getClientStatus(""_sr)); });
 	} else {
 		// If a database is created first retrieve its status
-		auto f = db->getClientStatus();
-		auto statusFuture = abortableFuture(f, dbState->dbVar->get().onChange);
+		auto f = db.value->getClientStatus();
+		auto statusFuture = abortableFuture(f, db.onChange);
 		return flatMapThreadFuture<Standalone<StringRef>, Standalone<StringRef>>(
 		    statusFuture, [stateRef](ErrorOr<Standalone<StringRef>> dbContextStatus) {
 			    return onMainThread([stateRef, dbContextStatus] {

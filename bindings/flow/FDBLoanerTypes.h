@@ -156,11 +156,61 @@ struct KeyValueRef {
 typedef Standalone<KeyValueRef> KeyValue;
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
-	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
-	           // limits requested)
-	// False implies that no such values remain
-	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
-	                              // beginning if reverse) of the range
+	// True if the range may have more keys in it (possibly beyond the specified limits).
+	// 'more' can be true even if there are no keys left in the range, e.g. if a shard boundary is hit, it may or may
+	// not have more keys left, but 'more' will be set to true in that case.
+	// Additionally, 'getRangeStream()' always sets 'more' to true and uses the 'end_of_stream' error to indicate that a
+	// range is exhausted.
+	// If 'more' is false, the range is guaranteed to have been exhausted.
+	bool more;
+
+	// Only present when 'more' is true, for example, when the read reaches the shard boundary, 'readThrough' is set to
+	// the shard boundary and the client's next range read should start with the 'readThrough'.
+	// But 'more' is true does not necessarily guarantee 'readThrough' is present, for example, when the read reaches
+	// size limit, 'readThrough' might not be set, the next read should just start from the keyAfter of the current
+	// query result's last key.
+	// In both cases, please use the getter function 'getReadThrough()' instead, which represents the end (or beginning
+	// if reverse) of the range which was read.
+	Optional<KeyRef> readThrough;
+
+	// return the value represents the end of the range which was read. If 'reverse' is true, returns the last key, as
+	// it should be used as the new "end" of the next query and the end key should be non-inclusive.
+	Key getReadThrough(bool reverse = false) const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return readThrough.get();
+		}
+		ASSERT(size() > 0);
+		return reverse ? back().key : keyAfter(back().key);
+	}
+
+	// Helper function to get the next range scan's BeginKeySelector, use it when the range read is non-reverse,
+	// otherwise, please use nextEndKeySelector().
+	KeySelectorRef nextBeginKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterThan(back().key);
+	}
+
+	// Helper function to get the next range scan's EndKeySelector, use it when the range read is reverse.
+	KeySelectorRef nextEndKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterOrEqual(back().key);
+	}
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
+
 	// which was read to produce these results. This is guaranteed to be less than the requested range.
 	bool readToBegin;
 	bool readThroughEnd;

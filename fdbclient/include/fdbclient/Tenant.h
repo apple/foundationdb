@@ -23,14 +23,13 @@
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/VersionedMap.h"
-#include "fdbclient/KeyBackedTypes.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/BooleanParam.h"
 #include "flow/flat_buffers.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(EnforceValidTenantId);
+FDB_BOOLEAN_PARAM(EnforceValidTenantId);
 
 namespace TenantAPI {
 KeyRef idToPrefix(Arena& p, int64_t id);

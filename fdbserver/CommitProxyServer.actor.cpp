@@ -2632,7 +2632,8 @@ ACTOR static Future<Void> tenantIdServer(CommitProxyInterface proxy,
 		GetTenantIdRequest req = waitNext(proxy.getTenantId.getFuture());
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 		if (commitData->stats.tenantIdRequestIn.getValue() - commitData->stats.tenantIdRequestOut.getValue() >
-		    SERVER_KNOBS->TENANT_ID_REQUEST_MAX_QUEUE_SIZE) {
+		        SERVER_KNOBS->TENANT_ID_REQUEST_MAX_QUEUE_SIZE ||
+		    (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.0001))) {
 			++commitData->stats.tenantIdRequestErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyGetTenantRequestThresholdExceeded").suppressFor(60);
@@ -2728,8 +2729,9 @@ ACTOR static Future<Void> readRequestServer(CommitProxyInterface proxy,
 		GetKeyServerLocationsRequest req = waitNext(proxy.getKeyServersLocations.getFuture());
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
 		if (req.limit != CLIENT_KNOBS->STORAGE_METRICS_SHARD_LIMIT && // Always do data distribution requests
-		    commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
-		        SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE) {
+		    (commitData->stats.keyServerLocationIn.getValue() - commitData->stats.keyServerLocationOut.getValue() >
+		         SERVER_KNOBS->KEY_LOCATION_MAX_QUEUE_SIZE ||
+		     (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.001)))) {
 			++commitData->stats.keyServerLocationErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyLocationRequestThresholdExceeded").suppressFor(60);
@@ -3667,9 +3669,10 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	//TraceEvent("CommitProxyInit1", proxy.id());
 
 	// Wait until we can load the "real" logsystem, since we don't support switching them currently
-	while (!(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
-	         commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
-	         (!commitData.encryptMode.isEncryptionEnabled() || commitData.db->get().encryptKeyProxy.present()))) {
+	while (
+	    !(masterLifetime.isEqual(commitData.db->get().masterLifetime) &&
+	      commitData.db->get().recoveryState >= RecoveryState::RECOVERY_TRANSACTION &&
+	      (!commitData.encryptMode.isEncryptionEnabled() || commitData.db->get().client.encryptKeyProxy.present()))) {
 		//TraceEvent("ProxyInit2", proxy.id()).detail("LSEpoch", db->get().logSystemConfig.epoch).detail("Need", epoch);
 		wait(commitData.db->onChange());
 	}

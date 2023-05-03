@@ -1,6 +1,6 @@
 # FindRocksDB
 
-find_package(RocksDB 7.7.3)
+find_package(RocksDB 8.1.1)
 
 include(ExternalProject)
 
@@ -52,8 +52,8 @@ if(ROCKSDB_FOUND)
       ${BINARY_DIR}/librocksdb.a)
 else()
   ExternalProject_Add(rocksdb
-    URL https://github.com/facebook/rocksdb/archive/refs/tags/v7.7.3.tar.gz
-    URL_HASH SHA256=b8ac9784a342b2e314c821f6d701148912215666ac5e9bdbccd93cf3767cb611
+    URL https://github.com/facebook/rocksdb/archive/refs/tags/v8.1.1.tar.gz
+    URL_HASH SHA256=9102704e169cfb53e7724a30750eeeb3e71307663852f01fa08d5a320e6155a8
     CMAKE_ARGS ${RocksDB_CMAKE_ARGS}
     BUILD_BYPRODUCTS <BINARY_DIR>/librocksdb.a
     INSTALL_COMMAND ""

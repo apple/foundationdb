@@ -74,14 +74,17 @@ ACTOR Future<Void> readGranuleFiles(Transaction* tr, Key* startKey, Key endKey, 
 			int64_t offset;
 			int64_t length;
 			int64_t fullFileLength;
+			int64_t logicalSize;
 			Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 			std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(it.key);
 			ASSERT(gid == granuleID);
 
-			std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) = decodeBlobGranuleFileValue(it.value);
+			std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
+			    decodeBlobGranuleFileValue(it.value);
 
-			BlobFileIndex idx(version, filename.toString(), offset, length, fullFileLength, cipherKeysMeta);
+			BlobFileIndex idx(
+			    version, filename.toString(), offset, length, fullFileLength, logicalSize, cipherKeysMeta);
 			if (fileType == 'S') {
 				ASSERT(files->snapshotFiles.empty() || files->snapshotFiles.back().version < idx.version);
 				files->snapshotFiles.push_back(idx);
@@ -250,7 +253,7 @@ static std::string makeTestFileName(Version v) {
 }
 
 static BlobFileIndex makeTestFile(Version v, int64_t len) {
-	return BlobFileIndex(v, makeTestFileName(v), 0, len, len);
+	return BlobFileIndex(v, makeTestFileName(v), 0, len, len, len);
 }
 
 static void checkFile(int expectedVersion, const BlobFilePointerRef& actualFile) {
@@ -468,10 +471,10 @@ ACTOR Future<Void> loadBlobMetadataForTenants(BGTenantMap* self, std::vector<Blo
 	loop {
 		try {
 			Future<EKPGetLatestBlobMetadataReply> requestFuture;
-			if (self->dbInfo.isValid() && self->dbInfo->get().encryptKeyProxy.present()) {
+			if (self->dbInfo.isValid() && self->dbInfo->get().client.encryptKeyProxy.present()) {
 				req.reply.reset();
-				requestFuture =
-				    brokenPromiseToNever(self->dbInfo->get().encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
+				requestFuture = brokenPromiseToNever(
+				    self->dbInfo->get().client.encryptKeyProxy.get().getLatestBlobMetadata.getReply(req));
 			} else {
 				requestFuture = Never();
 			}
@@ -608,4 +611,50 @@ ACTOR Future<Reference<GranuleTenantData>> getDataForGranuleActor(BGTenantMap* s
 // TODO: handle case where tenant isn't loaded yet
 Future<Reference<GranuleTenantData>> BGTenantMap::getDataForGranule(const KeyRangeRef& keyRange) {
 	return getDataForGranuleActor(this, keyRange);
+}
+
+ACTOR Future<Void> loadBGTenantMap(BGTenantMap* tenantData, Transaction* tr) {
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantResults;
+			wait(store(tenantResults,
+			           TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+			ASSERT(tenantResults.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantResults.more);
+			tenantData->addTenants(tenantResults.results);
+			TraceEvent("LoadedBGTenantMap").detail("Size", tenantResults.results.size());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
+ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap* tenantData, KeyRange keyRange) {
+	if (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant") {
+		state int retryCount = 0;
+		loop {
+			state Reference<GranuleTenantData> data;
+			wait(store(data, tenantData->getDataForGranule(keyRange)));
+			if (data.isValid()) {
+				wait(data->bstoreLoaded.getFuture());
+				wait(delay(0));
+				return data->bstore;
+			} else {
+				CODE_PROBE(true, "bstore for unknown tenant");
+				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
+				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
+				// loading tenants, and instead a persistent issue.
+				retryCount++;
+				TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "UnknownTenantForGranule")
+				    .detail("KeyRange", keyRange);
+				wait(delay(0.1));
+			}
+		}
+	} else if (!SERVER_KNOBS->BG_URL.empty()) {
+		return BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
+	} else {
+		TraceEvent(SevError, "MissingBlobStoreConfig").detail("KeyRange", keyRange);
+		throw restore_error();
+	}
 }

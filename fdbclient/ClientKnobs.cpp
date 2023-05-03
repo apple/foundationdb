@@ -190,6 +190,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BACKUP_STATUS_JITTER,                   0.05 );
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
+	init( RESTORE_RANGES_READ_BATCH,             10000 );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
@@ -225,7 +226,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BLOBSTORE_READ_CACHE_BLOCKS_PER_FILE,      2 );
 	init( BLOBSTORE_MULTIPART_MAX_PART_SIZE,  20000000 );
 	init( BLOBSTORE_MULTIPART_MIN_PART_SIZE,   5242880 );
-	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,       true );
+	init( BLOBSTORE_GLOBAL_CONNECTION_POOL,      false );
 	init( BLOBSTORE_ENABLE_LOGGING,               true );
 	init( BLOBSTORE_STATS_LOGGING_INTERVAL,       10.0 );
 	init( BLOBSTORE_LATENCY_LOGGING_INTERVAL,    120.0 );
@@ -287,6 +288,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 	init( BG_TOO_MANY_GRANULES,                   20000 );
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
+	init( ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE,  false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE = true; }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_DELAY,      2.0 );

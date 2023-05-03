@@ -23,8 +23,7 @@
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunRYWTransaction.actor.h"
 #include "fdbclient/Tenant.h"
@@ -32,7 +31,6 @@
 #include "fdbclient/TenantSpecialKeys.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/BooleanParam.h"
@@ -41,6 +39,10 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/Trace.h"
 #include "flow/flow.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterConsistency.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct TenantCapacityLimits : TestWorkload {
@@ -74,36 +76,20 @@ struct TenantCapacityLimits : TestWorkload {
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantCapacityLimits* self) {
 		if (self->useMetacluster) {
-			Reference<IDatabase> threadSafeHandle =
-			    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-
-			wait(success(MetaclusterAPI::createMetacluster(
-			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
-
-			DataClusterEntry entry;
+			metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
-			wait(MetaclusterAPI::registerCluster(
-			    self->managementDb, "test_data_cluster"_sr, g_simulator->extraDatabases[0], entry));
 
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
-			// wait for tenant mode change on dataDB
-			wait(success(self->waitDataDbTenantModeChange()));
+			metacluster::util::SimulatedMetacluster simMetacluster =
+			    wait(metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry));
+
+			self->managementDb = simMetacluster.managementDb;
+			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
+			self->dataDb = simMetacluster.dataDbs.begin()->second;
 		} else {
 			self->dataDb = cx;
 		}
 
 		return Void();
-	}
-
-	Future<Optional<Key>> waitDataDbTenantModeChange() const {
-		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get("\xff"_sr); // just a meaningless read
-		});
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -138,7 +124,7 @@ struct TenantCapacityLimits : TestWorkload {
 				try {
 					tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					int64_t maxTenantId = TenantAPI::getMaxAllowableTenantId(self->tenantIdPrefix << 48);
-					MetaclusterAPI::ManagementClusterMetadata::tenantMetadata().lastTenantId.set(tr, maxTenantId);
+					metacluster::metadata::management::tenantMetadata().lastTenantId.set(tr, maxTenantId);
 					wait(safeThreadFutureToFuture(tr->commit()));
 					break;
 				} catch (Error& e) {
@@ -147,9 +133,10 @@ struct TenantCapacityLimits : TestWorkload {
 			}
 			// Attempt to create a tenant on the metacluster which should fail since the cluster is at capacity
 			try {
-				MetaclusterTenantMapEntry entry;
+				metacluster::MetaclusterTenantMapEntry entry;
 				entry.tenantName = "test_tenant_metacluster"_sr;
-				wait(MetaclusterAPI::createTenant(self->managementDb, entry, AssignClusterAutomatically::True));
+				wait(metacluster::createTenant(
+				    self->managementDb, entry, metacluster::AssignClusterAutomatically::True));
 				ASSERT(false);
 			} catch (Error& e) {
 				ASSERT(e.code() == error_code_cluster_no_capacity);

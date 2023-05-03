@@ -394,13 +394,24 @@ ACTOR Future<TraceEventFields> getStorageMetricsTimeout(UID storage, WorkerInter
 	state int retries = 0;
 	loop {
 		++retries;
-		state Future<TraceEventFields> result =
+		state Future<TraceEventFields> eventLogReply =
 		    wi.eventLogRequest.getReply(EventLogRequest(StringRef(storage.toString() + "/StorageMetrics")));
 		state Future<Void> timeout = delay(30.0);
+		state TraceEventFields storageMetrics;
 		choose {
-			when(TraceEventFields res = wait(result)) {
-				if (version == invalidVersion || getDurableVersion(res) >= static_cast<int64_t>(version)) {
-					return res;
+			when(wait(store(storageMetrics, eventLogReply))) {
+				try {
+					if (version == invalidVersion ||
+					    getDurableVersion(storageMetrics) >= static_cast<int64_t>(version)) {
+						return storageMetrics;
+					}
+				} catch (Error& e) {
+					TraceEvent("QuietDatabaseFailure")
+					    .error(e)
+					    .detail("Reason", "Failed to extract DurableVersion from StorageMetrics")
+					    .detail("SSID", storage)
+					    .detail("StorageMetrics", storageMetrics.toString());
+					throw;
 				}
 			}
 			when(wait(timeout)) {
@@ -788,13 +799,13 @@ ACTOR Future<Void> reconfigureAfter(Database cx,
                                     Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                     std::string context) {
 	wait(delay(time));
-	wait(repairDeadDatacenter(cx, dbInfo, context));
+	wait(uncancellable(repairDeadDatacenter(cx, dbInfo, context)));
 	return Void();
 }
 
 struct QuietDatabaseChecker {
-	ProcessEvents::Callback timeoutCallback = [this](StringRef name, StringRef msg, Error const& e) {
-		logFailure(name, msg, e);
+	ProcessEvents::Callback timeoutCallback = [this](StringRef name, std::any const& msg, Error const& e) {
+		logFailure(name, std::any_cast<StringRef>(msg), e);
 	};
 	double start = now();
 	double maxDDRunTime;

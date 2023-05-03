@@ -104,7 +104,9 @@ ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
-ERROR( storage_engine_migration_in_progress, 1083, "Storage engine is under migration")
+ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
+ERROR( dd_config_changed, 1084, "DataDistribution configuration changed." )
+ERROR( storage_engine_migration_in_progress, 1085, "Storage engine is under migration")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -141,6 +143,8 @@ ERROR( key_value_store_deadline_exceeded, 1224, "Exceeded maximum time allowed t
 ERROR( storage_quota_exceeded, 1225, "Exceeded the maximum storage quota allocated to the tenant.")
 ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
+ERROR( test_failed, 1228, "Test failed" )
+ERROR( retry_clean_up_datamove_tombstone_added, 1229, "Need background datamove cleanup" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -170,6 +174,7 @@ ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection
 ERROR( lock_file_failure, 1529, "Unable to lock the file")
 ERROR( rest_unsupported_protocol, 1530, "Unsupported REST protocol")
 ERROR( rest_malformed_response, 1531, "Malformed REST response")
+ERROR( rest_max_base_cipher_len, 1532, "Max BaseCipher length violation")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
@@ -221,7 +226,8 @@ ERROR( invalid_checkpoint_format, 2044, "Invalid checkpoint format" )
 ERROR( invalid_throttle_quota_value, 2045, "Invalid quota value. Note that reserved_throughput cannot exceed total_throughput" )
 ERROR( failed_to_create_checkpoint, 2046, "Failed to create a checkpoint" )
 ERROR( failed_to_restore_checkpoint, 2047, "Failed to restore a checkpoint" )
-ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file")
+ERROR( failed_to_create_checkpoint_shard_metadata, 2048, "Failed to dump shard metadata for a checkpoint to a sst file" )
+ERROR( address_parse_error, 2049, "Failed to parse address" )
 
 ERROR( incompatible_protocol_version, 2100, "Incompatible protocol version" )
 ERROR( transaction_too_large, 2101, "Transaction exceeds byte limit" )
@@ -279,6 +285,8 @@ ERROR( cluster_restoring, 2170, "The cluster is being restored to the metacluste
 ERROR( invalid_data_cluster, 2171, "The data cluster being restored has no record of its metacluster" )
 ERROR( metacluster_mismatch, 2172, "The cluster does not have the expected name or is associated with a different metacluster" )
 ERROR( conflicting_restore, 2173, "Another restore is running for the same data cluster" )
+ERROR( invalid_metacluster_configuration, 2174, "Metacluster configuration is invalid" )
+ERROR( unsupported_metacluster_version, 2175, "Client is not compatible with the metacluster" )
 
 // 2200 - errors from bindings and official APIs
 ERROR( api_version_unset, 2200, "API version is not set" )
@@ -371,6 +379,8 @@ ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
 ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
+ERROR( encrypt_key_check_value_mismatch, 2711, "Encryption key-check-value mismatch")
+ERROR( encrypt_max_base_cipher_len, 2712, "Max BaseCipher buffer length violation")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

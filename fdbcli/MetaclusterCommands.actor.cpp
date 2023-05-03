@@ -23,24 +23,27 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
-#include "fdbclient/Metacluster.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Schemas.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/ThreadHelper.actor.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterUtil.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <string>
 
 namespace fdb_cli {
 
-Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>>> parseClusterConfiguration(
-    std::vector<StringRef> const& tokens,
-    DataClusterEntry const& defaults,
-    int startIndex,
-    int endIndex) {
-	Optional<DataClusterEntry> entry;
+Optional<std::pair<Optional<ClusterConnectionString>, Optional<metacluster::DataClusterEntry>>>
+parseClusterConfiguration(std::vector<StringRef> const& tokens,
+                          metacluster::DataClusterEntry const& defaults,
+                          int startIndex,
+                          int endIndex) {
+	Optional<metacluster::DataClusterEntry> entry;
 	Optional<ClusterConnectionString> connectionString;
 
 	std::set<std::string> usedParams;
@@ -61,7 +64,9 @@ Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>
 			return {};
 		}
 		if (tokencmp(param, "max_tenant_groups")) {
-			entry = defaults;
+			if (!entry.present()) {
+				entry = defaults;
+			}
 
 			int n;
 			if (sscanf(value.c_str(), "%d%n", &entry.get().capacity.numTenantGroups, &n) != 1 || n != value.size() ||
@@ -71,6 +76,20 @@ Optional<std::pair<Optional<ClusterConnectionString>, Optional<DataClusterEntry>
 			}
 		} else if (tokencmp(param, "connection_string")) {
 			connectionString = ClusterConnectionString(value);
+		} else if (tokencmp(param, "auto_tenant_assignment")) {
+			std::transform(
+			    value.begin(), value.end(), value.begin(), [](unsigned char ch) { return std::tolower(ch); });
+			if (!entry.present()) {
+				entry = defaults;
+			}
+			if (value == "disabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			} else if (value == "enabled") {
+				entry.get().autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
+			} else {
+				fmt::print(stderr, "ERROR: invalid configuration `{}' for `auto_tenant_assignment'.\n", value.c_str());
+				return {};
+			}
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};
@@ -84,6 +103,8 @@ void printMetaclusterConfigureOptionsUsage() {
 	fmt::print("max_tenant_groups sets the maximum number of tenant groups that can be assigned\n"
 	           "to the named data cluster.\n");
 	fmt::print("connection_string sets the connection string for the named data cluster.\n");
+	fmt::print("auto_tenant_assignment determines whether this data cluster is added to the auto-assignment pool, i.e. "
+	           "whether tenants may be automatically assigned to this data cluster.\n");
 }
 
 // metacluster create command
@@ -104,7 +125,7 @@ ACTOR Future<bool> metaclusterCreateCommand(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	Optional<std::string> errorStr = wait(MetaclusterAPI::createMetacluster(db, tokens[2], tenantIdPrefix, true));
+	Optional<std::string> errorStr = wait(metacluster::createMetacluster(db, tokens[2], tenantIdPrefix, true));
 	if (errorStr.present()) {
 		fmt::print("ERROR: {}.\n", errorStr.get());
 	} else {
@@ -122,7 +143,7 @@ ACTOR Future<bool> metaclusterDecommissionCommand(Reference<IDatabase> db, std::
 		return false;
 	}
 
-	wait(MetaclusterAPI::decommissionMetacluster(db));
+	wait(metacluster::decommissionMetacluster(db));
 
 	fmt::print("The cluster is no longer a metacluster.\n");
 	return true;
@@ -132,14 +153,14 @@ ACTOR Future<bool> metaclusterDecommissionCommand(Reference<IDatabase> db, std::
 ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster register <NAME> connection_string=<CONNECTION_STRING>\n"
-		           "[max_tenant_groups=<NUM_GROUPS>]\n\n");
+		           "[max_tenant_groups=<NUM_GROUPS> | auto_tenant_assignment=<enabled|disabled>] ...\n\n");
 		fmt::print("Adds a data cluster to a metacluster.\n");
 		fmt::print("NAME is used to identify the cluster in future commands.\n");
 		printMetaclusterConfigureOptionsUsage();
 		return false;
 	}
 
-	DataClusterEntry defaultEntry;
+	metacluster::DataClusterEntry defaultEntry;
 	auto config = parseClusterConfiguration(tokens, defaultEntry, 3, tokens.size());
 	if (!config.present()) {
 		return false;
@@ -148,7 +169,7 @@ ACTOR Future<bool> metaclusterRegisterCommand(Reference<IDatabase> db, std::vect
 		return false;
 	}
 
-	wait(MetaclusterAPI::registerCluster(
+	wait(metacluster::registerCluster(
 	    db, tokens[2], config.get().first.get(), config.get().second.orDefault(defaultEntry)));
 
 	fmt::print("The cluster `{}' has been added\n", printable(tokens[2]).c_str());
@@ -177,7 +198,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		return TenantAPI::getClusterType(tr);
 	}));
 
-	ForceRemove forceRemove(tokens.size() == 4);
+	metacluster::ForceRemove forceRemove(tokens.size() == 4);
 	if (clusterType == ClusterType::METACLUSTER_DATA && !forceRemove) {
 		if (tokens[2] == "FORCE"_sr) {
 			fmt::print("ERROR: a cluster name must be specified.\n");
@@ -190,7 +211,7 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 		return false;
 	}
 
-	bool updatedDataCluster = wait(MetaclusterAPI::removeCluster(db, clusterName, clusterType, forceRemove, 15.0));
+	bool updatedDataCluster = wait(metacluster::removeCluster(db, clusterName, clusterType, forceRemove, 15.0));
 
 	if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 		fmt::print("The cluster `{}' has been removed\n", printable(clusterName).c_str());
@@ -209,8 +230,9 @@ ACTOR Future<bool> metaclusterRemoveCommand(Reference<IDatabase> db, std::vector
 }
 
 void printRestoreUsage() {
-	fmt::print("Usage: metacluster restore <NAME> [dryrun] connection_string=<CONNECTION_STRING>\n"
-	           "<restore_known_data_cluster|repopulate_from_data_cluster> [force_join]\n\n");
+	fmt::print(
+	    "Usage: metacluster restore <NAME> [dryrun] connection_string=<CONNECTION_STRING>\n"
+	    "<restore_known_data_cluster|repopulate_from_data_cluster> [force_join|force_reuse_tenant_id_prefix] ...\n\n");
 
 	fmt::print("Add a restored data cluster back to a metacluster.\n\n");
 
@@ -233,30 +255,49 @@ void printRestoreUsage() {
 	fmt::print("clusters. Any conflicts arising between the added data cluster and existing data\n");
 	fmt::print("will cause the restore to fail. Before repopulating a metacluster from a data\n");
 	fmt::print("cluster, that data cluster needs to be detached from its prior metacluster using\n");
-	fmt::print("the `metacluster remove' command.\n");
+	fmt::print("the `metacluster remove' command.\n\n");
+
+	fmt::print("When repopulating a management cluster, it is expected that the new metacluster\n");
+	fmt::print("will be configured with a different tenant ID prefix. By default, reusing the same\n");
+	fmt::print("prefix will result in an error during the restore process. To override this behavior,\n");
+	fmt::print("use `force_reuse_tenant_id_prefix'.\n");
 }
 
 // metacluster restore command
 ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 5 || tokens.size() > 7) {
+	if (tokens.size() < 5 || tokens.size() > 8) {
 		printRestoreUsage();
 		return false;
 	}
 
 	state bool dryRun = tokens[3] == "dryrun"_sr;
-	state bool forceJoin = tokens[tokens.size() - 1] == "force_join"_sr;
+	state bool forceJoin = false;
+	state bool forceReuseTenantIdPrefix = false;
 
-	if (tokens.size() < 5 + (int)dryRun + (int)forceJoin) {
+	loop {
+		if (tokens.back() == "force_join"_sr) {
+			forceJoin = true;
+		} else if (tokens.back() == "force_reuse_tenant_id_prefix"_sr) {
+			forceReuseTenantIdPrefix = true;
+		} else {
+			break;
+		}
+
+		tokens.pop_back();
+	}
+
+	int expectedTokens = 5 + (dryRun ? 1 : 0);
+	if (tokens.size() != expectedTokens) {
 		printRestoreUsage();
 		return false;
 	}
 
 	state ClusterName clusterName = tokens[2];
-	state StringRef restoreType = tokens[tokens.size() - 1 - (int)forceJoin];
+	state StringRef restoreType = tokens.back();
 
 	// connection string
-	DataClusterEntry defaultEntry;
-	auto config = parseClusterConfiguration(tokens, defaultEntry, 3 + (int)dryRun, 3 + (int)dryRun + 1);
+	metacluster::DataClusterEntry defaultEntry;
+	auto config = parseClusterConfiguration(tokens, defaultEntry, expectedTokens - 2, expectedTokens - 1);
 	if (!config.present()) {
 		return false;
 	} else if (!config.get().first.present()) {
@@ -269,21 +310,23 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 
 	try {
 		if (restoreType == "restore_known_data_cluster"_sr) {
-			wait(MetaclusterAPI::restoreCluster(db,
-			                                    clusterName,
-			                                    config.get().first.get(),
-			                                    ApplyManagementClusterUpdates::True,
-			                                    RestoreDryRun(dryRun),
-			                                    ForceJoin(forceJoin),
-			                                    &messages));
+			wait(metacluster::restoreCluster(db,
+			                                 clusterName,
+			                                 config.get().first.get(),
+			                                 metacluster::ApplyManagementClusterUpdates::True,
+			                                 metacluster::RestoreDryRun(dryRun),
+			                                 metacluster::ForceJoin(forceJoin),
+			                                 metacluster::ForceReuseTenantIdPrefix(forceReuseTenantIdPrefix),
+			                                 &messages));
 		} else if (restoreType == "repopulate_from_data_cluster"_sr) {
-			wait(MetaclusterAPI::restoreCluster(db,
-			                                    clusterName,
-			                                    config.get().first.get(),
-			                                    ApplyManagementClusterUpdates::False,
-			                                    RestoreDryRun(dryRun),
-			                                    ForceJoin(forceJoin),
-			                                    &messages));
+			wait(metacluster::restoreCluster(db,
+			                                 clusterName,
+			                                 config.get().first.get(),
+			                                 metacluster::ApplyManagementClusterUpdates::False,
+			                                 metacluster::RestoreDryRun(dryRun),
+			                                 metacluster::ForceJoin(forceJoin),
+			                                 metacluster::ForceReuseTenantIdPrefix(forceReuseTenantIdPrefix),
+			                                 &messages));
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized restore mode `{}'\n", printable(restoreType));
 			success = false;
@@ -320,7 +363,8 @@ ACTOR Future<bool> metaclusterRestoreCommand(Reference<IDatabase> db, std::vecto
 ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 4) {
 		fmt::print("Usage: metacluster configure <NAME> <max_tenant_groups=<NUM_GROUPS>|\n"
-		           "connection_string=<CONNECTION_STRING>> ...\n\n");
+		           "connection_string=<CONNECTION_STRING>|\n"
+		           "auto_tenant_assignment=<enabled|disabled>> ...\n\n");
 		fmt::print("Updates the configuration of the metacluster.\n");
 		printMetaclusterConfigureOptionsUsage();
 		return false;
@@ -332,7 +376,8 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-			Optional<DataClusterMetadata> metadata = wait(MetaclusterAPI::tryGetClusterTransaction(tr, tokens[2]));
+			Optional<metacluster::DataClusterMetadata> metadata =
+			    wait(metacluster::tryGetClusterTransaction(tr, tokens[2]));
 			if (!metadata.present()) {
 				throw cluster_not_found();
 			}
@@ -342,8 +387,7 @@ ACTOR Future<bool> metaclusterConfigureCommand(Reference<IDatabase> db, std::vec
 				return false;
 			}
 
-			MetaclusterAPI::updateClusterMetadata(
-			    tr, tokens[2], metadata.get(), config.get().first, config.get().second);
+			metacluster::updateClusterMetadata(tr, tokens[2], metadata.get(), config.get().first, config.get().second);
 
 			wait(safeThreadFutureToFuture(tr->commit()));
 			break;
@@ -377,7 +421,8 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 		}
 	}
 
-	std::map<ClusterName, DataClusterMetadata> clusters = wait(MetaclusterAPI::listClusters(db, begin, end, limit));
+	std::map<ClusterName, metacluster::DataClusterMetadata> clusters =
+	    wait(metacluster::listClusters(db, begin, end, limit));
 	if (clusters.empty()) {
 		if (tokens.size() == 2) {
 			fmt::print("The metacluster has no registered data clusters\n");
@@ -396,7 +441,7 @@ ACTOR Future<bool> metaclusterListCommand(Reference<IDatabase> db, std::vector<S
 
 // metacluster get command
 ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 4 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
+	if (tokens.size() > 4 || tokens.size() < 3 || (tokens.size() == 4 && tokens[3] != "JSON"_sr)) {
 		fmt::print("Usage: metacluster get <NAME> [JSON]\n\n");
 		fmt::print("Prints metadata associated with the given data cluster.\n");
 		fmt::print("If JSON is specified, then the output will be in JSON format.\n");
@@ -406,7 +451,7 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 	state bool useJson = tokens.size() == 4;
 
 	try {
-		DataClusterMetadata metadata = wait(MetaclusterAPI::getCluster(db, tokens[2]));
+		metacluster::DataClusterMetadata metadata = wait(metacluster::getCluster(db, tokens[2]));
 
 		if (useJson) {
 			json_spirit::mObject obj;
@@ -416,9 +461,13 @@ ACTOR Future<bool> metaclusterGetCommand(Reference<IDatabase> db, std::vector<St
 		} else {
 			fmt::print("  id: {}\n", metadata.entry.id.toString().c_str());
 			fmt::print("  connection string: {}\n", metadata.connectionString.toString().c_str());
-			fmt::print("  cluster state: {}\n", DataClusterEntry::clusterStateToString(metadata.entry.clusterState));
+			fmt::print("  cluster state: {}\n",
+			           metacluster::DataClusterEntry::clusterStateToString(metadata.entry.clusterState));
 			fmt::print("  tenant group capacity: {}\n", metadata.entry.capacity.numTenantGroups);
 			fmt::print("  allocated tenant groups: {}\n", metadata.entry.allocated.numTenantGroups);
+			fmt::print(
+			    "  auto tenant assignment: {}\n",
+			    metacluster::DataClusterEntry::autoTenantAssignmentToString(metadata.entry.autoTenantAssignment));
 		}
 	} catch (Error& e) {
 		if (useJson) {
@@ -454,7 +503,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			Optional<MetaclusterRegistrationEntry> registrationEntry =
-			    wait(MetaclusterMetadata::metaclusterRegistration().get(tr));
+			    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 			const ClusterType clusterType =
 			    !registrationEntry.present() ? ClusterType::STANDALONE : registrationEntry.get().clusterType;
 			if (ClusterType::STANDALONE == clusterType) {
@@ -491,9 +540,9 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			metaclusterName = registrationEntry.get().metaclusterName.toString();
 
 			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
-			std::map<ClusterName, DataClusterMetadata> clusters =
-			    wait(MetaclusterAPI::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
-			auto capacityNumbers = MetaclusterAPI::metaclusterCapacity(clusters);
+			std::map<ClusterName, metacluster::DataClusterMetadata> clusters =
+			    wait(metacluster::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			auto capacityNumbers = metacluster::util::metaclusterCapacity(clusters);
 			if (useJson) {
 				json_spirit::mObject obj;
 				obj[msgTypeKey] = "success";
@@ -567,7 +616,7 @@ void metaclusterGenerator(const char* text,
 			                   "configure",           "list",         "get",      "status", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() > 1 && (tokencmp(tokens[1], "register") || tokencmp(tokens[1], "configure"))) {
-		const char* opts[] = { "max_tenant_groups=", "connection_string=", nullptr };
+		const char* opts[] = { "max_tenant_groups=", "connection_string=", "auto_tenant_assignment=", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if ((tokens.size() == 2 && tokencmp(tokens[1], "status")) ||
 	           (tokens.size() == 3 && tokencmp(tokens[1], "get"))) {
@@ -581,15 +630,15 @@ void metaclusterGenerator(const char* text,
 			const char* opts[] = { "dryrun", "connection_string=", nullptr };
 			arrayGenerator(text, line, opts, lc);
 		} else {
-			bool dryrun = tokens[3] == "dryrun"_sr;
-			if (tokens.size() == 3 + (int)dryrun) {
+			int dryrun = tokens[3] == "dryrun"_sr ? 1 : 0;
+			if (tokens.size() == 3 + dryrun) {
 				const char* opts[] = { "connection_string=", nullptr };
 				arrayGenerator(text, line, opts, lc);
-			} else if (tokens.size() == 4 + (int)dryrun) {
+			} else if (tokens.size() == 4 + dryrun) {
 				const char* opts[] = { "restore_known_data_cluster", "repopulate_from_data_cluster", nullptr };
 				arrayGenerator(text, line, opts, lc);
-			} else if (tokens.size() == 5 + (int)dryrun) {
-				const char* opts[] = { "force_join", nullptr };
+			} else if (tokens.size() >= 5 + dryrun && tokens.size() < 7 + dryrun) {
+				const char* opts[] = { "force_join", "force_reuse_tenant_id_prefix", nullptr };
 				arrayGenerator(text, line, opts, lc);
 			}
 		}
@@ -605,10 +654,12 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 	} else if (tokencmp(tokens[1], "decommission")) {
 		return {};
 	} else if (tokencmp(tokens[1], "register") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "<NAME>",
-			                                     "connection_string=<CONNECTION_STRING>",
-			                                     "[max_tenant_groups=<NUM_GROUPS>]" };
-		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+		static std::vector<const char*> opts = {
+			"<NAME>",
+			"connection_string=<CONNECTION_STRING>",
+			"[max_tenant_groups=<NUM_GROUPS>|auto_tenant_assignment=<enabled|disabled>]"
+		};
+		return std::vector<const char*>(opts.begin() + std::min<int>(2, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "remove") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "[FORCE]", "<NAME>" };
 		if (tokens.size() == 2) {
@@ -619,23 +670,23 @@ std::vector<const char*> metaclusterHintGenerator(std::vector<StringRef> const& 
 		} else {
 			return {};
 		}
-	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 7) {
+	} else if (tokencmp(tokens[1], "restore") && tokens.size() < 8) {
 		static std::vector<const char*> opts = { "<NAME>",
 			                                     "[dryrun]",
 			                                     "connection_string=<CONNECTION_STRING>",
 			                                     "<restore_known_data_cluster|repopulate_from_data_cluster>",
-			                                     "[force_join]" };
-		if (tokens.size() < 4 || (tokens[3].size() <= 6 && "dryrun"_sr.startsWith(tokens[3]))) {
-			return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
-		} else if (tokens.size() < 6) {
-			return std::vector<const char*>(opts.begin() + tokens.size() - 1, opts.end());
+			                                     "[force_join|force_reuse_tenant_id_prefix]" };
+		if (tokens.size() < 4 || (tokens[3].size() <= 7 && "dryrun"_sr.startsWith(tokens[3]))) {
+			return std::vector<const char*>(opts.begin() + std::min(tokens.size() - 2, opts.size() - 1), opts.end());
+		} else if (tokens.size() < 7) {
+			return std::vector<const char*>(opts.begin() + std::min(tokens.size() - 1, opts.size() - 1), opts.end());
 		} else {
 			return {};
 		}
 	} else if (tokencmp(tokens[1], "configure")) {
-		static std::vector<const char*> opts = {
-			"<NAME>", "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>>"
-		};
+		static std::vector<const char*> opts = { "<NAME>",
+			                                     "<max_tenant_groups=<NUM_GROUPS>|connection_string=<CONNECTION_STRING>"
+			                                     "|auto_tenant_assignment=<enabled|disabled>>" };
 		return std::vector<const char*>(opts.begin() + std::min<int>(1, tokens.size() - 2), opts.end());
 	} else if (tokencmp(tokens[1], "list") && tokens.size() < 5) {
 		static std::vector<const char*> opts = { "[BEGIN]", "[END]", "[LIMIT]" };

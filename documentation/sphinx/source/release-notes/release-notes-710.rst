@@ -2,6 +2,36 @@
 Release Notes
 #############
 
+7.1.31
+======
+* Same as 7.1.30 release with AVX enabled.
+
+7.1.30
+======
+* Released with AVX disabled.
+* Fixed storage server finishedQueries metric when using getMappedRange. `(PR #9785) <https://github.com/apple/foundationdb/pull/9785>`_
+* Fixed unnecessary transaction system recovery when excluding the servers that are already excluded/failed. `(PR #9809) <https://github.com/apple/foundationdb/pull/9809>`_ and `(PR #9878) <https://github.com/apple/foundationdb/pull/9878>`_
+* Fixed the exclusion of stateless processes by skipping the free capacity check. `(PR #9789) <https://github.com/apple/foundationdb/pull/9789>`_ and `(PR #9769) <https://github.com/apple/foundationdb/pull/9769>`_
+* Fixed an issue where the new worker cannot get ServerDBInfo update. `(PR #9778) <https://github.com/apple/foundationdb/pull/9778>`_
+* Added RocksDB bloom filter knobs. `(PR #9770) <https://github.com/apple/foundationdb/pull/9770>`_
+* Upgraded RocksDB to version 7.10.2. `(PR #9829) <https://github.com/apple/foundationdb/pull/9829>`_
+* Fixed an issue where ExclusionSafetyCheckRequest could be blocked forever. `(PR #9871) <https://github.com/apple/foundationdb/pull/9871>`_
+* Fixed fdbserver not able to join the cluster if the majority of coordinators in its connection string have failed. `(PR #9883) <https://github.com/apple/foundationdb/pull/9883>`_
+
+7.1.29
+======
+* Same as 7.1.28 release with AVX enabled.
+
+7.1.28
+======
+* Released with AVX disabled.
+* Changed log router to detect slow peeks and to automatically switch DC for peeking. `(PR #9640) <https://github.com/apple/foundationdb/pull/9640>`_
+* Added multiple prefix filter support for fdbdecode. `(PR #9483) <https://github.com/apple/foundationdb/pull/9483>`_, `(PR #9489) <https://github.com/apple/foundationdb/pull/9489>`_, `(PR #9511) <https://github.com/apple/foundationdb/pull/9511>`_, and `(PR #9560) <https://github.com/apple/foundationdb/pull/9560>`_
+* Enhanced fdbbackup query command to estimate data processing from a specific snapshot to a target version. `(PR #9506) <https://github.com/apple/foundationdb/pull/9506>`_
+* Improved PTree insertion and erase performance for storage servers. `(PR #9508) <https://github.com/apple/foundationdb/pull/9508>`_
+* Added exclude to fdbcli's configure command to prevent faulty TLogs from affecting recovery. `(PR #9404) <https://github.com/apple/foundationdb/pull/9404>`_
+* Fixed getMappedRange metrics. `(PR #9331) <https://github.com/apple/foundationdb/pull/9331>`_
+
 7.1.27
 ======
 * Same as 7.1.26 release with AVX enabled.

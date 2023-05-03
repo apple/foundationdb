@@ -38,8 +38,17 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template <class T>
+Optional<EncryptKeyProxyInterface> _getEncryptKeyProxyInterface(const Reference<AsyncVar<T> const>& db) {
+	if constexpr (std::is_same_v<T, ClientDBInfo>) {
+		return db->get().encryptKeyProxy;
+	} else {
+		return db->get().client.encryptKeyProxy;
+	}
+}
+
+template <class T>
 Optional<UID> getEncryptKeyProxyId(const Reference<AsyncVar<T> const>& db) {
-	return db->get().encryptKeyProxy.map(&EncryptKeyProxyInterface::id);
+	return _getEncryptKeyProxyInterface(db).map(&EncryptKeyProxyInterface::id);
 }
 
 ACTOR template <class T>
@@ -63,7 +72,7 @@ ACTOR template <class T>
 Future<EKPGetLatestBaseCipherKeysReply> _getUncachedLatestEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                             EKPGetLatestBaseCipherKeysRequest request,
                                                                             BlobCipherMetrics::UsageType usageType) {
-	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
+	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetLatestEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
@@ -74,7 +83,7 @@ Future<EKPGetLatestBaseCipherKeysReply> _getUncachedLatestEncryptCipherKeys(Refe
 		EKPGetLatestBaseCipherKeysReply reply = wait(proxy.get().getLatestBaseCipherKeys.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetLatestEncryptCipherKeysRequestFailed").error(reply.error.get());
-			throw encrypt_keys_fetch_failed();
+			throw reply.error.get();
 		}
 		return reply;
 	} catch (Error& e) {
@@ -126,6 +135,7 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> _get
 					                                                                     details.baseCipherId,
 					                                                                     details.baseCipherKey.begin(),
 					                                                                     details.baseCipherKey.size(),
+					                                                                     details.baseCipherKCV,
 					                                                                     details.refreshAt,
 					                                                                     details.expireAt);
 					ASSERT(cipherKey.isValid());
@@ -165,7 +175,7 @@ ACTOR template <class T>
 Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                                      EKPGetBaseCipherKeysByIdsRequest request,
                                                                      BlobCipherMetrics::UsageType usageType) {
-	Optional<EncryptKeyProxyInterface> proxy = db->get().encryptKeyProxy;
+	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
 		TraceEvent("GetEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
@@ -176,8 +186,10 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 		EKPGetBaseCipherKeysByIdsReply reply = wait(proxy.get().getBaseCipherKeysByIds.getReply(request));
 		if (reply.error.present()) {
 			TraceEvent(SevWarn, "GetEncryptCipherKeysRequestFailed").error(reply.error.get());
-			throw encrypt_keys_fetch_failed();
+			throw reply.error.get();
 		}
+		// The code below is used only during simulation to test backup/restore ability to handle encryption keys
+		// not being found for deleted tenants
 		if (g_network && g_network->isSimulated() && usageType == BlobCipherMetrics::RESTORE) {
 			std::unordered_set<int64_t> tenantIdsToDrop =
 			    parseStringToUnorderedSet<int64_t>(CLIENT_KNOBS->SIMULATION_EKP_TENANT_IDS_TO_DROP, ',');
@@ -185,7 +197,11 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 				for (auto& baseCipherInfo : request.baseCipherInfos) {
 					if (tenantIdsToDrop.count(baseCipherInfo.domainId)) {
 						TraceEvent("GetEncryptCipherKeysSimulatedError").detail("DomainId", baseCipherInfo.domainId);
-						throw encrypt_keys_fetch_failed();
+						if (deterministicRandom()->coinflip()) {
+							throw encrypt_keys_fetch_failed();
+						} else {
+							throw encrypt_key_not_found();
+						}
 					}
 				}
 			}
@@ -261,6 +277,7 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> _getEncr
 				                                                                     details.baseCipherId,
 				                                                                     itr->second.baseCipherKey.begin(),
 				                                                                     itr->second.baseCipherKey.size(),
+				                                                                     itr->second.baseCipherKCV,
 				                                                                     details.salt,
 				                                                                     itr->second.refreshAt,
 				                                                                     itr->second.expireAt);

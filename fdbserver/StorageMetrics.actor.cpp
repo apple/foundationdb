@@ -22,6 +22,30 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+CommonStorageCounters::CommonStorageCounters(const std::string& name,
+                                             const std::string& id,
+                                             const StorageServerMetrics* metrics)
+  : cc(name, id), finishedQueries("FinishedQueries", cc), bytesQueried("BytesQueried", cc),
+    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc), kvFetched("KVFetched", cc),
+    mutations("Mutations", cc), setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc) {
+	if (metrics) {
+		specialCounter(cc, "BytesStored", [metrics]() { return metrics->byteSample.getEstimate(allKeys); });
+		specialCounter(cc, "BytesReadSampleCount", [metrics]() { return metrics->bytesReadSample.queue.size(); });
+		specialCounter(cc, "OpsReadSampleCount", [metrics]() { return metrics->opsReadSample.queue.size(); });
+		specialCounter(cc, "BytesWriteSampleCount", [metrics]() { return metrics->bytesWriteSample.queue.size(); });
+		specialCounter(cc, "IopsReadSampleCount", [metrics]() { return metrics->iopsSample.queue.size(); });
+	}
+}
+
+// TODO: update the cost as bytesReadPerKSecond + opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY. The source of
+// this model is Redwood will have a constant cost of seek of each read ops then read the actual data.
+// As by 71.2.8, bytesReadPerKSecond should be larger than opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY because
+// the bytes always round to EMPTY_READ_PENALTY when the returned result size is less than EMPTY_READ_PENALTY. This cost
+// is different from what tag throttling use to produce throttling decision.
+int64_t StorageMetrics::readLoadKSecond() const {
+	return std::max(bytesReadPerKSecond, opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY);
+}
+
 int64_t StorageMetricSample::getEstimate(KeyRangeRef keys) const {
 	return sample.sumRange(keys.begin, keys.end);
 }

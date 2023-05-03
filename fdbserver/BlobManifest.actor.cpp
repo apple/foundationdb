@@ -163,11 +163,10 @@ public:
 			const BlobManifestFile& firstFile = *iter;
 			result.push_back(firstFile);
 			// search all following files belonging to same manifest
-			for (auto it = iter + 1; it != allFiles.end(); ++it) {
-				if (it->belongToSameManifest(firstFile)) {
-					result.push_back(*it);
+			for (++iter; iter != allFiles.end(); ++iter) {
+				if (iter->belongToSameManifest(firstFile)) {
+					result.push_back(*iter);
 				} else {
-					iter = it; // start point for next search
 					break;
 				}
 			}
@@ -188,18 +187,20 @@ public:
 	}
 
 	// Delete all files of oldest manifest
-	static void deleteOldest(const std::vector<BlobManifestFile>& allFiles,
-	                         Reference<BackupContainerFileSystem> container) {
+	ACTOR static Future<Void> deleteOldest(std::vector<BlobManifestFile> allFiles,
+	                                       Reference<BackupContainerFileSystem> container) {
 		if (allFiles.empty()) {
-			return;
+			return Void();
 		}
-		int64_t epoch = allFiles.back().epoch;
-		int64_t seqNo = allFiles.back().seqNo;
+		state int64_t epoch = allFiles.back().epoch;
+		state int64_t seqNo = allFiles.back().seqNo;
 		for (auto& f : allFiles) {
 			if (f.epoch == epoch && f.seqNo == seqNo) {
-				container->deleteFile(f.fileName);
+				wait(container->deleteFile(f.fileName));
 			}
 		}
+		TraceEvent("BlobManfiestDelete").detail("Epoch", epoch).detail("SeqNo", seqNo);
+		return Void();
 	}
 
 	// Count how many manifests
@@ -388,7 +389,7 @@ private:
 				// last updated version for table metadata
 				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
 
-				for (auto range : ranges) {
+				for (auto& range : ranges) {
 					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 					limits.minRows = 0;
 					state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
@@ -401,11 +402,7 @@ private:
 						if (!result.more) {
 							break;
 						}
-						if (result.readThrough.present()) {
-							begin = firstGreaterOrEqual(result.readThrough.get());
-						} else {
-							begin = firstGreaterThan(result.back().key);
-						}
+						begin = result.nextBeginKeySelector();
 					}
 				}
 
@@ -416,6 +413,7 @@ private:
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
+				TraceEvent("BlobManfiestDump").detail("Size", splitter->totalBytes());
 				return splitter->totalBytes();
 			} catch (Error& e) {
 				TraceEvent("BlobManfiestDumpError").error(e).log();
@@ -434,11 +432,12 @@ private:
 
 		loop {
 			state std::vector<BlobManifestFile> allFiles = wait(BlobManifestFile::listAll(writer));
+			TraceEvent("BlobManfiestCleanup").detail("FileCount", allFiles.size());
 			int count = BlobManifest::count(allFiles);
 			if (count <= SERVER_KNOBS->BLOB_RESTORE_MANIFEST_RETENTION_MAX) {
 				return Void();
 			}
-			BlobManifest::deleteOldest(allFiles, writer);
+			wait(BlobManifest::deleteOldest(allFiles, writer));
 		}
 	}
 
@@ -485,6 +484,7 @@ public:
 
 			try {
 				state Standalone<VectorRef<KeyRef>> blobRanges;
+				state Standalone<VectorRef<bool>> blobRangesAssigned;
 				// Read all granules
 				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 				limits.minRows = 0;
@@ -494,22 +494,22 @@ public:
 					RangeResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : rows) {
 						blobRanges.push_back_deep(blobRanges.arena(), row.key);
+						blobRangesAssigned.push_back(blobRangesAssigned.arena(), !row.value.empty());
 					}
 					if (!rows.more) {
 						break;
 					}
-					if (rows.readThrough.present()) {
-						begin = firstGreaterOrEqual(rows.readThrough.get());
-					} else {
-						begin = firstGreaterThan(rows.end()[-1].key);
-					}
+					begin = rows.nextBeginKeySelector();
 				}
 
 				// check each granule range
 				state int i = 0;
 				for (i = 0; i < blobRanges.size() - 1; i++) {
 					Key startKey = blobRanges[i].removePrefix(blobGranuleMappingKeys.begin);
+					if (!blobRangesAssigned[i])
+						continue;
 					Key endKey = blobRanges[i + 1].removePrefix(blobGranuleMappingKeys.begin);
+
 					state KeyRange granuleRange = KeyRangeRef(startKey, endKey);
 					try {
 						Standalone<BlobGranuleRestoreVersion> granule = wait(getGranule(&tr, granuleRange));
@@ -565,6 +565,7 @@ private:
 		for (iter = manifest.segmentsBegin(); iter != manifest.segmentsEnd(); ++iter) {
 			wait(loadSegment(self, container, *iter, &totalRows, &totalBytes));
 		}
+		wait(writeDelayedRows(self));
 
 		// Validate tailer
 		if (tailer.totalRows != totalRows || tailer.totalSegments != manifest.totalSegments() ||
@@ -650,11 +651,40 @@ private:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				for (int i = start; i < end; ++i) {
-					tr.set(rows[i].key, rows[i].value);
+					// A special key to be loaded at the end:
+					// Blob worker monitors lastTenantId to refresh tenant map. If we load it before
+					// rest of other part of tenant metadata, Blob worker may get partial tenant map. So delay it.
+					if (rows[i].key == TenantMetadata::lastTenantId().key) {
+						self->delayedRows_.push_back_deep(self->delayedRows_.arena(), rows[i]);
+					} else {
+						tr.set(rows[i].key, rows[i].value);
+					}
 				}
 				wait(tr.commit());
 				dprint("Blob manifest loaded rows from {} to {}\n", start, end);
 				TraceEvent("BlobManifestLoader").detail("RowStart", start).detail("RowEnd", end);
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> writeDelayedRows(Reference<BlobManifestLoader> self) {
+		if (self->delayedRows_.empty()) {
+			return Void();
+		}
+
+		state Transaction tr(self->db_);
+		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				for (auto& row : self->delayedRows_) {
+					tr.set(row.key, row.value);
+				}
+				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -768,10 +798,11 @@ private:
 				int64_t offset;
 				int64_t length;
 				int64_t fullFileLength;
+				int64_t logicalSize;
 				Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta;
 
 				std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
-				std::tie(filename, offset, length, fullFileLength, cipherKeysMeta) =
+				std::tie(filename, offset, length, fullFileLength, logicalSize, cipherKeysMeta) =
 				    decodeBlobGranuleFileValue(row.value);
 				GranuleFileVersion vs = { version, fileType, filename.toString(), length };
 				files.push_back(vs);
@@ -779,11 +810,7 @@ private:
 			if (!results.more) {
 				break;
 			}
-			if (results.readThrough.present()) {
-				begin = firstGreaterOrEqual(results.readThrough.get());
-			} else {
-				begin = firstGreaterThan(results.end()[-1].key);
-			}
+			begin = results.nextBeginKeySelector();
 		}
 		return files;
 	}
@@ -819,6 +846,7 @@ private:
 
 	Database db_;
 	Reference<BlobConnectionProvider> blobConn_;
+	RangeResult delayedRows_; // special rows that we would write at the end of restore
 };
 
 // API to dump a manifest copy to external storage

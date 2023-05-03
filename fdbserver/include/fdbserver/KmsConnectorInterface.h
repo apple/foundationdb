@@ -72,50 +72,45 @@ struct EncryptCipherKeyDetailsRef {
 	EncryptCipherDomainId encryptDomainId;
 	EncryptCipherBaseKeyId encryptKeyId;
 	StringRef encryptKey;
+	EncryptCipherKeyCheckValue encryptKCV;
 	Optional<int64_t> refreshAfterSec;
 	Optional<int64_t> expireAfterSec;
 
-	EncryptCipherKeyDetailsRef() {}
+	EncryptCipherKeyDetailsRef()
+	  : encryptDomainId(INVALID_ENCRYPT_DOMAIN_ID), encryptKeyId(INVALID_ENCRYPT_CIPHER_KEY_ID),
+	    encryptKey(StringRef()) {}
 	explicit EncryptCipherKeyDetailsRef(Arena& arena,
 	                                    EncryptCipherDomainId dId,
 	                                    EncryptCipherBaseKeyId keyId,
-	                                    StringRef key)
-	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)),
+	                                    StringRef key,
+	                                    EncryptCipherKeyCheckValue keyKCV)
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)), encryptKCV(keyKCV),
 	    refreshAfterSec(Optional<int64_t>()), expireAfterSec(Optional<int64_t>()) {}
-	explicit EncryptCipherKeyDetailsRef(EncryptCipherDomainId dId, EncryptCipherBaseKeyId keyId, StringRef key)
-	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(key), refreshAfterSec(Optional<int64_t>()),
-	    expireAfterSec(Optional<int64_t>()) {}
 	explicit EncryptCipherKeyDetailsRef(Arena& arena,
 	                                    EncryptCipherDomainId dId,
 	                                    EncryptCipherBaseKeyId keyId,
 	                                    StringRef key,
+	                                    EncryptCipherKeyCheckValue keyKCV,
 	                                    Optional<int64_t> refAfterSec,
 	                                    Optional<int64_t> expAfterSec)
-	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)), refreshAfterSec(refAfterSec),
-	    expireAfterSec(expAfterSec) {}
-	explicit EncryptCipherKeyDetailsRef(EncryptCipherDomainId dId,
-	                                    EncryptCipherBaseKeyId keyId,
-	                                    StringRef key,
-	                                    Optional<int64_t> refAfterSec,
-	                                    Optional<int64_t> expAfterSec)
-	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(key), refreshAfterSec(refAfterSec),
-	    expireAfterSec(expAfterSec) {}
+	  : encryptDomainId(dId), encryptKeyId(keyId), encryptKey(StringRef(arena, key)), encryptKCV(keyKCV),
+	    refreshAfterSec(refAfterSec), expireAfterSec(expAfterSec) {}
 
 	bool operator==(const EncryptCipherKeyDetailsRef& toCompare) {
 		return encryptDomainId == toCompare.encryptDomainId && encryptKeyId == toCompare.encryptKeyId &&
-		       encryptKey.compare(toCompare.encryptKey) == 0;
+		       encryptKey.compare(toCompare.encryptKey) == 0 && encryptKCV == toCompare.encryptKCV;
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, encryptDomainId, encryptKeyId, encryptKey, refreshAfterSec, expireAfterSec);
+		serializer(ar, encryptDomainId, encryptKeyId, encryptKey, encryptKCV, refreshAfterSec, expireAfterSec);
 	}
 };
 
 struct KmsConnLookupEKsByKeyIdsRep {
 	constexpr static FileIdentifier file_identifier = 2313778;
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetailsRef> cipherKeyDetails;
+	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> cipherKeyDetails;
 
 	KmsConnLookupEKsByKeyIdsRep() {}
 
@@ -172,7 +167,7 @@ struct KmsConnLookupEKsByKeyIdsReq {
 struct KmsConnLookupEKsByDomainIdsRep {
 	constexpr static FileIdentifier file_identifier = 3009025;
 	Arena arena;
-	VectorRef<EncryptCipherKeyDetailsRef> cipherKeyDetails;
+	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> cipherKeyDetails;
 
 	KmsConnLookupEKsByDomainIdsRep() {}
 

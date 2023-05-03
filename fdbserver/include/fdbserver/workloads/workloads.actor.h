@@ -234,7 +234,7 @@ struct IWorkloadFactory : ReferenceCounted<IWorkloadFactory> {
 	virtual Reference<TestWorkload> create(WorkloadContext const& wcx) = 0;
 };
 
-FDB_DECLARE_BOOLEAN_PARAM(UntrustedMode);
+FDB_BOOLEAN_PARAM(UntrustedMode);
 
 template <class Workload>
 struct WorkloadFactory : IWorkloadFactory {
@@ -388,6 +388,10 @@ Future<Void> testExpectedError(Future<Void> test,
                                UID id = UID());
 
 std::string getTestEncryptionFileName();
+
+// This should become a BehaviorInjectionWorkload or perhaps ConfigInjectionWorkload which should be a new class that
+// should represent non-failure behaviors that can be randomly injected into any test run.
+ACTOR Future<Void> customShardConfigWorkload(Database cx);
 
 #include "flow/unactorcompiler.h"
 

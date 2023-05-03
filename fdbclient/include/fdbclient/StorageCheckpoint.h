@@ -25,6 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 
 const std::string checkpointBytesSampleFileName = "metadata_bytes.sst";
+const std::string emptySstFilePath = "Dummy Empty SST File Path";
 
 // FDB storage checkpoint format.
 enum CheckpointFormat {
@@ -60,6 +61,8 @@ struct CheckpointMetaData {
 	Standalone<StringRef> serializedCheckpoint;
 
 	Optional<UID> actionId; // Unique ID defined by the application.
+
+	std::string dir;
 
 	CheckpointMetaData() = default;
 	CheckpointMetaData(const std::vector<KeyRange>& ranges,
@@ -103,13 +106,23 @@ struct CheckpointMetaData {
 		return true;
 	}
 
+	bool containsKey(const KeyRef key) const {
+		for (const auto& range : ranges) {
+			if (range.contains(key)) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	bool operator==(const CheckpointMetaData& r) const { return checkpointID == r.checkpointID; }
 
 	std::string toString() const {
 		std::string res = "Checkpoint MetaData: [Ranges]: " + describe(ranges) +
 		                  " [Version]: " + std::to_string(version) + " [Format]: " + std::to_string(format) +
-		                  " [Server]: " + describe(src) + " [ID]: " + checkpointID.toString() +
-		                  " [State]: " + std::to_string(static_cast<int>(state)) +
+		                  " [Checkpoint Dir:] " + dir + " [Server]: " + describe(src) +
+		                  " [ID]: " + checkpointID.toString() + " [State]: " + std::to_string(static_cast<int>(state)) +
 		                  (actionId.present() ? (" [Action ID]: " + actionId.get().toString()) : "") +
 		                  (bytesSampleFile.present() ? " [bytesSampleFile]: " + bytesSampleFile.get() : "");
 		;
@@ -118,8 +131,17 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId, bytesSampleFile);
+		serializer(ar,
+		           version,
+		           ranges,
+		           format,
+		           state,
+		           checkpointID,
+		           src,
+		           serializedCheckpoint,
+		           actionId,
+		           bytesSampleFile,
+		           dir);
 	}
 };
 
@@ -159,6 +181,7 @@ struct DataMoveMetaData {
 	DataMoveMetaData(UID id, KeyRange range) : id(id), version(invalidVersion), priority(0), mode(0) {
 		this->ranges.push_back(range);
 	}
+	DataMoveMetaData(UID id) : id(id), version(invalidVersion), priority(0), mode(0) {}
 
 	Phase getPhase() const { return static_cast<Phase>(phase); }
 
@@ -167,7 +190,8 @@ struct DataMoveMetaData {
 	std::string toString() const {
 		std::string res = "DataMoveMetaData: [ID]: " + id.shortString() + ", [Range]: " + describe(ranges) +
 		                  ", [Phase]: " + std::to_string(static_cast<int>(phase)) +
-		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest);
+		                  ", [Source Servers]: " + describe(src) + ", [Destination Servers]: " + describe(dest) +
+		                  ", [Checkpoints]: " + describe(checkpoints);
 		return res;
 	}
 

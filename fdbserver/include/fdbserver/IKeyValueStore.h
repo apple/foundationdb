@@ -54,9 +54,7 @@ public:
 	// persistRangeMapping().
 	virtual bool shardAware() const { return false; }
 	virtual void set(KeyValueRef keyValue, const Arena* arena = nullptr) = 0;
-	virtual void clear(KeyRangeRef range,
-	                   const StorageServerMetrics* storageMetrics = nullptr,
-	                   const Arena* arena = nullptr) = 0;
+	virtual void clear(KeyRangeRef range, const Arena* arena = nullptr) = 0;
 	virtual Future<Void> canCommit() { return Void(); }
 	virtual Future<Void> commit(
 	    bool sequential = false) = 0; // returns when prior sets and clears are (atomically) durable
@@ -81,6 +79,9 @@ public:
 
 	// Removes a key range from KVS and returns a list of empty physical shards after the removal.
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
+
+	// Replace the specified range, the default implementation ignores `blockRange` and writes the key one by one.
+	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data);
 
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}

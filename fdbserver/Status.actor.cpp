@@ -21,16 +21,17 @@
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
+#include "fdbserver/BlobManagerInterface.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/Trace.h"
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/Metacluster.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -242,20 +243,6 @@ protected:
 	int64_t counter;
 };
 
-static JsonBuilderObject getLocalityInfo(const LocalityData& locality) {
-	JsonBuilderObject localityObj;
-
-	for (auto it = locality._data.begin(); it != locality._data.end(); it++) {
-		if (it->second.present()) {
-			localityObj[it->first] = it->second.get();
-		} else {
-			localityObj[it->first] = JsonBuilder();
-		}
-	}
-
-	return localityObj;
-}
-
 static JsonBuilderObject getError(const TraceEventFields& errorFields) {
 	JsonBuilderObject statusObj;
 	try {
@@ -354,7 +341,7 @@ JsonBuilderObject machineStatusFetcher(WorkerEvents mMetrics,
 				}
 
 				if (locality.count(it->first)) {
-					statusObj["locality"] = getLocalityInfo(locality[it->first]);
+					statusObj["locality"] = locality[it->first].toJSON<JsonBuilderObject>();
 				}
 
 				statusObj["address"] = address;
@@ -523,6 +510,7 @@ struct RolesInfo {
 		double dataLagSeconds = -1.0;
 		obj["id"] = iface.id().shortString();
 		obj["role"] = role;
+		obj["tss"] = iface.isTss();
 		if (iface.metadata.present()) {
 			StatusObject metadataObj = iface.metadata.get().toJSON();
 			if (iface.storageEngineParams.present()) {
@@ -861,8 +849,8 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		roles.addRole("consistency_scan", db->get().consistencyScan.get());
 	}
 
-	if (db->get().encryptKeyProxy.present()) {
-		roles.addRole("encrypt_key_proxy", db->get().encryptKeyProxy.get());
+	if (db->get().client.encryptKeyProxy.present()) {
+		roles.addRole("encrypt_key_proxy", db->get().client.encryptKeyProxy.get());
 	}
 
 	for (auto& tLogSet : db->get().logSystemConfig.tLogs) {
@@ -956,7 +944,7 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 				std::string MachineID = processMetrics.getValue("MachineID");
 				statusObj["machine_id"] = MachineID;
 
-				statusObj["locality"] = getLocalityInfo(workerItr->interf.locality);
+				statusObj["locality"] = workerItr->interf.locality.toJSON<JsonBuilderObject>();
 
 				statusObj.setKeyRawNumber("uptime_seconds", processMetrics.getValue("UptimeSeconds"));
 
@@ -1914,6 +1902,10 @@ ACTOR static Future<JsonBuilderObject> dataStatusFetcher(WorkerDetails ddWorker,
 			} else if (highestPriority == SERVER_KNOBS->PRIORITY_TEAM_HEALTHY) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy";
+			} else if (highestPriority == SERVER_KNOBS->PRIORITY_PERPETUAL_STORAGE_WIGGLE) {
+				stateSectionObj["healthy"] = true;
+				stateSectionObj["name"] = "healthy_perpetual_wiggle";
+				stateSectionObj["description"] = "Wiggling storage server";
 			} else if (highestPriority >= SERVER_KNOBS->PRIORITY_RECOVER_MOVE) {
 				stateSectionObj["healthy"] = true;
 				stateSectionObj["name"] = "healthy_rebalancing";
@@ -2458,23 +2450,36 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
-    std::vector<BlobWorkerInterface> servers,
+ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
+    Optional<BlobManagerInterface> managerIntf,
+    std::vector<BlobWorkerInterface> workers,
     std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
     std::set<std::string>* incompleteReason) {
 
 	state JsonBuilderObject statusObj;
 	state std::vector<Future<Optional<TraceEventFields>>> futures;
 
-	statusObj["number_of_blob_workers"] = static_cast<int>(servers.size());
-
+	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		for (auto& intf : servers) {
+		// Blob manager status
+		if (managerIntf.present()) {
+			Optional<TraceEventFields> fields = wait(timeoutError(
+			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
+			if (fields.present()) {
+				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
+				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
+				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
+				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+			}
+		}
+
+		// Blob workers status
+		for (auto& intf : workers) {
 			auto workerIntf = addressWorkersMap[intf.address()];
 			futures.push_back(latestEventOnWorker(workerIntf, "BlobWorkerMetrics"));
 		}
 
-		wait(waitForAll(futures));
+		wait(timeoutError(waitForAll(futures), 2.0));
 
 		state int totalRanges = 0;
 		for (auto future : futures) {
@@ -2506,12 +2511,11 @@ ACTOR static Future<JsonBuilderObject> blobWorkerStatusFetcher(
 }
 
 ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
-
 	state JsonBuilderObject statusObj;
-
 	try {
 		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
-		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
+		Optional<BlobRestoreState> restoreState =
+		    wait(timeoutError(BlobRestoreController::getState(restoreController), 1.0));
 		if (restoreState.present()) {
 			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
 			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
@@ -2520,6 +2524,7 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 			Optional<StringRef> error = restoreState.get().error;
 			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
 		}
+
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
@@ -3044,8 +3049,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
     std::vector<NetworkAddress> incompatibleConnections,
     Version datacenterVersionDifference,
     ConfigBroadcaster const* configBroadcaster,
-    Optional<MetaclusterRegistrationEntry> metaclusterRegistration,
-    MetaclusterMetrics metaclusterMetrics) {
+    Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration,
+    metacluster::MetaclusterMetrics metaclusterMetrics) {
 	state double tStart = timer();
 
 	state JsonBuilderArray messages;
@@ -3196,6 +3201,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state std::vector<std::pair<CommitProxyInterface, EventMap>> commitProxies;
 		state std::vector<std::pair<GrvProxyInterface, EventMap>> grvProxies;
 		state std::vector<BlobWorkerInterface> blobWorkers;
+
 		state JsonBuilderObject qos;
 		state JsonBuilderObject dataOverlay;
 		state JsonBuilderObject tenants;
@@ -3390,12 +3396,18 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				if (metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA) {
 					metacluster["data_cluster_name"] = metaclusterRegistration.get().name;
 					metacluster["data_cluster_id"] = metaclusterRegistration.get().id.toString();
-				} else { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
+				} else if (!metaclusterMetrics.error.present()) { // clusterType == ClusterType::METACLUSTER_MANAGEMENT
 					metacluster["num_data_clusters"] = metaclusterMetrics.numDataClusters;
 					tenants["num_tenants"] = metaclusterMetrics.numTenants;
 					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
 					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
+				} else {
+					messages.push_back(JsonString::makeMessage(
+					    "metacluster_metrics_missing",
+					    fmt::format("Failed to fetch metacluster metrics: {}.", metaclusterMetrics.error.get())
+					        .c_str()));
 				}
+
 			} else {
 				metacluster["cluster_type"] = clusterTypeToString(ClusterType::STANDALONE);
 			}
@@ -3509,9 +3521,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
 			JsonBuilderObject blobGranuelsStatus =
-			    wait(blobWorkerStatusFetcher(blobWorkers, address_workers, &status_incomplete_reasons));
+			    wait(timeoutError(blobGranulesStatusFetcher(
+			                          db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
+			                      2.0));
 			statusObj["blob_granules"] = blobGranuelsStatus;
-			JsonBuilderObject blobRestoreStatus = wait(blobRestoreStatusFetcher(cx, &status_incomplete_reasons));
+			JsonBuilderObject blobRestoreStatus =
+			    wait(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0));
 			statusObj["blob_restore"] = blobRestoreStatus;
 		}
 

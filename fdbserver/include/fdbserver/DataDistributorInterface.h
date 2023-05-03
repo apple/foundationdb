@@ -40,9 +40,10 @@ struct DataDistributorInterface {
 	RequestStream<struct GetStorageWigglerStateRequest> storageWigglerState;
 	RequestStream<struct TriggerAuditRequest> triggerAudit;
 	RequestStream<struct TenantsOverStorageQuotaRequest> tenantsOverStorageQuota;
+	RequestStream<struct PrepareBlobRestoreRequest> prepareBlobRestoreReq;
 	RequestStream<struct GetStorageEngineParamsRequest> storageEngineParams;
 
-	DataDistributorInterface() {}
+	DataDistributorInterface() = default;
 	explicit DataDistributorInterface(const struct LocalityData& l, UID id) : locality(l), myId(id) {}
 
 	void initEndpoints() {}
@@ -65,7 +66,41 @@ struct DataDistributorInterface {
 		           storageWigglerState,
 		           triggerAudit,
 		           tenantsOverStorageQuota,
+		           prepareBlobRestoreReq,
 		           storageEngineParams);
+	}
+};
+
+struct PrepareBlobRestoreReply {
+	constexpr static FileIdentifier file_identifier = 1024888;
+
+	enum Type : int8_t { SUCCESS = 0, CONFLICT_SNAPSHOT, CONFLICT_BLOB_RESTORE, PROCESSING_RELOCATION };
+	int8_t res;
+
+	PrepareBlobRestoreReply() = default;
+	PrepareBlobRestoreReply(Type t) : res(int8_t(t)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, res);
+	}
+};
+
+// when receive this request, DD will do the preparation work for blob migrator
+struct PrepareBlobRestoreRequest {
+	constexpr static FileIdentifier file_identifier = 1704246;
+	UID requesterID;
+	ReplyPromise<PrepareBlobRestoreReply> reply;
+	StorageServerInterface ssi;
+	KeyRange keys;
+
+	PrepareBlobRestoreRequest() = default;
+	PrepareBlobRestoreRequest(const UID& id, StorageServerInterface ssi, KeyRangeRef keyRange)
+	  : requesterID(id), ssi(std::move(ssi)), keys(keyRange) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, requesterID, reply, ssi, keys);
 	}
 };
 
@@ -74,7 +109,7 @@ struct HaltDataDistributorRequest {
 	UID requesterID;
 	ReplyPromise<Void> reply;
 
-	HaltDataDistributorRequest() {}
+	HaltDataDistributorRequest() = default;
 	explicit HaltDataDistributorRequest(UID uid) : requesterID(uid) {}
 
 	template <class Ar>
@@ -88,7 +123,7 @@ struct GetDataDistributorMetricsReply {
 	Standalone<VectorRef<DDMetricsRef>> storageMetricsList;
 	Optional<int64_t> midShardSize;
 
-	GetDataDistributorMetricsReply() {}
+	GetDataDistributorMetricsReply() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -103,7 +138,7 @@ struct GetDataDistributorMetricsRequest {
 	ReplyPromise<struct GetDataDistributorMetricsReply> reply;
 	bool midOnly = false;
 
-	GetDataDistributorMetricsRequest() {}
+	GetDataDistributorMetricsRequest() = default;
 	explicit GetDataDistributorMetricsRequest(KeyRange const& keys, const int shardLimit, bool midOnly = false)
 	  : keys(keys), shardLimit(shardLimit), midOnly(midOnly) {}
 
@@ -149,9 +184,9 @@ struct DistributorExclusionSafetyCheckRequest {
 	std::vector<AddressExclusion> exclusions;
 	ReplyPromise<DistributorExclusionSafetyCheckReply> reply;
 
-	DistributorExclusionSafetyCheckRequest() {}
+	DistributorExclusionSafetyCheckRequest() = default;
 	explicit DistributorExclusionSafetyCheckRequest(std::vector<AddressExclusion> exclusions)
-	  : exclusions(exclusions) {}
+	  : exclusions(std::move(exclusions)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -165,7 +200,7 @@ struct DistributorSplitRangeRequest {
 	std::vector<Key> splitPoints;
 	ReplyPromise<SplitShardReply> reply;
 
-	DistributorSplitRangeRequest() {}
+	DistributorSplitRangeRequest() = default;
 	explicit DistributorSplitRangeRequest(std::vector<Key> splitPoints) : splitPoints{ std::move(splitPoints) } {}
 
 	template <class Ar>
@@ -179,7 +214,7 @@ struct GetStorageWigglerStateReply {
 	uint8_t primary = 0, remote = 0; // StorageWiggler::State enum
 	double lastStateChangePrimary = 0.0, lastStateChangeRemote = 0.0;
 
-	GetStorageWigglerStateReply() {}
+	GetStorageWigglerStateReply() = default;
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, primary, remote);
@@ -190,7 +225,7 @@ struct GetStorageWigglerStateRequest {
 	constexpr static FileIdentifier file_identifier = 356722;
 	ReplyPromise<GetStorageWigglerStateReply> reply;
 
-	GetStorageWigglerStateRequest() {}
+	GetStorageWigglerStateRequest() = default;
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, reply);
@@ -201,7 +236,7 @@ struct TenantsOverStorageQuotaReply {
 	constexpr static FileIdentifier file_identifier = 5952266;
 	std::unordered_set<int64_t> tenants;
 
-	TenantsOverStorageQuotaReply() {}
+	TenantsOverStorageQuotaReply() = default;
 	explicit TenantsOverStorageQuotaReply(std::unordered_set<int64_t> const& tenants) : tenants(tenants) {}
 
 	template <class Ar>
@@ -214,7 +249,7 @@ struct TenantsOverStorageQuotaRequest {
 	constexpr static FileIdentifier file_identifier = 84290;
 	ReplyPromise<TenantsOverStorageQuotaReply> reply;
 
-	TenantsOverStorageQuotaRequest() {}
+	TenantsOverStorageQuotaRequest() = default;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

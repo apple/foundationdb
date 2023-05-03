@@ -24,27 +24,29 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/MetaclusterManagement.actor.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/ThreadSafeTransaction.h"
 #include "fdbrpc/simulator.h"
-#include "fdbserver/workloads/MetaclusterConsistency.actor.h"
-#include "fdbserver/workloads/TenantConsistency.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/flow.h"
+
+#include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterConsistency.actor.h"
+#include "metacluster/TenantConsistency.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	static constexpr auto NAME = "MetaclusterManagementConcurrency";
 
-	Reference<IDatabase> managementDb;
-	std::map<ClusterName, Database> dataDbs;
+	metacluster::util::SimulatedMetacluster simMetacluster;
 	std::vector<ClusterName> dataDbIndex;
 
 	double testDuration;
@@ -56,28 +58,19 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterManagementConcurrencyWorkload* self) {
-		Reference<IDatabase> threadSafeHandle =
-		    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
+		wait(store(self->simMetacluster,
+		           metacluster::util::createSimulatedMetacluster(
+		               cx,
+		               deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                                TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+		               {},
+		               metacluster::util::SkipMetaclusterCreation(self->clientId != 0))));
 
-		MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-		self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-
-		ASSERT(g_simulator->extraDatabases.size() > 0);
-		for (auto connectionString : g_simulator->extraDatabases) {
-			ClusterConnectionString ccs(connectionString);
-			self->dataDbIndex.push_back(ClusterName(format("cluster_%08d", self->dataDbs.size())));
-			self->dataDbs[self->dataDbIndex.back()] =
-			    Database::createSimulatedExtraDatabase(connectionString, cx->defaultTenant);
+		ASSERT_GT(self->simMetacluster.dataDbs.size(), 0);
+		for (auto const& [name, db] : self->simMetacluster.dataDbs) {
+			self->dataDbIndex.push_back(name);
 		}
 
-		if (self->clientId == 0) {
-			wait(success(MetaclusterAPI::createMetacluster(
-			    cx.getReference(),
-			    "management_cluster"_sr,
-			    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
-			    false)));
-		}
 		return Void();
 	}
 
@@ -85,22 +78,25 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> registerCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
-		state Database dataDb = self->dataDbs[clusterName];
+		state Database dataDb = self->simMetacluster.dataDbs[clusterName];
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
 		try {
-			state DataClusterEntry entry;
+			state metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
+			if (deterministicRandom()->random01() < 0.2) {
+				entry.autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			}
 			loop {
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRegisteringCluster", debugId)
 				    .detail("ClusterName", clusterName)
 				    .detail("NumTenantGroups", entry.capacity.numTenantGroups);
 				Future<Void> registerFuture =
-				    MetaclusterAPI::registerCluster(self->managementDb,
-				                                    clusterName,
-				                                    dataDb.getReference()->getConnectionRecord()->getConnectionString(),
-				                                    entry);
+				    metacluster::registerCluster(self->simMetacluster.managementDb,
+				                                 clusterName,
+				                                 dataDb.getReference()->getConnectionRecord()->getConnectionString(),
+				                                 entry);
 
 				Optional<Void> result = wait(timeout(registerFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
@@ -123,8 +119,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				ASSERT(false);
 			}
 
-			wait(success(errorOr(MetaclusterAPI::removeCluster(
-			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True))));
+			wait(success(errorOr(metacluster::removeCluster(self->simMetacluster.managementDb,
+			                                                clusterName,
+			                                                ClusterType::METACLUSTER_MANAGEMENT,
+			                                                metacluster::ForceRemove::True))));
 
 			return Void();
 		}
@@ -134,8 +132,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> removeCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
-		state Database dataDb = self->dataDbs[clusterName];
-		state ForceRemove forceRemove(deterministicRandom()->coinflip());
+		state Database dataDb = self->simMetacluster.dataDbs[clusterName];
+		state metacluster::ForceRemove forceRemove(deterministicRandom()->coinflip());
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
@@ -143,8 +141,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			loop {
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRemovingCluster", debugId)
 				    .detail("ClusterName", clusterName);
-				Future<bool> removeFuture = MetaclusterAPI::removeCluster(
-				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::False);
+				Future<bool> removeFuture = metacluster::removeCluster(self->simMetacluster.managementDb,
+				                                                       clusterName,
+				                                                       ClusterType::METACLUSTER_MANAGEMENT,
+				                                                       metacluster::ForceRemove::False);
 				Optional<bool> result = wait(timeout(removeFuture, deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					ASSERT(result.get());
@@ -172,15 +172,15 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	ACTOR static Future<Void> listClusters(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName1 = self->chooseClusterName();
 		state ClusterName clusterName2 = self->chooseClusterName();
-		state int limit = deterministicRandom()->randomInt(1, self->dataDbs.size() + 1);
+		state int limit = deterministicRandom()->randomInt(1, self->simMetacluster.dataDbs.size() + 1);
 		try {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyListClusters")
 			    .detail("StartClusterName", clusterName1)
 			    .detail("EndClusterName", clusterName2)
 			    .detail("Limit", limit);
 
-			std::map<ClusterName, DataClusterMetadata> clusterList =
-			    wait(MetaclusterAPI::listClusters(self->managementDb, clusterName1, clusterName2, limit));
+			std::map<ClusterName, metacluster::DataClusterMetadata> clusterList =
+			    wait(metacluster::listClusters(self->simMetacluster.managementDb, clusterName1, clusterName2, limit));
 
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyListedClusters")
 			    .detail("StartClusterName", clusterName1)
@@ -210,11 +210,12 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> getCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
-		state Database dataDb = self->dataDbs[clusterName];
+		state Database dataDb = self->simMetacluster.dataDbs[clusterName];
 
 		try {
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyGetCluster").detail("ClusterName", clusterName);
-			DataClusterMetadata clusterMetadata = wait(MetaclusterAPI::getCluster(self->managementDb, clusterName));
+			metacluster::DataClusterMetadata clusterMetadata =
+			    wait(metacluster::getCluster(self->simMetacluster.managementDb, clusterName));
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyGotCluster").detail("ClusterName", clusterName);
 
 			ASSERT(dataDb.getReference()->getConnectionRecord()->getConnectionString() ==
@@ -235,25 +236,34 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Optional<DataClusterEntry>> configureImpl(MetaclusterManagementConcurrencyWorkload* self,
-	                                                              ClusterName clusterName,
-	                                                              Optional<int64_t> numTenantGroups,
-	                                                              Optional<ClusterConnectionString> connectionString) {
-		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+	ACTOR static Future<Optional<metacluster::DataClusterEntry>> configureImpl(
+	    MetaclusterManagementConcurrencyWorkload* self,
+	    ClusterName clusterName,
+	    Optional<int64_t> numTenantGroups,
+	    Optional<ClusterConnectionString> connectionString,
+	    Optional<metacluster::AutoTenantAssignment> autoTenantAssignment) {
+		state Reference<ITransaction> tr = self->simMetacluster.managementDb->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<DataClusterMetadata> clusterMetadata =
-				    wait(MetaclusterAPI::tryGetClusterTransaction(tr, clusterName));
-				state Optional<DataClusterEntry> entry;
+				Optional<metacluster::DataClusterMetadata> clusterMetadata =
+				    wait(metacluster::tryGetClusterTransaction(tr, clusterName));
+				state Optional<metacluster::DataClusterEntry> entry;
 
 				if (clusterMetadata.present()) {
 					if (numTenantGroups.present()) {
-						entry = clusterMetadata.get().entry;
+						if (!entry.present()) {
+							entry = clusterMetadata.get().entry;
+						}
 						entry.get().capacity.numTenantGroups = numTenantGroups.get();
 					}
-					MetaclusterAPI::updateClusterMetadata(
-					    tr, clusterName, clusterMetadata.get(), connectionString, entry);
+					if (autoTenantAssignment.present()) {
+						if (!entry.present()) {
+							entry = clusterMetadata.get().entry;
+						}
+						entry.get().autoTenantAssignment = autoTenantAssignment.get();
+					}
+					metacluster::updateClusterMetadata(tr, clusterName, clusterMetadata.get(), connectionString, entry);
 
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 				}
@@ -267,17 +277,22 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> configureCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
-		state Database dataDb = self->dataDbs[clusterName];
+		state Database dataDb = self->simMetacluster.dataDbs[clusterName];
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
 
 		state Optional<int64_t> newNumTenantGroups;
 		state Optional<ClusterConnectionString> connectionString;
+		state Optional<metacluster::AutoTenantAssignment> autoTenantAssignment;
 		if (deterministicRandom()->coinflip()) {
 			newNumTenantGroups = deterministicRandom()->randomInt(0, 4);
 		}
 		if (deterministicRandom()->coinflip()) {
 			connectionString = dataDb.getReference()->getConnectionRecord()->getConnectionString();
+		}
+		if (deterministicRandom()->coinflip()) {
+			autoTenantAssignment = deterministicRandom()->coinflip() ? metacluster::AutoTenantAssignment::DISABLED
+			                                                         : metacluster::AutoTenantAssignment::ENABLED;
 		}
 
 		try {
@@ -287,9 +302,9 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				    .detail("NewNumTenantGroups", newNumTenantGroups.orDefault(-1))
 				    .detail("NewConnectionString",
 				            connectionString.map(&ClusterConnectionString::toString).orDefault(""));
-				Optional<Optional<DataClusterEntry>> result =
-				    wait(timeout(configureImpl(self, clusterName, newNumTenantGroups, connectionString),
-				                 deterministicRandom()->randomInt(1, 30)));
+				Optional<Optional<metacluster::DataClusterEntry>> result = wait(timeout(
+				    configureImpl(self, clusterName, newNumTenantGroups, connectionString, autoTenantAssignment),
+				    deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					TraceEvent(SevDebug, "MetaclusterManagementConcurrencyConfiguredCluster", debugId)
 					    .detail("ClusterName", clusterName)
@@ -319,9 +334,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 
 	ACTOR static Future<Void> restoreCluster(MetaclusterManagementConcurrencyWorkload* self) {
 		state ClusterName clusterName = self->chooseClusterName();
-		state Database db = self->dataDbs[clusterName];
-		state ApplyManagementClusterUpdates applyManagementClusterUpdates(deterministicRandom()->coinflip());
-		state ForceJoin forceJoin(deterministicRandom()->coinflip());
+		state Database db = self->simMetacluster.dataDbs[clusterName];
+		state metacluster::ApplyManagementClusterUpdates applyManagementClusterUpdates(
+		    deterministicRandom()->coinflip());
+		state metacluster::ForceJoin forceJoin(deterministicRandom()->coinflip());
 		state bool removeFirst = !applyManagementClusterUpdates && deterministicRandom()->coinflip();
 
 		state UID debugId = deterministicRandom()->randomUniqueID();
@@ -336,8 +352,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				    .detail("ClusterName", clusterName)
 				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 
-				wait(success(MetaclusterAPI::removeCluster(
-				    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True)));
+				wait(success(metacluster::removeCluster(self->simMetacluster.managementDb,
+				                                        clusterName,
+				                                        ClusterType::METACLUSTER_MANAGEMENT,
+				                                        metacluster::ForceRemove::True)));
 
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreRemovedDataCluster", debugId)
 				    .detail("ClusterName", clusterName)
@@ -350,13 +368,14 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				    .detail("ClusterName", clusterName)
 				    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 
-				wait(MetaclusterAPI::restoreCluster(self->managementDb,
-				                                    clusterName,
-				                                    db->getConnectionRecord()->getConnectionString(),
-				                                    applyManagementClusterUpdates,
-				                                    RestoreDryRun::True,
-				                                    forceJoin,
-				                                    &messages));
+				wait(metacluster::restoreCluster(self->simMetacluster.managementDb,
+				                                 clusterName,
+				                                 db->getConnectionRecord()->getConnectionString(),
+				                                 applyManagementClusterUpdates,
+				                                 metacluster::RestoreDryRun::True,
+				                                 forceJoin,
+				                                 metacluster::ForceReuseTenantIdPrefix::True,
+				                                 &messages));
 
 				TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreDryRunDone", debugId)
 				    .detail("ClusterName", clusterName)
@@ -365,13 +384,14 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				messages.clear();
 			}
 
-			wait(MetaclusterAPI::restoreCluster(self->managementDb,
-			                                    clusterName,
-			                                    db->getConnectionRecord()->getConnectionString(),
-			                                    applyManagementClusterUpdates,
-			                                    RestoreDryRun::False,
-			                                    forceJoin,
-			                                    &messages));
+			wait(metacluster::restoreCluster(self->simMetacluster.managementDb,
+			                                 clusterName,
+			                                 db->getConnectionRecord()->getConnectionString(),
+			                                 applyManagementClusterUpdates,
+			                                 metacluster::RestoreDryRun::False,
+			                                 forceJoin,
+			                                 metacluster::ForceReuseTenantIdPrefix::True,
+			                                 &messages));
 
 			TraceEvent(SevDebug, "MetaclusterManagementConcurrencyRestoreComplete", debugId)
 			    .detail("ClusterName", clusterName)
@@ -383,12 +403,11 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 			    .detail("ApplyManagementClusterUpdates", applyManagementClusterUpdates);
 
 			if (e.code() == error_code_cluster_already_registered) {
-				ASSERT(!forceJoin || applyManagementClusterUpdates == ApplyManagementClusterUpdates::False);
-			} else if (applyManagementClusterUpdates == ApplyManagementClusterUpdates::True &&
-			           e.code() == error_code_invalid_data_cluster) {
+				ASSERT(!forceJoin || !applyManagementClusterUpdates);
+			} else if (applyManagementClusterUpdates && e.code() == error_code_invalid_data_cluster) {
 				// Restoring a data cluster can fail if the cluster is not actually a data cluster registered with
 				// the metacluster
-			} else if (applyManagementClusterUpdates == ApplyManagementClusterUpdates::False &&
+			} else if (!applyManagementClusterUpdates &&
 			           (e.code() == error_code_cluster_already_exists || e.code() == error_code_tenant_already_exists ||
 			            e.code() == error_code_invalid_tenant_configuration)) {
 				// Repopulating a management cluster can fail if the cluster is already in the metacluster
@@ -401,8 +420,10 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 				ASSERT(false);
 			}
 
-			wait(success(errorOr(MetaclusterAPI::removeCluster(
-			    self->managementDb, clusterName, ClusterType::METACLUSTER_MANAGEMENT, ForceRemove::True))));
+			wait(success(errorOr(metacluster::removeCluster(self->simMetacluster.managementDb,
+			                                                clusterName,
+			                                                ClusterType::METACLUSTER_MANAGEMENT,
+			                                                metacluster::ForceRemove::True))));
 		}
 
 		return Void();
@@ -442,8 +463,8 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	}
 	ACTOR static Future<bool> _check(Database cx, MetaclusterManagementConcurrencyWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
-		state MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-		    self->managementDb, AllowPartialMetaclusterOperations::True);
+		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
+		    self->simMetacluster.managementDb, metacluster::util::AllowPartialMetaclusterOperations::True);
 		wait(metaclusterConsistencyCheck.run());
 
 		return true;

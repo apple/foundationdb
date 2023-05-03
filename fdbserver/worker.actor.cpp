@@ -21,10 +21,12 @@
 #include <cstdlib>
 #include <tuple>
 #include <boost/lexical_cast.hpp>
+#include <unordered_map>
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "flow/ApiVersion.h"
+#include "flow/CodeProbe.h"
 #include "flow/IAsyncFile.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/GetEncryptCipherKeys_impl.actor.h"
@@ -770,7 +772,7 @@ bool addressInDbAndPrimaryDc(const NetworkAddress& address, Reference<AsyncVar<S
 		return true;
 	}
 
-	if (dbi.encryptKeyProxy.present() && dbi.encryptKeyProxy.get().address() == address) {
+	if (dbi.client.encryptKeyProxy.present() && dbi.client.encryptKeyProxy.get().address() == address) {
 		return true;
 	}
 
@@ -1036,6 +1038,67 @@ TEST_CASE("/fdbserver/worker/addressInDbAndRemoteDc") {
 
 } // namespace
 
+bool addressIsRemoteLogRouter(const NetworkAddress& address, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	const auto& dbi = dbInfo->get();
+
+	for (const auto& logSet : dbi.logSystemConfig.tLogs) {
+		if (!logSet.isLocal) {
+			for (const auto& logRouter : logSet.logRouters) {
+				if (logRouter.present() && logRouter.interf().addresses().contains(address)) {
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
+}
+
+namespace {
+
+TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
+	// Setup a ServerDBInfo for test.
+	ServerDBInfo testDbInfo;
+	LocalityData testLocal;
+	testLocal.set("dcid"_sr, StringRef(std::to_string(1)));
+	testDbInfo.master.locality = testLocal;
+
+	// First, create an empty TLogInterface, and check that it shouldn't be considered as remote log router.
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = true;
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface<TLogInterface>());
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a local log router, and it shouldn't be considered as remote log router.
+	TLogInterface localLogRouter(testLocal);
+	localLogRouter.initEndpoints();
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(localLogRouter));
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote TLog, and it shouldn't be considered as remote log router.
+	LocalityData fakeRemote;
+	fakeRemote.set("dcid"_sr, StringRef(std::to_string(2)));
+	TLogInterface remoteTlog(fakeRemote);
+	remoteTlog.initEndpoints();
+
+	testDbInfo.logSystemConfig.tLogs.push_back(TLogSet());
+	testDbInfo.logSystemConfig.tLogs.back().isLocal = false;
+	testDbInfo.logSystemConfig.tLogs.back().tLogs.push_back(OptionalInterface(remoteTlog));
+	ASSERT(!addressIsRemoteLogRouter(g_network->getLocalAddress(), makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	// Create a remote log router, and it should be considered as remote log router.
+	NetworkAddress logRouterAddress(IPAddress(0x26262626), 1);
+	TLogInterface remoteLogRouter(fakeRemote);
+	remoteLogRouter.initEndpoints();
+	remoteLogRouter.peekMessages = RequestStream<struct TLogPeekRequest>(Endpoint({ logRouterAddress }, UID(1, 2)));
+	testDbInfo.logSystemConfig.tLogs.back().logRouters.push_back(OptionalInterface(remoteLogRouter));
+	ASSERT(addressIsRemoteLogRouter(logRouterAddress, makeReference<AsyncVar<ServerDBInfo>>(testDbInfo)));
+
+	return Void();
+}
+
+} // namespace
+
 // The actor that actively monitors the health of local and peer servers, and reports anomaly to the cluster controller.
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
@@ -1046,14 +1109,20 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
 			const auto& allPeers = FlowTransport::transport().getAllPeers();
+
+			// Check remote log router connectivity only when remote TLogs are recruited and in use.
+			bool checkRemoteLogRouterConnectivity = dbInfo->get().recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
+			                                        dbInfo->get().recoveryState == RecoveryState::FULLY_RECOVERED;
 			UpdateWorkerHealthRequest req;
 
-			enum WorkerLocation { None, Primary, Remote };
+			enum WorkerLocation { None, Primary, Satellite, Remote };
 			WorkerLocation workerLocation = None;
 			if (addressesInDbAndPrimaryDc(interf.addresses(), dbInfo)) {
 				workerLocation = Primary;
 			} else if (addressesInDbAndRemoteDc(interf.addresses(), dbInfo)) {
 				workerLocation = Remote;
+			} else if (addressesInDbAndPrimarySatelliteDc(interf.addresses(), dbInfo)) {
+				workerLocation = Satellite;
 			}
 
 			if (workerLocation != None) {
@@ -1062,11 +1131,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 					    peer->pingLatencies.getPopulationSize() < SERVER_KNOBS->PEER_LATENCY_CHECK_MIN_POPULATION) {
 						// Ignore peers that don't have enough samples.
 						// TODO(zhewu): Currently, FlowTransport latency monitor clears ping latency samples on a
-						// regular
-						//              basis, which may affect the measurement count. Currently,
-						//              WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval,
-						//              so it may be ok. If this ends to be a problem, we need to consider keep track of
-						//              last ping latencies logged.
+						// regular basis, which may affect the measurement count. Currently,
+						// WORKER_HEALTH_MONITOR_INTERVAL is much smaller than the ping clearance interval, so it may be
+						// ok. If this ends to be a problem, we need to consider keep track of last ping latencies
+						// logged.
 						continue;
 					}
 					bool degradedPeer = false;
@@ -1137,6 +1205,28 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 							    .detail("PingTimeoutCount", peer->timeoutCount)
 							    .detail("ConnectionFailureCount", peer->connectFailedCount);
 						}
+					} else if (checkRemoteLogRouterConnectivity &&
+					           (workerLocation == Primary || workerLocation == Satellite) &&
+					           addressIsRemoteLogRouter(address, dbInfo)) {
+						// Monitor remote log router's connectivity to the primary DCs' transaction system. We ignore
+						// latency based degradation between primary region and remote region due to that remote region
+						// may be distant from primary region.
+						if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+							TraceEvent("HealthMonitorDetectDegradedPeer")
+							    .detail("WorkerLocation", workerLocation)
+							    .detail("Peer", address)
+							    .detail("RemoteLogRouter", true)
+							    .detail("Elapsed", now() - lastLoggedTime)
+							    .detail("Disconnected", true)
+							    .detail("MinLatency", peer->pingLatencies.min())
+							    .detail("MaxLatency", peer->pingLatencies.max())
+							    .detail("MeanLatency", peer->pingLatencies.mean())
+							    .detail("MedianLatency", peer->pingLatencies.median())
+							    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+							    .detail("PingTimeoutCount", peer->timeoutCount)
+							    .detail("ConnectionFailureCount", peer->connectFailedCount);
+							disconnectedPeer = true;
+						}
 					}
 
 					if (disconnectedPeer) {
@@ -1160,7 +1250,10 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 						if ((workerLocation == Primary && addressInDbAndPrimaryDc(address, dbInfo)) ||
 						    (workerLocation == Remote && addressInDbAndRemoteDc(address, dbInfo)) ||
-						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+						    (workerLocation == Primary && addressInDbAndPrimarySatelliteDc(address, dbInfo)) ||
+						    (checkRemoteLogRouterConnectivity &&
+						     (workerLocation == Primary || workerLocation == Satellite) &&
+						     addressIsRemoteLogRouter(address, dbInfo))) {
 							TraceEvent("HealthMonitorDetectRecentClosedPeer").suppressFor(30).detail("Peer", address);
 							req.disconnectedPeers.push_back(address);
 						}
@@ -1332,20 +1425,55 @@ ACTOR Future<Void> monitorHighMemory(int64_t threshold) {
 	return Void();
 }
 
+struct StorageDiskCleaner {
+	KeyValueStoreType storeType;
+	LocalityData locality;
+	std::string filename;
+	Future<Void> future;
+};
+
 struct TrackRunningStorage {
 	UID self;
 	KeyValueStoreType storeType;
+	LocalityData locality;
+	std::string filename;
 	std::set<std::pair<UID, KeyValueStoreType>>* runningStorages;
+	std::unordered_map<UID, StorageDiskCleaner>* storageCleaners;
+
 	TrackRunningStorage(UID self,
 	                    KeyValueStoreType storeType,
-	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages)
-	  : self(self), storeType(storeType), runningStorages(runningStorages) {
+	                    LocalityData locality,
+	                    const std::string& filename,
+	                    std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+	                    std::unordered_map<UID, StorageDiskCleaner>* storageCleaners)
+	  : self(self), storeType(storeType), locality(locality), filename(filename), runningStorages(runningStorages),
+	    storageCleaners(storageCleaners) {
 		runningStorages->emplace(self, storeType);
 	}
-	~TrackRunningStorage() { runningStorages->erase(std::make_pair(self, storeType)); };
+	~TrackRunningStorage() {
+		runningStorages->erase(std::make_pair(self, storeType));
+
+		// Start a disk cleaner except for tss data store
+		try {
+			if (basename(filename).find(testingStoragePrefix.toString()) != 0) {
+				if (!storageCleaners->contains(self)) {
+					StorageDiskCleaner cleaner;
+					cleaner.storeType = storeType;
+					cleaner.locality = locality;
+					cleaner.filename = filename;
+					cleaner.future = Void(); // cleaner task will start later
+					storageCleaners->insert({ self, cleaner });
+					TraceEvent("AddStorageCleaner", self).detail("Size", storageCleaners->size());
+				}
+			}
+		} catch (Error& e) {
+			TraceEvent("SkipStorageCleaner", self).error(e).detail("File", filename);
+		}
+	};
 };
 
 ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValueStoreType>>* runningStorages,
+                                                 std::unordered_map<UID, StorageDiskCleaner>* storageCleaners,
                                                  Future<Void> prevStorageServer,
                                                  KeyValueStoreType storeType,
                                                  std::string filename,
@@ -1360,7 +1488,7 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  bool validateDataFiles,
                                                  Optional<EncryptionAtRestMode> encryptionMode,
                                                  Reference<StorageEngineParamSet> storageEngineParams) {
-	state TrackRunningStorage _(id, storeType, runningStorages);
+	state TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	loop {
 		state Future<Void> kvClosed = store->onClosed();
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
@@ -1746,6 +1874,65 @@ ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<
 	return Void();
 }
 
+ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                                           std::unordered_map<UID, StorageDiskCleaner>* cleaners,
+                                           UID storeID,
+                                           StorageDiskCleaner cleaner,
+                                           int64_t memoryLimit) {
+	state int retries = 0;
+	loop {
+		try {
+			if (retries > SERVER_KNOBS->STORAGE_DISK_CLEANUP_MAX_RETRIES) {
+				TraceEvent("SkipDiskCleanup").detail("Filename", cleaner.filename).detail("StoreID", storeID);
+				return Void();
+			}
+
+			TraceEvent("StorageServerLivenessCheck").detail("StoreID", storeID).detail("Retry", retries);
+			Reference<CommitProxyInfo> commitProxies(new CommitProxyInfo(dbInfo->get().client.commitProxies));
+			if (commitProxies->size() == 0) {
+				TraceEvent("SkipDiskCleanup").log();
+				return Void();
+			}
+			GetStorageServerRejoinInfoRequest request(storeID, cleaner.locality.dcId());
+			GetStorageServerRejoinInfoReply _rep =
+			    wait(basicLoadBalance(commitProxies, &CommitProxyInterface::getStorageServerRejoinInfo, request));
+			// a successful response means the storage server is still alive
+			retries++;
+		} catch (Error& e) {
+			// error worker_removed indicates the storage server has been removed, so it's safe to delete its data
+			if (e.code() == error_code_worker_removed) {
+				// delete the files on disk
+				if (fileExists(cleaner.filename)) {
+					state IKeyValueStore* kvs = openKVStore(
+					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
+					wait(ready(kvs->init()));
+					kvs->dispose();
+					CODE_PROBE(true, "Removed stale disk file");
+					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
+				}
+
+				// remove the cleaner
+				cleaners->erase(storeID);
+				return Void();
+			}
+		}
+		wait(delay(SERVER_KNOBS->STORAGE_DISK_CLEANUP_RETRY_INTERVAL));
+	}
+}
+
+// Delete storage server data files if it's not alive anymore
+void cleanupStorageDisks(Reference<AsyncVar<ServerDBInfo>> dbInfo,
+                         std::unordered_map<UID, StorageDiskCleaner>& storageCleaners,
+                         int64_t memoryLimit) {
+	for (auto& cleaner : storageCleaners) {
+		if (cleaner.second.future.isReady()) {
+			CODE_PROBE(true, "Cleanup stale disk stores for double recruitment");
+			cleaner.second.future =
+			    cleanupStaleStorageDisk(dbInfo, &storageCleaners, cleaner.first, cleaner.second, memoryLimit);
+		}
+	}
+}
+
 ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                 LocalityData locality,
@@ -1804,7 +1991,14 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state std::string coordFolder = abspath(_coordFolder);
 
 	state WorkerInterface interf(locality);
+
 	state std::set<std::pair<UID, KeyValueStoreType>> runningStorages;
+	// storageCleaners manages cleanup actors after a storage server is terminated. It cleans up
+	// stale disk files in case storage server is terminated for io_timeout or io_error but the worker
+	// process is still alive. If worker process is alive, it may be recruited as a new storage server
+	// and leave the stale disk file unattended.
+	state std::unordered_map<UID, StorageDiskCleaner> storageCleaners;
+
 	interf.initEndpoints();
 
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
@@ -1912,8 +2106,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 
 				// std::string doesn't have startsWith
 				std::string tssPrefix = testingStoragePrefix.toString();
-				// TODO might be more efficient to mark a boolean on DiskStore in getDiskStores, but that kind of breaks
-				// the abstraction since DiskStore also applies to storage cache + tlog
+				// TODO might be more efficient to mark a boolean on DiskStore in getDiskStores, but that kind of
+				// breaks the abstraction since DiskStore also applies to storage cache + tlog
 				bool isTss = s.filename.find(tssPrefix) != std::string::npos;
 				Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 
@@ -1922,8 +2116,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.locality = locality;
 				recruited.tssPairID =
 				    isTss ? Optional<UID>(UID())
-				          : Optional<UID>(); // presence of optional is used as source of truth for tss vs not. Value
-				                             // gets overridden later in restoreDurableState
+				          : Optional<UID>(); // presence of optional is used as source of truth for tss vs not.
+				                             // Value gets overridden later in restoreDurableState
 				recruited.initEndpoints();
 
 				std::map<std::string, std::string> details;
@@ -1962,6 +2156,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
+				                                  &storageCleaners,
 				                                  f,
 				                                  s.storeType,
 				                                  s.filename,
@@ -2137,13 +2332,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		// to make sure:
 		//   (1) the worker can start serving requests once it is recruited as storage or TLog server, and
 		//   (2) a slow recovering worker server wouldn't been recruited as TLog and make recovery slow.
-		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to have
-		// some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
+		// However, the worker server can still serve stateless roles, and if encryption is on, it is crucial to
+		// have some worker available to serve the EncryptKeyProxy role, before opening encrypted storage files.
 		//
 		// To achieve it, registrationClient allows a worker to first register with the cluster controller to be
-		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local disk
-		// recovery is complete (if applicable), the process re-registers with cluster controller as a stateful process
-		// role.
+		// recruited only as a stateless process i.e. it can't be recruited as a SS or TLog process; once the local
+		// disk recovery is complete (if applicable), the process re-registers with cluster controller as a stateful
+		// process role.
 		Promise<Void> recoveredDiskFiles;
 		Future<Void> recoverDiskFiles = trigger(
 		    [=]() {
@@ -2211,7 +2406,9 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						    .detail("BlobMigratorID",
 						            localInfo.blobMigrator.present() ? localInfo.blobMigrator.get().id() : UID())
 						    .detail("EncryptKeyProxyID",
-						            localInfo.encryptKeyProxy.present() ? localInfo.encryptKeyProxy.get().id() : UID());
+						            localInfo.client.encryptKeyProxy.present()
+						                ? localInfo.client.encryptKeyProxy.get().id()
+						                : UID());
 						dbInfo->set(localInfo);
 					}
 					errorForwarders.add(
@@ -2402,17 +2599,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					CODE_PROBE(true, "Recruited while already a blob manager.");
 				} else if (lastBMRecruitRequestId == req.reqId && !bmEpochAndInterf->get().present()) {
 					// The previous blob manager WAS present, like the above case, but it died before the CC got the
-					// response to the recruitment request, so the CC retried to recruit the same blob manager id/epoch
-					// from the same reqId. To keep epoch safety between different managers, instead of restarting the
-					// same manager id at the same epoch, we should just tell it the original request succeeded, and let
-					// it realize this manager died via failure detection and start a new one.
+					// response to the recruitment request, so the CC retried to recruit the same blob manager
+					// id/epoch from the same reqId. To keep epoch safety between different managers, instead of
+					// restarting the same manager id at the same epoch, we should just tell it the original request
+					// succeeded, and let it realize this manager died via failure detection and start a new one.
 					CODE_PROBE(true, "Recruited while formerly the same blob manager.", probe::decoration::rare);
 				} else {
-					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it out
-					// via the epoch check
-					// Also, not halting lets us handle the case here where the last BM had a higher
-					// epoch and somehow the epochs got out of order by a delayed initialize request. The one we start
-					// here will just halt on the lock check.
+					// TODO: it'd be more optimal to halt the last manager if present here, but it will figure it
+					// out via the epoch check Also, not halting lets us handle the case here where the last BM had
+					// a higher epoch and somehow the epochs got out of order by a delayed initialize request. The
+					// one we start here will just halt on the lock check.
 					startRole(Role::BLOB_MANAGER, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
 					DUMPTOKEN(recruited.haltBlobManager);
@@ -2510,8 +2706,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				} else {
 					startRole(Role::ENCRYPT_KEY_PROXY, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.waitFailure);
+					DUMPTOKEN(recruited.haltEncryptKeyProxy);
+					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
+					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
+					DUMPTOKEN(recruited.getLatestBlobMetadata);
 
-					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo);
+					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
 					    errors,
 					    Role::ENCRYPT_KEY_PROXY,
@@ -2612,6 +2812,13 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					ASSERT(req.initialClusterVersion >= 0);
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::Storage;
+
+					// When a new storage server is recruited, we need to check if any other storage
+					// server has run on this worker process(a.k.a double recruitment). The previous storage
+					// server may have leftover disk files if it stopped with io_error or io_timeout. Now DD
+					// already repairs the team and it's time to start the cleanup
+					cleanupStorageDisks(dbInfo, storageCleaners, memoryLimit);
+
 					bool isTss = req.tssPairIDAndVersion.present();
 					StorageServerInterface recruited(req.interfaceId);
 					recruited.locality = locality;
@@ -2686,6 +2893,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
+					                                  &storageCleaners,
 					                                  s,
 					                                  req.storeType,
 					                                  filename,
@@ -2952,30 +3160,35 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role);
 					ASSERT(snapReq.role == snapReqMap[snapReqKey].role);
 					ASSERT(snapReq.snapPayload == snapReqMap[snapReqKey].snapPayload);
+					// Discard the old request if a duplicate new request is received
+					// In theory, the old request should be discarded when we send this error since DD won't resend a
+					// request unless for a network error, where the old request is discarded before sending the
+					// duplicate request.
+					snapReqMap[snapReqKey].reply.sendError(duplicate_snapshot_request());
 					snapReqMap[snapReqKey] = snapReq;
 				} else {
 					snapReqMap[snapReqKey] = snapReq; // set map point to the request
 					if (g_network->isSimulated() && (now() - lastSnapTime) < SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP) {
-						// only allow duplicate snapshots on same process in a short time for different roles
-						auto okay = (lastSnapReq.snapUID == snapReq.snapUID) && lastSnapReq.role != snapReq.role;
+						// duplicate snapshots on the same process for the same role is not allowed
+						auto okay = lastSnapReq.snapUID != snapReq.snapUID || lastSnapReq.role != snapReq.role;
 						TraceEvent(okay ? SevInfo : SevError, "RapidSnapRequestsOnSameProcess")
-						    .detail("CurrSnapUID", snapReqKey)
+						    .detail("CurrSnapUID", snapReq.snapUID)
 						    .detail("PrevSnapUID", lastSnapReq.snapUID)
 						    .detail("CurrRole", snapReq.role)
 						    .detail("PrevRole", lastSnapReq.role)
 						    .detail("GapTime", now() - lastSnapTime);
 					}
-					errorForwarders.add(workerSnapCreate(snapReq,
-					                                     snapReq.role.toString() == "coord" ? coordFolder : folder,
-					                                     &snapReqMap,
-					                                     &snapReqResultMap));
 					auto* snapReqResultMapPtr = &snapReqResultMap;
 					errorForwarders.add(fmap(
 					    [snapReqResultMapPtr, snapReqKey](Void _) {
 						    snapReqResultMapPtr->erase(snapReqKey);
 						    return Void();
 					    },
-					    delay(SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					    delayed(workerSnapCreate(snapReq,
+					                             snapReq.role.toString() == "coord" ? coordFolder : folder,
+					                             &snapReqMap,
+					                             &snapReqResultMap),
+					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
 					if (g_network->isSimulated()) {
 						lastSnapReq = snapReq;
 						lastSnapTime = now();

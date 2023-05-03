@@ -25,8 +25,6 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-FDB_DEFINE_BOOLEAN_PARAM(SkipDDModeCheck);
-
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -244,6 +242,11 @@ class DDTxnProcessorImpl {
 
 		state Transaction tr(cx);
 
+		if (ddLargeTeamEnabled()) {
+			wait(store(result->userRangeConfig,
+			           DDConfiguration().userRangeConfig().getSnapshot(
+			               SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end)));
+		}
 		state std::map<UID, Optional<Key>> server_dc;
 		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
@@ -284,8 +287,8 @@ class DDTxnProcessorImpl {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
 				}
-				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isDDEnabled()) {
-					// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
+					// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
 				}
@@ -315,6 +318,16 @@ class DDTxnProcessorImpl {
 				for (int i = 0; i < dms.size(); ++i) {
 					auto dataMove = std::make_shared<DataMove>(decodeDataMoveValue(dms[i].value), true);
 					const DataMoveMetaData& meta = dataMove->meta;
+					if (meta.ranges.empty()) {
+						// Any persisted datamove with an empty range must be an tombstone persisted by
+						// a background cleanup (with retry_clean_up_datamove_tombstone_added),
+						// and this datamove must be in DataMoveMetaData::Deleting state
+						// A datamove without processed by a background cleanup must have a non-empty range
+						// For this case, we simply clear the range when dd init
+						ASSERT(meta.getPhase() == DataMoveMetaData::Deleting);
+						result->toCleanDataMoveTombstone.push_back(meta.id);
+						continue;
+					}
 					ASSERT(!meta.ranges.empty());
 					for (const UID& id : meta.src) {
 						auto& dc = server_dc[id];
@@ -348,7 +361,12 @@ class DDTxnProcessorImpl {
 				RangeResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
-					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
+					auto auditState = decodeAuditStorageState(ads[i].value);
+					if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed ||
+					    auditState.getPhase() == AuditPhase::Error) {
+						continue;
+					}
+					result->auditStates.push_back(auditState);
 				}
 
 				succeeded = true;
@@ -493,7 +511,7 @@ class DDTxnProcessorImpl {
 
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled()) {
+				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
 				}
@@ -503,8 +521,8 @@ class DDTxnProcessorImpl {
 					rd >> m;
 					TraceEvent(SevDebug, "WaitForDDEnabled")
 					    .detail("Mode", m)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-					if (m && ddEnabledState->isDDEnabled()) {
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						return Void();
 					}
@@ -526,16 +544,16 @@ class DDTxnProcessorImpl {
 
 			try {
 				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled())
+				if (!mode.present() && ddEnabledState->isEnabled())
 					return true;
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					int m;
 					rd >> m;
-					if (m && ddEnabledState->isDDEnabled()) {
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						    .detail("Mode", m)
-						    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 						return true;
 					}
 				}
@@ -543,17 +561,17 @@ class DDTxnProcessorImpl {
 				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-				if (ddEnabledState->isDDEnabled() && (currentOwner != dataDistributionModeLock)) {
+				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
 					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 					    .detail("CurrentOwner", currentOwner)
 					    .detail("DDModeLock", dataDistributionModeLock)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 					return true;
 				}
 				TraceEvent(SevDebug, "IsDDEnabledFailed")
 				    .detail("CurrentOwner", currentOwner)
 				    .detail("DDModeLock", dataDistributionModeLock)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+				    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 				return false;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -720,7 +738,7 @@ struct DDMockTxnProcessorImpl {
 			KeyRangeRef cloneRef = range;
 			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
 				    auto& server = selfP->mgs->allServers.at(id);
-				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
+				    return server->allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
 			    })) {
 				break;
 			}
@@ -763,7 +781,7 @@ struct DDMockTxnProcessorImpl {
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
-		res.servers.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+		res.servers.emplace_back(mss->ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
 	// FIXME(xwang): possible generate version from time?
 	res.readVersion = 0;
@@ -887,10 +905,10 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 		}
 		// insert to serverKeys
 		for (auto& id : shardInfo.primarySrc) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
 		}
 		for (auto& id : shardInfo.primaryDest) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
 		}
 	}
 
@@ -974,8 +992,8 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
 		auto& server = mgs->allServers.at(id);
-		server.setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
-		server.signalFetchKeys(keys, randomRangeSize);
+		server->setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server->signalFetchKeys(keys, randomRangeSize);
 	}
 	return Void();
 }
@@ -1018,7 +1036,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
 	// remove destination servers from source servers
@@ -1026,7 +1044,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	for (auto& id : srcTeams.front().servers) {
 		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
-			mgs->allServers.at(id).removeShard(keys);
+			mgs->allServers.at(id)->removeShard(keys);
 		}
 	}
 	mgs->shardMapping->finishMove(keys);
@@ -1037,4 +1055,18 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 Future<Void> DDMockTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
                                                    const std::map<UID, StorageServerInterface>& tssMapping) {
 	return ::rawFinishMovement(mgs, params, tssMapping);
+}
+
+Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(const UID& id,
+                                                                              double maxStaleness) const {
+	return cx->getStorageStats(id, maxStaleness);
+}
+
+Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
+                                                                                  double maxStaleness) const {
+	auto it = mgs->allServers.find(id);
+	if (it == mgs->allServers.end()) {
+		return Optional<HealthMetrics::StorageStats>();
+	}
+	return Optional<HealthMetrics::StorageStats>(it->second->getStorageStats());
 }

@@ -12,7 +12,7 @@ import lib.fdb_process
 import lib.local_cluster
 import lib.process
 
-from typing import List
+from typing import List, Union
 
 logger = logging.getLogger("binding_test")
 
@@ -58,10 +58,6 @@ def _setup_logs(log_level: int = logging.INFO):
     lib_logger = logging.getLogger("lib")
     lib_logger.addHandler(stdout_handler)
     lib_logger.setLevel(log_level)
-
-    local_cluster_logger = logging.getLogger("local_cluster")
-    local_cluster_logger.addHandler(stdout_handler)
-    local_cluster_logger.setLevel(log_level)
 
 
 def _setup_args() -> argparse.Namespace:
@@ -156,7 +152,7 @@ class TestSet:
         self._update_path_from_env("LD_LIBRARY_PATH", ld_library_path)
         self._update_path_from_env("PYTHONPATH", DEFAULT_PYTHON_BINDER)
 
-    def set_cluster_file(self, cluster_file: str):
+    def set_cluster_file(self, cluster_file: Union[str, None]):
         """Sets the cluster file for the test"""
         self._cluster_file = cluster_file
 
@@ -218,7 +214,7 @@ class TestSet:
                 test_name=test_name,
                 additional_args=additional_args,
             )
-        except asyncio.TimeoutError as timeout:
+        except asyncio.TimeoutError:
             logger.exception(
                 f"Test API [{api_language}] Test name [{test_name}] failed due to timeout {self._timeout}"
             )
@@ -301,7 +297,7 @@ def _log_cluster_lines_with_severity(
                 )
 
 
-def _generate_test_list(test_set: TestSet, api_languages: List[str]):
+def _generate_test_list(test_set: TestSet, api_languages: List[str] = API_LANGUAGES):
     tests = [
         test_set.run_scripted_test,
         test_set.run_api_test,
@@ -310,14 +306,14 @@ def _generate_test_list(test_set: TestSet, api_languages: List[str]):
         test_set.run_directory_hca_test,
     ]
     return [
-        lambda: test(api_language) for test in tests for api_language in API_LANGUAGES
+        lambda: test(api_language) for test in tests for api_language in api_languages
     ]
 
 
 async def run_binding_tests(
     test_set: TestSet,
     num_cycles: int,
-    stop_at_failure: int = None,
+    stop_at_failure: Union[int, None] = None,
     random_pick_single: bool = False,
 ) -> int:
     """Run the binding tests
@@ -362,7 +358,7 @@ async def run_binding_tests(
         return num_failures
 
     async with lib.local_cluster.FDBServerLocalCluster(1) as local_cluster:
-        test_set.set_cluster_file(local_cluster)
+        test_set.set_cluster_file(local_cluster.cluster_file)
 
         try:
             await run_test_cycles()
@@ -405,7 +401,6 @@ def main() -> int:
         timeout=args.test_timeout,
     )
 
-    logger.info(f"Binding test start")
     num_failures = asyncio.run(
         run_binding_tests(test_set, args.num_cycles, args.stop_at_failure, args.random)
     )

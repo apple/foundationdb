@@ -36,9 +36,6 @@
 #define BOOST_REGEX_NO_LIB
 #endif
 #include <boost/asio.hpp>
-#if defined(HAVE_WOLFSSL)
-#include <wolfssl/options.h>
-#endif
 #include "boost/asio/ssl.hpp"
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <boost/range.hpp>
@@ -1826,7 +1823,10 @@ ACTOR static Future<std::vector<NetworkAddress>> resolveTCPEndpoint_impl(Net2* s
 			    auto endpoint = iter->endpoint();
 			    auto addr = endpoint.address();
 			    if (addr.is_v6()) {
-				    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    // IPV6 loopback might not be supported, only return IPV6 address
+				    if (!addr.is_loopback()) {
+					    addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				    }
 			    } else {
 				    addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
 			    }

@@ -466,7 +466,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	KeyRef mapper;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	int matchIndex;
 	Optional<TagSet> tags;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
@@ -493,7 +492,6 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           tenantInfo,
 		           options,
 		           ssLatestCommitVersions,
-		           matchIndex,
 		           arena);
 	}
 };
@@ -655,6 +653,9 @@ struct StorageMetrics {
 	int64_t opsReadPerKSecond = 0;
 
 	static const int64_t infinity = 1LL << 60;
+
+	// the read load model coming from both read ops and read bytes
+	int64_t readLoadKSecond() const;
 
 	bool allLessOrEqual(const StorageMetrics& rhs) const {
 		return bytes <= rhs.bytes && bytesWrittenPerKSecond <= rhs.bytesWrittenPerKSecond &&
@@ -1283,12 +1284,12 @@ struct StorageQueuingMetricsReply {
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
-	int64_t bytesDurable, bytesInput;
+	int64_t bytesDurable{ 0 }, bytesInput{ 0 };
 	StorageBytes storageBytes;
 	Version version; // current storage server version
 	Version durableVersion; // latest version durable on storage server
-	double cpuUsage;
-	double diskUsage;
+	double cpuUsage{ 0.0 };
+	double diskUsage{ 0.0 };
 	double localRateLimit;
 	std::vector<TagInfo> busiestTags;
 

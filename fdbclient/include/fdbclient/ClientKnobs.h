@@ -26,8 +26,8 @@
 #include "flow/Knobs.h"
 #include "flow/flow.h"
 
-FDB_DECLARE_BOOLEAN_PARAM(Randomize);
-FDB_DECLARE_BOOLEAN_PARAM(IsSimulated);
+FDB_BOOLEAN_PARAM(Randomize);
+FDB_BOOLEAN_PARAM(IsSimulated);
 
 class ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
@@ -190,6 +190,7 @@ public:
 	double BACKUP_STATUS_JITTER;
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
+	int RESTORE_RANGES_READ_BATCH;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
@@ -278,6 +279,7 @@ public:
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
 	int64_t BLOB_METADATA_REFRESH_INTERVAL;
+	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
 	// This might happen when a recovery is happening together with a cluster controller coordinator key change.

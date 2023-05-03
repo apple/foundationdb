@@ -37,18 +37,18 @@ class Version:
         return hash(self.version_tuple())
 
     def __str__(self):
-        return format('{}.{}.{}'.format(self.major, self.minor, self.patch))
+        return format("{}.{}.{}".format(self.major, self.minor, self.patch))
 
     @staticmethod
     def of_binary(binary: Path):
-        parts = binary.name.split('-')
+        parts = binary.name.split("-")
         if len(parts) != 2:
             return Version.max_version()
         return Version.parse(parts[1])
 
     @staticmethod
     def parse(version: str):
-        version_tuple = version.split('.')
+        version_tuple = version.split(".")
         self = Version()
         self.major = int(version_tuple[0])
         if len(version_tuple) > 1:

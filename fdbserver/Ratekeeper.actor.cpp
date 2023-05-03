@@ -251,6 +251,9 @@ public:
 		state Transaction tr(db);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
 				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
 				// workers currently.
@@ -350,7 +353,9 @@ public:
 					TraceEvent("RkMinBlobWorkerVersion")
 					    .detail("BWVersion", minVer)
 					    .detail("MaxVer", self->maxVersion)
-					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID());
+					    .detail("MinId", blobWorkers.size() > 0 ? blobWorkers[minIdx].id() : UID())
+					    .detail("BMBlocked",
+					            now() - self->unblockedAssignmentTime >= SERVER_KNOBS->BW_MAX_BLOCKED_INTERVAL);
 				}
 			}
 			wait(blobWorkerDelay);
@@ -515,13 +520,17 @@ public:
 
 						bool returningTagsToProxy{ false };
 						if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-							reply.proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
-							returningTagsToProxy =
-							    reply.proxyThrottledTags.present() && reply.proxyThrottledTags.get().size() > 0;
+							auto proxyThrottledTags = self.tagThrottler->getProxyRates(self.grvProxyInfo.size());
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = proxyThrottledTags.size() > 0;
+								reply.proxyThrottledTags = std::move(proxyThrottledTags);
+							}
 						} else {
-							reply.clientThrottledTags = self.tagThrottler->getClientRates();
-							returningTagsToProxy =
-							    reply.clientThrottledTags.present() && reply.clientThrottledTags.get().size() > 0;
+							auto clientThrottledTags = self.tagThrottler->getClientRates();
+							if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+								returningTagsToProxy = clientThrottledTags.size() > 0;
+								reply.clientThrottledTags = std::move(clientThrottledTags);
+							}
 						}
 						CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 					}
@@ -1355,7 +1364,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 			maxCost = cost;
 		}
 	}
-	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE) {
+	if (maxRate > SERVER_KNOBS->MIN_TAG_WRITE_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;

@@ -34,8 +34,15 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-variable"
 
-FDB_DECLARE_BOOLEAN_PARAM(AssignEmptyRange);
-FDB_DECLARE_BOOLEAN_PARAM(UnassignShard);
+FDB_BOOLEAN_PARAM(AssignEmptyRange);
+FDB_BOOLEAN_PARAM(UnassignShard);
+FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
+
+// SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
+// and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
+struct SystemKey : Key {
+	SystemKey(Key const& k);
+};
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -98,10 +105,14 @@ extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
 
+// Key for a particular audit
 const Key auditKey(const AuditType type, const UID& auditId);
+// KeyRange for whole audit
 const KeyRange auditKeyRange(const AuditType type);
-const Key auditRangeKey(const UID& auditId, const KeyRef& key);
-const Key auditRangePrefixFor(const UID& auditId);
+// Prefix for audit work progress by range
+const Key auditRangePrefixFor(const AuditType type, const UID& auditId);
+// Prefix for audit work progress by audit server id
+const Key auditServerPrefixFor(const AuditType type, const UID& auditId, const UID& serverId);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
@@ -145,16 +156,21 @@ void decodeStorageCacheValue(const ValueRef& value, std::vector<uint16_t>& serve
 extern const KeyRangeRef serverKeysRange;
 extern const KeyRef serverKeysPrefix;
 extern const ValueRef serverKeysTrue, serverKeysTrueEmptyRange, serverKeysFalse;
-const UID newShardId(const uint64_t physicalShardId,
-                     AssignEmptyRange assignEmptyRange,
-                     UnassignShard unassignShard = UnassignShard::False);
+const UID newDataMoveId(const uint64_t physicalShardId,
+                        AssignEmptyRange assignEmptyRange,
+                        EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False,
+                        UnassignShard unassignShard = UnassignShard::False);
 const Key serverKeysKey(UID serverID, const KeyRef& keys);
 const Key serverKeysPrefixFor(UID serverID);
 UID serverKeysDecodeServer(const KeyRef& key);
 std::pair<UID, Key> serverKeysDecodeServerBegin(const KeyRef& key);
 bool serverHasKey(ValueRef storedValue);
 const Value serverKeysValue(const UID& id);
-void decodeServerKeysValue(const ValueRef& value, bool& assigned, bool& emptyRange, UID& id);
+void decodeServerKeysValue(const ValueRef& value,
+                           bool& assigned,
+                           bool& emptyRange,
+                           EnablePhysicalShardMove& enablePSM,
+                           UID& id);
 
 extern const KeyRangeRef conflictingKeysRange;
 extern const ValueRef conflictingKeysTrue, conflictingKeysFalse;
@@ -641,6 +657,8 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 extern const StringRef blobRangeActive;
 extern const StringRef blobRangeInactive;
 
+bool isBlobRangeActive(const ValueRef& blobRangeValue);
+
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
 
@@ -680,8 +698,9 @@ const Value blobGranuleFileValueFor(
     int64_t offset,
     int64_t length,
     int64_t fullFileLength,
+    int64_t logicalSize,
     Optional<BlobGranuleCipherKeysMeta> cipherKeysMeta = Optional<BlobGranuleCipherKeysMeta>());
-std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
+std::tuple<Standalone<StringRef>, int64_t, int64_t, int64_t, int64_t, Optional<BlobGranuleCipherKeysMeta>>
 decodeBlobGranuleFileValue(ValueRef const& value);
 
 const Value blobGranulePurgeValueFor(Version version, KeyRange range, bool force);

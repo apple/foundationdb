@@ -19,8 +19,8 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
-#include "fdbclient/Metacluster.h"
+#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
+#include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
@@ -622,19 +622,22 @@ private:
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 			for (const auto& ssID : checkpoint.src) {
-				Tag tag = decodeServerTagValue(txnStateStore->readValue(serverTagKeyFor(ssID)).get().get());
-				MutationRef privatized = m;
-				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-				    .detail("Original", m)
-				    .detail("Privatized", privatized)
-				    .detail("Server", ssID)
-				    .detail("TagKey", serverTagKeyFor(ssID))
-				    .detail("Tag", tag.toString())
-				    .detail("Checkpoint", checkpoint.toString());
+				Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+				if (tagV.present()) {
+					Tag tag = decodeServerTagValue(tagV.get());
+					MutationRef privatized = m;
+					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+					TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+					    .detail("Original", m)
+					    .detail("Privatized", privatized)
+					    .detail("Server", ssID)
+					    .detail("TagKey", serverTagKeyFor(ssID))
+					    .detail("Tag", tag.toString())
+					    .detail("Checkpoint", checkpoint.toString());
 
-				toCommit->addTag(tag);
-				writeMutation(privatized);
+					toCommit->addTag(tag);
+					writeMutation(privatized);
+				}
 			}
 		}
 	}
@@ -745,18 +748,30 @@ private:
 		}
 	}
 
+	template <bool Versioned>
+	void reportMetaclusterRegistration(ValueRef value) {
+		MetaclusterRegistrationEntryImpl<Versioned> entry = MetaclusterRegistrationEntryImpl<Versioned>::decode(value);
+
+		TraceEvent("SetMetaclusterRegistration", dbgid)
+		    .detail("ClusterType", entry.clusterType)
+		    .detail("MetaclusterID", entry.metaclusterId)
+		    .detail("MetaclusterName", entry.metaclusterName)
+		    .detail("ClusterID", entry.id)
+		    .detail("ClusterName", entry.name)
+		    .detail("MetaclusterVersion", entry.version);
+	}
+
 	void checkSetMetaclusterRegistration(MutationRef m) {
-		if (m.param1 == MetaclusterMetadata::metaclusterRegistration().key) {
-			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
+		if (m.param1 == metacluster::metadata::metaclusterRegistration().key) {
+			if (MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites) {
+				reportMetaclusterRegistration<false>(m.param2);
+			} else {
+				CODE_PROBE(true, "Writing metacluster registration with version validation");
+				reportMetaclusterRegistration<true>(m.param2);
+			}
 
-			TraceEvent("SetMetaclusterRegistration", dbgid)
-			    .detail("ClusterType", entry.clusterType)
-			    .detail("MetaclusterID", entry.metaclusterId)
-			    .detail("MetaclusterName", entry.metaclusterName)
-			    .detail("ClusterID", entry.id)
-			    .detail("ClusterName", entry.name);
-
-			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			Optional<Value> value =
+			    txnStateStore->readValue(metacluster::metadata::unversionedMetaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -1196,12 +1211,13 @@ private:
 	}
 
 	void checkClearMetaclusterRegistration(KeyRangeRef range) {
-		if (range.contains(MetaclusterMetadata::metaclusterRegistration().key)) {
+		if (range.contains(metacluster::metadata::metaclusterRegistration().key)) {
 			TraceEvent("ClearMetaclusterRegistration", dbgid);
 
-			Optional<Value> value = txnStateStore->readValue(MetaclusterMetadata::metaclusterRegistration().key).get();
+			Optional<Value> value =
+			    txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key).get();
 			if (!initialCommit) {
-				txnStateStore->clear(singleKeyRange(MetaclusterMetadata::metaclusterRegistration().key));
+				txnStateStore->clear(singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 			}
 
 			if (value.present()) {

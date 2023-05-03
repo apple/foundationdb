@@ -192,7 +192,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 			// BlobCipherKeyCache is 'empty'; fetching invalid cipher from KMS must through 'encrypt_key_not_found'
 			ASSERT(false);
 		} catch (Error& e) {
-			ASSERT(e.code() == error_code_encrypt_keys_fetch_failed);
+			ASSERT(e.code() == error_code_encrypt_key_not_found);
 		}
 
 		TraceEvent("SimLookupInvalidKeyIdDone");
@@ -209,7 +209,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		// Ensure EncryptKeyProxy role is recruited (a singleton role)
 		self->numDomains = self->maxDomainId - self->minDomainId;
 
-		while (!self->dbInfo->get().encryptKeyProxy.present()) {
+		while (!self->dbInfo->get().client.encryptKeyProxy.present()) {
 			wait(self->dbInfo->onChange());
 		}
 

@@ -1241,8 +1241,9 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 			if (e.code() == error_code_transaction_too_old)
 				*isTooOld = true;
 			output.more = true;
-			if (begin.isFirstGreaterOrEqual())
-				output.readThrough = begin.getKey();
+			if (begin.isFirstGreaterOrEqual()) {
+				output.setReadThrough(begin.getKey());
+			}
 			return output;
 		}
 		throw;

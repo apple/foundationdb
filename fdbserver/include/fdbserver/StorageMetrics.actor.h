@@ -152,15 +152,24 @@ private:
 	static void add(KeyRangeMap<int>& map, KeyRangeRef const& keys, int delta);
 };
 
-// Contains information about whether or not a key-value pair should be included in a byte sample
-// Also contains size information about the byte sample
+// Contains information about whether or not a key-value pair should be included in a byte sample.
+//
+// The invariant holds:
+//    probability * sampledSize == size
 struct ByteSampleInfo {
+	// True if we've decided to sample this key-value pair.
 	bool inSample;
 
-	// Actual size of the key value pair
+	// Actual size of the key value pair.
 	int64_t size;
 
-	// The recorded size of the sample (max of bytesPerSample, size)
+	// Probability that the key-value pair will be sampled.
+	// This is a function of key and value sizes.
+	// The goal is to sample ~1/BYTE_SAMPLING_FACTOR of the key-value space,
+	// which by default is 1/250th.
+	double probability;
+
+	// The recorded size of the sample (max of bytesPerSample, size).
 	int64_t sampledSize;
 };
 
@@ -170,6 +179,30 @@ ByteSampleInfo isKeyValueInSample(KeyRef key, int64_t totalKvSize);
 inline ByteSampleInfo isKeyValueInSample(KeyValueRef keyValue) {
 	return isKeyValueInSample(keyValue.key, keyValue.key.size() + keyValue.value.size());
 }
+
+struct CommonStorageCounters {
+	CounterCollection cc;
+	// read ops
+	Counter finishedQueries, bytesQueried;
+
+	// write ops
+	// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
+	// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
+	// and the lengths of both parameters.
+	Counter mutationBytes;
+	Counter mutations, setMutations, clearRangeMutations;
+
+	// Bytes fetched by fetchKeys() for data movements. The size is counted as a collection of KeyValueRef.
+	Counter bytesFetched;
+	// The number of key-value pairs fetched by fetchKeys()
+	Counter kvFetched;
+
+	// name and id are the inputs to CounterCollection initialization. If metrics provided, the caller should guarantee
+	// the lifetime of metrics is longer than this counter
+	CommonStorageCounters(const std::string& name,
+	                      const std::string& id,
+	                      const StorageServerMetrics* metrics = nullptr);
+};
 
 class IStorageMetricsService {
 public:

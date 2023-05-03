@@ -69,8 +69,8 @@ private:
 					    auto val = f.get<fdb::future_var::ValueRef>();
 					    if (expectedVal != val) {
 						    error(fmt::format("cancelAfterFirstResTx mismatch. expected: {:.80} actual: {:.80}",
-						                      fdb::toCharsRef(expectedVal.value()),
-						                      fdb::toCharsRef(val.value())));
+						                      fdb::toCharsRef(expectedVal),
+						                      fdb::toCharsRef(val)));
 					    }
 					    ctx->done();
 				    });
