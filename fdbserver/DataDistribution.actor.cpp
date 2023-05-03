@@ -45,14 +45,15 @@
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 void RelocateShard::setParentRange(KeyRange const& parent) {
 	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
@@ -2526,6 +2527,13 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 	}
 
 	return Void();
+}
+
+Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, std::shared_ptr<MockGlobalState> mgs) {
+	Reference<DataDistributor> dd =
+	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context);
+	dd->txnProcessor = makeReference<DDMockTxnProcessor>(mgs);
+	return dataDistributor_impl(context->interface, dd, IsMocked::True);
 }
 
 Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
