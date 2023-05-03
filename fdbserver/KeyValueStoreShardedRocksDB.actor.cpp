@@ -864,7 +864,7 @@ public:
 		try {
 			wait(openFuture);
 			loop {
-				wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+				wait(delay(SERVER_KNOBS->ROCKSDB_CF_METRICS_DELAY));
 				if (rState->closing) {
 					break;
 				}
@@ -876,6 +876,13 @@ public:
 					if (!shard->initialized()) {
 						continue;
 					}
+					uint64_t liveDataSize = 0;
+					ASSERT(shard->db->GetIntProperty(
+					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
+					TraceEvent(SevInfo, "PhysicalShardCFSize")
+					    .detail("ShardId", id)
+					    .detail("LiveDataSize", liveDataSize);
+
 					std::string propValue = "";
 					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
 					TraceEvent(SevInfo, "PhysicalShardCFStats")
