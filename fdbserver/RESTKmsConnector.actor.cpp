@@ -1704,7 +1704,7 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	doc.AddMember(key, details, doc.GetAllocator());
 
 	addVersionToDoc(doc, 1);
-	
+
 	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
