@@ -32,6 +32,8 @@ struct MetaclusterMetrics {
 	int tenantGroupCapacity = 0;
 	int tenantGroupsAllocated = 0;
 
+	Optional<std::string> error;
+
 	MetaclusterMetrics() = default;
 
 	static Future<MetaclusterMetrics> getMetaclusterMetrics(Database db);

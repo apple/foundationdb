@@ -27,7 +27,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantName.h"
@@ -69,11 +69,11 @@ void updateClusterCapacityIndex(Transaction tr,
                                 DataClusterEntry const& previousEntry,
                                 DataClusterEntry const& updatedEntry) {
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
-	if (previousEntry.hasCapacity()) {
+	if (previousEntry.hasCapacity() || updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));
 	}
-	if (updatedEntry.hasCapacity()) {
+	if (updatedEntry.hasCapacity() && updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED) {
 		metadata::management::clusterCapacityIndex().insert(
 		    tr, Tuple::makeTuple(updatedEntry.allocated.numTenantGroups, name));
 	}

@@ -276,10 +276,6 @@ public:
 		}
 
 		result.more = rowLimit == 0 || byteLimit <= 0;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		return result;
 	}
 

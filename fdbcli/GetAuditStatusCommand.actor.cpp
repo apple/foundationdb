@@ -39,6 +39,12 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 	AuditType type = AuditType::Invalid;
 	if (tokencmp(tokens[1], "ha")) {
 		type = AuditType::ValidateHA;
+	} else if (tokencmp(tokens[1], "replica")) {
+		type = AuditType::ValidateReplica;
+	} else if (tokencmp(tokens[1], "locationmetadata")) {
+		type = AuditType::ValidateLocationMetadata;
+	} else if (tokencmp(tokens[1], "ssshard")) {
+		type = AuditType::ValidateStorageServerShard;
 	} else {
 		printUsage(tokens[0]);
 		return false;
@@ -51,7 +57,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		const UID id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
-		printf("Audit result is:\n%s", res.toString().c_str());
+		printf("Audit result is:\n%s", res.toStringForCLI().c_str());
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
@@ -71,7 +77,8 @@ CommandFactory getAuditStatusFactory(
                 "Retrieve audit storage status",
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
-                "Only 'ha' `Type' is supported currently. If specified, `Count' is how many\n"
+                "Only 'ha' and `replica` and `locationmetadata` and "
+                "`ssshard` `Type' is supported currently. If specified, `Count' is how many\n"
                 "rows to audit. If not specified, check all rows in audit.\n"
                 "Results have the following format:\n"
                 "  `[ID]: 000000000001000000000000, [Range]:  - 0xff, [Type]: 1, [Phase]: 2'\n"

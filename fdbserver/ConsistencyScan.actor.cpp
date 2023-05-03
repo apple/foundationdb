@@ -28,6 +28,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
@@ -273,9 +274,11 @@ ACTOR Future<bool> getKeyLocations(Database cx,
 // Retrieves a vector of the storage servers' estimates for the size of a particular shard
 // If a storage server can't be reached, its estimate will be -1
 // If there is an error, then the returned vector will have 0 size
-ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageServerInterface> storageServers,
-                                                          KeyRangeRef shard) {
+ACTOR Future<std::pair<std::vector<int64_t>, StorageMetrics>> getStorageSizeEstimate(
+    std::vector<StorageServerInterface> storageServers,
+    KeyRangeRef shard) {
 	state std::vector<int64_t> estimatedBytes;
+	state StorageMetrics metrics;
 
 	state WaitMetricsRequest req;
 	req.keys = shard;
@@ -315,9 +318,10 @@ ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageSer
 			else if (reply.present()) {
 				int64_t numBytes = reply.get().bytes;
 				estimatedBytes.push_back(numBytes);
-				if (firstValidStorageServer < 0)
+				if (firstValidStorageServer < 0) {
 					firstValidStorageServer = i;
-				else if (estimatedBytes[firstValidStorageServer] != numBytes) {
+					metrics = reply.get();
+				} else if (estimatedBytes[firstValidStorageServer] != numBytes) {
 					TraceEvent("ConsistencyCheck_InconsistentStorageMetrics")
 					    .detail("ByteEstimate1", estimatedBytes[firstValidStorageServer])
 					    .detail("ByteEstimate2", numBytes)
@@ -339,7 +343,7 @@ ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageSer
 		estimatedBytes.clear();
 	}
 
-	return estimatedBytes;
+	return std::make_pair(estimatedBytes, metrics);
 }
 
 ACTOR Future<int64_t> getDatabaseSize(Database cx) {
@@ -440,6 +444,10 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		sharedRandom.randomShuffle(shardOrder);
 	}
 
+	state Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig =
+	    wait(DDConfiguration().userRangeConfig().getSnapshot(
+	        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
+
 	for (; i < ranges.size(); i++) {
 		state int shard = shardOrder[i];
 
@@ -457,46 +465,56 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		// If the destStorageServers is non-empty, then this shard is being relocated
 		state bool isRelocating = destStorageServers.size() > 0;
 
-		state int customReplication = configuration.storageTeamSize;
-		if (g_network->isSimulated() && ddLargeTeamEnabled()) {
-			for (auto& it : g_simulator->customReplicas) {
-				KeyRangeRef replicaRange(std::get<0>(it), std::get<1>(it));
-				if (range.intersects(replicaRange)) {
-					TraceEvent("ConsistencyCheck_CheckCustomReplica")
+		state int expectedReplicas = configuration.storageTeamSize;
+		if (ddLargeTeamEnabled()) {
+			// For every custom range that overlaps with this shard range, print it and update the replication count
+			// There should only be one custom range, possibly the default range with no custom configuration at all
+			for (auto it : userRangeConfig->intersectingRanges(range.begin, range.end)) {
+				KeyRangeRef configuredRange(it->range().begin, it->range().end);
+
+				CODE_PROBE(true, "Checked custom replication configuration.");
+				TraceEvent("ConsistencyCheck_CheckCustomReplica")
+				    .detail("ShardBegin", printable(range.begin))
+				    .detail("ShardEnd", printable(range.end))
+				    .detail("SourceTeamSize", sourceStorageServers.size())
+				    .detail("DestServerSize", destStorageServers.size())
+				    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+				    .detail("CustomBegin", configuredRange.begin)
+				    .detail("CustomEnd", configuredRange.end)
+				    .detail("CustomConfig", it->value())
+				    .detail("UsableRegions", configuration.usableRegions)
+				    .detail("First", firstClient)
+				    .detail("Perform", performQuiescentChecks);
+
+				// The custom range should completely contain the shard range or a shard boundary that should exist
+				// does not exist.
+				if (!configuredRange.contains(range)) {
+					TraceEvent(SevWarn, "ConsistencyCheck_BoundaryMissing")
 					    .detail("ShardBegin", printable(range.begin))
 					    .detail("ShardEnd", printable(range.end))
-					    .detail("SourceTeamSize", sourceStorageServers.size())
-					    .detail("DestServerSize", destStorageServers.size())
-					    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
-					    .detail("CustomBegin", std::get<0>(it))
-					    .detail("CustomEnd", std::get<1>(it))
-					    .detail("CustomReplicas", std::get<2>(it))
-					    .detail("UsableRegions", configuration.usableRegions)
-					    .detail("First", firstClient)
-					    .detail("Perform", performQuiescentChecks);
-					if (!replicaRange.contains(range)) {
-						testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
-						return Void();
-					}
-					customReplication = std::max(customReplication, std::get<2>(it));
+					    .detail("CustomBegin", configuredRange.begin)
+					    .detail("CustomEnd", configuredRange.end);
+					testFailure("Custom shard boundary violated", performQuiescentChecks, success, failureIsError);
+					return Void();
 				}
+
+				expectedReplicas = std::max(expectedReplicas, it->value().replicationFactor.orDefault(0));
 			}
 		}
 
 		// In a quiescent database, check that the team size is the same as the desired team size
 		// FIXME: when usable_regions=2, we need to determine how many storage servers are alive in each DC
 		if (firstClient && performQuiescentChecks &&
-		    ((configuration.usableRegions == 1 &&
-		      sourceStorageServers.size() != std::min(ssCount, customReplication)) ||
+		    ((configuration.usableRegions == 1 && sourceStorageServers.size() != std::min(ssCount, expectedReplicas)) ||
 		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
-		     sourceStorageServers.size() > configuration.usableRegions * customReplication)) {
+		     sourceStorageServers.size() > configuration.usableRegions * expectedReplicas)) {
 			TraceEvent("ConsistencyCheck_InvalidTeamSize")
 			    .detail("ShardBegin", printable(range.begin))
 			    .detail("ShardEnd", printable(range.end))
 			    .detail("SourceTeamSize", sourceStorageServers.size())
 			    .detail("DestServerSize", destStorageServers.size())
 			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
-			    .detail("CustomReplicas", customReplication)
+			    .detail("ExpectedReplicas", expectedReplicas)
 			    .detail("UsableRegions", configuration.usableRegions)
 			    .detail("SSCount", ssCount);
 			// Record the server reponsible for the problematic shards
@@ -547,7 +565,10 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			}
 		}
 
-		state std::vector<int64_t> estimatedBytes = wait(getStorageSizeEstimate(storageServerInterfaces, range));
+		std::pair<std::vector<int64_t>, StorageMetrics> estimatedBytesAndMetrics =
+		    wait(getStorageSizeEstimate(storageServerInterfaces, range));
+		state std::vector<int64_t> estimatedBytes = estimatedBytesAndMetrics.first;
+		state StorageMetrics estimated = estimatedBytesAndMetrics.second;
 
 		// Gets permitted size range of shard
 		int64_t maxShardSize = getMaxShardSize(dbSize);
@@ -983,6 +1004,26 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				            failureIsError);
 			}
 
+			// Check if the storage server returns split point for the shard. There are cases where
+			// the split point returned by storage server is discarded because it's an unfair split.
+			// See splitStorageMetrics() in NativeAPI.actor.cpp.
+			if (canSplit && sampledKeys > 5 && performQuiescentChecks) {
+				StorageMetrics splitMetrics;
+				splitMetrics.bytes = shardBounds.max.bytes / 2;
+				splitMetrics.bytesWrittenPerKSecond = range.begin >= keyServersKeys.begin
+				                                          ? splitMetrics.infinity
+				                                          : SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
+				splitMetrics.iosPerKSecond = splitMetrics.infinity;
+				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity; // Don't split by readBandwidth
+
+				Standalone<VectorRef<KeyRef>> splits = wait(cx->splitStorageMetrics(range, splitMetrics, estimated));
+				if (splits.size() <= 2) {
+					// Because the range's begin and end is included in splits, so this is the case
+					// the returned split is unfair and is discarded.
+					TraceEvent("ConsistencyCheck_DiscardSplits").detail("Range", range);
+					canSplit = false;
+				}
+			}
 			// In a quiescent database, check that the (estimated) size of the shard is within permitted bounds
 			// Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard
 			// sizes are not precise Shard splits ignore the first key in a shard, so its size shouldn't be
