@@ -1171,9 +1171,12 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 	state AuditStorageState auditState;
 	loop {
 		try {
+			while (dbInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+			       !dbInfo->get().distributor.present()) {
+				wait(dbInfo->onChange());
+			}
 			TriggerAuditRequest req(auditType, allKeys);
-			UID auditId_ =
-			    wait(timeoutError(dbInfo->get().clusterInterface.clientInterface.triggerAudit.getReply(req), 300));
+			UID auditId_ = wait(timeoutError(dbInfo->get().distributor.get().triggerAudit.getReply(req), 300));
 			auditId = auditId_;
 			TraceEvent(SevDebug, "AuditStorageCorrectnessTriggered")
 			    .detail("AuditID", auditId)
