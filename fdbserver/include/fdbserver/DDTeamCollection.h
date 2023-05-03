@@ -269,8 +269,15 @@ protected:
 
 	AsyncVar<Optional<Key>> healthyZone;
 	Future<bool> clearHealthyZoneFuture;
-	double medianAvailableSpace;
-	double lastMedianAvailableSpaceUpdate;
+
+	// team pivot values
+	struct {
+		double lastPivotValuesUpdate = 0.0;
+
+		double pivotAvailableSpaceRatio = 0.0;
+		double pivotCPU = 100.0;
+		double minTeamAvgCPU = std::numeric_limits<double>::max();
+	} teamPivots;
 
 	int lowestUtilizationTeam;
 	int highestUtilizationTeam;
@@ -620,6 +627,14 @@ protected:
 	// When it reaches the threshold, first try to build a server team with existing machine teams; if failed,
 	// build an extra machine team and record the event in trace
 	int addTeamsBestOf(int teamsToBuild, int desiredTeams, int maxTeams);
+
+	void updateTeamPivotValues();
+	// get the min available space ratio from every healthy team, update the pivot ratio `pivotAvailableSpaceRatio`
+	void updateAvailableSpacePivots();
+
+	void updateCpuPivots();
+
+	void updateTeamEligibility();
 
 public:
 	Database cx;

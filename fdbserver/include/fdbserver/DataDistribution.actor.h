@@ -148,6 +148,37 @@ private:
 	    moveReason(DataMovementReason::INVALID) {}
 };
 
+struct GetTeamRequest;
+namespace data_distribution {
+// DD evaluate the metrics of server teams and will increase the count if corresponding metrics is within a eligible
+// range
+class EligibilityCounter {
+public:
+	// The type value are used to do bit operations to get combined type. Ex. combineType = LOW_CPU | LOW_DISK_UTIL .
+	// When adding more types, the value should be 2^n, like 4, 8, 16...
+	enum Type {
+		NONE = 0, // don't care about eligibility
+		LOW_CPU = 1,
+		LOW_DISK_UTIL = 2
+	};
+
+	// set the count of type to 0
+	void reset(Type type);
+
+	// return the minimal count of a combined eligible type
+	int getCount(int combinedType) const;
+
+	// increase the count of type
+	void increase(Type type);
+
+	// return combinedType that can be used as input to getCount().
+	static int fromGetTeamRequest(GetTeamRequest const&);
+
+private:
+	std::unordered_map<Type, int> type_count;
+};
+
+} // namespace data_distribution
 struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
@@ -157,7 +188,10 @@ struct IDataDistributionTeam {
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
-	virtual double getLoadReadBandwidth(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+	virtual double getReadLoad(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
+
+	virtual double getAverageCPU() const = 0;
+	virtual bool hasLowerCpu(double cpuThreshold) const = 0;
 	virtual int64_t getMinAvailableSpace(bool includeInFlight = true) const = 0;
 	virtual double getMinAvailableSpaceRatio(bool includeInFlight = true) const = 0;
 	virtual bool hasHealthyAvailableSpace(double minRatio) const = 0;
@@ -215,8 +249,8 @@ struct GetTeamRequest {
 	               WantTrueBest wantsTrueBest,
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
+	               PreferLowerReadUtil preferLowerReadUtil,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
-	               PreferLowerReadUtil preferLowerReadUtil = PreferLowerReadUtil::False,
 	               double inflightPenalty = 1.0)
 	  : wantsNewServers(wantsNewServers), wantsTrueBest(wantsTrueBest), preferLowerDiskUtil(preferLowerDiskUtil),
 	    teamMustHaveShards(teamMustHaveShards), forReadBalance(forReadBalance),
@@ -242,8 +276,8 @@ struct GetTeamRequest {
 
 		ss << "WantsNewServers:" << wantsNewServers << " WantsTrueBest:" << wantsTrueBest
 		   << " PreferLowerDiskUtil:" << preferLowerDiskUtil << " teamMustHaveShards:" << teamMustHaveShards
-		   << "forReadBalance" << forReadBalance << " inflightPenalty:" << inflightPenalty
-		   << " findTeamByServers:" << findTeamByServers << ";";
+		   << " forReadBalance:" << forReadBalance << " PreferLowerReadUtil:" << preferLowerReadUtil
+		   << " inflightPenalty:" << inflightPenalty << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
 		for (const auto& cs : completeSources) {
 			ss << cs.toString() << ",";
@@ -262,12 +296,12 @@ private:
 
 	// return -1 if a.readload > b.readload
 	static int greaterReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(true), r2 = b->getLoadReadBandwidth(true);
+		auto r1 = a->getReadLoad(true), r2 = b->getReadLoad(true);
 		return r1 == r2 ? 0 : (r1 > r2 ? -1 : 1);
 	}
 	// return -1 if a.readload < b.readload
 	static int lessReadLoad(TeamRef a, TeamRef b) {
-		auto r1 = a->getLoadReadBandwidth(false), r2 = b->getLoadReadBandwidth(false);
+		auto r1 = a->getReadLoad(false), r2 = b->getReadLoad(false);
 		return r1 == r2 ? 0 : (r1 < r2 ? -1 : 1);
 	}
 };
@@ -298,15 +332,15 @@ private:
 public:
 	std::vector<KeyRange> keys;
 	Promise<GetTopKMetricsReply> reply; // topK storage metrics
-	double maxBytesReadPerKSecond = 0, minBytesReadPerKSecond = 0; // all returned shards won't exceed this read load
+	double maxReadLoadPerKSecond = 0, minReadLoadPerKSecond = 0; // all returned shards won't exceed this read load
 
 	GetTopKMetricsRequest() {}
 	GetTopKMetricsRequest(std::vector<KeyRange> const& keys,
 	                      int topK = 1,
-	                      double maxBytesReadPerKSecond = std::numeric_limits<double>::max(),
-	                      double minBytesReadPerKSecond = 0)
-	  : topK(topK), keys(keys), maxBytesReadPerKSecond(maxBytesReadPerKSecond),
-	    minBytesReadPerKSecond(minBytesReadPerKSecond) {
+	                      double maxReadLoadPerKSecond = std::numeric_limits<double>::max(),
+	                      double minReadLoadPerKSecond = 0)
+	  : topK(topK), keys(keys), maxReadLoadPerKSecond(maxReadLoadPerKSecond),
+	    minReadLoadPerKSecond(minReadLoadPerKSecond) {
 		ASSERT_GE(topK, 1);
 	}
 
@@ -322,8 +356,8 @@ private:
 	// larger read density means higher score
 	static bool compareByReadDensity(const GetTopKMetricsReply::KeyRangeStorageMetrics& a,
 	                                 const GetTopKMetricsReply::KeyRangeStorageMetrics& b) {
-		return a.metrics.bytesReadPerKSecond / std::max(a.metrics.bytes * 1.0, 1.0) >
-		       b.metrics.bytesReadPerKSecond / std::max(b.metrics.bytes * 1.0, 1.0);
+		return a.metrics.readLoadKSecond() / std::max(a.metrics.bytes * 1.0, 1.0) >
+		       b.metrics.readLoadKSecond() / std::max(b.metrics.bytes * 1.0, 1.0);
 	}
 };
 
@@ -428,6 +462,44 @@ struct ShardSizeBounds {
 
 	bool operator==(ShardSizeBounds const& rhs) const {
 		return max == rhs.max && min == rhs.min && permittedError == rhs.permittedError;
+	}
+
+	void resetBytes() {
+		max.bytes = -1;
+		min.bytes = -1;
+		permittedError.bytes = -1;
+	}
+
+	void resetBytesWrittenPerKSecond() {
+		max.bytesWrittenPerKSecond = max.infinity;
+		min.bytesWrittenPerKSecond = 0;
+		permittedError.bytesWrittenPerKSecond = permittedError.infinity;
+	}
+
+	void resetBytesReadPerKSecond() {
+		max.bytesReadPerKSecond = max.infinity;
+		min.bytesReadPerKSecond = 0;
+		permittedError.bytesReadPerKSecond = permittedError.infinity;
+	}
+
+	void resetOpsReadPerKSecond() {
+		max.opsReadPerKSecond = max.infinity;
+		min.opsReadPerKSecond = 0;
+		permittedError.opsReadPerKSecond = permittedError.infinity;
+	}
+
+	void resetIOPerKSecond() {
+		max.iosPerKSecond = max.infinity;
+		min.iosPerKSecond = 0;
+		permittedError.iosPerKSecond = permittedError.infinity;
+	}
+
+	void reset() {
+		resetBytes();
+		resetBytesWrittenPerKSecond();
+		resetIOPerKSecond();
+		resetBytesReadPerKSecond();
+		resetOpsReadPerKSecond();
 	}
 };
 

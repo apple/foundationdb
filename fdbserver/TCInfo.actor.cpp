@@ -100,10 +100,12 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server) {
+	ACTOR static Future<Void> serverMetricsPolling(TCServerInfo* server, Reference<IDDTxnProcessor> txnProcessor) {
 		state double lastUpdate = now();
 		loop {
-			wait(server->updateServerMetrics());
+			wait(server->updateServerMetrics() &&
+			     store(server->storageStats,
+			           txnProcessor->getStorageStats(server->getId(), SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE)));
 			wait(delayUntil(lastUpdate + SERVER_KNOBS->STORAGE_METRICS_POLLING_DELAY +
 			                    SERVER_KNOBS->STORAGE_METRICS_RANDOM_DELAY * deterministicRandom()->random01(),
 			                TaskPriority::DataDistributionLaunch));
@@ -168,8 +170,8 @@ Future<Void> TCServerInfo::updateServerMetrics(Reference<TCServerInfo> server) {
 	return TCServerInfoImpl::updateServerMetrics(server);
 }
 
-Future<Void> TCServerInfo::serverMetricsPolling() {
-	return TCServerInfoImpl::serverMetricsPolling(this);
+Future<Void> TCServerInfo::serverMetricsPolling(Reference<IDDTxnProcessor> txnProcessor) {
+	return TCServerInfoImpl::serverMetricsPolling(this, txnProcessor);
 }
 
 void TCServerInfo::updateInDesiredDC(std::vector<Optional<Key>> const& includedDCs) {
@@ -396,20 +398,31 @@ int64_t TCTeamInfo::getLoadBytes(bool includeInFlight, double inflightPenalty) c
 }
 
 // average read bandwidth within a team
-double TCTeamInfo::getLoadReadBandwidth(bool includeInFlight, double inflightPenalty) const {
+double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) const {
 	// FIXME: consider team load variance
 	double sum = 0;
 	int size = 0;
 	for (const auto& server : servers) {
 		if (server->metricsPresent()) {
-			auto& replyValue = server->getMetrics();
-			ASSERT(replyValue.load.bytesReadPerKSecond >= 0);
-			sum += replyValue.load.bytesReadPerKSecond;
+			auto replyValue = server->getMetrics().load.readLoadKSecond();
+			ASSERT(replyValue >= 0);
+			sum += replyValue;
 			size += 1;
 		}
 	}
 	return (size == 0 ? 0 : sum / size) +
 	       (includeInFlight ? inflightPenalty * getReadInFlightToTeam() / servers.size() : 0);
+}
+
+double TCTeamInfo::getAverageCPU() const {
+	double sum = 0;
+	for (const auto& server : servers) {
+		auto& stats = server->getStorageStats();
+		// If storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
+		// return 100.0;
+		sum += stats.present() ? stats.get().cpuUsage : 100.0;
+	}
+	return servers.empty() ? 0.0 : sum / servers.size();
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
