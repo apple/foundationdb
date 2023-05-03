@@ -82,8 +82,9 @@ const char DISCOVER_URL_FILE_URL_SEP = '\n';
 
 const char* BLOB_METADATA_DETAILS_TAG = "blob_metadata_details";
 const char* BLOB_METADATA_DOMAIN_ID_TAG = "domain_id";
-const char* BLOB_METADATA_BASE_LOCATION_TAG = "base_location";
-const char* BLOB_METADATA_PARTITIONS_TAG = "partitions";
+const char* BLOB_METADATA_LOCATIONS_TAG = "locations";
+const char* BLOB_METADATA_LOCATION_ID_TAG = "id";
+const char* BLOB_METADATA_LOCATION_PATH_TAG = "path";
 
 constexpr int INVALID_REQUEST_VERSION = 0;
 
@@ -509,11 +510,9 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	//   "blob_metadata_details" : [
 	//     {
 	//        "domain_id" : <domainId>,
-	//        "domain_name" : <baseCipher>,
-	//        "baseLocation" : <baseLocation>, (Optional if partitions is present)
-	//        "partitions" : [
-	//			  "partition1", "partition2", ...
-	//		  ], (Optional if baseLocation is present)
+	//        "locations" : [
+	//			  { id: 1, path: "fdbblob://partition1"} , {id: 2, path: "fdbblob://partition2"}, ...
+	//		  ],
 	//        "refresh_after_sec"   : <refreshTimeInterval>, (Optional)
 	//        "expire_after_sec"    : <expireTimeInterval>  (Optional)
 	//     },
@@ -558,40 +557,42 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		}
 
 		const bool isDomainIdPresent = detail.HasMember(BLOB_METADATA_DOMAIN_ID_TAG);
-		const bool isBasePresent = detail.HasMember(BLOB_METADATA_BASE_LOCATION_TAG);
-		const bool isPartitionsPresent = detail.HasMember(BLOB_METADATA_PARTITIONS_TAG);
-		if (!isDomainIdPresent || (!isBasePresent && !isPartitionsPresent)) {
+		const bool isLocationsPresent =
+		    detail.HasMember(BLOB_METADATA_LOCATIONS_TAG) && detail[BLOB_METADATA_LOCATIONS_TAG].IsArray();
+		if (!isDomainIdPresent || !isLocationsPresent) {
 			TraceEvent(SevWarn, "ParseBlobMetadataResponseMalformedDetail", ctx->uid)
 			    .detail("DomainIdPresent", isDomainIdPresent)
-			    .detail("BaseLocationPresent", isBasePresent)
-			    .detail("PartitionsPresent", isPartitionsPresent);
+			    .detail("LocationsPresent", isLocationsPresent);
 			CODE_PROBE(true, "REST BlobMetadata detail malformed", probe::decoration::rare);
 			throw rest_malformed_response();
 		}
 
-		std::unique_ptr<uint8_t[]> baseStr;
-		Optional<StringRef> base;
-		if (isBasePresent) {
-			const int baseLen = detail[BLOB_METADATA_BASE_LOCATION_TAG].GetStringLength();
-			baseStr = std::make_unique<uint8_t[]>(baseLen);
-			memcpy(baseStr.get(), detail[BLOB_METADATA_BASE_LOCATION_TAG].GetString(), baseLen);
-			base = StringRef(baseStr.get(), baseLen);
-		}
+		BlobMetadataDomainId domainId = detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64();
 
 		// just do extra memory copy for simplicity here
-		Standalone<VectorRef<StringRef>> partitions;
-		if (isPartitionsPresent) {
-			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
-				if (!partition.IsString()) {
-					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
-					    .detail("PartitionType", partition.GetType());
-					throw operation_failed();
-				}
-				const int partitionLen = partition.GetStringLength();
-				std::unique_ptr<uint8_t[]> partitionStr = std::make_unique<uint8_t[]>(partitionLen);
-				memcpy(partitionStr.get(), partition.GetString(), partitionLen);
-				partitions.push_back_deep(partitions.arena(), StringRef(partitionStr.get(), partitionLen));
+		Standalone<VectorRef<BlobMetadataLocationRef>> locations;
+		for (const auto& location : detail[BLOB_METADATA_LOCATIONS_TAG].GetArray()) {
+			if (!location.IsObject()) {
+				TraceEvent("ParseBlobMetadataResponseFailureLocationNotObject", ctx->uid)
+				    .detail("LocationType", location.GetType());
+				throw rest_malformed_response();
 			}
+			const bool isLocationIdPresent = location.HasMember(BLOB_METADATA_LOCATION_ID_TAG);
+			const bool isPathPresent = location.HasMember(BLOB_METADATA_LOCATION_PATH_TAG);
+			if (!isLocationIdPresent || !isPathPresent) {
+				TraceEvent(SevWarn, "ParseBlobMetadataResponseMalformedLocation", ctx->uid)
+				    .detail("LocationIdPresent", isLocationIdPresent)
+				    .detail("PathPresent", isPathPresent);
+				CODE_PROBE(true, "REST BlobMetadata location malformed");
+				throw rest_malformed_response();
+			}
+
+			BlobMetadataLocationId locationId = location[BLOB_METADATA_LOCATION_ID_TAG].GetInt64();
+
+			const int pathLen = location[BLOB_METADATA_LOCATION_PATH_TAG].GetStringLength();
+			std::unique_ptr<uint8_t[]> pathStr = std::make_unique<uint8_t[]>(pathLen);
+			memcpy(pathStr.get(), location[BLOB_METADATA_LOCATION_PATH_TAG].GetString(), pathLen);
+			locations.emplace_back_deep(locations.arena(), locationId, StringRef(pathStr.get(), pathLen));
 		}
 
 		// Extract refresh and/or expiry interval if supplied
@@ -600,8 +601,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		                       : std::numeric_limits<double>::max();
 		double expireAt = detail.HasMember(EXPIRE_AFTER_SEC) ? now() + detail[EXPIRE_AFTER_SEC].GetInt64()
 		                                                     : std::numeric_limits<double>::max();
-		result.emplace_back_deep(
-		    result.arena(), detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64(), base, partitions, refreshAt, expireAt);
+		result.emplace_back_deep(result.arena(), domainId, locations, refreshAt, expireAt);
 	}
 
 	checkDocForNewKmsUrls(ctx, resp, doc);
@@ -1188,7 +1188,6 @@ void forceLinkRESTKmsConnectorTest() {}
 namespace {
 std::string_view KMS_URL_NAME_TEST = "http://foo/bar";
 std::string_view BLOB_METADATA_BASE_LOCATION_TEST = "file://local";
-std::string_view BLOB_METADATA_PARTITION_TEST = "part";
 uint8_t BASE_CIPHER_KEY_TEST[32];
 
 std::shared_ptr<platform::TmpFile> prepareTokenFile(const uint8_t* buff, const int len) {
@@ -1466,25 +1465,26 @@ void getFakeBlobMetadataResponse(StringRef jsonReqRef,
 		domainId.SetInt64(detail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64());
 		keyDetail.AddMember(key, domainId, resDoc.GetAllocator());
 
-		int type = deterministicRandom()->randomInt(0, 3);
-		if (type == 0 || type == 1) {
-			key.SetString(BLOB_METADATA_BASE_LOCATION_TAG, resDoc.GetAllocator());
-			rapidjson::Value baseLocation;
-			baseLocation.SetString(BLOB_METADATA_BASE_LOCATION_TEST.data(), resDoc.GetAllocator());
-			keyDetail.AddMember(key, baseLocation, resDoc.GetAllocator());
+		int locationCount = deterministicRandom()->randomInt(1, 6);
+		rapidjson::Value locations(rapidjson::kArrayType);
+		for (int i = 0; i < locationCount; i++) {
+			rapidjson::Value location(rapidjson::kObjectType);
+
+			rapidjson::Value locId;
+			key.SetString(BLOB_METADATA_LOCATION_ID_TAG, resDoc.GetAllocator());
+			locId.SetInt64(i);
+			location.AddMember(key, locId, resDoc.GetAllocator());
+
+			rapidjson::Value path;
+			key.SetString(BLOB_METADATA_LOCATION_PATH_TAG, resDoc.GetAllocator());
+			path.SetString(BLOB_METADATA_BASE_LOCATION_TEST.data(), resDoc.GetAllocator());
+			location.AddMember(key, path, resDoc.GetAllocator());
+
+			locations.PushBack(location, resDoc.GetAllocator());
 		}
-		if (type == 1 || type == 2) {
-			int partitionCount = deterministicRandom()->randomInt(2, 6);
-			rapidjson::Value partitions(rapidjson::kArrayType);
-			for (int i = 0; i < partitionCount; i++) {
-				rapidjson::Value p;
-				p.SetString(((type == 1) ? BLOB_METADATA_PARTITION_TEST : BLOB_METADATA_BASE_LOCATION_TEST).data(),
-				            resDoc.GetAllocator());
-				partitions.PushBack(p, resDoc.GetAllocator());
-			}
-			key.SetString(BLOB_METADATA_PARTITIONS_TAG, resDoc.GetAllocator());
-			keyDetail.AddMember(key, partitions, resDoc.GetAllocator());
-		}
+
+		key.SetString(BLOB_METADATA_LOCATIONS_TAG, resDoc.GetAllocator());
+		keyDetail.AddMember(key, locations, resDoc.GetAllocator());
 
 		addFakeRefreshExpire(resDoc, keyDetail, key);
 
@@ -1603,7 +1603,7 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	for (const auto& detail : details) {
 		auto it = domainIds.find(detail.domainId);
 		ASSERT(it != domainIds.end());
-		ASSERT(detail.base.present() || !detail.partitions.empty());
+		ASSERT(!detail.locations.empty());
 	}
 	if (refreshKmsUrls) {
 		validateKmsUrls(ctx);
