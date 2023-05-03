@@ -53,16 +53,15 @@ TEST_CASE("/randomKeyValueUtils/generate") {
 	// Index generator will use a min of 0 so this is the same as 0:5
 	printNextN(RandomKeySetGenerator("5", "3..10/d..g"), 20);
 
-	printNextN(RandomKeyTupleSetGenerator(
-	               RandomIntGenerator(10),
-	               RandomKeyTupleGenerator(
-	                   { RandomKeySetGenerator(
-	                         RandomIntGenerator(5),
-	                         RandomStringGenerator(RandomIntGenerator(5), RandomIntGenerator('a', 'c', false))),
-	                     RandomKeySetGenerator(RandomIntGenerator(5),
-	                                           RandomStringGenerator(RandomIntGenerator(3, 10, true),
-	                                                                 RandomIntGenerator('d', 'f', false))) })),
-	           10);
+	std::vector<RandomKeySetGenerator> tupleParts{
+		RandomKeySetGenerator(RandomIntGenerator(5),
+		                      RandomStringGenerator(RandomIntGenerator(5), RandomIntGenerator('a', 'c', false))),
+		RandomKeySetGenerator(
+		    RandomIntGenerator(5),
+		    RandomStringGenerator(RandomIntGenerator(3, 10, true), RandomIntGenerator('d', 'f', false)))
+	};
+
+	printNextN(RandomKeyTupleSetGenerator(RandomIntGenerator(10), RandomKeyTupleGenerator(tupleParts)), 10);
 
 	// Same as above in string form
 	printNextN(RandomKeyTupleSetGenerator("10::5::5/a..c,5::^3..10/d..f"), 10);
