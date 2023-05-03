@@ -596,6 +596,11 @@ TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag3") {
 		wait(delay(1.0));
 		env.blobMonitor.setCurrentVersion(SERVER_KNOBS->VERSIONS_PER_SECOND * i / 2);
 		env.rateServer.updateProxy(UID(1, 1), SERVER_KNOBS->VERSIONS_PER_SECOND * i, testActualTps);
+		if (now() >= FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY) {
+			// If time grows large enough, there is a simulation-only assertion that will fail
+			// in RkRateUpdater::update, because we're simulating too much blob worker lag.
+			return Void();
+		}
 		env.update();
 	}
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
