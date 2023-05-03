@@ -147,13 +147,12 @@ ACTOR Future<Void> persistAuditState(Database cx,
                                      bool ddEnabled) {
 	state Transaction tr(cx);
 	state AuditPhase auditPhase = auditState.getPhase();
+	ASSERT(auditPhase == AuditPhase::Complete || auditPhase == AuditPhase::Failed || auditPhase == AuditPhase::Error);
 
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			ASSERT(auditPhase == AuditPhase::Complete || auditPhase == AuditPhase::Failed ||
-			       auditPhase == AuditPhase::Error);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
