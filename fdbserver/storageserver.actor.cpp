@@ -4672,6 +4672,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			req.limitBytes = limitBytes;
 			req.version = version;
 			req.tags = TagSet();
+			req.arena.dependsOn(range.arena());
 			fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 
 			GetKeyValuesRequest localReq;
@@ -4681,6 +4682,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			localReq.limitBytes = limitBytes;
 			localReq.version = version;
 			localReq.tags = TagSet();
+			localReq.arena.dependsOn(range.arena());
 			data->actors.add(getKeyValuesQ(data, localReq));
 			fs.push_back(errorOr(localReq.reply.getFuture()));
 			std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
