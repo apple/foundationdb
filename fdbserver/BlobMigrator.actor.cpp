@@ -147,14 +147,19 @@ private:
 		state Future<Void> dbInfoChange = Void();
 		state Future<Void> delayTime = Void();
 		state int retries = 0;
+		// In simulation, we have to wait the DD finish inflight data movement, which may can't be done within
+		// BLOB_MIGRATOR_ERROR_RETRIES retries.
+		state int retryLimit = g_network->isSimulated() ? 5000 : SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES;
 		state UID requestId;
 		loop {
 			choose {
 				when(wait(dbInfoChange)) {
 					if (self->dbInfo->get().distributor.present()) {
 						requestId = deterministicRandom()->randomUniqueID();
-						replyFuture = errorOr(self->dbInfo->get().distributor.get().prepareBlobRestoreReq.getReply(
-						    PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)));
+						replyFuture =
+						    errorOr(timeoutError(self->dbInfo->get().distributor.get().prepareBlobRestoreReq.getReply(
+						                             PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)),
+						                         SERVER_KNOBS->BLOB_MIGRATOR_PREPARE_TIMEOUT));
 						dbInfoChange = Never();
 						TraceEvent("BlobRestorePrepare", self->interf_.id())
 						    .detail("State", "SendReq")
@@ -188,7 +193,7 @@ private:
 						    .detail("Retries", retries);
 					}
 
-					if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
+					if (++retries > retryLimit) {
 						throw restore_error();
 					}
 					delayTime = delayJittered(10.0);
