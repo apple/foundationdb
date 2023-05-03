@@ -1749,9 +1749,9 @@ void testMalformedDetailNotObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
-	httpResp->contentLen = sb.GetSize();
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
