@@ -26,6 +26,6 @@
 
 class MockDataDistributor {
 public:
-	Future<Void> run(Reference<DDSharedContext> context, std::shared_ptr<MockGlobalState> mgs);
+	Future<Void> run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor);
 };
 #endif // FOUNDATIONDB_MOCKDATADISTRIBUTOR_H
