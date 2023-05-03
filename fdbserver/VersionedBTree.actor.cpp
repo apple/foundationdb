@@ -8012,9 +8012,8 @@ public:
 			ASSERT(keyProvider.isValid() || db.isValid());
 		}
 
-		int pageSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
-		            : params.get("page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
+		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
+		                       : params.get("page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
