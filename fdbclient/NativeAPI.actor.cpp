@@ -1592,14 +1592,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
 
-	if (apiVersion.version() >= 720) {
-		registerSpecialKeysImpl(
-		    SpecialKeySpace::MODULE::CONFIGURATION,
-		    SpecialKeySpace::IMPLTYPE::READONLY,
-		    std::make_unique<StorageEngineParamsImpl>(
-		        KeyRangeRef("storage_engine_params/"_sr, "storage_engine_params0"_sr)
-		            .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
-	}
 	if (apiVersion.version() >= 700) {
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::ERRORMSG,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
@@ -8120,31 +8112,6 @@ ACTOR Future<Standalone<VectorRef<DDMetricsRef>>> waitDataDistributionMetricsLis
 					throw rep.getError();
 				}
 				return rep.get().storageMetricsList;
-			}
-		}
-	}
-}
-
-ACTOR Future<std::string> fetchStorageEngineParams(Database cx) {
-	loop {
-		choose {
-			when(wait(cx->onProxiesChanged())) {}
-			when(ErrorOr<GetStorageEngineParamsReply> rep =
-			         wait(errorOr(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                       &CommitProxyInterface::getStorageEngineParams,
-			                                       GetStorageEngineParamsRequest())))) {
-				if (rep.isError()) {
-					throw rep.getError();
-				}
-				json_spirit::mObject resultObj;
-				for (const auto& [k, vstr] : rep.get().params.getParams()) {
-					json_spirit::mValue value;
-					json_spirit::read_string(vstr, value);
-					resultObj[k] = value;
-				}
-				const std::string result =
-				    json_spirit::write_string(json_spirit::mValue(resultObj), json_spirit::pretty_print);
-				return result;
 			}
 		}
 	}

@@ -3021,30 +3021,6 @@ ACTOR Future<Void> ddMetricsRequestServer(CommitProxyInterface proxy, Reference<
 	}
 }
 
-ACTOR Future<Void> storageEngineParamsRequestServer(CommitProxyInterface proxy,
-                                                    Reference<AsyncVar<ServerDBInfo> const> db) {
-	loop {
-		choose {
-			when(state GetStorageEngineParamsRequest req = waitNext(proxy.getStorageEngineParams.getFuture())) {
-				if (!db->get().distributor.present()) {
-					req.reply.sendError(dd_not_found());
-					continue;
-				}
-				TraceEvent("CPStorageEngineParamsRequestServer").log();
-				ErrorOr<GetStorageEngineParamsReply> reply = wait(
-				    errorOr(db->get().distributor.get().storageEngineParams.getReply(GetStorageEngineParamsRequest())));
-				if (reply.isError()) {
-					req.reply.sendError(reply.getError());
-				} else {
-					GetStorageEngineParamsReply newReply;
-					newReply.params = reply.get().params;
-					req.reply.send(newReply);
-				}
-			}
-		}
-	}
-}
-
 ACTOR Future<Void> monitorRemoteCommitted(ProxyCommitData* self) {
 	loop {
 		wait(delay(0)); // allow this actor to be cancelled if we are removed after db changes.
@@ -3722,7 +3698,6 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	addActor.send(rejoinServer(proxy, &commitData));
 	addActor.send(ddMetricsRequestServer(proxy, db));
 	addActor.send(reportTxnTagCommitCost(proxy.id(), db, &commitData.ssTrTagCommitCost));
-	addActor.send(storageEngineParamsRequestServer(proxy, db));
 	addActor.send(logDetailedMetrics(&commitData));
 
 	auto openDb = openDBOnServer(db);

@@ -1685,18 +1685,6 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
-ACTOR Future<Void> getStorageEngineParams(Reference<DataDistributor> self, GetStorageEngineParamsRequest req) {
-	if (self->teamCollection) {
-		StorageEngineParamSet res = wait(self->teamCollection->getStorageEngineParams());
-		GetStorageEngineParamsReply _reply(res);
-		req.reply.send(_reply);
-	} else {
-		TraceEvent("GetStorageEngineParamsDDNotFound").log();
-		req.reply.sendError(dd_not_found());
-	}
-	return Void();
-}
-
 // Maintain an alive state of an audit until the audit completes
 // Automatically retry until if errors of the auditing process happen
 // Return if (1) audit completes; (2) retry times exceed the maximum retry times
@@ -2501,9 +2489,6 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));
-			}
-			when(GetStorageEngineParamsRequest req = waitNext(di.storageEngineParams.getFuture())) {
-				actors.add(getStorageEngineParams(self, req));
 			}
 		}
 	} catch (Error& err) {

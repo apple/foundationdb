@@ -63,7 +63,6 @@ struct CommitProxyInterface {
 	RequestStream<struct ProxySnapRequest> proxySnapReq;
 	RequestStream<struct ExclusionSafetyCheckRequest> exclusionSafetyCheckReq;
 	RequestStream<struct GetDDMetricsRequest> getDDMetrics;
-	RequestStream<struct GetStorageEngineParamsRequest> getStorageEngineParams;
 	PublicRequestStream<struct ExpireIdempotencyIdRequest> expireIdempotencyId;
 	PublicRequestStream<struct GetTenantIdRequest> getTenantId;
 	PublicRequestStream<struct GetBlobGranuleLocationsRequest> getBlobGranuleLocations;
@@ -98,8 +97,6 @@ struct CommitProxyInterface {
 			getTenantId = PublicRequestStream<struct GetTenantIdRequest>(commit.getEndpoint().getAdjustedEndpoint(11));
 			getBlobGranuleLocations = PublicRequestStream<struct GetBlobGranuleLocationsRequest>(
 			    commit.getEndpoint().getAdjustedEndpoint(12));
-			getStorageEngineParams =
-			    RequestStream<struct GetStorageEngineParamsRequest>(commit.getEndpoint().getAdjustedEndpoint(13));
 		}
 	}
 
@@ -119,7 +116,6 @@ struct CommitProxyInterface {
 		streams.push_back(expireIdempotencyId.getReceiver());
 		streams.push_back(getTenantId.getReceiver());
 		streams.push_back(getBlobGranuleLocations.getReceiver());
-		streams.push_back(getStorageEngineParams.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };

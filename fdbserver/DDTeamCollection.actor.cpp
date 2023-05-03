@@ -2383,45 +2383,6 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<StorageEngineParamSet> getStorageEngineParams(DDTeamCollection* self) {
-		// TODO : should wait for any pending changes for storages to apply and return
-		state std::vector<Future<ErrorOr<GetStorageEngineParamsReply>>> fs;
-		for (const auto& [_, ss] : self->server_and_tss_info) {
-			StorageServerInterface si = ss->getLastKnownInterface();
-			fs.push_back(si.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
-		}
-		// for (const auto& [_, ss] : self->tss_info_by_pair) {
-		// 	StorageServerInterface si = ss->getLastKnownInterface();
-		// 	fs.push_back(si.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
-		// }
-		wait(waitForAll(fs));
-		int index = 0;
-		StorageEngineParamSet result;
-		for (const auto& [serverId, ss] : self->server_and_tss_info) {
-			const std::string addr = ss->getLastKnownInterface().address().toString();
-			Future<ErrorOr<GetStorageEngineParamsReply>> f = fs[index++];
-			if (!f.isReady() || f.get().isError()) {
-				TraceEvent(SevWarnAlways, "GetStorageEngineParamsError")
-				    .detail("ServerId", serverId)
-				    .detail("Error", f.get().getError().code());
-				json_spirit::mObject errorObj;
-				errorObj["Error"] = f.get().getError().name();
-				errorObj["Message"] = f.get().getError().what();
-				result.set(addr, json_spirit::write_string(json_spirit::mValue(errorObj)));
-				continue;
-			}
-			GetStorageEngineParamsReply reply = f.get().get();
-			json_spirit::mObject paramsObj;
-			for (const auto& [k, v] : reply.params.getParams()) {
-				paramsObj[k] = v;
-			}
-			const std::string params_json_str = json_spirit::write_string(json_spirit::mValue(paramsObj));
-			result.set(addr, params_json_str);
-			TraceEvent("GetStorageParamsPerProcess").detail("Process", addr).detail("Params", params_json_str);
-		}
-		return result;
-	}
-
 	ACTOR static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
 		state ReadYourWritesTransaction tr(self->dbContext());
 		loop {
@@ -4022,10 +3983,6 @@ Future<Void> DDTeamCollection::tssStorageParamsUpdater() {
 	return StorageEngineParamsFactory::isSupported(configuration.testingStorageServerStoreType)
 	           ? DDTeamCollectionImpl::tssStorageParamsUpdater(this, configuration.tssStorageEngineParams)
 	           : Never();
-}
-
-Future<StorageEngineParamSet> DDTeamCollection::getStorageEngineParams() {
-	return DDTeamCollectionImpl::getStorageEngineParams(this);
 }
 
 Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRemoved,

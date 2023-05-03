@@ -745,8 +745,5 @@ public:
 	// task on the run loop.
 	static Future<Void> printSnapshotTeamsInfo(Reference<DDTeamCollection> self);
 
-	// <addr> -> ParamsJsonString
-	Future<StorageEngineParamSet> getStorageEngineParams();
-
 	Database dbContext() const { return db->context(); }
 };
