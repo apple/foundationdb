@@ -2223,7 +2223,7 @@ public:
 	                                               Future<Void> wigglerInitialized) {
 		// always set the params from database configuration when DD starts
 		// the API has no change if the storage servers already have the expected config
-		TraceEvent("DDTCStorageEngineParamsUpdaterStart")
+		TraceEvent(SevDebug, "DDTCStorageEngineParamsUpdaterStart")
 		    .detail("StoreType", self->configuration.storageServerStoreType.toString())
 		    .detail("NewParams", describe(newParams.getParams()));
 		// send update requests to all storages interfaces
@@ -2246,13 +2246,13 @@ public:
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			if (!f.isReady() || f.get().isError()) {
-				TraceEvent(SevWarnAlways, "DDTCSetStorageEngineParamsFailed")
+				TraceEvent(SevWarn, "DDTCSetStorageEngineParamsFailed")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
 				continue;
 			}
 			if (!self->server_info.contains(serverId)) {
-				TraceEvent(SevWarnAlways, "DDTCSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				TraceEvent(SevWarn, "DDTCSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
 				continue;
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
@@ -2260,22 +2260,22 @@ public:
 				newParams.getParams().contains(k)
 				    ? self->configuration.storageEngineParams.set(k, newParams.getParams().at(k))
 				    : self->configuration.storageEngineParams.clear(k);
-				TraceEvent(SevInfo, "StorageEngineParamApplied")
+				TraceEvent(SevDebug, "StorageEngineParamApplied")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent(SevInfo, "StorageEngineParamUpdaterNeedReplacement")
+				TraceEvent(SevDebug, "StorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			for (const auto& k : reply.result.unknown) {
-				TraceEvent(SevWarnAlways, "UnknownStorageEngineParam")
+				TraceEvent(SevWarn, "UnknownStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			std::vector<std::string> noNeedReplacement;
 			auto paramsUnderWiggle = paramsUnderWiggleF.getValue()[serverId];
@@ -2283,10 +2283,10 @@ public:
 				if (paramsUnderWiggle.contains(k)) {
 					// rollback to old value, no need to wiggle now, update the wiggle data
 					noNeedReplacement.push_back(k);
-					TraceEvent(SevInfo, "StorageEngineParamRollbackReplacement")
+					TraceEvent(SevDebug, "StorageEngineParamRollbackReplacement")
 					    .detail("ServerId", serverId)
 					    .detail("Param", k)
-					    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+					    .detail("Value", newParams.get(k, ""));
 				}
 			}
 
@@ -2305,7 +2305,7 @@ public:
 				} else {
 					// TODO : now only warnings, should we consider rollback or disallow change if perpetual wiggle is
 					// not enabled
-					TraceEvent(SevWarnAlways, "NeedReplacementInvalidAsWiggleNotEnabled")
+					TraceEvent(SevWarn, "NeedReplacementInvalidAsWiggleNotEnabled")
 					    .detail("ServerId", serverId)
 					    .detail("HelpMessage", "Please enable the perpetual wiggle and reboot the cluster");
 				}
@@ -2314,14 +2314,14 @@ public:
 
 		wait(waitForAll(collection));
 
-		TraceEvent("DDTCStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
+		TraceEvent(SevDebug, "DDTCStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
 		return Void();
 	}
 
 	ACTOR static Future<Void> tssStorageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
 		// always set the params from database configuration when DD starts
 		// the API has no change if the storage servers already have the expected config
-		TraceEvent("DDTCTSSStorageEngineParamsUpdaterStart")
+		TraceEvent(SevDebug, "DDTCTSSStorageEngineParamsUpdaterStart")
 		    .detail("StoreType", self->configuration.testingStorageServerStoreType.toString())
 		    .detail("NewParams", describe(newParams.getParams()));
 		// send update requests to all storages interfaces
@@ -2338,13 +2338,13 @@ public:
 		state std::vector<Future<Void>> collection;
 		for (const auto& [serverId, f] : fmap) {
 			if (!f.isReady() || f.get().isError()) {
-				TraceEvent(SevWarnAlways, "DDTCTSSSetStorageEngineParamsFailed")
+				TraceEvent(SevWarn, "DDTCTSSSetStorageEngineParamsFailed")
 				    .detail("ServerId", serverId)
 				    .detail("Error", f.get().getError().code());
 				continue;
 			}
 			if (!self->tss_info_by_pair.contains(serverId)) {
-				TraceEvent(SevWarnAlways, "DDTCTSSSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				TraceEvent(SevWarn, "DDTCTSSSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
 				continue;
 			}
 			SetStorageEngineParamsReply reply = f.get().get();
@@ -2352,34 +2352,35 @@ public:
 				newParams.getParams().contains(k)
 				    ? self->configuration.tssStorageEngineParams.set(k, newParams.getParams().at(k))
 				    : self->configuration.tssStorageEngineParams.clear(k);
-				TraceEvent(SevInfo, "TSSStorageEngineParamApplied")
+				TraceEvent(SevDebug, "TSSStorageEngineParamApplied")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			for (const auto& k : reply.result.needReplacement) {
-				TraceEvent(SevInfo, "TSSStorageEngineParamUpdaterNeedReplacement")
+				TraceEvent(SevDebug, "TSSStorageEngineParamUpdaterNeedReplacement")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			for (const auto& k : reply.result.unknown) {
-				TraceEvent(SevWarnAlways, "TSSUnknownStorageEngineParam")
+				TraceEvent(SevDebug, "TSSUnknownStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 			for (const auto& k : reply.result.unchanged) {
-				TraceEvent(SevWarnAlways, "TSSUnchangedStorageEngineParam")
+				TraceEvent(SevDebug, "TSSUnchangedStorageEngineParam")
 				    .detail("ServerId", serverId)
 				    .detail("Param", k)
-				    .detail("Value", newParams.getParams().contains(k) ? newParams.getParams().at(k) : "");
+				    .detail("Value", newParams.get(k, ""));
 			}
 		}
 
 		wait(waitForAll(collection));
 
-		TraceEvent("DDTCTSSStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
+		TraceEvent(SevDebug, "DDTCTSSStorageParamsUpdaterFinished")
+		    .detail("NewParams", describe(newParams.getParams()));
 		return Void();
 	}
 

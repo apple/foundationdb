@@ -245,9 +245,6 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
 				// no need to wait.
-			} else if (e.isError() && e.getError().code() == error_code_please_reboot_kv_store) {
-				// the error means to close and reopen the kv store
-				store->close();
 			} else {
 				wait(onClosed);
 			}

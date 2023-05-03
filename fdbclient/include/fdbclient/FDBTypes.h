@@ -1853,6 +1853,10 @@ struct StorageEngineParamSet : public ReferenceCounted<StorageEngineParamSet> {
 
 	bool getBool(const std::string& name) const { return params.at(name) == "true"; }
 
+	std::string get(const std::string& name, const std::string& defaultValue) const {
+		return params.contains(name) ? params.at(name) : defaultValue;
+	}
+
 	const std::map<std::string, std::string>& getParams() const { return params; }
 
 	std::map<std::string, std::string>& getMutableParams() { return params; }

@@ -2027,12 +2027,7 @@ public:
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
 		g_redwoodMetrics.ioLock = ioLock.getPtr();
-		// if (!g_redwoodMetricsActor.isValid()) {
-		TraceEvent("GRedwoodMetricsActorInit")
-		    .detail("MetricsInterval", metricsInterval)
-		    .detail("HistogramInterval", histogramInterval);
 		g_redwoodMetricsActor = redwoodMetricsLogger(metricsInterval, histogramInterval);
-		// }
 
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
@@ -8315,8 +8310,6 @@ public:
 
 	Future<StorageEngineParamSet> getParameters() const override {
 		StorageEngineParamSet result;
-		// how to get the default page size from m_tree,
-		// what's the general way to get it
 		result.set("kvstore_range_prefetch", prefetch ? "true" : "false");
 		result.set("page_size", std::to_string(m_tree->getPageSize()));
 		result.set("metrics_interval", std::to_string(metrics_interval));
@@ -8334,25 +8327,15 @@ public:
 		for (const auto& k : result.applied) {
 			if (k == "kvstore_range_prefetch")
 				prefetch = !prefetch;
-			TraceEvent("RedwoodStorageEngineParamsApplied").detail("Param", k);
-		}
-		for (const auto& k : result.needReboot) {
-			TraceEvent("RedwoodStorageEngineParamsNeedReboot").detail("Param", k);
-		}
-		for (const auto& k : result.needReplacement) {
-			TraceEvent("RedwoodStorageEngineParamsNeedReplacement").detail("Param", k);
-		}
-		for (const auto& k : result.unchanged) {
-			TraceEvent("RedwoodStorageEngineParamsUnchanged").detail("Param", k);
+			TraceEvent(SevDebug, "RedwoodStorageEngineParamsApplied").detail("Param", k);
 		}
 		return result;
 	}
 
 	Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) override {
 		StorageEngineParamResult result;
-		// TODO : have a set lookup for parameters
 		for (auto const& [k, v] : params.getParams()) {
-			TraceEvent("CheckCompatibilityParam").detail("Param", k).detail("New", v);
+			TraceEvent(SevDebug, "CheckCompatibilityParam").detail("Param", k).detail("New", v);
 			if (k == "kvstore_range_prefetch") {
 				params.getBool(k) == prefetch ? result.unchanged.push_back(k) : result.applied.push_back(k);
 			} else if (k == "metrics_interval") {
@@ -10196,8 +10179,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	    params.getInt("remapCleanupWindowBytes")
 	        .orDefault(BUGGIFY ? 0 : deterministicRandom()->randomInt64(1, 100) * 1024 * 1024);
 	state int concurrentExtentReads =
-	    params.getInt("concurrentExtentReads")
-	        .orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS); // a default redwood options
+	    params.getInt("concurrentExtentReads").orDefault(SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS);
 
 	// These settings are an attempt to keep the test execution real reasonably short
 	state int64_t maxPageOps = params.getInt("maxPageOps").orDefault((shortTest || serialTest) ? 50e3 : 1e6);
