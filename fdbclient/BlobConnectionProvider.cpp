@@ -76,6 +76,7 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 	void updateMetadata(const Standalone<BlobMetadataDetailsRef>& newMetadata, bool checkPrevious) {
 		ASSERT(newMetadata.locations.size() >= 1);
 		if (checkPrevious) {
+			CODE_PROBE(true, "Updating blob metadata details with new credentials");
 			// FIXME: validate only the credentials changed and the locations are the same. They don't necessarily need
 			// to be provided in the same order though.
 			ASSERT(newMetadata.locations.size() == metadata.locations.size());
