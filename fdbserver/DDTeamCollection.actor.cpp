@@ -1367,6 +1367,8 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
+								// TODO: Improve simulation testing to test locality changes. Until then, we
+								// realistically don't expect this code probe to be hit.
 								CODE_PROBE(true, "Server locality change created bad teams", probe::decoration::rare);
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
@@ -2568,7 +2570,6 @@ public:
 						// trigger restartRecruiting again, or the host will become healthy again, in which case we
 						// won't need to recruit on it and it would be counted with Excl1.
 						exclusions.insert(it.first);
-						CODE_PROBE(true, "DD excluding host with many failed storages", probe::decoration::rare);
 						TraceEvent(SevDebug, "DDRecruitExcl3")
 						    .detail("Primary", self->primary)
 						    .detail("Excluding", it.first.toString())
