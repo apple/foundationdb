@@ -82,7 +82,7 @@ struct HaltConsistencyScanRequest {
 //   RangeConfig - Tells the scan what ranges to operate on or ignore
 //
 //   CurrentRoundStats - Execution state and stats for the current round
-//   RoundHistory - History of RoundInfo's by start version (TODO)
+//   RoundHistory - History of RoundInfo's by start version
 // 	 LifetimeStats - Accumulated lifetime counts for the cluster
 //
 // The class trigger will only be fired by changes to Config or RangeConfig
@@ -287,7 +287,6 @@ struct ConsistencyScanState : public KeyBackedClass {
 	}
 
 	// History of scan round stats stored by their start version
-	// TODO:  This is not used yet so it is commented out.
 	StatsHistoryMap roundStatsHistory() { return { subspace.pack(__FUNCTION__sr), IncludeVersion() }; }
 };
 

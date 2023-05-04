@@ -159,22 +159,26 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 
 		// Scan loop.  Each iteration makes incremental, durable progress on the scan.
 		loop {
-			// Calculate the rate we should go given the database size estimate, the target time interval, and the max
-			// read rate.  Note that since the database size is only an estimate, basing the rate on the amount of bytes
-			// and time left could result in the scan slowing down too much at the end.  Also, avoid divide by 0 and use
-			// a reasonable min of 100e3.
-			// The read rate is meant to represent bandwidth, but each shard can have 1 or many more replicas, so the
-			// database size is smaller than the amount of data we actually have to read. Assume a replication factor of
-			// 3, or if the scan has already made progress use the ratio of replicated bytes read to logical kv bytes
-			// scanned.
-			double replicationFactor =
-			    (statsCurrentRound.logicalBytesScanned == 0)
-			        ? 3
-			        : ((double)statsCurrentRound.replicatedBytesRead / statsCurrentRound.logicalBytesScanned);
-			int configuredRate = std::max<int>(
-			    100e3,
-			    std::min<int>(config.maxReadByteRate,
-			                  databaseSize.get() * replicationFactor / (config.targetRoundTimeSeconds + 1)));
+			// Calculate the rate we should read at
+			int configuredRate;
+
+			// If the round is overdue to be finished, use the max rate allowed.
+			if (now() - statsCurrentRound.startTime > config.targetRoundTimeSeconds) {
+				configuredRate = config.maxReadByteRate;
+			} else {
+				// Otherwise, use databaseSize * replicationFactor / targetCompletionTimeSeconds,
+				// with a max of maxReadByteRate and a reasonable min of 100e3.  Also, avoid divide by zero.
+				// Estimate average replication factor from the current round stats or default to 3.
+				double replicationFactor =
+				    (statsCurrentRound.logicalBytesScanned == 0)
+				        ? 3
+				        : ((double)statsCurrentRound.replicatedBytesRead / statsCurrentRound.logicalBytesScanned);
+				configuredRate = std::max<int>(
+				    100e3,
+				    std::min<int>(config.maxReadByteRate,
+				                  databaseSize.get() * replicationFactor /
+				                      (config.targetRoundTimeSeconds > 0 ? config.targetRoundTimeSeconds : 1)));
+			}
 
 			// The rateControl has an accumulated budget so we only want to reset it if the configured rate has changed.
 			if (readRateLimit != configuredRate) {
@@ -184,19 +188,27 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 
 			// This will store how many total bytes we read from all replicas in this loop iteration
 			// We will wait on the rate control *after* reading using the actual amount that we read
-			state int bytesRead = 0;
+			state int replicatedBytesRead = 0;
+			// This is the amount of logical KV bytes read regardless of how many replicas exist of each key
+			state int logicalBytesRead = 0;
 
 			tr->reset();
 			loop {
 				try {
 					systemDB->setOptions(tr);
 
-					state RangeResult shards;
+					state RangeResult shard;
 					state Optional<Versionstamp> csVersion;
 
-					// TODO: Read the keyServers map starting at lastLessThanOrEqual(statsCurrentRound.lastEndKey)
-					// with a rows min/max of 2 to get the shard that this key is in.
-					wait(store(csVersion, cs.trigger.get(tr)));
+					GetRangeLimits limits;
+					limits.minRows = 2;
+					limits.rows = 2;
+					wait(store(shard,
+					           tr->getRange(lastLessOrEqual(statsCurrentRound.lastEndKey),
+					                        firstGreaterOrEqual(statsCurrentRound.lastEndKey),
+					                        limits,
+					                        Snapshot::True)) &&
+					     store(csVersion, cs.trigger.get(tr)));
 
 					// Check for a config version change
 					// If there is one, skip the commit and break to the main loop
@@ -205,22 +217,28 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 						break;
 					}
 
+					// TODO:  Decode the shard KV pairs and get storage interfaces
+
 					// We must read at the same version from all replicas before the version is too old.
 					// TODO: Figure out a reasonable read size.
 
-					// TODO:  Decode the shard locations and read from each replica
+					state int errors = 0;
+					state bool noMoreRecords = false;
 
-					// TODO:  Do reads, compare results, update these
-					// statsCurrentRound.errorCount
-					// statsCurrentRound.logicalBytesScanned
-					// statsCurrentRound.replicatedBytesScanned
-					// statsCurrentRound.lastEndKey
-					// statsLifetime.logicalBytesScanned
-					// statsLifetime.replicatedBytesRead
-					// statsLifetime.errorCount
+					// TODO:  Do reads, compare results, update replicatedBytesRead and logicalBytesRead, and update
+					// statsCurrentRound.lastEndKey and noMoreRecords
 
-					// TODO:  If we reached the end of the database
-					if (true /*TODO*/) {
+					statsCurrentRound.errorCount += errors;
+					statsLifetime.errorCount += errors;
+
+					statsCurrentRound.logicalBytesScanned += logicalBytesRead;
+					statsCurrentRound.replicatedBytesRead += replicatedBytesRead;
+
+					statsLifetime.logicalBytesScanned += logicalBytesRead;
+					statsLifetime.replicatedBytesRead += replicatedBytesRead;
+
+					// If we reached the end of the database then end the round
+					if (noMoreRecords) {
 						// Complete the current round and write it to history
 						statsCurrentRound.endVersion = tr->getReadVersion().get();
 						statsCurrentRound.endTime = now();
@@ -247,7 +265,7 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 			} // Transaction retry loop for making one increment of durable progress
 
 			// Wait for the rate control to generate enough budget to match what we read.
-			wait(readRateControl->getAllowance(bytesRead));
+			wait(readRateControl->getAllowance(replicatedBytesRead));
 
 			if (restartMainLoop) {
 				wait(delayBeforeMainLoopRestart);
