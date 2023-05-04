@@ -153,8 +153,10 @@ private:
 				when(wait(dbInfoChange)) {
 					if (self->dbInfo->get().distributor.present()) {
 						requestId = deterministicRandom()->randomUniqueID();
-						replyFuture = errorOr(self->dbInfo->get().distributor.get().prepareBlobRestoreReq.getReply(
-						    PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)));
+						replyFuture =
+						    errorOr(timeoutError(self->dbInfo->get().distributor.get().prepareBlobRestoreReq.getReply(
+						                             PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)),
+						                         SERVER_KNOBS->BLOB_MIGRATOR_PREPARE_TIMEOUT));
 						dbInfoChange = Never();
 						TraceEvent("BlobRestorePrepare", self->interf_.id())
 						    .detail("State", "SendReq")
@@ -184,7 +186,7 @@ private:
 						TraceEvent("BlobRestorePrepare", self->interf_.id())
 						    .detail("State", "Failed")
 						    .detail("ReqId", requestId)
-						    .detail("Code", reply.get().res)
+						    .detail("Reply", reply.get().toString())
 						    .detail("Retries", retries);
 					}
 

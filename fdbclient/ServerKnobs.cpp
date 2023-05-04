@@ -1132,6 +1132,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
 	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "" );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
+	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
 	init( BLOB_RESTORE_MANIFEST_URL, isSimulated ? "file://simfdb/fdbblob/manifest" : "" );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );

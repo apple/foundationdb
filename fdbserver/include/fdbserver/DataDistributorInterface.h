@@ -72,7 +72,7 @@ struct DataDistributorInterface {
 struct PrepareBlobRestoreReply {
 	constexpr static FileIdentifier file_identifier = 1024888;
 
-	enum Type : int8_t { SUCCESS = 0, CONFLICT_SNAPSHOT, CONFLICT_BLOB_RESTORE, PROCESSING_RELOCATION };
+	enum Type : int8_t { SUCCESS = 0, CONFLICT_SNAPSHOT, CONFLICT_BLOB_RESTORE };
 	int8_t res;
 
 	PrepareBlobRestoreReply() = default;
@@ -81,6 +81,20 @@ struct PrepareBlobRestoreReply {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, res);
+	}
+
+	std::string toString() const {
+		switch (res) {
+		case SUCCESS:
+			return "success";
+		case CONFLICT_SNAPSHOT:
+			return "conflict_snapshot";
+		case CONFLICT_BLOB_RESTORE:
+			return "conflict_blob_restore";
+		default:
+			ASSERT(false);
+		}
+		return "";
 	}
 };
 
