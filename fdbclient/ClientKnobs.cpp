@@ -97,7 +97,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( GET_RANGE_SHARD_LIMIT,                     2 );
 	init( WARM_RANGE_SHARD_LIMIT,                  100 );
-	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 3;
+	init( STORAGE_METRICS_SHARD_LIMIT,             100 ); if( randomize && BUGGIFY ) STORAGE_METRICS_SHARD_LIMIT = 10;
 	init( SHARD_COUNT_LIMIT,                        80 ); if( randomize && BUGGIFY ) SHARD_COUNT_LIMIT = 3;
 	init( STORAGE_METRICS_UNFAIR_SPLIT_LIMIT,  2.0/3.0 );
 	init( STORAGE_METRICS_TOO_MANY_SHARDS_DELAY,  15.0 );
