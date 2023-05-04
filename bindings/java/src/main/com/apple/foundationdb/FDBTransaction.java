@@ -766,6 +766,10 @@ class FDBTransaction extends NativeObjectWrapper implements Transaction, OptionC
 		FDBTransaction tr = null;
 		try {
 			tr = new FDBTransaction(getPtr(), database, executor);
+			// In newer versions, this option is set as a default option on the database
+			if (FDB.instance().getAPIVersion() < 730) {
+				tr.options().setUsedDuringCommitProtectionDisable();
+			}
 			transactionOwner = false;
 			return tr;
 		}
