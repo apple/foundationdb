@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-// #include "fdbrpc/HTTPServer.h"
 #include "fdbrpc/HTTP.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
