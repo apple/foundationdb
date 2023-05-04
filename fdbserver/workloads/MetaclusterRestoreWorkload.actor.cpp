@@ -774,8 +774,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				metacluster::MetaclusterTenantMapEntry tenantEntry;
 				tenantEntry.tenantName = tenantName;
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
-				wait(metacluster::createTenant(
-				    self->managementDb, tenantEntry, metacluster::AssignClusterAutomatically::True));
+				wait(metacluster::createTenant(self->managementDb,
+				                               tenantEntry,
+				                               metacluster::AssignClusterAutomatically::True,
+				                               metacluster::IgnoreCapacityLimit::False));
 				metacluster::MetaclusterTenantMapEntry createdEntry =
 				    wait(metacluster::getTenant(self->managementDb, tenantName));
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreatedTenant")

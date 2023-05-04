@@ -167,12 +167,15 @@ void applyConfigurationToSpecialKeys(Reference<ITransaction> tr,
 
 // tenant create command
 ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 3 || tokens.size() > 5) {
-		fmt::print("Usage: tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>]\n\n");
+	if (tokens.size() < 3 || tokens.size() > 6) {
+		fmt::print("Usage: tenant create <NAME> [tenant_group=<TENANT_GROUP>] [assigned_cluster=<CLUSTER_NAME>] "
+		           "[ignore_capacity_limit]\n\n");
 		fmt::print("Creates a new tenant in the cluster with the specified name.\n");
 		fmt::print("An optional group can be specified that will require this tenant\n");
 		fmt::print("to be placed on the same cluster as other tenants in the same group.\n");
 		fmt::print("An optional cluster name can be specified that this tenant will be placed in.\n");
+		fmt::print("Optionally, `ignore_capacity_limit' can be specified together with `assigned_cluster' to create a "
+		           "tenant ignoring tenant group limit on the specified cluster.\n");
 		return false;
 	}
 
@@ -180,11 +183,21 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 	state Reference<ITransaction> tr = db->createTransaction();
 	state bool doneExistenceCheck = false;
 
+	state bool ignoreCapacityLimit = tokens.back() == "ignore_capacity_limit";
+	int configurationEndIndex = tokens.size() - (ignoreCapacityLimit ? 1 : 0);
+
 	state Optional<std::map<Standalone<StringRef>, Optional<Value>>> configuration =
-	    parseTenantConfiguration(tokens, 3, tokens.size(), false);
+	    parseTenantConfiguration(tokens, 3, configurationEndIndex, false);
 
 	if (!configuration.present()) {
 		return false;
+	} else if (ignoreCapacityLimit) {
+		if (!configuration.get().contains("assigned_cluster"_sr) && !configuration.get().contains("tenant_group"_sr)) {
+			fmt::print(stderr,
+			           "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set or when the "
+			           "tenant belongs to an existing group.\n");
+			return false;
+		}
 	}
 
 	loop {
@@ -203,7 +216,10 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 					tenantEntry.configure(name, value);
 				}
 				tenantEntry.tenantName = tokens[2];
-				wait(metacluster::createTenant(db, tenantEntry, assignClusterAutomatically));
+				wait(metacluster::createTenant(db,
+				                               tenantEntry,
+				                               assignClusterAutomatically,
+				                               metacluster::IgnoreCapacityLimit(ignoreCapacityLimit)));
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
@@ -996,9 +1012,9 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 	if (tokens.size() == 1) {
 		return { "<create|delete|deleteId|list|get|getId|configure|rename>", "[ARGS]" };
 	} else if (tokencmp(tokens[1], "create") && tokens.size() < 5) {
-		static std::vector<const char*> opts = { "<NAME>",
-			                                     "[tenant_group=<TENANT_GROUP>]",
-			                                     "[assigned_cluster=<CLUSTER_NAME>]" };
+		static std::vector<const char*> opts = {
+			"<NAME>", "[tenant_group=<TENANT_GROUP>]", "[assigned_cluster=<CLUSTER_NAME>]", "[ignore_capacity_limit]"
+		};
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "delete") && tokens.size() < 3) {
 		static std::vector<const char*> opts = { "<NAME>" };

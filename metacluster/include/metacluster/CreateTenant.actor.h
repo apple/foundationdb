@@ -46,6 +46,7 @@ template <class DB>
 struct CreateTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
 	AssignClusterAutomatically assignClusterAutomatically;
+	IgnoreCapacityLimit ignoreCapacityLimit;
 
 	// Initialization parameters
 	MetaclusterTenantMapEntry tenantEntry;
@@ -55,8 +56,10 @@ struct CreateTenantImpl {
 
 	CreateTenantImpl(Reference<DB> managementDb,
 	                 MetaclusterTenantMapEntry tenantEntry,
-	                 AssignClusterAutomatically assignClusterAutomatically)
-	  : ctx(managementDb), tenantEntry(tenantEntry), assignClusterAutomatically(assignClusterAutomatically) {}
+	                 AssignClusterAutomatically assignClusterAutomatically,
+	                 IgnoreCapacityLimit ignoreCapacityLimit)
+	  : ctx(managementDb), tenantEntry(tenantEntry), assignClusterAutomatically(assignClusterAutomatically),
+	    ignoreCapacityLimit(ignoreCapacityLimit) {}
 
 	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
 	                                                          ClusterName clusterName) {
@@ -146,6 +149,9 @@ struct CreateTenantImpl {
 					throw invalid_tenant_configuration();
 				}
 				return std::make_pair(groupEntry.get().assignedCluster, true);
+			} else if (self->assignClusterAutomatically && self->ignoreCapacityLimit) {
+				TraceEvent("MetaclusterCreateTenantNonExistingGroupIgnoreCapacityAutoAssign").log();
+				throw invalid_tenant_configuration();
 			}
 		}
 
@@ -157,10 +163,15 @@ struct CreateTenantImpl {
 		if (!self->assignClusterAutomatically) {
 			DataClusterMetadata dataClusterMetadata =
 			    wait(getClusterTransaction(tr, self->tenantEntry.assignedCluster));
-			if (!dataClusterMetadata.entry.hasCapacity()) {
+			if (!dataClusterMetadata.entry.hasCapacity() && !self->ignoreCapacityLimit) {
 				throw cluster_no_capacity();
 			}
 			dataClusterNames.push_back(self->tenantEntry.assignedCluster);
+		} else if (self->ignoreCapacityLimit) {
+			TraceEvent("MetaclusterCreateTenantAutoAssignIgnoreCapLimit")
+			    .detail("TenantName", self->tenantEntry.tenantName)
+			    .detail("TenantGroup", self->tenantEntry.tenantGroup);
+			throw invalid_tenant_configuration();
 		} else {
 			state KeyBackedSet<Tuple>::RangeResultType availableClusters =
 			    wait(metadata::management::clusterCapacityIndex().getRange(
@@ -272,8 +283,11 @@ struct CreateTenantImpl {
 
 		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::READY);
 
-		internal::managementClusterAddTenantToGroup(
-		    tr, self->tenantEntry, &self->ctx.dataClusterMetadata.get(), GroupAlreadyExists(assignment.second));
+		internal::managementClusterAddTenantToGroup(tr,
+		                                            self->tenantEntry,
+		                                            &self->ctx.dataClusterMetadata.get(),
+		                                            GroupAlreadyExists(assignment.second),
+		                                            self->ignoreCapacityLimit);
 
 		return Void();
 	}
@@ -315,6 +329,9 @@ struct CreateTenantImpl {
 	}
 
 	ACTOR static Future<Void> run(CreateTenantImpl* self) {
+		if (!self->tenantEntry.assignedCluster.empty() && self->assignClusterAutomatically) {
+			throw invalid_tenant_configuration();
+		}
 		if (self->tenantEntry.tenantName.startsWith("\xff"_sr)) {
 			throw invalid_tenant_name();
 		}
@@ -352,8 +369,9 @@ struct CreateTenantImpl {
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db,
                           MetaclusterTenantMapEntry tenantEntry,
-                          AssignClusterAutomatically assignClusterAutomatically) {
-	state internal::CreateTenantImpl<DB> impl(db, tenantEntry, assignClusterAutomatically);
+                          AssignClusterAutomatically assignClusterAutomatically,
+                          IgnoreCapacityLimit ignoreCapacityLimit) {
+	state internal::CreateTenantImpl<DB> impl(db, tenantEntry, assignClusterAutomatically, ignoreCapacityLimit);
 	wait(impl.run());
 	return Void();
 }

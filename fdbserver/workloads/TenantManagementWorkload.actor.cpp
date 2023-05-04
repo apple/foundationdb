@@ -392,7 +392,7 @@ struct TenantManagementWorkload : TestWorkload {
 				assign = metacluster::AssignClusterAutomatically::False;
 			}
 
-			wait(metacluster::createTenant(self->mvDb, entry, assign));
+			wait(metacluster::createTenant(self->mvDb, entry, assign, metacluster::IgnoreCapacityLimit::False));
 			return Void();
 		}
 

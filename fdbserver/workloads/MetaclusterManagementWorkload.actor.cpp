@@ -967,8 +967,10 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						preferredClusterIndex = deterministicRandom()->randomInt(0, preferredClusters.size());
 						tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
 					}
-					Future<Void> createFuture =
-					    metacluster::createTenant(self->managementDb, tenantMapEntry, assignClusterAutomatically);
+					Future<Void> createFuture = metacluster::createTenant(self->managementDb,
+					                                                      tenantMapEntry,
+					                                                      assignClusterAutomatically,
+					                                                      metacluster::IgnoreCapacityLimit::False);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
 						break;
