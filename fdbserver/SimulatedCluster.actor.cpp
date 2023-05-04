@@ -2126,7 +2126,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+	if (!testConfig.singleRegion &&
+	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
 	setMachineCount(testConfig);

@@ -112,6 +112,7 @@ Future<Void> MockDDTestWorkload::setup(Database const& cx) {
 	testConfig.simpleConfig = simpleConfig;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
+	testConfig.singleRegion = true;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 
 	// initialize sharedMgs
