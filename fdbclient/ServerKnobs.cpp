@@ -850,7 +850,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
-	init( PERSIST_COMPLETE_AUDIT_COUNT,                           10 ); if ( isSimulated ) PERSIST_COMPLETE_AUDIT_COUNT = 1;
+	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = 1;
 	init( AUDIT_RETRY_COUNT_MAX,                                  10 );
 	init( SS_AUDIT_AUTO_PROCEED_COUNT_MAX,                         5 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );

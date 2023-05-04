@@ -778,31 +778,45 @@ void resumeStorageAudits(Reference<DataDistributor> self) {
 		return;
 	}
 	cancelAllAuditsInAuditMap(self); // cancel existing audits
-	int numCompleteAudit = 0;
+	int numFinishAudit = 0; // "finish" audits include Complete/Failed audits
 	for (const auto& auditState : self->initData->auditStates) {
-		if (auditState.getPhase() == AuditPhase::Complete) {
-			numCompleteAudit++;
+		if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
+			numFinishAudit++;
 		}
 	}
-	const int numCompleteAuditsToClear = numCompleteAudit - SERVER_KNOBS->PERSIST_COMPLETE_AUDIT_COUNT;
-	int numCompleteAuditsCleared = 0;
+	const int numFinishAuditsToClear = numFinishAudit - SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT;
+	int numFinishAuditsCleared = 0;
 	std::sort(self->initData->auditStates.begin(),
 	          self->initData->auditStates.end(),
 	          [](AuditStorageState a, AuditStorageState b) {
 		          return a.id < b.id; // Inplacement sort in ascending order
 	          });
-	// resume from disk
+	// Cleanup audit metadata for Failed/Complete audits
+	// Resume RUNNING audits
+	// Keep Error audits persistent
 	for (const auto& auditState : self->initData->auditStates) {
 		if (auditState.getPhase() == AuditPhase::Error) {
 			continue;
 		} else if (auditState.getPhase() == AuditPhase::Failed) {
-			self->addActor.send(clearAuditMetadata(self->txnProcessor->context(), auditState.getType(), auditState.id));
+			if (numFinishAuditsCleared < numFinishAuditsToClear) {
+				// Clear both audit metadata and corresponding progress metadata
+				self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
+				                                       auditState.getType(),
+				                                       auditState.id,
+				                                       /*clearProgressMetadata=*/true));
+				numFinishAuditsCleared++;
+			}
 			continue;
 		} else if (auditState.getPhase() == AuditPhase::Complete) {
-			if (numCompleteAuditsCleared < numCompleteAuditsToClear) {
-				self->addActor.send(
-				    clearAuditMetadata(self->txnProcessor->context(), auditState.getType(), auditState.id));
-				numCompleteAuditsCleared++;
+			if (numFinishAuditsCleared < numFinishAuditsToClear) {
+				// Clear audit metadata only
+				// No need to clear the corresponding progress metadata
+				// since it has been cleared for Complete audits
+				self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
+				                                       auditState.getType(),
+				                                       auditState.id,
+				                                       /*clearProgressMetadata=*/false));
+				numFinishAuditsCleared++;
 			}
 			continue;
 		}
@@ -810,6 +824,7 @@ void resumeStorageAudits(Reference<DataDistributor> self) {
 		TraceEvent(SevDebug, "AuditStorageResume", self->ddId)
 		    .detail("AuditID", auditState.id)
 		    .detail("AuditType", auditState.getType())
+		    .detail("NumFinishAuditsCleared", numFinishAuditsCleared)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		runAuditStorage(self, auditState, 0, "ResumeAudit");
 	}
@@ -1967,7 +1982,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			UID auditID_ = wait(persistNewAuditState(
 			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled())); // must succeed
 			self->addActor.send(clearAuditMetadataForType(
-			    self->txnProcessor->context(), auditState.getType(), SERVER_KNOBS->PERSIST_COMPLETE_AUDIT_COUNT));
+			    self->txnProcessor->context(), auditState.getType(), SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
 			// data distribution could restart in the middle of persistNewAuditState
 			// It is possible that the auditState has been written to disk before data distribution restarts,
 			// hence a new audit resumption loads audits from disk and launch the audits
