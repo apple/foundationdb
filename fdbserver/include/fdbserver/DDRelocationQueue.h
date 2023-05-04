@@ -317,6 +317,10 @@ public:
 
 	MovingWindow<int64_t> moveBytesRate;
 
+	int64_t relocateTotalCount;
+
+	int64_t relocateToSourceCount;
+
 	DDQueue() = default;
 
 	void startRelocation(int priority, int healthPriority);

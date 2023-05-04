@@ -289,7 +289,7 @@ public:
 			// When relocating shards, DD would evaluate the CPU & AvailabeSpace of sourceTeam. If
 			// both of metrics are below pivot values, we would return the source team to dataDistributionRelocator
 			if (req.teamSelect.isForRelocateShard() && SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-				auto sourceTeam = self->evaluateSourceTeam(req.completeSources);
+				auto sourceTeam = self->evaluateSourceTeam(req.src);
 				if (sourceTeam.present()) {
 					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevInfo, "GetTeamReturnSourceTeam", self->distributorId)
@@ -3317,7 +3317,7 @@ void DDTeamCollection::updateAvailableSpacePivots() {
 		                 teamAvailableSpace.begin() + strictPivot,
 		                 teamAvailableSpace.end(),
 		                 std::greater{});
-		teamPivots.strictPivotAS = std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO, teamAvailableSpace[strictPivot]);
+		teamPivots.strictPivotAS = teamAvailableSpace[strictPivot];
 	} else {
 		teamPivots.pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 		teamPivots.strictPivotAS = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
@@ -6440,7 +6440,7 @@ public:
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
 		                               ForReadBalance::True);
-		sourceReq.completeSources = std::vector{ UID(1, 0) };
+		sourceReq.src = std::vector{ UID(1, 0) };
 
 		wait(collection->getTeam(sourceReq));
 		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
@@ -6459,7 +6459,7 @@ public:
 		                             TeamMustHaveShards::False,
 		                             PreferLowerReadUtil::True,
 		                             ForReadBalance::True);
-		bestReq.completeSources = std::vector{ UID(4, 0) };
+		bestReq.src = std::vector{ UID(4, 0) };
 		wait(collection->getTeam(bestReq));
 		const auto [bestTeam, found2] = bestReq.reply.getFuture().get();
 		ASSERT(bestTeam.present());
@@ -6473,7 +6473,7 @@ public:
 		                            TeamMustHaveShards::False,
 		                            PreferLowerReadUtil::True,
 		                            ForReadBalance::True);
-		anyReq.completeSources = std::vector{ UID(3, 0) };
+		anyReq.src = std::vector{ UID(3, 0) };
 		wait(collection->getTeam(anyReq));
 		const auto [anyTeam, found3] = anyReq.reply.getFuture().get();
 		ASSERT(anyTeam.present());
