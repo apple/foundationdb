@@ -778,10 +778,32 @@ void resumeStorageAudits(Reference<DataDistributor> self) {
 		return;
 	}
 	cancelAllAuditsInAuditMap(self); // cancel existing audits
+	int numCompleteAudit = 0;
+	for (const auto& auditState : self->initData->auditStates) {
+		if (auditState.getPhase() == AuditPhase::Complete) {
+			numCompleteAudit++;
+		}
+	}
+	const int numCompleteAuditsToClear = numCompleteAudit - SERVER_KNOBS->PERSIST_COMPLETE_AUDIT_COUNT;
+	int numCompleteAuditsCleared = 0;
+	std::sort(self->initData->auditStates.begin(),
+	          self->initData->auditStates.end(),
+	          [](AuditStorageState a, AuditStorageState b) {
+		          return a.id < b.id; // Inplacement sort in ascending order
+	          });
 	// resume from disk
 	for (const auto& auditState : self->initData->auditStates) {
-		if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Error ||
-		    auditState.getPhase() == AuditPhase::Failed) {
+		if (auditState.getPhase() == AuditPhase::Error) {
+			continue;
+		} else if (auditState.getPhase() == AuditPhase::Failed) {
+			self->addActor.send(clearAuditMetadata(self->txnProcessor->context(), auditState.getType(), auditState.id));
+			continue;
+		} else if (auditState.getPhase() == AuditPhase::Complete) {
+			if (numCompleteAuditsCleared < numCompleteAuditsToClear) {
+				self->addActor.send(
+				    clearAuditMetadata(self->txnProcessor->context(), auditState.getType(), auditState.id));
+				numCompleteAuditsCleared++;
+			}
 			continue;
 		}
 		ASSERT(auditState.getPhase() == AuditPhase::Running);
@@ -1948,6 +1970,8 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			    .detail("Range", auditRange);
 			UID auditID_ = wait(persistNewAuditState(
 			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled())); // must succeed
+			self->addActor.send(clearAuditMetadataForType(
+			    self->txnProcessor->context(), auditState.getType(), SERVER_KNOBS->PERSIST_COMPLETE_AUDIT_COUNT));
 			// data distribution could restart in the middle of persistNewAuditState
 			// It is possible that the auditState has been written to disk before data distribution restarts,
 			// hence a new audit resumption loads audits from disk and launch the audits

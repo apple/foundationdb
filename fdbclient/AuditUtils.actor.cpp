@@ -27,12 +27,16 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Transaction* tr, AuditType type, int num) {
+ACTOR static Future<std::vector<AuditStorageState>> getAuditStatesForTypeImpl(Transaction* tr,
+                                                                              AuditType type,
+                                                                              int num,
+                                                                              bool newFirst) {
 	state std::vector<AuditStorageState> auditStates;
 	loop {
 		auditStates.clear();
 		try {
-			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
+			auto reverse = newFirst ? Reverse::True : Reverse::False;
+			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, reverse));
 			for (int i = 0; i < res.size(); ++i) {
 				auditStates.push_back(decodeAuditStorageState(res[i].value));
 			}
@@ -43,6 +47,73 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Tra
 	}
 
 	return auditStates;
+}
+
+ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId) {
+	state Transaction tr(cx);
+	TraceEvent(SevDebug, "ClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			// Clear audit
+			tr.clear(auditKey(auditType, auditId));
+			wait(tr.commit());
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevInfo, "ClearAuditMetadataError", auditId)
+			    .errorUnsuppressed(e)
+			    .detail("AuditKey", auditKey(auditType, auditId));
+			wait(tr.onError(e));
+		}
+	}
+	TraceEvent(SevDebug, "ClearAuditMetadataEnd", auditId).detail("AuditKey", auditKey(auditType, auditId));
+
+	return Void();
+}
+
+ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, int numCompleteAuditToKeep) {
+	state Transaction tr(cx);
+	state int numCompleteAuditCleaned = 0;
+	state int numFailedAuditCleaned = 0;
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			std::vector<AuditStorageState> auditStates =
+			    wait(getAuditStatesForTypeImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
+			int numCompleteAudit = 0;
+			for (const auto& auditState : auditStates) { // UID from small to large since oldFirst=true
+				if (auditState.getPhase() == AuditPhase::Complete) {
+					numCompleteAudit++;
+				}
+			}
+			const int numCompleteAuditToClean = numCompleteAudit - numCompleteAuditToKeep;
+			numCompleteAuditCleaned = 0;
+			numFailedAuditCleaned = 0;
+			for (const auto& auditState : auditStates) {
+				ASSERT(auditState.getType() == auditType);
+				if (auditState.getPhase() == AuditPhase::Complete &&
+				    numCompleteAuditCleaned < numCompleteAuditToClean) {
+					tr.clear(auditKey(auditType, auditState.id));
+					numCompleteAuditCleaned++;
+				} else if (auditState.getPhase() == AuditPhase::Failed) {
+					tr.clear(auditKey(auditType, auditState.id));
+					numFailedAuditCleaned++;
+				}
+			}
+			wait(tr.commit());
+			TraceEvent(SevDebug, "DDCleanupExistingAuditStorageMetadataEnd")
+			    .detail("NumCleanedCompleteAudits", numCompleteAuditCleaned)
+			    .detail("NumCleanedFailedAudits", numFailedAuditCleaned);
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevInfo, "DDCleanupExistingAuditStorageMetadataError").errorUnsuppressed(e);
+			wait(tr.onError(e));
+		}
+	}
+	return Void();
 }
 
 ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
@@ -113,7 +184,8 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 	loop {
 		try {
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
-			std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, auditState.getType(), 1));
+			std::vector<AuditStorageState> auditStates =
+			    wait(getAuditStatesForTypeImpl(&tr, auditState.getType(), 1, /*newFirst=*/true));
 			uint64_t nextId = 1;
 			if (!auditStates.empty()) {
 				nextId = auditStates.front().id.first() + 1;
@@ -209,7 +281,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num) {
 	Transaction tr(cx);
-	std::vector<AuditStorageState> auditStates = wait(getLatestAuditStatesImpl(&tr, type, num));
+	std::vector<AuditStorageState> auditStates = wait(getAuditStatesForTypeImpl(&tr, type, num, /*newFirst=*/true));
 	return auditStates;
 }
 
