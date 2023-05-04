@@ -10074,7 +10074,7 @@ RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 
 	int tupleSetNum = deterministicRandom()->randomInt(0, 10);
 	for (int i = 0; i < tupleSetNum && maxKeySize > 0; i++) {
-		int mKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100));
+		int mKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100) + 1);
 		maxKeySize -= mKeySize;
 		keyGen.addKeyGenerator(
 		    std::make_unique<RandomKeySetGenerator>(RandomIntGenerator(deterministicRandom()->randomInt(1, 5) * (i + 1)),
