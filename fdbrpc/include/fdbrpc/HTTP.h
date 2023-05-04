@@ -130,7 +130,7 @@ Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
 
 // Implementation of http server that handles http requests
 // TODO: could change to factory pattern instead of clone pattern
-struct IRequestHandler : ReferenceCounted<IRequestHandler>, NonCopyable {
+struct IRequestHandler {
 	// Sets up state for each instance of the handler. Provides default stateless implementation, but a stateful handler
 	// must override this.
 	virtual Future<Void> init() { return Future<Void>(Void()); };
@@ -144,7 +144,9 @@ struct IRequestHandler : ReferenceCounted<IRequestHandler>, NonCopyable {
 	// not copy or share the non-global state between instances.
 	virtual Reference<IRequestHandler> clone() = 0;
 
-	virtual ~IRequestHandler() = default;
+	// for reference counting an interface - don't implement ReferenceCounted<T>
+	virtual void addref() = 0;
+	virtual void delref() = 0;
 };
 
 struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {

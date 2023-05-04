@@ -172,11 +172,15 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	return Void();
 }
 
-struct HelloWorldRequestHandler : HTTP::IRequestHandler {
-	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
+struct HelloWorldRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloWorldRequestHandler> {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
+	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloWorldServerCallback(req, response);
 	}
-	Reference<HTTP::IRequestHandler> clone() { return makeReference<HelloWorldRequestHandler>(); }
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<HelloWorldRequestHandler>(); }
+
+	void addref() override { ReferenceCounted<HelloWorldRequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<HelloWorldRequestHandler>::delref(); }
 };
 
 ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req,
@@ -189,11 +193,15 @@ ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req
 	}
 }
 
-struct HelloErrorRequestHandler : HTTP::IRequestHandler {
-	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
+struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloErrorRequestHandler> {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
+	                           Reference<HTTP::OutgoingResponse> response) override {
 		return helloErrorServerCallback(req, response);
 	}
-	Reference<HTTP::IRequestHandler> clone() { return makeReference<HelloErrorRequestHandler>(); }
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<HelloErrorRequestHandler>(); }
+
+	void addref() override { ReferenceCounted<HelloErrorRequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<HelloErrorRequestHandler>::delref(); }
 };
 
 typedef std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)> DoRequestFunction;
