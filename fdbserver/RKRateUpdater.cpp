@@ -299,8 +299,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					double targetRateRatio;
 					if (blobWorkerLag > 3 * limits.bwLagTarget) {
 						targetRateRatio = 0;
-						ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
+						ASSERT(!expectSmallBlobVersionLag() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG);
 					} else if (blobWorkerLag > limits.bwLagTarget) {
 						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
 					} else {
@@ -691,6 +690,11 @@ void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& met
 		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 	}
+}
+
+bool IRKRateUpdater::expectSmallBlobVersionLag() {
+	return g_network->isSimulated() &&
+	       now() > FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY;
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,

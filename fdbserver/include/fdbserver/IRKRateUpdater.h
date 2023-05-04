@@ -33,6 +33,11 @@ public:
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
 	                    class IRKBlobMonitor&) = 0;
+
+	// In simulation, after a certain period of time has passed,
+	// we expect blob worker lag to be low, and fail an assertion
+	// if this is not the case.
+	static bool expectSmallBlobVersionLag();
 };
 
 class RKRateUpdater : public IRKRateUpdater {
