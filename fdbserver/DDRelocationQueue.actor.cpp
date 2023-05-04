@@ -548,8 +548,8 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
     retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL),
-	relocateTotalCount(0), relocateToSourceCount(0) {}
+    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL), relocateTotalCount(0), relocateToSourceCount(0) {
+}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -1893,6 +1893,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					// lists, while rd.src would be the union set.
 					// FIXME. It is a bit over-estimated here with rd.completeSources.
 					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
+					self->relocateTotalCount++;
+					if (nonOverlappingCount == 0) {
+						self->relocateToSourceCount++;
+					}
 					self->bytesWritten += metrics.bytes;
 					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
@@ -2405,7 +2409,6 @@ struct DDQueueImpl {
 
 						auto const highestPriorityRelocation = self->getHighestPriorityRelocation();
 
-
 						TraceEvent("MovingData", self->distributorId)
 						    .detail("InFlight", self->activeRelocations)
 						    .detail("InQueue", self->queuedRelocations)
@@ -2414,9 +2417,10 @@ struct DDQueueImpl {
 						    .detail("HighestPriority", highestPriorityRelocation)
 						    .detail("BytesWritten", self->moveBytesRate.getTotal())
 						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
-							.detail("RelocateCount", self->relocateTotalCount)
-							.detail("RelocateToSourceCount", self->relocateToSourceCount)
-							.detail("RelocateToSourceRatio", self->relocateTotalCount? 1.0 * self->relocateToSourceCount / self->relocateTotalCount: 0)
+						    .detail("RelocateToSourceRatio",
+						            self->relocateTotalCount
+						                ? 1.0 * self->relocateToSourceCount / self->relocateTotalCount
+						                : 0)
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
