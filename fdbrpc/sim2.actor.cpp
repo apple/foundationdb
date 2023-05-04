@@ -2866,10 +2866,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			auto partFile = machineCache.find(actualFilename);
 			if (partFile != machineCache.end()) {
 				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
-				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-					f = map(f, [=](Reference<IAsyncFile> r) {
-						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
-					});
 				return f;
 			}
 		}
@@ -2881,11 +2877,15 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
 			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
-			f = AsyncFileNonDurable::open(filename,
-			                              actualFilename,
-			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
-			                              diskParameters,
-			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
+
+			f = SimpleFile::open(filename, flags, mode, diskParameters, false);
+			if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
+				f = map(f,
+				        [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+			}
+
+			f = AsyncFileNonDurable::open(
+			    filename, actualFilename, f, diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 
 			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 		} else {
@@ -2893,8 +2893,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		}
 
 		f = AsyncFileDetachable::open(f);
-		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)
