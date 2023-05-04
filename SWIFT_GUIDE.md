@@ -22,6 +22,7 @@ cmake -G 'Ninja' \
   -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_Swift_COMPILER=swiftc \
   -DWITH_SWIFT=ON \
+  -DUSE_LIBCXX=OFF \
   -DCMAKE_Swift_COMPILER_EXTERNAL_TOOLCHAIN=/opt/rh/devtoolset-11/root/usr \
   ../src/foundationdb/
 ```
