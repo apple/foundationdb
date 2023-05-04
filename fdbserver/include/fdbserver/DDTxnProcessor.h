@@ -65,6 +65,11 @@ public:
 		return std::vector<DDRangeLocations>();
 	}
 
+	virtual Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const = 0;
+
 	// get the storage server list and Process class, only throw transaction non-retryable exceptions
 	virtual Future<ServerWorkerInfos> getServerListAndProcessClasses() = 0;
 
@@ -226,6 +231,11 @@ public:
 
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
+
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
@@ -306,6 +316,11 @@ public:
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
 	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
+
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
