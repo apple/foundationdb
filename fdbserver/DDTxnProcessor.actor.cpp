@@ -25,6 +25,22 @@
 #include "fdbclient/DatabaseContext.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+static void updateServersAndCompleteSources(std::set<UID>& servers,
+                                            std::vector<UID>& completeSources,
+                                            int shard,
+                                            const std::vector<UID>& src) {
+	servers.insert(src.begin(), src.end());
+	if (shard == 0) {
+		completeSources = src;
+	} else {
+		for (int i = 0; i < completeSources.size(); i++) {
+			if (std::find(src.begin(), src.end(), completeSources[i]) == src.end()) {
+				swapAndPop(&completeSources, i--);
+			}
+		}
+	}
+}
+
 class DDTxnProcessorImpl {
 	friend class DDTxnProcessor;
 
@@ -70,18 +86,7 @@ class DDTxnProcessorImpl {
 						std::vector<UID> src, dest;
 						decodeKeyServersValue(UIDtoTagMap, keyServersEntries[shard].value, src, dest);
 						ASSERT(src.size());
-						for (int i = 0; i < src.size(); i++) {
-							servers.insert(src[i]);
-						}
-						if (shard == 0) {
-							completeSources = src;
-						} else {
-							for (int i = 0; i < completeSources.size(); i++) {
-								if (std::find(src.begin(), src.end(), completeSources[i]) == src.end()) {
-									swapAndPop(&completeSources, i--);
-								}
-							}
-						}
+						updateServersAndCompleteSources(servers, completeSources, shard, src);
 					}
 
 					ASSERT(servers.size() > 0);
@@ -1073,4 +1078,18 @@ Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStat
 
 Future<DatabaseConfiguration> DDMockTxnProcessor::getDatabaseConfiguration() const {
 	return mgs->configuration;
+}
+
+Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRange(const KeyRangeRef keys) {
+	std::set<UID> servers;
+	std::vector<UID> completeSources;
+	auto ranges = mgs->shardMapping->intersectingRanges(keys);
+	int count = 0;
+	for (auto it = ranges.begin(); it != ranges.end(); ++it, ++count) {
+		auto sources = mgs->shardMapping->getSourceServerIdsFor(it->begin());
+		ASSERT(!sources.empty());
+		updateServersAndCompleteSources(servers, completeSources, count, sources);
+	}
+	ASSERT(!servers.empty());
+	return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
 }
