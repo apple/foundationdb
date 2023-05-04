@@ -84,7 +84,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, i
 			std::vector<AuditStorageState> auditStates =
 			    wait(getAuditStatesForTypeImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
 			int numCompleteAudit = 0;
-			for (const auto& auditState : auditStates) { // UID from small to large since oldFirst=true
+			for (const auto& auditState : auditStates) { // UID from small to large since newFirst=false
 				if (auditState.getPhase() == AuditPhase::Complete) {
 					numCompleteAudit++;
 				}
