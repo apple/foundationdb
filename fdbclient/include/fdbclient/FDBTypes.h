@@ -28,7 +28,6 @@
 #include <vector>
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
-#include <boost/lexical_cast.hpp>
 
 #include "flow/FastRef.h"
 #include "flow/ProtocolVersion.h"

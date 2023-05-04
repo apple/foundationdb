@@ -18,13 +18,9 @@
  * limitations under the License.
  */
 
-#include <boost/algorithm/string/join.hpp>
 #include <cinttypes>
 #include <string>
-#include <string_view>
 #include <vector>
-
-#include <boost/algorithm/string.hpp>
 
 #include "fdbclient/GenericManagementAPI.actor.h"
 #include "fmt/format.h"
@@ -57,38 +53,6 @@ bool isInteger(const std::string& s) {
 	char* p;
 	strtol(s.c_str(), &p, 10);
 	return (*p == 0);
-}
-
-bool parseStorageEngineParams(KeyValueStoreType::StoreType storeType,
-                              std::string const& kvPairsStr,
-                              std::map<std::string, std::string>& out) {
-	auto& paramsInitMap = StorageEngineParamsFactory::getParams(storeType);
-
-	if (kvPairsStr.empty()) {
-		// no params are given, just return
-		return true;
-	}
-
-	std::vector<std::string> kvPairs;
-	boost::split(kvPairs, kvPairsStr, [](char c) { return c == ','; });
-	for (auto const& kv : kvPairs) {
-		auto pos = kv.find("=");
-		if (pos != std::string::npos) {
-			auto k = kv.substr(0, pos);
-			auto v = kv.substr(pos + 1);
-			fmt::print("Parsed storage engine param, k:{}; v:{}\n", k, v);
-			if (!paramsInitMap.count(k)) {
-				fmt::print("Warning: {} is not a supported parameter for storage engine {}.\n",
-				           k,
-				           KeyValueStoreType::getStoreTypeStr(storeType));
-			}
-			out[storageEngineParamsPrefix.toString() + k] = v;
-		} else {
-			fmt::print("Error: {} does not follow the foramt <param>=<val>\n", kv);
-			return false;
-		}
-	}
-	return true;
 }
 
 // Check if there's any storage engine params change,
@@ -316,7 +280,6 @@ std::map<std::string, std::string> configForToken(std::string const& mode) {
 			while (!s.empty()) {
 				auto k = s.eat("=");
 				auto v = s.eat(":");
-				// TODO : check empty values here
 				out[p + fmt::format("{}_params/{}", key, k.toString())] = v.toString();
 			}
 

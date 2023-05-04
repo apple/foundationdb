@@ -133,6 +133,9 @@ bool isCompleteConfiguration(std::map<std::string, std::string> const& options);
 
 ConfigureAutoResult parseConfig(StatusObject const& status);
 
+// Check if there's any storage engine params change for the specified engine
+// engine_prefix will tell whether it's storage engine, tss engine or others
+// paramsChange will be set to true if we find any related changes
 bool checkForStorageEngineParamsChange(std::map<std::string, std::string>& m,
                                        const std::string& engine_type,
                                        KeyRef engine_prefix,
