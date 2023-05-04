@@ -140,7 +140,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 	// Configuration value in a range map for a key range
 	struct RangeConfig {
-		constexpr static FileIdentifier file_identifier = 84636323;
+		constexpr static FileIdentifier file_identifier = 846323;
 
 		// Whether the range is included as a configured target for the scan
 		// This should normally be set by the user
@@ -148,6 +148,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 		// Whether the range should be currently even though it remains a scan target
 		// This should be set by operations on the cluster that would make shards temporarily inconsistent.
+		// TODO:  Track/update skipped shards in stats
 		Optional<bool> skip;
 
 		RangeConfig apply(RangeConfig const& rhs) const {
@@ -218,6 +219,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 		// Actual amount of data read from shard replicas
 		int64_t replicatedBytesRead = 0;
 		int64_t errorCount = 0;
+		int64_t skippedRanges = 0;
 
 		Key lastEndKey = ""_sr;
 
@@ -241,6 +243,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 			           logicalBytesScanned,
 			           replicatedBytesRead,
 			           errorCount,
+			           skippedRanges,
 			           lastEndKey);
 		}
 
@@ -255,6 +258,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 			doc["replicated_bytes_scanned"] = replicatedBytesRead;
 			doc["errors"] = errorCount;
 			doc["last_end_key"] = lastEndKey.toString();
+			doc["skippedRanges"] = skippedRanges;
 			return doc;
 		}
 	};
@@ -266,12 +270,10 @@ struct ConsistencyScanState : public KeyBackedClass {
 	// Map of scan start version to its stats so a history can be maintained.
 	typedef KeyBackedObjectMap<Version, RoundStats, _IncludeVersion> StatsHistoryMap;
 
-	// TODO:  This is not used yet so it is commented out.
-	// rangeConfig() must be watched and obeyed by the actual data scan
-	// RangeConfigMap rangeConfig() {
-	// 	// Updating rangeConfig updates the class trigger
-	// 	return { subspace.pack(__FUNCTION__sr), trigger, IncludeVersion() };
-	// }
+	RangeConfigMap rangeConfig() {
+		// Updating rangeConfig updates the class trigger
+		return { subspace.pack(__FUNCTION__sr), trigger, IncludeVersion() };
+	}
 
 	KeyBackedObjectProperty<Config, _IncludeVersion> config() {
 		// Updating rangeConfig updates the class trigger

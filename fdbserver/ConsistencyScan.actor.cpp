@@ -18,6 +18,9 @@
  * limitations under the License.
  */
 
+#include "fdbclient/JSONDoc.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
@@ -41,17 +44,33 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> pollDatabaseSize(Database cx, AsyncVar<int64_t>* pSize, double interval) {
+// Get database KV bytes size from Status JSON at cluster.data.total_kv_size_bytes
+ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, double interval) {
 	loop {
 		try {
-			// TODO:  Get DataDistribution worker somehow.
-			WorkerDetails ddWorker;
-			TraceEventFields event =
-			    wait(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 1.0));
-			pSize->set(event.getInt64("TotalSizeBytes"));
+			// TODO:  Get DataDistribution worker somehow and just get the one number we need from DDTrackerStats
+			// directly instead of reading the entire Status document unless there are more things in Status to make use
+			// of. Something like this.. WorkerDetails ddWorker = .... TraceEventFields event =
+			// 	  wait(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
+			// pSize->set(event.getInt64("TotalSizeBytes"));
 
-			// If the above did not throw, we succesfully updated the size so wait interval
-			wait(delay(interval));
+			Optional<Value> status =
+			    wait(runTransaction(db.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
+				    return tr->get("\xff\xff/status/json"_sr);
+			    }));
+
+			if (status.present()) {
+				json_spirit::mValue mv;
+				json_spirit::read_string(status->toString(), mv);
+				JSONDoc doc(mv);
+				int64_t space;
+				if (doc.tryGet("cluster.data.total_kv_size_bytes", space)) {
+					pSize->set(space);
+
+					// If the above did not throw, we succesfully updated the size so wait interval
+					wait(delay(interval));
+				}
+			}
 
 		} catch (Error& e) {
 			TraceEvent("ConsistencyScan_PollDBSizeError").error(e);
@@ -59,6 +78,7 @@ ACTOR Future<Void> pollDatabaseSize(Database cx, AsyncVar<int64_t>* pSize, doubl
 				throw;
 			}
 		}
+
 		wait(delay(1.0));
 	}
 }
@@ -149,8 +169,8 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 			}
 		}
 
-		// Get the database size if we don't know it yet
-		if (databaseSize.get() == 0) {
+		// Wait for disk usage if we don't know it yet
+		if (databaseSize.get() < 0) {
 			wait(databaseSize.onChange());
 		}
 
@@ -186,19 +206,22 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 				readRateControl = Reference<IRateControl>(new SpeedLimit(readRateLimit, 1));
 			}
 
-			// This will store how many total bytes we read from all replicas in this loop iteration
-			// We will wait on the rate control *after* reading using the actual amount that we read
-			state int replicatedBytesRead = 0;
-			// This is the amount of logical KV bytes read regardless of how many replicas exist of each key
-			state int logicalBytesRead = 0;
+			// This will store how many total bytes we read from all replicas in this loop iteration, including retries,
+			// because that's what our bandwidth limiting should be based on. We will wait on the rate control *after*
+			// reading using the actual amount that we read
+			state int totalReadBytesFromStorageServers = 0;
 
 			tr->reset();
 			loop {
 				try {
 					systemDB->setOptions(tr);
 
+					// Read all of these things in parallel
 					state RangeResult shard;
+					// The consistency scan config update version
 					state Optional<Versionstamp> csVersion;
+					// The range config for the range that we're about to read
+					state Optional<ConsistencyScanState::RangeConfigMap::RangeValue> rangeConfig;
 
 					GetRangeLimits limits;
 					limits.minRows = 2;
@@ -208,7 +231,8 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 					                        firstGreaterOrEqual(statsCurrentRound.lastEndKey),
 					                        limits,
 					                        Snapshot::True)) &&
-					     store(csVersion, cs.trigger.get(tr)));
+					     store(csVersion, cs.trigger.get(tr)) &&
+					     store(rangeConfig, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
 
 					// Check for a config version change
 					// If there is one, skip the commit and break to the main loop
@@ -217,25 +241,59 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 						break;
 					}
 
-					// TODO:  Decode the shard KV pairs and get storage interfaces
+					bool scanRange = true;
+					// Check if we are supposed to scan this range.  The default for a range not represented is to scan
+					// it.
+					if (rangeConfig.present()) {
+						auto val = rangeConfig->value;
 
-					// We must read at the same version from all replicas before the version is too old.
-					// TODO: Figure out a reasonable read size.
+						// If included is unspecified for the range, the default is true
+						// If skip is unspecified for the range, the default is false
+						if (!val.included.orDefault(true) || !val.skip.orDefault(false)) {
+							// If we aren't supposed to scan this range, advance lastEndKey forward to the end of this
+							// configured range which is the next point that will have a different RangeConfig value.
 
-					state int errors = 0;
-					state bool noMoreRecords = false;
+							// If the range is configured to be skipped, increment counter
+							if (val.skip.orDefault(false)) {
+								++statsCurrentRound.skippedRanges;
+							}
+							statsCurrentRound.lastEndKey = rangeConfig->range.begin;
+							scanRange = false;
+						}
+					}
 
-					// TODO:  Do reads, compare results, update replicatedBytesRead and logicalBytesRead, and update
-					// statsCurrentRound.lastEndKey and noMoreRecords
+					// If we've skipped to the end of all records then there are no more records to scan
+					state bool noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
 
-					statsCurrentRound.errorCount += errors;
-					statsLifetime.errorCount += errors;
+					if (scanRange) {
+						// Stats for *this unit of durable progress only*, which will be committed atomically with the
+						// endKey update. Total bytes from all replicas read
+						state int replicatedBytesRead = 0;
+						// Logical KV bytes scanned regardless of how many replicas exist of each key
+						state int logicalBytesRead = 0;
+						// Number of key differences found (essentially a count of comparisons that failed)
+						// TODO: More precision here about error types would be good - missing key, different value, etc
+						state int errors = 0;
 
-					statsCurrentRound.logicalBytesScanned += logicalBytesRead;
-					statsCurrentRound.replicatedBytesRead += replicatedBytesRead;
+						// TODO:  Decode the shard KV pairs and get storage interfaces
 
-					statsLifetime.logicalBytesScanned += logicalBytesRead;
-					statsLifetime.replicatedBytesRead += replicatedBytesRead;
+						// We must read at the same version from all replicas before the version is too old, so read in
+						// reasonable chunks of size CLIENT_KNOBS->REPLY_BYTE_LIMIT
+
+						// TODO:  Do reads, compare results, update replicatedBytesRead and logicalBytesRead, and update
+						// statsCurrentRound.lastEndKey and noMoreRecords
+
+						statsCurrentRound.errorCount += errors;
+						statsLifetime.errorCount += errors;
+
+						statsCurrentRound.logicalBytesScanned += logicalBytesRead;
+						statsCurrentRound.replicatedBytesRead += replicatedBytesRead;
+
+						statsLifetime.logicalBytesScanned += logicalBytesRead;
+						statsLifetime.replicatedBytesRead += replicatedBytesRead;
+
+						totalReadBytesFromStorageServers += replicatedBytesRead;
+					}
 
 					// If we reached the end of the database then end the round
 					if (noMoreRecords) {
@@ -265,7 +323,7 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 			} // Transaction retry loop for making one increment of durable progress
 
 			// Wait for the rate control to generate enough budget to match what we read.
-			wait(readRateControl->getAllowance(replicatedBytesRead));
+			wait(readRateControl->getAllowance(totalReadBytesFromStorageServers));
 
 			if (restartMainLoop) {
 				wait(delayBeforeMainLoopRestart);
@@ -304,6 +362,8 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 				config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
 				config.targetRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
 				config.minRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
+
+				// TODO:  Reconfigure cs.rangeConfig() randomly
 
 				cs.config().set(tr, config);
 				wait(tr->commit());
