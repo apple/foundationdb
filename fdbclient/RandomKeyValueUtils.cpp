@@ -30,15 +30,6 @@ void printNextN(T generator, int count = 10) {
 	fmt::print("\n");
 }
 
-TEST_CASE("/randomKeyValueUtils/g1") {
-//	printNextN(RandomStringGenerator("3..5/^a..c"), 100);
-//	printNextN(RandomKeyTupleGenerator("100::"), 100);
-//	printNextN(RandomKeySetGenerator("5::5/a..c"), 100);
-//	printNextN(RandomKeyTupleSetGenerator("1000000::10::3..5/^a..d,100::5..10/^a..f,10000::20..30/^a..z"), 100);
-	printNextN(RandomValueGenerator("10..1000/a..z"), 20);
-	return Void();
-}
-
 TEST_CASE("/randomKeyValueUtils/generate") {
 
 	printNextN(RandomIntGenerator(3, 10, false), 5);

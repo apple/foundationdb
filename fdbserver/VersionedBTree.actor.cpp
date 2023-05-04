@@ -10067,6 +10067,28 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 	return Void();
 }
 
+namespace {
+
+RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
+	RandomKeyGenerator keyGen;
+
+	int tupleSetNum = deterministicRandom()->randomInt(0, 10);
+	for (int i = 0; i < tupleSetNum && maxKeySize > 0; i++) {
+		int mKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100));
+		maxKeySize -= mKeySize;
+		keyGen.addKeyGenerator(
+		    std::make_unique<RandomKeySetGenerator>(RandomIntGenerator(deterministicRandom()->randomInt(1, 5) * (i + 1)),
+		                                            RandomStringGenerator(RandomIntGenerator(1, mKeySize), RandomIntGenerator(1, 254))));
+	}
+	if (deterministicRandom()->coinflip() && maxKeySize > 0) {
+		keyGen.addKeyGenerator(std::make_unique<RandomStringGenerator>(RandomIntGenerator(1, maxKeySize), RandomIntGenerator(1, 254)));
+	}
+
+	return keyGen;
+}
+
+} // namespace
+
 TEST_CASE("Lredwood/correctness/btree") {
 	g_redwoodMetricsActor = Void(); // Prevent trace event metrics from starting
 	g_redwoodMetrics.clear();
@@ -10131,13 +10153,19 @@ TEST_CASE("Lredwood/correctness/btree") {
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
-	state std::string keyGenerator = params.get("keyGenerator").orDefault("1000000::10::3..5/^a..d,100::5..10/^a..f,10000::20..30/^a..z");
+	state Optional<std::string> keyGenerator = params.get("keyGenerator");
 
 	state std::string valueGenerator = params.get("valueGenerator").orDefault("10..1000/a..z");
 
-	state std::unique_ptr<RandomKeyTupleSetGenerator> keyGen = std::make_unique<RandomKeyTupleSetGenerator>(keyGenerator);
+	state RandomKeyGenerator keyGen;
 
-	state std::unique_ptr<RandomValueGenerator> valGen = std::make_unique<RandomValueGenerator>(valueGenerator);
+	if (keyGenerator.present()) {
+		keyGen.addKeyGenerator(std::make_unique<RandomKeyTupleSetGenerator>(keyGenerator.get()));
+	} else {
+		keyGen = getDefaultKeyGenerator(2 * pageSize);
+	};
+
+	state RandomValueGenerator valGen = RandomValueGenerator(valueGenerator);
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =
@@ -10173,7 +10201,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("domainMode: %d\n", encryptionDomainMode);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
-	printf("keyGenerator: %s\n", keyGenerator.c_str());
+	printf("keyGenerator: %s\n", keyGenerator.orDefault("default").c_str());
 	printf("valueGenerator: %s\n", valueGenerator.c_str());
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
@@ -10247,8 +10275,8 @@ TEST_CASE("Lredwood/correctness/btree") {
 
 		// Sometimes do a clear range
 		if (deterministicRandom()->random01() < clearProbability) {
-			Key start = keyGen->next();
-			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : keyGen->next();
+			Key start = keyGen.next();
+			Key end = (deterministicRandom()->random01() < .01) ? keyAfter(start) : keyGen.next();
 
 			// Sometimes replace start and/or end with a close actual (previously used) value
 			if (deterministicRandom()->random01() < clearExistingBoundaryProbability) {
@@ -10327,15 +10355,15 @@ TEST_CASE("Lredwood/correctness/btree") {
 			if (deterministicRandom()->random01() < clearPostSetProbability) {
 				KeyValue kv;
 				kv.key = range.begin;
-				kv.value = valGen->next();
+				kv.value = valGen.next();
 				btree->set(kv);
 				written[std::make_pair(kv.key.toString(), version)] = kv.value.toString();
 			}
 		} else {
 			// Set a key
 			KeyValue kv;
-			kv.key = keyGen->next();
-			kv.value = valGen->next();
+			kv.key = keyGen.next();
+			kv.value = valGen.next();
 			// Sometimes change key to a close previously used key
 			if (deterministicRandom()->random01() < setExistingKeyProbability) {
 				auto i = keys.upper_bound(kv.key);
