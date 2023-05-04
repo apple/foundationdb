@@ -12620,7 +12620,6 @@ void StorageServer::byteSampleApplySet(KeyValueRef kv, Version ver) {
 	}
 
 	if (delta) {
-		TraceEvent("ByteSampleSet").detail("Key", key).detail("Version", ver).detail("Delta", delta);
 		metrics.notifyBytes(key, delta);
 	}
 }
