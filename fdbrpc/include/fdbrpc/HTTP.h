@@ -126,7 +126,26 @@ Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
                                             const std::string& proxyService);
 
 // HTTP server stuff
-typedef std::function<Future<Void>(Reference<IncomingRequest>, Reference<OutgoingResponse>)> ServerCallback;
+// typedef std::function<Future<Void>(Reference<IncomingRequest>, Reference<OutgoingResponse>)> ServerCallback;
+
+// Implementation of http server that handles http requests
+// TODO: could change to factory pattern instead of clone pattern
+struct IRequestHandler : ReferenceCounted<IRequestHandler>, NonCopyable {
+	// Sets up state for each instance of the handler. Provides default stateless implementation, but a stateful handler
+	// must override this.
+	virtual Future<Void> init() { return Future<Void>(Void()); };
+
+	// Actual callback implementation. Fills out the response object based on the request.
+	virtual Future<Void> handleRequest(Reference<IncomingRequest>, Reference<OutgoingResponse>) = 0;
+
+	// If each instance has a mix of global state provided in the type-specific construtor, but then also local state
+	// instantiated in init, the default instance passed to registerSimHTTPServer is cloned for each process to copy the
+	// global state, but before init is called. You may optionally clone after init, but the contract is that clone must
+	// not copy or share the non-global state between instances.
+	virtual Reference<IRequestHandler> clone() = 0;
+
+	virtual ~IRequestHandler() = default;
+};
 
 struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {
 	UID dbgid;
@@ -140,7 +159,7 @@ struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {
 	SimServerContext() : dbgid(deterministicRandom()->randomUniqueID()), running(true), actors(false), nextPort(5000) {}
 
 	NetworkAddress newAddress();
-	void registerNewServer(NetworkAddress addr, ServerCallback server);
+	void registerNewServer(NetworkAddress addr, Reference<IRequestHandler> server);
 
 	void stop() {
 		running = false;

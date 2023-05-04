@@ -2428,11 +2428,12 @@ public:
 
 	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
 	                                                     std::string hostname,
+	                                                     std::string service,
 	                                                     int numAddresses,
-	                                                     HTTP::ServerCallback callback) {
+	                                                     Reference<HTTP::IRequestHandler> requestHandler) {
 		// handle race where test client tries to register server before all processes are up, but time out eventually
 		// FIXME: make this so a server that starts after this or a server that restarts will automatically re-add
-		// itself, register the callback, and register with dns
+		// itself, register the handler, and register with dns
 		state int checks = 0;
 		while (self->httpServerProcesses.empty()) {
 			TraceEvent(SevWarn, "NoAvailableHTTPServerProcesses").detail("Checks", checks);
@@ -2457,25 +2458,35 @@ public:
 		for (; i < numAddresses; i++) {
 			state ProcessInfo* serverProcess = self->httpServerProcesses[i % self->httpServerProcesses.size()].first;
 			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
-			auto& proc = self->httpServerProcesses[i % self->httpServerProcesses.size()].second;
-			NetworkAddress addr = proc->newAddress();
-			addresses.push_back(addr);
-			serverProcess->listenerMap[addr] = Reference<IListener>(new Sim2Listener(serverProcess, addr));
-			self->addressMap[addr] = serverProcess;
+			try {
+				auto& proc = self->httpServerProcesses[i % self->httpServerProcesses.size()].second;
+				NetworkAddress addr = proc->newAddress();
+				addresses.push_back(addr);
+				serverProcess->listenerMap[addr] = Reference<IListener>(new Sim2Listener(serverProcess, addr));
+				self->addressMap[addr] = serverProcess;
 
-			proc->registerNewServer(addr, callback);
+				proc->registerNewServer(addr, requestHandler->clone());
+			} catch (Error& e) {
+				// this should never happen, but would cause weird behavior if it did like unintentionally switching
+				// processes, so just fail
+				TraceEvent(SevError, "UnexpectedErrorRegisteringHTTPServer").errorUnsuppressed(e);
+				ASSERT(false);
+			}
 		}
 
 		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
 
-		INetworkConnections::net()->addMockTCPEndpoint(hostname, "80", addresses);
+		INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
 
 		return Void();
 	}
 
-	// starts a numAddresses http servers with the dns alias hostname:80 with the provided server callback
-	Future<Void> registerSimHTTPServer(std::string hostname, int numAddresses, HTTP::ServerCallback callback) override {
-		return registerSimHTTPServerActor(this, hostname, numAddresses, callback);
+	// starts a numAddresses http servers with the dns alias hostname:service with the provided server callback
+	Future<Void> registerSimHTTPServer(std::string hostname,
+	                                   std::string service,
+	                                   int numAddresses,
+	                                   Reference<HTTP::IRequestHandler> requestHandler) override {
+		return registerSimHTTPServerActor(this, hostname, service, numAddresses, requestHandler);
 	}
 
 	Sim2(bool printSimTime)
