@@ -110,8 +110,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		pw.serializeBytes(url.body);
 	}
 
-	// FIXME: should this be url.host, url.service?
-	std::string statsKey = RESTClient::getStatsKey(url.service, url.service);
+	std::string statsKey = RESTClient::getStatsKey(url.host, url.service);
 	auto sItr = client->statsMap.find(statsKey);
 	if (sItr == client->statsMap.end()) {
 		client->statsMap.emplace(statsKey, std::make_unique<RESTClient::Stats>(statsKey));

@@ -282,8 +282,9 @@ public:
 
 	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
 	virtual Future<Void> registerSimHTTPServer(std::string hostname,
+	                                           std::string service,
 	                                           int numAddresses,
-	                                           HTTP::ServerCallback callback) = 0;
+	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
 
 	int desiredCoordinators;
 	int physicalDatacenters;

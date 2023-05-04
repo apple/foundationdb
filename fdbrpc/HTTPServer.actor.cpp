@@ -28,7 +28,7 @@
 
 ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
                                    Future<Void> readRequestDone,
-                                   HTTP::ServerCallback callback,
+                                   Reference<HTTP::IRequestHandler> requestHandler,
                                    Reference<HTTP::IncomingRequest> req,
                                    FlowMutex* mutex) {
 	state Reference<HTTP::OutgoingResponse> response = makeReference<HTTP::OutgoingResponse>();
@@ -38,7 +38,7 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 
 	try {
 		wait(readRequestDone);
-		wait(callback(req, response));
+		wait(requestHandler->handleRequest(req, response));
 	} catch (Error& e) {
 		if (e.code() == error_code_operation_cancelled) {
 			throw e;
@@ -76,7 +76,7 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 
 ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
                                      Reference<IConnection> conn,
-                                     HTTP::ServerCallback callback) {
+                                     Reference<HTTP::IRequestHandler> requestHandler) {
 	try {
 		// TODO do we actually have multiple requests on a connection? how does this work
 		state FlowMutex responseMutex;
@@ -88,7 +88,7 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			wait(conn->onReadable());
 			state Reference<HTTP::IncomingRequest> req = makeReference<HTTP::IncomingRequest>();
 			readPrevRequest = req->read(conn, false);
-			server->actors.add(callbackHandler(conn, readPrevRequest, callback, req, &responseMutex));
+			server->actors.add(callbackHandler(conn, readPrevRequest, requestHandler, req, &responseMutex));
 		}
 	} catch (Error& e) {
 		if (e.code() != error_code_actor_cancelled) {
@@ -104,11 +104,14 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 }
 
 ACTOR Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
-                               HTTP::ServerCallback callback,
+                               Reference<HTTP::IRequestHandler> requestHandler,
                                NetworkAddress addr,
                                Reference<IListener> listener) {
-	// TODO: reduce trace verbosity and/or SevDebug?
-	TraceEvent("HTTPServerListenStart", server->dbgid).detail("ListenAddress", addr.toString());
+	TraceEvent(SevDebug, "HTTPServerListenStart", server->dbgid).detail("ListenAddress", addr.toString());
+
+	wait(requestHandler->init());
+
+	TraceEvent(SevDebug, "HTTPServerListenInitialized", server->dbgid).detail("ListenAddress", addr.toString());
 
 	try {
 		loop {
@@ -118,7 +121,7 @@ ACTOR Future<Void> listenActor(Reference<HTTP::SimServerContext> server,
 				break;
 			}
 			if (conn) {
-				server->actors.add(connectionHandler(server, conn, callback));
+				server->actors.add(connectionHandler(server, conn, requestHandler));
 			}
 		}
 	} catch (Error& e) {
@@ -136,10 +139,10 @@ NetworkAddress HTTP::SimServerContext::newAddress() {
 	    g_simulator->getCurrentProcess()->address.ip, nextPort++, true /* isPublic*/, false /*isTLS*/);
 }
 
-void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, ServerCallback server) {
+void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, Reference<HTTP::IRequestHandler> requestHandler) {
 	listenAddresses.push_back(addr);
 	listeners.push_back(INetworkConnections::net()->listen(addr));
-	actors.add(listenActor(Reference<HTTP::SimServerContext>::addRef(this), server, addr, listeners.back()));
+	actors.add(listenActor(Reference<HTTP::SimServerContext>::addRef(this), requestHandler, addr, listeners.back()));
 }
 
 // unit test stuff
@@ -169,8 +172,15 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	return Void();
 }
 
-ACTOR Future<Void> errorServerCallback(Reference<HTTP::IncomingRequest> req,
-                                       Reference<HTTP::OutgoingResponse> response) {
+struct HelloWorldRequestHandler : HTTP::IRequestHandler {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
+		return helloWorldServerCallback(req, response);
+	}
+	Reference<HTTP::IRequestHandler> clone() { return makeReference<HelloWorldRequestHandler>(); }
+};
+
+ACTOR Future<Void> helloErrorServerCallback(Reference<HTTP::IncomingRequest> req,
+                                            Reference<HTTP::OutgoingResponse> response) {
 	wait(delay(0));
 	if (deterministicRandom()->coinflip()) {
 		throw http_bad_response();
@@ -179,14 +189,23 @@ ACTOR Future<Void> errorServerCallback(Reference<HTTP::IncomingRequest> req,
 	}
 }
 
+struct HelloErrorRequestHandler : HTTP::IRequestHandler {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req, Reference<HTTP::OutgoingResponse> response) {
+		return helloErrorServerCallback(req, response);
+	}
+	Reference<HTTP::IRequestHandler> clone() { return makeReference<HelloErrorRequestHandler>(); }
+};
+
 typedef std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)> DoRequestFunction;
 
 // handles retrying on timeout and reinitializing connection like other users of HTTP (S3BlobStore, RestClient)
-ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname, DoRequestFunction reqFunction) {
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostname,
+                                                              std::string service,
+                                                              DoRequestFunction reqFunction) {
 	state Reference<IConnection> conn;
 	loop {
 		if (!conn) {
-			wait(store(conn, INetworkConnections::net()->connect(hostname, "80", false)));
+			wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
 			ASSERT(conn.isValid());
 			wait(conn->connectHandshake());
 		}
@@ -267,10 +286,10 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 TEST_CASE("!/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloworld", 1, helloWorldServerCallback));
+	wait(g_simulator->registerSimHTTPServer("helloworld", "80", 1, makeReference<HelloWorldRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloworld", doHelloWorldReq)));
+	wait(success(doRequestTest("helloworld", "80", doHelloWorldReq)));
 
 	fmt::print("Done\n");
 	return Void();
@@ -279,10 +298,10 @@ TEST_CASE("!/HTTP/Server/HelloWorld") {
 TEST_CASE("!/HTTP/Server/HelloError") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloerror", 1, errorServerCallback));
+	wait(g_simulator->registerSimHTTPServer("helloerror", "80", 1, makeReference<HelloErrorRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloerror", doHelloWorldErrorReq)));
+	wait(success(doRequestTest("helloerror", "80", doHelloWorldErrorReq)));
 
 	fmt::print("Done\n");
 	return Void();
