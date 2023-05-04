@@ -405,7 +405,7 @@ class TestRun:
             str(self.uid),
             "--log-directory",
             str(self.temp_path),
-            "--check-rocksdb"
+            "--check-rocksdb",
         ]
         subprocess.run(command, check=True)
 

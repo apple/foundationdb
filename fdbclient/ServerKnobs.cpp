@@ -334,7 +334,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
 
 	// Large teams are disabled when SHARD_ENCODE_LOCATION_METADATA is enabled
-	init( DD_MAXIMUM_LARGE_TEAMS,                                100 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAMS = 0;
+	init( DD_MAX_SHARDS_ON_LARGE_TEAMS,                          100 ); if( randomize && BUGGIFY ) DD_MAX_SHARDS_ON_LARGE_TEAMS = 0;
 	init( DD_MAXIMUM_LARGE_TEAM_CLEANUP,                       10000 ); if( randomize && BUGGIFY ) DD_MAXIMUM_LARGE_TEAM_CLEANUP = 10;
 	init( DD_LARGE_TEAM_DELAY,                                  60.0 );
 	init( DD_FIX_WRONG_REPLICAS_DELAY,                          60.0 );
@@ -432,7 +432,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_LEVEL_STYLE_COMPACTION,                       true );
 	init( ROCKSDB_UNSAFE_AUTO_FSYNC,                           false );
 	init( ROCKSDB_PERIODIC_COMPACTION_SECONDS,                     0 );
-	init( ROCKSDB_PREFIX_LEN,                                      0 );
+	init( ROCKSDB_PREFIX_LEN,                                      0 ); if( randomize && BUGGIFY )  ROCKSDB_PREFIX_LEN = deterministicRandom()->randomInt(1, 20);
 	init( ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO,              0.1 );
 	init( ROCKSDB_BLOOM_BITS_PER_KEY,                             10 );
 	init( ROCKSDB_BLOOM_WHOLE_KEY_FILTERING,                   false );
@@ -479,7 +479,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS knob.
 	// These knobs have contrary functionality.
 	init( ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE,              true );
-	init( ROCKSDB_SINGLEKEY_DELETES_BYTES_LIMIT,               10000 ); // 10KB
 	init( ROCKSDB_SINGLEKEY_DELETES_MAX,                         200 ); // Max rocksdb::delete calls in a transaction
 	init( ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS,              false );
 	init( ROCKSDB_FORCE_DELETERANGE_FOR_CLEARRANGE,            false );
@@ -506,8 +505,13 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MAX_BACKGROUND_JOBS,                             2 ); // RocksDB default.
 	init( ROCKSDB_DELETE_OBSOLETE_FILE_PERIOD,                 21600 ); // 6h, RocksDB default.
 	init( ROCKSDB_PHYSICAL_SHARD_CLEAN_UP_DELAY, isSimulated ? 10.0 : 300.0 ); // Delays shard clean up, must be larger than ROCKSDB_READ_VALUE_TIMEOUT to prevent reading deleted shard.
-	init( ROCKSDB_EMPTY_RANGE_CHECK,              isSimulated ? true : false);
+	init( ROCKSDB_EMPTY_RANGE_CHECK,       isSimulated ? true : false);
 	init( ROCKSDB_CREATE_BYTES_SAMPLE_FILE_RETRY_MAX,             50 );
+	init( ROCKSDB_ATOMIC_FLUSH,                                false ); if( randomize && BUGGIFY )  ROCKSDB_ATOMIC_FLUSH = deterministicRandom()->coinflip();
+ 	init( ROCKSDB_IMPORT_MOVE_FILES,                           false );
+ 	init( ROCKSDB_CHECKPOINT_REPLAY_MARKER,                    false );
+ 	init( ROCKSDB_VERIFY_CHECKSUM_BEFORE_RESTORE,               true );
+ 	init( ROCKSDB_ENABLE_CHECKPOINT_VALIDATION,                false ); // if( randomize && BUGGIFY )   ROCKSDB_ENABLE_CHECKPOINT_VALIDATION = deterministicRandom()->coinflip();
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
@@ -818,6 +822,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
 	init( GLOBAL_TAG_THROTTLING_MIN_TPS,                         1.0 );
 	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
+	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -849,6 +854,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
+	init( AUDIT_RETRY_COUNT_MAX,                                  10 );
+	init( SS_AUDIT_AUTO_PROCEED_COUNT_MAX,                         5 );
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
@@ -893,7 +900,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REPORT_DD_METRICS,                                    true );
 	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
 	init( FETCH_KEYS_TOO_LONG_TIME_CRITERIA,                   300.0 );
-	init( MAX_STORAGE_COMMIT_TIME,                             120.0 ); //The max fsync stall time on the storage server and tlog before marking a disk as failed
+	init( MAX_STORAGE_COMMIT_TIME,                             200.0 ); //The max fsync stall time on the storage server and tlog before marking a disk as failed
 	init( RANGESTREAM_LIMIT_BYTES,                               2e6 ); if( randomize && BUGGIFY ) RANGESTREAM_LIMIT_BYTES = 1;
 	init( CHANGEFEEDSTREAM_LIMIT_BYTES,                          1e6 ); if( randomize && BUGGIFY ) CHANGEFEEDSTREAM_LIMIT_BYTES = 1;
 	init( BLOBWORKERSTATUSSTREAM_LIMIT_BYTES,                    1e4 ); if( randomize && BUGGIFY ) BLOBWORKERSTATUSSTREAM_LIMIT_BYTES = 1;
@@ -1082,6 +1089,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BG_CONSISTENCY_CHECK_ENABLED,                         true ); if (randomize && BUGGIFY) BG_CONSISTENCY_CHECK_ENABLED = false;
 	init( BG_CONSISTENCY_CHECK_TARGET_SPEED_KB,                 1000 ); if (randomize && BUGGIFY) BG_CONSISTENCY_CHECK_TARGET_SPEED_KB *= (deterministicRandom()->randomInt(2, 50) / 10);
 	init( BG_KEY_TUPLE_TRUNCATE_OFFSET,                            0 );
+	init( BG_ENABLE_SPLIT_TRUNCATED,                           false ); if (randomize && BUGGIFY) BG_ENABLE_SPLIT_TRUNCATED = true;
 	init( BG_ENABLE_READ_DRIVEN_COMPACTION,                     true ); if (randomize && BUGGIFY) BG_ENABLE_READ_DRIVEN_COMPACTION = false;
 	init( BG_RDC_BYTES_FACTOR,                                     2 ); if (randomize && BUGGIFY) BG_RDC_BYTES_FACTOR = deterministicRandom()->randomInt(1, 10);
 	init( BG_RDC_READ_FACTOR,                                      3 ); if (randomize && BUGGIFY) BG_RDC_READ_FACTOR = deterministicRandom()->randomInt(1, 10);
@@ -1127,6 +1135,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
 	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "" );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
+	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
 	init( BLOB_RESTORE_MANIFEST_URL, isSimulated ? "file://simfdb/fdbblob/manifest" : "" );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );

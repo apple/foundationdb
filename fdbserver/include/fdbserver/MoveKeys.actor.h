@@ -42,18 +42,32 @@ struct MoveKeysLock {
 	}
 };
 
+// An transient state of DD. Some functionality of DD maybe disabled depends on the enabled state.
+// If the process restarts, the state will be forgotten and become the default value.
 class DDEnabledState {
+	enum Value {
+		ENABLED, // DD is enabled
+		SNAPSHOT, // disabled for snapshot
+		BLOB_RESTORE_PREPARING // disabled for hybrid restore
+	};
+
 	// in-memory flag to disable DD
-	bool ddEnabled = true;
 	UID ddEnabledStatusUID;
+	Value stateValue = ENABLED;
 
 public:
-	// checks if DD is enabled/disable transiently
-	bool isDDEnabled() const;
+	bool sameId(const UID&) const;
 
-	// transiently enable(true) or disable(false) the DD. If the process
-	// restarts, the state will be forgotten.
-	bool setDDEnabled(bool status, UID snapUID);
+	bool isEnabled() const;
+
+	bool isBlobRestorePreparing() const;
+
+	// All tryXXX() methods return true if the in-memory state change succeed.
+	bool trySetEnabled(UID requesterId);
+
+	bool trySetSnapshot(UID requesterId);
+
+	bool trySetBlobRestorePreparing(UID requesterId);
 };
 
 struct MoveKeysParams {
@@ -179,6 +193,16 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
                                               const DDEnabledState* ddEnabledState);
 // Directly removes serverID from serverKeys and keyServers system keyspace.
 // Performed when a storage server is marked as permanently failed.
+
+// Prepare for data migration for given key range. Reassign key ranges to the storage server interface hold by blob
+// migrator
+ACTOR Future<Void> prepareBlobRestore(Database occ,
+                                      MoveKeysLock lock,
+                                      const DDEnabledState* ddEnabledState,
+                                      UID traceId,
+                                      KeyRangeRef keys,
+                                      UID bmId,
+                                      UID reqId = UID());
 
 #include "flow/unactorcompiler.h"
 #endif

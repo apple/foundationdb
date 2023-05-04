@@ -1191,7 +1191,8 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
-		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
+		int minimumCoordinators = (desiredCoordinators.size() / 2) + 1;
+		while (protectedCount < minimumCoordinators && i < desiredCoordinators.size()) {
 			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
@@ -1207,6 +1208,15 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
 			i++;
+		}
+
+		if (protectedCount < minimumCoordinators) {
+			TraceEvent("NotEnoughReliableCoordinators")
+			    .detail("NumReliable", protectedCount)
+			    .detail("MinimumRequired", minimumCoordinators)
+			    .detail("ConnectionString", conn->toString());
+
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 		}
 	}
 
@@ -2645,22 +2655,33 @@ ACTOR Future<Void> forceRecovery(Reference<IClusterConnectionRecord> clusterFile
 ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
                                KeyRange range,
                                AuditType type,
-                               bool async) {
+                               double timeoutSeconds) {
 	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
 	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
-	TraceEvent(SevDebug, "ManagementAPIAuditStorageBegin");
-
-	loop {
+	TraceEvent(SevVerbose, "ManagementAPIAuditStorageTrigger").detail("AuditType", type).detail("Range", range);
+	state UID auditId;
+	try {
 		while (!clusterInterface->get().present()) {
 			wait(clusterInterface->onChange());
 		}
-
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageBegin").detail("AuditType", type).detail("Range", range);
 		TriggerAuditRequest req(type, range);
-		req.async = async;
-		UID auditId = wait(clusterInterface->get().get().triggerAudit.getReply(req));
-		TraceEvent(SevDebug, "ManagementAPIAuditStorageEnd").detail("AuditID", auditId);
-		return auditId;
+		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		auditId = auditId_;
+		TraceEvent(SevVerbose, "ManagementAPIAuditStorageEnd")
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("AuditID", auditId);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPIAuditStorageError")
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", type)
+		    .detail("Range", range)
+		    .detail("AuditID", auditId);
+		throw e;
 	}
+
+	return auditId;
 }
 
 ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {

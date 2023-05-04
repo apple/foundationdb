@@ -29,9 +29,6 @@
 // call synchronous method from components outside DDRelocationQueue
 class IDDRelocationQueue {
 public:
-	PromiseStream<RelocateShard> relocationProducer, relocationConsumer; // FIXME(xwang): not used yet
-	// PromiseStream<Promise<int>> getUnhealthyRelocationCount; // FIXME(xwang): change it to a synchronous call
-
 	virtual int getUnhealthyRelocationCount() const = 0;
 	virtual ~IDDRelocationQueue() = default;
 	;
@@ -122,6 +119,8 @@ struct DDQueueInitParams {
 
 // DDQueue receives RelocateShard from any other DD components and schedules the actual movements
 class DDQueue : public IDDRelocationQueue, public ReferenceCounted<DDQueue> {
+	const DDEnabledState* ddEnabledState = nullptr;
+
 public:
 	friend struct DDQueueImpl;
 

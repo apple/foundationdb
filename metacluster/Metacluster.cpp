@@ -93,12 +93,24 @@ DataClusterState DataClusterEntry::stringToClusterState(std::string stateStr) {
 	UNREACHABLE();
 }
 
+std::string DataClusterEntry::autoTenantAssignmentToString(AutoTenantAssignment autoTenantAssignment) {
+	switch (autoTenantAssignment) {
+	case AutoTenantAssignment::DISABLED:
+		return "disabled";
+	case AutoTenantAssignment::ENABLED:
+		return "enabled";
+	default:
+		UNREACHABLE();
+	}
+}
+
 json_spirit::mObject DataClusterEntry::toJson() const {
 	json_spirit::mObject obj;
 	obj["id"] = id.toString();
 	obj["capacity"] = capacity.toJson();
 	obj["allocated"] = allocated.toJson();
 	obj["cluster_state"] = DataClusterEntry::clusterStateToString(clusterState);
+	obj["auto_tenant_assignment"] = autoTenantAssignmentToString(autoTenantAssignment);
 	return obj;
 }
 

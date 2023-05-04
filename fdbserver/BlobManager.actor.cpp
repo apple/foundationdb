@@ -28,7 +28,7 @@
 
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/ClientBooleanParams.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/ServerKnobs.h"
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
@@ -578,12 +578,14 @@ static void alignKeyBoundary(Reference<BlobManagerData> bmData,
 		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, keys.arena());
 	}
 
-	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
+	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split if not allowed.
 	if (alignedKey <= keys.back()) {
-		// Set split boundary.
-		BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
-		boundaries[key] = boundary;
-		keys.push_back_deep(keys.arena(), key);
+		if (SERVER_KNOBS->BG_ENABLE_SPLIT_TRUNCATED) {
+			// Set split boundary.
+			BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
+			boundaries[key] = boundary;
+			keys.push_back_deep(keys.arena(), key);
+		} // else drop the split
 	} else {
 		keys.push_back_deep(keys.arena(), alignedKey);
 	}
@@ -988,6 +990,17 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				bmData->iAmReplaced.sendError(e);
 			}
 			throw;
+		}
+
+		if (e.code() == error_code_no_more_servers && assignment.isAssign &&
+		    assignment.assign.get().type == AssignRequestType::Continue) {
+			// If the BW the BM was telling to continue is already dead, just drop this as we already reassigned the
+			// granule
+			TraceEvent("BMDroppingContinueAssignment", bmData->id)
+			    .detail("Epoch", bmData->epoch)
+			    .detail("Seqno", seqNo);
+			CODE_PROBE(true, "BM no more servers on continue", probe::decoration::rare);
+			return Void();
 		}
 
 		// this assign failed and we will retry, consider it blocked until it successfully retries
@@ -1585,14 +1598,14 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// FIXME: only need to align propsedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
-	ASSERT(finalSplit.keys.size() > 2);
-
 	if (BM_DEBUG) {
 		fmt::print("Aligned split ({0}):\n", finalSplit.keys.size());
 		for (auto& it : finalSplit.keys) {
 			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
 		}
 	}
+
+	ASSERT(finalSplit.keys.size() > 2);
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at

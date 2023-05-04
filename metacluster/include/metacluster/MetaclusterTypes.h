@@ -25,7 +25,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "flow/flat_buffers.h"
 
@@ -85,17 +85,22 @@ struct ClusterUsage {
 //             created/updated/deleted.
 enum class DataClusterState { REGISTERING, READY, REMOVING, RESTORING };
 
+enum class AutoTenantAssignment { ENABLED, DISABLED };
+
 struct DataClusterEntry {
 	constexpr static FileIdentifier file_identifier = 929511;
 
 	static std::string clusterStateToString(DataClusterState clusterState);
 	static DataClusterState stringToClusterState(std::string stateStr);
+	static std::string autoTenantAssignmentToString(AutoTenantAssignment autoTenantAssignment);
 
 	UID id;
 	ClusterUsage capacity;
 	ClusterUsage allocated;
 
 	DataClusterState clusterState = DataClusterState::READY;
+
+	AutoTenantAssignment autoTenantAssignment = AutoTenantAssignment::ENABLED;
 
 	DataClusterEntry() = default;
 	DataClusterEntry(ClusterUsage capacity) : capacity(capacity) {}
@@ -123,7 +128,7 @@ struct DataClusterEntry {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, capacity, allocated, clusterState);
+		serializer(ar, id, capacity, allocated, clusterState, autoTenantAssignment);
 	}
 };
 

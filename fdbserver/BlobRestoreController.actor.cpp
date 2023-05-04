@@ -59,11 +59,7 @@ ACTOR Future<BlobRestoreRangeState> BlobRestoreController::getRangeState(Referen
 				if (!ranges.more) {
 					break;
 				}
-				if (ranges.readThrough.present()) {
-					begin = firstGreaterOrEqual(ranges.readThrough.get());
-				} else {
-					begin = firstGreaterThan(ranges.end()[-1].key);
-				}
+				begin = ranges.nextBeginKeySelector();
 			}
 			return std::make_pair(KeyRangeRef(), BlobRestoreState(BlobRestorePhase::DONE));
 		} catch (Error& e) {
@@ -165,11 +161,7 @@ ACTOR Future<Optional<BlobRestoreArg>> BlobRestoreController::getArgument(Refere
 					if (!ranges.more) {
 						break;
 					}
-					if (ranges.readThrough.present()) {
-						begin = firstGreaterOrEqual(ranges.readThrough.get());
-					} else {
-						begin = firstGreaterThan(ranges.back().key);
-					}
+					begin = ranges.nextBeginKeySelector();
 				}
 				return result;
 			} catch (Error& e) {

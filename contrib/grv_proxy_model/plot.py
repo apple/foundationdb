@@ -48,62 +48,90 @@ class Plotter:
         for priority in self.results.started.keys():
             Plotter.add_plot(self.results.started[priority], time_resolution, priority)
 
-        plt.xlabel('Time (s)')
-        plt.ylabel('Released/s')
+        plt.xlabel("Time (s)")
+        plt.ylabel("Released/s")
         plt.legend()
 
         plt.subplot(3, 3, 2)
         for priority in self.results.queued.keys():
             Plotter.add_plot(self.results.queued[priority], time_resolution, priority)
 
-        plt.xlabel('Time (s)')
-        plt.ylabel('Requests/s')
+        plt.xlabel("Time (s)")
+        plt.ylabel("Requests/s")
         plt.legend()
 
         plt.subplot(3, 3, 3)
         for priority in self.results.unprocessed_queue_sizes.keys():
-            data = {k: max(v) for (k, v) in self.results.unprocessed_queue_sizes[priority].items()}
+            data = {
+                k: max(v)
+                for (k, v) in self.results.unprocessed_queue_sizes[priority].items()
+            }
             Plotter.add_plot(data, time_resolution, priority)
 
-        plt.xlabel('Time (s)')
-        plt.ylabel('Max queue size')
+        plt.xlabel("Time (s)")
+        plt.ylabel("Max queue size")
         plt.legend()
 
         num = 4
         for priority in self.results.latencies.keys():
             plt.subplot(3, 3, num)
-            median_latencies = {k: v[int(0.5 * len(v))] if len(v) > 0 else 0 for (k, v) in
-                                self.results.latencies[priority].items()}
-            percentile90_latencies = {k: v[int(0.9 * len(v))] if len(v) > 0 else 0 for (k, v) in
-                                      self.results.latencies[priority].items()}
-            max_latencies = {k: max(v) if len(v) > 0 else 0 for (k, v) in self.results.latencies[priority].items()}
+            median_latencies = {
+                k: v[int(0.5 * len(v))] if len(v) > 0 else 0
+                for (k, v) in self.results.latencies[priority].items()
+            }
+            percentile90_latencies = {
+                k: v[int(0.9 * len(v))] if len(v) > 0 else 0
+                for (k, v) in self.results.latencies[priority].items()
+            }
+            max_latencies = {
+                k: max(v) if len(v) > 0 else 0
+                for (k, v) in self.results.latencies[priority].items()
+            }
 
-            Plotter.add_plot(median_latencies, time_resolution, 'median')
-            Plotter.add_plot(percentile90_latencies, time_resolution, '90th percentile')
-            Plotter.add_plot(max_latencies, time_resolution, 'max')
+            Plotter.add_plot(median_latencies, time_resolution, "median")
+            Plotter.add_plot(percentile90_latencies, time_resolution, "90th percentile")
+            Plotter.add_plot(max_latencies, time_resolution, "max")
 
-            plt.xlabel('Time (s)')
-            plt.ylabel(str(priority) + ' Latency (s)')
-            plt.yscale('log')
+            plt.xlabel("Time (s)")
+            plt.ylabel(str(priority) + " Latency (s)")
+            plt.yscale("log")
             plt.legend()
             num += 1
 
         for priority in self.results.rate.keys():
             plt.subplot(3, 3, num)
             if len(self.results.rate[priority]) > 0:
-                Plotter.add_plot(self.results.rate[priority], time_resolution, 'Rate', use_avg=True)
+                Plotter.add_plot(
+                    self.results.rate[priority], time_resolution, "Rate", use_avg=True
+                )
             if len(self.results.released[priority]) > 0:
-                Plotter.add_plot(self.results.released[priority], time_resolution, 'Released', use_avg=True)
+                Plotter.add_plot(
+                    self.results.released[priority],
+                    time_resolution,
+                    "Released",
+                    use_avg=True,
+                )
             if len(self.results.limit[priority]) > 0:
-                Plotter.add_plot(self.results.limit[priority], time_resolution, 'Limit', use_avg=True)
+                Plotter.add_plot(
+                    self.results.limit[priority], time_resolution, "Limit", use_avg=True
+                )
             if len(self.results.limit_and_budget[priority]) > 0:
-                Plotter.add_plot(self.results.limit_and_budget[priority], time_resolution, 'Limit and budget',
-                                 use_avg=True)
+                Plotter.add_plot(
+                    self.results.limit_and_budget[priority],
+                    time_resolution,
+                    "Limit and budget",
+                    use_avg=True,
+                )
             if len(self.results.budget[priority]) > 0:
-                Plotter.add_plot(self.results.budget[priority], time_resolution, 'Budget', use_avg=True)
+                Plotter.add_plot(
+                    self.results.budget[priority],
+                    time_resolution,
+                    "Budget",
+                    use_avg=True,
+                )
 
-            plt.xlabel('Time (s)')
-            plt.ylabel('Value (' + str(priority) + ')')
+            plt.xlabel("Time (s)")
+            plt.ylabel("Value (" + str(priority) + ")")
             plt.legend()
             num += 1
 
