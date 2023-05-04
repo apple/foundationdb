@@ -20,6 +20,7 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fmt/format.h"
@@ -2999,25 +3000,6 @@ ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistribu
 	return res;
 }
 
-// read consistencyScanInfo through Read-only tx
-ACTOR Future<Optional<Value>> consistencyScanInfoFetcher(Database cx) {
-	state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-	state Optional<Value> val;
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait(store(val, ConsistencyScanInfo::getInfo(tr)));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	TraceEvent("ConsistencyScanInfoFetcher").log();
-	return val;
-}
-
 // constructs the cluster section of the json status output
 ACTOR Future<StatusReply> clusterGetStatus(
     Reference<AsyncVar<ServerDBInfo>> db,
@@ -3563,13 +3545,32 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// Fetch Consistency Scan Information
 		try {
-			Optional<Value> val = wait(timeoutError(consistencyScanInfoFetcher(cx), 2.0));
-			if (val.present()) {
-				ConsistencyScanInfo consistencyScanInfo =
-				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
-				TraceEvent("StatusConsistencyScanGotVal").log();
-				statusObj["consistency_scan_info"] = consistencyScanInfo.toJSON();
+			state ConsistencyScanState cs;
+			state ConsistencyScanState::Config config;
+			state ConsistencyScanState::RoundStats currentRound;
+			state ConsistencyScanState::LifetimeStats lifetime;
+			state ConsistencyScanState::StatsHistoryMap::RangeResultType olderStats;
+			auto sysDB = SystemDBWriteLockedNow(cx.getReference());
+
+			// TODO: Use the same transaction.
+			wait(timeoutError(
+			    store(config, cs.config().getD(sysDB)) && store(currentRound, cs.currentRoundStats().getD(sysDB)) &&
+			        store(lifetime, cs.lifetimeStats().getD(sysDB)) &&
+			        store(olderStats,
+			              cs.roundStatsHistory().getRange(sysDB, {}, {}, 5, Snapshot::False, Reverse::True)),
+			    2.0));
+			json_spirit::mObject csDoc;
+			csDoc["configuration"] = config.toJSON();
+			csDoc["current_round"] = currentRound.toJSON();
+			csDoc["lifetime_stats"] = lifetime.toJSON();
+			json_spirit::mArray olderRounds;
+			for (auto const& kv : olderStats.results) {
+				olderRounds.push_back(kv.second.toJSON());
 			}
+			csDoc["previous_rounds"] = olderRounds;
+
+			statusObj["consistency_scan"] = config.toJSON();
+			// TODO:  Update JSON schemas
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
