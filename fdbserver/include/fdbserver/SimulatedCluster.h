@@ -52,6 +52,5 @@ struct BasicSimulationConfig {
 	DatabaseConfiguration db;
 };
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig);
 #endif

@@ -1,3 +1,7 @@
+[configuration]
+datacenters = 1
+generateFearless = false
+
 [[knobs]]
 enable_dd_physical_shard = false
 shard_encode_location_metadata = false

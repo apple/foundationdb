@@ -2868,10 +2868,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	ASSERT(false);
 }
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
-	return generateBasicSimulationConfig(testConfig).db;
-}
-
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
 	if (!rocksDBEnabled) {

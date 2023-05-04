@@ -297,7 +297,7 @@ public:
 	// State initialized when bootstrap
 	Reference<IDDTxnProcessor> txnProcessor;
 	MoveKeysLock& lock; // reference to context->lock
-	DatabaseConfiguration configuration;
+	DatabaseConfiguration& configuration; // reference to context->configuration
 	std::vector<Optional<Key>> primaryDcId;
 	std::vector<Optional<Key>> remoteDcIds;
 	Reference<InitialDataDistribution> initData;
@@ -329,7 +329,7 @@ public:
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
-	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    configuration(context->configuration), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
