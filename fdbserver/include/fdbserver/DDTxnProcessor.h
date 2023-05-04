@@ -59,7 +59,7 @@ public:
 	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
 	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
 		return std::vector<DDRangeLocations>();
@@ -133,7 +133,7 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<ValueReadResult> readRebalanceDDIgnoreKey() const { return Optional<Value>(); }
+	virtual Future<ValueReadResult> readRebalanceDDIgnoreKey() const = 0;
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -302,6 +302,10 @@ public:
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 
 	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+
+	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
