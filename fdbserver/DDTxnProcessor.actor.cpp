@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbclient/DatabaseContext.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 static void updateServersAndCompleteSources(std::set<UID>& servers,
@@ -628,7 +629,51 @@ class DDTxnProcessorImpl {
 			}
 		}
 	}
+
+	ACTOR static Future<Void> waitForAllDataRemoved(
+	    Database cx,
+	    UID serverID,
+	    Version addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Version ver = wait(tr->getReadVersion());
+
+				// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
+				// could cause us to not store the mutations sent to the short lived storage server.
+				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
+					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
+					auto shards = shardsAffectedByTeamFailure->getNumberOfShards(serverID);
+					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
+					    .detail("Server", serverID)
+					    .detail("CanRemove", canRemove)
+					    .detail("Shards", shards);
+					ASSERT_GE(shards, 0);
+					if (canRemove && shards == 0) {
+						return Void();
+					}
+				}
+
+				// Wait for any change to the serverKeys for this server
+				wait(delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution));
+				tr->reset();
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
 };
+
+Future<Void> DDTxnProcessor::waitForAllDataRemoved(
+    const UID& serverID,
+    const Version& addedVersion,
+    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
+
+	return DDTxnProcessorImpl::waitForAllDataRemoved(cx, serverID, addedVersion, shardsAffectedByTeamFailure);
+}
 
 Future<IDDTxnProcessor::SourceServers> DDTxnProcessor::getSourceServersForRange(const KeyRangeRef range) {
 	return DDTxnProcessorImpl::getSourceServersForRange(cx, range);
@@ -1088,4 +1133,17 @@ Future<IDDTxnProcessor::SourceServers> DDMockTxnProcessor::getSourceServersForRa
 	}
 	ASSERT(!servers.empty());
 	return IDDTxnProcessor::SourceServers{ std::vector<UID>(servers.begin(), servers.end()), completeSources };
+}
+
+Future<Void> DDMockTxnProcessor::waitForAllDataRemoved(
+    const UID& serverID,
+    const Version& addedVersion,
+    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
+	return checkUntil(
+	    SERVER_KNOBS->ALL_DATA_REMOVED_DELAY,
+	    [&, this]() -> bool {
+		    return mgs->allShardsRemovedFromServer(serverID) &&
+		           shardsAffectedByTeamFailure->getNumberOfShards(serverID);
+	    },
+	    TaskPriority::DataDistribution);
 }
