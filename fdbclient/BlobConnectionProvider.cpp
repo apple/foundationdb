@@ -31,7 +31,9 @@ public:
 
 	Reference<BackupContainerFileSystem> getForRead(std::string filePath) { return conn; }
 
-	SingleBlobConnectionProvider(std::string url) { conn = BackupContainerFileSystem::openContainerFS(url, {}, {}); }
+	SingleBlobConnectionProvider(std::string url, bool useBackupPath) {
+		conn = BackupContainerFileSystem::openContainerFS(url, {}, {}, useBackupPath);
+	}
 
 	bool needsRefresh() const { return false; }
 
@@ -73,7 +75,7 @@ struct PartitionedBlobConnectionProvider : BlobConnectionProvider {
 			}
 		}
 		metadata = newMetadata;
-		conn = BackupContainerFileSystem::openContainerFS(metadata.base.get().toString(), {}, {});
+		conn = BackupContainerFileSystem::openContainerFS(metadata.base.get().toString(), {}, {}, false);
 	}
 
 	PartitionedBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
@@ -126,7 +128,7 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 		for (auto& it : metadata.partitions) {
 			// these should be whole blob urls
 			ASSERT(it.toString().find("://") != std::string::npos);
-			partitions.push_back(BackupContainerFileSystem::openContainerFS(it.toString(), {}, {}));
+			partitions.push_back(BackupContainerFileSystem::openContainerFS(it.toString(), {}, {}, false));
 		}
 	}
 
@@ -146,13 +148,14 @@ private:
 };
 
 Reference<BlobConnectionProvider> BlobConnectionProvider::newBlobConnectionProvider(std::string blobUrl) {
-	return makeReference<SingleBlobConnectionProvider>(blobUrl);
+	// still use backup mode path for backwards compatibility with 71.2
+	return makeReference<SingleBlobConnectionProvider>(blobUrl, true);
 }
 
 Reference<BlobConnectionProvider> BlobConnectionProvider::newBlobConnectionProvider(
     Standalone<BlobMetadataDetailsRef> blobMetadata) {
 	if (blobMetadata.partitions.empty()) {
-		return makeReference<SingleBlobConnectionProvider>(blobMetadata.base.get().toString());
+		return makeReference<SingleBlobConnectionProvider>(blobMetadata.base.get().toString(), false);
 	} else {
 		ASSERT(blobMetadata.partitions.size() >= 2);
 		if (blobMetadata.base.present()) {

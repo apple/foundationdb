@@ -355,6 +355,7 @@ void parseGetTenant(Optional<KeyRef>& dest, FDBBGTenantPrefix const* source) {
 void parseGetEncryptionKey(BlobGranuleCipherKey& dest, FDBBGEncryptionKey const* source) {
 	dest.encryptDomainId = source->domain_id;
 	dest.baseCipherId = source->base_key_id;
+	dest.baseCipherKCV = source->base_kcv;
 	dest.salt = source->random_salt;
 	dest.baseCipher = StringRef(source->base_key.key, source->base_key.key_length);
 }
@@ -371,6 +372,7 @@ void parseGetEncryptionKeyCtx(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEnc
 void setEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCipherKey& source) {
 	dest->domain_id = source.encryptDomainId;
 	dest->base_key_id = source.baseCipherId;
+	dest->base_kcv = source.baseCipherKCV;
 	dest->random_salt = source.salt;
 	dest->base_key.key = source.baseCipher.begin();
 	dest->base_key.key_length = source.baseCipher.size();
@@ -379,7 +381,9 @@ void setEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCipherKey& sour
 void setEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source) {
 	dest->present = true;
 	setEncryptionKey(&dest->textKey, source.textCipherKey);
+	dest->textKCV = source.textCipherKey.baseCipherKCV;
 	setEncryptionKey(&dest->headerKey, source.headerCipherKey);
+	dest->headerKCV = source.headerCipherKey.baseCipherKCV;
 	dest->iv.key = source.ivRef.begin();
 	dest->iv.key_length = source.ivRef.size();
 }

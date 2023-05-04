@@ -396,6 +396,10 @@ struct StorageServerDisk {
 
 	std::vector<std::string> removeRange(KeyRangeRef range) { return storage->removeRange(range); }
 
+	Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+		return storage->replaceRange(range, data);
+	}
+
 	void persistRangeMapping(KeyRangeRef range, bool isAdd) { storage->persistRangeMapping(range, isAdd); }
 
 	CoalescedKeyRangeMap<std::string> getExistingRanges() { return storage->getExistingRanges(); }
@@ -1271,6 +1275,15 @@ public:
 		// The count of change feed reads that hit disk
 		Counter changeFeedDiskReads;
 
+		// The count of 'set' inserted to pTree. The actual ptree.insert() number could be higher, because of the range
+		// clear split, see metric pTreeClearSplits.
+		Counter pTreeSets;
+		// The count of clear range inserted to pTree
+		Counter pTreeClears;
+		// If set is within a range of clear, the clear is split. It's tracking the number of splits, the split could be
+		// expensive.
+		Counter pTreeClearSplits;
+
 		LatencySample readLatencySample;
 		LatencySample readKeyLatencySample;
 		LatencySample readValueLatencySample;
@@ -1318,6 +1331,7 @@ public:
 		    getMappedRangeBytesQueried("GetMappedRangeBytesQueried", cc),
 		    finishedGetMappedRangeQueries("FinishedGetMappedRangeQueries", cc),
 		    finishedGetMappedRangeSecondaryQueries("FinishedGetMappedRangeSecondaryQueries", cc),
+		    pTreeSets("PTreeSets", cc), pTreeClears("PTreeClears", cc), pTreeClearSplits("PTreeClearSplits", cc),
 		    readLatencySample("ReadLatencyMetrics",
 		                      self->thisServerID,
 		                      SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -3256,7 +3270,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// the end
 		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
 		    remainingLimitBytes <= 0) {
-			CODE_PROBE(true, "Memory feed adding empty version after memory filtered");
+			CODE_PROBE(true, "Memory feed adding empty version after memory filtered", probe::decoration::rare);
 			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
 		}
 	}
@@ -6185,15 +6199,18 @@ void applyMutation(StorageServer* self,
 				// is a waste, but not asymptotic)
 				data.insert(nextKey, ValueOrClearToRef::clearTo(KeyRef(arena, end)));
 			}
+			++self->counters.pTreeClearSplits;
 		}
 		data.insert(m.param1, ValueOrClearToRef::value(m.param2));
 		self->watches.trigger(m.param1);
+		++self->counters.pTreeSets;
 	} else if (m.type == MutationRef::ClearRange) {
 		data.erase(m.param1, m.param2);
 		ASSERT(m.param2 > m.param1);
 		ASSERT(!data.isClearContaining(data.atLatest(), m.param1));
 		data.insert(m.param1, ValueOrClearToRef::clearTo(m.param2));
 		self->watches.triggerRange(m.param1, m.param2);
+		++self->counters.pTreeClears;
 	}
 }
 
@@ -6549,9 +6566,6 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
 			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
-			if (!rep.more) {
-				rep.readThrough = keys.end;
-			}
 			results.send(rep);
 
 			if (!rep.more) {
@@ -6559,11 +6573,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 				return Void();
 			}
 
-			if (rep.readThrough.present()) {
-				begin = firstGreaterOrEqual(rep.readThrough.get());
-			} else {
-				begin = firstGreaterThan(rep.end()[-1].key);
-			}
+			begin = rep.nextBeginKeySelector();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -6624,12 +6634,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 			    .detail("Rows", rows.size())
 			    .detail("ChunkRange", chunkRange)
 			    .detail("FetchVersion", fetchVersion);
-			if (rows.size() == 0) {
-				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
-			}
+			// It should read all the data from that chunk
+			ASSERT(!rows.more);
 			if (i == chunks.size() - 1) {
-				rows.readThrough = KeyRef(rows.arena(), keys.end);
+				// set more to false when it's the last chunk
+				rows.more = false;
+			} else {
+				rows.more = true;
+				// no need to set readThrough, as the next read key range has to be the next chunkRange
 			}
+			ASSERT(!rows.readThrough.present());
 			results.send(rows);
 		}
 		results.sendError(end_of_stream()); // end of range read
@@ -7569,6 +7583,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
+			state KeyRef rangeEnd;
 			if (isFullRestore) {
 				state BlobRestoreRangeState rangeStatus = wait(BlobRestoreController::getRangeState(restoreController));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
@@ -7577,14 +7592,17 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
 					hold = tryGetRangeFromBlob(results, &tr, rangeStatus.first, version, data->blobConn);
+					rangeEnd = rangeStatus.first.end;
 				} else {
 					hold = tryGetRange(results, &tr, keys);
+					rangeEnd = keys.end;
 				}
 			} else {
 				hold = tryGetRange(results, &tr, keys);
+				rangeEnd = keys.end;
 			}
 
-			state Key nfk = keys.begin;
+			state Key blockBegin = keys.begin;
 
 			try {
 				loop {
@@ -7619,20 +7637,22 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
 
 					// Write this_block to storage
-					state int sinceYield = 0;
+					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
+					state Key blockEnd =
+					    this_block.size() > 0 && this_block.more ? keyAfter(this_block.back().key) : keys.end;
+					state KeyRange blockRange(KeyRangeRef(blockBegin, blockEnd));
+					wait(data->storage.replaceRange(blockRange, blockData));
+
 					state KeyValueRef* kvItr = this_block.begin();
 					for (; kvItr != this_block.end(); ++kvItr) {
-						data->storage.writeKeyValue(*kvItr);
 						data->byteSampleApplySet(*kvItr, invalidVersion);
-						if (++sinceYield > 1000) {
-							wait(yield());
-							sinceYield = 0;
-						}
 					}
-
-					ASSERT(this_block.readThrough.present() || this_block.size());
-					nfk = this_block.readThrough.present() ? this_block.readThrough.get()
-					                                       : keyAfter(this_block.end()[-1].key);
+					if (this_block.more) {
+						blockBegin = this_block.getReadThrough();
+					} else {
+						ASSERT(!this_block.readThrough.present());
+						blockBegin = rangeEnd;
+					}
 					this_block = RangeResult();
 
 					data->fetchKeysBytesBudget -= expectedBlockSize;
@@ -7643,7 +7663,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					throw;
 				}
 				lastError = e;
-				if (nfk == keys.begin) {
+				if (blockBegin == keys.begin) {
 					TraceEvent("FKBlockFail", data->thisServerID)
 					    .errorUnsuppressed(e)
 					    .suppressFor(1.0)
@@ -7667,7 +7687,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 					continue;
 				}
-				if (nfk < keys.end) {
+				if (blockBegin < keys.end) {
 					std::deque<Standalone<VerUpdateRef>> updatesToSplit = std::move(shard->updates);
 
 					// This actor finishes committing the keys [keys.begin,nfk) that we already fetched.
@@ -7675,18 +7695,18 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					// fetchKeys.
 					if (data->shardAware) {
 						StorageServerShard rightShard = data->shards[keys.begin]->toStorageServerShard();
-						rightShard.range = KeyRangeRef(nfk, keys.end);
-						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard);
+						rightShard.range = KeyRangeRef(blockBegin, keys.end);
+						auto* leftShard = ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard);
 						leftShard->populateShard(rightShard);
 						shard->server->addShard(leftShard);
 						shard->server->addShard(ShardInfo::newShard(data, rightShard));
 					} else {
-						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, nfk), shard));
-						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(nfk, keys.end)));
+						shard->server->addShard(ShardInfo::addingSplitLeft(KeyRangeRef(keys.begin, blockBegin), shard));
+						shard->server->addShard(ShardInfo::newAdding(data, KeyRangeRef(blockBegin, keys.end)));
 					}
 					shard = data->shards.rangeContaining(keys.begin).value()->adding.get();
 					warningLogger = logFetchKeysWarning(shard);
-					AddingShard* otherShard = data->shards.rangeContaining(nfk).value()->adding.get();
+					AddingShard* otherShard = data->shards.rangeContaining(blockBegin).value()->adding.get();
 					keys = shard->keys;
 
 					// Split our prior updates.  The ones that apply to our new, restricted key range will go back into
@@ -9724,8 +9744,7 @@ ACTOR Future<bool> createSstFileForCheckpointShardBytesSample(StorageServer* dat
 							numSampledKeys++;
 						}
 						if (readResult.more) {
-							ASSERT(readResult.readThrough.present());
-							readBegin = keyAfter(readResult.readThrough.get());
+							readBegin = readResult.getReadThrough();
 							ASSERT(readBegin <= readEnd);
 						} else {
 							break; // finish for current metaDataRangesIter

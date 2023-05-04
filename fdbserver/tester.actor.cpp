@@ -875,37 +875,38 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 
 ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
-	state UID debugID = debugRandom()->randomUniqueID();
-	tr.debugTransaction(debugID);
 
 	loop {
 		try {
-			TraceEvent("TesterClearingDatabaseStart", debugID).log();
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
+			TraceEvent("TesterClearingDatabaseStart", tr.trState->readOptions.get().debugID.get()).log();
 			// This transaction needs to be self-conflicting, but not conflict consistently with
 			// any other transactions
 			tr.clear(normalKeys);
 			tr.makeSelfConflicting();
 			Version rv = wait(tr.getReadVersion()); // required since we use addReadConflictRange but not get
-			TraceEvent("TesterClearingDatabaseRV", debugID).detail("RV", rv);
+			TraceEvent("TesterClearingDatabaseRV", tr.trState->readOptions.get().debugID.get()).detail("RV", rv);
 			wait(tr.commit());
-			TraceEvent("TesterClearingDatabase", debugID).detail("AtVersion", tr.getCommittedVersion());
+			TraceEvent("TesterClearingDatabase", tr.trState->readOptions.get().debugID.get())
+			    .detail("AtVersion", tr.getCommittedVersion());
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingDatabaseError", debugID).error(e);
+			TraceEvent(SevWarn, "TesterClearingDatabaseError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
-			debugID = debugRandom()->randomUniqueID();
-			tr.debugTransaction(debugID);
 		}
 	}
 
 	tr = Transaction(cx);
 	loop {
 		try {
-			TraceEvent("TesterClearingTenantsStart", debugID);
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
+			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
 			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
 			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
 
-			TraceEvent("TesterClearingTenantsDeletingBatch", debugID)
+			TraceEvent("TesterClearingTenantsDeletingBatch", tr.trState->readOptions.get().debugID.get())
 			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
 			    .detail("BatchSize", tenants.results.size());
 
@@ -919,17 +920,18 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 			wait(waitForAll(deleteFutures));
 			wait(tr.commit());
 
-			TraceEvent("TesterClearingTenantsDeletedBatch", debugID)
+			TraceEvent("TesterClearingTenantsDeletedBatch", tr.trState->readOptions.get().debugID.get())
 			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
 			    .detail("BatchSize", tenants.results.size());
 
 			if (!tenants.more) {
-				TraceEvent("TesterClearingTenantsComplete", debugID).detail("AtVersion", tr.getCommittedVersion());
+				TraceEvent("TesterClearingTenantsComplete", tr.trState->readOptions.get().debugID.get())
+				    .detail("AtVersion", tr.getCommittedVersion());
 				break;
 			}
 			tr.reset();
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingTenantsError", debugID).error(e);
+			TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -937,6 +939,7 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	tr = Transaction(cx);
 	loop {
 		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
 			state Optional<Key> tenantPrefix;
@@ -962,9 +965,12 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 
 				ASSERT(false);
 			}
+			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
+			TraceEvent("TesterCheckDatabaseClearedDone", tr.trState->readOptions.get().debugID.get());
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError").error(e);
+			TraceEvent(SevWarn, "TesterCheckDatabaseClearedError", tr.trState->readOptions.get().debugID.get())
+			    .error(e);
 			wait(tr.onError(e));
 		}
 	}
@@ -1099,7 +1105,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults").log();
+		TraceEvent("TestCheckingResults").detail("WorkloadTitle", spec.title);
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -1116,6 +1122,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 			else
 				failure++;
 		}
+		TraceEvent("TestCheckComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if (spec.phases & TestWorkload::METRICS) {

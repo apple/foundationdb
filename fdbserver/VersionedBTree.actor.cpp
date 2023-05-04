@@ -4992,15 +4992,14 @@ public:
 
 	void clear(KeyRangeRef clearedRange) {
 		++m_mutationCount;
+		ASSERT(!clearedRange.empty());
 		// Optimization for single key clears to create just one mutation boundary instead of two
-		if (clearedRange.begin.size() == clearedRange.end.size() - 1 &&
-		    clearedRange.end[clearedRange.end.size() - 1] == 0 && clearedRange.end.startsWith(clearedRange.begin)) {
+		if (clearedRange.singleKeyRange()) {
 			++g_redwoodMetrics.metric.opClear;
 			++g_redwoodMetrics.metric.opClearKey;
 			m_pBuffer->insert(clearedRange.begin).mutation().clearBoundary();
 			return;
 		}
-
 		++g_redwoodMetrics.metric.opClear;
 		MutationBuffer::iterator iBegin = m_pBuffer->insert(clearedRange.begin);
 		MutationBuffer::iterator iEnd = m_pBuffer->insert(clearedRange.end);
@@ -8258,10 +8257,6 @@ public:
 		}
 
 		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		g_redwoodMetrics.kvSizeReadByGetRange->sample(accumulatedBytes);
 		return result;
 	}
