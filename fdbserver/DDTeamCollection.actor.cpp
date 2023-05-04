@@ -3832,7 +3832,7 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
-	if(db->isMocked())
+	if (db->isMocked())
 		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }

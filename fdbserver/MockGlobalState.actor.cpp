@@ -56,18 +56,32 @@ public:
 			           "Some shard is in the same location.",
 			           probe::decoration::rare);
 
-			Optional<StorageMetrics> res =
-			    wait(::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
+			try {
+				Optional<StorageMetrics> res = wait(
+				    ::waitStorageMetricsWithLocation(tenantInfo, version, keys, locations, min, max, permittedError));
 
-			TraceEvent(SevDebug, "MGSWaitStorageMetrics")
-			    .detail("Phase", "GetStorageMetrics")
-			    .detail("KeyRange", keys.toString())
-			    .detail("Present", res.present());
+				TraceEvent(SevDebug, "MGSWaitStorageMetrics")
+				    .detail("Phase", "GetStorageMetrics")
+				    .detail("KeyRange", keys.toString())
+				    .detail("Present", res.present());
 
-			if (res.present()) {
-				return std::make_pair(res, -1);
+				if (res.present()) {
+					return std::make_pair(res, -1);
+				}
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "MGSWaitStorageMetricsHandleError").error(e);
+				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
+					wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+				} else if (e.code() == error_code_future_version) {
+					wait(delay(CLIENT_KNOBS->FUTURE_VERSION_RETRY_DELAY, TaskPriority::DataDistribution));
+				} else {
+					bool ok = e.code() == error_code_tenant_not_found;
+					TraceEvent(ok ? SevInfo : SevError, "MGSWaitStorageMetricsError").error(e);
+					throw;
+				}
 			}
-			wait(delay(CLIENT_KNOBS->WRONG_SHARD_SERVER_DELAY, TaskPriority::DataDistribution));
+			// Avoid busy spin
+			wait(delay(0.1, TaskPriority::DataDistribution));
 		}
 	}
 

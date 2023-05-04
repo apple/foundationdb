@@ -544,9 +544,8 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 }
 
 DDQueue::DDQueue(DDQueueInitParams const& params)
-  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock),
-    txnProcessor(params.db), teamCollections(params.teamCollections),
-    shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
+  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), txnProcessor(params.db),
+    teamCollections(params.teamCollections), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), getAverageShardBytes(params.getAverageShardBytes),
     startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
