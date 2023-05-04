@@ -693,7 +693,7 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	state int64_t bytes_sent = 0;
 
-	state Reference<OutgoingRequest> req;
+	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
 	req->verb = HTTP_VERB_CONNECT;
 	req->resource = remoteHost + ":" + remoteService;
 	req->data.content = nullptr;
@@ -707,8 +707,8 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		state Reference<IncomingResponse> r;
 
 		try {
-			Reference<IncomingResponse> _r =
-			    wait(timeoutError(doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), requestTimeout));
+			Reference<IncomingResponse> _r = wait(timeoutError(
+			    HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), requestTimeout));
 			r = _r;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
