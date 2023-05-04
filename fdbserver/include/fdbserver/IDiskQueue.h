@@ -76,8 +76,6 @@ public:
 	virtual location getNextReadLocation()
 	    const = 0; // Returns a location >= the location of all bytes previously returned by readNext(), and <= the
 	               // location of all bytes subsequently returned
-	virtual location getNextCommitLocation()
-	    const = 0; // If commit() were to be called, all buffered writes would be written starting at `location`.
 	virtual location getNextPushLocation()
 	    const = 0; // If push() were to be called, the pushed data would be written starting at `location`.
 

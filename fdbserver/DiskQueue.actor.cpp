@@ -878,7 +878,6 @@ public:
 
 class DiskQueue final : public IDiskQueue, public Tracked<DiskQueue> {
 public:
-	// FIXME: Is setting lastCommittedSeq to -1 instead of 0 necessary?
 	DiskQueue(std::string basename,
 	          std::string fileExtension,
 	          UID dbgid,
@@ -886,7 +885,7 @@ public:
 	          int64_t fileSizeWarningLimit)
 	  : rawQueue(new RawDiskQueue_TwoFiles(basename, fileExtension, dbgid, fileSizeWarningLimit)), dbgid(dbgid),
 	    diskQueueVersion(diskQueueVersion), anyPopped(false), warnAlwaysForMemory(true), nextPageSeq(0), poppedSeq(0),
-	    lastPoppedSeq(0), lastCommittedSeq(-1), pushed_page_buffer(nullptr), recovered(false), initialized(false),
+	    lastPoppedSeq(0), lastCommittedSeq(0), pushed_page_buffer(nullptr), recovered(false), initialized(false),
 	    nextReadLocation(-1), readBufPage(nullptr), readBufPos(0) {}
 
 	location push(StringRef contents) override {
@@ -981,7 +980,9 @@ public:
 		   rawQueue->files[1].size).detail("WritingPos", rawQueue->writingPos) .detail("RawFile0Name",
 		   rawQueue->files[0].dbgFilename);*/
 
-		lastCommittedSeq = backPage().endSeq();
+		// Since we only commit entire pages, round the last
+		// committed location up to the next page.
+		lastCommittedSeq = pageCeiling(backPage().endSeq());
 		auto f = rawQueue->pushAndCommit(
 		    pushed_page_buffer->get(), pushed_page_buffer, poppedSeq / sizeof(Page) - lastPoppedSeq / sizeof(Page));
 		lastPoppedSeq = poppedSeq;
@@ -997,10 +998,6 @@ public:
 	// FIXME: getNextReadLocation should ASSERT( initialized ), but the memory storage engine needs
 	// to be changed to understand the new intiailizeRecovery protocol.
 	location getNextReadLocation() const override { return nextReadLocation; }
-	location getNextCommitLocation() const override {
-		ASSERT(initialized);
-		return lastCommittedSeq + sizeof(Page);
-	}
 	location getNextPushLocation() const override {
 		ASSERT(initialized);
 		return endLocation();
@@ -1560,10 +1557,15 @@ private:
 	int readBufPos;
 };
 
-// A class wrapping DiskQueue which durably allows uncommitted data to be popped.
-// This works by performing two commits when uncommitted data is popped:
+// A class wrapping DiskQueue which prevents uncommitted data from being popped.
+//
+// Once upon a time, it was intended to allow popping uncommitted data
+// by performing two commits when uncommitted data is popped:
 //	Commit 1 - pop only previously committed data and push new data (i.e., commit uncommitted data)
-//  Commit 2 - finish pop into uncommitted data
+//      Commit 2 - finish pop into uncommitted data
+//
+// Now, instead, we only use this to catch errors in tlog logic where
+// we attempt to pop too much.
 class DiskQueue_PopUncommitted final : public IDiskQueue {
 
 public:
@@ -1596,7 +1598,6 @@ public:
 	Future<Standalone<StringRef>> read(location start, location end, CheckHashes ch) override {
 		return queue->read(start, end, ch);
 	}
-	location getNextCommitLocation() const override { return queue->getNextCommitLocation(); }
 	location getNextPushLocation() const override { return queue->getNextPushLocation(); }
 
 	location push(StringRef contents) override {
@@ -1621,7 +1622,10 @@ public:
 		Future<Void> commitFuture = queue->commit();
 
 		bool updatePop = popLocation > committed;
-		committed = pushLocation;
+
+		// Since we only commit entire pages, round the last
+		// committed location up to the next page.
+		committed = location(pushLocation.hi, pageCeiling(pushLocation.lo));
 
 		if (updatePop) {
 			ASSERT_WE_THINK(false);

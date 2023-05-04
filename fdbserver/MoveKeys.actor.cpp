@@ -2049,15 +2049,15 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
-				StorageMetadataType metadata(StorageMetadataType::currentTime());
-				metadataMap.set(tr, server.id(), metadata);
-
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.set(tr, server.id(), server.id());
 				}
 			}
+
+			StorageMetadataType metadata(StorageMetadataType::currentTime());
+			metadataMap.set(tr, server.id(), metadata);
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());

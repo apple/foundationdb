@@ -149,7 +149,7 @@ public:
 		AsyncVar<bool> blobRestoreEnabled;
 		ClusterType clusterType = ClusterType::STANDALONE;
 		Optional<ClusterName> metaclusterName;
-		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
+		Optional<UnversionedMetaclusterRegistrationEntry> metaclusterRegistration;
 		metacluster::MetaclusterMetrics metaclusterMetrics;
 
 		DBInfo()

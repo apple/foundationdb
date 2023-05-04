@@ -387,7 +387,7 @@ private:
 				// last updated version for table metadata
 				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
 
-				for (auto range : ranges) {
+				for (auto& range : ranges) {
 					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 					limits.minRows = 0;
 					state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
@@ -484,6 +484,7 @@ public:
 
 			try {
 				state Standalone<VectorRef<KeyRef>> blobRanges;
+				state Standalone<VectorRef<bool>> blobRangesAssigned;
 				// Read all granules
 				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 				limits.minRows = 0;
@@ -493,6 +494,7 @@ public:
 					RangeResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : rows) {
 						blobRanges.push_back_deep(blobRanges.arena(), row.key);
+						blobRangesAssigned.push_back(blobRangesAssigned.arena(), !row.value.empty());
 					}
 					if (!rows.more) {
 						break;
@@ -508,7 +510,10 @@ public:
 				state int i = 0;
 				for (i = 0; i < blobRanges.size() - 1; i++) {
 					Key startKey = blobRanges[i].removePrefix(blobGranuleMappingKeys.begin);
+					if (!blobRangesAssigned[i])
+						continue;
 					Key endKey = blobRanges[i + 1].removePrefix(blobGranuleMappingKeys.begin);
+
 					state KeyRange granuleRange = KeyRangeRef(startKey, endKey);
 					try {
 						Standalone<BlobGranuleRestoreVersion> granule = wait(getGranule(&tr, granuleRange));
@@ -564,6 +569,7 @@ private:
 		for (iter = manifest.segmentsBegin(); iter != manifest.segmentsEnd(); ++iter) {
 			wait(loadSegment(self, container, *iter, &totalRows, &totalBytes));
 		}
+		wait(writeDelayedRows(self));
 
 		// Validate tailer
 		if (tailer.totalRows != totalRows || tailer.totalSegments != manifest.totalSegments() ||
@@ -649,11 +655,40 @@ private:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
 				for (int i = start; i < end; ++i) {
-					tr.set(rows[i].key, rows[i].value);
+					// A special key to be loaded at the end:
+					// Blob worker monitors lastTenantId to refresh tenant map. If we load it before
+					// rest of other part of tenant metadata, Blob worker may get partial tenant map. So delay it.
+					if (rows[i].key == TenantMetadata::lastTenantId().key) {
+						self->delayedRows_.push_back_deep(self->delayedRows_.arena(), rows[i]);
+					} else {
+						tr.set(rows[i].key, rows[i].value);
+					}
 				}
 				wait(tr.commit());
 				dprint("Blob manifest loaded rows from {} to {}\n", start, end);
 				TraceEvent("BlobManifestLoader").detail("RowStart", start).detail("RowEnd", end);
+				return Void();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> writeDelayedRows(Reference<BlobManifestLoader> self) {
+		if (self->delayedRows_.empty()) {
+			return Void();
+		}
+
+		state Transaction tr(self->db_);
+		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				for (auto& row : self->delayedRows_) {
+					tr.set(row.key, row.value);
+				}
+				wait(tr.commit());
 				return Void();
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -819,6 +854,7 @@ private:
 
 	Database db_;
 	Reference<BlobConnectionProvider> blobConn_;
+	RangeResult delayedRows_; // special rows that we would write at the end of restore
 };
 
 // API to dump a manifest copy to external storage
