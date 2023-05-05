@@ -80,6 +80,9 @@ private:
 		ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT(data.metaclusterRegistration.get().id == data.metaclusterRegistration.get().metaclusterId &&
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
+		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
 		ASSERT(data.clusterTenantCounts.results.size() <= data.dataClusters.size() && !data.clusterTenantCounts.more);
@@ -97,12 +100,15 @@ private:
 		int numFoundInTenantGroupMap = 0;
 		for (auto const& [clusterName, clusterMetadata] : data.dataClusters) {
 			// If the cluster has capacity, it should be in the capacity index and have the correct count of
-			// allocated tenants stored there
+			// allocated tenants stored there.
+			// If the cluster has disabled auto tenant assignment, then it mustn't exist in the capacity index.
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
-			if (!clusterMetadata.entry.hasCapacity()) {
+			if (!clusterMetadata.entry.hasCapacity() ||
+			    clusterMetadata.entry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
 			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
+				ASSERT_EQ(AutoTenantAssignment::ENABLED, clusterMetadata.entry.autoTenantAssignment);
 				++numFoundInAllocatedMap;
 			} else {
 				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
@@ -198,6 +204,9 @@ private:
 			ASSERT(data.metaclusterRegistration.get().matches(managementData.metaclusterRegistration.get()));
 			ASSERT(data.metaclusterRegistration.get().name == clusterName);
 			ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
+			ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+			ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+			ASSERT_EQ(data.metaclusterRegistration.get().version, managementData.metaclusterRegistration.get().version);
 
 			if (data.tenantData.lastTenantId >= 0) {
 				ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);

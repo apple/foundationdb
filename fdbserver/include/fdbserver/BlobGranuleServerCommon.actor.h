@@ -147,6 +147,9 @@ private:
 	Future<Void> collection;
 };
 
+ACTOR Future<Void> loadBGTenantMap(BGTenantMap* tenantData, Transaction* tr);
+ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap* tenantData, KeyRange keyRange);
+
 // Defines granule info that interests full restore
 struct BlobGranuleRestoreVersion {
 	// Two constructors required by VectorRef
