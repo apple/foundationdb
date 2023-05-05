@@ -35,7 +35,7 @@ class FutureKeyResult extends NativeFuture<ResultBytes> {
 
 	@Override
 	protected ResultBytes getIfDone_internal(long cPtr) throws FDBException {
-		return new FDBResultBytes(FutureKey_get(cPtr), 0.0f, 0.0f);
+		return new FDBResultBytes(FutureKeyResult_get(cPtr), 0.0f, 0.0f);
 	}
 
 	@Override
@@ -46,5 +46,5 @@ class FutureKeyResult extends NativeFuture<ResultBytes> {
 		super.postMarshal(value);
 	}
 
-	private native byte[] FutureKey_get(long cPtr) throws FDBException;
+	private native byte[] FutureKeyResult_get(long cPtr) throws FDBException;
 }

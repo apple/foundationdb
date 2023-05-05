@@ -747,6 +747,12 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKeyResult_FutureKeyResult_1get(JNIEnv* jenv,
+                                                                                              jobject obj,
+                                                                                              jlong future) {
+	return Java_com_apple_foundationdb_FutureKey_FutureKey_1get(jenv, obj, future);
+}
+
 JNIEXPORT jlong JNICALL Java_com_apple_foundationdb_FDBDatabase_Database_1openTenant(JNIEnv* jenv,
                                                                                      jobject,
                                                                                      jlong dbPtr,
@@ -2355,7 +2361,7 @@ jint JNI_OnLoad(JavaVM* vm, void* reserved) {
 		    env->GetMethodID(local_mapped_range_result_class, "<init>", "([Lcom/apple/foundationdb/MappedKeyValue;Z)V");
 		mapped_range_result_class = (jclass)(env)->NewGlobalRef(local_mapped_range_result_class);
 
-		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/MappedKeyValue");
+		jclass local_mapped_key_value_class = env->FindClass("com/apple/foundationdb/FDBMappedKeyValue");
 		mapped_key_value_from_bytes = env->GetStaticMethodID(
 		    local_mapped_key_value_class, "fromBytes", "([B[I)Lcom/apple/foundationdb/MappedKeyValue;");
 		mapped_key_value_class = (jclass)(env)->NewGlobalRef(local_mapped_key_value_class);
