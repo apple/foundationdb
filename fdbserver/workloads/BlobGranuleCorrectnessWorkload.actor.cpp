@@ -146,6 +146,10 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	Key getKey(uint32_t key, uint32_t id) {
 		std::stringstream ss;
 		ss << std::setw(32) << std::setfill('0') << id;
+		if (g_network->isSimulated() && g_simulator->dataAtRestPlaintextMarker.present()) {
+			ss << g_simulator->dataAtRestPlaintextMarker.get();
+		}
+
 		Standalone<StringRef> str(ss.str());
 		Tuple::UserTypeStr udt(0x41, str);
 		return Tuple::makeTuple((int64_t)key, udt).pack();
@@ -194,6 +198,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 #define DEBUG_KEY_OP(dirId, keyId) BGW_DEBUG&& DEBUG_MISMATCH&& dirId == DEBUG_DIR_ID&& DEBUG_KEY_ID == keyId
 #define DEBUG_READ_OP(dirId, rv) BGW_DEBUG&& DEBUG_MISMATCH&& dirId == DEBUG_DIR_ID&& rv == DEBUG_RV
 
+const std::string BG_ENCRYPTION_AT_REST_MARKER_STRING = "Expecto..Patronum...BlobGranule";
 /*
  * This is a stand-alone workload designed to validate blob granule correctness.
  * By enabling distinct ranges and writing to those parts of the key space, we can control what parts of the key space
@@ -291,6 +296,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		if (self->doSetup) {
 			// FIXME: run the actual FDBCLI command instead of copy/pasting its implementation
 			wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
+		}
+
+		DatabaseConfiguration dbConfig = wait(getDatabaseConfiguration(cx));
+		if (g_network->isSimulated() && dbConfig.encryptionAtRestMode.isEncryptionEnabled()) {
+			TraceEvent("EncryptionAtRestPlainTextMarkerCheckEnabled")
+			    .detail("EncryptionMode", dbConfig.encryptionAtRestMode.toString())
+			    .detail("DataAtRestMarker", BG_ENCRYPTION_AT_REST_MARKER_STRING);
+			g_simulator->dataAtRestPlaintextMarker = BG_ENCRYPTION_AT_REST_MARKER_STRING;
 		}
 
 		if (self->directories.empty()) {
