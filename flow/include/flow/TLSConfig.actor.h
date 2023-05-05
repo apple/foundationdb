@@ -203,7 +203,7 @@ private:
 	std::string tlsCertPath, tlsKeyPath, tlsCAPath;
 	std::string tlsCertBytes, tlsKeyBytes, tlsCABytes;
 	std::string tlsPassword;
-	bool tlsDisablePlainTextConnection;
+	bool tlsDisablePlainTextConnection = false;
 	std::vector<std::string> tlsVerifyPeers;
 	TLSEndpointType endpointType = TLSEndpointType::UNSET;
 };
