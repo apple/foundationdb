@@ -21,6 +21,8 @@
 #include "fdbclient/JSONDoc.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
+#include "fdbclient/json_spirit/json_spirit_writer_options.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
@@ -54,8 +56,10 @@ ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, doubl
 			// 	  wait(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
 			// pSize->set(event.getInt64("TotalSizeBytes"));
 
-			Optional<Value> status =
+			// TODO:  This does not work for some reason, the value always comes back !present().
+			state Optional<Value> status =
 			    wait(runTransaction(db.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				    return tr->get("\xff\xff/status/json"_sr);
 			    }));
 
@@ -70,6 +74,12 @@ ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, doubl
 					// If the above did not throw, we succesfully updated the size so wait interval
 					wait(delay(interval));
 				}
+			}
+
+			// TODO: Remove this when getting the actual db size works
+			if (true) {
+				pSize->set(10e6);
+				wait(delay(interval));
 			}
 
 		} catch (Error& e) {
@@ -91,7 +101,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 
 	// Infrequently poll the database size to use in speed calculations.
 	state AsyncVar<int64_t> databaseSize = -1;
-	state Future<Void> pollSize = pollDatabaseSize(db, &databaseSize, 900);
+	state Future<Void> pollSize = pollDatabaseSize(db, &databaseSize, g_network->isSimulated() ? 15 : 900);
 
 	state int64_t readRateLimit = 0;
 	state Reference<IRateControl> readRateControl;
@@ -149,10 +159,12 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 				}
 
 				// Trim stats history based on configured round history
-				cs.roundStatsHistory().erase(tr,
-				                             0,
-				                             tr->getReadVersion().get() - (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 60 *
-				                                                           60 * 24 * config.roundHistoryDays));
+				cs.roundStatsHistory().erase(
+				    tr,
+				    0,
+				    std::max<Version>(0,
+				                      tr->getReadVersion().get() - (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 60 * 60 *
+				                                                    24 * config.roundHistoryDays)));
 
 				state Future<Void> watch = config.enabled ? Void() : cs.trigger.watch(tr);
 				wait(tr->commit());
@@ -162,6 +174,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 				}
 
 				wait(watch);
+				tr->reset();
 			} catch (Error& e) {
 				TraceEvent("ConsistencyScan_MainLoopError").error(e);
 				wait(tr->onError(e));
@@ -220,23 +233,24 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 					statsCurrentRound = savedCurrentRoundState;
 					systemDB->setOptions(tr);
 
-					// Read all of these things in parallel
-					state RangeResult shard;
+					// The shard boundaries for the shard that lastEndKey is in
+					state RangeResult shardBoundaries;
 					// The consistency scan config update version
 					state Optional<Versionstamp> csVersion;
 					// The range config for the range that we're about to read
-					state Optional<ConsistencyScanState::RangeConfigMap::RangeValue> rangeConfig;
+					state Optional<ConsistencyScanState::RangeConfigMap::RangeValue> configRange;
 
 					GetRangeLimits limits;
 					limits.minRows = 2;
 					limits.rows = 2;
-					wait(store(shard,
-					           tr->getRange(lastLessOrEqual(statsCurrentRound.lastEndKey),
-					                        firstGreaterOrEqual(statsCurrentRound.lastEndKey),
+					// Read these things in parallel
+					wait(store(shardBoundaries,
+					           tr->getRange(lastLessOrEqual(statsCurrentRound.lastEndKey.withPrefix(keyServersPrefix)),
+					                        firstGreaterThan(allKeys.end.withPrefix(keyServersPrefix)),
 					                        limits,
 					                        Snapshot::True)) &&
 					     store(csVersion, cs.trigger.get(tr)) &&
-					     store(rangeConfig, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
+					     store(configRange, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
 
 					// Check for a config version change
 					// If there is one, skip the commit and break to the main loop
@@ -245,11 +259,14 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 						break;
 					}
 
+					state KeyRange shardRange = KeyRangeRef(shardBoundaries[0].key.removePrefix(keyServersPrefix),
+					                                        shardBoundaries[1].key.removePrefix(keyServersPrefix));
 					bool scanRange = true;
-					// Check if we are supposed to scan this range.  The default for a range not represented is to scan
-					// it.
-					if (rangeConfig.present()) {
-						auto val = rangeConfig->value;
+
+					// Check if we are supposed to scan this range.
+					// The default for a range with no options set is to scan it.
+					if (configRange.present()) {
+						auto val = configRange->value;
 
 						// If included is unspecified for the range, the default is true
 						// If skip is unspecified for the range, the default is false
@@ -261,7 +278,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 							if (val.skip.orDefault(false)) {
 								++statsCurrentRound.skippedRanges;
 							}
-							statsCurrentRound.lastEndKey = rangeConfig->range.begin;
+							statsCurrentRound.lastEndKey = configRange->range.begin;
 							scanRange = false;
 						}
 					}
@@ -288,9 +305,22 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 						readOptions.type = ReadType::LOW;
 						readOptions.consistencyCheckStartVersion = statsCurrentRound.startVersion;
 
-						// TODO:  Use readOptions
-						// TODO:  Do reads, compare results
-						// TODO: update statsCurrentRound.lastEndKey and noMoreRecords
+						// TODO: Remove this block, do real reads
+						if (true) {
+							state int bytes = deterministicRandom()->randomInt(0, 1e6);
+							logicalBytesRead += bytes;
+							replicatedBytesRead += 3 * bytes;
+							wait(delay(deterministicRandom()->random01() * .1));
+							if (deterministicRandom()->random01() < .01) {
+								throw transaction_too_old();
+							}
+							statsCurrentRound.lastEndKey = shardRange.end;
+							noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
+						}
+
+						// TODO: Do real reads using readOptions, compare results
+						// TODO: update statsCurrentRound.lastEndKey to the next *start* key
+						// TODO: update noMoreRecords
 
 						statsCurrentRound.errorCount += errors;
 						statsLifetime.errorCount += errors;
@@ -325,8 +355,11 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 					cs.lifetimeStats().set(tr, statsLifetime);
 
 					wait(tr->commit());
+					// fmt::print("CONSISTENCY SCAN PROGRESS: {}\n",
+					//            json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON())));
 					break;
 				} catch (Error& e) {
+					TraceEvent("ConsistencyScan_ScanLoopError").error(e);
 					wait(tr->onError(e));
 				}
 			} // Transaction retry loop for making one increment of durable progress
@@ -348,6 +381,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	state ActorCollection actors;
 	state ConsistencyScanState cs;
 
+	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
 	actors.add(consistencyScanCore(db, ConsistencyScanState()));
@@ -389,7 +423,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 				when(HaltConsistencyScanRequest req = waitNext(csInterf.haltConsistencyScan.getFuture())) {
 					req.reply.send(Void());
 					TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-					break;
+					return Void();
 				}
 				when(wait(actors.getResult())) {
 					ASSERT(false);
