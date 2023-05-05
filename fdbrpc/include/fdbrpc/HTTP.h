@@ -113,11 +113,11 @@ struct OutgoingResponse : ResponseBase<UnsentPacketQueue*> {
 };
 
 // Do an HTTP request to the blob store, parse the response.
-Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> const& conn,
-                                              Reference<OutgoingRequest> const& request,
-                                              Reference<IRateControl> const& sendRate,
-                                              int64_t* const& pSent,
-                                              Reference<IRateControl> const& recvRate);
+Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
+                                              Reference<OutgoingRequest> request,
+                                              Reference<IRateControl> sendRate,
+                                              int64_t* pSent,
+                                              Reference<IRateControl> recvRate);
 
 // Connect to proxy, send CONNECT command, and connect to the remote host.
 Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
