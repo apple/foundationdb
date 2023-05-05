@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "fdbclient/FDBOptions.g.h"
+#include "flow/Error.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
@@ -672,11 +673,14 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 					for (int s = 0; s < serverListValues.size(); s++) {
+						// We don't think this condition should be triggered, but we're not sure if there are conditions
+						// that might cause it to trigger. Adding this assertion to find any such cases via testing.
+						ASSERT_WE_THINK(serverListValues[s].present());
 						if (!serverListValues[s].present()) {
 							// Attempt to move onto a server that isn't in serverList (removed or never added to the
 							// database) This can happen (why?) and is handled by the data distribution algorithm
 							// FIXME: Answer why this can happen?
-							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
+							// CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
@@ -873,9 +877,12 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			std::vector<Future<Void>> requests;
 			state std::vector<Future<Void>> tssRequests;
 			for (int s = 0; s < serverListValues.size(); s++) {
+				// We don't think this condition should be triggered, but we're not sure if there are conditions
+				// that might cause it to trigger. Adding this assertion to find any such cases via testing.
+				ASSERT_WE_THINK(serverListValues[s].present());
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
+					// CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
