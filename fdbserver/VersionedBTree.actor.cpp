@@ -10072,17 +10072,21 @@ namespace {
 RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 	ASSERT(maxKeySize > 0);
 	RandomKeyGenerator keyGen;
-
-	int tupleSetNum = deterministicRandom()->randomInt(0, 10);
+	const int maxTuples = 10;
+	const int tupleSetNum = deterministicRandom()->randomInt(0, maxTuples);
 	for (int i = 0; i < tupleSetNum && maxKeySize > 0; i++) {
-		int mKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100) + 1);
-		maxKeySize -= mKeySize;
-		keyGen.addKeyGenerator(
-		    std::make_unique<RandomKeySetGenerator>(RandomIntGenerator(deterministicRandom()->randomInt(1, 5) * (i + 1)),
-		                                            RandomStringGenerator(RandomIntGenerator(1, mKeySize), RandomIntGenerator(1, 254))));
+		int subStrKeySize = deterministicRandom()->randomInt(1, std::min(maxKeySize, 100) + 1);
+		maxKeySize -= subStrKeySize;
+		// setSize determines the RandomKeySet cardinality, it is lower at the beginning and higher at the end.
+		// Also make sure there's enough key for the test to finish.
+		int setSize = deterministicRandom()->randomInt(1, 10) * (maxTuples - tupleSetNum + i);
+		keyGen.addKeyGenerator(std::make_unique<RandomKeySetGenerator>(
+		    RandomIntGenerator(setSize),
+		    RandomStringGenerator(RandomIntGenerator(1, subStrKeySize), RandomIntGenerator(1, 254))));
 	}
 	if (tupleSetNum == 0 || (deterministicRandom()->coinflip() && maxKeySize > 0)) {
-		keyGen.addKeyGenerator(std::make_unique<RandomStringGenerator>(RandomIntGenerator(1, maxKeySize), RandomIntGenerator(1, 254)));
+		keyGen.addKeyGenerator(
+		    std::make_unique<RandomStringGenerator>(RandomIntGenerator(1, maxKeySize), RandomIntGenerator(1, 254)));
 	}
 
 	return keyGen;
@@ -10114,11 +10118,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                                                     : deterministicRandom()->randomInt(4096, 32768));
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
-	state int maxCommitSize =
-	    params.getInt("maxCommitSize")
-	        .orDefault(shortTest
-	                       ? 1000
-	                       : randomSize(10e6));
+	state int maxCommitSize = params.getInt("maxCommitSize").orDefault(shortTest ? 1000 : randomSize(10e6));
 	state double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearProbability =

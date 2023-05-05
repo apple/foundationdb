@@ -34,9 +34,7 @@ struct IGenerator {
 	virtual T next() = 0;
 	virtual T last() const = 0;
 	virtual std::string toString() const = 0;
-	virtual T next(int distance, bool wrap = false) {
-		throw unsupported_operation();
-	}
+	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
 	virtual ~IGenerator(){};
 };
 
@@ -212,9 +210,6 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 	void init(RandomIntGenerator originalIndexGenerator, KeyGen& keyGen) {
 		indexGenerator = originalIndexGenerator;
 		indexGenerator.min = 0;
-		if (indexGenerator.max == 0) {
-			fprintf(stdout, "JJJ1: error\n");
-		}
 		ASSERT(indexGenerator.max > 0);
 		std::set<Key> uniqueKeys;
 		int inserts = 0;
@@ -337,14 +332,13 @@ struct RandomKeyTupleGenerator {
 typedef RandomStringSetGenerator<RandomKeyTupleGenerator> RandomKeyTupleSetGenerator;
 
 // RandomKeyGenerator is a helper function to contain multiple KeyGenerators
+// TODO: ideally, if all RandomGenerators support IGenerator interface and can be nested with each other, there's no
+//  need to have this class. But that also requires more complicated string syntax to build the generators.
 struct RandomKeyGenerator : IKeyGenerator {
 	std::vector<std::unique_ptr<IKeyGenerator>> keyGenerators;
 	Key val;
 
-
-	void addKeyGenerator(std::unique_ptr<IKeyGenerator> gen) {
-		keyGenerators.emplace_back(std::move(gen));
-	}
+	void addKeyGenerator(std::unique_ptr<IKeyGenerator> gen) { keyGenerators.emplace_back(std::move(gen)); }
 
 	Key next() override {
 		int totalBytes = 0;

@@ -43,9 +43,6 @@ double DeterministicRandom::random01() {
 }
 
 int DeterministicRandom::randomInt(int min, int maxPlusOne) {
-	if (min >= maxPlusOne) {
-		fprintf(stdout, "JJJ1:error\n");
-	}
 	ASSERT_LT(min, maxPlusOne);
 	unsigned int range;
 	if (maxPlusOne < 0)
