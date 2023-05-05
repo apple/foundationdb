@@ -420,10 +420,12 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	int64_t epoch;
 	int64_t seqNo = 1;
 	int64_t manifestDumperSeqNo = 1;
+	bool enableManifestEncryption = false;
 
 	Promise<Void> iAmReplaced;
 
 	bool isFullRestoreMode = false;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 	BlobManagerData(UID id,
 	                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -437,7 +439,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	    activeGranuleMerges(invalidVersion, normalKeys.end), forcePurgingRanges(false, normalKeys.end),
 	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0), exclusionTracker(db),
-	    epoch(epoch) {}
+	    epoch(epoch), dbInfo(dbInfo) {}
 
 	// only initialize blob store if actually needed
 	void initBStore() {
@@ -3573,8 +3575,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
 			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
 			try {
-				wait(loadManifest(bmData->db, bmData->manifestStore));
-				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
+				wait(loadManifest(bmData->db, bmData->dbInfo, bmData->manifestStore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
 				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
@@ -5562,6 +5564,9 @@ ACTOR Future<Void> maybeFlushAndTruncateMutationLogs(Reference<BlobManagerData> 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
+	DatabaseConfiguration config = wait(getDatabaseConfiguration(bmData->db, true));
+	bmData->enableManifestEncryption = config.encryptionAtRestMode.isEncryptionEnabled();
+
 	loop {
 		// Skip backup if no active blob ranges
 		bool activeRanges = false;
@@ -5575,8 +5580,12 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 		if (activeRanges && SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
 			if (bmData->manifestStore.isValid()) {
 				wait(maybeFlushAndTruncateMutationLogs(bmData));
-				int64_t bytes =
-				    wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
+				int64_t bytes = wait(dumpManifest(bmData->db,
+				                                  bmData->dbInfo,
+				                                  bmData->manifestStore,
+				                                  bmData->epoch,
+				                                  bmData->manifestDumperSeqNo,
+				                                  bmData->enableManifestEncryption));
 				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 				bmData->stats.manifestSizeInBytes += bytes;
 				bmData->stats.lastManifestDumpTs = now();
