@@ -288,6 +288,9 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			}
 		}
 		double blobWorkerLag = (now() - blobWorkerTime) - recoveryTracker.getRecoveryDuration(lastBWVer);
+		if (requireSmallBlobVersionLag() && limits.bwLagTarget == SERVER_KNOBS->TARGET_BW_LAG) {
+			ASSERT_LE(blobWorkerLag, 3 * limits.bwLagTarget);
+		}
 		if (blobWorkerLag > limits.bwLagTarget / 2 && !blobWorkerVersionHistory.empty()) {
 			double elapsed = blobWorkerVersionHistory.back().first - blobWorkerVersionHistory.front().first;
 			Version firstBWVer = blobWorkerVersionHistory.front().second;
@@ -299,7 +302,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					double targetRateRatio;
 					if (blobWorkerLag > 3 * limits.bwLagTarget) {
 						targetRateRatio = 0;
-						ASSERT(!requireSmallBlobVersionLag() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG);
 					} else if (blobWorkerLag > limits.bwLagTarget) {
 						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
 					} else {
@@ -356,8 +358,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 							    .detail("RecoveryDuration", recoveryTracker.getRecoveryDuration(lastBWVer));
 						}
 						limitReason = limitReason_t::blob_worker_missing;
-						ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 					} else if (bwTPS < limits.tpsLimit) {
 						if (verbose) {
 							TraceEvent("RatekeeperLimitReasonDetails")
@@ -385,8 +385,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					;
 				}
 				limitReason = limitReason_t::blob_worker_missing;
-				ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-				       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 			}
 		} else if (blobWorkerLag > 3 * limits.bwLagTarget) {
 			limits.tpsLimit = 0.0;
@@ -398,8 +396,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 				    .detail("HistorySize", blobWorkerVersionHistory.size());
 			}
 			limitReason = limitReason_t::blob_worker_missing;
-			ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-			       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 		}
 	} else {
 		blobWorkerTime = now();
