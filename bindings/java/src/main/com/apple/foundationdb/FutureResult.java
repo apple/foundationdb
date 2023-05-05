@@ -35,7 +35,7 @@ class FutureResult extends NativeFuture<ResultBytes> {
 
 	@Override
 	protected ResultBytes getIfDone_internal(long cPtr) throws FDBException {
-		return new FDBResultBytesWithMetrics(FutureResult_get(cPtr), 0.0f, 0.0f);
+		return new FDBResultBytes(FutureResult_get(cPtr), 0.0f, 0.0f);
 	}
 
 	@Override

@@ -20,11 +20,8 @@
 
 package com.apple.foundationdb;
 
-import java.util.Arrays;
-
 /**
  * A byte string and associated metrics returned from a read operation.
- *  This is a simple value type; mutating it won't affect your {@code Transaction} or the {@code Database}.
  */
 public interface ResultBytes extends ReadMetrics {
 	/**

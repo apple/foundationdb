@@ -1,5 +1,5 @@
 /*
- * ResultBytes.java
+ * FDBResultBytes.java
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -23,13 +23,13 @@ package com.apple.foundationdb;
 import java.util.Arrays;
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-class FDBResultBytesWithMetrics implements ResultBytes {
+class FDBResultBytes implements ResultBytes {
 	private byte[] bytes;
 
 	private float serverBusyness;
 	private float rangeBusyness;
 
-	public FDBResultBytesWithMetrics(byte[] bytes, float serverBusyness, float rangeBusyness) {
+	FDBResultBytes(byte[] bytes, float serverBusyness, float rangeBusyness) {
 		this.bytes = bytes;
 		this.serverBusyness = serverBusyness;
 		this.rangeBusyness = rangeBusyness;
