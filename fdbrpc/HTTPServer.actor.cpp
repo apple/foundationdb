@@ -144,6 +144,25 @@ void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, Reference<HT
 	actors.add(listenActor(Reference<HTTP::SimServerContext>::addRef(this), requestHandler, addr, listeners.back()));
 }
 
+void HTTP::SimRegisteredHandlerContext::updateDNS() {
+	INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
+}
+
+void HTTP::SimRegisteredHandlerContext::addAddress(NetworkAddress addr) {
+	addresses.push_back(addr);
+	updateDNS();
+}
+
+void HTTP::SimRegisteredHandlerContext::removeIp(IPAddress ip) {
+	for (int i = 0; i < addresses.size(); i++) {
+		if (addresses[i].ip == ip) {
+			swapAndPop(&addresses, i);
+			i--;
+		}
+	}
+	updateDNS();
+}
+
 // unit test stuff
 
 ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req,
@@ -211,23 +230,26 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostna
                                                               DoRequestFunction reqFunction) {
 	state Reference<IConnection> conn;
 	loop {
-		if (!conn) {
-			wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
-			ASSERT(conn.isValid());
-			wait(conn->connectHandshake());
-		}
-
 		try {
+			if (!conn) {
+				wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
+				ASSERT(conn.isValid());
+				wait(conn->connectHandshake());
+			}
+
 			Future<Reference<HTTP::IncomingResponse>> f = reqFunction(conn);
 			Reference<HTTP::IncomingResponse> response = wait(f);
 			conn->close();
 			return response;
 		} catch (Error& e) {
-			conn->close();
-			if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed) {
+			if (conn) {
+				conn->close();
+			}
+			if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed &&
+			    e.code() != error_code_lookup_failed) {
 				throw e;
 			}
-			// request got stuck, close conn and try again
+			// request got timed out or connection could not be established, close conn and try again
 			conn.clear();
 			wait(delay(0.1));
 		}
@@ -290,25 +312,27 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 }
 
 // can't run as regular unit test right now because it needs special setup
-TEST_CASE("!/HTTP/Server/HelloWorld") {
+TEST_CASE("/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloworld", "80", 1, makeReference<HelloWorldRequestHandler>()));
+	state std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloworld", "80", doHelloWorldReq)));
+	wait(success(doRequestTest(hostname, "80", doHelloWorldReq)));
 
 	fmt::print("Done\n");
 	return Void();
 }
 
-TEST_CASE("!/HTTP/Server/HelloError") {
+TEST_CASE("/HTTP/Server/HelloError") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloerror", "80", 1, makeReference<HelloErrorRequestHandler>()));
+	state std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloerror", "80", doHelloWorldErrorReq)));
+	wait(success(doRequestTest(hostname, "80", doHelloWorldErrorReq)));
 
 	fmt::print("Done\n");
 	return Void();
