@@ -1022,7 +1022,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				// It can happen when a process failed before it persisted the connection string to disk
 				Reference<IClusterConnectionRecord> clusterFile(
 				    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
-				                : new ClusterConnectionFile(path));
+				                                     : new ClusterConnectionFile(path));
 				const int listenPort = i * listenPerProcess + 1;
 				ProcessMode ipProcessMode =
 				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;
