@@ -210,9 +210,14 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 			// reading using the actual amount that we read
 			state int totalReadBytesFromStorageServers = 0;
 
+			// We only want to update initialRoundState with *durable* progess, so if the loop below retries it must
+			// start from the same initial state, so save it here and restore it at the start of the transaction.
+			state ConsistencyScanState::RoundStats savedCurrentRoundState = statsCurrentRound;
+
 			tr->reset();
 			loop {
 				try {
+					statsCurrentRound = savedCurrentRoundState;
 					systemDB->setOptions(tr);
 
 					// Read all of these things in parallel
