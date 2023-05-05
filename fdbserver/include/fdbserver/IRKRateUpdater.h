@@ -37,7 +37,7 @@ public:
 	// In simulation, after a certain period of time has passed,
 	// we expect blob worker lag to be low, and fail an assertion
 	// if this is not the case.
-	static bool expectSmallBlobVersionLag();
+	static bool requireSmallBlobVersionLag();
 };
 
 class RKRateUpdater : public IRKRateUpdater {

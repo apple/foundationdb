@@ -596,7 +596,7 @@ TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag3") {
 		wait(delay(1.0));
 		env.blobMonitor.setCurrentVersion(SERVER_KNOBS->VERSIONS_PER_SECOND * i / 2);
 		env.rateServer.updateProxy(UID(1, 1), SERVER_KNOBS->VERSIONS_PER_SECOND * i, testActualTps);
-		if (IRKRateUpdater::expectSmallBlobVersionLag()) {
+		if (IRKRateUpdater::requireSmallBlobVersionLag()) {
 			return Void();
 		}
 		env.update();
