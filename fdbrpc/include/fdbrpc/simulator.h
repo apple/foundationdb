@@ -37,6 +37,7 @@
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbrpc/HTTP.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -281,6 +282,12 @@ public:
 	virtual void destroyProcess(ProcessInfo* p) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId) = 0;
 
+	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
+	virtual Future<Void> registerSimHTTPServer(std::string hostname,
+	                                           std::string service,
+	                                           int numAddresses,
+	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
+
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
@@ -352,6 +359,10 @@ public:
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
+
+	std::set<std::string> httpServerHostnames;
+	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
+	std::set<IPAddress> httpServerIps;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
