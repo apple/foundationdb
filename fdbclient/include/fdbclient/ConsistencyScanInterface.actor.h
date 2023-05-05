@@ -250,9 +250,17 @@ struct ConsistencyScanState : public KeyBackedClass {
 			json_spirit::mObject doc;
 			doc["complete"] = complete;
 			doc["start_version"] = startVersion;
-			doc["start_timestamp"] = startTime;
+			if (startTime != 0) {
+				doc["start_timestamp"] = startTime;
+				doc["start_datetime"] = epochsToGMTString(startTime);
+			}
+
 			doc["end_version"] = endVersion;
-			doc["end_timestamp"] = endTime;
+			if (endTime != 0) {
+				doc["end_timestamp"] = endTime;
+				doc["end_datetime"] = epochsToGMTString(endTime);
+			}
+
 			doc["logical_bytes_scanned"] = logicalBytesScanned;
 			doc["replicated_bytes_scanned"] = replicatedBytesRead;
 			doc["errors"] = errorCount;

@@ -100,14 +100,14 @@ CommandFactory consistencyScanFactory(
     CommandHelp(
         // TODO:  Expose/document additional configuration options
         "consistencyscan [on|off] [restart] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]",
-        "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans\n"
+        "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans "
         "shard replicas for consistency.",
         "`on' enables the scan.\n\n"
         "`off' disables the scan but keeps the current cycle's progress so it will resume later if enabled again.\n\n"
-        "`restart' will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when\n\n"
+        "`restart' will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when "
         "it is enabled.\n\n"
         "`maxRate <BYTES_PER_SECOND>' sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.\n\n"
-        "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed\n"
+        "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed "
         "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n\n"
         "The consistency scan role publishes its configuration and metrics in Status JSON under the path "
         "`.cluster.consistency_scan'\n"

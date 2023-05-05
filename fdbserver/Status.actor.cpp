@@ -3569,13 +3569,12 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			}
 			csDoc["previous_rounds"] = olderRounds;
 
-			statusObj["consistency_scan"] = config.toJSON();
-			// TODO:  Update JSON schemas in code and documentation
+			statusObj["consistency_scan"] = csDoc;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
-			messages.push_back(JsonString::makeMessage("fetch_consistency_scan_info_timeout",
-			                                           "Fetching consistency scan information timed out."));
+			messages.push_back(JsonString::makeMessage("fetch_consistency_scan_status_timeout",
+			                                           "Fetching consistency scan state timed out."));
 		}
 
 		// Create the status_incomplete message if there were any reasons that the status is incomplete.
