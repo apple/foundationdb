@@ -277,6 +277,8 @@ public:
 	void initializeClusterLayout(const BasicSimulationConfig&);
 	void initializeAsEmptyDatabaseMGS(const DatabaseConfiguration& conf,
 	                                  uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
+	// create a storage server interface on each process
+	void addStoragePerProcess(uint64_t defaultDiskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
 	void addStorageServer(StorageServerInterface server, uint64_t diskSpace = MockStorageServer::DEFAULT_DISK_SPACE);
 
