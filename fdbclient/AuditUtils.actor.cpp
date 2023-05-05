@@ -27,10 +27,10 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-ACTOR static Future<std::vector<AuditStorageState>> getAuditStatesForTypeImpl(Transaction* tr,
-                                                                              AuditType type,
-                                                                              int num,
-                                                                              bool newFirst) {
+ACTOR static Future<std::vector<AuditStorageState>> getAuditStatesImpl(Transaction* tr,
+                                                                       AuditType type,
+                                                                       int num,
+                                                                       bool newFirst) {
 	state std::vector<AuditStorageState> auditStates;
 	loop {
 		auditStates.clear();
@@ -89,7 +89,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, i
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			std::vector<AuditStorageState> auditStates =
-			    wait(getAuditStatesForTypeImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
+			    wait(getAuditStatesImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
 			int numFinishAudit = 0;
 			for (const auto& auditState : auditStates) { // UID from small to large since newFirst=false
 				if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
@@ -201,7 +201,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			std::vector<AuditStorageState> auditStates =
-			    wait(getAuditStatesForTypeImpl(&tr, auditState.getType(), 1, /*newFirst=*/true));
+			    wait(getAuditStatesImpl(&tr, auditState.getType(), 1, /*newFirst=*/true));
 			uint64_t nextId = 1;
 			if (!auditStates.empty()) {
 				nextId = auditStates.front().id.first() + 1;
@@ -306,7 +306,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num) {
 	Transaction tr(cx);
-	std::vector<AuditStorageState> auditStates = wait(getAuditStatesForTypeImpl(&tr, type, num, /*newFirst=*/true));
+	std::vector<AuditStorageState> auditStates = wait(getAuditStatesImpl(&tr, type, num, /*newFirst=*/true));
 	return auditStates;
 }
 
