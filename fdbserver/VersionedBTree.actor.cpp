@@ -10070,6 +10070,7 @@ TEST_CASE(":/redwood/pager/ArenaPage") {
 namespace {
 
 RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
+	ASSERT(maxKeySize > 0);
 	RandomKeyGenerator keyGen;
 
 	int tupleSetNum = deterministicRandom()->randomInt(0, 10);
@@ -10080,7 +10081,7 @@ RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 		    std::make_unique<RandomKeySetGenerator>(RandomIntGenerator(deterministicRandom()->randomInt(1, 5) * (i + 1)),
 		                                            RandomStringGenerator(RandomIntGenerator(1, mKeySize), RandomIntGenerator(1, 254))));
 	}
-	if (deterministicRandom()->coinflip() && maxKeySize > 0) {
+	if (tupleSetNum == 0 || (deterministicRandom()->coinflip() && maxKeySize > 0)) {
 		keyGen.addKeyGenerator(std::make_unique<RandomStringGenerator>(RandomIntGenerator(1, maxKeySize), RandomIntGenerator(1, 254)));
 	}
 
@@ -10201,7 +10202,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("domainMode: %d\n", encryptionDomainMode);
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
-	printf("keyGenerator: %s\n", keyGenerator.orDefault("default").c_str());
+	printf("keyGenerator: %s\n", keyGen.toString().c_str());
 	printf("valueGenerator: %s\n", valueGenerator.c_str());
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
