@@ -51,6 +51,8 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 				break;
 			}
 
+			// TODO:  Expose/document additional configuration options
+			// TODO:  Range configuration.
 			while (!error && !args.empty()) {
 				auto next = args.front();
 				args.pop_front();
@@ -59,15 +61,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 				} else if (next == "off") {
 					config.enabled = false;
 				} else if (next == "restart") {
-					// For backward compatibility, support but do not require a next token of 0 or 1
-					bool restart = true;
-					if (!args.empty() && (args.front() == "0"_sr || args.front() == "1"_sr)) {
-						restart = (args.front() == "1");
-						args.pop_front();
-					}
-					if (restart) {
-						config.minStartVersion = tr->getReadVersion().get();
-					}
+					config.minStartVersion = tr->getReadVersion().get();
 				} else if (next == "maxRate") {
 					error = args.empty();
 					if (!error) {
@@ -104,6 +98,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 CommandFactory consistencyScanFactory(
     "consistencyscan",
     CommandHelp(
+        // TODO:  Expose/document additional configuration options
         "consistencyscan [on|off] [restart] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]",
         "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans\n"
         "shard replicas for consistency.",
@@ -113,6 +108,10 @@ CommandFactory consistencyScanFactory(
         "it is enabled.\n\n"
         "`maxRate <BYTES_PER_SECOND>' sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.\n\n"
         "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed\n"
-        "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n"));
+        "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n\n"
+        "The consistency scan role publishes its configuration and metrics in Status JSON under the path "
+        "`.cluster.consistency_scan'\n"
+        // TODO:  Syntax hint generator
+        ));
 
 } // namespace fdb_cli

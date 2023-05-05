@@ -3561,8 +3561,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			    2.0));
 			json_spirit::mObject csDoc;
 			csDoc["configuration"] = config.toJSON();
-			csDoc["current_round"] = currentRound.toJSON();
 			csDoc["lifetime_stats"] = lifetime.toJSON();
+			csDoc["current_round"] = currentRound.toJSON();
 			json_spirit::mArray olderRounds;
 			for (auto const& kv : olderStats.results) {
 				olderRounds.push_back(kv.second.toJSON());
@@ -3570,7 +3570,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 			csDoc["previous_rounds"] = olderRounds;
 
 			statusObj["consistency_scan"] = config.toJSON();
-			// TODO:  Update JSON schemas
+			// TODO:  Update JSON schemas in code and documentation
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
 				throw;

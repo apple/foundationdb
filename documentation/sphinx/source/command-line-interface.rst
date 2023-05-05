@@ -138,7 +138,7 @@ This command controls a native data consistency scan role that is automatically 
 
 The syntax is
 
-``consistencyscan [on|off] [restart [0|1]] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
+``consistencyscan [on|off] [restart] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
 
 * ``on`` enables the scan.
 
@@ -150,7 +150,7 @@ The syntax is
 
 * ``targetInterval <SECONDS>`` sets the target interval for the scan to SECONDS.  The scan will adjust speed to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND.
 
-The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan``.
 
 consistencycheck
 ----------------

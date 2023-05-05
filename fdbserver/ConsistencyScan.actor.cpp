@@ -83,10 +83,9 @@ ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, doubl
 	}
 }
 
-ACTOR Future<Void> consistencyScanCore(Database db) {
+ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 	TraceEvent("ConsistencyScanCoreStart").log();
 
-	state ConsistencyScanState cs;
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state Reference<SystemTransactionGenerator<DatabaseContext>> systemDB = SystemDBWriteLockedNow(db.getReference());
 
@@ -272,7 +271,6 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 						// Logical KV bytes scanned regardless of how many replicas exist of each key
 						state int logicalBytesRead = 0;
 						// Number of key differences found (essentially a count of comparisons that failed)
-						// TODO: More precision here about error types would be good - missing key, different value, etc
 						state int errors = 0;
 
 						// TODO:  Decode the shard KV pairs and get storage interfaces
@@ -280,8 +278,14 @@ ACTOR Future<Void> consistencyScanCore(Database db) {
 						// We must read at the same version from all replicas before the version is too old, so read in
 						// reasonable chunks of size CLIENT_KNOBS->REPLY_BYTE_LIMIT
 
-						// TODO:  Do reads, compare results, update replicatedBytesRead and logicalBytesRead, and update
-						// statsCurrentRound.lastEndKey and noMoreRecords
+						ReadOptions readOptions;
+						readOptions.cacheResult = CacheResult::False;
+						readOptions.type = ReadType::LOW;
+						readOptions.consistencyCheckStartVersion = statsCurrentRound.startVersion;
+
+						// TODO:  Use readOptions
+						// TODO:  Do reads, compare results
+						// TODO: update statsCurrentRound.lastEndKey and noMoreRecords
 
 						statsCurrentRound.errorCount += errors;
 						statsLifetime.errorCount += errors;
@@ -341,7 +345,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
-	actors.add(consistencyScanCore(db));
+	actors.add(consistencyScanCore(db, ConsistencyScanState()));
 
 	// Randomly enable consistencyScan in simulation
 	// TODO:  Move this to a BehaviorInjection workload once that concept exists.

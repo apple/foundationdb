@@ -148,7 +148,6 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 		// Whether the range should be currently even though it remains a scan target
 		// This should be set by operations on the cluster that would make shards temporarily inconsistent.
-		// TODO:  Track/update skipped shards in stats
 		Optional<bool> skip;
 
 		RangeConfig apply(RangeConfig const& rhs) const {
