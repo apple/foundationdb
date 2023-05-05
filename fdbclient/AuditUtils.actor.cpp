@@ -53,28 +53,32 @@ ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID audi
 	state Transaction tr(cx);
 	TraceEvent(SevDebug, "ClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
 
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			// Clear audit
-			tr.clear(auditKey(auditType, auditId));
-			if (clearProgressMetadata) {
-				// Here, we do not distinguish which range exactly used by an audit
-				// Simply clear any possible place of storing the progress of the audit
-				tr.clear(auditServerBasedProgressRangeFor(auditType, auditId));
-				tr.clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+	try {
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				// Clear audit
+				tr.clear(auditKey(auditType, auditId));
+				if (clearProgressMetadata) {
+					// Here, we do not distinguish which range exactly used by an audit
+					// Simply clear any possible place of storing the progress of the audit
+					tr.clear(auditServerBasedProgressRangeFor(auditType, auditId));
+					tr.clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+				}
+				wait(tr.commit());
+				TraceEvent(SevDebug, "ClearAuditMetadataEnd", auditId).detail("AuditKey", auditKey(auditType, auditId));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			TraceEvent(SevInfo, "ClearAuditMetadataError", auditId)
-			    .errorUnsuppressed(e)
-			    .detail("AuditKey", auditKey(auditType, auditId));
-			wait(tr.onError(e));
 		}
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ClearAuditMetadataError", auditId)
+		    .errorUnsuppressed(e)
+		    .detail("AuditKey", auditKey(auditType, auditId));
+		// We do not want audit cleanup effects to DD
 	}
-	TraceEvent(SevDebug, "ClearAuditMetadataEnd", auditId).detail("AuditKey", auditKey(auditType, auditId));
 
 	return Void();
 }
@@ -84,48 +88,53 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, i
 	state int numFinishAuditCleaned = 0; // We regard "Complete" and "Failed" audits as finish audits
 	TraceEvent(SevDebug, "DDClearAuditMetadataForTypeStart").detail("AuditType", auditType);
 
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			std::vector<AuditStorageState> auditStates =
-			    wait(getAuditStatesImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
-			int numFinishAudit = 0;
-			for (const auto& auditState : auditStates) { // UID from small to large since newFirst=false
-				if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
-					numFinishAudit++;
+	try {
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				std::vector<AuditStorageState> auditStates =
+				    wait(getAuditStatesImpl(&tr, auditType, CLIENT_KNOBS->TOO_MANY, /*newFirst=*/false));
+				int numFinishAudit = 0;
+				for (const auto& auditState : auditStates) { // UID from small to large since newFirst=false
+					if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed) {
+						numFinishAudit++;
+					}
 				}
-			}
-			const int numFinishAuditToClean = numFinishAudit - numFinishAuditToKeep;
-			numFinishAuditCleaned = 0;
-			for (const auto& auditState : auditStates) {
-				ASSERT(auditState.getType() == auditType);
-				if (auditState.getPhase() == AuditPhase::Complete && numFinishAuditCleaned < numFinishAuditToClean) {
-					tr.clear(auditKey(auditType, auditState.id));
-					// No need to clear progress metadata of Complete audits
-					// which has been done when Complete phase persistent
-					numFinishAuditCleaned++;
-				} else if (auditState.getPhase() == AuditPhase::Failed &&
-				           numFinishAuditCleaned < numFinishAuditToClean) {
-					tr.clear(auditKey(auditType, auditState.id));
-					// Clear progress metadata of Failed audits
-					// Here, we do not distinguish which range exactly used by an audit
-					// Simply clear any possible place of storing the progress of the audit
-					tr.clear(auditServerBasedProgressRangeFor(auditType, auditState.id));
-					tr.clear(auditRangeBasedProgressRangeFor(auditType, auditState.id));
-					numFinishAuditCleaned++;
+				const int numFinishAuditToClean = numFinishAudit - numFinishAuditToKeep;
+				numFinishAuditCleaned = 0;
+				for (const auto& auditState : auditStates) {
+					ASSERT(auditState.getType() == auditType);
+					if (auditState.getPhase() == AuditPhase::Complete &&
+					    numFinishAuditCleaned < numFinishAuditToClean) {
+						tr.clear(auditKey(auditType, auditState.id));
+						// No need to clear progress metadata of Complete audits
+						// which has been done when Complete phase persistent
+						numFinishAuditCleaned++;
+					} else if (auditState.getPhase() == AuditPhase::Failed &&
+					           numFinishAuditCleaned < numFinishAuditToClean) {
+						tr.clear(auditKey(auditType, auditState.id));
+						// Clear progress metadata of Failed audits
+						// Here, we do not distinguish which range exactly used by an audit
+						// Simply clear any possible place of storing the progress of the audit
+						tr.clear(auditServerBasedProgressRangeFor(auditType, auditState.id));
+						tr.clear(auditRangeBasedProgressRangeFor(auditType, auditState.id));
+						numFinishAuditCleaned++;
+					}
 				}
+				wait(tr.commit());
+				TraceEvent(SevDebug, "DDClearAuditMetadataForTypeEnd")
+				    .detail("AuditType", auditType)
+				    .detail("NumCleanedFinishAudits", numFinishAuditCleaned);
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
 			}
-			wait(tr.commit());
-			break;
-		} catch (Error& e) {
-			TraceEvent(SevInfo, "DDClearAuditMetadataForTypeError").detail("AuditType", auditType).errorUnsuppressed(e);
-			wait(tr.onError(e));
 		}
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "DDClearAuditMetadataForTypeError").detail("AuditType", auditType).errorUnsuppressed(e);
+		// We do not want audit cleanup effects to DD
 	}
-	TraceEvent(SevDebug, "DDClearAuditMetadataForTypeEnd")
-	    .detail("AuditType", auditType)
-	    .detail("NumCleanedFinishAudits", numFinishAuditCleaned);
 
 	return Void();
 }
