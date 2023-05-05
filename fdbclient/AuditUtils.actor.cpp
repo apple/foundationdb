@@ -49,6 +49,28 @@ ACTOR static Future<std::vector<AuditStorageState>> getAuditStatesImpl(Transacti
 	return auditStates;
 }
 
+void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditId) {
+	// There are two possible places to store AuditProgressMetadata:
+	// (1) auditServerBasedProgressRangeFor or (2) auditRangeBasedProgressRangeFor
+	// Which place stores the progress metadata is decided by DDAudit design
+	// This function enforces the DDAudit design when clear the progress metadata
+	// Design: for replica/ha/locationMetadata, the audit always writes to RangeBased space
+	// for SSShard, the audit always writes to ServerBased space
+	// This function clears the progress metadata accordingly
+	if (auditType == AuditType::ValidateStorageServerShard) {
+		tr->clear(auditServerBasedProgressRangeFor(auditType, auditId));
+	} else if (auditType == AuditType::ValidateHA) {
+		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+	} else if (auditType == AuditType::ValidateReplica) {
+		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+	} else if (auditType == AuditType::ValidateLocationMetadata) {
+		tr->clear(auditRangeBasedProgressRangeFor(auditType, auditId));
+	} else {
+		UNREACHABLE();
+	}
+	return;
+}
+
 ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
 	state Transaction tr(cx);
 	TraceEvent(SevDebug, "ClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
@@ -58,14 +80,10 @@ ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID audi
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				// Clear audit
+				// Clear audit metadata
 				tr.clear(auditKey(auditType, auditId));
-				if (clearProgressMetadata) {
-					// Here, we do not distinguish which range exactly used by an audit
-					// Simply clear any possible place of storing the progress of the audit
-					tr.clear(auditServerBasedProgressRangeFor(auditType, auditId));
-					tr.clear(auditRangeBasedProgressRangeFor(auditType, auditId));
-				}
+				// Clear progress metadata
+				clearAuditProgressMetadata(&tr, auditType, auditId);
 				wait(tr.commit());
 				TraceEvent(SevDebug, "ClearAuditMetadataEnd", auditId).detail("AuditKey", auditKey(auditType, auditId));
 				break;
@@ -77,7 +95,7 @@ ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID audi
 		TraceEvent(SevInfo, "ClearAuditMetadataError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditType, auditId));
-		// We do not want audit cleanup effects to DD
+		// We do not want audit cleanup effects DD
 	}
 
 	return Void();
@@ -107,18 +125,17 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, i
 					ASSERT(auditState.getType() == auditType);
 					if (auditState.getPhase() == AuditPhase::Complete &&
 					    numFinishAuditCleaned < numFinishAuditToClean) {
+						// Clear audit metadata
 						tr.clear(auditKey(auditType, auditState.id));
 						// No need to clear progress metadata of Complete audits
 						// which has been done when Complete phase persistent
 						numFinishAuditCleaned++;
 					} else if (auditState.getPhase() == AuditPhase::Failed &&
 					           numFinishAuditCleaned < numFinishAuditToClean) {
+						// Clear audit metadata
 						tr.clear(auditKey(auditType, auditState.id));
-						// Clear progress metadata of Failed audits
-						// Here, we do not distinguish which range exactly used by an audit
-						// Simply clear any possible place of storing the progress of the audit
-						tr.clear(auditServerBasedProgressRangeFor(auditType, auditState.id));
-						tr.clear(auditRangeBasedProgressRangeFor(auditType, auditState.id));
+						// Clear progress metadata
+						clearAuditProgressMetadata(&tr, auditType, auditState.id);
 						numFinishAuditCleaned++;
 					}
 				}
@@ -133,7 +150,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx, AuditType auditType, i
 		}
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDClearAuditMetadataForTypeError").detail("AuditType", auditType).errorUnsuppressed(e);
-		// We do not want audit cleanup effects to DD
+		// We do not want audit cleanup effects DD
 	}
 
 	return Void();
@@ -251,10 +268,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
-				// Here, we do not distinguish which range exactly used by an audit
-				// Simply clear any possible place of storing the progress of the audit
-				tr.clear(auditServerBasedProgressRangeFor(auditState.getType(), auditState.id));
-				tr.clear(auditRangeBasedProgressRangeFor(auditState.getType(), auditState.id));
+				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
 			} // We keep the progess metadata of Failed and Error audits for further investigations
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
