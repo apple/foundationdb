@@ -4706,6 +4706,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	state Key originBegin = range.begin;
 	state int validatedKeys = 0;
 	state std::string error;
+	state int64_t cumulatedValidatedKeysNum = 0;
 	loop {
 		try {
 			std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
@@ -4755,6 +4756,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			auditState.range = range;
 
 			const int end = std::min(local.data.size(), remote.data.size());
+			cumulatedValidatedKeysNum = cumulatedValidatedKeysNum + end;
 			int i = 0;
 			for (; i < end; ++i) {
 				KeyValueRef remoteKV = remote.data[i];
@@ -4788,6 +4790,15 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 
 				lastKey = localKV.key;
 			}
+
+			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditId", auditState.id)
+			    .detail("AuditRange", auditState.range)
+			    .detail("CurrentValidatedKeysNum", end)
+			    .detail("CurrentValidatedInclusiveRange", KeyRangeRef(range.begin, lastKey))
+			    .detail("CumulatedValidatedKeysNum", cumulatedValidatedKeysNum)
+			    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(auditState.range.begin, lastKey));
 
 			if (!error.empty()) {
 				break;
@@ -5289,6 +5300,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	state int storageAutoProceedCount = 0;
 	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
 	// by itself without being notified by DD
+	state int64_t cumulatedValidatedLocalShardsNum = 0;
+	state int64_t cumulatedValidatedServerKeysNum = 0;
 
 	try {
 		while (true) {
@@ -5379,6 +5392,20 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			    .detail("ClaimRange", claimRange)
 			    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
 			    .detail("ShardInfoAtVersion", data->version.get());
+
+			// Log statistic
+			cumulatedValidatedLocalShardsNum = cumulatedValidatedLocalShardsNum + ownRangesLocalView.size();
+			cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + ownRangesSeenByServerKey.size();
+			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			    .detail("AuditType", req.getType())
+			    .detail("AuditId", req.id)
+			    .detail("AuditRange", req.range)
+			    .detail("CurrentValidatedLocalShardsNum", ownRangesLocalView.size())
+			    .detail("CurrentValidatedServerKeysNum", ownRangesSeenByServerKey.size())
+			    .detail("CurrentValidatedInclusiveRange", claimRange)
+			    .detail("CumulatedValidatedLocalShardsNum", cumulatedValidatedLocalShardsNum)
+			    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
+			    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
 			// Compare
 			Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
@@ -5488,6 +5515,8 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	state int storageAutoProceedCount = 0;
 	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
 	// by itself without being notified by DD
+	state int64_t cumulatedValidatedServerKeysNum = 0;
+	state int64_t cumulatedValidatedKeyServersNum = 0;
 
 	try {
 		while (true) {
@@ -5527,6 +5556,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				ASSERT(readAtVersion == serverKeyRes.readAtVersion);
 			}
 			// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
+			int64_t numValidatedServerKeys = 0;
 			for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
 				for (auto& range : serverKeyRes.ownRanges) {
 					KeyRange overlappingRange = range & claimRange;
@@ -5539,8 +5569,12 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("Range", overlappingRange)
 					    .detail("SSID", ssid);
 					mapFromServerKeys[ssid].push_back(overlappingRange);
+					numValidatedServerKeys++;
 				}
 			}
+			cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + numValidatedServerKeys;
+
+			int64_t numValidatedKeyServers = 0;
 			for (auto& [ssid, ranges] : mapFromKeyServersRaw) {
 				std::vector mergedRanges = coalesceRangeList(ranges);
 				for (auto& range : mergedRanges) {
@@ -5554,8 +5588,10 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("Range", overlappingRange)
 					    .detail("SSID", ssid);
 					mapFromKeyServers[ssid].push_back(overlappingRange);
+					numValidatedKeyServers++;
 				}
 			}
+			cumulatedValidatedKeyServersNum = cumulatedValidatedKeyServersNum + numValidatedKeyServers;
 
 			// Compare: check if mapFromKeyServers === mapFromServerKeys
 			// 1. check mapFromKeyServers => mapFromServerKeys
@@ -5612,6 +5648,18 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					    .detail("AuditServerID", data->thisServerID);
 				}
 			}
+
+			// Log statistic
+			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			    .detail("AuditType", req.getType())
+			    .detail("AuditId", req.id)
+			    .detail("AuditRange", req.range)
+			    .detail("CurrentValidatedServerKeysNum", numValidatedServerKeys)
+			    .detail("CurrentValidatedKeyServersNum", numValidatedServerKeys)
+			    .detail("CurrentValidatedInclusiveRange", claimRange)
+			    .detail("CumulatedValidatedServerKeysNum", cumulatedValidatedServerKeysNum)
+			    .detail("CumulatedValidatedKeyServersNum", cumulatedValidatedKeyServersNum)
+			    .detail("CumulatedValidatedInclusiveRange", KeyRangeRef(req.range.begin, claimRange.end));
 
 			// Return result
 			if (!errors.empty()) {
