@@ -511,11 +511,11 @@ Future<Void> HTTP::IncomingResponse::read(Reference<IConnection> conn, bool head
 // Request content is provided as UnsentPacketQueue in req, which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
 // TODO:  pSent is very hackish, do something better.
-ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest(Reference<IConnection> conn,
-                                                          Reference<OutgoingRequest> request,
-                                                          Reference<IRateControl> sendRate,
-                                                          int64_t* pSent,
-                                                          Reference<IRateControl> recvRate) {
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> conn,
+                                                               Reference<OutgoingRequest> request,
+                                                               Reference<IRateControl> sendRate,
+                                                               int64_t* pSent,
+                                                               Reference<IRateControl> recvRate) {
 	state TraceEvent event(SevDebug, "HTTPRequest");
 
 	// There is no standard http request id header field, so either a global default can be set via a knob
@@ -683,6 +683,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest(Reference<IConnection>
 	}
 }
 
+// IDE build didn't like the actor conversion i guess
+Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
+                                              Reference<OutgoingRequest> request,
+                                              Reference<IRateControl> sendRate,
+                                              int64_t* pSent,
+                                              Reference<IRateControl> recvRate) {
+	return doRequestActor(conn, request, sendRate, pSent, recvRate);
+}
+
 ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
                                            std::string remoteHost,
                                            std::string remoteService) {
@@ -704,11 +713,12 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	loop {
 		state Optional<Error> err;
 
-		state Reference<IncomingResponse> r;
+		state Reference<HTTP::IncomingResponse> r;
 
 		try {
-			Reference<IncomingResponse> _r = wait(timeoutError(
-			    HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), requestTimeout));
+			Future<Reference<HTTP::IncomingResponse>> f =
+			    HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate);
+			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(f, requestTimeout));
 			r = _r;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
