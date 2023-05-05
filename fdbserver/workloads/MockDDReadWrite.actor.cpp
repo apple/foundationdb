@@ -44,6 +44,7 @@ public:
 		MockDDTestWorkload::setup(cx);
 		// populate sharedMgs before run DD
 		populateMgs();
+		sharedMgs->addStoragePerProcess();
 		mock = makeReference<DDMockTxnProcessor>(sharedMgs);
 		return Void();
 	}
