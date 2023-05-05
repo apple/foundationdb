@@ -204,7 +204,7 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 			TraceEvent(SevWarnAlways, "CandidatesLessThanTeamSize").log();
 			throw operation_failed();
 		}
-		deterministicRandom()->randomShuffle(realInitDD->allServers, teamSize);
+		deterministicRandom()->randomShuffle(realInitDD->allServers, 0, teamSize);
 		std::vector<UID> result(teamSize);
 		for (int i = 0; i < teamSize; ++i) {
 			result[i] = realInitDD->allServers[i].first.id();

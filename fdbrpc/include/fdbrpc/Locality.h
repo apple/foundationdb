@@ -155,6 +155,7 @@ public:
 		else if (s=="storage_cache") _class = StorageCacheClass;
 		else if (s=="backup") _class = BackupClass;
 		else if (s=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
+		else if (s=="sim_http_server") _class = SimHTTPServerClass;
 		else _class = InvalidClass;
 	}
 
@@ -186,6 +187,7 @@ public:
 		else if (classStr=="storage_cache") _class = StorageCacheClass;
 		else if (classStr=="backup") _class = BackupClass;
 		else if (classStr=="encrypt_key_proxy") _class = EncryptKeyProxyClass;
+		else if (classStr=="sim_http_server") _class = SimHTTPServerClass;
 		else _class = InvalidClass;
 
 		if (sourceStr=="command_line") _source = CommandLineSource;
@@ -227,6 +229,7 @@ public:
 			case StorageCacheClass: return "storage_cache";
 			case BackupClass: return "backup";
 			case EncryptKeyProxyClass: return "encrypt_key_proxy";
+			case SimHTTPServerClass: return "sim_http_server";
 			default: return "invalid";
 		}
 	}

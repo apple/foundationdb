@@ -126,7 +126,6 @@ Future<Reference<IConnection>> proxyConnect(const std::string& remoteHost,
                                             const std::string& proxyService);
 
 // HTTP server stuff
-// typedef std::function<Future<Void>(Reference<IncomingRequest>, Reference<OutgoingResponse>)> ServerCallback;
 
 // Implementation of http server that handles http requests
 // TODO: could change to factory pattern instead of clone pattern
@@ -147,6 +146,23 @@ struct IRequestHandler {
 	// for reference counting an interface - don't implement ReferenceCounted<T>
 	virtual void addref() = 0;
 	virtual void delref() = 0;
+};
+
+struct SimRegisteredHandlerContext : ReferenceCounted<SimRegisteredHandlerContext>, NonCopyable {
+public:
+	std::string hostname;
+	std::string service;
+	Reference<IRequestHandler> requestHandler;
+
+	SimRegisteredHandlerContext(std::string hostname, std::string service, Reference<IRequestHandler> requestHandler)
+	  : hostname(hostname), service(service), requestHandler(requestHandler) {}
+
+	void addAddress(NetworkAddress addr);
+	void removeIp(IPAddress addr);
+
+private:
+	std::vector<NetworkAddress> addresses;
+	void updateDNS();
 };
 
 struct SimServerContext : ReferenceCounted<SimServerContext>, NonCopyable {
