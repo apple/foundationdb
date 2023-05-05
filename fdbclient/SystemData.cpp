@@ -43,7 +43,7 @@ SystemKey::SystemKey(Key const& k) : Key(k) {
 
 		if (!knownKeys.contains(k)) {
 			for (auto& known : knownKeys) {
-				if (!k.startsWith(known)) {
+				if (k.startsWith(known) || known.startsWith(k)) {
 					TraceEvent(SevError, "SystemKeyPrefixConflict").detail("NewKey", k).detail("ExistingKey", known);
 					UNSTOPPABLE_ASSERT(false);
 				}
