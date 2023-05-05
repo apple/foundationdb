@@ -21,6 +21,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -1076,8 +1077,11 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
-				status.isWrongConfiguration = false;
+				state bool isBm = BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
+				status.isUndesired =
+				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
+
+				status.isWrongConfiguration = isBm;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
@@ -1229,7 +1233,7 @@ public:
 						    .detail("Server", server->getId())
 						    .detail("Excluded", worstAddr.toString());
 						wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
-						while (!ddEnabledState->isDDEnabled()) {
+						while (!ddEnabledState->isEnabled()) {
 							wait(delay(1.0));
 						}
 						if (self->removeFailedServer.canBeSet()) {

@@ -295,7 +295,7 @@ public:
 
 	// State initialized when bootstrap
 	Reference<IDDTxnProcessor> txnProcessor;
-	MoveKeysLock lock;
+	MoveKeysLock& lock; // reference to context->lock
 	DatabaseConfiguration configuration;
 	std::vector<Optional<Key>> primaryDcId;
 	std::vector<Optional<Key>> remoteDcIds;
@@ -323,7 +323,7 @@ public:
 	Optional<Reference<TenantCache>> ddTenantCache;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
-	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr),
+	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
 	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
@@ -371,6 +371,9 @@ public:
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
+			wait(self->waitDataDistributorEnabled());
+			TraceEvent("DataDistributionEnabled").log();
+
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 			wait(self->takeMoveKeysLock());
 			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
@@ -403,7 +406,7 @@ public:
 			}
 
 			if (self->initData->mode && self->context->isDDEnabled()) {
-				// mode may be set true by system operator using fdbcli and isDDEnabled() set to true
+				// mode may be set true by system operator using fdbcli and isEnabled() set to true
 				break;
 			}
 
@@ -443,9 +446,6 @@ public:
 			    .detail("UnhealthyServers", 0)
 			    .detail("HighestPriority", self->configuration.usableRegions > 1 ? 0 : -1)
 			    .trackLatest(self->totalDataInFlightRemoteEventHolder->trackingKey);
-
-			wait(self->waitDataDistributorEnabled());
-			TraceEvent("DataDistributionEnabled").log();
 		}
 		return Void();
 	}
@@ -603,7 +603,9 @@ public:
 		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 
-	Future<Void> pollMoveKeysLock() { return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get()); }
+	Future<Void> pollMoveKeysLock() const {
+		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get());
+	}
 
 	Future<bool> isDataDistributionEnabled() const {
 		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
@@ -660,6 +662,63 @@ ACTOR Future<Void> monitorPhysicalShardStatus(Reference<PhysicalShardCollection>
 		self->cleanUpPhysicalShardCollection();
 		self->logPhysicalShardCollection();
 		wait(delay(SERVER_KNOBS->PHYSICAL_SHARD_METRICS_DELAY));
+	}
+}
+
+// This actor must be a singleton
+ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
+                                        Reference<DDSharedContext> context,
+                                        Database cx) {
+	try {
+		// Register as a storage server, so that DataDistributor could start data movement after
+		std::pair<Version, Tag> verAndTag = wait(addStorageServer(cx, req.ssi));
+		TraceEvent(SevDebug, "BlobRestorePrepare", context->id())
+		    .detail("State", "BMAdded")
+		    .detail("ReqId", req.requesterID)
+		    .detail("Version", verAndTag.first)
+		    .detail("Tag", verAndTag.second);
+
+		wait(prepareBlobRestore(
+		    cx, context->lock, context->ddEnabledState.get(), context->id(), req.keys, req.ssi.id(), req.requesterID));
+		req.reply.send(PrepareBlobRestoreReply(PrepareBlobRestoreReply::SUCCESS));
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled)
+			throw e;
+		req.reply.sendError(e);
+	}
+
+	ASSERT(context->ddEnabledState->trySetEnabled(req.requesterID));
+	return Void();
+}
+
+ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
+                                             Reference<DataDistributionTracker> tracker,
+                                             Reference<DDQueue> queue) {
+	wait(self->initialized.getFuture());
+	loop {
+		PrepareBlobRestoreRequest req = waitNext(self->context->interface.prepareBlobRestoreReq.getFuture());
+		if (BlobMigratorInterface::isBlobMigrator(req.ssi.id())) {
+			if (self->context->ddEnabledState->sameId(req.requesterID) &&
+			    self->context->ddEnabledState->isBlobRestorePreparing()) {
+				// the sender use at-least once model, so we need to guarantee the idempotence
+				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
+				continue;
+			}
+			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
+				// trySetBlobRestorePreparing won't destroy DataDistributor, but will destroy tracker and queue
+				self->addActor.send(prepareDataMigration(req, self->context, self->txnProcessor->context()));
+				// force reloading initData and restarting DD components
+				throw dd_config_changed();
+			} else {
+				auto reason = self->context->ddEnabledState->isBlobRestorePreparing()
+				                  ? PrepareBlobRestoreReply::CONFLICT_BLOB_RESTORE
+				                  : PrepareBlobRestoreReply::CONFLICT_SNAPSHOT;
+				req.reply.send(PrepareBlobRestoreReply(reason));
+				continue;
+			}
+		} else {
+			req.reply.sendError(operation_failed());
+		}
 	}
 }
 
@@ -885,12 +944,15 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
+			actors.push_back(serveBlobMigratorRequests(self, shardTracker, ddQueue));
+
 			wait(waitForAll(actors));
+			ASSERT_WE_THINK(false);
 			return Void();
 		} catch (Error& e) {
 			trackerCancelled = true;
 			state Error err = e;
-			TraceEvent("DataDistributorDestroyTeamCollections").error(e);
+			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
@@ -917,7 +979,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				wait(shards.clearAsync());
 			}
-			TraceEvent("DataDistributorTeamCollectionsDestroyed").error(err);
+			TraceEvent("DataDistributorTeamCollectionsDestroyed", self->ddId).error(err);
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				TraceEvent("RemoveFailedServer", removeFailedServer.getFuture().get()).error(err);
 				wait(self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(), teamForDroppedRange));
@@ -928,7 +990,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				}
 
 				bool ddEnabled = wait(self->isDataDistributionEnabled());
-				TraceEvent("DataDistributionMoveKeysConflict").error(err).detail("DataDistributionEnabled", ddEnabled);
+				TraceEvent("DataDistributionError", self->ddId).error(err).detail("DataDistributionEnabled", ddEnabled);
 				if (ddEnabled) {
 					throw err;
 				}
@@ -1279,7 +1341,7 @@ ACTOR Future<Void> ddSnapCreate(
     std::map<UID, ErrorOr<Void>>*
         ddSnapResultMap /* finished snapshot requests, expired in SNAP_MINIMUM_TIME_GAP seconds */) {
 	state Future<Void> dbInfoChange = db->onChange();
-	if (!ddEnabledState->setDDEnabled(false, snapReq.snapUID)) {
+	if (!ddEnabledState->trySetSnapshot(snapReq.snapUID)) {
 		// disable DD before doing snapCreate, if previous snap req has already disabled DD then this operation fails
 		// here
 		TraceEvent("SnapDDSetDDEnabledFailedInMemoryCheck").detail("SnapUID", snapReq.snapUID);
@@ -1326,13 +1388,13 @@ ACTOR Future<Void> ddSnapCreate(
 			(*ddSnapResultMap)[snapReq.snapUID] = ErrorOr<Void>(e);
 		} else {
 			// enable DD should always succeed
-			bool success = ddEnabledState->setDDEnabled(true, snapReq.snapUID);
+			bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 			ASSERT(success);
 			throw e;
 		}
 	}
 	// enable DD should always succeed
-	bool success = ddEnabledState->setDDEnabled(true, snapReq.snapUID);
+	bool success = ddEnabledState->trySetEnabled(snapReq.snapUID);
 	ASSERT(success);
 	return Void();
 }
@@ -1731,7 +1793,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 }
 
 ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<DDSharedContext> context(new DDSharedContext(di.id()));
+	state Reference<DDSharedContext> context(new DDSharedContext(di));
 	state Reference<DataDistributor> self(new DataDistributor(db, di.id(), context));
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
