@@ -613,6 +613,16 @@ void MockGlobalState::addStorageServer(StorageServerInterface server, uint64_t d
 	allServers[server.id()] = makeReference<MockStorageServer>(server, diskSpace);
 }
 
+void MockGlobalState::addStoragePerProcess(uint64_t defaultDiskSpace) {
+	for(auto p : processes) {
+		if(p->ssInterfaces.empty()) {
+			p->ssInterfaces.emplace_back(deterministicRandom()->randomUniqueID());
+			p->ssInterfaces.back().locality = p->locality;
+			addStorageServer(p->ssInterfaces.back(), defaultDiskSpace);
+		}
+	}
+}
+
 bool MockGlobalState::serverIsSourceForShard(const UID& serverId, KeyRangeRef shard, bool inFlightShard) {
 	if (!allServers.count(serverId))
 		return false;
