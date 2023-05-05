@@ -518,6 +518,20 @@ public:
 	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
 	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
 
+	template <class DB>
+	Future<RangeResultType> getRange(Optional<KeyType> const& begin,
+	                                 Optional<KeyType> const& end,
+	                                 int limit,
+	                                 Reference<DB> db,
+	                                 Snapshot snapshot = Snapshot::False,
+	                                 Reverse reverse = Reverse::False) const {
+		return runTransaction(db, [=, this](Reference<typename DB::TransactionT> tr) {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			return this->getRange(tr, begin, end, limit, snapshot, reverse);
+		});
+	}
+
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,

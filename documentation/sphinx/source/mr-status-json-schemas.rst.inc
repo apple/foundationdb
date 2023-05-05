@@ -112,6 +112,25 @@
                         "coordinator"
                      ]
                   },
+                  "tss":false,
+                  "storage_metadata":{
+                     "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
+                     "created_time_timestamp": 0,
+                     "storage_engine":{
+                     "$enum":[
+                     "ssd",
+                     "ssd-1",
+                     "ssd-2",
+                     "ssd-redwood-1",
+                     "ssd-rocksdb-v1",
+                     "ssd-sharded-rocksdb",
+                     "memory",
+                     "memory-1",
+                     "memory-2",
+                     "memory-radixtree-beta",
+                     "unknown"
+                     ]}
+                  },
                   "data_version":12341234,
                   "durable_version":12341234,
                   "data_lag": {
@@ -529,7 +548,8 @@
                   "primary_dc_missing",
                   "fetch_primary_dc_timeout",
                   "fetch_storage_wiggler_stats_timeout",
-                  "fetch_consistency_scan_info_timeout"
+                  "fetch_consistency_scan_info_timeout",
+                  "metacluster_metrics_missing"
                ]
             },
             "issues":[

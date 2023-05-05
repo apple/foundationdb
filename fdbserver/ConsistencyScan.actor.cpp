@@ -978,7 +978,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			// normal distribution
 			if (sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev) {
 				double numStdDev = estimateError / sqrt(shardVariance);
-				TraceEvent("ConsistencyCheck_InaccurateShardEstimate")
+				TraceEvent(SevWarn, "ConsistencyCheck_InaccurateShardEstimate")
 				    .detail("Min", shardBounds.min.bytes)
 				    .detail("Max", shardBounds.max.bytes)
 				    .detail("Estimate", sampledBytes)
@@ -992,10 +992,13 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				    .detail("NumSampledKeys", sampledKeys)
 				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
 
-				testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
-				            performQuiescentChecks,
-				            success,
-				            failureIsError);
+				// NOTE: Shard sampling is known to be biased.
+				// Disable this test failure until we have a proper solution.
+				//
+				// testFailure(format("Shard size is more than %f std dev from estimate", failErrorNumStdDev),
+				//             performQuiescentChecks,
+				//             success,
+				//             false);
 			}
 
 			// In a quiescent database, check that the (estimated) size of the shard is within permitted bounds
