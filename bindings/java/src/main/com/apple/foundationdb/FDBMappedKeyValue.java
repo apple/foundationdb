@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -97,6 +97,7 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 		return b;
 	}
 
+	// Equality comparison does not consider the the read metrics
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == null)
@@ -111,6 +112,7 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 			Objects.equals(rangeResult, rhs.getRangeResult());
 	}
 
+	// Hash code does not consider the the read metrics
 	@Override
 	public int hashCode() {
 		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();

@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,12 +24,6 @@ import com.apple.foundationdb.tuple.ByteArrayUtil;
 
 import java.util.Arrays;
 
-/**
- * A key/value pair. Range read operation on FoundationDB return {@code KeyValue}s.
- *  This is a simple value type; mutating it won't affect your {@code Transaction} or
- *  the {@code Database}.
- *
- */
 class FDBKeyValue implements KeyValue {
 	private final byte[] key, value;
 	private final float serverBusyness;
@@ -51,42 +45,27 @@ class FDBKeyValue implements KeyValue {
 		this.rangeBusyness = rangeBusyness;
 	}
 
-	/**
-	 * Gets the key from the pair.
-	 *
-	 * @return the key
-	 */
 	@Override
 	public byte[] getKey() {
 		return this.key;
 	}
 
-	/**
-	 * Gets the value from the pair.
-	 *
-	 * @return the value
-	 */
 	@Override
 	public byte[] getValue() {
 		return this.value;
 	}
 
-	/**
-	 * {@inheritDoc}
-	 */
 	@Override
 	public float getServerBusyness() {
 		return serverBusyness;
 	}
 
-	/**
-	 * {@inheritDoc}
-	 */
 	@Override
 	public float getRangeBusyness() {
 		return rangeBusyness;
 	}
 
+	// Equality comparison does not consider the read metrics
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == null)
@@ -100,6 +79,7 @@ class FDBKeyValue implements KeyValue {
 		return Arrays.equals(key, rhs.getKey()) && Arrays.equals(value, rhs.getValue());
 	}
 
+	// Hash code does not consider the read metrics
 	@Override
 	public int hashCode() {
 		return 17 + (37 * Arrays.hashCode(key) + Arrays.hashCode(value));

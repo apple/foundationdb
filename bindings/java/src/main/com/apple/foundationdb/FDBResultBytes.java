@@ -50,6 +50,7 @@ class FDBResultBytes implements ResultBytes {
 		return rangeBusyness;
 	}
 
+	// Equality comparison does not consider the read metrics
 	@Override
 	public boolean equals(Object obj) {
 		if (obj == null)
@@ -63,6 +64,7 @@ class FDBResultBytes implements ResultBytes {
 		return Arrays.equals(bytes, rhs.getBytes());
 	}
 
+	// Hash code does not consider the read metrics
 	@Override
 	public int hashCode() {
 		return Arrays.hashCode(bytes);
