@@ -175,7 +175,7 @@ bool DDEnabledState::isBlobRestorePreparing() const {
 bool DDEnabledState::trySetSnapshot(UID requesterId) {
 	ASSERT(requesterId != UID());
 	// disabling DD
-	if (isEnabled()) {
+	if (!isEnabled()) {
 		// only allow state modification to snapshot when DD is enabled.
 		return false;
 	}
