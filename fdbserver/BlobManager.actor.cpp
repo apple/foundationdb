@@ -4109,7 +4109,9 @@ ACTOR Future<Void> blobWorkerRecruiter(
 
 			// don't recruit on excluded or failed addresses
 			CODE_PROBE(!self->exclusionTracker.excluded.empty(), "ignoring excluded hosts in BM recruitment");
-			CODE_PROBE(!self->exclusionTracker.failed.empty(), "ignoring failed hosts in BM recruitment");
+			CODE_PROBE(!self->exclusionTracker.failed.empty(),
+			           "ignoring failed hosts in BM recruitment",
+			           probe::decoration::rare);
 
 			for (auto addr : self->exclusionTracker.excluded) {
 				recruitReq.excludeAddresses.push_back(addr);
