@@ -1096,6 +1096,8 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
+					if (self->db->isMocked())
+						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -3326,6 +3328,11 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowDiskUtil = team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
+
+			TraceEvent(SevDebug, "EligiblityDebug")
+			    .detail("TeamId", team->getTeamID())
+			    .detail("CPU", team->getAverageCPU())
+			    .detail("AvailableSpace", team->getMinAvailableSpaceRatio());
 
 			if (lowDiskUtil) {
 				lowDiskUtilTotal++;
