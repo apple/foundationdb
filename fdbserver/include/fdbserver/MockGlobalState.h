@@ -21,13 +21,15 @@
 #ifndef FOUNDATIONDB_MOCKGLOBALSTATE_H
 #define FOUNDATIONDB_MOCKGLOBALSTATE_H
 
-#include "StorageMetrics.actor.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/KeyLocationService.h"
-#include "SimulatedCluster.h"
-#include "ShardsAffectedByTeamFailure.h"
+#include "fdbserver/SimulatedCluster.h"
+#include "fdbserver/ShardsAffectedByTeamFailure.h"
+
+constexpr const char* MOCK_DD_TEST_CLASS = "MockDD";
 
 struct MockGlobalStateTester;
 
@@ -272,6 +274,9 @@ public:
 	bool restrictSize = true;
 
 	MockGlobalState() : shardMapping(new ShardsAffectedByTeamFailure) {}
+
+	// A globally shared state
+	static std::shared_ptr<MockGlobalState>& g_mockState();
 
 	static UID indexToUID(uint64_t a) { return UID(a, a); }
 	void initializeClusterLayout(const BasicSimulationConfig&);
