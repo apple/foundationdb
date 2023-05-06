@@ -266,11 +266,12 @@ ACTOR static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
 	state Future<Void> timer;
 	state TransactionTagMap<uint32_t> tags;
 	for (const auto& tag : tagSet) {
-		tags[tag] = batchSize;
+		tags[tag] = batchSize / tagSet.size();
 	}
 	loop {
 		timer = delayJittered(static_cast<double>(batchSize) / desiredRate);
 		GetReadVersionRequest req;
+		req.transactionCount = batchSize;
 		req.tags = tags;
 		req.priority = priority;
 		throttler->addRequest(req);
@@ -415,8 +416,8 @@ TEST_CASE("/GrvProxyTagThrottler/MultiTag") {
 	}
 	tagSet1.addTag("sampleTag1"_sr);
 	tagSet2.addTag("sampleTag2"_sr);
-	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 5, 20.0, &counters);
-	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 5, 20.0, &counters);
+	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 1, 20.0, &counters);
+	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 1, 20.0, &counters);
 	state Future<Void> server = mockServer(&throttler);
 	wait(timeout(client1 && client2 && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_MultiTag")
