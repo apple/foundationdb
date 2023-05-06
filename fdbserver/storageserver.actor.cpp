@@ -460,10 +460,21 @@ struct UpdateEagerReadInfo {
 	std::vector<std::pair<KeyRef, int>> keys;
 	std::vector<Optional<Value>> value;
 
-	Arena arena;
 	bool enableClearRangeEagerReads;
 
+private:
+	Arena arena;
+
+public:
 	UpdateEagerReadInfo(bool enableClearRangeEagerReads) : enableClearRangeEagerReads(enableClearRangeEagerReads) {}
+
+	void clear() {
+		keyBegin.clear();
+		keyEnd.clear();
+		keys.clear();
+		value.clear();
+		arena = Arena();
+	}
 
 	void addMutations(VectorRef<MutationRef> const& mutations) {
 		for (auto& m : mutations)
@@ -8441,6 +8452,26 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+// TODO:  Create new BlobCipherCache which provides Futures for keys, batches key requests,
+// and expires entries based on TTL, and use it here and in other places.  Also, move this 
+// function to somewhere else such as MutationRef or some other more accessible place, and
+// remove MutationRef functions that accept std::maps of keys.
+ACTOR template <typename T>
+Future<MutationRef> decryptMutation(Reference<AsyncVar<T> const> db,
+									   MutationRef m,
+									   Arena* arena,
+                                       BlobCipherMetrics::UsageType usageType) {
+	loop {
+		choose {
+			when(TextAndHeaderCipherKeys keys = wait(getEncryptCipherKeys(db, *m.encryptionHeader(), usageType))) {
+				return Standalone<MutationRef>(m.decrypt(keys, *arena, usageType));
+			}
+			when(wait(db->onChange())) {
+			}
+		}
+	}
+}
+
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double updateStart = g_network->timer();
 	state double start;
@@ -8450,6 +8481,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	        ? SERVER_KNOBS->ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS
 	        : SERVER_KNOBS->ENABLE_CLEAR_RANGE_EAGER_READS;
 	state UpdateEagerReadInfo eager(enableClearRangeEagerReads);
+	state Arena arena;
+	
 	try {
 
 		// If we are disk bound and durableVersion is very old, we need to block updates or we could run out of
@@ -8570,6 +8603,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			// Read from the cursor and accumulate results in messages vector
 			for (; batch->hasMessage(); batch->nextMessage()) {
 				ArenaReader& cloneReader = *batch->reader();
+				arena.dependsOn(cloneReader.arena());
 
 				if (LogProtocolMessage::isNextIn(cloneReader)) {
 					// The LogProtocolMessage does not have any members but still must be removed from the stream.
@@ -8599,7 +8633,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						ASSERT(false);
 					}
 					if (msg.isEncrypted()) {
-						messages.emplace_back(batch->version(), msg.decrypt(eager.arena, BlobCipherMetrics::TLOG));
+						messages.emplace_back(batch->version(), decryptMutation(data->db, msg, &arena, BlobCipherMetrics::TLOG));
 					} else {
 						messages.emplace_back(batch->version(), msg);
 					}
@@ -8663,19 +8697,24 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 			// If the shard counter has not changed then the eager read results are valid so leave this loop and
 			// continue to process the mutation batch
-			if (data->shardChangeCounter == changeCounter)
+			if (data->shardChangeCounter == changeCounter && !BUGGIFY)
 				break;
 
-			CODE_PROBE(true,
+			CODE_PROBE(data->shardChangeCounter != changeCounter,
 			           "A fetchKeys completed while we were doing this, so eager might be outdated.  Read it again.");
+
+			if(BUGGIFY) {
+				wait(delay(0.001));
+			}
 
 			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 			// only selectively.
-			eager = UpdateEagerReadInfo(enableClearRangeEagerReads);
+			eager.clear();
 
 			// Get a new cursor that maybe has more data, advance it to where the batch cursor left off
 			// and set its protocol version to the protocol version that the batch cursor last used.
 			Reference<ILogSystem::IPeekCursor> maybeNewData = cursor->cloneNoMore();
+			maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
 			maybeNewData->advanceTo(batch->version());
 			maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
 			batch = maybeNewData;
@@ -8766,7 +8805,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				OTELSpanContextMessage& scm = std::get<OTELSpanContextMessage>(logMsg.content);
 				spanContext = scm.spanContext;
 			} else {
-				const MutationRef& msg = std::get<Future<MutationRef>>(logMsg.content).get();
+				const MutationRef &msg = std::get<Future<MutationRef>>(logMsg.content).get();
 
 				Span span("SS:update"_loc, spanContext);
 				span.addAttribute("key"_sr, msg.param1);

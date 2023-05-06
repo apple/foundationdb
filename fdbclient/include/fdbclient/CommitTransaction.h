@@ -142,10 +142,6 @@ struct MutationRef {
 		return reinterpret_cast<const BlobCipherEncryptHeader*>(param1.begin());
 	}
 
-	Future<MutationRef> encrypt(const EncryptCipherDomainId& domainId,
-	                            Arena& arena,
-	                            BlobCipherMetrics::UsageType usageType) const;
-
 	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
 	                    const EncryptCipherDomainId& domainId,
 	                    Arena& arena,
@@ -171,10 +167,6 @@ struct MutationRef {
 		StringRef payload =
 		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
 		return MutationRef(Encrypted, headerRef, payload);
-	}
-
-	Future<MutationRef> encryptMetadata(Arena& arena, BlobCipherMetrics::UsageType usageType) const {
-		return encrypt(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
