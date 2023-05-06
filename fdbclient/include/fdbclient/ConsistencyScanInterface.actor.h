@@ -287,6 +287,9 @@ struct ConsistencyScanState : public KeyBackedClass {
 		return { subspace.pack(__FUNCTION__sr), IncludeVersion(), trigger };
 	}
 
+	// Updating the lifetime stats does not update the class trigger because the stats are constantly updated, but when
+	// resetting them the same transaction that sets the stats value must also call trigger.update(tr) so that the scan
+	// loop will restart and not overwrite the reset value with a stale copy.
 	KeyBackedObjectProperty<LifetimeStats, _IncludeVersion> lifetimeStats() {
 		return { subspace.pack(__FUNCTION__sr), IncludeVersion() };
 	}
