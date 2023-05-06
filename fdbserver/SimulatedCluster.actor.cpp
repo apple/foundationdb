@@ -56,6 +56,7 @@
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IConnection.h"
+#include "fdbserver/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -2138,6 +2139,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	*tenantMode = simconfig.db.tenantMode;
+
+	if(testConfig.testClass == MOCK_DD_TEST_CLASS) {
+		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
+	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
