@@ -686,7 +686,7 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore", probe::decoration::rare);
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
