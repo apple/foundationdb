@@ -2049,7 +2049,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		g_knobs.setKnob("remote_kv_store", KnobValueRef::create(bool{ false }));
 		TraceEvent(SevDebug, "DisableRemoteKVS");
 	}
-	if (testConfig.disableEncryption) {
+	if (testConfig.disableEncryption || true) {
 		g_knobs.setKnob("enable_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_tlog_encryption", KnobValueRef::create(bool{ false }));
 		g_knobs.setKnob("enable_storage_server_encryption", KnobValueRef::create(bool{ false }));

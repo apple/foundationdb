@@ -8592,7 +8592,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 		// The starting point of the batch to read is cursor, and batchReader will advance from there
 		// but cursor is untouched until after the batch is processed
-		state Reference<ILogSystem::IPeekCursor> batch = cursor->cloneNoMore();
+		state Reference<ILogSystem::IPeekCursor> batch = cursor; //->cloneNoMore();
 		batch->setProtocolVersion(data->logProtocol);
 
 		// Accumulate messages, then do eager reads and stop if the shard change counter is stable across the reads.
@@ -8633,9 +8633,11 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 						ASSERT(false);
 					}
 					if (msg.isEncrypted()) {
-						messages.emplace_back(batch->version(), decryptMutation(data->db, msg, &arena, BlobCipherMetrics::TLOG));
+						printf("%lu phase1: encrypted\n", messages.size());
+						messages.emplace_back(batch->version(), decryptMutation(data->db, MutationRef(arena, msg), &arena, BlobCipherMetrics::TLOG));
 					} else {
-						messages.emplace_back(batch->version(), msg);
+						printf("%lu phase1: %s\n", messages.size(), msg.toString().c_str());
+						messages.emplace_back(batch->version(), MutationRef(arena, msg));
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
 				}
@@ -8662,6 +8664,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 
 				if (std::holds_alternative<Future<MutationRef>>(msg)) {
 					MutationRef m = wait(std::get<Future<MutationRef>>(msg));
+					printf("%d: phase2 %s\n", i, m.toString().c_str());
 
 					if (firstMutation && m.param1.startsWith(systemKeys.end)) {
 						hasPrivateData = true;
@@ -8707,17 +8710,18 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				wait(delay(0.001));
 			}
 
+			printf("Trying again\n");
 			// SOMEDAY: Theoretically we could check the change counters of individual shards and retry the reads
 			// only selectively.
 			eager.clear();
 
 			// Get a new cursor that maybe has more data, advance it to where the batch cursor left off
 			// and set its protocol version to the protocol version that the batch cursor last used.
-			Reference<ILogSystem::IPeekCursor> maybeNewData = cursor->cloneNoMore();
-			maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
-			maybeNewData->advanceTo(batch->version());
-			maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
-			batch = maybeNewData;
+			// Reference<ILogSystem::IPeekCursor> maybeNewData = cursor->cloneNoMore();
+			// maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
+			// maybeNewData->advanceTo(batch->version());
+			// maybeNewData->setProtocolVersion(batch->reader()->protocolVersion());
+			// batch = maybeNewData;
 		}
 		data->eagerReadsLatencyHistogram->sampleSeconds(now() - start);
 
@@ -8772,7 +8776,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			auto& logMsg = messages[i];
 			Version msgVersion = logMsg.version.version;
 
-			if (logMsg.version.version > ver) {
+			if (msgVersion > ver) {
+				printf("msg %lld data %lld\n", msgVersion, data->version.get());
 				ASSERT(msgVersion > data->version.get());
 			}
 
@@ -8806,6 +8811,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 				spanContext = scm.spanContext;
 			} else {
 				const MutationRef &msg = std::get<Future<MutationRef>>(logMsg.content).get();
+				printf("%d: phase3 %s\n", i, msg.toString().c_str());
 
 				Span span("SS:update"_loc, spanContext);
 				span.addAttribute("key"_sr, msg.param1);
@@ -8975,7 +8981,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			}
 		}
 
-		data->logCursor->advanceTo(batch->version());
+		//data->logCursor->advanceTo(batch->version());
 		if (cursor->version().version >= data->lastTLogVersion) {
 			if (data->behind) {
 				TraceEvent("StorageServerNoLongerBehind", data->thisServerID)
