@@ -21,6 +21,7 @@
 #include "fdbserver/MockGlobalState.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/DataDistribution.actor.h"
+#include "fdbclient/FDBTypes.h"
 #include "flow/actorcompiler.h"
 
 class MockGlobalStateImpl {
@@ -349,7 +350,11 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 	return MockStorageServerImpl::waitMetricsTenantAware(this, req);
 }
 
-void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
+void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
+	StorageBytes storageBytes(
+	    totalDiskSpace - usedDiskSpace, totalDiskSpace, usedDiskSpace, totalDiskSpace - usedDiskSpace);
+	metrics.getStorageMetrics(req, storageBytes, counters.bytesInput.getRate(), 0, now());
+}
 
 void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {
 	this->metrics.splitMetrics(req);
@@ -384,6 +389,7 @@ void MockStorageServer::set(KeyRef const& key, int64_t bytes, int64_t oldBytes) 
 	++counters.mutations;
 	++counters.setMutations;
 	counters.mutationBytes += bytes;
+	counters.bytesInput += mvccStorageBytes(bytes);
 
 	notifyWriteMetrics(key, bytes);
 	byteSampleApplySet(key, bytes);
@@ -396,6 +402,7 @@ void MockStorageServer::clear(KeyRef const& key, int64_t bytes) {
 	++counters.mutations;
 	++counters.clearRangeMutations;
 	counters.mutationBytes += key.size();
+	counters.bytesInput += mvccStorageBytes(key.size());
 
 	notifyWriteMetrics(key, bytes);
 	KeyRange sr = singleKeyRange(key);
@@ -408,6 +415,7 @@ int64_t MockStorageServer::clearRange(KeyRangeRef const& range, int64_t beginSha
 	++counters.mutations;
 	++counters.clearRangeMutations;
 	counters.mutationBytes += range.expectedSize();
+	counters.bytesInput += mvccStorageBytes(range.expectedSize());
 
 	notifyWriteMetrics(range.begin, range.begin.size() + range.end.size());
 	byteSampleApplyClear(range);
@@ -557,6 +565,11 @@ double MockStorageServer::calculateCpuUsage() const {
 	             counters.mutationBytes.getRate() * write_byte_cpu_multiplier +
 	             counters.bytesQueried.getRate() * read_byte_cpu_multiplier;
 	return std::min(100.0, res);
+}
+
+std::shared_ptr<MockGlobalState>& MockGlobalState::g_mockState() {
+	static std::shared_ptr<MockGlobalState> res(new MockGlobalState);
+	return res;
 }
 
 void MockGlobalState::initializeClusterLayout(const BasicSimulationConfig& conf) {
