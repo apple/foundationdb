@@ -24,12 +24,44 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
+namespace {
+
+// When enforcing tag throttling on proxies, only a single tag is used for throttling.
+// If a tenant group is associated with the request, this tenant group overrides any
+// tags for throttling purposes, so it is returned as the single "tag."
+//
+// Using multiple tags or both tags and a tenant group can lead to unexpected
+// behavior, because some tags will be ignored when throttling on proxies.
+// In this case, SevWarnAlways trace event is logged.
+TransactionTag getSingleTag(GetReadVersionRequest const& req) {
+	ASSERT(req.isTagged());
+	if (req.tenantGroup.present()) {
+		if (!req.tags.empty()) {
+			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_IgnoringTags")
+			    .suppressFor(60.0)
+			    .detail("NumTags", req.tags.size())
+			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()));
+		}
+		return req.tenantGroup.get();
+	} else {
+		auto const& tag = req.tags.begin()->first;
+		if (req.tags.size() > 1) {
+			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
+			    .suppressFor(60.0)
+			    .detail("NumTags", req.tags.size())
+			    .detail("UsingTag", printable(tag));
+		}
+		return tag;
+	}
+}
+
+} // namespace
+
 uint64_t GrvProxyTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
 void GrvProxyTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(LatencyBandsMap& latencyBandsMap) {
 	req.proxyTagThrottledDuration = now() - startTime;
-	auto const& [tag, count] = *req.tags.begin();
-	latencyBandsMap.addMeasurement(tag, req.proxyTagThrottledDuration, count);
+	latencyBandsMap.addMeasurement(getSingleTag(req), req.proxyTagThrottledDuration, req.transactionCount);
 }
 
 bool GrvProxyTagThrottler::DelayedRequest::isMaxThrottled(double maxThrottleDuration) const {
@@ -105,23 +137,7 @@ void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates
 // use this to determine throttling. If no tenant group exists, use the
 // first transaction tag.
 void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
-	ASSERT(req.isTagged());
-	if (req.tenantGroup.present()) {
-		queues[req.tenantGroup.get()].requests.emplace_back(req);
-	} else {
-		auto const& tag = req.tags.begin()->first;
-		if (req.tags.size() > 1) {
-			// The GrvProxyTagThrottler assumes that each GetReadVersionRequest
-			// has at most one tag. If a transaction uses multiple tags and
-			// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
-			// unexpected behaviour, because only one tag is used for throttling.
-			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
-			    .suppressFor(60.0)
-			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTag", printable(tag));
-		}
-		queues[tag].requests.emplace_back(req);
-	}
+	queues[getSingleTag(req)].requests.emplace_back(req);
 }
 
 void GrvProxyTagThrottler::releaseTransactions(double elapsed,
@@ -178,7 +194,7 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 
 		while (!tagQueueHandle.queue->requests.empty()) {
 			auto& delayedReq = tagQueueHandle.queue->requests.front();
-			auto count = delayedReq.req.tags.begin()->second;
+			auto count = delayedReq.req.transactionCount;
 			ASSERT_EQ(tagQueueHandle.nextSeqNo, delayedReq.sequenceNumber);
 			if (tagQueueHandle.queue->rateInfo.present() &&
 			    !tagQueueHandle.queue->rateInfo.get().canStart(*(tagQueueHandle.numReleased), count)) {
