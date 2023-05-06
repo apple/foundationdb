@@ -916,15 +916,17 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state metacluster::AssignClusterAutomatically assignClusterAutomatically(deterministicRandom()->coinflip());
+		state metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
 		state bool tenantGroupExists = tenantGroup.present() && self->tenantGroups.count(tenantGroup.get());
-		state bool hasCapacity = tenantGroupExists || self->ungroupedTenants.size() + self->tenantGroups.size() <
-		                                                  self->totalTenantGroupCapacity;
+		// Initialize hasCapacity. If the tenant is being created in an existing tenant group, then it does not
+		// consume additional capacity, thus hasCapacity is true.
+		state bool hasCapacity = tenantGroupExists;
 
-		if (assignClusterAutomatically && !tenantGroupExists && hasCapacity) {
-			// In this case, the condition of `hasCapacity` will be further tightened since we will exclude those
+		if (!hasCapacity && assignClusterAutomatically) {
+			// In this case, the condition of `hasCapacity` will be further computed since we will exclude those
 			// data clusters with autoTenantAssignment being false.
 			// It's possible that all the data clusters are excluded from the auto-assignment pool.
 			// Consequently, even if the the metacluster has capacity, the capacity index has no available data
@@ -958,6 +960,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			preferredClusters.push_back(self->chooseClusterName());
 			preferredClusters.push_back(self->chooseClusterName());
 			tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
+			auto dataDb = self->dataDbs[tenantMapEntry.assignedCluster];
+			hasCapacity = tenantGroupExists ||
+			              (dataDb->tenantGroups.size() + dataDb->ungroupedTenants.size() < dataDb->tenantGroupCapacity);
 		}
 
 		try {
@@ -967,10 +972,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						preferredClusterIndex = deterministicRandom()->randomInt(0, preferredClusters.size());
 						tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
 					}
-					Future<Void> createFuture = metacluster::createTenant(self->managementDb,
-					                                                      tenantMapEntry,
-					                                                      assignClusterAutomatically,
-					                                                      metacluster::IgnoreCapacityLimit::False);
+					Future<Void> createFuture = metacluster::createTenant(
+					    self->managementDb, tenantMapEntry, assignClusterAutomatically, ignoreCapacityLimit);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
 						break;
@@ -1001,7 +1004,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 							preferredClusters.erase(preferredClusters.begin() + preferredClusterIndex);
 							preferredClusterIndex = 0;
 							tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
-
 							continue;
 						}
 
@@ -1026,7 +1028,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			ASSERT(self->metaclusterCreated);
 			ASSERT(!exists);
-			ASSERT(hasCapacity);
+			auto dataDb = self->dataDbs[entry.assignedCluster];
+			// Recompute hasCapacity. At this point, the tenant should already have been assigned to a specific cluster,
+			// thus hasCapacity can be computed based on this cluster's conditions.
+			hasCapacity = tenantGroupExists ||
+			              (dataDb->ungroupedTenants.size() + dataDb->tenantGroups.size() < dataDb->tenantGroupCapacity);
+			ASSERT(ignoreCapacityLimit || hasCapacity);
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
@@ -1063,7 +1070,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(!assignClusterAutomatically || clusterAssignedToTenantGroup.present() ||
 			       assignedCluster->second->autoTenantAssignment == metacluster::AutoTenantAssignment::ENABLED);
 
-			ASSERT(tenantGroupExists ||
+			ASSERT(tenantGroupExists || ignoreCapacityLimit ||
 			       assignedCluster->second->tenantGroupCapacity >=
 			           assignedCluster->second->tenantGroups.size() + assignedCluster->second->ungroupedTenants.size());
 		} catch (Error& e) {
@@ -1075,15 +1082,28 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
 				ASSERT(!assignClusterAutomatically);
+				// When trying to create a new tenant, there are several cases in which "cluster_no_capacity" can be
+				// thrown. The only one case in which ignoreCapacityLimit is true is when the number of tenants exceed
+				// a threshold configured via knob. But this is not possible due to the way we pick tenant names in this
+				// test, thus we can have the following assertion.
+				ASSERT(!ignoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(tenantGroup.present());
-				auto itr = self->tenantGroups.find(tenantGroup.get());
-				ASSERT(itr != self->tenantGroups.end());
-				ASSERT(itr->second->cluster != tenantMapEntry.assignedCluster);
+				if (tenantGroup.present()) {
+					auto itr = self->tenantGroups.find(tenantGroup.get());
+					if (itr != self->tenantGroups.end()) {
+						ASSERT(itr->second->cluster != tenantMapEntry.assignedCluster);
+					} else {
+						ASSERT(assignClusterAutomatically);
+						ASSERT(ignoreCapacityLimit);
+					}
+				} else {
+					ASSERT(assignClusterAutomatically);
+					ASSERT(ignoreCapacityLimit);
+				}
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
@@ -1726,7 +1746,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				dataClusterChecks.push_back(checkDataCluster(self, clusterName, dataClusterData));
 			}
 			auto capacityNumbers = metacluster::util::metaclusterCapacity(dataClusters);
-			ASSERT(capacityNumbers.first.numTenantGroups == self->totalTenantGroupCapacity);
+			// The number of tenant groups on each cluster can be greater than the capacity limit due to the
+			// `ignoreCapacityLimit' configuration option.
+			ASSERT(capacityNumbers.first.numTenantGroups >= self->totalTenantGroupCapacity);
 			ASSERT(capacityNumbers.second.numTenantGroups == totalTenantGroupsAllocated);
 
 			wait(waitForAll(dataClusterChecks));
