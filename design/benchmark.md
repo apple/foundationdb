@@ -1,57 +1,36 @@
 Summary
 =======
 
-`flowbench` is an executable that can be used to microbenchmark parts of the FoundationDB code. The goal is to make it easy to test the performance of various sub-millisecond operations using `flow` and `fdbrpc`. Specifically, this tool can be used to:
-
-- Test the performance effects of changes to the actor compiler or to the `flow` and `fdbrpc` libraries
-- Test the performance of various uses of the `flow` and `fdbrpc` libraries
-- Find areas for improvement in the `flow` and `fdbrpc` libraries
-- Compare `flow`/`fdbrpc` primitives to alternatives provided by the standard library or other third-party libraries.
+With the `benchmark` role, `fdbserver` will execute microbenchmarks determined by the `--benchmark_filter` filter. The goal is to make it easy to test the performance of various sub-millisecond operations in FDB.
 
 Usage
 =====
 
-- To build the `flowbench` executable, run `ninja flowbench` or `make flowbench` depending on which build system you're using.
-- Then you can run `bin/flowbench --help` to see possible uses of `flowbench`.
-- Running `bin/flowbench` directly will run all registered benchmarks, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/flowbench --benchmark_filter=<regex>`
-- All benchmark names can be listed with `bin/flowbench --benchmark_list_tests`
+- Running `bin/fdbserver -r benchmark` will run all registered benchmarks, but you may want to limit your run to a subset of benchmarks. This can be done by running `bin/fdbserver -r benchmark --benchmark_filter <regex>`
 - Example output:
 
 ```
-$ bin/flowbench --benchmark_filter=bench_ref
-2020-08-04 21:49:40
-Running bin/flowbench
-Run on (7 X 2904 MHz CPU s)
+$ bin/fdbserver -r benchmark --benchmark_filter bench_ref
+2023-05-07T19:47:00+00:00
+Run on (128 X 3500 MHz CPU s)
 CPU Caches:
-  L1 Data 32 KiB (x7)
-  L1 Instruction 32 KiB (x7)
-  L2 Unified 256 KiB (x7)
-  L3 Unified 12288 KiB (x1)
-Load Average: 0.15, 0.15, 0.72
----------------------------------------------------------------------------------------------------------------
-Benchmark                                                     Time             CPU   Iterations UserCounters...
----------------------------------------------------------------------------------------------------------------
-bench_ref_create_and_destroy<RefType::RawPointer>          4.90 ns         4.90 ns    116822124 items_per_second=203.88M/s
-bench_ref_create_and_destroy<RefType::UniquePointer>       4.94 ns         4.94 ns    141101924 items_per_second=202.555M/s
-bench_ref_create_and_destroy<RefType::SharedPointer>       42.5 ns         42.5 ns     13802909 items_per_second=23.531M/s
-bench_ref_create_and_destroy<RefType::FlowReference>       5.05 ns         5.05 ns    100000000 items_per_second=197.955M/s
-bench_ref_copy<RefType::RawPointer>                        1.15 ns         1.15 ns    612121585 items_per_second=871.218M/s
-bench_ref_copy<RefType::SharedPointer>                     10.0 ns         10.0 ns     67553102 items_per_second=99.8113M/s
-bench_ref_copy<RefType::FlowReference>                     2.33 ns         2.33 ns    292317474 items_per_second=428.507M/s
+  L1 Data 48 KiB (x64)
+  L1 Instruction 32 KiB (x64)
+  L2 Unified 1280 KiB (x64)
+  L3 Unified 55296 KiB (x2)
+Load Average: 0.26, 1.28, 9.22
+-------------------------------------------------------------------------------------------------------------------------
+Benchmark                                                               Time             CPU   Iterations UserCounters...
+-------------------------------------------------------------------------------------------------------------------------
+bench_ref_create_and_destroy<RefType::RawPointer>                    4.60 ns         4.60 ns    152280138 items_per_second=217.587M/s
+bench_ref_create_and_destroy<RefType::UniquePointer>                 4.87 ns         4.87 ns    143870613 items_per_second=205.454M/s
+bench_ref_create_and_destroy<RefType::SharedPointer>                 12.1 ns         12.1 ns     57693256 items_per_second=82.3919M/s
+bench_ref_create_and_destroy<RefType::FlowReference>                 4.98 ns         4.98 ns    140142911 items_per_second=200.653M/s
+bench_ref_create_and_destroy<RefType::FlowReferenceThreadSafe>       8.88 ns         8.88 ns     78724970 items_per_second=112.634M/s
+bench_ref_copy<RefType::RawPointer>                                 0.286 ns        0.286 ns   1000000000 items_per_second=3.49255G/s
+bench_ref_copy<RefType::SharedPointer>                               11.4 ns         11.4 ns     61197885 items_per_second=87.4362M/s
+bench_ref_copy<RefType::FlowReference>                               4.13 ns         4.13 ns    167578390 items_per_second=242.328M/s
+bench_ref_copy<RefType::FlowReferenceThreadSafe>                     11.4 ns         11.4 ns     61196408 items_per_second=87.4355M/s
 ```
-- More detailed documentation can be found at https://github.com/google/benchmark
 
-Existing Benchmarks
-===================
-- `bench_populate` measures the population of a vector of mutations
-- `bench_ref` compares the performance of the `flow` `Reference` type to other pointer types
-- `bench_iterate` measures iteration over a list of mutations
-- `bench_stream` measures the performance of writing to and reading from a `PromiseStream`
-- `bench_random` measures the performance of `DeterministicRandom`.
-- `bench_timer` measures the perforamnce of FoundationDB timers.
-
-Future use cases
-================
-
-- Benchmark the overhead of sending and receiving messages through `FlowTransport`
-- Benchmark the performance of serializing/deserializing various types
+- More detailed documentation on the benchmarking tool used can be found at https://github.com/google/benchmark.
