@@ -22,9 +22,9 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbserver/BenchmarkGlobalData.h"
 #include "flow/Arena.h"
 #include "flow/FastAlloc.h"
-#include "flowbench/GlobalData.h"
 
 static constexpr bool EMPLACE_BACK = true;
 static constexpr bool PUSH_BACK = false;

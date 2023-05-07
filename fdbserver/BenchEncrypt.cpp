@@ -21,9 +21,9 @@
 #include "benchmark/benchmark.h"
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbserver/BenchmarkGlobalData.h"
 #include "flow/EncryptUtils.h"
 #include "flow/StreamCipher.h"
-#include "flowbench/GlobalData.h"
 
 static StreamCipher::IV getRandomIV() {
 	StreamCipher::IV iv;

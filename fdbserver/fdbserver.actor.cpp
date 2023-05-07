@@ -31,7 +31,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
+#include <thread>
 
+#include "benchmark/benchmark.h"
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -1007,6 +1009,7 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum class ServerRole {
+	Benchmark,
 	ChangeClusterKey,
 	ConsistencyCheck,
 	CreateTemplateDatabase,
@@ -1300,6 +1303,8 @@ private:
 					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
+				else if (!strcmp(sRole, "benchmark"))
+					role = ServerRole::Benchmark;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1785,7 +1790,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests && role != ServerRole::Benchmark) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -2439,6 +2444,15 @@ int main(int argc, char* argv[]) {
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
+		} else if (role == ServerRole::Benchmark) {
+			Promise<Void> benchmarksDone;
+			std::thread benchmarkThread([&] {
+				benchmark::RunSpecifiedBenchmarks();
+				onMainThreadVoid([&] { benchmarksDone.send(Void()); });
+			});
+			f = stopAfter(benchmarksDone.getFuture());
+			g_network->run();
+			benchmarkThread.join();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;
