@@ -259,27 +259,40 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 						break;
 					}
 
-					state KeyRange shardRange = KeyRangeRef(shardBoundaries[0].key.removePrefix(keyServersPrefix),
-					                                        shardBoundaries[1].key.removePrefix(keyServersPrefix));
+					state KeyRange targetRange = KeyRangeRef(shardBoundaries[0].key.removePrefix(keyServersPrefix),
+					                                         shardBoundaries[1].key.removePrefix(keyServersPrefix));
 					bool scanRange = true;
 
-					// Check if we are supposed to scan this range.
+					// Check if we are supposed to scan this range by finding the range that contains the start
+					// key in the Consistency Scan range config
 					// The default for a range with no options set is to scan it.
 					if (configRange.present()) {
 						auto val = configRange->value;
 
 						// If included is unspecified for the range, the default is true
 						// If skip is unspecified for the range, the default is false
-						if (!val.included.orDefault(true) || !val.skip.orDefault(false)) {
+						// If not included, or included but currently skipped...
+						if (!val.included.orDefault(true) || val.skip.orDefault(false)) {
 							// If we aren't supposed to scan this range, advance lastEndKey forward to the end of this
-							// configured range which is the next point that will have a different RangeConfig value.
+							// configured range which is the next point that will have a different RangeConfig value
+							// which could result in a different evaluation of this conditional
 
 							// If the range is configured to be skipped, increment counter
 							if (val.skip.orDefault(false)) {
 								++statsCurrentRound.skippedRanges;
 							}
+
+							// Advance lastEndKey to the end of the range
 							statsCurrentRound.lastEndKey = configRange->range.begin;
 							scanRange = false;
+						} else {
+							// We are supposed to scan the range that contains lastEndKey, but we may not be supposed to
+							// scan the entire shard that this key is in.  At the end key boundary of the range config
+							// map entry, the range configuration changes, so clip targetRange.end to the range config
+							// entry end if it is lower than the shard range end which targetRange was initialized to.
+							if (configRange->range.end < targetRange.end) {
+								targetRange = KeyRangeRef(targetRange.begin, configRange->range.end);
+							}
 						}
 					}
 
@@ -298,7 +311,10 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 						// TODO:  Decode the shard KV pairs and get storage interfaces
 
 						// We must read at the same version from all replicas before the version is too old, so read in
-						// reasonable chunks of size CLIENT_KNOBS->REPLY_BYTE_LIMIT
+						// reasonable chunks of size CLIENT_KNOBS->REPLY_BYTE_LIMIT from each replica before reading
+						// more, but read more in a loop here so we are not committing every 80k of progress. Or
+						// ideally, use streaming read and target some total amount that can be read within a few
+						// seconds.
 
 						ReadOptions readOptions;
 						readOptions.cacheResult = CacheResult::False;
@@ -306,6 +322,10 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 						readOptions.consistencyCheckStartVersion = statsCurrentRound.startVersion;
 
 						// TODO: Remove this block, do real reads
+						// TODO: Verify change feed consistency?
+						// TODO: Also read from blob as one of the replicas?  If so, maybe separately track blob errors
+						// where blob disagrees from the other replicas, which would also be a general ++error
+
 						if (true) {
 							state int bytes = deterministicRandom()->randomInt(0, 1e6);
 							logicalBytesRead += bytes;
@@ -314,7 +334,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 							if (deterministicRandom()->random01() < .01) {
 								throw transaction_too_old();
 							}
-							statsCurrentRound.lastEndKey = shardRange.end;
+							statsCurrentRound.lastEndKey = targetRange.end;
 							noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
 						}
 
@@ -384,7 +404,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
-	actors.add(consistencyScanCore(db, ConsistencyScanState()));
+	state Future<Void> core = consistencyScanCore(db, ConsistencyScanState());
 
 	// Randomly enable consistencyScan in simulation
 	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
@@ -419,11 +439,25 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 
 	loop {
 		try {
+			// TODO:  Verify that this loop is doing what it should.  In the original, it would respond to a Halt
+			// request on the interface by killing the scan actor and then immediately check if the configuration for
+			// the scan is enabled, which it often is, so then it would start the scan again.  This seemed to result in
+			// rapid loops of constant Halt, start, Halt events.
+			// In this version, the ConsistencyScan role will stop the scan actor if it gets a Halt request, and since
+			// there is no Start request, that is a final state. Similar to the old version, the scan enabled state is
+			// in the database, but unlike the old version in this version the ConsistencyScanCore is meant to run *all
+			// the time*, it will do no work if it is disabled and it will follow the configuration in the given
+			// ConsistencyScanState as it changes.
 			loop choose {
+				when(wait(core)) {
+					// This actor never returns so the only way out is throwing an exception.
+					ASSERT(false);
+				}
 				when(HaltConsistencyScanRequest req = waitNext(csInterf.haltConsistencyScan.getFuture())) {
 					req.reply.send(Void());
+					core = Void();
 					TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-					return Void();
+					wait(Never());
 				}
 				when(wait(actors.getResult())) {
 					ASSERT(false);
