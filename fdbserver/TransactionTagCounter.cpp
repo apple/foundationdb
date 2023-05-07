@@ -65,8 +65,8 @@ public:
 		}
 	}
 
-	std::vector<StorageQueuingMetricsReply::TagInfo> getBusiestTags(double elapsed, double totalCost) const {
-		std::vector<StorageQueuingMetricsReply::TagInfo> result;
+	std::vector<BusyTagInfo> getBusiestTags(double elapsed, double totalCost) const {
+		std::vector<BusyTagInfo> result;
 		for (auto const& tagAndCost : topTags) {
 			auto rate = tagAndCost.cost / elapsed;
 			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
@@ -88,7 +88,7 @@ class TransactionTagCounterImpl {
 	TopKTags topTags;
 	double intervalStart = 0;
 
-	std::vector<StorageQueuingMetricsReply::TagInfo> previousBusiestTags;
+	std::vector<BusyTagInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
 	void updateTagCost(TransactionTag tag, double additionalCost) {
@@ -154,7 +154,7 @@ public:
 		intervalStart = now();
 	}
 
-	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const { return previousBusiestTags; }
+	std::vector<BusyTagInfo> const& getBusiestTags() const { return previousBusiestTags; }
 };
 
 TransactionTagCounter::TransactionTagCounter(UID thisServerID)
@@ -172,7 +172,7 @@ void TransactionTagCounter::startNewInterval() {
 	return impl->startNewInterval();
 }
 
-std::vector<StorageQueuingMetricsReply::TagInfo> const& TransactionTagCounter::getBusiestTags() const {
+std::vector<BusyTagInfo> const& TransactionTagCounter::getBusiestTags() const {
 	return impl->getBusiestTags();
 }
 
