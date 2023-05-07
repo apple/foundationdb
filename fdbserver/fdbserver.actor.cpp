@@ -120,7 +120,8 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION,
+	OPT_BENCHMARK_FILTER,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -225,6 +226,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-latest-encryption-keys-endpoint", SO_REQ_SEP },
 	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
+	{ OPT_BENCHMARK_FILTER, "--benchmark_filter", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1090,6 +1092,8 @@ struct CLIOptions {
 	bool printSimTime = false;
 	IPAllowList allowList;
 
+	std::string benchmarkFilter;
+
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
 		opts.parseArgsInternal(argc, argv);
@@ -1750,6 +1754,9 @@ private:
 					::useFutureProtocolVersion();
 				}
 				break;
+			}
+			case OPT_BENCHMARK_FILTER: {
+				benchmarkFilter = args.OptionArg();
 			}
 			}
 		}
@@ -2446,9 +2453,9 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::Benchmark) {
 			Promise<Void> benchmarksDone;
-			std::thread benchmarkThread([&benchmarksDone] {
-				benchmark::RunSpecifiedBenchmarks();
-				onMainThreadVoid([&benchmarksDone] { benchmarksDone.send(Void()); });
+			std::thread benchmarkThread([benchmarksDone, benchmarkFilter = opts.benchmarkFilter] {
+				benchmark::RunSpecifiedBenchmarks(benchmarkFilter);
+				onMainThreadVoid([benchmarksDone] { benchmarksDone.send(Void()); });
 			});
 			f = stopAfter(benchmarksDone.getFuture());
 			g_network->run();
