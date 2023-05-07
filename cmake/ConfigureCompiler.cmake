@@ -362,6 +362,8 @@ else()
       -Wno-unused-command-line-argument
       # Disable C++ 20 warning for ambiguous operator.
       -Wno-ambiguous-reversed-operator
+      # Required to compile googlebenchmark:
+      -Wno-shift-sign-overflow
       )
     if (USE_CCACHE)
       add_compile_options(
