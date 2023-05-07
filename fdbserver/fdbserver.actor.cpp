@@ -2446,9 +2446,9 @@ int main(int argc, char* argv[]) {
 			g_network->run();
 		} else if (role == ServerRole::Benchmark) {
 			Promise<Void> benchmarksDone;
-			std::thread benchmarkThread([&] {
+			std::thread benchmarkThread([&benchmarksDone] {
 				benchmark::RunSpecifiedBenchmarks();
-				onMainThreadVoid([&] { benchmarksDone.send(Void()); });
+				onMainThreadVoid([&benchmarksDone] { benchmarksDone.send(Void()); });
 			});
 			f = stopAfter(benchmarksDone.getFuture());
 			g_network->run();
