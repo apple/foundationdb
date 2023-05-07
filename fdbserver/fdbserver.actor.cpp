@@ -686,7 +686,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests,"
+		                 " benchmark, skiplistest, dsltest, versionedmaptest, createtemplatedb, kvfiledump,"
+		                 " flowprocess, changeclusterkey)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -747,6 +749,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--use-future-protocol-version [true,false]",
 		                 " Run the process with a simulated future protocol version."
 		                 " This option can be used testing purposes only!");
+		printOptionUsage("--benchmark_filter BENCHMARK_REGEX",
+		                 " Used by benchmark role, executes benchmarks whose names "
+		                 " contain the provided regex.");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
