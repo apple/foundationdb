@@ -52,7 +52,12 @@ ACTOR Future<Void> printAfterDelay(double delaySeconds, std::string message) {
 	return Void();
 }
 
-ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<Version> version, bool force) {
+ACTOR Future<Void> doBlobPurge(Database db,
+                               Optional<Reference<Tenant>> tenant,
+                               Key startKey,
+                               Key endKey,
+                               Optional<Version> version,
+                               bool force) {
 	state Version purgeVersion;
 	if (version.present()) {
 		purgeVersion = version.get();
@@ -60,7 +65,8 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 		wait(store(purgeVersion, getLatestReadVersion(db)));
 	}
 
-	state Key purgeKey = wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, {}, force));
+	state Key purgeKey =
+	    wait(db->purgeBlobGranules(KeyRange(KeyRangeRef(startKey, endKey)), purgeVersion, tenant, force));
 
 	fmt::print("Blob purge registered for [{0} - {1}) @ {2}\n", startKey.printable(), endKey.printable(), purgeVersion);
 
@@ -73,10 +79,14 @@ ACTOR Future<Void> doBlobPurge(Database db, Key startKey, Key endKey, Optional<V
 	return Void();
 }
 
-ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<Version> version) {
+ACTOR Future<Void> doBlobCheck(Database db,
+                               Optional<Reference<Tenant>> tenant,
+                               Key startKey,
+                               Key endKey,
+                               Optional<Version> version) {
 	state double elapsed = -timer_monotonic();
 
-	state Version readVersionOut = wait(db->verifyBlobRange(KeyRangeRef(startKey, endKey), version));
+	state Version readVersionOut = wait(db->verifyBlobRange(KeyRangeRef(startKey, endKey), version, tenant));
 
 	elapsed += timer_monotonic();
 
@@ -88,10 +98,15 @@ ACTOR Future<Void> doBlobCheck(Database db, Key startKey, Key endKey, Optional<V
 	return Void();
 }
 
-ACTOR Future<Void> doBlobFlush(Database db, Key startKey, Key endKey, Optional<Version> version, bool compact) {
+ACTOR Future<Void> doBlobFlush(Database db,
+                               Optional<Reference<Tenant>> tenant,
+                               Key startKey,
+                               Key endKey,
+                               Optional<Version> version,
+                               bool compact) {
 	state double elapsed = -timer_monotonic();
 	state KeyRange keyRange(KeyRangeRef(startKey, endKey));
-	bool result = wait(db->flushBlobRange(keyRange, compact, version));
+	bool result = wait(db->flushBlobRange(keyRange, compact, version, tenant));
 	elapsed += timer_monotonic();
 
 	fmt::print("Blob Flush [{0} - {1}) {2} in {3:.6f} seconds\n",
@@ -116,16 +131,13 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 		return false;
 	}
 
-	Key begin;
-	Key end;
-
+	Optional<Reference<Tenant>> tenant;
 	if (tenantEntry.present()) {
-		begin = tokens[2].withPrefix(tenantEntry.get().prefix);
-		end = tokens[3].withPrefix(tenantEntry.get().prefix);
-	} else {
-		begin = tokens[2];
-		end = tokens[3];
+		tenant = Reference<Tenant>(new Tenant(tenantEntry.get().id));
 	}
+
+	Key begin = tokens[2];
+	Key end = tokens[3];
 
 	if (end > "\xff"_sr) {
 		// TODO is this something we want?
@@ -146,9 +158,9 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			           tokens[3].printable());
 			state bool success = false;
 			if (starting) {
-				wait(store(success, localDb->blobbifyRange(KeyRangeRef(begin, end))));
+				wait(store(success, localDb->blobbifyRange(KeyRangeRef(begin, end), tenant)));
 			} else {
-				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end))));
+				wait(store(success, localDb->unblobbifyRange(KeyRangeRef(begin, end), tenant)));
 			}
 			if (success) {
 				fmt::print("{0} updated blob range [{1} - {2}) succeeded\n",
@@ -179,7 +191,7 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			}
 
 			fmt::print("{0} blob range [{1} - {2}){3}",
-			           purge ? "Purging" : "Checking",
+			           tokens[1].printable(),
 			           tokens[2].printable(),
 			           tokens[3].printable(),
 			           forcePurge ? " (force)" : "");
@@ -189,14 +201,14 @@ ACTOR Future<bool> blobRangeCommandActor(Database localDb,
 			fmt::print("\n");
 
 			if (purge) {
-				wait(doBlobPurge(localDb, begin, end, version, forcePurge));
+				wait(doBlobPurge(localDb, tenant, begin, end, version, forcePurge));
 			} else {
 				if (tokencmp(tokens[1], "check")) {
-					wait(doBlobCheck(localDb, begin, end, version));
+					wait(doBlobCheck(localDb, tenant, begin, end, version));
 				} else if (tokencmp(tokens[1], "flush")) {
-					wait(doBlobFlush(localDb, begin, end, version, false));
+					wait(doBlobFlush(localDb, tenant, begin, end, version, false));
 				} else if (tokencmp(tokens[1], "compact")) {
-					wait(doBlobFlush(localDb, begin, end, version, true));
+					wait(doBlobFlush(localDb, tenant, begin, end, version, true));
 				} else {
 					ASSERT(false);
 				}

@@ -170,6 +170,8 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> doBlobGranuleRequests(
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			// raw access for avoiding tenant check in required mode
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			Standalone<VectorRef<REPLY_TYPE(Request)>> partialResults =
 			    wait(txnDoBlobGranuleRequests(&tr, &beginKey, endKey, request, channel));
 			if (!partialResults.empty()) {
