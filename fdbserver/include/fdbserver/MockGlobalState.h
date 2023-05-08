@@ -35,8 +35,8 @@ struct MockGlobalStateTester;
 
 // the status is roughly order by transition order, except for UNSET and EMPTY
 enum class MockShardStatus {
-	EMPTY = 0, // data loss
-	UNSET,
+	UNSET = 0,
+	EMPTY, // data loss
 	INFLIGHT,
 	FETCHED, // finish fetch but not change the serverKey mapping. Only can be set by MSS itself.
 	COMPLETED

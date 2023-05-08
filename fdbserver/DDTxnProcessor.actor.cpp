@@ -1002,6 +1002,7 @@ Future<std::vector<ProcessData>> DDMockTxnProcessor::getWorkers() const {
 ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
                                     MoveKeysParams params,
                                     std::map<UID, StorageServerInterface> tssMapping) {
+	state TraceInterval interval("RelocateShard_MockStartMoveKeys");
 	state KeyRange keys;
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
@@ -1017,6 +1018,7 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
 	wait(params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
+	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
@@ -1045,6 +1047,7 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 		server->setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
 		server->signalFetchKeys(keys, randomRangeSize);
 	}
+	TraceEvent(SevDebug, interval.end());
 	return Void();
 }
 
@@ -1056,6 +1059,7 @@ Future<Void> DDMockTxnProcessor::rawStartMovement(const MoveKeysParams& params,
 ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
                                      MoveKeysParams params,
                                      std::map<UID, StorageServerInterface> tssMapping) {
+	state TraceInterval interval("RelocateShard_MockFinishMoveKeys");
 	state KeyRange keys;
 	if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
 		ASSERT(params.ranges.present());
@@ -1072,6 +1076,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
 	wait(params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
+	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
@@ -1090,7 +1095,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	// remove destination servers from source servers
-	ASSERT_EQ(srcTeams.size(), 0);
+	ASSERT_EQ(srcTeams.size(), 1);
 	for (auto& id : srcTeams.front().servers) {
 		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
@@ -1099,6 +1104,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 	mgs->shardMapping->finishMove(keys);
 	mgs->shardMapping->defineShard(keys); // coalesce for merge
+	TraceEvent(SevDebug, interval.end());
 	return Void();
 }
 
