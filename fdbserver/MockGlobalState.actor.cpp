@@ -223,12 +223,8 @@ bool MockStorageServer::allShardStatusIn(const KeyRangeRef& range, const std::se
 
 void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize) {
 	auto ranges = serverKeys.intersectingRanges(range);
-
-	if (ranges.empty()) {
-		CODE_PROBE(true, "new shard is adding to server", probe::decoration::rare);
-		serverKeys.insert(range, ShardInfo{ status, 0 });
-		return;
-	}
+	// ranges at least has allKeys
+	ASSERT(!ranges.empty());
 
 	// change the old status
 	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
@@ -322,11 +318,10 @@ void MockStorageServer::twoWayShardSplitting(const KeyRangeRef& range,
 }
 
 void MockStorageServer::removeShard(const KeyRangeRef& range) {
-	auto ranges = serverKeys.containedRanges(range);
-	ASSERT(ranges.begin().range() == range);
 	auto rangeSize = sumRangeSize(range);
 	usedDiskSpace -= rangeSize;
-	serverKeys.rawErase(range);
+	serverKeys.insert(range, MockStorageServer::ShardInfo{ MockShardStatus::UNSET, 0 });
+	serverKeys.coalesce(range);
 	byteSampleApplyClear(range);
 	metrics.notifyNotReadable(range);
 }
@@ -636,8 +631,8 @@ void MockGlobalState::addStorageServer(StorageServerInterface server, uint64_t d
 }
 
 void MockGlobalState::addStoragePerProcess(uint64_t defaultDiskSpace) {
-	for(auto p : processes) {
-		if(p->ssInterfaces.empty()) {
+	for (auto p : processes) {
+		if (p->ssInterfaces.empty()) {
 			p->ssInterfaces.emplace_back(deterministicRandom()->randomUniqueID());
 			p->ssInterfaces.back().locality = p->locality;
 			addStorageServer(p->ssInterfaces.back(), defaultDiskSpace);
