@@ -239,7 +239,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return v != invalidVersion;
 	}
 
-	ACTOR Future<Void> checkRange(Database cx, BlobGranuleRangesWorkload* self, KeyRange range, bool isActive) {
+	ACTOR Future<Void> checkRange(Database cx,
+	                              BlobGranuleRangesWorkload* self,
+	                              KeyRange range,
+	                              bool isActive,
+	                              bool strict) {
 		// Check that a read completes for the range. If not loop around and try again
 		loop {
 			bool completed = wait(self->isRangeActive(cx, range, self->tenant));
@@ -261,8 +265,13 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(cx->listBlobbifiedRanges(range, 1000000, self->tenant));
 		if (isActive) {
 			ASSERT(blobRanges.size() == 1);
-			ASSERT(blobRanges[0].begin <= range.begin);
-			ASSERT(blobRanges[0].end >= range.end);
+			if (strict) {
+				ASSERT_EQ(blobRanges[0].begin, range.begin);
+				ASSERT_EQ(blobRanges[0].end, range.end);
+			} else {
+				ASSERT_LE(blobRanges[0].begin, range.begin);
+				ASSERT_GE(blobRanges[0].end, range.end);
+			}
 		} else {
 			ASSERT(blobRanges.empty());
 		}
@@ -273,8 +282,13 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(range, 1000000));
 				if (isActive) {
 					ASSERT(granules.size() >= 1);
-					ASSERT(granules.front().begin <= range.begin);
-					ASSERT(granules.back().end >= range.end);
+					if (strict) {
+						ASSERT_EQ(granules.front().begin, range.begin);
+						ASSERT_EQ(granules.back().end, range.end);
+					} else {
+						ASSERT_LE(granules.front().begin, range.begin);
+						ASSERT_GE(granules.back().end, range.end);
+					}
 					for (int i = 0; i < granules.size() - 1; i++) {
 						ASSERT(granules[i].end == granules[i + 1].begin);
 					}
@@ -311,13 +325,13 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 		state std::vector<Future<Void>> checks;
 		for (int i = 0; i < self->activeRanges.size(); i++) {
-			checks.push_back(self->checkRange(cx, self, self->activeRanges[i], true));
+			checks.push_back(self->checkRange(cx, self, self->activeRanges[i], true, true));
 		}
 
 		// FIXME: re-enable! if we don't force purge there are weird races that cause granules to technically still
 		// exist
 		/*for (int i = 0; i < self->inactiveRanges.size(); i++) {
-		    checks.push_back(self->checkRange(cx, self, self->inactiveRanges[i], false));
+		    checks.push_back(self->checkRange(cx, self, self->inactiveRanges[i], false, false));
 		}*/
 		wait(waitForAll(checks));
 		wait(self->unitClient);
@@ -369,7 +383,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 		bool setSuccess = wait(cx->blobbifyRange(activeRange, self->tenant));
 		ASSERT(setSuccess);
-		wait(self->checkRange(cx, self, activeRange, true));
+		wait(self->checkRange(cx, self, activeRange, true, true));
 
 		bool success1 = wait(self->isRangeActive(cx, KeyRangeRef(activeRange.begin, middleKey), self->tenant));
 		ASSERT(success1);
@@ -422,9 +436,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			if (i != rangeToNotBlobbify) {
 				bool setSuccess = wait(cx->blobbifyRange(subRange, self->tenant));
 				ASSERT(setSuccess);
-				wait(self->checkRange(cx, self, subRange, true));
+				wait(self->checkRange(cx, self, subRange, true, true));
 			} else {
-				wait(self->checkRange(cx, self, subRange, false));
+				wait(self->checkRange(cx, self, subRange, false, false));
 			}
 		}
 
@@ -472,11 +486,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		state KeyRange subRange(KeyRangeRef(range.begin.withSuffix("A"_sr), range.begin.withSuffix("B"_sr)));
 
 		// validate range set up correctly
-		wait(self->checkRange(cx, self, range, true));
+		wait(self->checkRange(cx, self, range, true, true));
 		wait(self->checkRangesMisaligned(cx, self, range, range));
 
 		// getBlobGranules and getBlobRanges on sub ranges- should return actual granule/range instead of clipped
-		wait(self->checkRange(cx, self, subRange, true));
+		wait(self->checkRange(cx, self, subRange, true, false));
 		wait(self->checkRangesMisaligned(cx, self, range, subRange));
 		wait(self->checkRangesMisaligned(cx, self, range, KeyRangeRef(range.begin, subRange.end)));
 		wait(self->checkRangesMisaligned(cx, self, range, KeyRangeRef(subRange.begin, range.end)));
@@ -502,7 +516,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		}
 
 		// ensure range still there after unaligned purges
-		wait(self->checkRange(cx, self, range, true));
+		wait(self->checkRange(cx, self, range, true, true));
 		wait(self->checkRangesMisaligned(cx, self, range, range));
 
 		wait(self->tearDownRangeAfterUnit(cx, self, range));
@@ -526,12 +540,12 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 
 		bool success = wait(cx->blobbifyRange(activeRange, self->tenant));
 		ASSERT(success);
-		wait(self->checkRange(cx, self, activeRange, true));
+		wait(self->checkRange(cx, self, activeRange, true, true));
 
 		// check that re-blobbifying same range is successful
 		bool retrySuccess = wait(cx->blobbifyRange(activeRange, self->tenant));
 		ASSERT(retrySuccess);
-		wait(self->checkRange(cx, self, activeRange, true));
+		wait(self->checkRange(cx, self, activeRange, true, true));
 
 		// check that blobbifying range that overlaps but does not match existing blob range fails
 		bool fail1 = wait(cx->blobbifyRange(range, self->tenant));
@@ -632,20 +646,20 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	ACTOR Future<Void> reBlobbifyUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
 		bool setSuccess = wait(cx->blobbifyRange(range, self->tenant));
 		ASSERT(setSuccess);
-		wait(self->checkRange(cx, self, range, true));
+		wait(self->checkRange(cx, self, range, true, true));
 
 		// force purge range
 		Key purgeKey = wait(self->versionedForcePurge(cx, range, self->tenant));
 		wait(cx->waitPurgeGranulesComplete(purgeKey));
-		wait(self->checkRange(cx, self, range, false));
+		wait(self->checkRange(cx, self, range, false, false));
 
 		bool unsetSuccess = wait(cx->unblobbifyRange(range, self->tenant));
 		ASSERT(unsetSuccess);
-		wait(self->checkRange(cx, self, range, false));
+		wait(self->checkRange(cx, self, range, false, false));
 
 		bool reSetSuccess = wait(cx->blobbifyRange(range, self->tenant));
 		ASSERT(reSetSuccess);
-		wait(self->checkRange(cx, self, range, true));
+		wait(self->checkRange(cx, self, range, true, true));
 
 		wait(self->tearDownRangeAfterUnit(cx, self, range));
 
@@ -661,10 +675,10 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		state bool setSuccess = false;
 		wait(store(setSuccess, cx->blobbifyRange(range1, self->tenant)));
 		ASSERT(setSuccess);
-		wait(self->checkRange(cx, self, range1, true));
+		wait(self->checkRange(cx, self, range1, true, true));
 		wait(store(setSuccess, cx->blobbifyRange(range2, self->tenant)));
 		ASSERT(setSuccess);
-		wait(self->checkRange(cx, self, range2, true));
+		wait(self->checkRange(cx, self, range2, true, true));
 
 		// force purge range
 		state Key purgeKey;
