@@ -244,7 +244,7 @@ class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, No
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
-	Tenant(Future<TenantLookupInfo> tenantIdAndGroupFuture, Optional<TenantName> name);
+	Tenant(Future<TenantLookupInfo> tenantLookupFuture, Optional<TenantName> name);
 
 	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
 
