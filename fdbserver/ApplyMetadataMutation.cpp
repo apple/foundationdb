@@ -698,6 +698,7 @@ private:
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
 				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+				tenantEntry.tenantGroup = txnStateStoreEntry.group;
 			} else {
 				tenantEntry = TenantMapEntry::decode(m.param2);
 			}
@@ -707,6 +708,7 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantEntry.tenantName)
+				    .detail("Group", tenantEntry.tenantGroup)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
