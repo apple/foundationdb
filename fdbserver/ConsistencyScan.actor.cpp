@@ -522,6 +522,15 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			}
 			if (sourceStorageServers.size() > configuration.storageTeamSize) {
 				customReplicatedShards++;
+				TraceEvent("ConsistencyCheck_CustomReplicatedTeam")
+				    .detail("ShardBegin", printable(range.begin))
+				    .detail("ShardEnd", printable(range.end))
+				    .detail("SourceTeamSize", sourceStorageServers.size())
+				    .detail("DestServerSize", destStorageServers.size())
+				    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+				    .detail("DesiredReplicas", desiredReplicas)
+				    .detail("UsableRegions", configuration.usableRegions)
+				    .detail("SSCount", ssCount);
 			}
 		}
 
