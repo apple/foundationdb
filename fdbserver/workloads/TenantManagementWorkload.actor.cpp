@@ -391,8 +391,9 @@ struct TenantManagementWorkload : TestWorkload {
 				entry.assignedCluster = self->dataClusterName;
 				assign = metacluster::AssignClusterAutomatically::False;
 			}
+			metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
 
-			wait(metacluster::createTenant(self->mvDb, entry, assign, metacluster::IgnoreCapacityLimit::False));
+			wait(metacluster::createTenant(self->mvDb, entry, assign, ignoreCapacityLimit));
 			return Void();
 		}
 
@@ -519,6 +520,8 @@ struct TenantManagementWorkload : TestWorkload {
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
+						} else if (e.code() == error_code_invalid_tenant_configuration) {
+							ASSERT_EQ(operationType, OperationType::METACLUSTER);
 						} else {
 							throw;
 						}
