@@ -320,7 +320,7 @@ struct GetReadVersionRequest : TimedRequest {
 
 	// Not serialized, because this field does not need to be sent to master.
 	// It is used for reporting to clients the amount of time spent delayed by
-	// the TagQueue:
+	// the TagQueue
 	double proxyTagThrottledDuration{ 0.0 };
 
 	Optional<UID> debugID;
