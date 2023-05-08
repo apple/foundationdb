@@ -39,12 +39,14 @@ private:
 	// in a simple vector. If the number of tracked tags increases, a more sophisticated
 	// data structure will be required.
 	std::vector<TagAndCost> topTags;
-	int limit;
+	int maxTagsTracked;
+	double minRateTracked;
 
 public:
-	explicit TopKTags(int limit) : limit(limit) {
-		ASSERT_GT(limit, 0);
-		topTags.reserve(limit);
+	explicit TopKTags(int maxTagsTracked, double minRateTracked)
+	  : maxTagsTracked(maxTagsTracked), minRateTracked(minRateTracked) {
+		ASSERT_GT(maxTagsTracked, 0);
+		topTags.reserve(maxTagsTracked);
 	}
 
 	void incrementCost(TransactionTag tag, double previousCost, double increase) {
@@ -52,7 +54,7 @@ public:
 		if (iter != topTags.end()) {
 			ASSERT_EQ(previousCost, iter->cost);
 			iter->cost += increase;
-		} else if (topTags.size() < limit) {
+		} else if (topTags.size() < maxTagsTracked) {
 			ASSERT_EQ(previousCost, 0);
 			topTags.emplace_back(tag, increase);
 		} else {
@@ -69,7 +71,7 @@ public:
 		std::vector<BusyTagInfo> result;
 		for (auto const& tagAndCost : topTags) {
 			auto rate = tagAndCost.cost / elapsed;
-			if (rate > SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE) {
+			if (rate > minRateTracked) {
 				result.emplace_back(tagAndCost.tag, rate, std::min(1.0, tagAndCost.cost / totalCost));
 			}
 		}
@@ -98,8 +100,8 @@ class TransactionTagCounterImpl {
 	}
 
 public:
-	TransactionTagCounterImpl(UID thisServerID)
-	  : thisServerID(thisServerID), topTags(SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED),
+	TransactionTagCounterImpl(UID thisServerID, int maxTagsTracked, double minRateTracked)
+	  : thisServerID(thisServerID), topTags(maxTagsTracked, minRateTracked),
 	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
 	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
@@ -157,8 +159,8 @@ public:
 	std::vector<BusyTagInfo> const& getBusiestTags() const { return previousBusiestTags; }
 };
 
-TransactionTagCounter::TransactionTagCounter(UID thisServerID)
-  : impl(PImpl<TransactionTagCounterImpl>::create(thisServerID)) {}
+TransactionTagCounter::TransactionTagCounter(UID thisServerID, int maxTagsTracked, double minRateTracked)
+  : impl(PImpl<TransactionTagCounterImpl>::create(thisServerID, maxTagsTracked, minRateTracked)) {}
 
 TransactionTagCounter::~TransactionTagCounter() = default;
 
@@ -186,31 +188,27 @@ bool containsTag(std::vector<BusyTagInfo> const& busyTags, TransactionTagRef tag
 } // namespace
 
 TEST_CASE("/TransactionTagCounter/TopKTags") {
-	TopKTags topTags(2);
-
-	// Ensure that costs are larger enough to show up
-	auto const costMultiplier =
-	    std::max<double>(1.0, 2 * SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	TopKTags topTags(2, 0.0);
 
 	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
-	topTags.incrementCost("a"_sr, 0, 1 * costMultiplier);
+	topTags.incrementCost("a"_sr, 0, 2.0);
 	{
-		auto const busiestTags = topTags.getBusiestTags(1.0, 1 * costMultiplier);
+		auto const busiestTags = topTags.getBusiestTags(1.0, 1.0);
 		ASSERT_EQ(busiestTags.size(), 1);
 		ASSERT(containsTag(busiestTags, "a"_sr));
 	}
-	topTags.incrementCost("b"_sr, 0, 2 * costMultiplier);
-	topTags.incrementCost("c"_sr, 0, 3 * costMultiplier);
+	topTags.incrementCost("b"_sr, 0, 2.0);
+	topTags.incrementCost("c"_sr, 0, 3.0);
 	{
-		auto busiestTags = topTags.getBusiestTags(1.0, 6 * costMultiplier);
+		auto busiestTags = topTags.getBusiestTags(1.0, 6.0);
 		ASSERT_EQ(busiestTags.size(), 2);
 		ASSERT(!containsTag(busiestTags, "a"_sr));
 		ASSERT(containsTag(busiestTags, "b"_sr));
 		ASSERT(containsTag(busiestTags, "c"_sr));
 	}
-	topTags.incrementCost("a"_sr, 1 * costMultiplier, 3 * costMultiplier);
+	topTags.incrementCost("a"_sr, 1.0, 3.0);
 	{
-		auto busiestTags = topTags.getBusiestTags(1.0, 9 * costMultiplier);
+		auto busiestTags = topTags.getBusiestTags(1.0, 9.0);
 		ASSERT_EQ(busiestTags.size(), 2);
 		ASSERT(containsTag(busiestTags, "a"_sr));
 		ASSERT(!containsTag(busiestTags, "b"_sr));

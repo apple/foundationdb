@@ -1482,7 +1482,11 @@ public:
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0),
+	    transactionTagCounter(ssi.id(),
+	                          /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
+	                          /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
+	                              CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
