@@ -687,7 +687,7 @@ static void printUsage(const char* name, bool devhelp) {
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
 		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests,"
-		                 " benchmark, skiplistest, dsltest, versionedmaptest, createtemplatedb, kvfiledump,"
+		                 " benchmark, skiplisttest, dsltest, versionedmaptest, createtemplatedb, kvfiledump,"
 		                 " flowprocess, changeclusterkey)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
@@ -1762,6 +1762,7 @@ private:
 			}
 			case OPT_BENCHMARK_FILTER: {
 				benchmarkFilter = args.OptionArg();
+				break;
 			}
 			}
 		}
