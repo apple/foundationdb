@@ -609,33 +609,43 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 			ASSERT(blobRanges.size() == 1);
 			ASSERT(blobRanges[0] == activeRange);
 
-			bool unblobbifyFail1 = wait(cx->unblobbifyRange(range, self->tenant));
+			// range that overlaps but does not completely include activeRange should fail to unblobbify
+			bool unblobbifyFail1 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey), self->tenant));
 			ASSERT(!unblobbifyFail1);
 
-			bool unblobbifyFail2 = wait(cx->unblobbifyRange(KeyRangeRef(range.begin, activeRange.end), self->tenant));
+			bool unblobbifyFail2 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end), self->tenant));
 			ASSERT(!unblobbifyFail2);
 
-			bool unblobbifyFail3 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, range.end), self->tenant));
+			bool unblobbifyFail3 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey), self->tenant));
 			ASSERT(!unblobbifyFail3);
 
-			bool unblobbifyFail4 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey), self->tenant));
+			bool unblobbifyFail4 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end), self->tenant));
 			ASSERT(!unblobbifyFail4);
 
-			bool unblobbifyFail5 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end), self->tenant));
+			bool unblobbifyFail5 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, middleKey2), self->tenant));
 			ASSERT(!unblobbifyFail5);
 
-			bool unblobbifyFail6 = wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, middleKey), self->tenant));
-			ASSERT(!unblobbifyFail6);
+			// several combinations of unblobbifying should work here, any that completely contain activeRange
+			state int unblobbifyMethod = deterministicRandom()->randomInt(0, 4);
+			if (unblobbifyMethod == 0) {
+				bool unblobbifySuccess0 = wait(cx->unblobbifyRange(range, self->tenant));
+				ASSERT(unblobbifySuccess0);
+			} else if (unblobbifyMethod == 1) {
+				bool unblobbifySuccess1 =
+				    wait(cx->unblobbifyRange(KeyRangeRef(range.begin, activeRange.end), self->tenant));
+				ASSERT(unblobbifySuccess1);
+			} else if (unblobbifyMethod == 2) {
+				bool unblobbifySuccess2 =
+				    wait(cx->unblobbifyRange(KeyRangeRef(activeRange.begin, range.end), self->tenant));
+				ASSERT(unblobbifySuccess2);
+			} else if (unblobbifyMethod == 3) {
+				bool unblobbifySuccess3 = wait(cx->unblobbifyRange(activeRange, self->tenant));
+				ASSERT(unblobbifySuccess3);
+			} else {
+				ASSERT(false);
+			}
 
-			bool unblobbifyFail7 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, activeRange.end), self->tenant));
-			ASSERT(!unblobbifyFail7);
-
-			bool unblobbifyFail8 = wait(cx->unblobbifyRange(KeyRangeRef(middleKey, middleKey2), self->tenant));
-			ASSERT(!unblobbifyFail8);
-
-			bool unblobbifySuccess = wait(cx->unblobbifyRange(activeRange, self->tenant));
-			ASSERT(unblobbifySuccess);
-
+			// unblobbify should be idempotent
 			bool unblobbifySuccessAgain = wait(cx->unblobbifyRange(activeRange, self->tenant));
 			ASSERT(unblobbifySuccessAgain);
 		}
@@ -730,6 +740,56 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		return Void();
 	}
 
+	// Simulate having many consecutive ranges within one subrange registered, and unblobbifying some prefix of them
+	// (potentially the whole range)
+	ACTOR Future<Void> unblobbifyManyUnit(Database cx, BlobGranuleRangesWorkload* self, KeyRange range) {
+		// Create 2 adjacent blobbified regions.
+		state int ranges = deterministicRandom()->randomInt(2, 10);
+		state int prefixToUnblobbify = deterministicRandom()->randomInt(1, ranges + 1);
+
+		state int i;
+		for (i = 0; i < ranges; i++) {
+			state KeyRange subRange(KeyRangeRef(range.begin.withSuffix("_" + std::to_string(i)),
+			                                    range.begin.withSuffix("_" + std::to_string(i + 1))));
+			bool success = wait(cx->blobbifyRange(subRange, self->tenant));
+			ASSERT(success);
+			wait(self->checkRange(cx, self, subRange, true, true));
+		}
+
+		// sometimes start purge and unblobbify at logical range start, other times at first subrange start
+		Key startKey = range.begin;
+		if (deterministicRandom()->coinflip()) {
+			startKey = startKey.withSuffix("_0"_sr);
+		}
+
+		// if purge is full range, sometimes end it at logical range end, other times at subrange boundary
+		state Key endKey = range.end;
+		if (prefixToUnblobbify < ranges || deterministicRandom()->coinflip()) {
+			endKey = range.begin.withSuffix("_" + std::to_string(prefixToUnblobbify));
+		}
+
+		state KeyRange unblobbifyRange(KeyRangeRef(startKey, endKey));
+
+		state Key purgeKey;
+		wait(store(purgeKey, self->versionedForcePurge(cx, unblobbifyRange, self->tenant)));
+		wait(cx->waitPurgeGranulesComplete(purgeKey));
+
+		bool unsetSuccess = wait(cx->unblobbifyRange(unblobbifyRange, self->tenant));
+		ASSERT(unsetSuccess);
+
+		// check that all ranges after the unblobbified boundary are still valid
+		for (i = prefixToUnblobbify; i < ranges; i++) {
+			KeyRange checkRange(KeyRangeRef(range.begin.withSuffix("_" + std::to_string(i)),
+			                                range.begin.withSuffix("_" + std::to_string(i + 1))));
+			wait(self->checkRange(cx, self, checkRange, true, true));
+		}
+
+		// tear down the part of the test that we didn't already do
+		wait(self->tearDownRangeAfterUnit(cx, self, KeyRangeRef(endKey, range.end)));
+
+		return Void();
+	}
+
 	enum UnitTestTypes {
 		VERIFY_RANGE_UNIT,
 		VERIFY_RANGE_GAP_UNIT,
@@ -739,7 +799,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		ADJACENT_PURGE,
 		BLOBBIFY_BLOCKING_UNIT,
 		DELETE_TENANT_UNIT,
-		OP_COUNT = 8 /* keep this last */
+		UNBLOBBIFY_MANY_UNIT,
+		OP_COUNT = 9 /* keep this last */
 	};
 
 	ACTOR Future<Void> blobGranuleRangesUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
@@ -787,6 +848,8 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 				wait(self->blobbifyBlockingUnit(cx, self, range));
 			} else if (op == DELETE_TENANT_UNIT) {
 				wait(self->deleteTenantUnit(cx, self, range));
+			} else if (op == UNBLOBBIFY_MANY_UNIT) {
+				wait(self->unblobbifyManyUnit(cx, self, range));
 			} else {
 				ASSERT(false);
 			}
