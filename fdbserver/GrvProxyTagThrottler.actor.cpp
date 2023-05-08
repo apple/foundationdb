@@ -37,16 +37,17 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 	ASSERT(req.isTagged());
 	if (req.tenantGroup.present()) {
 		if (!req.tags.empty()) {
-			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_IgnoringTags")
+			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerIgnoringTags")
 			    .suppressFor(60.0)
 			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()));
+			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()))
+				.detail("FirstTag", printable(req.tags.begin()->first));
 		}
 		return req.tenantGroup.get();
 	} else {
 		auto const& tag = req.tags.begin()->first;
 		if (req.tags.size() > 1) {
-			TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
+			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerMultipleTags")
 			    .suppressFor(60.0)
 			    .detail("NumTags", req.tags.size())
 			    .detail("UsingTag", printable(tag));
