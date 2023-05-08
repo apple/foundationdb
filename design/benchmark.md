@@ -34,3 +34,48 @@ bench_ref_copy<RefType::FlowReferenceThreadSafe>                     11.4 ns    
 ```
 
 - More detailed documentation on the benchmarking tool used can be found at https://github.com/google/benchmark.
+
+Current Benchmarks
+==================
+
+Currently supported benchmarks are:
+
+- `bench_serialize_deltas`
+- `bench_sort_deltas`
+- `bench_callback`
+- `bench_encrypt`
+- `bench_decrypt`
+- `blob_cipher_encrypt`
+- `blob_cipher_decrypt`
+- `bench_hash`
+- `bench_ionet2`
+- `bench_add_idempotency_ids`
+- `bench_iterate`
+- `bench_memcmp`
+- `bench_memcpy`
+- `bench_check_metadata1`
+- `bench_check_metadata2`
+- `bench_net2`
+- `bench_delay`
+- `bench_populate`
+- `bench_priorityMultiLock`
+- `bench_random`
+- `bench_ref`
+- `bench_ddsketchUnsigned` 
+- `bench_ddsketchInt`
+- `bench_ddsketchDouble`
+- `bench_ddsketchLatency`
+- `bench_continuousSampleInt`
+- `bench_continuousSampleLatency`
+- `bench_latencyBands`
+- `bench_histogramInt`
+- `bench_histogramPct`
+- `bench_histogramTime`
+- `bench_stream`
+- `bench_timer`
+- `bench_timer_monotonic`
+- `bench_vv_getdelta`
+- `bench_serializable_traits_version` 
+- `bench_dynamic_traits_version`
+- `bench_zstd_decompress`
+- `bench_zstd_decompress_stream`

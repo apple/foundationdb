@@ -82,7 +82,7 @@ BENCHMARK(bench_decrypt)->Ranges({ { 1 << 12, 1 << 20 }, { 1, 1 << 12 } });
 
 // DEPRECATED -- Use EncryptionOps for benchmarking purposes.
 
-// blob_chipher* benchmarks are following the encrypt and decrypt unittests from BlobCipher.cpp
+// blob_cipher* benchmarks are following the encrypt and decrypt unittests from BlobCipher.cpp
 // Construct a dummy External Key Manager representation and populate with some keys
 class BaseCipher : public ReferenceCounted<BaseCipher>, NonCopyable {
 public:
@@ -145,7 +145,7 @@ void static SetupEncryptCipher() {
 	}
 }
 
-static void blob_chipher_encrypt(benchmark::State& state) {
+static void blob_cipher_encrypt(benchmark::State& state) {
 	const EncryptCipherDomainId minDomainId = 1;
 	const int pageLen = state.range(0);
 	const bool isInplace = state.range(1);
@@ -180,7 +180,7 @@ static void blob_chipher_encrypt(benchmark::State& state) {
 	}
 }
 
-static void blob_chipher_decrypt(benchmark::State& state) {
+static void blob_cipher_decrypt(benchmark::State& state) {
 	const EncryptCipherDomainId minDomainId = 1;
 	const int pageLen = state.range(0);
 	const bool isInplace = state.range(1);
@@ -224,7 +224,7 @@ static void blob_chipher_decrypt(benchmark::State& state) {
 	}
 }
 
-static void blob_chipher_args(benchmark::internal::Benchmark* b) {
+static void blob_cipher_args(benchmark::internal::Benchmark* b) {
 	for (int pageLen : { 8000, 16000 }) {
 		for (bool isInplace : { false, true }) {
 			b->Args({ pageLen, isInplace });
@@ -233,5 +233,5 @@ static void blob_chipher_args(benchmark::internal::Benchmark* b) {
 	b->ArgNames({ "pageLen", "isInplace" });
 }
 
-BENCHMARK(blob_chipher_encrypt)->Apply(blob_chipher_args);
-BENCHMARK(blob_chipher_decrypt)->Apply(blob_chipher_args);
+BENCHMARK(blob_cipher_encrypt)->Apply(blob_cipher_args);
+BENCHMARK(blob_cipher_decrypt)->Apply(blob_cipher_args);
