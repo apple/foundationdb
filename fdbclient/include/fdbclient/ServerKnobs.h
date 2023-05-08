@@ -735,6 +735,10 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 	// Interval at which ratekeeper logs statistics for each tag:
 	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// If this knob is set to true, the global tag throttler will still
+	// compute rates, but these rates won't be sent to GRV proxies for
+	// enforcement.
+	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
