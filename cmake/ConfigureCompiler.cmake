@@ -363,7 +363,7 @@ else()
       # Disable C++ 20 warning for ambiguous operator.
       -Wno-ambiguous-reversed-operator
       # Required to compile googlebenchmark:
-      -Wno-shift-sign-overflow
+      -Wno-error=shift-sign-overflow
       )
     if (USE_CCACHE)
       add_compile_options(
