@@ -1,0 +1,16 @@
+# This test can't run as part of RandomUnitTests.toml yet, so run it less frequently
+testPriority = '100'
+
+[configuration]
+simHTTPServerEnabled = true
+
+[[test]]
+testTitle = 'HTTPServerUnit'
+startDelay = 0
+useDB = false
+timeout = 1000
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    maxTestCases = 1
+    testsMatching = '!/HTTP/Server'

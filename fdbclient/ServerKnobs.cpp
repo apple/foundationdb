@@ -322,9 +322,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC,   isSimulated ? 2 : 21 * 60 * 60 * 24 ); if(randomize && BUGGIFY) DD_STORAGE_WIGGLE_MIN_SS_AGE_SEC = isSimulated ? 0: 120;
 	init( DD_TENANT_AWARENESS_ENABLED,                         false );
 	init( STORAGE_QUOTA_ENABLED,                                true ); if(isSimulated) STORAGE_QUOTA_ENABLED = deterministicRandom()->coinflip();
-	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                      2 ); if( randomize && BUGGIFY ) TENANT_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
-	init( TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL,             2 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
-	init( TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,            10 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
+	init( TENANT_CACHE_LIST_REFRESH_INTERVAL,                      5 ); if( randomize && BUGGIFY ) TENANT_CACHE_LIST_REFRESH_INTERVAL = deterministicRandom()->randomInt(1, 10);
+	init( TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL,            60 ); if(isSimulated) TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL = 10; if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_USAGE_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 15);
+	init( TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL,            10 ); if( randomize && BUGGIFY ) TENANT_CACHE_STORAGE_QUOTA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 15);
 	init( TENANT_CACHE_STORAGE_USAGE_TRACE_INTERVAL,             300 );
 	init( CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL,            5 ); if( randomize && BUGGIFY ) CP_FETCH_TENANTS_OVER_STORAGE_QUOTA_INTERVAL = deterministicRandom()->randomInt(1, 10);
 	init( DD_BUILD_EXTRA_TEAMS_OVERRIDE,                          10 ); if( randomize && BUGGIFY ) DD_BUILD_EXTRA_TEAMS_OVERRIDE = 2;
@@ -469,6 +469,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_SOFT_PENDING_COMPACT_BYTES_LIMIT,      64000000000 ); // 64GB, Rocksdb option, Writes will slow down.
 	init( ROCKSDB_HARD_PENDING_COMPACT_BYTES_LIMIT,     100000000000 ); // 100GB, Rocksdb option, Writes will stall.
 	init( ROCKSDB_CAN_COMMIT_COMPACT_BYTES_LIMIT,        50000000000 ); // 50GB, Commit waits.
+	// Enabling ROCKSDB_PARANOID_FILE_CHECKS knob will have overhead. Be cautious to enable in prod.
+	init( ROCKSDB_PARANOID_FILE_CHECKS,                        false ); if( randomize && BUGGIFY ) ROCKSDB_PARANOID_FILE_CHECKS = deterministicRandom()->coinflip();
 	// Enable this knob only for experminatal purpose, never enable this in production.
 	// If enabled, all the committed in-memory memtable writes are lost on a crash.
 	init( ROCKSDB_DISABLE_WAL_EXPERIMENTAL,                    false );
@@ -1131,6 +1133,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
 	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "" );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
+	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
 	init( BLOB_RESTORE_MANIFEST_URL, isSimulated ? "file://simfdb/fdbblob/manifest" : "" );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );
