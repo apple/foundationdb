@@ -1404,6 +1404,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
 				return Void();
+			} else if (e.code() == error_code_tenant_locked) {
+			   ASSERT(exists);
+			   return Void();
 			}
 
 			TraceEvent(SevError, "LockTenantFailure")
