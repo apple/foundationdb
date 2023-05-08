@@ -1352,6 +1352,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 		state VectorRef<KeyRangeRef> rangesToAdd;
 		state VectorRef<KeyRangeRef> rangesToRemove;
 		state Arena ar;
+		state Optional<Value> ckvBegin;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1359,7 +1360,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				// read change key at this point along with data
-				state Optional<Value> ckvBegin = wait(tr->get(blobRangeChangeKey));
+				wait(store(ckvBegin, tr->get(blobRangeChangeKey)));
 
 				if (firstLoad || !SERVER_KNOBS->BG_USE_BLOB_RANGE_CHANGE_LOG) {
 					// FIXME: enable this to read across multiple transactions in next release
@@ -1587,8 +1588,8 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 						wait(checkManagerLock(tr, bmData));
 						wait(tr->commit());
 						if (BM_DEBUG) {
-							printf("Blob manager done processing client ranges @ {0}, retrying\n",
-							       tr->getCommittedVersion());
+							fmt::print("Blob manager done processing client ranges @ {0}, retrying\n",
+							           tr->getCommittedVersion());
 						}
 					}
 					watchFuture = Future<Void>(Void()); // restart immediately
