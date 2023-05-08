@@ -41,7 +41,7 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 			    .suppressFor(60.0)
 			    .detail("NumTags", req.tags.size())
 			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()))
-				.detail("FirstTag", printable(req.tags.begin()->first));
+			    .detail("FirstTag", printable(req.tags.begin()->first));
 		}
 		return req.tenantGroup.get();
 	} else {
