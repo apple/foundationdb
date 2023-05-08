@@ -115,7 +115,9 @@ public class MappedKeyValue extends KeyValue {
 	@Override
 	public String toString() {
 		final StringBuilder sb = new StringBuilder("MappedKeyValue{");
-		sb.append("rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
+		sb.append("key=").append(ByteArrayUtil.printable(getKey()));
+		sb.append(", value=").append(ByteArrayUtil.printable(getValue()));
+		sb.append(", rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
 		sb.append(", rangeEnd=").append(ByteArrayUtil.printable(rangeEnd));
 		sb.append(", rangeResult=").append(rangeResult);
 		sb.append('}');
