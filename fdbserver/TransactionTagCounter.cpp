@@ -176,6 +176,15 @@ std::vector<BusyTagInfo> const& TransactionTagCounter::getBusiestTags() const {
 	return impl->getBusiestTags();
 }
 
+namespace {
+
+bool containsTag(std::vector<BusyTagInfo> const& busyTags, TransactionTagRef tag) {
+	return std::count_if(busyTags.begin(), busyTags.end(), [tag](auto const& tagInfo) { return tagInfo.tag == tag; }) ==
+	       1;
+}
+
+} // namespace
+
 TEST_CASE("/TransactionTagCounter/TopKTags") {
 	TopKTags topTags(2);
 
@@ -188,45 +197,24 @@ TEST_CASE("/TransactionTagCounter/TopKTags") {
 	{
 		auto const busiestTags = topTags.getBusiestTags(1.0, 1 * costMultiplier);
 		ASSERT_EQ(busiestTags.size(), 1);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
-		          1);
+		ASSERT(containsTag(busiestTags, "a"_sr));
 	}
 	topTags.incrementCost("b"_sr, 0, 2 * costMultiplier);
 	topTags.incrementCost("c"_sr, 0, 3 * costMultiplier);
 	{
 		auto busiestTags = topTags.getBusiestTags(1.0, 6 * costMultiplier);
 		ASSERT_EQ(busiestTags.size(), 2);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
-		          0);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "b"_sr; }),
-		          1);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "c"_sr; }),
-		          1);
+		ASSERT(!containsTag(busiestTags, "a"_sr));
+		ASSERT(containsTag(busiestTags, "b"_sr));
+		ASSERT(containsTag(busiestTags, "c"_sr));
 	}
 	topTags.incrementCost("a"_sr, 1 * costMultiplier, 3 * costMultiplier);
 	{
 		auto busiestTags = topTags.getBusiestTags(1.0, 9 * costMultiplier);
 		ASSERT_EQ(busiestTags.size(), 2);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "a"_sr; }),
-		          1);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "b"_sr; }),
-		          0);
-		ASSERT_EQ(std::count_if(busiestTags.begin(),
-		                        busiestTags.end(),
-		                        [](auto const& tagInfo) { return tagInfo.tag == "c"_sr; }),
-		          1);
+		ASSERT(containsTag(busiestTags, "a"_sr));
+		ASSERT(!containsTag(busiestTags, "b"_sr));
+		ASSERT(containsTag(busiestTags, "c"_sr));
 	}
 	topTags.clear();
 	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
