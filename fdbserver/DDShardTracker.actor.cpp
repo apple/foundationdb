@@ -531,7 +531,8 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				result.emplace_back(shardContainingTenantStart, faultLines);
 			} else {
 				CODE_PROBE(true,
-				           "Shard that contains complete tenant key range not split since shard stats are unavailable");
+				           "Shard that contains complete tenant key range not split since shard stats are unavailable",
+				           probe::decoration::rare);
 			}
 		}
 	} else {

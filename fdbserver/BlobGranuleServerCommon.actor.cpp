@@ -641,7 +641,7 @@ ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap*
 				wait(delay(0));
 				return data->bstore;
 			} else {
-				CODE_PROBE(true, "bstore for unknown tenant");
+				CODE_PROBE(true, "bstore for unknown tenant", probe::decoration::rare);
 				// Assume not loaded yet, just wait a bit. Could do sophisticated mechanism but will redo tenant
 				// loading to be versioned anyway. 10 retries means it's likely not a transient race with
 				// loading tenants, and instead a persistent issue.

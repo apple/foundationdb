@@ -545,7 +545,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(BLOB_METADATA_DETAILS_TAG) || !doc[BLOB_METADATA_DETAILS_TAG].IsArray()) {
 		TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureMissingDetails", ctx->uid).log();
-		CODE_PROBE(true, "REST BlobMedata details missing or not-array");
+		CODE_PROBE(true, "REST BlobMetadata details missing or not-array");
 		throw rest_malformed_response();
 	}
 
@@ -553,7 +553,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 		if (!detail.IsObject()) {
 			TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureDetailsNotObject", ctx->uid)
 			    .detail("CipherDetailType", detail.GetType());
-			CODE_PROBE(true, "REST BlobMedata detail not-object");
+			CODE_PROBE(true, "REST BlobMetadata detail not-object");
 			throw rest_malformed_response();
 		}
 
@@ -565,7 +565,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			    .detail("DomainIdPresent", isDomainIdPresent)
 			    .detail("BaseLocationPresent", isBasePresent)
 			    .detail("PartitionsPresent", isPartitionsPresent);
-			CODE_PROBE(true, "REST BlobMedata detail malformed");
+			CODE_PROBE(true, "REST BlobMetadata detail malformed", probe::decoration::rare);
 			throw rest_malformed_response();
 		}
 

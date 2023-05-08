@@ -1320,7 +1320,8 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	CODE_PROBE(true, "encryptInplace: BlobCipher data encryption");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "encryptInplace: Encryption authentication disabled");
+	           "encryptInplace: Encryption authentication disabled",
+	           probe::decoration::rare);
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 	           "encryptInplace: HMAC_SHA Auth token generation");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
@@ -1725,7 +1726,8 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 
 	CODE_PROBE(true, "decryptInplace: BlobCipher data decryption");
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "decryptInplace: Decryption authentication disabled");
+	           "decryptInplace: Decryption authentication disabled",
+	           probe::decoration::rare);
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 	           "decryptInplace: Decryption HMAC_SHA Auth token verification");
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
