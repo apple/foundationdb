@@ -1,5 +1,5 @@
 /*
- * TransactionTagCounter.cpp
+ * TransactionTagCounter.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,6 +22,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TransactionTagCounter.h"
 #include "flow/Trace.h"
+#include "flow/actorcompiler.h"
 
 namespace {
 
@@ -50,6 +51,10 @@ public:
 	}
 
 	void incrementCost(TransactionTag tag, double previousCost, double increase) {
+		TraceEvent("HERE")
+		    .detail("Tag", printable(tag))
+		    .detail("PreviousCost", previousCost)
+		    .detail("Increase", increase);
 		auto iter = std::find_if(topTags.begin(), topTags.end(), [tag](const auto& tc) { return tc.tag == tag; });
 		if (iter != topTags.end()) {
 			ASSERT_EQ(previousCost, iter->cost);
@@ -216,5 +221,41 @@ TEST_CASE("/TransactionTagCounter/TopKTags") {
 	}
 	topTags.clear();
 	ASSERT_EQ(topTags.getBusiestTags(1.0, 0).size(), 0);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
+	state TransactionTagCounter counter(
+	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.startNewInterval();
+	ASSERT_EQ(counter.getBusiestTags().size(), 0);
+	{
+		wait(delay(1.0));
+		counter.addRequest({}, "tenantGroupA"_sr, 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+		counter.addRequest({}, "tenantGroupA"_sr, 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+		counter.addRequest({}, "tenantGroupB"_sr, 15 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+		counter.addRequest({}, "tenantGroupC"_sr, 20 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+		counter.startNewInterval();
+		auto const busiestTags = counter.getBusiestTags();
+		ASSERT_EQ(busiestTags.size(), 2);
+		ASSERT(containsTag(busiestTags, "tenantGroupA"_sr));
+		ASSERT(!containsTag(busiestTags, "tenantGroupB"_sr));
+		ASSERT(containsTag(busiestTags, "tenantGroupC"_sr));
+	}
+	return Void();
+}
+
+TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
+	state TransactionTagCounter counter(
+	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	counter.startNewInterval();
+	ASSERT_EQ(counter.getBusiestTags().size(), 0);
+	{
+		wait(delay(1.0));
+		counter.addRequest({}, "tenantGroupA"_sr, 5 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+		counter.startNewInterval();
+		auto const busiestTags = counter.getBusiestTags();
+		ASSERT_EQ(busiestTags.size(), 0);
+	}
 	return Void();
 }
