@@ -98,6 +98,8 @@ public: // workload functions
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
 		// Data movement is not allowed while taking snapshot
+		// FIXME: the data movement should be delayed while taking snapshots, the workload at present doesn't know the
+		// DD is disabled by the snapshot
 		out.insert("RandomMoveKeys");
 	}
 
