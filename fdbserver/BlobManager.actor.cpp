@@ -46,6 +46,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/Tuple.h"
 #include "fdbclient/BackupAgent.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/BlobManagerInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/BlobGranuleValidation.actor.h"
@@ -452,7 +453,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
 		}
-
 		if (SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL != "") {
 			manifestStore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 		}
@@ -3565,10 +3565,6 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		if (!bmData->manifestStore.isValid()) {
-			TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-			throw blob_restore_invalid_manifest_url();
-		}
 		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
 		ASSERT(restoreState.present());
 		state BlobRestorePhase phase = restoreState.get().phase;
@@ -5510,55 +5506,90 @@ ACTOR Future<int64_t> getLastFlushTs(Database db) {
 	}
 }
 
-ACTOR Future<Void> maybeFlushAndTruncateMutationLogs(Reference<BlobManagerData> bmData) {
-	try {
-		int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
-		bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
-		if (!shouldFlush) {
-			TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
-			return Void();
-		}
-
-		state std::string mlogsUrl = wait(getMutationLogUrl());
-		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-		state BackupDescription desc = wait(bc->describeBackup(true));
-		if (!desc.contiguousLogEnd.present()) {
-			TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
-			return Void(); // skip truncation if no valid backup for mutation logs
-		}
-
-		state Version logEndVersion = desc.contiguousLogEnd.get();
-		// Force flush in-memory data of all blob workers until end of log
-		FlushGranuleRequest req(bmData->epoch, normalKeys, logEndVersion, false);
-		wait(success(doBlobGranuleRequests(bmData->db, normalKeys, req, &BlobWorkerInterface::flushGranuleRequest)));
-		wait(updateLastFlushTs(bmData->db));
-		bmData->stats.lastFlushVersion = logEndVersion;
-
-		// Truncate mutation logs to max retention period
-		Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
-		Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
-		if (!logEndEpochs.present()) {
-			TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
-			return Void(); // skip truncation if no timestamp about log end
-		}
-
-		// Find timestamp and version to truncate
-		int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
-		if (epochs <= 0) {
-			TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
-			return Void();
-		}
-		state std::string timestamp = BackupAgentBase::formatTime(epochs);
-		state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
-
-		wait(bc->expireData(truncVersion, true));
-		bmData->stats.lastMLogTruncationVersion = truncVersion;
-		TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
-		CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
-	} catch (Error& e) {
-		TraceEvent("TruncateMutationLogsError").error(e); // skip and retry next time
+ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
+	bool enabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	if (!enabled) {
+		return false;
 	}
-	return Void();
+
+	if (bmData->isFullRestoreMode) {
+		return false;
+	}
+
+	auto knownRanges = bmData->knownBlobRanges.intersectingRanges(normalKeys);
+	for (auto& it : knownRanges) {
+		if (it.cvalue()) {
+			return true; // there is at least one active blob range
+		}
+	}
+	return false;
+}
+
+ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
+	loop {
+		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
+		try {
+			bool shouldBackup = wait(shouldBackupManifest(bmData));
+			if (!shouldBackup) {
+				continue;
+			}
+
+			int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
+			bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+			if (!shouldFlush) {
+				TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+				return Void();
+			}
+
+			state std::string mlogsUrl = wait(getMutationLogUrl());
+			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+			state BackupDescription desc = wait(bc->describeBackup());
+			if (!desc.contiguousLogEnd.present()) {
+				TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
+				return Void(); // skip truncation if no valid backup for mutation logs
+			}
+			state Version logEndVersion = desc.contiguousLogEnd.get();
+			TraceEvent("DescribedMutationLogs").detail("LogEndVersion", logEndVersion);
+
+			// Force flush in-memory data of all blob workers until end of log
+			FlushGranuleRequest req(bmData->epoch, normalKeys, logEndVersion, false);
+			wait(
+			    success(doBlobGranuleRequests(bmData->db, normalKeys, req, &BlobWorkerInterface::flushGranuleRequest)));
+			wait(updateLastFlushTs(bmData->db));
+			bmData->stats.lastFlushVersion = logEndVersion;
+			TraceEvent("FlushedBlobGranules").detail("FlushVersion", logEndVersion);
+
+			// Truncate mutation logs to max retention period
+			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
+			Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
+			if (!logEndEpochs.present()) {
+				TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
+				return Void(); // skip truncation if no timestamp about log end
+			}
+
+			// Find timestamp and version to truncate
+			int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+			if (epochs <= 0) {
+				TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
+				return Void();
+			}
+			state std::string timestamp = BackupAgentBase::formatTime(epochs);
+			state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
+
+			wait(bc->expireData(truncVersion, true));
+			bmData->stats.lastMLogTruncationVersion = truncVersion;
+			TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
+			CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+		} catch (Error& e) {
+			TraceEvent("TruncateMutationLogsError").error(e); // skip and retry next time
+		}
+	}
+}
+
+ACTOR Future<Reference<BlobConnectionProvider>> initManifestStore(Reference<BlobManagerData> bmData) {
+	auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+	std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
+	return BlobConnectionProvider::newBlobConnectionProvider(url);
 }
 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
@@ -5568,31 +5599,25 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->enableManifestEncryption = config.encryptionAtRestMode.isEncryptionEnabled();
 
 	loop {
-		// Skip backup if no active blob ranges
-		bool activeRanges = false;
-		auto knownRanges = bmData->knownBlobRanges.intersectingRanges(normalKeys);
-		for (auto& it : knownRanges) {
-			if (it.cvalue()) {
-				activeRanges = true;
-				break;
+		try {
+			// Skip backup if no active blob ranges
+			bool shouldBackup = wait(shouldBackupManifest(bmData));
+			if (shouldBackup) {
+				if (bmData->manifestStore.isValid()) {
+					int64_t bytes = wait(dumpManifest(bmData->db,
+					                                  bmData->dbInfo,
+					                                  bmData->manifestStore,
+					                                  bmData->epoch,
+					                                  bmData->manifestDumperSeqNo,
+					                                  bmData->enableManifestEncryption));
+					bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
+					bmData->stats.manifestSizeInBytes += bytes;
+					bmData->stats.lastManifestDumpTs = now();
+					bmData->manifestDumperSeqNo++;
+				}
 			}
-		}
-		if (activeRanges && SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
-			if (bmData->manifestStore.isValid()) {
-				wait(maybeFlushAndTruncateMutationLogs(bmData));
-				int64_t bytes = wait(dumpManifest(bmData->db,
-				                                  bmData->dbInfo,
-				                                  bmData->manifestStore,
-				                                  bmData->epoch,
-				                                  bmData->manifestDumperSeqNo,
-				                                  bmData->enableManifestEncryption));
-				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
-				bmData->stats.manifestSizeInBytes += bytes;
-				bmData->stats.lastManifestDumpTs = now();
-				bmData->manifestDumperSeqNo++;
-			} else {
-				TraceEvent(SevError, "InvalidBlobManifestUrl").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
-			}
+		} catch (Error& e) {
+			TraceEvent("BackupManifestError").error(e);
 		}
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
@@ -5687,9 +5712,8 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
 		}
-		if (SERVER_KNOBS->BLOB_MANIFEST_BACKUP && !self->isFullRestoreMode) {
-			self->addActor.send(backupManifest(self));
-		}
+		self->addActor.send(backupManifest(self));
+		self->addActor.send(truncateMutationLogs(self));
 
 		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
