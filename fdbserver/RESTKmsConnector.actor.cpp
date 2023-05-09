@@ -772,7 +772,9 @@ Future<T> kmsRequestImpl(
     Reference<RESTKmsConnectorCtx> ctx,
     std::string urlSuffix,
     StringRef requestBodyRef,
-    std::function<T(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFunc) {
+    std::function<T(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFunc,
+    std::function<Future<Void>(Reference<RESTKmsConnectorCtx>, RefreshPersistedUrls)> discoverKmsUrlsFn,
+    Optional<std::function<Reference<HTTP::IncomingResponse>()>> doPostFn) {
 	state UID requestID = deterministicRandom()->randomUniqueID();
 
 	// Follow 2-phase scheme:
@@ -782,10 +784,11 @@ Future<T> kmsRequestImpl(
 	//          repeat phase-1.
 
 	state int pass = 1;
-	for (; pass <= 2; pass++) {
+	loop {
 		state std::stack<std::shared_ptr<KmsUrlCtx>> tempStack;
 
 		// Iterate over Kms URLs
+		state Optional<Error> err;
 		while (!ctx->kmsUrlHeap.empty()) {
 			state std::shared_ptr<KmsUrlCtx> curUrl = ctx->kmsUrlHeap.top();
 			ctx->kmsUrlHeap.pop();
@@ -793,7 +796,6 @@ Future<T> kmsRequestImpl(
 
 			try {
 				std::string kmsEncryptionFullUrl = getFullRequestUrl(ctx, curUrl->url, urlSuffix);
-
 				if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 					TraceEvent("RESTKmsRequestImpl", ctx->uid)
 					    .detail("Pass", pass)
@@ -805,8 +807,15 @@ Future<T> kmsRequestImpl(
 				headers["Content-type"] = "application/json";
 				headers["Accept"] = "application/json";
 
-				Reference<HTTP::IncomingResponse> resp =
-				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
+				state Reference<HTTP::IncomingResponse> resp;
+
+				if (g_network && g_network->isSimulated() && doPostFn.present()) {
+					resp = (doPostFn.get())();
+				} else {
+					Reference<HTTP::IncomingResponse> resp_ =
+					    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
+					resp = resp_;
+				}
 				curUrl->nRequests++;
 
 				try {
@@ -817,31 +826,30 @@ Future<T> kmsRequestImpl(
 						ctx->kmsUrlHeap.emplace(tempStack.top());
 						tempStack.pop();
 					}
-
 					return parsedResp;
 				} catch (Error& e) {
 					TraceEvent(SevWarn, "KmsRequestRespParseFailure").error(e).detail("RequestID", requestID);
 					curUrl->nResponseParseFailures++;
+					err = e;
 					// attempt to do request from next KmsUrl
 				}
 			} catch (Error& e) {
 				curUrl->nFailedResponses++;
-				if (pass > 1 && isKmsNotReachable(e.code())) {
-					TraceEvent(SevDebug, "KmsRequestFailedUnreachable", ctx->uid)
-					    .error(e)
-					    .detail("RequestID", requestID);
-					throw e;
-				} else {
-					TraceEvent(SevDebug, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
-					// attempt to do request from next KmsUrl
-				}
+				err = e;
+				// attempt to do request from next KmsUrl
+				TraceEvent(SevDebug, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
 			}
 		}
 
-		if (pass == 1) {
-			// Re-discover KMS urls and re-attempt request using newer KMS URLs
-			wait(discoverKmsUrls(ctx, RefreshPersistedUrls::True));
+		// If this is the first pass or we are getting connection errors then re-discover KMS urls and re-attempt
+		// request using newer KMS URLs
+		// TODO: Do we need exponential backoff here?
+		if (pass == 1 || (err.present() && isKmsNotReachable(err.get().code()))) {
+			wait(discoverKmsUrlsFn(ctx, RefreshPersistedUrls::True));
+		} else {
+			break;
 		}
+		pass++;
 	}
 
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
@@ -862,10 +870,13 @@ ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ct
 		std::function<Standalone<VectorRef<EncryptCipherKeyDetailsRef>>(Reference<RESTKmsConnectorCtx>,
 		                                                                Reference<HTTP::IncomingResponse>)>
 		    f = &parseEncryptCipherResponse;
-		wait(store(
-		    reply.cipherKeyDetails,
-		    kmsRequestImpl(
-		        ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT, requestBodyRef, std::move(f))));
+		wait(store(reply.cipherKeyDetails,
+		           kmsRequestImpl(ctx,
+		                          SERVER_KNOBS->REST_KMS_CONNECTOR_GET_ENCRYPTION_KEYS_ENDPOINT,
+		                          requestBodyRef,
+		                          std::move(f),
+		                          discoverKmsUrls,
+		                          Optional<std::function<Reference<HTTP::IncomingResponse>()>>())));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent("RESTLookupEKsByKeyIdsFailed", ctx->uid).error(e);
@@ -949,7 +960,9 @@ ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx>
 		           kmsRequestImpl(ctx,
 		                          SERVER_KNOBS->REST_KMS_CONNECTOR_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT,
 		                          requestBodyRef,
-		                          std::move(f))));
+		                          std::move(f),
+		                          discoverKmsUrls,
+		                          Optional<std::function<Reference<HTTP::IncomingResponse>()>>())));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent("RESTLookupEKsByDomainIdsFailed", ctx->uid).error(e);
@@ -1029,10 +1042,13 @@ ACTOR Future<Void> fetchBlobMetadata(Reference<RESTKmsConnectorCtx> ctx, KmsConn
 		std::function<Standalone<VectorRef<BlobMetadataDetailsRef>>(Reference<RESTKmsConnectorCtx>,
 		                                                            Reference<HTTP::IncomingResponse>)>
 		    f = &parseBlobMetadataResponse;
-		wait(
-		    store(reply.metadataDetails,
-		          kmsRequestImpl(
-		              ctx, SERVER_KNOBS->REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT, requestBodyRef, std::move(f))));
+		wait(store(reply.metadataDetails,
+		           kmsRequestImpl(ctx,
+		                          SERVER_KNOBS->REST_KMS_CONNECTOR_GET_BLOB_METADATA_ENDPOINT,
+		                          requestBodyRef,
+		                          std::move(f),
+		                          discoverKmsUrls,
+		                          Optional<std::function<Reference<HTTP::IncomingResponse>()>>())));
 		req.reply.send(reply);
 	} catch (Error& e) {
 		TraceEvent("RESTLookupBlobMetadataFailed", ctx->uid).error(e);
@@ -1905,6 +1921,131 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 	return Void();
 }
 
+ACTOR Future<Void> testKmsRequestConnectionFailedThenSuccess() {
+	state std::function<bool(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, Reference<HTTP::IncomingResponse> resp) { return true; };
+	state std::function<Future<Void>(Reference<RESTKmsConnectorCtx>, RefreshPersistedUrls)> discoverKmsUrlsFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls persistUrls) {
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+		    return Void();
+	    };
+
+	state int callCount = 0;
+	state std::function<Reference<HTTP::IncomingResponse>()> doPostFn = [&]() {
+		callCount++;
+		// On the first three passes (1 pass per URL) we get connection errors but succeed on the fourth pass
+		if (callCount <= 6) {
+			Error e = deterministicRandom()->coinflip() ? timed_out() : connection_failed();
+			throw e;
+		}
+		return makeReference<HTTP::IncomingResponse>();
+	};
+
+	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+
+	bool resp = wait(kmsRequestImpl(ctx, "suffix", StringRef(), parseFn, discoverKmsUrlsFn, doPostFn));
+	ASSERT(resp);
+	ASSERT_EQ(callCount, 7);
+	return Void();
+}
+
+ACTOR Future<Void> testKmsRequestConnectionFailedThenErrorThrown() {
+	state std::function<bool(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, Reference<HTTP::IncomingResponse> resp) { return true; };
+	state std::function<Future<Void>(Reference<RESTKmsConnectorCtx>, RefreshPersistedUrls)> discoverKmsUrlsFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls persistUrls) {
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+		    return Void();
+	    };
+
+	state int callCount = 0;
+	state std::function<Reference<HTTP::IncomingResponse>()> doPostFn = [&]() {
+		callCount++;
+		// On the first three passes (1 pass per URL) we get connection errors then we throw
+		if (callCount <= 6) {
+			Error e = deterministicRandom()->coinflip() ? timed_out() : connection_failed();
+			throw e;
+		} else {
+			throw operation_failed();
+		}
+		return makeReference<HTTP::IncomingResponse>();
+	};
+
+	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+
+	try {
+		wait(success(kmsRequestImpl(ctx, "suffix", StringRef(), parseFn, discoverKmsUrlsFn, doPostFn)));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_encrypt_keys_fetch_failed);
+		ASSERT_EQ(callCount, 8);
+	}
+	return Void();
+}
+
+ACTOR Future<Void> testKmsRequestSuccess() {
+	state std::function<bool(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, Reference<HTTP::IncomingResponse> resp) { return true; };
+	state std::function<Future<Void>(Reference<RESTKmsConnectorCtx>, RefreshPersistedUrls)> discoverKmsUrlsFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls persistUrls) {
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+		    return Void();
+	    };
+
+	state int callCount = 0;
+	state std::function<Reference<HTTP::IncomingResponse>()> doPostFn = [&]() {
+		callCount++;
+		return makeReference<HTTP::IncomingResponse>();
+	};
+
+	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+
+	bool res = wait(kmsRequestImpl(ctx, "suffix", StringRef(), parseFn, discoverKmsUrlsFn, doPostFn));
+	ASSERT(res);
+	ASSERT_EQ(callCount, 1);
+	return Void();
+}
+
+ACTOR Future<Void> testKmsRequestFailed() {
+	state std::function<bool(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, Reference<HTTP::IncomingResponse> resp) { return true; };
+	state std::function<Future<Void>(Reference<RESTKmsConnectorCtx>, RefreshPersistedUrls)> discoverKmsUrlsFn =
+	    [&](Reference<RESTKmsConnectorCtx> ctx, RefreshPersistedUrls persistUrls) {
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+		    ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+		    return Void();
+	    };
+
+	state int callCount = 0;
+	state std::function<Reference<HTTP::IncomingResponse>()> doPostFn = [&]() {
+		callCount++;
+		throw operation_failed();
+		return makeReference<HTTP::IncomingResponse>();
+	};
+
+	state Reference<RESTKmsConnectorCtx> ctx = makeReference<RESTKmsConnectorCtx>();
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url1.com"));
+	ctx->kmsUrlHeap.emplace(std::make_shared<KmsUrlCtx>("http:://www.url2.com"));
+
+	try {
+		wait(success(kmsRequestImpl(ctx, "suffix", StringRef(), parseFn, discoverKmsUrlsFn, doPostFn)));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_encrypt_keys_fetch_failed);
+		ASSERT_EQ(callCount, 4);
+	}
+	return Void();
+}
+
 void setKnobs() {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	g_knobs.setKnob("rest_kms_current_cipher_request_version", KnobValueRef::create(int{ 1 }));
@@ -2001,5 +2142,13 @@ TEST_CASE("/KmsConnector/REST/GetEncryptionKeyOps") {
 		testGetEncryptKeysByDomainIdsRequestBody(ctx, arena);
 		testGetBlobMetadataRequestBody(ctx);
 	}
+	return Void();
+}
+
+TEST_CASE("/KmsConnector/REST/KmsRequest") {
+	wait(testKmsRequestSuccess());
+	wait(testKmsRequestFailed());
+	wait(testKmsRequestConnectionFailedThenSuccess());
+	wait(testKmsRequestConnectionFailedThenErrorThrown());
 	return Void();
 }
