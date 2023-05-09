@@ -55,7 +55,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 	if (tokens.size() == 2) {
 		ASSERT(type == AuditType::CheckMigrationStatus);
 		std::string res = wait(checkMigrationProgress(cx));
-		printf(res.c_str());
+		printf("\n%s", res.c_str());
 	} else {
 		if (tokencmp(tokens[2], "id")) {
 			if (tokens.size() != 4) {
