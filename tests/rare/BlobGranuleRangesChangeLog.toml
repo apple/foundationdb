@@ -8,8 +8,6 @@ tenantModes = ['optional', 'required']
 
 [[knobs]]
 bg_use_blob_range_change_log = true
-storage_fetch_keys_delay=0.0
-worker_start_storage_delay=0.0
 
 [[test]]
 testTitle = 'BlobGranuleRanges'

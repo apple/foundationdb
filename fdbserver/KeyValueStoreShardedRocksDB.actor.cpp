@@ -771,7 +771,7 @@ struct PhysicalShard {
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
-	uint64_t numRangeDeletions;
+	uint64_t numRangeDeletions = 0;
 	double deleteTimeSec;
 };
 
