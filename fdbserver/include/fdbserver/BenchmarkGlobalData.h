@@ -1,5 +1,5 @@
 /*
- * GlobalData.cpp
+ * BenchmarkGlobalData.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,27 +18,42 @@
  * limitations under the License.
  */
 
+#ifndef __FDBBENCH_GLOBALDATA_H__
+#define __FDBBENCH_GLOBALDATA_H__
+
+#pragma once
+
 #include "fdbclient/FDBTypes.h"
-#include "flow/IRandom.h"
 
-static constexpr size_t globalDataSize = 1 << 20;
-static uint8_t* globalData = nullptr;
+KeyValueRef getKV(size_t keySize, size_t valueSize);
+KeyRef getKey(size_t keySize);
 
-static inline void initGlobalData() {
-	if (!globalData) {
-		globalData = static_cast<uint8_t*>(allocateFast(globalDataSize));
+// Pre-generate a vector of T using a lambda then return them
+// via next() one by one with wrap-around
+template <typename T>
+struct InputGenerator {
+	InputGenerator() {}
+
+	template <typename Fn>
+	InputGenerator(int n, Fn genFunc) {
+		ASSERT(n > 0);
+		data.reserve(n);
+		for (int i = 0; i < n; ++i) {
+			data.push_back(genFunc());
+		}
+		lastIndex = -1;
 	}
-	deterministicRandom()->randomBytes(globalData, globalDataSize);
-}
 
-KeyValueRef getKV(size_t keySize, size_t valueSize) {
-	initGlobalData();
-	ASSERT(keySize + valueSize <= globalDataSize);
-	return KeyValueRef(KeyRef(globalData, keySize), ValueRef(globalData + keySize, valueSize));
-}
+	const T& next() {
+		if (++lastIndex == data.size()) {
+			lastIndex = 0;
+		}
 
-KeyRef getKey(size_t keySize) {
-	initGlobalData();
-	ASSERT(keySize);
-	return KeyRef(globalData, keySize);
-}
+		return data[lastIndex];
+	}
+
+	std::vector<T> data;
+	int lastIndex;
+};
+
+#endif

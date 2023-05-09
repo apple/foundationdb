@@ -23,9 +23,9 @@
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/MutationList.h"
+#include "fdbserver/BenchmarkGlobalData.h"
 #include "flow/Arena.h"
 #include "flow/FastAlloc.h"
-#include "flowbench/GlobalData.h"
 
 void populate(Standalone<VectorRef<MutationRef>>& mutations, size_t items, size_t size, KeyRef key, ValueRef value) {
 	mutations = Standalone<VectorRef<MutationRef>>{};
