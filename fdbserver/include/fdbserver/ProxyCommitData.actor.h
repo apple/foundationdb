@@ -62,9 +62,9 @@ struct ProxyStats {
 	Counter mutations;
 	Counter conflictRanges;
 	Counter keyServerLocationIn, keyServerLocationOut, keyServerLocationErrors;
-	Counter tenantIdRequestIn;
-	Counter tenantIdRequestOut;
-	Counter tenantIdRequestErrors;
+	Counter tenantLookupRequestIn;
+	Counter tenantLookupRequestOut;
+	Counter tenantLookupRequestErrors;
 	Counter blobGranuleLocationIn, blobGranuleLocationOut, blobGranuleLocationErrors;
 	Counter txnExpensiveClearCostEstCount;
 	Version lastCommitVersionAssigned;
@@ -130,9 +130,10 @@ struct ProxyStats {
 	    commitBatchIn("CommitBatchIn", cc), commitBatchOut("CommitBatchOut", cc), mutationBytes("MutationBytes", cc),
 	    mutations("Mutations", cc), conflictRanges("ConflictRanges", cc),
 	    keyServerLocationIn("KeyServerLocationIn", cc), keyServerLocationOut("KeyServerLocationOut", cc),
-	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantIdRequestIn("TenantIdRequestIn", cc),
-	    tenantIdRequestOut("TenantIdRequestOut", cc), tenantIdRequestErrors("TenantIdRequestErrors", cc),
-	    blobGranuleLocationIn("BlobGranuleLocationIn", cc), blobGranuleLocationOut("BlobGranuleLocationOut", cc),
+	    keyServerLocationErrors("KeyServerLocationErrors", cc), tenantLookupRequestIn("TenantLookupRequestIn", cc),
+	    tenantLookupRequestOut("TenantLookupRequestOut", cc),
+	    tenantLookupRequestErrors("TenantLookupRequestErrors", cc), blobGranuleLocationIn("BlobGranuleLocationIn", cc),
+	    blobGranuleLocationOut("BlobGranuleLocationOut", cc),
 	    blobGranuleLocationErrors("BlobGranuleLocationErrors", cc),
 	    txnExpensiveClearCostEstCount("ExpensiveClearCostEstCount", cc), lastCommitVersionAssigned(0),
 	    commitLatencySample("CommitLatencyMetrics",
@@ -190,7 +191,7 @@ struct ExpectedIdempotencyIdCountForKey {
 struct ProxyCommitData {
 	UID dbgid;
 	int64_t commitBatchesMemBytesCount;
-	std::unordered_map<TenantName, int64_t> tenantNameIndex;
+	std::unordered_map<TenantName, TenantLookupInfo> tenantNameIndex;
 	std::map<int64_t, TenantName> tenantMap;
 	std::set<int64_t> lockedTenants;
 	std::unordered_set<int64_t> tenantsOverStorageQuota;

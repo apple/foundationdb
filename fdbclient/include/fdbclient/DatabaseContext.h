@@ -473,7 +473,7 @@ public:
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
@@ -482,7 +482,9 @@ public:
 		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
-	std::map<uint32_t, VersionBatcher> versionBatcher;
+
+	using VersionBatcherIndex = std::pair<uint32_t, Optional<TenantGroupName>>;
+	std::map<VersionBatcherIndex, VersionBatcher> versionBatcher;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
@@ -729,7 +731,7 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
-	Future<int64_t> lookupTenant(TenantName tenant);
+	Future<TenantLookupInfo> lookupTenant(TenantName tenant);
 
 	// Get client-side status information as a JSON string with the following schema:
 	// { "Healthy" : <overall health status: true or false>,

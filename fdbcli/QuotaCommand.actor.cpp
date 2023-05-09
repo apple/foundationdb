@@ -72,7 +72,7 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 				Optional<ThrottleApi::TagQuotaValue> quota =
-				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::fromValue(val); });
+				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(val)); });
 
 				if (!quota.present()) {
 					fmt::print("<empty>\n");
@@ -101,7 +101,7 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
 				ThrottleApi::TagQuotaValue quota;
 				if (v.present()) {
-					quota = ThrottleApi::TagQuotaValue::fromValue(v.get());
+					quota = ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(v.get()));
 				}
 				// Internally, costs are stored in terms of pages, but in the API,
 				// costs are specified in terms of bytes

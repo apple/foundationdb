@@ -49,6 +49,15 @@ private:
 	// the case with the current metacluster simulation workloads
 	static inline const int metaclusterMaxTenants = 10e6;
 
+	void validateQuotas() const {
+		for (auto const& [tenantGroup, quota] : tenantData.throughputQuotas) {
+			ASSERT(tenantData.tenantGroupIndex.count(tenantGroup));
+		}
+		for (auto const& [tenantGroup, quota] : tenantData.storageQuotas) {
+			ASSERT(tenantData.tenantGroupIndex.count(tenantGroup));
+		}
+	}
+
 	void validateTenantMetadataImpl() {
 		ASSERT_EQ(tenantData.tenantMap.size(), tenantData.tenantCount);
 
@@ -77,6 +86,8 @@ private:
 			ASSERT_NE(tenantMapEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED,
 			          tenantMapEntry.tenantLockId.present());
 		}
+
+		validateQuotas();
 	}
 
 	// Specialization for TenantMapEntry, used on data and standalone clusters
