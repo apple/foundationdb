@@ -4,6 +4,7 @@ blobGranulesEnabled = true
 allowDefaultTenant = false
 injectTargetedSSRestart = true
 injectSSDelay = true
+tenantModes = ['optional', 'required']
 
 [[knobs]]
 bg_use_blob_range_change_log = true
