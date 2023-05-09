@@ -60,8 +60,8 @@ ACTOR Future<bool> printBlobHistory(Database db,
 			wait(tr.onError(e));
 		}
 	}
-	if (tenantEntry.present()) {
-		activeGranule = activeGranule.withPrefix(tenantEntry.get().prefix);
+	if (tenant.present()) {
+		activeGranule = activeGranule.withPrefix(tenant.get()->prefix());
 	}
 
 	fmt::print("Active granule: [{0} - {1})\n", activeGranule.begin.printable(), activeGranule.end.printable());
