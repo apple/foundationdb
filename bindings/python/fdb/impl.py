@@ -195,6 +195,15 @@ def _error_predicate(predicate, error_code):
     return bool(_capi.fdb_error_predicate(predicate, error_code))
 
 
+# define generated types for linters
+class StreamingMode:
+    pass
+
+
+class ConflictRangeType:
+    pass
+
+
 def make_enum(scope):
     _dict = getattr(_opts, scope)
 
