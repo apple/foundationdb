@@ -157,7 +157,6 @@ class ClientConfigTest:
         self.test_cluster_file = self.test_dir.joinpath(
             "{}.cluster".format(random_alphanum_string(16))
         )
-        port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
@@ -612,10 +611,10 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
-        prev_ver_trace = self.find_trace_file(
-            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
-        )
         # disable because older version does not guarantee trace flush before network::stop() returns
+        # prev_ver_trace = self.find_trace_file(
+        #     with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        # )
         # self.find_and_check_event(prev_ver_trace, "ClientStart", ["Machine"], [])
 
     def test_default_config_error_case(self):
@@ -771,7 +770,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-        Unit tests for running FDB client with different configurations. 
+        Unit tests for running FDB client with different configurations.
         Also accepts python unit tests command line arguments.
         """,
     )
