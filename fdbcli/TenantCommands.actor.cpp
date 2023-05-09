@@ -191,13 +191,9 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 
 	if (!configuration.present()) {
 		return false;
-	} else if (ignoreCapacityLimit) {
-		if (!configuration.get().contains("assigned_cluster"_sr) && !configuration.get().contains("tenant_group"_sr)) {
-			fmt::print(stderr,
-			           "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set or when the "
-			           "tenant belongs to an existing group.\n");
-			return false;
-		}
+	} else if (ignoreCapacityLimit && !configuration.get().contains("assigned_cluster"_sr)) {
+		fmt::print(stderr, "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set.\n");
+		return false;
 	}
 
 	loop {

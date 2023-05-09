@@ -478,7 +478,7 @@ def create_tenants_test(logger, cluster_files):
     )
     assert (
         err
-        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set or when the tenant belongs to an existing group."
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
     )
 
     output, err = create_tenant(
@@ -520,10 +520,13 @@ def create_tenants_test(logger, cluster_files):
         assigned_cluster=None,
         ignore_capacity_limit=True,
     )
-    assert len(err) == 0
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
 
     all_tenants = get_tenant_names(cluster_files[0])
-    assert all_tenants == ["tenant1", "tenant11", "tenant12", "tenant13"]
+    assert all_tenants == ["tenant1", "tenant11", "tenant12"]
 
     clear_all_tenants(cluster_files[0])
     cleanup_after_test(cluster_files[0], data_cluster_names)

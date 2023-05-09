@@ -1092,18 +1092,15 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
+				bool tenantGroupClusterMismatch = false;
 				if (tenantGroup.present()) {
 					auto itr = self->tenantGroups.find(tenantGroup.get());
-					if (itr != self->tenantGroups.end()) {
-						ASSERT(itr->second->cluster != tenantMapEntry.assignedCluster);
-					} else {
-						ASSERT(assignClusterAutomatically);
-						ASSERT(ignoreCapacityLimit);
+					if (itr != self->tenantGroups.end() && itr->second->cluster != tenantMapEntry.assignedCluster) {
+						tenantGroupClusterMismatch = true;
 					}
-				} else {
-					ASSERT(assignClusterAutomatically);
-					ASSERT(ignoreCapacityLimit);
 				}
+				bool invalidIgnoreCapacityLimit = assignClusterAutomatically && ignoreCapacityLimit;
+				ASSERT(tenantGroupClusterMismatch || invalidIgnoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);

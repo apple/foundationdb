@@ -149,9 +149,6 @@ struct CreateTenantImpl {
 					throw invalid_tenant_configuration();
 				}
 				return std::make_pair(groupEntry.get().assignedCluster, true);
-			} else if (self->assignClusterAutomatically && self->ignoreCapacityLimit) {
-				TraceEvent("MetaclusterCreateTenantNonExistingGroupIgnoreCapacityAutoAssign").log();
-				throw invalid_tenant_configuration();
 			}
 		}
 
@@ -330,6 +327,10 @@ struct CreateTenantImpl {
 
 	ACTOR static Future<Void> run(CreateTenantImpl* self) {
 		if (!self->tenantEntry.assignedCluster.empty() && self->assignClusterAutomatically) {
+			throw invalid_tenant_configuration();
+		}
+		if (self->assignClusterAutomatically && self->ignoreCapacityLimit) {
+			TraceEvent("MetaclusterCreateTenantIgnoreCapacityAutoAssign").log();
 			throw invalid_tenant_configuration();
 		}
 		if (self->tenantEntry.tenantName.startsWith("\xff"_sr)) {
