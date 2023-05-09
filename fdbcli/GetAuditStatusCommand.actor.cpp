@@ -56,26 +56,28 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		ASSERT(type == AuditType::CheckMigrationStatus);
 		std::string res = wait(checkMigrationProgress(cx));
 		printf("\n%s", res.c_str());
-	} else {
-		if (tokencmp(tokens[2], "id")) {
-			if (tokens.size() != 4) {
-				printUsage(tokens[0]);
-				return false;
-			}
-			const UID id = UID::fromString(tokens[3].toString());
-			AuditStorageState res = wait(getAuditState(cx, type, id));
-			printf("Audit result is:\n%s", res.toStringForCLI().c_str());
-		} else if (tokencmp(tokens[2], "recent")) {
-			int count = CLIENT_KNOBS->TOO_MANY;
-			if (tokens.size() == 4) {
-				count = std::stoi(tokens[3].toString());
-			}
-			std::vector<AuditStorageState> res = wait(getLatestAuditStates(cx, type, count));
-			for (const auto& it : res) {
-				printf("Audit result is:\n%s\n", it.toString().c_str());
-			}
+	} else if (tokencmp(tokens[2], "id")) {
+		if (tokens.size() != 4) {
+			printUsage(tokens[0]);
+			return false;
 		}
+		const UID id = UID::fromString(tokens[3].toString());
+		AuditStorageState res = wait(getAuditState(cx, type, id));
+		printf("Audit result is:\n%s", res.toStringForCLI().c_str());
+	} else if (tokencmp(tokens[2], "recent")) {
+		int count = CLIENT_KNOBS->TOO_MANY;
+		if (tokens.size() == 4) {
+			count = std::stoi(tokens[3].toString());
+		}
+		std::vector<AuditStorageState> res = wait(getLatestAuditStates(cx, type, count));
+		for (const auto& it : res) {
+			printf("Audit result is:\n%s\n", it.toString().c_str());
+		}
+	} else {
+		printUsage(tokens[0]);
+		return false;
 	}
+
 	return true;
 }
 

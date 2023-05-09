@@ -247,8 +247,6 @@ ACTOR Future<std::string> checkMigrationProgress(Database cx) {
 				RangeResult shards = wait(
 				    krmGetRanges(tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
 
-				// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest
-				// servers from serverKeys
 				for (int i = 0; i < shards.size() - 1; ++i) {
 					std::vector<UID> src;
 					std::vector<UID> dest;
