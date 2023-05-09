@@ -490,15 +490,17 @@ public:
 		}
 
 		state std::vector<Key> customBoundaries;
-		for (auto& it : self->initData->customReplication->ranges()) {
-			customBoundaries.push_back(it->range().begin);
-			TraceEvent(SevDebug, "DDInitCustomReplicas", self->ddId)
-			    .detail("Range", it->range())
-			    .detail("Replication", it->value());
+		for (auto it : self->initData->userRangeConfig->ranges()) {
+			auto range = it->range();
+			customBoundaries.push_back(range.begin);
+			TraceEvent(SevDebug, "DDInitCustomRangeConfig", self->ddId)
+			    .detail("Range", KeyRangeRef(range.begin, range.end))
+			    .detail("Config", it->value());
 		}
 
 		state int shard = 0;
 		state int customBoundary = 0;
+		state int overreplicatedCount = 0;
 		for (; shard < self->initData->shards.size() - 1; shard++) {
 			const DDShardInfo& iShard = self->initData->shards[shard];
 			std::vector<KeyRangeRef> ranges;
@@ -525,13 +527,19 @@ public:
 				auto& keys = ranges[r];
 				self->shardsAffectedByTeamFailure->defineShard(keys);
 
-				auto customRange = self->initData->customReplication->rangeContaining(keys.begin);
-				int customReplicas = std::max(self->configuration.storageTeamSize, customRange.value());
-				ASSERT_WE_THINK(customRange.range().contains(keys));
+				auto it = self->initData->userRangeConfig->rangeContaining(keys.begin);
+				int customReplicas =
+				    std::max(self->configuration.storageTeamSize, it->value().replicationFactor.orDefault(0));
+				ASSERT_WE_THINK(KeyRangeRef(it->range().begin, it->range().end).contains(keys));
 
 				bool unhealthy = iShard.primarySrc.size() != customReplicas;
 				if (!unhealthy && self->configuration.usableRegions > 1) {
 					unhealthy = iShard.remoteSrc.size() != customReplicas;
+				}
+				if (!unhealthy && iShard.primarySrc.size() > self->configuration.storageTeamSize) {
+					if (++overreplicatedCount > SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+						unhealthy = true;
+					}
 				}
 
 				if (traceShard) {
@@ -545,7 +553,8 @@ public:
 					    .detail("DestID", iShard.destId)
 					    .detail("CustomReplicas", customReplicas)
 					    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-					    .detail("Unhealthy", unhealthy);
+					    .detail("Unhealthy", unhealthy)
+					    .detail("Overreplicated", overreplicatedCount);
 				}
 
 				self->shardsAffectedByTeamFailure->moveShard(keys, teams);
@@ -707,6 +716,21 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 	state Reference<DDTeamCollection> remoteTeamCollection;
 	state bool trackerCancelled;
 
+	// Start watching for changes before reading the config in init() below
+	state Promise<Version> configChangeWatching;
+	state Future<Void> onConfigChange =
+	    map(DDConfiguration().trigger.onChange(SystemDBWriteLockedNow(cx.getReference()), {}, configChangeWatching),
+	        [](Version v) {
+		        CODE_PROBE(true, "DataDistribution change detected");
+		        TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
+		        throw dd_config_changed();
+		        return Void();
+	        });
+
+	// Make sure that the watcher has established a baseline before init() below so the watcher will
+	// see any changes that occur after init() has read the config state.
+	wait(success(configChangeWatching.getFuture()));
+
 	loop {
 		trackerCancelled = false;
 		// whether all initial shard are tracked
@@ -748,6 +772,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
+			actors.push_back(onConfigChange);
+
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
 				replicaSize = 2 * self->configuration.storageTeamSize;
@@ -932,7 +958,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				wait(self->removeKeysFromFailedServer(removeFailedServer.getFuture().get(), teamForDroppedRange));
 				wait(self->removeStorageServer(removeFailedServer.getFuture().get()));
 			} else {
-				if (err.code() != error_code_movekeys_conflict) {
+				if (err.code() != error_code_movekeys_conflict && err.code() != error_code_dd_config_changed) {
 					throw err;
 				}
 
@@ -956,6 +982,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_movekeys_conflict);
 		s.insert(error_code_data_move_cancelled);
 		s.insert(error_code_data_move_dest_team_not_found);
+		s.insert(error_code_dd_config_changed);
 	}
 	return s;
 }

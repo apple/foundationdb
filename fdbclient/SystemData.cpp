@@ -35,6 +35,24 @@ const KeyRangeRef allKeys = KeyRangeRef(normalKeys.begin, systemKeys.end);
 const KeyRef afterAllKeys = "\xff\xff\x00"_sr;
 const KeyRangeRef specialKeys = KeyRangeRef("\xff\xff"_sr, "\xff\xff\xff"_sr);
 
+SystemKey::SystemKey(Key const& k) : Key(k) {
+	// In simulation, if k is not in the known key set then make sure no known key is a prefix of it, then add it to the
+	// known set.
+	if (g_network->isSimulated()) {
+		static std::unordered_set<Key> knownKeys;
+
+		if (!knownKeys.contains(k)) {
+			for (auto& known : knownKeys) {
+				if (k.startsWith(known) || known.startsWith(k)) {
+					TraceEvent(SevError, "SystemKeyPrefixConflict").detail("NewKey", k).detail("ExistingKey", known);
+					UNSTOPPABLE_ASSERT(false);
+				}
+			}
+			knownKeys.insert(k);
+		}
+	}
+}
+
 // keyServersKeys.contains(k) iff k.startsWith(keyServersPrefix)
 const KeyRangeRef keyServersKeys("\xff/keyServers/"_sr, "\xff/keyServers0"_sr);
 const KeyRef keyServersPrefix = keyServersKeys.begin;

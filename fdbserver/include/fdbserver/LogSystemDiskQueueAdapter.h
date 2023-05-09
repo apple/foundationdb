@@ -97,10 +97,6 @@ public:
 	Future<bool> initializeRecovery(location recoverAt) override { return false; }
 	Future<Standalone<StringRef>> readNext(int bytes) override;
 	IDiskQueue::location getNextReadLocation() const override;
-	IDiskQueue::location getNextCommitLocation() const override {
-		ASSERT(false);
-		throw internal_error();
-	}
 	IDiskQueue::location getNextPushLocation() const override {
 		ASSERT(false);
 		throw internal_error();

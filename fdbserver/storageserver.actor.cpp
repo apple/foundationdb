@@ -56,7 +56,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Notified.h"
@@ -4668,6 +4668,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			GetKeyValuesRequest req;
 			req.begin = firstGreaterOrEqual(range.begin);
 			req.end = firstGreaterOrEqual(range.end);
+			req.arena.dependsOn(range.arena());
 			req.limit = limit;
 			req.limitBytes = limitBytes;
 			req.version = version;
@@ -4677,6 +4678,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			GetKeyValuesRequest localReq;
 			localReq.begin = firstGreaterOrEqual(range.begin);
 			localReq.end = firstGreaterOrEqual(range.end);
+			localReq.arena.dependsOn(range.arena());
 			localReq.limit = limit;
 			localReq.limitBytes = limitBytes;
 			localReq.version = version;
@@ -4714,9 +4716,9 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				if (!range.contains(remoteKV.key) || !range.contains(localKV.key)) {
 					TraceEvent(SevWarn, "SSValidateRangeKeyOutOfRange", data->thisServerID)
 					    .detail("Range", range)
-					    .detail("RemoteServer", remoteServer.toString().c_str())
-					    .detail("LocalKey", Traceable<StringRef>::toString(localKV.key).c_str())
-					    .detail("RemoteKey", Traceable<StringRef>::toString(remoteKV.key).c_str());
+					    .detail("RemoteServer", remoteServer.toString())
+					    .detail("LocalKey", localKV.key)
+					    .detail("RemoteKey", remoteKV.key);
 					throw wrong_shard_server();
 				}
 

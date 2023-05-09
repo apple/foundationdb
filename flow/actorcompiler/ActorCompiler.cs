@@ -1047,7 +1047,7 @@ namespace actorcompiler
             bool useContinuation = WillContinue(stmt.ifBody) || WillContinue(stmt.elseBody);
 
             LineNumber(cx.target, stmt.FirstSourceLine);
-            cx.target.WriteLine("if ({0})", stmt.expression);
+            cx.target.WriteLine("if {1}({0})", stmt.expression, stmt.constexpr ? "constexpr " : "");
             cx.target.WriteLine("{");
             cx.target.Indent(+1);
             Function ifTarget = Compile(AsCodeBlock(stmt.ifBody), cx, useContinuation).target;

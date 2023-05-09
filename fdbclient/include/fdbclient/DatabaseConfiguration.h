@@ -269,6 +269,7 @@ struct DatabaseConfiguration {
 	std::set<AddressExclusion> getExcludedServers() const;
 	std::set<std::string> getExcludedLocalities() const;
 
+	// report auto value or configured value
 	int32_t getDesiredCommitProxies() const {
 		if (commitProxyCount == -1)
 			return autoCommitProxyCount;

@@ -1188,7 +1188,8 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 	if (g_network->isSimulated()) {
 		int i = 0;
 		int protectedCount = 0;
-		while ((protectedCount < ((desiredCoordinators.size() / 2) + 1)) && (i < desiredCoordinators.size())) {
+		int minimumCoordinators = (desiredCoordinators.size() / 2) + 1;
+		while (protectedCount < minimumCoordinators && i < desiredCoordinators.size()) {
 			auto process = g_simulator->getProcessByAddress(desiredCoordinators[i]);
 			auto addresses = process->addresses;
 
@@ -1204,6 +1205,15 @@ ACTOR Future<Optional<CoordinatorsResult>> changeQuorumChecker(Transaction* tr,
 			TraceEvent("ProtectCoordinator").detail("Address", desiredCoordinators[i]).backtrace();
 			protectedCount++;
 			i++;
+		}
+
+		if (protectedCount < minimumCoordinators) {
+			TraceEvent("NotEnoughReliableCoordinators")
+			    .detail("NumReliable", protectedCount)
+			    .detail("MinimumRequired", minimumCoordinators)
+			    .detail("ConnectionString", conn->toString());
+
+			return CoordinatorsResult::COORDINATOR_UNREACHABLE;
 		}
 	}
 
