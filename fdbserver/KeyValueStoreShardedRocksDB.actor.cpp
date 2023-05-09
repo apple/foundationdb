@@ -4320,9 +4320,11 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
 	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
 	state int i = 0;
+	state std::string key1;
+	state std::string key2;
 	for (; i < deleteCount; ++i) {
-		state std::string key1 = format("\xffprefix/%d", i);
-		state std::string key2 = format("\xffprefix/%d", i + 1);
+		key1 = format("\xffprefix/%d", i);
+		key2 = format("\xffprefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
@@ -4345,6 +4347,7 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearSysKey") {
 
 	std::cout << "Restarted.\n";
 	i = 0;
+
 	for (; i < deleteCount; ++i) {
 		key1 = format("\xffprefix/%d", i);
 		key2 = format("\xffprefix/%d", i + 1);
@@ -4378,9 +4381,11 @@ TEST_CASE("perf/ShardedRocksDB/RangeClearUserKey") {
 	wait(kvStore->addRange(prefixRange(shardPrefix), "shard-1"));
 	kvStore->persistRangeMapping(prefixRange(shardPrefix), true);
 	state int i = 0;
+	state std::string key1;
+	state std::string key2;
 	for (; i < deleteCount; ++i) {
-		state std::string key1 = format("prefix/%d", i);
-		state std::string key2 = format("prefix/%d", i + 1);
+		key1 = format("prefix/%d", i);
+		key2 = format("prefix/%d", i + 1);
 
 		kvStore->set({ key2, std::to_string(i) });
 		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
