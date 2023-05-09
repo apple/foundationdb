@@ -42,7 +42,7 @@ def getOrValidateAddress(address):
             s.connect(("www.foundationdb.org", 80))
             return s.getsockname()[0]
         except Exception as e:
-            print("ERROR: Could not determine an address")
+            print("ERROR: Could not determine an address: %s" % e)
             exit(1)
     else:
         try:

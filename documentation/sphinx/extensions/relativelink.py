@@ -18,8 +18,6 @@
 # limitations under the License.
 #
 
-from sphinx.addnodes import toctree
-
 # This extension cruelly monkey patches sphinx.environment.BuildEnvironment so
 # that toctree entries can contain relative internal links, using the syntax
 # Name <relative://relative/path>
