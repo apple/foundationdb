@@ -54,12 +54,15 @@ public:
 			genDeltas(i);
 		}
 
-		fmt::print("key range: {} - {}\n", range.begin.printable(), range.end.printable());
-		fmt::print("start version: {}\n", version);
-		fmt::print("max value bytes: {}\n", maxValueSize);
-		fmt::print("version jump range: {} - {}\n", minVersionJump, maxVersionJump);
-		fmt::print("probability for update: {}\n", updateExistingKeysProb);
-		fmt::print("unseed: {}\n", randGen->randomUInt32());
+		// These print statements are commented out because they would show up
+		// in every benchmark run.
+		// FIXME: Reenable this print statements, just for this particular benchmark
+		// fmt::print("key range: {} - {}\n", range.begin.printable(), range.end.printable());
+		// fmt::print("start version: {}\n", version);
+		// fmt::print("max value bytes: {}\n", maxValueSize);
+		// fmt::print("version jump range: {} - {}\n", minVersionJump, maxVersionJump);
+		// fmt::print("probability for update: {}\n", updateExistingKeysProb);
+		// fmt::print("unseed: {}\n", randGen->randomUInt32());
 	}
 
 	KeyRange getRange() { return range; }

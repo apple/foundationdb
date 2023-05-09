@@ -1140,7 +1140,7 @@ ACTOR Future<Void> grvProxyServer(GrvProxyInterface proxy,
 		ASSERT(e.code() !=
 		       error_code_broken_promise); // all broken_promise should be transformed to the correct error code
 		CODE_PROBE(e.code() == error_code_master_failed, "GrvProxyServer master failed");
-		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed");
+		CODE_PROBE(e.code() == error_code_tlog_failed, "GrvProxyServer tlog failed", probe::decoration::rare);
 		if (e.code() != error_code_worker_removed && e.code() != error_code_tlog_stopped &&
 		    e.code() != error_code_tlog_failed && e.code() != error_code_coordinators_changed &&
 		    e.code() != error_code_coordinated_state_conflict && e.code() != error_code_new_coordinators_timed_out &&

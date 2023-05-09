@@ -126,7 +126,7 @@ int64_t getMaxShardSize(double dbSizeEstimate) {
 }
 
 bool ddLargeTeamEnabled() {
-	return SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
+	return SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS > 0 && !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA;
 }
 
 // Returns the shard size bounds as well as whether `keys` a read hot shard.
@@ -531,7 +531,8 @@ std::vector<RangeToSplit> findTenantShardBoundaries(KeyRangeMap<ShardTrackedData
 				result.emplace_back(shardContainingTenantStart, faultLines);
 			} else {
 				CODE_PROBE(true,
-				           "Shard that contains complete tenant key range not split since shard stats are unavailable");
+				           "Shard that contains complete tenant key range not split since shard stats are unavailable",
+				           probe::decoration::rare);
 			}
 		}
 	} else {

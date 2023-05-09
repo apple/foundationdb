@@ -31,7 +31,9 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <time.h>
+#include <thread>
 
+#include "benchmark/benchmark.h"
 #include <boost/algorithm/string.hpp>
 #include <boost/interprocess/managed_shared_memory.hpp>
 
@@ -118,7 +120,8 @@ enum {
 	OPT_METRICSPREFIX, OPT_LOGGROUP, OPT_LOCALITY, OPT_IO_TRUST_SECONDS, OPT_IO_TRUST_WARN_ONLY, OPT_FILESYSTEM, OPT_PROFILER_RSS_SIZE, OPT_KVFILE,
 	OPT_TRACE_FORMAT, OPT_WHITELIST_BINPATH, OPT_BLOB_CREDENTIAL_FILE, OPT_CONFIG_PATH, OPT_USE_TEST_CONFIG_DB, OPT_NO_CONFIG_DB, OPT_FAULT_INJECTION, OPT_PROFILER, OPT_PRINT_SIMTIME,
 	OPT_FLOW_PROCESS_NAME, OPT_FLOW_PROCESS_ENDPOINT, OPT_IP_TRUSTED_MASK, OPT_KMS_CONN_DISCOVERY_URL_FILE, OPT_KMS_CONNECTOR_TYPE, OPT_KMS_REST_ALLOW_NOT_SECURE_CONECTION, OPT_KMS_CONN_VALIDATION_TOKEN_DETAILS,
-	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION
+	OPT_KMS_CONN_GET_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT, OPT_NEW_CLUSTER_KEY, OPT_AUTHZ_PUBLIC_KEY_FILE, OPT_USE_FUTURE_PROTOCOL_VERSION,
+	OPT_BENCHMARK_FILTER,
 };
 
 CSimpleOpt::SOption g_rgOptions[] = {
@@ -223,6 +226,7 @@ CSimpleOpt::SOption g_rgOptions[] = {
 	{ OPT_KMS_CONN_GET_LATEST_ENCRYPTION_KEYS_ENDPOINT, "--kms-conn-get-latest-encryption-keys-endpoint", SO_REQ_SEP },
 	{ OPT_KMS_CONN_GET_BLOB_METADATA_ENDPOINT,   "--kms-conn-get-blob-metadata-endpoint",   SO_REQ_SEP },
 	{ OPT_USE_FUTURE_PROTOCOL_VERSION, 			 "--use-future-protocol-version",			SO_REQ_SEP },
+	{ OPT_BENCHMARK_FILTER, "--benchmark_filter", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -682,7 +686,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("-r ROLE, --role ROLE",
 		                 " Server role (valid options are fdbd, test, multitest,"
 		                 " simulation, networktestclient, networktestserver, restore"
-		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests)."
+		                 " consistencycheck, kvfileintegritycheck, kvfilegeneratesums, kvfiledump, unittests,"
+		                 " benchmark, skiplisttest, dsltest, versionedmaptest, createtemplatedb, kvfiledump,"
+		                 " flowprocess, changeclusterkey)."
 		                 " The default is `fdbd'.");
 #ifdef _WIN32
 		printOptionUsage("-n, --newconsole", " Create a new console.");
@@ -743,6 +749,9 @@ static void printUsage(const char* name, bool devhelp) {
 		printOptionUsage("--use-future-protocol-version [true,false]",
 		                 " Run the process with a simulated future protocol version."
 		                 " This option can be used testing purposes only!");
+		printOptionUsage("--benchmark_filter BENCHMARK_REGEX",
+		                 " Used by benchmark role, executes benchmarks whose names "
+		                 " contain the provided regex.");
 		printf("\n"
 		       "The 'kvfiledump' role dump all key-values from kvfile to stdout in binary format:\n"
 		       "{key length}{key binary}{value length}{value binary}, length is 4 bytes int\n"
@@ -1007,6 +1016,7 @@ void restoreRoleFilesHelper(std::string dirSrc, std::string dirToMove, std::stri
 
 namespace {
 enum class ServerRole {
+	Benchmark,
 	ChangeClusterKey,
 	ConsistencyCheck,
 	CreateTemplateDatabase,
@@ -1086,6 +1096,8 @@ struct CLIOptions {
 	Endpoint flowProcessEndpoint;
 	bool printSimTime = false;
 	IPAllowList allowList;
+
+	std::string benchmarkFilter;
 
 	static CLIOptions parseArgs(int argc, char* argv[]) {
 		CLIOptions opts;
@@ -1300,6 +1312,8 @@ private:
 					role = ServerRole::FlowProcess;
 				else if (!strcmp(sRole, "changeclusterkey"))
 					role = ServerRole::ChangeClusterKey;
+				else if (!strcmp(sRole, "benchmark"))
+					role = ServerRole::Benchmark;
 				else {
 					fprintf(stderr, "ERROR: Unknown role `%s'\n", sRole);
 					printHelpTeaser(argv[0]);
@@ -1746,6 +1760,10 @@ private:
 				}
 				break;
 			}
+			case OPT_BENCHMARK_FILTER: {
+				benchmarkFilter = args.OptionArg();
+				break;
+			}
 			}
 		}
 
@@ -1785,7 +1803,7 @@ private:
 		    });
 		if ((role != ServerRole::Simulation && role != ServerRole::CreateTemplateDatabase &&
 		     role != ServerRole::KVFileIntegrityCheck && role != ServerRole::KVFileGenerateIOLogChecksums &&
-		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests) ||
+		     role != ServerRole::KVFileDump && role != ServerRole::UnitTests && role != ServerRole::Benchmark) ||
 		    autoPublicAddress) {
 
 			if (seedSpecified && !fileExists(connFile)) {
@@ -2439,6 +2457,15 @@ int main(int argc, char* argv[]) {
 			Key oldClusterKey = opts.connectionFile->getConnectionString().clusterKey();
 			f = stopAfter(coordChangeClusterKey(opts.dataFolder, newClusterKey, oldClusterKey));
 			g_network->run();
+		} else if (role == ServerRole::Benchmark) {
+			Promise<Void> benchmarksDone;
+			std::thread benchmarkThread([benchmarksDone, benchmarkFilter = opts.benchmarkFilter] {
+				benchmark::RunSpecifiedBenchmarks(benchmarkFilter);
+				onMainThreadVoid([benchmarksDone] { benchmarksDone.send(Void()); });
+			});
+			f = stopAfter(benchmarksDone.getFuture());
+			g_network->run();
+			benchmarkThread.join();
 		}
 
 		int rc = FDB_EXIT_SUCCESS;

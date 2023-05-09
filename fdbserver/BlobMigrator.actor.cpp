@@ -603,7 +603,7 @@ private:
 			bytes = 0;
 			// Limit number of splits in single response for fast RPC processing
 			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
-				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more");
+				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more", probe::decoration::rare);
 				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
 				    .detail("Range", req.keys)
 				    .detail("Splits", rep.splits.size());

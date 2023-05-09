@@ -3041,7 +3041,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			when(state WorkerSnapRequest snapReq = waitNext(interf.workerSnapReq.getFuture())) {
 				std::string snapReqKey = snapReq.snapUID.toString() + snapReq.role.toString();
 				if (snapReqResultMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate finished snapshot request", probe::decoration::rare);
+					CODE_PROBE(true, "Worker received a duplicate finished snapshot request");
 					auto result = snapReqResultMap[snapReqKey];
 					result.isError() ? snapReq.reply.sendError(result.getError()) : snapReq.reply.send(result.get());
 					TraceEvent("RetryFinishedWorkerSnapRequest")
@@ -3049,7 +3049,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					    .detail("Role", snapReq.role)
 					    .detail("Result", result.isError() ? result.getError().code() : success().code());
 				} else if (snapReqMap.count(snapReqKey)) {
-					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request", probe::decoration::rare);
+					CODE_PROBE(true, "Worker received a duplicate ongoing snapshot request");
 					TraceEvent("RetryOngoingWorkerSnapRequest")
 					    .detail("SnapUID", snapReq.snapUID.toString())
 					    .detail("Role", snapReq.role);
