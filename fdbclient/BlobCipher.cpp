@@ -1197,13 +1197,6 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
 	updateEncryptHeader(plaintext, plaintextLen, headerRef);
@@ -1302,13 +1295,6 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 		TraceEvent(SevWarn, "BlobCipherInplaceEncryptUnexpectedCipherLen")
 		    .detail("PlaintextLen", plaintextLen)
 		    .detail("EncryptedBufLen", bytes);
-		throw encrypt_ops_error();
-	}
-
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherInplaceEncryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
 
@@ -1713,13 +1699,6 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
-		throw encrypt_ops_error();
-	}
-
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
@@ -1759,13 +1738,6 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 		TraceEvent(SevWarn, "BlobCipherEncryptUnexpectedPlaintextLen")
 		    .detail("CiphertextLen", ciphertextLen)
 		    .detail("DecryptedBufLen", bytesDecrypted);
-		throw encrypt_ops_error();
-	}
-
-	if (EVP_CIPHER_CTX_reset(ctx) != 1) {
-		TraceEvent(SevWarn, "BlobCipherDecryptCTXResetFailed")
-		    .detail("BaseCipherId", textCipherKey->getBaseCipherId())
-		    .detail("EncryptDomainId", textCipherKey->getDomainId());
 		throw encrypt_ops_error();
 	}
 
@@ -2021,6 +1993,76 @@ Reference<BlobCipherKey> corruptCipherKey(const Reference<BlobCipherKey>& cipher
 
 using BaseKeyMap = std::unordered_map<EncryptCipherBaseKeyId, Reference<BaseCipher>>;
 using DomainKeyMap = std::unordered_map<EncryptCipherDomainId, BaseKeyMap>;
+
+Reference<EncryptBuf> encryptTest(EncryptBlobCipherAes265Ctr& encryptor,
+                                  const uint8_t* plaintext,
+                                  const int plaintextLen,
+                                  BlobCipherEncryptHeader* header,
+                                  Arena& arena) {
+	bool useInplace = deterministicRandom()->coinflip();
+	Reference<EncryptBuf> encrypted;
+	if (useInplace) {
+		encrypted = makeReference<EncryptBuf>(plaintextLen, arena);
+		memcpy(encrypted->begin(), plaintext, plaintextLen);
+		encryptor.encryptInplace(encrypted->begin(), plaintextLen, header);
+	} else {
+		encrypted = encryptor.encrypt(plaintext, plaintextLen, header, arena);
+	}
+	return encrypted;
+}
+
+StringRef encryptTest(EncryptBlobCipherAes265Ctr& encryptor,
+                      const uint8_t* plaintext,
+                      const int plaintextLen,
+                      BlobCipherEncryptHeaderRef* headerRef,
+                      Arena& arena) {
+	bool useInplace = deterministicRandom()->coinflip();
+	StringRef encrypted;
+	if (useInplace) {
+		encrypted = makeString(plaintextLen, arena);
+		uint8_t* data = mutateString(encrypted);
+		memcpy(data, plaintext, plaintextLen);
+		encryptor.encryptInplace(data, plaintextLen, headerRef);
+	} else {
+		encrypted = encryptor.encrypt(plaintext, plaintextLen, headerRef, arena);
+	}
+	return encrypted;
+}
+
+Reference<EncryptBuf> decryptTest(DecryptBlobCipherAes256Ctr& decryptor,
+                                  const uint8_t* ciphertext,
+                                  const int ciphertextLen,
+                                  const BlobCipherEncryptHeader& header,
+                                  Arena& arena) {
+	bool useInplace = deterministicRandom()->coinflip();
+	Reference<EncryptBuf> decrypted;
+	if (useInplace) {
+		decrypted = makeReference<EncryptBuf>(ciphertextLen, arena);
+		memcpy(decrypted->begin(), ciphertext, ciphertextLen);
+		decryptor.decryptInplace(decrypted->begin(), ciphertextLen, header);
+	} else {
+		decrypted = decryptor.decrypt(ciphertext, ciphertextLen, header, arena);
+	}
+	return decrypted;
+}
+
+StringRef decryptTest(DecryptBlobCipherAes256Ctr& decryptor,
+                      const uint8_t* ciphertext,
+                      const int ciphertextLen,
+                      const BlobCipherEncryptHeaderRef& headerRef,
+                      Arena& arena) {
+	bool useInplace = deterministicRandom()->coinflip();
+	StringRef decrypted;
+	if (useInplace) {
+		decrypted = makeString(ciphertextLen, arena);
+		uint8_t* data = mutateString(decrypted);
+		memcpy(data, ciphertext, ciphertextLen);
+		decryptor.decryptInplace(data, ciphertextLen, headerRef);
+	} else {
+		decrypted = decryptor.decrypt(ciphertext, ciphertextLen, headerRef, arena);
+	}
+	return decrypted;
+}
 
 } // namespace
 
@@ -2289,7 +2331,7 @@ void testNoAuthMode(const int minDomainId) {
 	                                     EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeader header;
-	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+	Reference<EncryptBuf> encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
 	ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
@@ -2311,7 +2353,7 @@ void testNoAuthMode(const int minDomainId) {
 	DecryptBlobCipherAes256Ctr decryptor(
 	    tCipherKey, Reference<BlobCipherKey>(), &header.iv[0], BlobCipherMetrics::TEST);
 
-	Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
+	Reference<EncryptBuf> decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, header, arena);
 	ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
 	ASSERT_EQ(memcmp(decrypted->begin(), &orgData[0], bufLen), 0);
 
@@ -2324,10 +2366,10 @@ void testNoAuthMode(const int minDomainId) {
 	       sizeof(BlobCipherEncryptHeader));
 	headerCopy.flags.headerVersion += 1;
 	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    tCipherKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, headerCopy, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2342,10 +2384,10 @@ void testNoAuthMode(const int minDomainId) {
 	       sizeof(BlobCipherEncryptHeader));
 	headerCopy.flags.encryptMode += 1;
 	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    tCipherKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, headerCopy, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2356,7 +2398,7 @@ void testNoAuthMode(const int minDomainId) {
 
 	// induce encrypted buffer payload corruption
 	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		uint8_t temp[bufLen];
 		deterministicRandom()->randomBytes(&temp[0], bufLen);
 		memcpy(encrypted->begin(), &temp[0], bufLen);
@@ -2364,7 +2406,7 @@ void testNoAuthMode(const int minDomainId) {
 		temp[tIdx] += 1;
 		DecryptBlobCipherAes256Ctr decryptor(
 		    tCipherKey, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
+		decrypted = decryptTest(decryptor, &temp[0], bufLen, header, arena);
 		TraceEvent("TestNoAuthEncryptPayloadCorruptionDone");
 	} catch (Error& e) {
 		// No authToken, hence, no corruption detection supported
@@ -2373,11 +2415,11 @@ void testNoAuthMode(const int minDomainId) {
 
 	// induce baseCipher corruption
 	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		Reference<BlobCipherKey> corruptedCipher = corruptCipherKey(tCipherKey);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    corruptedCipher, Reference<BlobCipherKey>(), header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, header, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
@@ -2494,7 +2536,7 @@ void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
 	                                     BlobCipherMetrics::TEST);
 
 	BlobCipherEncryptHeaderRef headerRef;
-	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+	encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 
 	ASSERT_EQ(headerRef.flagsVersion(), 1);
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
@@ -2553,7 +2595,8 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	                                     BlobCipherMetrics::TEST);
 
 	BlobCipherEncryptHeaderRef headerRef;
-	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+
+	StringRef encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 
 	// validate header version details
 	AesCtrNoAuth noAuth = std::get<AesCtrNoAuth>(headerRef.algoHeader);
@@ -2564,7 +2607,7 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	DecryptBlobCipherAes256Ctr decryptor(
 	    tCipherKey, Reference<BlobCipherKey>(), &noAuth.v1.iv[0], BlobCipherMetrics::TEST);
 
-	StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), encryptedBuf.size(), headerRef, arena);
+	StringRef decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), encryptedBuf.size(), headerRef, arena);
 	ASSERT_EQ(decryptedBuf.size(), bufLen);
 	ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 
@@ -2584,9 +2627,9 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	corruptedFlags.encryptMode += 1;
 	corruptedHeaderRef.flags = corruptedFlags;
 	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
+		decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2597,14 +2640,14 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 
 	// induce encrypted buffer payload corruption
 	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		uint8_t temp[bufLen];
 		deterministicRandom()->randomBytes(&temp[0], bufLen);
 		memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
+		decryptedBuf = decryptTest(decryptor, &temp[0], bufLen, headerRef, arena);
 		ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 		TraceEvent("TestConfigurableEncryptionNoAuthPayloadCorruptionDone");
 	} catch (Error& e) {
@@ -2615,10 +2658,10 @@ void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
 	// induce baseCipher corruption
 	try {
 		Reference<BlobCipherKey> corruptedTextCipher = corruptCipherKey(tCipherKey);
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		DecryptBlobCipherAes256Ctr decryptor(
 		    corruptedTextCipher, Reference<BlobCipherKey>(), &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
+		decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, headerRef, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_key_check_value_mismatch);
@@ -2659,7 +2702,7 @@ void testSingleAuthMode(const int minDomainId) {
 	                                     authAlgo,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeader header;
-	Reference<EncryptBuf> encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+	Reference<EncryptBuf> encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 
 	ASSERT_EQ(encrypted->getLogicalSize(), bufLen);
 	ASSERT_NE(memcmp(&orgData[0], encrypted->begin(), bufLen), 0);
@@ -2685,7 +2728,7 @@ void testSingleAuthMode(const int minDomainId) {
 	                                                                   header.cipherHeaderDetails.salt);
 	ASSERT(tCipherKey->isEqual(cipherKey));
 	DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-	Reference<EncryptBuf> decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
+	Reference<EncryptBuf> decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, header, arena);
 
 	ASSERT_EQ(decrypted->getLogicalSize(), bufLen);
 	ASSERT_EQ(memcmp(decrypted->begin(), &orgData[0], bufLen), 0);
@@ -2694,14 +2737,14 @@ void testSingleAuthMode(const int minDomainId) {
 
 	// induce encryption header corruption - headerVersion corrupted
 	BlobCipherEncryptHeader headerCopy;
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+	encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
 	headerCopy.flags.headerVersion += 1;
 	try {
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, headerCopy, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2711,14 +2754,14 @@ void testSingleAuthMode(const int minDomainId) {
 	}
 
 	// induce encryption header corruption - encryptionMode corrupted
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+	encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
 	headerCopy.flags.encryptMode += 1;
 	try {
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, headerCopy, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2728,7 +2771,7 @@ void testSingleAuthMode(const int minDomainId) {
 	}
 
 	// induce encryption header corruption - authToken mismatch
-	encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+	encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 	memcpy(reinterpret_cast<uint8_t*>(&headerCopy),
 	       reinterpret_cast<const uint8_t*>(&header),
 	       sizeof(BlobCipherEncryptHeader));
@@ -2736,7 +2779,7 @@ void testSingleAuthMode(const int minDomainId) {
 	headerCopy.singleAuthToken.authToken[hIdx] += 1;
 	try {
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(encrypted->begin(), bufLen, headerCopy, arena);
+		decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, headerCopy, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
@@ -2747,14 +2790,14 @@ void testSingleAuthMode(const int minDomainId) {
 
 	// induce encrypted buffer payload corruption
 	try {
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		uint8_t temp[bufLen];
 		deterministicRandom()->randomBytes(temp, bufLen);
 		memcpy(encrypted->begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-		decrypted = decryptor.decrypt(&temp[0], bufLen, header, arena);
+		decrypted = decryptTest(decryptor, &temp[0], bufLen, header, arena);
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
 			throw;
@@ -2765,15 +2808,15 @@ void testSingleAuthMode(const int minDomainId) {
 	// induce baseCipher corruption
 	try {
 		const bool corruptTextCipher = deterministicRandom()->coinflip();
-		encrypted = encryptor.encrypt(&orgData[0], bufLen, &header, arena);
+		encrypted = encryptTest(encryptor, &orgData[0], bufLen, &header, arena);
 		if (corruptTextCipher) {
 			Reference<BlobCipherKey> corruptedCipher = corruptCipherKey(tCipherKey);
 			DecryptBlobCipherAes256Ctr decryptor(corruptedCipher, hCipherKey, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
+			decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, header, arena);
 		} else {
 			Reference<BlobCipherKey> corruptedCipher = corruptCipherKey(hCipherKey);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, corruptedCipher, header.iv, BlobCipherMetrics::TEST);
-			decrypted = decryptor.decrypt(encrypted->begin(), bufLen, header, arena);
+			decrypted = decryptTest(decryptor, encrypted->begin(), bufLen, header, arena);
 		}
 		ASSERT(false); // error expected
 	} catch (Error& e) {
@@ -2813,7 +2856,7 @@ void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	                                         : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeaderRef headerRef;
-	encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+	encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 
 	ASSERT_EQ(headerRef.flagsVersion(), 1);
 	BlobCipherEncryptHeaderFlagsV1 flags = std::get<BlobCipherEncryptHeaderFlagsV1>(headerRef.flags);
@@ -2885,7 +2928,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	                                     authAlgo,
 	                                     BlobCipherMetrics::TEST);
 	BlobCipherEncryptHeaderRef headerRef;
-	StringRef encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+	StringRef encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 
 	ASSERT_EQ(encryptedBuf.size(), bufLen);
 	ASSERT_NE(memcmp(&orgData[0], encryptedBuf.begin(), bufLen), 0);
@@ -2919,7 +2962,7 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	ASSERT(tCipherKey->isEqual(cipherKey));
 	ASSERT(hCipherKey->isEqual(headerCipherKey));
 	DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, &withAuth.v1.iv[0], BlobCipherMetrics::TEST);
-	StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
+	StringRef decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, headerRef, arena);
 
 	ASSERT_EQ(decryptedBuf.size(), bufLen);
 	ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
@@ -2943,9 +2986,9 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	corruptedFlags.encryptMode += 1;
 	corruptedHeaderRef.flags = corruptedFlags;
 	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
+		decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, corruptedHeaderRef, arena);
 		ASSERT(false); // error expected
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_metadata_mismatch) {
@@ -2956,14 +2999,14 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 
 	// induce encrypted buffer payload corruption
 	try {
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		uint8_t temp[bufLen];
 		deterministicRandom()->randomBytes(temp, bufLen);
 		memcpy((void*)encryptedBuf.begin(), &temp[0], bufLen);
 		int tIdx = deterministicRandom()->randomInt(0, bufLen - 1);
 		temp[tIdx] += 1;
 		DecryptBlobCipherAes256Ctr decryptor(tCipherKey, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-		decryptedBuf = decryptor.decrypt(&temp[0], bufLen, headerRef, arena);
+		decryptedBuf = decryptTest(decryptor, &temp[0], bufLen, headerRef, arena);
 		ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 	} catch (Error& e) {
 		if (e.code() != error_code_encrypt_header_authtoken_mismatch) {
@@ -2975,15 +3018,15 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	// induce baseCipher payload corruption
 	try {
 		const bool corruptTextCipher = deterministicRandom()->coinflip();
-		encryptedBuf = encryptor.encrypt(&orgData[0], bufLen, &headerRef, arena);
+		encryptedBuf = encryptTest(encryptor, &orgData[0], bufLen, &headerRef, arena);
 		if (corruptTextCipher) {
 			Reference<BlobCipherKey> corruptedCipher = corruptCipherKey(tCipherKey);
 			DecryptBlobCipherAes256Ctr decryptor(corruptedCipher, hCipherKey, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
+			decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, headerRef, arena);
 		} else {
 			Reference<BlobCipherKey> corruptedCipher = corruptCipherKey(hCipherKey);
 			DecryptBlobCipherAes256Ctr decryptor(tCipherKey, corruptedCipher, &iv[0], BlobCipherMetrics::TEST);
-			decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
+			decryptedBuf = decryptTest(decryptor, encryptedBuf.begin(), bufLen, headerRef, arena);
 		}
 		ASSERT(false); // error expected
 	} catch (Error& e) {
