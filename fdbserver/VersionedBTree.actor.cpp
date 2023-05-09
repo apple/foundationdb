@@ -10118,7 +10118,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	                                                     : deterministicRandom()->randomInt(4096, 32768));
 	state bool pagerMemoryOnly =
 	    params.getInt("pagerMemoryOnly").orDefault(shortTest && (deterministicRandom()->random01() < .001));
-	state int maxCommitSize = params.getInt("maxCommitSize").orDefault(shortTest ? 1000 : randomSize(10e6));
+
 	state double setExistingKeyProbability =
 	    params.getDouble("setExistingKeyProbability").orDefault(deterministicRandom()->random01() * .5);
 	state double clearProbability =
@@ -10155,18 +10155,26 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
 
 	state Optional<std::string> keyGenerator = params.get("keyGenerator");
-
-	state std::string valueGenerator = params.get("valueGenerator").orDefault("10..1000/a..z");
-
 	state RandomKeyGenerator keyGen;
-
 	if (keyGenerator.present()) {
 		keyGen.addKeyGenerator(std::make_unique<RandomKeyTupleSetGenerator>(keyGenerator.get()));
 	} else {
 		keyGen = getDefaultKeyGenerator(2 * pageSize);
 	};
 
-	state RandomValueGenerator valGen = RandomValueGenerator(valueGenerator);
+	state Optional<std::string> valueGenerator = params.get("valueGenerator");
+	state RandomValueGenerator valGen;
+	if (valueGenerator.present()) {
+		valGen = RandomValueGenerator(valueGenerator.get());
+	} else {
+		valGen = RandomValueGenerator(RandomIntGenerator(0, randomSize(pageSize * 25)), "a..z");
+	}
+
+	state int maxCommitSize =
+	    params.getInt("maxCommitSize")
+	        .orDefault(shortTest ? 1000
+	                             : randomSize((int)std::min<int64_t>(
+	                                   (keyGen.getMaxKeyLen() + valGen.getMaxValLen()) * int64_t(20000), 10e6)));
 
 	state EncodingType encodingType = static_cast<EncodingType>(encoding);
 	state EncryptionAtRestMode encryptionMode =
@@ -10203,7 +10211,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 	printf("pageSize: %d\n", pageSize);
 	printf("extentSize: %d\n", extentSize);
 	printf("keyGenerator: %s\n", keyGen.toString().c_str());
-	printf("valueGenerator: %s\n", valueGenerator.c_str());
+	printf("valueGenerator: %s\n", valGen.toString().c_str());
 	printf("maxCommitSize: %d\n", maxCommitSize);
 	printf("setExistingKeyProbability: %f\n", setExistingKeyProbability);
 	printf("clearProbability: %f\n", clearProbability);

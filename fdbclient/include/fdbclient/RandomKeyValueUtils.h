@@ -38,7 +38,9 @@ struct IGenerator {
 	virtual ~IGenerator(){};
 };
 
-typedef IGenerator<Key> IKeyGenerator;
+struct IKeyGenerator : public IGenerator<Key> {
+	virtual int getMaxKeyLen() const = 0;
+};
 
 // Random unsigned int generator which generates integers between and including first and last
 // Distribution can be uniform, skewed small, or skewed large
@@ -157,7 +159,7 @@ struct RandomStringGenerator : IKeyGenerator {
 	RandomIntGenerator bytes;
 	Standalone<StringRef> val;
 
-	Standalone<StringRef> next() {
+	Standalone<StringRef> next() override {
 		val = makeString(size.next());
 		for (int i = 0; i < val.size(); ++i) {
 			mutateString(val)[i] = (uint8_t)bytes.next();
@@ -165,9 +167,11 @@ struct RandomStringGenerator : IKeyGenerator {
 		return val;
 	}
 
-	Standalone<StringRef> last() const { return val; };
+	Standalone<StringRef> last() const override { return val; };
 
-	std::string toString() const { return fmt::format("{}/{}", size.toString(), bytes.toString()); }
+	std::string toString() const override { return fmt::format("{}/{}", size.toString(), bytes.toString()); }
+
+	int getMaxKeyLen() const override { return size.max - 1; }
 };
 
 // Same construction, definition, and usage as RandomStringGenerator but sacrifices randomness
@@ -193,6 +197,8 @@ struct RandomValueGenerator {
 	Value last() const { return val; };
 
 	std::string toString() const { return fmt::format("{}", strings.toString()); }
+
+	int getMaxValLen() const { return strings.size.max - 1; }
 };
 
 // Base class for randomly generated key sets
@@ -205,11 +211,13 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 	RandomIntGenerator indexGenerator;
 	int iVal;
 	KeyRange rangeVal;
+	int maxKeyLen;
 
 	template <typename KeyGen>
 	void init(RandomIntGenerator originalIndexGenerator, KeyGen& keyGen) {
 		indexGenerator = originalIndexGenerator;
 		indexGenerator.min = 0;
+		maxKeyLen = keyGen.getMaxKeyLen();
 		ASSERT(indexGenerator.max > 0);
 		std::set<Key> uniqueKeys;
 		int inserts = 0;
@@ -230,16 +238,16 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 		iVal = 0;
 	}
 
-	Key last() const { return Key(keys[iVal], arena); };
+	Key last() const override { return Key(keys[iVal], arena); };
 	KeyRange lastRange() const { return rangeVal; }
 
-	Key next() {
+	Key next() override {
 		iVal = indexGenerator.next();
 		return last();
 	}
 
 	// Next sequential with some jump distance and optional wrap-around which is false
-	Key next(int distance, bool wrap = false) {
+	Key next(int distance, bool wrap = false) override {
 		iVal += distance;
 		if (wrap) {
 			iVal %= keys.size();
@@ -261,6 +269,8 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 	}
 
 	KeyRange nextRange() { return nextRange(deterministicRandom()->randomSkewedUInt32(0, keys.size())); }
+
+	int getMaxKeyLen() const override { return maxKeyLen; }
 };
 
 template <typename StringGenT>
@@ -287,7 +297,7 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
-struct RandomKeyTupleGenerator {
+struct RandomKeyTupleGenerator : public IKeyGenerator {
 	RandomKeyTupleGenerator(){};
 	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
@@ -300,7 +310,7 @@ struct RandomKeyTupleGenerator {
 	std::vector<RandomKeySetGenerator> tuples;
 	Key val;
 
-	Key next() {
+	Key next() override {
 		int totalBytes = 0;
 		for (auto& t : tuples) {
 			totalBytes += t.next().size();
@@ -315,9 +325,9 @@ struct RandomKeyTupleGenerator {
 		return val;
 	}
 
-	Key last() const { return val; };
+	Key last() const override { return val; };
 
-	std::string toString() const {
+	std::string toString() const override {
 		std::string s;
 		for (auto const& t : tuples) {
 			if (!s.empty()) {
@@ -326,6 +336,14 @@ struct RandomKeyTupleGenerator {
 			s += t.toString();
 		}
 		return s;
+	}
+
+	int getMaxKeyLen() const override {
+		int maxKeyLen = 0;
+		for (const auto& g : tuples) {
+			maxKeyLen += g.getMaxKeyLen();
+		}
+		return maxKeyLen;
 	}
 };
 
@@ -363,6 +381,14 @@ struct RandomKeyGenerator : IKeyGenerator {
 			s += "[" + g->toString() + "]";
 		}
 		return s;
+	}
+
+	int getMaxKeyLen() const override {
+		int maxKeyLen = 0;
+		for (const auto& g : keyGenerators) {
+			maxKeyLen += g->getMaxKeyLen();
+		}
+		return maxKeyLen;
 	}
 };
 
