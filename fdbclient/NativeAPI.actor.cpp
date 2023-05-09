@@ -8507,8 +8507,11 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 	return version;
 }
 
-ACTOR Future<Version> checkBlobSubrange(Database db, KeyRange keyRange, Optional<Version> version) {
-	state Transaction tr(db);
+ACTOR Future<Version> checkBlobSubrange(Database db,
+                                        Optional<Reference<Tenant>> tenant,
+                                        KeyRange keyRange,
+                                        Optional<Version> version) {
+	state Transaction tr(db, tenant);
 	state Optional<Version> summaryVersion;
 	if (version.present()) {
 		summaryVersion = version.get();
@@ -8535,7 +8538,7 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
                                            Optional<Version> version,
                                            Optional<Reference<Tenant>> tenant) {
 	state Database db(cx);
-	state Transaction tr(db);
+	state Transaction tr(db, tenant);
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
 	state KeyRange curRegion = KeyRangeRef(range.begin, range.begin);
 	state Version readVersionOut = invalidVersion;
@@ -8562,8 +8565,6 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 
 	if (tenant.present()) {
 		wait(tenant.get()->ready());
-		range = range.withPrefix(tenant.get()->prefix());
-		curRegion = KeyRangeRef(range.begin, range.begin);
 	}
 
 	loop {
@@ -8598,13 +8599,13 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 			batchCount++;
 
 			if (batchCount == batchSize) {
-				checkParts.push_back(checkBlobSubrange(db, curRegion, version));
+				checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version));
 				batchCount = 0;
 				curRegion = KeyRangeRef(curRegion.end, curRegion.end);
 			}
 		}
 		if (!curRegion.empty()) {
-			checkParts.push_back(checkBlobSubrange(db, curRegion, version));
+			checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version));
 		}
 
 		try {
