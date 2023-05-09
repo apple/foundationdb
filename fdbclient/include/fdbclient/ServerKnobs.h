@@ -196,9 +196,11 @@ public:
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
-	// TODO@muzhi: Whether use the same knos as `AVAILABLE_SPACE_PIVOT_RATIO`.
+	// DD won't move out a shard from its source team, if the utilization of source team meets two criterias:
+	// 1. The available space ratio is above strict pivot space ratio, where using DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO
+	// to calculate pivot space ratio.
+	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU.
 	double DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO;
-	// TODO@muzhi: Whether use the same knos as `CPU_PIVOT_RATIO`.
 	double DD_STRICT_CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;

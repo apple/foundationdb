@@ -435,6 +435,8 @@ public:
 			    .detail("HighestPriority", 0)
 			    .detail("BytesWritten", 0)
 			    .detail("BytesWrittenAverageRate", 0)
+			    .detail("RelocatorTotalCount", 0)
+			    .detail("RelocatorToSourceTeamCount", 0)
 			    .detail("PriorityRecoverMove", 0)
 			    .detail("PriorityRebalanceUnderutilizedTeam", 0)
 			    .detail("PriorityRebalannceOverutilizedTeam", 0)

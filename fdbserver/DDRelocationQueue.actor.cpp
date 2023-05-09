@@ -1238,7 +1238,8 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 	    .detail("KeyEnd", decision.rd.keys.end)
 	    .detail("Reason", decision.rd.reason.toString())
 	    .detail("SourceServers", describe(decision.rd.src))
-	    .detail("DestinationTeam", describe(decision.destIds))
+	    .detail("CompleteSources", describe(decision.rd.completeSources))
+	    .detail("DestinationServers", describe(decision.destIds))
 	    .detail("ExtraIds", describe(decision.extraIds));
 	if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
 		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
@@ -2417,10 +2418,8 @@ struct DDQueueImpl {
 						    .detail("HighestPriority", highestPriorityRelocation)
 						    .detail("BytesWritten", self->moveBytesRate.getTotal())
 						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
-						    .detail("RelocateToSourceRatio",
-						            self->relocateTotalCount
-						                ? 1.0 * self->relocateToSourceCount / self->relocateTotalCount
-						                : 0)
+						    .detail("RelocatorTotalCount", self->relocateTotalCount)
+						    .detail("RelocatorToSourceTeamCount", self->relocateToSourceCount)
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",
