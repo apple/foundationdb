@@ -11093,6 +11093,8 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 		int randLen = deterministicRandom()->randomInt(2, 20);
 		value = StringRef(deterministicRandom()->randomAlphaNumeric(randLen));
 	}
+	Standalone<BlobRangeChangeLogRef> changeLog(BlobRangeChangeLogRef(range, value));
+	state Value changeValue = blobRangeChangeLogValueFor(changeLog);
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -11126,6 +11128,9 @@ ACTOR Future<bool> setBlobRangeActor(Reference<DatabaseContext> cx,
 			tr->set(blobRangeChangeKey, deterministicRandom()->randomUniqueID().toString());
 			// This is not coalescing because we want to keep each range logically separate.
 			wait(krmSetRange(tr, blobRangeKeys.begin, range, value));
+			// RYWTransaction has issues with atomic op sizing when using addVersionstampAtEnd on old api versions
+			tr->getTransaction().atomicOp(
+			    addVersionStampAtEnd(blobRangeChangeLogKeys.begin), changeValue, MutationRef::SetVersionstampedKey);
 			wait(tr->commit());
 			return true;
 		} catch (Error& e) {
