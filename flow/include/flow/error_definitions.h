@@ -144,6 +144,7 @@ ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 ERROR( test_failed, 1228, "Test failed" )
 ERROR( retry_clean_up_datamove_tombstone_added, 1229, "Need background datamove cleanup" )
+ERROR( persist_new_audit_metadata_error, 1230, "Persist new audit metadata error" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

@@ -334,12 +334,13 @@ public:
 
 	std::unordered_map<AuditType, std::unordered_map<UID, std::shared_ptr<DDAudit>>> audits;
 	Promise<Void> auditInitialized;
+	bool anyAuditStorageRunning;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
-	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    anyAuditStorageRunning(false), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
@@ -1190,6 +1191,7 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_data_move_dest_team_not_found);
 		s.insert(error_code_dd_config_changed);
 		s.insert(error_code_audit_storage_failed);
+		s.insert(error_code_persist_new_audit_metadata_error);
 	}
 	return s;
 }
@@ -1981,8 +1983,10 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			    .detail("Range", auditRange);
 			UID auditID_ = wait(persistNewAuditState(
 			    self->txnProcessor->context(), auditState, lockInfo, self->context->isDDEnabled())); // must succeed
-			self->addActor.send(clearAuditMetadataForType(
-			    self->txnProcessor->context(), auditState.getType(), SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
+			self->addActor.send(clearAuditMetadataForType(self->txnProcessor->context(),
+			                                              auditState.getType(),
+			                                              auditID_,
+			                                              SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT));
 			// data distribution could restart in the middle of persistNewAuditState
 			// It is possible that the auditState has been written to disk before data distribution restarts,
 			// hence a new audit resumption loads audits from disk and launch the audits
@@ -2014,18 +2018,23 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 }
 
 // Handling audit requests
-// For each request, launch audit storage and reply to CC with following three replies:
+// For each request, launch audit storage and reply to CC with following four replies:
 // (1) auditID: reply auditID when the audit is successfully launch
-// (2) broken_promise: reply this error when dd actor is cancelled
-// In this case, we do not know whether an audit is launched
-// (3) audit_storage_failed: reply this error when retry time exceeds the maximum
-// In this case, we do not know whether an audit is launched
+// (2) error_code_audit_storage_exceeded_request_limit: reply this error when dd
+// already has a running auditStorage
+// (3) broken_promise: reply this error when dd actor is cancelled
+// In this case, we do not know whether an audit starts, but DD will restart
+// (4) audit_storage_failed: reply this error when retry time exceeds the maximum or
+// error when persist new audit state. For this return category, we believe no new audit is persisted
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
 	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
 	    req.getType() != AuditType::ValidateLocationMetadata &&
 	    req.getType() != AuditType::ValidateStorageServerShard) {
 		req.reply.sendError(not_implemented());
+		return Void();
 	}
+	ASSERT(!self->anyAuditStorageRunning);
+	self->anyAuditStorageRunning = true;
 	state int retryCount = 0;
 	loop {
 		try {
@@ -2049,6 +2058,12 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("Range", req.range);
 			if (e.code() == error_code_actor_cancelled) {
 				req.reply.sendError(broken_promise());
+				self->anyAuditStorageRunning = false;
+				throw e;
+			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
+				req.reply.sendError(audit_storage_exceeded_request_limit());
+			} else if (e.code() == error_code_persist_new_audit_metadata_error) {
+				req.reply.sendError(audit_storage_failed());
 			} else if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 				retryCount++;
 				wait(delay(0.1));
@@ -2059,6 +2074,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		}
 		break;
 	}
+	self->anyAuditStorageRunning = false;
 	return Void();
 }
 
@@ -2522,7 +2538,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(getStorageWigglerStates(self));
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
-				actors.add(auditStorage(self, req));
+				if (!self->anyAuditStorageRunning) {
+					actors.add(auditStorage(self, req));
+				} else {
+					req.reply.sendError(audit_storage_exceeded_request_limit());
+				}
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));
