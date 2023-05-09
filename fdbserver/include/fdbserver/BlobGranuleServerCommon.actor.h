@@ -147,6 +147,9 @@ private:
 	Future<Void> collection;
 };
 
+ACTOR Future<Void> loadBGTenantMap(BGTenantMap* tenantData, Transaction* tr);
+ACTOR Future<Reference<BlobConnectionProvider>> loadBStoreForTenant(BGTenantMap* tenantData, KeyRange keyRange);
+
 // Defines granule info that interests full restore
 struct BlobGranuleRestoreVersion {
 	// Two constructors required by VectorRef
@@ -165,13 +168,23 @@ struct BlobGranuleRestoreVersion {
 typedef Standalone<VectorRef<BlobGranuleRestoreVersion>> BlobGranuleRestoreVersionVector;
 
 ACTOR Future<int64_t> dumpManifest(Database db,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                    Reference<BlobConnectionProvider> blobConn,
                                    int64_t epoch,
-                                   int64_t seqNo);
-ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
+                                   int64_t seqNo,
+                                   bool encryptionEnabled);
+ACTOR Future<Void> loadManifest(Database db,
+                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db,
+                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                       Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db,
+                                                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                               Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<int64_t> lastBlobEpoc(Database db,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                   Reference<BlobConnectionProvider> blobConn);
 ACTOR Future<std::string> getMutationLogUrl();
 
 using BlobRestoreRangeState = std::pair<KeyRange, BlobRestoreState>;
@@ -197,6 +210,10 @@ private:
 	Database db_;
 	Standalone<KeyRangeRef> range_;
 };
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                                  BlobGranuleCipherKeysMeta cipherKeysMeta,
+                                                                  Arena* arena);
 #include "flow/unactorcompiler.h"
 
 #endif

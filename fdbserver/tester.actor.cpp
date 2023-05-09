@@ -1112,7 +1112,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		}
 
 		state std::vector<Future<ErrorOr<CheckReply>>> checks;
-		TraceEvent("CheckingResults").log();
+		TraceEvent("TestCheckingResults").detail("WorkloadTitle", spec.title);
 
 		printf("checking test (%s)...\n", printable(spec.title).c_str());
 
@@ -1129,6 +1129,7 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 			else
 				failure++;
 		}
+		TraceEvent("TestCheckComplete").detail("WorkloadTitle", spec.title);
 	}
 
 	if (spec.phases & TestWorkload::METRICS) {

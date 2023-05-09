@@ -420,10 +420,12 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	int64_t epoch;
 	int64_t seqNo = 1;
 	int64_t manifestDumperSeqNo = 1;
+	bool enableManifestEncryption = false;
 
 	Promise<Void> iAmReplaced;
 
 	bool isFullRestoreMode = false;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
 	BlobManagerData(UID id,
 	                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -437,7 +439,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	    activeGranuleMerges(invalidVersion, normalKeys.end), forcePurgingRanges(false, normalKeys.end),
 	    concurrentMergeChecks(SERVER_KNOBS->BLOB_MANAGER_CONCURRENT_MERGE_CHECKS),
 	    restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), recruitingStream(0), exclusionTracker(db),
-	    epoch(epoch) {}
+	    epoch(epoch), dbInfo(dbInfo) {}
 
 	// only initialize blob store if actually needed
 	void initBStore() {
@@ -578,12 +580,14 @@ static void alignKeyBoundary(Reference<BlobManagerData> bmData,
 		alignedKey = alignedKey.withPrefix(tenantData->entry.prefix, keys.arena());
 	}
 
-	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split.
+	// Only add the alignedKey if it's larger than the last key. If it's the same, drop the split if not allowed.
 	if (alignedKey <= keys.back()) {
-		// Set split boundary.
-		BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
-		boundaries[key] = boundary;
-		keys.push_back_deep(keys.arena(), key);
+		if (SERVER_KNOBS->BG_ENABLE_SPLIT_TRUNCATED) {
+			// Set split boundary.
+			BlobGranuleMergeBoundary boundary = { /*buddy=*/true };
+			boundaries[key] = boundary;
+			keys.push_back_deep(keys.arena(), key);
+		} // else drop the split
 	} else {
 		keys.push_back_deep(keys.arena(), alignedKey);
 	}
@@ -988,6 +992,17 @@ ACTOR Future<Void> doRangeAssignment(Reference<BlobManagerData> bmData,
 				bmData->iAmReplaced.sendError(e);
 			}
 			throw;
+		}
+
+		if (e.code() == error_code_no_more_servers && assignment.isAssign &&
+		    assignment.assign.get().type == AssignRequestType::Continue) {
+			// If the BW the BM was telling to continue is already dead, just drop this as we already reassigned the
+			// granule
+			TraceEvent("BMDroppingContinueAssignment", bmData->id)
+			    .detail("Epoch", bmData->epoch)
+			    .detail("Seqno", seqNo);
+			CODE_PROBE(true, "BM no more servers on continue", probe::decoration::rare);
+			return Void();
 		}
 
 		// this assign failed and we will retry, consider it blocked until it successfully retries
@@ -1585,14 +1600,14 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 	// FIXME: only need to align propsedSplitKey in the middle
 	state BlobGranuleSplitPoints finalSplit = wait(alignKeys(bmData, granuleRange, newRanges));
 
-	ASSERT(finalSplit.keys.size() > 2);
-
 	if (BM_DEBUG) {
 		fmt::print("Aligned split ({0}):\n", finalSplit.keys.size());
 		for (auto& it : finalSplit.keys) {
 			fmt::print("    {0}{1}\n", it.printable(), finalSplit.boundaries.count(it) ? " *" : "");
 		}
 	}
+
+	ASSERT(finalSplit.keys.size() > 2);
 
 	// Check lock to see if lock is still the specified epoch and seqno, and there are no files for the granule.
 	// If either of these are false, some other worker now has the granule. if there are files, it already succeeded at
@@ -3560,8 +3575,8 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
 			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
 			try {
-				wait(loadManifest(bmData->db, bmData->manifestStore));
-				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->manifestStore));
+				wait(loadManifest(bmData->db, bmData->dbInfo, bmData->manifestStore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, bmData->manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
 				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
@@ -5549,6 +5564,9 @@ ACTOR Future<Void> maybeFlushAndTruncateMutationLogs(Reference<BlobManagerData> 
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
+	DatabaseConfiguration config = wait(getDatabaseConfiguration(bmData->db, true));
+	bmData->enableManifestEncryption = config.encryptionAtRestMode.isEncryptionEnabled();
+
 	loop {
 		// Skip backup if no active blob ranges
 		bool activeRanges = false;
@@ -5562,8 +5580,12 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 		if (activeRanges && SERVER_KNOBS->BLOB_MANIFEST_BACKUP) {
 			if (bmData->manifestStore.isValid()) {
 				wait(maybeFlushAndTruncateMutationLogs(bmData));
-				int64_t bytes =
-				    wait(dumpManifest(bmData->db, bmData->manifestStore, bmData->epoch, bmData->manifestDumperSeqNo));
+				int64_t bytes = wait(dumpManifest(bmData->db,
+				                                  bmData->dbInfo,
+				                                  bmData->manifestStore,
+				                                  bmData->epoch,
+				                                  bmData->manifestDumperSeqNo,
+				                                  bmData->enableManifestEncryption));
 				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
 				bmData->stats.manifestSizeInBytes += bytes;
 				bmData->stats.lastManifestDumpTs = now();

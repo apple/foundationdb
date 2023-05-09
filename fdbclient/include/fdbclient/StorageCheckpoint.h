@@ -37,6 +37,12 @@ enum CheckpointFormat {
 
 // Metadata of a FDB checkpoint.
 struct CheckpointMetaData {
+private:
+	// 71.2 field. We should consider remove them when not support 71.2 upgrade/downgrade
+	KeyRange deprecated_range;
+	UID deprecated_sid; // Storage server ID on which this checkpoint is created.
+	int deprecated_gcTime; // Time to delete this checkpoint, a Unix timestamp in seconds.
+public:
 	enum CheckpointState {
 		InvalidState = 0,
 		Pending = 1, // Checkpoint creation pending.
@@ -114,7 +120,19 @@ struct CheckpointMetaData {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, ranges, format, state, checkpointID, src, serializedCheckpoint, actionId);
+		// In SFC FDB 71.2, the serialization order is serializer(ar, version, range, format, state, checkpointID, ssID,
+		// gcTime, serializedCheckpoint); We shouldn't change it until we don't support upgrade from 71.2
+		serializer(ar,
+		           version,
+		           deprecated_range,
+		           format,
+		           state,
+		           checkpointID,
+		           deprecated_sid,
+		           deprecated_gcTime,
+		           serializedCheckpoint,
+		           ranges,
+		           actionId);
 	}
 };
 

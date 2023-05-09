@@ -94,19 +94,16 @@ class FDBServerLocalCluster:
 
     @property
     def processes(self):
-        """Processes
-        """
+        """Processes"""
         return self._processes["processes"]
 
     @property
     def handlers(self):
-        """Handlers
-        """
+        """Handlers"""
         return self._processes["handlers"]
 
     def terminate(self):
-        """Terminate the cluster
-        """
+        """Terminate the cluster"""
         # Send SIGTERM
         logger.debug("Sending SIGTERM")
         for process in self.processes:

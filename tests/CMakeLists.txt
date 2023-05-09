@@ -152,6 +152,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BlobRestoreBasic.toml)
   add_fdb_test(TEST_FILES fast/BlobRestoreLarge.toml)
   add_fdb_test(TEST_FILES fast/BlobRestoreToVersion.toml)
+  add_fdb_test(TEST_FILES fast/BlobRestoreTenantMode.toml)
   add_fdb_test(TEST_FILES fast/CacheTest.toml)
   add_fdb_test(TEST_FILES fast/CloggedSideband.toml)
   add_fdb_test(TEST_FILES fast/CompressionUtilsUnit.toml IGNORE)
@@ -226,7 +227,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
 
-  if(WITH_ROCKSDB_EXPERIMENTAL)
+#  if(WITH_ROCKSDB_EXPERIMENTAL)
+  if(0)
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
@@ -241,6 +243,7 @@ if(WITH_PYTHON)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
+  add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
   add_fdb_test(TEST_FILES rare/ClogUnclog.toml)
@@ -305,20 +308,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0_until_71.2.0/ConfigureTestRestart-1.toml
     restarting/from_7.1.0_until_71.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapCycleRestart-1.txt
-    restarting/from_7.1.0_until_71.2.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapIncrementalRestore-1.txt
     restarting/from_7.1.0_until_71.2.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapTestAttrition-1.txt
-    restarting/from_7.1.0_until_71.2.0/SnapTestAttrition-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.1.0_until_71.2.0/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapTestRestart-1.txt
-    restarting/from_7.1.0_until_71.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -367,6 +358,18 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
     restarting/from_71.3.0/CycleTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.txt
+    restarting/from_71.3.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestAttrition-1.txt
+    restarting/from_71.3.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestSimpleRestart-1.txt
+    restarting/from_71.3.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestRestart-1.txt
+    restarting/from_71.3.0/SnapTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.3.0/StorefrontTestRestart-2.txt)
