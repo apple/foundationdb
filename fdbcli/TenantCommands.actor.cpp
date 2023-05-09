@@ -977,8 +977,8 @@ void tenantGenerator(const char* text,
 		const char* opts[] = { "create",    "delete", "deleteId", "list",   "get",
 			                   "configure", "rename", "lock",     "unlock", nullptr };
 		arrayGenerator(text, line, opts, lc);
-	} else if (tokens.size() == 3 && tokencmp(tokens[1], "create")) {
-		const char* opts[] = { "tenant_group=", nullptr };
+	} else if (tokens.size() >= 3 && tokencmp(tokens[1], "create")) {
+		const char* opts[] = { "tenant_group=", "assigned_cluster=", "ignore_capacity_limit", nullptr };
 		arrayGenerator(text, line, opts, lc);
 	} else if (tokens.size() == 3 && tokencmp(tokens[1], "get")) {
 		const char* opts[] = { "JSON", nullptr };
