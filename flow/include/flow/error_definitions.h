@@ -104,6 +104,7 @@ ERROR( blob_granule_request_failed, 1079, "BlobGranule request failed" )
 ERROR( storage_too_many_feed_streams, 1080, "Too many feed streams to a single storage server" )
 ERROR( storage_engine_not_initialized, 1081, "Storage engine was never successfully initialized." )
 ERROR( unknown_storage_engine, 1082, "Storage engine type is not recognized." )
+ERROR( duplicate_snapshot_request, 1083, "A duplicate snapshot request has been sent, the old request is discarded.")
 
 ERROR( broken_promise, 1100, "Broken promise" )
 ERROR( operation_cancelled, 1101, "Asynchronous operation cancelled" )
@@ -171,6 +172,7 @@ ERROR( rest_connectpool_key_not_found, 1528, "ConnectKey not found in connection
 ERROR( lock_file_failure, 1529, "Unable to lock the file")
 ERROR( rest_unsupported_protocol, 1530, "Unsupported REST protocol")
 ERROR( rest_malformed_response, 1531, "Malformed REST response")
+ERROR( rest_max_base_cipher_len, 1532, "Max BaseCipher length violation")
 
 
 // 2xxx Attempt (presumably by a _client_) to do something illegal.  If an error is known to
@@ -374,6 +376,8 @@ ERROR( encrypt_keys_fetch_failed, 2707, "Encryption keys fetch from external KMS
 ERROR( encrypt_invalid_kms_config, 2708, "Invalid encryption/kms configuration: discovery-url, validation-token, endpoint etc." )
 ERROR( encrypt_unsupported, 2709, "Encryption not supported" )
 ERROR( encrypt_mode_mismatch, 2710, "Encryption mode mismatch with configuration")
+ERROR( encrypt_key_check_value_mismatch, 2711, "Encryption key-check-value mismatch")
+ERROR( encrypt_max_base_cipher_len, 2712, "Max BaseCipher buffer length violation")
 
 // 4xxx Internal errors (those that should be generated only by bugs) are decimal 4xxx
 ERROR( unknown_error, 4000, "An unknown error occurred" )  // C++ exception not of type Error

@@ -234,6 +234,7 @@ typedef struct bgtenantprefix {
 typedef struct bgencryptionkey {
 	int64_t domain_id;
 	uint64_t base_key_id;
+	uint32_t base_kcv;
 	uint64_t random_salt;
 	FDBKey base_key;
 } FDBBGEncryptionKey;
@@ -241,7 +242,9 @@ typedef struct bgencryptionkey {
 typedef struct bgencryptionctx {
 	fdb_bool_t present;
 	FDBBGEncryptionKey textKey;
+	uint32_t textKCV;
 	FDBBGEncryptionKey headerKey;
+	uint32_t headerKCV;
 	FDBKey iv;
 } FDBBGEncryptionCtx;
 
