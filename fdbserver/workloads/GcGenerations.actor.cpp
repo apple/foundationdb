@@ -161,6 +161,36 @@ struct GcGenerationsWorkload : TestWorkload {
 		}
 		TraceEvent("AfterMultipleRecovery")
 		    .detail("OldGenerationCount", self->dbInfo->get().logSystemConfig.oldTLogs.size());
+		StatusObject statusResult = wait(StatusClient::statusFetcher(cx));
+		StatusObjectReader statusObj(statusResult);
+
+		state StatusObjectReader statusObjCluster;
+		state StatusObjectReader processesMap;
+		state int64_t queryQueueMax = 0;
+		state int waitInterval = 2;
+		if (!statusObj.get("cluster", statusObjCluster)) {
+			TraceEvent("NoCluster");
+			wait(delay(waitInterval));
+			ASSERT(false);
+		}
+
+		if (!statusObjCluster.get("processes", processesMap)) {
+			TraceEvent("NoProcesses");
+			wait(delay(waitInterval));
+			ASSERT(false);
+		}
+		for (auto proc : processesMap.obj()) {
+			StatusObjectReader process(proc.second);
+			std::string address;
+			process.get("address", address);
+			std::cout << address << std::endl;
+			if (process.has("roles")) {
+				StatusArray rolesArray = proc.second.get_obj()["roles"].get_array();
+				for (StatusObjectReader role : rolesArray) {
+					std::cout << role["role"].get_str() << std::endl;
+				}
+			}
+		}
 		return Void();
 	}
 
