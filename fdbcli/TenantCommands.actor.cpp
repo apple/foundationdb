@@ -174,8 +174,8 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 		fmt::print("An optional group can be specified that will require this tenant\n");
 		fmt::print("to be placed on the same cluster as other tenants in the same group.\n");
 		fmt::print("An optional cluster name can be specified that this tenant will be placed in.\n");
-		fmt::print("Optionally, `ignore_capacity_limit' can be specified together with `assigned_cluster' to create a "
-		           "tenant ignoring tenant group limit on the specified cluster.\n");
+		fmt::print("Optionally, `ignore_capacity_limit' can be specified together with `assigned_cluster' to allow "
+		           "creation of a new tenant group on a cluster with no tenant group capacity remaining.\n");
 		return false;
 	}
 
