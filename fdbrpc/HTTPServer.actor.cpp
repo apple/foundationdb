@@ -183,6 +183,8 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	response->data.headers["Hello"] = "World";
 
 	std::string hello = "Hello World Response!";
+	response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(hello);
+
 	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
 	pw.serializeBytes(hello);
 	response->data.contentLen = hello.size();
@@ -220,6 +222,44 @@ struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloE
 
 	void addref() override { ReferenceCounted<HelloErrorRequestHandler>::addref(); }
 	void delref() override { ReferenceCounted<HelloErrorRequestHandler>::delref(); }
+};
+
+ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> req,
+                                             Reference<HTTP::OutgoingResponse> response) {
+	wait(delay(0));
+	ASSERT_EQ(req->verb, HTTP::HTTP_VERB_GET);
+	ASSERT_EQ(req->resource, "/hello-world");
+	ASSERT_EQ(req->data.headers.size(), 1);
+	ASSERT(req->data.headers.count("Content-Length"));
+	ASSERT_EQ(req->data.headers["Content-Length"], std::to_string(req->data.content.size()));
+	ASSERT_EQ(req->data.contentLen, req->data.content.size());
+	ASSERT_EQ(req->data.content, "Hello Bad MD5 Request!");
+
+	response->code = 200;
+	response->data.headers["Hello"] = "World";
+
+	std::string hello = "Hello World Response!";
+	response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(hello);
+
+	// change content to not match md5 sum!
+	hello = "Hello Bad MD5 Response";
+
+	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
+	pw.serializeBytes(hello);
+	response->data.contentLen = hello.size();
+
+	return Void();
+}
+
+struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
+	                           Reference<HTTP::OutgoingResponse> response) override {
+		return helloBadMD5ServerCallback(req, response);
+	}
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<HelloBadMD5RequestHandler>(); }
+
+	void addref() override { ReferenceCounted<HelloBadMD5RequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<HelloBadMD5RequestHandler>::delref(); }
 };
 
 typedef std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)> DoRequestFunction;
@@ -278,14 +318,18 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConne
 	Reference<HTTP::IncomingResponse> response =
 	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
 
+	std::string expectedContent = "Hello World Response!";
+
 	ASSERT_EQ(response->code, 200);
-	ASSERT_EQ(response->data.headers.size(), 2);
+	ASSERT_EQ(response->data.headers.size(), 3);
 	ASSERT(response->data.headers.count("Hello"));
 	ASSERT_EQ(response->data.headers["Hello"], "World");
 	ASSERT(response->data.headers.count("Content-Length"));
 	ASSERT_EQ(response->data.headers["Content-Length"], std::to_string(response->data.content.size()));
+	ASSERT(response->data.headers.count("Content-MD5"));
+	ASSERT_EQ(response->data.headers["Content-MD5"], HTTP::computeMD5Sum(expectedContent));
 	ASSERT_EQ(response->data.contentLen, response->data.content.size());
-	ASSERT_EQ(response->data.content, "Hello World Response!");
+	ASSERT_EQ(response->data.content, expectedContent);
 
 	return response;
 }
@@ -311,6 +355,33 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 	return response;
 }
 
+ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection> conn) {
+	state UnsentPacketQueue content;
+	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+
+	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	state int64_t bytes_sent = 0;
+
+	req->verb = HTTP::HTTP_VERB_GET;
+	req->resource = "/hello-world";
+
+	std::string hello = "Hello Bad MD5 Request!";
+
+	req->data.content = &content;
+	req->data.contentLen = hello.size();
+
+	PacketWriter pw(req->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
+	pw.serializeBytes(hello);
+
+	Reference<HTTP::IncomingResponse> response =
+	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+
+	// should have gotten error
+	ASSERT(false);
+
+	return response;
+}
+
 // can't run as regular unit test right now because it needs special setup
 TEST_CASE("/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
@@ -321,7 +392,7 @@ TEST_CASE("/HTTP/Server/HelloWorld") {
 
 	wait(success(doRequestTest(hostname, "80", doHelloWorldReq)));
 
-	fmt::print("Done\n");
+	fmt::print("Done Hello\n");
 	return Void();
 }
 
@@ -334,6 +405,25 @@ TEST_CASE("/HTTP/Server/HelloError") {
 
 	wait(success(doRequestTest(hostname, "80", doHelloWorldErrorReq)));
 
-	fmt::print("Done\n");
+	fmt::print("Done Error\n");
+	return Void();
+}
+
+TEST_CASE("/HTTP/Server/HelloBadMD5") {
+	ASSERT(g_network->isSimulated());
+	fmt::print("Registering sim server\n");
+	state std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>()));
+	fmt::print("Registered sim server\n");
+
+	// TODO refactor this into ASSERT_ERROR()?
+	try {
+		wait(success(doRequestTest(hostname, "80", doHelloBadMD5Req)));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_http_bad_response);
+	}
+
+	fmt::print("Done Bad MD5\n");
 	return Void();
 }
