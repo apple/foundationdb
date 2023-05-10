@@ -132,9 +132,8 @@ public:
 	bool allShardStatusIn(const KeyRangeRef& range, const std::set<MockShardStatus>& status) const;
 
 	// change the status of range. This function may result in split to make the shard boundary align with range.begin
-	// and range.end. In this case, if restrictSize==true, the sum of the split shard size is strictly equal to the old
-	// large shard. Otherwise, the size are randomly generated between (min_shard_size, max_shard_size)
-	void setShardStatus(const KeyRangeRef& range, MockShardStatus status, bool restrictSize);
+	// and range.end. If split happened, the shard size will be equally split.
+	void setShardStatus(const KeyRangeRef& range, MockShardStatus status);
 
 	// this function removed an aligned range from server
 	void removeShard(const KeyRangeRef& range);
@@ -200,15 +199,9 @@ public:
 protected:
 	PromiseStream<FetchKeysParams> fetchKeysRequests;
 
-	void threeWayShardSplitting(const KeyRangeRef& outerRange,
-	                            const KeyRangeRef& innerRange,
-	                            uint64_t outerRangeSize,
-	                            bool restrictSize);
+	void threeWayShardSplitting(const KeyRangeRef& outerRange, const KeyRangeRef& innerRange, uint64_t outerRangeSize);
 
-	void twoWayShardSplitting(const KeyRangeRef& range,
-	                          const KeyRef& splitPoint,
-	                          uint64_t rangeSize,
-	                          bool restrictSize);
+	void twoWayShardSplitting(const KeyRangeRef& range, const KeyRef& splitPoint, uint64_t rangeSize);
 
 	// Assuming the first and last shard within the range having size `beginShardBytes` and `endShardBytes`
 	int64_t estimateRangeTotalBytes(KeyRangeRef const& range, int64_t beginShardBytes, int64_t endShardBytes);
@@ -344,6 +337,8 @@ public:
 	                                                               Optional<UID> debugID,
 	                                                               UseProvisionalProxies useProvisionalProxies,
 	                                                               Version version) override;
+
+	int getRangeSize(KeyRangeRef const& range);
 
 	// data ops - the key is not accurate, only the shard the key locate in matters.
 
