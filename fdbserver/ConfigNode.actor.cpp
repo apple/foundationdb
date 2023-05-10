@@ -22,7 +22,7 @@
 
 #include "fdbclient/SystemData.h"
 #include "fdbserver/ConfigNode.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/OnDemandStore.h"
 #include "flow/Arena.h"
 #include "flow/genericactors.actor.h"
