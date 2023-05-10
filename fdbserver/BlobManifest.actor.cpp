@@ -144,7 +144,6 @@ public:
 			ASSERT(iter->seqNo == seqNo);
 			if (iter->segmentNo != nextSegmentNo) {
 				TraceEvent("BlobRestoreMissingSegment")
-				    .detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL)
 				    .detail("Epoch", epoch)
 				    .detail("SeqNo", epoch)
 				    .detail("Expected", nextSegmentNo)
@@ -183,7 +182,7 @@ public:
 		}
 
 		dprint("No valid blob manifest files\n");
-		TraceEvent("BlobRestoreMissingManifest").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
+		TraceEvent("BlobRestoreMissingManifest").log();
 		throw blob_restore_missing_manifest();
 	}
 
@@ -649,7 +648,7 @@ private:
 	                                                               Reference<BackupContainerFileSystem> container,
 	                                                               BlobManifestFile tailerFile) {
 		if (tailerFile.segmentNo != 0) {
-			TraceEvent("BlobRestoreMissingTailer").detail("Url", SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
+			TraceEvent("BlobRestoreMissingTailer").log();
 			throw blob_restore_corrupted_manifest();
 		}
 

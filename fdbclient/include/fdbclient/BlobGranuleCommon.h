@@ -25,7 +25,7 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
-
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/EncryptUtils.h"
 #include "flow/IRandom.h"
 #include "flow/serialize.h"
@@ -409,6 +409,27 @@ struct BlobRestoreArg {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, version);
+	}
+};
+
+// Value of blob range change log.
+struct BlobRangeChangeLogRef {
+	constexpr static FileIdentifier file_identifier = 9774587;
+
+	KeyRangeRef range;
+	ValueRef value;
+
+	BlobRangeChangeLogRef() {}
+	BlobRangeChangeLogRef(KeyRangeRef range, ValueRef value) : range(range), value(value) {}
+	BlobRangeChangeLogRef(Arena& to, KeyRangeRef range, ValueRef value) : range(to, range), value(to, value) {}
+	BlobRangeChangeLogRef(Arena& to, const BlobRangeChangeLogRef& from)
+	  : range(to, from.range), value(to, from.value) {}
+
+	int expectedSize() const { return range.expectedSize() + value.expectedSize(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, range, value);
 	}
 };
 

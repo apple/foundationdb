@@ -9,9 +9,9 @@
 #                                                          xyzdev
 #                                                          vvvv
 set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00C071300000LL")
-set(FDB_PV_FUTURE_VERSION                       "0x0FDB00C072000000LL")
+set(FDB_PV_FUTURE_VERSION                       "0x0FDB00C080000000LL")
 set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00C071200000LL")
-set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00C073000000LL")
+set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00C090000000LL")
 set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00C100000000LL")
 set(FDB_PV_LSB_MASK                             "0xFFFFLL")
 
@@ -91,3 +91,4 @@ set(FDB_PV_BLOB_GRANULE_FILE                    "0x0FDB00C071200000LL")
 set(FDB_PV_CLUSTER_ID_SPECIAL_KEY               "0x0FDB00C071200000LL")
 set(FDB_ENCRYPTED_SNAPSHOT_BACKUP_FILE          "0x0FDB00C071300000LL")
 set(FDB_PV_BLOB_GRANULE_FILE_LOGICAL_SIZE       "0x0FDB00B071300000LL")
+set(FDB_PV_BLOB_RANGE_CHANGE_LOG                "0x0FDB00B071300000LL")
