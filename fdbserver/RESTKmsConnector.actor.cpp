@@ -782,6 +782,7 @@ Future<T> kmsRequestImpl(
 	//          past success requests success counts.
 	// Phase-2: For some reason if none of the cached KmsUrls worked, re-discover the KmsUrls and
 	//          repeat phase-1.
+	// This 2-phase scheme is repeated if we get connection/time out errors
 
 	state int pass = 1;
 	loop {
