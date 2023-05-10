@@ -3329,10 +3329,11 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
 
-			TraceEvent(SevDebug, "EligiblityDebug")
+			DisabledTraceEvent(SevDebug, "EligiblityTeamDebug")
 			    .detail("TeamId", team->getTeamID())
 			    .detail("CPU", team->getAverageCPU())
-			    .detail("AvailableSpace", team->getMinAvailableSpaceRatio());
+			    .detail("AvailableSpace", team->getMinAvailableSpace())
+			    .detail("AvailableSpaceRatio", team->getMinAvailableSpaceRatio());
 
 			if (lowDiskUtil) {
 				lowDiskUtilTotal++;

@@ -778,20 +778,23 @@ Future<Void> DDTxnProcessor::rawFinishMovement(const MoveKeysParams& params,
 struct DDMockTxnProcessorImpl {
 	// return when all status become FETCHED
 	ACTOR static Future<Void> checkFetchingState(DDMockTxnProcessor* self, std::vector<UID> ids, KeyRangeRef range) {
+		state TraceInterval interval("MockCheckFetchingState");
+		TraceEvent(SevDebug, interval.begin()).detail("Range", range);
 		loop {
-			wait(delayJittered(1.0));
-			DDMockTxnProcessor* selfP = self;
-			KeyRangeRef cloneRef = range;
-			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
-				    auto& server = selfP->mgs->allServers.at(id);
-				    return server->allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
-			    })) {
+			wait(delayJittered(1.0, TaskPriority::FetchKeys));
+			bool done = true;
+			for (auto& id : ids) {
+				auto& server = self->mgs->allServers.at(id);
+				if (!server->allShardStatusIn(range, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED })) {
+					done = false;
+					break;
+				}
+			}
+			if (done) {
 				break;
 			}
 		}
-		if (BUGGIFY_WITH_PROB(0.5)) {
-			wait(delayJittered(5.0));
-		}
+		TraceEvent(SevDebug, interval.end()).log();
 		return Void();
 	}
 
@@ -1009,12 +1012,9 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 		ASSERT(params.keys.present());
 		keys = params.keys.get();
 	}
-	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
-	// will always finish without coroutine switch.
-	ASSERT(params.startMoveKeysParallelismLock->activePermits() == 0);
+	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 	wait(params.startMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*params.startMoveKeysParallelismLock);
-	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 
 	std::vector<ShardsAffectedByTeamFailure::Team> destTeams;
 	destTeams.emplace_back(params.destinationTeam, true);
@@ -1030,18 +1030,18 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	ASSERT(keys.begin == intersectRanges.begin().begin());
 	ASSERT(keys.end == intersectRanges.end().begin());
 
+	int totalRangeSize = 0;
 	for (auto it = intersectRanges.begin(); it != intersectRanges.end(); ++it) {
 		auto teamPair = mgs->shardMapping->getTeamsFor(it->begin());
 		auto& srcTeams = teamPair.second.empty() ? teamPair.first : teamPair.second;
+		totalRangeSize += mgs->getRangeSize(it->range());
 		mgs->shardMapping->rawMoveShard(it->range(), srcTeams, destTeams);
 	}
 
-	auto randomRangeSize =
-	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
 		auto& server = mgs->allServers.at(id);
-		server->setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
-		server->signalFetchKeys(keys, randomRangeSize);
+		server->setShardStatus(keys, MockShardStatus::INFLIGHT);
+		server->signalFetchKeys(keys, totalRangeSize);
 	}
 	TraceEvent(SevDebug, interval.end());
 	return Void();
@@ -1067,12 +1067,10 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 		keys = params.keys.get();
 	}
 
-	// There won’t be parallel rawStart or rawFinish in mock world due to the fact the following *mock* transaction code
-	// will always finish without coroutine switch.
-	ASSERT(params.finishMoveKeysParallelismLock->activePermits() == 0);
+	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
+
 	wait(params.finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser(*params.finishMoveKeysParallelismLock);
-	TraceEvent(SevDebug, interval.begin()).detail("Keys", keys);
 
 	// get source and dest teams
 	auto [destTeams, srcTeams] = mgs->shardMapping->getTeamsForFirstShard(keys);
@@ -1087,7 +1085,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED);
 	}
 
 	// remove destination servers from source servers
