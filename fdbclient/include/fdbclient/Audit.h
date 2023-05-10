@@ -36,6 +36,7 @@ enum class AuditPhase : uint8_t {
 enum class AuditType : uint8_t {
 	Invalid = 0,
 	ValidateHA = 1,
+	CheckMigrationStatus = 5,
 };
 
 struct AuditStorageState {
