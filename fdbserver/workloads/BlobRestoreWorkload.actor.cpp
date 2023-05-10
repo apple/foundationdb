@@ -82,7 +82,7 @@ struct BlobRestoreWorkload : TestWorkload {
 
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
 			if (self->restoreTargetVersion_ == invalidVersion) {
-				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs");
+				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs", probe::decoration::rare);
 				return Void();
 			}
 			CODE_PROBE(true, "Perform blob restore");
@@ -109,14 +109,14 @@ struct BlobRestoreWorkload : TestWorkload {
 		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
 		if (containers.size() == 0) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			CODE_PROBE(true, "Skip blob restore test because of missing log backups");
+			CODE_PROBE(true, "Skip blob restore test because of missing log backups", probe::decoration::rare);
 			return invalidVersion;
 		}
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			fmt::print("invalid mutation log backup {}\n", baseUrl);
-			CODE_PROBE(true, "Skip blob restore test because of invalid log backup");
+			CODE_PROBE(true, "Skip blob restore test because of invalid log backup", probe::decoration::rare);
 			return invalidVersion;
 		}
 		targetVersion = desc.contiguousLogEnd.get() - 1;
