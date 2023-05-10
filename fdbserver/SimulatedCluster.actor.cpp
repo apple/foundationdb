@@ -815,6 +815,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					TraceEvent("RebootProcessAndSwitchLateReboot").detail("Address", process->address);
 					g_simulator->switchCluster(process->address);
 					process->shutdownSignal.send(ISimulator::KillType::RebootProcessAndSwitch);
+					// Need to set the rebooting flag to true to keep the same behavior as MachineAttrition
+					// Otherwise, a protected process, like a coordinator process can execute this code path but the
+					// rebooting flag is still false, which breaks the assertion in g_simulator->destroyProcess
+					process->rebooting = true;
 				}
 				wait(waitForAny(futures));
 			} catch (Error& e) {
@@ -1018,9 +1022,11 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
+				// Fall back to use seed string if fdb.cluster not present
+				// It can happen when a process failed before it persisted the connection string to disk
 				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
-				                : new ClusterConnectionFile(path));
+				    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
+				                                     : new ClusterConnectionFile(path));
 				const int listenPort = i * listenPerProcess + 1;
 				ProcessMode ipProcessMode =
 				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;

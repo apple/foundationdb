@@ -277,7 +277,7 @@ def address_file(
                 fout.write("\n".join(new_lines))
 
         return True
-    except (OSError, UnicodeDecodeError) as e:
+    except (OSError, UnicodeDecodeError):
         logging.exception(
             "Unable to read file %s due to OSError", os.path.join(base_path, file_path)
         )
@@ -336,7 +336,7 @@ def address_path(
         else:
             logging.error("Path %s does not exist", path)
             return False
-    except OSError as e:
+    except OSError:
         logging.exception("Unable to find all API versions due to OSError")
         return False
 

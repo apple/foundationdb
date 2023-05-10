@@ -32,7 +32,7 @@ EncryptCipherMode encryptModeFromString(const std::string& modeStr) {
 	} else if (modeStr == "AES-256-CTR") {
 		return ENCRYPT_CIPHER_MODE_AES_256_CTR;
 	} else {
-		TraceEvent("EncryptModeFromString").log();
+		TraceEvent("EncryptModeFromString").detail("Mode", modeStr);
 		throw not_implemented();
 	}
 }

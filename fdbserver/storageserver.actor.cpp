@@ -7442,10 +7442,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = false;
 			} else {
 				rows.more = true;
-				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
 			results.send(rows);
 		}
+
+		if (chunks.size() == 0) {
+			RangeResult rows;
+			results.send(rows);
+		}
+
 		results.sendError(end_of_stream()); // end of range read
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "ReadBlobDataFailure")

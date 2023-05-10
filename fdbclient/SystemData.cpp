@@ -1433,6 +1433,7 @@ const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/config
 // Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
 const KeyRef blobRangeChangeKey = "\xff\x02/blobRangeChange"_sr;
 const KeyRangeRef blobRangeKeys("\xff\x02/blobRange/"_sr, "\xff\x02/blobRange0"_sr);
+const KeyRangeRef blobRangeChangeLogKeys("\xff\x02/blobRangeLog/"_sr, "\xff\x02/blobRangeLog0"_sr);
 const KeyRef blobManagerEpochKey = "\xff\x02/blobManagerEpoch"_sr;
 
 const Value blobManagerEpochValueFor(int64_t epoch) {
@@ -1457,6 +1458,24 @@ bool isBlobRangeActive(const ValueRef& blobRangeValue) {
 	// "1" is active
 	// Support future change where serialized metadata struct is also active
 	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
+}
+
+const Key blobRangeChangeLogReadKeyFor(Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobRangeChangeLog()));
+	wr.serializeBytes(blobRangeChangeLogKeys.begin);
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+
+const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value) {
+	return ObjectWriter::toValue(value, IncludeVersion(ProtocolVersion::withBlobRangeChangeLog()));
+}
+
+Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value) {
+	Standalone<BlobRangeChangeLogRef> result;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(result);
+	return result;
 }
 
 const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);

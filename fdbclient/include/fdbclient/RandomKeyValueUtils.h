@@ -28,13 +28,27 @@
 #include "flow/Error.h"
 #include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
+
+template <typename T>
+struct IGenerator {
+	virtual T next() = 0;
+	virtual T last() const = 0;
+	virtual std::string toString() const = 0;
+	virtual T next(int distance, bool wrap = false) { throw unsupported_operation(); }
+	virtual ~IGenerator(){};
+};
+
+struct IKeyGenerator : public IGenerator<Key> {
+	virtual int getMaxKeyLen() const = 0;
+};
+
 // Random unsigned int generator which generates integers between and including first and last
 // Distribution can be uniform, skewed small, or skewed large
 // String Definition Format:  [^]first[..last]
 //   last is optional and defaults to first
 //   If ^ is present, the generated numbers skew toward first, otherwise are uniform random
 //   If either first or last begins with a letter character it will be interpreted as its ASCII byte value.
-struct RandomIntGenerator {
+struct RandomIntGenerator : IGenerator<unsigned int> {
 	enum Skew { LARGE, SMALL, NONE };
 
 	unsigned int min;
@@ -55,7 +69,7 @@ struct RandomIntGenerator {
 	}
 
 	RandomIntGenerator(unsigned int only = 0) : min(only), max(only) {}
-	RandomIntGenerator(unsigned int first, unsigned int last, bool skewTowardFirst) : min(first), max(last) {
+	RandomIntGenerator(unsigned int first, unsigned int last, bool skewTowardFirst = false) : min(first), max(last) {
 		if (first != last && skewTowardFirst) {
 			skew = (first < last) ? SMALL : LARGE;
 		}
@@ -126,7 +140,7 @@ struct RandomIntGenerator {
 // String Definition Format:  sizeRange[/byteRange]
 // sizeRange and byteRange are RandomIntGenerators
 // The default `byteRange` is 0:255
-struct RandomStringGenerator {
+struct RandomStringGenerator : IKeyGenerator {
 	RandomStringGenerator() {}
 	RandomStringGenerator(RandomIntGenerator size, RandomIntGenerator byteset) : size(size), bytes(byteset) {}
 	RandomStringGenerator(const char* cstr) : RandomStringGenerator(std::string(cstr)) {}
@@ -145,7 +159,7 @@ struct RandomStringGenerator {
 	RandomIntGenerator bytes;
 	Standalone<StringRef> val;
 
-	Standalone<StringRef> next() {
+	Standalone<StringRef> next() override {
 		val = makeString(size.next());
 		for (int i = 0; i < val.size(); ++i) {
 			mutateString(val)[i] = (uint8_t)bytes.next();
@@ -153,9 +167,11 @@ struct RandomStringGenerator {
 		return val;
 	}
 
-	Standalone<StringRef> last() { return val; };
+	Standalone<StringRef> last() const override { return val; };
 
-	std::string toString() const { return fmt::format("{}/{}", size.toString(), bytes.toString()); }
+	std::string toString() const override { return fmt::format("{}/{}", size.toString(), bytes.toString()); }
+
+	int getMaxKeyLen() const override { return size.max - 1; }
 };
 
 // Same construction, definition, and usage as RandomStringGenerator but sacrifices randomness
@@ -181,23 +197,28 @@ struct RandomValueGenerator {
 	Value last() const { return val; };
 
 	std::string toString() const { return fmt::format("{}", strings.toString()); }
+
+	int getMaxValLen() const { return strings.size.max - 1; }
 };
 
 // Base class for randomly generated key sets
 // Returns a random or nearby key at some distance from a vector of keys generated at init time.
 // Requires a RandomIntGenerator as the index generator for selecting which random next key to return.  The given index
 // generator should have a min of 0 and if it doesn't its min will be updated to 0.
-struct RandomStringSetGeneratorBase {
+struct RandomStringSetGeneratorBase : IKeyGenerator {
 	Arena arena;
 	std::vector<KeyRef> keys;
 	RandomIntGenerator indexGenerator;
 	int iVal;
 	KeyRange rangeVal;
+	int maxKeyLen;
 
 	template <typename KeyGen>
 	void init(RandomIntGenerator originalIndexGenerator, KeyGen& keyGen) {
 		indexGenerator = originalIndexGenerator;
 		indexGenerator.min = 0;
+		maxKeyLen = keyGen.getMaxKeyLen();
+		ASSERT(indexGenerator.max > 0);
 		std::set<Key> uniqueKeys;
 		int inserts = 0;
 		while (uniqueKeys.size() < indexGenerator.max) {
@@ -217,16 +238,16 @@ struct RandomStringSetGeneratorBase {
 		iVal = 0;
 	}
 
-	Key last() const { return Key(keys[iVal], arena); };
+	Key last() const override { return Key(keys[iVal], arena); };
 	KeyRange lastRange() const { return rangeVal; }
 
-	Key next() {
+	Key next() override {
 		iVal = indexGenerator.next();
 		return last();
 	}
 
 	// Next sequential with some jump distance and optional wrap-around which is false
-	Key next(int distance, bool wrap = false) {
+	Key next(int distance, bool wrap = false) override {
 		iVal += distance;
 		if (wrap) {
 			iVal %= keys.size();
@@ -248,6 +269,8 @@ struct RandomStringSetGeneratorBase {
 	}
 
 	KeyRange nextRange() { return nextRange(deterministicRandom()->randomSkewedUInt32(0, keys.size())); }
+
+	int getMaxKeyLen() const override { return maxKeyLen; }
 };
 
 template <typename StringGenT>
@@ -274,7 +297,7 @@ typedef RandomStringSetGenerator<RandomStringGenerator> RandomKeySetGenerator;
 
 // Generate random keys which are composed of tuple segments from a list of RandomKeySets
 // String Definition Format: RandomKeySet[,RandomKeySet]...
-struct RandomKeyTupleGenerator {
+struct RandomKeyTupleGenerator : public IKeyGenerator {
 	RandomKeyTupleGenerator(){};
 	RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator> tupleParts) : tuples(tupleParts) {}
 	RandomKeyTupleGenerator(std::string s) : RandomKeyTupleGenerator(StringRef(s)) {}
@@ -287,7 +310,7 @@ struct RandomKeyTupleGenerator {
 	std::vector<RandomKeySetGenerator> tuples;
 	Key val;
 
-	Key next() {
+	Key next() override {
 		int totalBytes = 0;
 		for (auto& t : tuples) {
 			totalBytes += t.next().size();
@@ -302,9 +325,9 @@ struct RandomKeyTupleGenerator {
 		return val;
 	}
 
-	Key last() const { return val; };
+	Key last() const override { return val; };
 
-	std::string toString() const {
+	std::string toString() const override {
 		std::string s;
 		for (auto const& t : tuples) {
 			if (!s.empty()) {
@@ -314,9 +337,60 @@ struct RandomKeyTupleGenerator {
 		}
 		return s;
 	}
+
+	int getMaxKeyLen() const override {
+		int maxKeyLen = 0;
+		for (const auto& g : tuples) {
+			maxKeyLen += g.getMaxKeyLen();
+		}
+		return maxKeyLen;
+	}
 };
 
 typedef RandomStringSetGenerator<RandomKeyTupleGenerator> RandomKeyTupleSetGenerator;
+
+// RandomKeyGenerator is a helper function to contain multiple KeyGenerators
+// TODO: ideally, if all RandomGenerators support IGenerator interface and can be nested with each other, there's no
+//  need to have this class. But that also requires more complicated string syntax to build the generators.
+struct RandomKeyGenerator : IKeyGenerator {
+	std::vector<std::unique_ptr<IKeyGenerator>> keyGenerators;
+	Key val;
+
+	void addKeyGenerator(std::unique_ptr<IKeyGenerator> gen) { keyGenerators.emplace_back(std::move(gen)); }
+
+	Key next() override {
+		int totalBytes = 0;
+		for (auto& g : keyGenerators) {
+			totalBytes += g->next().size();
+		}
+		val = makeString(totalBytes);
+		totalBytes = 0;
+		for (const auto& g : keyGenerators) {
+			memcpy(mutateString(val) + totalBytes, g->last().begin(), g->last().size());
+			totalBytes += g->last().size();
+		}
+		return val;
+	}
+
+	Key last() const override { return val; };
+
+	// TODO: the string is only for output, RandomKeyGenerator currently doesn't support constructing from a string.
+	std::string toString() const override {
+		std::string s;
+		for (auto const& g : keyGenerators) {
+			s += "[" + g->toString() + "]";
+		}
+		return s;
+	}
+
+	int getMaxKeyLen() const override {
+		int maxKeyLen = 0;
+		for (const auto& g : keyGenerators) {
+			maxKeyLen += g->getMaxKeyLen();
+		}
+		return maxKeyLen;
+	}
+};
 
 struct RandomMutationGenerator {
 	RandomKeyTupleSetGenerator keys;
