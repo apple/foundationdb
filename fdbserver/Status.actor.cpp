@@ -828,6 +828,11 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 
 	for (auto& old : db->get().logSystemConfig.oldTLogs) {
 		for (auto& tLogSet : old.tLogs) {
+			for (auto& it : tLogSet.tLogs) {
+				if (it.present()) {
+					roles.addRole("log", it.interf());
+				}
+			}
 			for (auto& it : tLogSet.logRouters) {
 				if (it.present()) {
 					roles.addRole("router", it.interf());
