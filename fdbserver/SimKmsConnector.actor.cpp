@@ -3,7 +3,7 @@
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/SimKmsVault.h"
 
 #include "fdbrpc/sim_validation.h"
 #include "fdbrpc/simulator.h"
@@ -53,78 +54,9 @@
 
 #define DEBUG_SIM_KEY_CIPHER DEBUG_ENCRYPT_KEY_CIPHER
 
-using SimEncryptKey = std::string;
-struct SimEncryptKeyCtx {
-	static const int minCipherLen = 4;
-	static const int maxCipherLen = 256;
-
-	EncryptCipherBaseKeyId id;
-	SimEncryptKey key;
-	int keyLen;
-	EncryptCipherKeyCheckValue kcv;
-
-	explicit SimEncryptKeyCtx(EncryptCipherBaseKeyId kId, const char* data, const int dataLen)
-	  : id(kId), key(data, dataLen), keyLen(dataLen) {
-		kcv = Sha256KCV().computeKCV((const uint8_t*)data, dataLen);
-		if (DEBUG_SIM_KEY_CIPHER) {
-			TraceEvent(SevDebug, "SimKmsKeyCtxInit")
-			    .detail("BaseCipherId", kId)
-			    .detail("BaseCipherLen", dataLen)
-			    .detail("KCV", kcv);
-		}
-	}
-
-	static int getKeyLen(const EncryptCipherBaseKeyId id) {
-		ASSERT_GT(id, INVALID_ENCRYPT_CIPHER_KEY_ID);
-
-		int ret = AES_256_KEY_LENGTH;
-		if ((id % 2) == 0) {
-			ret += (id % (MAX_BASE_CIPHER_LEN - AES_256_KEY_LENGTH));
-		}
-		CODE_PROBE(ret == AES_256_KEY_LENGTH, "BaseCipherKeyLen AES_256_KEY_LENGTH");
-		CODE_PROBE(ret != AES_256_KEY_LENGTH, "BaseCipherKeyLen variable length");
-
-		return ret;
-	}
-};
-
 // The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
 // restarts. Keep it as global static state in simulation.
 static std::unordered_map<BlobMetadataDomainId, Standalone<BlobMetadataDetailsRef>> simBlobMetadataStore;
-
-struct SimKmsConnectorContext : NonCopyable, ReferenceCounted<SimKmsConnectorContext> {
-	uint32_t maxEncryptionKeys;
-	std::unordered_map<EncryptCipherBaseKeyId, std::unique_ptr<SimEncryptKeyCtx>> simEncryptKeyStore;
-
-	explicit SimKmsConnectorContext(uint32_t keyCount) : maxEncryptionKeys(keyCount) {
-		const unsigned char SHA_KEY[] = "0c39e7906db6d51ac0573d328ce1b6be";
-
-		// Construct encryption keyStore.
-		// Note the keys generated must be the same after restart.
-		for (int i = 1; i <= maxEncryptionKeys; i++) {
-			const int keyLen = SimEncryptKeyCtx::getKeyLen(i);
-			uint8_t key[keyLen];
-			uint8_t digest[AUTH_TOKEN_HMAC_SHA_SIZE];
-
-			// TODO: Allow baseCipherKeyLen < AES_256_KEY_LENGTH
-			ASSERT_EQ(AES_256_KEY_LENGTH, AUTH_TOKEN_HMAC_SHA_SIZE);
-			computeAuthToken({ { reinterpret_cast<const uint8_t*>(&i), sizeof(i) } },
-			                 SHA_KEY,
-			                 AES_256_KEY_LENGTH,
-			                 &digest[0],
-			                 EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
-			                 AUTH_TOKEN_HMAC_SHA_SIZE);
-			memcpy(&key[0], &digest[0], std::min(keyLen, AUTH_TOKEN_HMAC_SHA_SIZE));
-			// Simulate variable length 'baseCipher' returned by external KMS
-			if (keyLen > AUTH_TOKEN_HMAC_SHA_SIZE) {
-				// pad it with known value
-				memset(&key[AUTH_TOKEN_HMAC_SHA_SIZE], 'b', (keyLen - AUTH_TOKEN_HMAC_SHA_SIZE));
-			}
-			simEncryptKeyStore[i] =
-			    std::make_unique<SimEncryptKeyCtx>(i, reinterpret_cast<const char*>(&key[0]), keyLen);
-		}
-	}
-};
 
 namespace {
 Optional<int64_t> getRefreshInterval(const int64_t now, const int64_t defaultTtl) {
@@ -144,9 +76,7 @@ Optional<int64_t> getExpireInterval(Optional<int64_t> refTS, const int64_t defau
 }
 } // namespace
 
-ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
-                                 KmsConnectorInterface interf,
-                                 KmsConnLookupEKsByKeyIdsReq req) {
+ACTOR Future<Void> ekLookupByIds(KmsConnectorInterface interf, KmsConnLookupEKsByKeyIdsReq req) {
 	state KmsConnLookupEKsByKeyIdsRep rep;
 	state bool success = true;
 	state Optional<TraceEvent> dbgKIdTrace =
@@ -165,31 +95,25 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	Optional<int64_t> expAtTS = getExpireInterval(refAtTS, defaultTtl);
 	TraceEvent("SimKmsEKLookupById").detail("RefreshAt", refAtTS).detail("ExpireAt", expAtTS);
 	for (const auto& item : req.encryptKeyInfos) {
-		const auto& itr = ctx->simEncryptKeyStore.find(item.baseCipherId);
-		if (itr != ctx->simEncryptKeyStore.end()) {
+		Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByBaseCipherId(item.baseCipherId);
+		if (keyCtx.isValid()) {
 			// TODO: Relax assert if EKP APIs are updated to make 'domain_id' optional for encryption keys point lookups
 			ASSERT(item.domainId.present());
-			rep.cipherKeyDetails.emplace_back_deep(rep.arena,
-			                                       item.domainId.get(),
-			                                       itr->first,
-			                                       StringRef(itr->second.get()->key),
-			                                       itr->second->kcv,
-			                                       refAtTS,
-			                                       expAtTS);
+			rep.cipherKeyDetails.emplace_back_deep(
+			    rep.arena, item.domainId.get(), keyCtx->id, keyCtx->key, keyCtx->kcv, refAtTS, expAtTS);
 
 			if (dbgKIdTrace.present()) {
 				// {encryptDomainId, baseCipherId} forms a unique tuple across encryption domains
 				dbgKIdTrace.get().detail(
-				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), itr->first), "");
+				    getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, item.domainId.get(), keyCtx->id), "");
 			}
 
 			if (DEBUG_SIM_KEY_CIPHER) {
 				TraceEvent("SimKmsEKLookupByKeyId")
 				    .detail("DomId", item.domainId.get())
 				    .detail("BaseCipherId", item.baseCipherId)
-				    .detail("BaseCipherLen", itr->second->keyLen)
-				    .detail("BaseCipherKeyLen", itr->second->keyLen)
-				    .detail("BaseCipherKCV", itr->second->kcv);
+				    .detail("BaseCipherKeyLen", keyCtx->keyLen)
+				    .detail("BaseCipherKCV", keyCtx->kcv);
 			}
 		} else {
 			TraceEvent("SimKmsEKLookupByIdsKeyNotFound")
@@ -205,9 +129,7 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 	return Void();
 }
 
-ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
-                                       KmsConnectorInterface interf,
-                                       KmsConnLookupEKsByDomainIdsReq req) {
+ACTOR Future<Void> ekLookupByDomainIds(KmsConnectorInterface interf, KmsConnLookupEKsByDomainIdsReq req) {
 	state KmsConnLookupEKsByDomainIdsRep rep;
 	state bool success = true;
 	state Optional<TraceEvent> dbgDIdTrace =
@@ -233,24 +155,22 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 			break;
 		}
 
-		EncryptCipherBaseKeyId keyId = 1 + abs(domainId) % SERVER_KNOBS->SIM_KMS_MAX_KEYS;
-		const auto& itr = ctx->simEncryptKeyStore.find(keyId);
-		if (itr != ctx->simEncryptKeyStore.end()) {
+		Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByDomainId(domainId);
+		if (keyCtx.isValid()) {
 			rep.cipherKeyDetails.emplace_back_deep(
-			    req.arena, domainId, keyId, StringRef(itr->second.get()->key), itr->second->kcv, refAtTS, expAtTS);
+			    req.arena, domainId, keyCtx->id, keyCtx->key, keyCtx->kcv, refAtTS, expAtTS);
 			if (dbgDIdTrace.present()) {
 				// {encryptId, baseCipherId} forms a unique tuple across encryption domains
-				dbgDIdTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, domainId, keyId), "");
+				dbgDIdTrace.get().detail(getEncryptDbgTraceKey(ENCRYPT_DBG_TRACE_RESULT_PREFIX, domainId, keyCtx->id),
+				                         "");
 			}
 			if (DEBUG_SIM_KEY_CIPHER) {
 				TraceEvent("SimKmsEKLookupByDomainId")
 				    .detail("DomId", domainId)
-				    .detail("BaseCipherId", itr->second->id)
-				    .detail("BaseCipherLen", itr->second->keyLen)
-				    .detail("BaseCipherKeyLen", itr->second->keyLen)
-				    .detail("BaseCipherKCV", itr->second->kcv);
+				    .detail("BaseCipherId", keyCtx->id)
+				    .detail("BaseCipherKeyLen", keyCtx->keyLen)
+				    .detail("BaseCipherKCV", keyCtx->kcv);
 			}
-
 		} else {
 			TraceEvent("SimKmsEKLookupByDomainIdKeyNotFound").detail("DomId", domainId);
 			success = false;
@@ -310,19 +230,15 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 ACTOR Future<Void> simconnectorCoreImpl(KmsConnectorInterface interf) {
 	TraceEvent("SimEncryptKmsProxyInit", interf.id()).detail("MaxEncryptKeys", SERVER_KNOBS->SIM_KMS_MAX_KEYS);
 
-	state Reference<SimKmsConnectorContext> ctx = makeReference<SimKmsConnectorContext>(SERVER_KNOBS->SIM_KMS_MAX_KEYS);
-
-	ASSERT_EQ(ctx->simEncryptKeyStore.size(), SERVER_KNOBS->SIM_KMS_MAX_KEYS);
-
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
 	loop {
 		choose {
 			when(KmsConnLookupEKsByKeyIdsReq req = waitNext(interf.ekLookupByIds.getFuture())) {
-				addActor.send(ekLookupByIds(ctx, interf, req));
+				addActor.send(ekLookupByIds(interf, req));
 			}
 			when(KmsConnLookupEKsByDomainIdsReq req = waitNext(interf.ekLookupByDomainIds.getFuture())) {
-				addActor.send(ekLookupByDomainIds(ctx, interf, req));
+				addActor.send(ekLookupByDomainIds(interf, req));
 			}
 			when(KmsConnBlobMetadataReq req = waitNext(interf.blobMetadataReq.getFuture())) {
 				addActor.send(blobMetadataLookup(interf, req));
@@ -342,52 +258,63 @@ void forceLinkSimKmsConnectorTests() {}
 
 namespace {
 
-ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncryptionKeys) {
-	state uint32_t maxEncryptionKeys = nEncryptionKeys;
+ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf) {
+	state uint32_t maxEncryptionKeys = SimKmsVault::maxSimKeys();
 	state int maxDomainIds = deterministicRandom()->randomInt(121, 295);
-	state int maxIterations = deterministicRandom()->randomInt(786, 1786);
-	state std::unordered_map<EncryptCipherDomainId, std::unique_ptr<SimEncryptKeyCtx>> domainIdKeyMap;
-	state int i = 0;
+	state int maxIterations = deterministicRandom()->randomInt(5, 15);
+	state int i;
 
 	TraceEvent("RunWorkloadStart").detail("MaxDomainIds", maxDomainIds).detail("MaxIterations", maxIterations);
 
-	{
-		// construct domainId to EncryptKeyCtx map
-		KmsConnLookupEKsByDomainIdsReq domainIdsReq;
-		for (i = 0; i < maxDomainIds; i++) {
-			// domainIdsReq.encryptDomainIds.push_back(i);
-			domainIdsReq.encryptDomainIds.emplace_back(i);
-		}
-		KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
-		for (auto& element : domainIdsRep.cipherKeyDetails) {
-			domainIdKeyMap.emplace(element.encryptDomainId,
-			                       std::make_unique<SimEncryptKeyCtx>(element.encryptKeyId,
-			                                                          element.encryptKey.toString().c_str(),
-			                                                          element.encryptKey.size()));
-		}
+	// construct {encryptId -> baseCipherId} mapping
+	state std::unordered_map<EncryptCipherDomainId, EncryptCipherBaseKeyId> domainIdMap;
+	state std::vector<EncryptCipherDomainId> domainIds;
+	KmsConnLookupEKsByDomainIdsReq domainIdsReq;
+	for (i = 0; i < maxDomainIds; i++) {
+		domainIdsReq.encryptDomainIds.emplace_back(i);
+	}
+	KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
+	for (auto& element : domainIdsRep.cipherKeyDetails) {
+		Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByDomainId(element.encryptDomainId);
+		ASSERT(keyCtx.isValid());
+		ASSERT_EQ(element.encryptKeyId, keyCtx->id);
+		ASSERT_EQ(element.encryptKey.compare(keyCtx->key), 0);
+		ASSERT_EQ(element.encryptKCV, keyCtx->kcv);
+		domainIdMap[element.encryptDomainId] = keyCtx->id;
+		domainIds.push_back(element.encryptDomainId);
+	}
 
-		// randomly pick any domainId and validate if lookupByKeyId result matches
-		state std::unordered_map<EncryptCipherBaseKeyId, StringRef> validationMap;
-		std::unordered_map<EncryptCipherBaseKeyId, EncryptCipherDomainId> idsToLookup;
-		for (i = 0; i < maxIterations; i++) {
-			state int idx = deterministicRandom()->randomInt(0, maxDomainIds);
-			state SimEncryptKeyCtx* ctx = domainIdKeyMap[idx].get();
-			validationMap[ctx->id] = StringRef(ctx->key);
-			idsToLookup.emplace(ctx->id, idx);
-		}
-
-		state KmsConnLookupEKsByKeyIdsReq keyIdsReq;
-		for (const auto& item : idsToLookup) {
-			keyIdsReq.encryptKeyInfos.emplace_back(item.second, item.first);
-		}
-		state KmsConnLookupEKsByKeyIdsRep keyIdsReply = wait(inf.ekLookupByIds.getReply(keyIdsReq));
-		/* TraceEvent("Lookup")
-		    .detail("KeyIdReqSize", keyIdsReq.encryptKeyIds.size())
-		    .detail("KeyIdsRepSz", keyIdsReply.encryptKeyDetails.size())
-		    .detail("ValSz", validationMap.size()); */
-		ASSERT(keyIdsReply.cipherKeyDetails.size() == validationMap.size());
-		for (const auto& element : keyIdsReply.cipherKeyDetails) {
-			ASSERT(validationMap[element.encryptKeyId].compare(element.encryptKey) == 0);
+	for (i = 0; i < maxIterations; i++) {
+		const int batchSize = deterministicRandom()->randomInt(1, maxEncryptionKeys);
+		int domIdx = deterministicRandom()->randomInt(0, domainIds.size() - 1);
+		if (deterministicRandom()->coinflip()) {
+			KmsConnLookupEKsByDomainIdsReq domainIdsReq;
+			for (int j = 0; j < batchSize && domIdx < domainIds.size(); j++, domIdx++) {
+				domainIdsReq.encryptDomainIds.emplace_back(domIdx);
+			}
+			KmsConnLookupEKsByDomainIdsRep domainIdsRep = wait(inf.ekLookupByDomainIds.getReply(domainIdsReq));
+			for (auto& element : domainIdsRep.cipherKeyDetails) {
+				Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByDomainId(element.encryptDomainId);
+				ASSERT(keyCtx.isValid());
+				ASSERT_EQ(element.encryptKeyId, keyCtx->id);
+				ASSERT_EQ(element.encryptKey.compare(keyCtx->key), 0);
+				ASSERT_EQ(element.encryptKCV, keyCtx->kcv);
+			}
+		} else {
+			state KmsConnLookupEKsByKeyIdsReq keyIdsReq;
+			for (int j = 0; j < batchSize && domIdx < domainIds.size(); j++, domIdx++) {
+				auto itr = domainIdMap.find(domIdx);
+				ASSERT(itr != domainIdMap.end());
+				keyIdsReq.encryptKeyInfos.emplace_back(domIdx, itr->second);
+			}
+			state KmsConnLookupEKsByKeyIdsRep keyIdsReply = wait(inf.ekLookupByIds.getReply(keyIdsReq));
+			for (auto& element : keyIdsReply.cipherKeyDetails) {
+				Reference<SimKmsVaultKeyCtx> keyCtx = SimKmsVault::getByBaseCipherId(element.encryptKeyId);
+				ASSERT(keyCtx.isValid());
+				ASSERT_EQ(element.encryptKeyId, keyCtx->id);
+				ASSERT_EQ(element.encryptKey.compare(keyCtx->key), 0);
+				ASSERT_EQ(element.encryptKCV, keyCtx->kcv);
+			}
 		}
 	}
 
@@ -410,14 +337,13 @@ ACTOR Future<Void> testRunWorkload(KmsConnectorInterface inf, uint32_t nEncrypti
 
 TEST_CASE("fdbserver/SimKmsConnector") {
 	state KmsConnectorInterface inf;
-	state uint32_t maxEncryptKeys = 64;
 	state SimKmsConnector connector("SimKmsConnector");
 
 	loop choose {
 		when(wait(connector.connectorCore(inf))) {
 			throw internal_error();
 		}
-		when(wait(testRunWorkload(inf, maxEncryptKeys))) {
+		when(wait(testRunWorkload(inf))) {
 			break;
 		}
 	}
