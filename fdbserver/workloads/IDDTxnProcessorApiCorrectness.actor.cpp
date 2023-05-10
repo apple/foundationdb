@@ -88,7 +88,7 @@ public:
 	Future<Void> testRawFinishMovement(MoveKeysParams& params,
 	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
 		for (auto& id : params.destinationTeam) {
-			mgs->allServers.at(id)->setShardStatus(params.keys.get(), MockShardStatus::FETCHED, mgs->restrictSize);
+			mgs->allServers.at(id)->setShardStatus(params.keys.get(), MockShardStatus::FETCHED);
 		}
 		return rawFinishMovement(params, tssMapping);
 	}
