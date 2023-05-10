@@ -280,7 +280,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				    wait(tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True));
 				ASSERT(res.size() == 0 || res.size() == 1);
 				uint64_t nextId = 1;
-				if (!res.empty() == 1) {
+				if (!res.empty()) {
 					latestExistingAuditState = decodeAuditStorageState(res[0].value);
 					if (auditId.isValid()) { // new audit state persist gets failed last time
 						// Check to confirm no other actor can persist new audit state
@@ -316,7 +316,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateUnRetriableError", auditId)
+		TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateUnretriableError", auditId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 		ASSERT_WE_THINK(e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict);

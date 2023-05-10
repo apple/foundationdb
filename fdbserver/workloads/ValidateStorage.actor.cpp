@@ -176,10 +176,11 @@ struct ValidateStorage : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				RangeResult res = wait(tr.getRange(auditRangeBasedProgressRangeFor(type), GetRangeLimits()));
-				ASSERT(res.empty() && !res.more);
-				RangeResult res = wait(tr.getRange(auditServerBasedProgressRangeFor(type), GetRangeLimits()));
-				ASSERT(res.empty() && !res.more);
+				RangeResult rangeBasedRes = wait(tr.getRange(auditRangeBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(rangeBasedRes.empty() && !rangeBasedRes.more);
+				RangeResult serverBasedRes =
+				    wait(tr.getRange(auditServerBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(serverBasedRes.empty() && !serverBasedRes.more);
 				break;
 
 			} catch (Error& e) {
