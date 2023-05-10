@@ -1306,8 +1306,7 @@ void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
 
 	CODE_PROBE(true, "encryptInplace: BlobCipher data encryption");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "encryptInplace: Encryption authentication disabled",
-	           probe::decoration::rare);
+	           "encryptInplace: Encryption authentication disabled");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 	           "encryptInplace: HMAC_SHA Auth token generation");
 	CODE_PROBE(header->flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
