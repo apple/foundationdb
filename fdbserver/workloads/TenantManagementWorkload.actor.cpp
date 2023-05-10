@@ -353,6 +353,10 @@ struct TenantManagementWorkload : TestWorkload {
 	                                           std::map<TenantName, TenantMapEntry> tenantsToCreate,
 	                                           OperationType operationType,
 	                                           TenantManagementWorkload* self) {
+		state metacluster::MetaclusterTenantMapEntry entry;
+		state metacluster::AssignClusterAutomatically assign = metacluster::AssignClusterAutomatically::True;
+		state metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
+
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (auto [tenant, entry] : tenantsToCreate) {
@@ -384,15 +388,21 @@ struct TenantManagementWorkload : TestWorkload {
 		} else {
 			ASSERT_EQ(operationType, OperationType::METACLUSTER);
 			ASSERT_EQ(tenantsToCreate.size(), 1);
-			metacluster::MetaclusterTenantMapEntry entry =
-			    metacluster::MetaclusterTenantMapEntry::fromTenantMapEntry(tenantsToCreate.begin()->second);
-			auto assign = metacluster::AssignClusterAutomatically::True;
+			entry = metacluster::MetaclusterTenantMapEntry::fromTenantMapEntry(tenantsToCreate.begin()->second);
 			if (deterministicRandom()->coinflip()) {
 				entry.assignedCluster = self->dataClusterName;
 				assign = metacluster::AssignClusterAutomatically::False;
 			}
 
-			wait(metacluster::createTenant(self->mvDb, entry, assign));
+			try {
+				wait(metacluster::createTenant(self->mvDb, entry, assign, ignoreCapacityLimit));
+				ASSERT(!assign || !ignoreCapacityLimit);
+			} catch (Error& e) {
+				if (e.code() == error_code_invalid_tenant_configuration) {
+					ASSERT(assign && ignoreCapacityLimit);
+				}
+				throw e;
+			}
 			return Void();
 		}
 
@@ -519,6 +529,8 @@ struct TenantManagementWorkload : TestWorkload {
 							       operationType == OperationType::MANAGEMENT_DATABASE);
 							ASSERT(retried);
 							break;
+						} else if (e.code() == error_code_invalid_tenant_configuration) {
+							ASSERT_EQ(operationType, OperationType::METACLUSTER);
 						} else {
 							throw;
 						}

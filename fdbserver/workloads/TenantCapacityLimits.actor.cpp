@@ -135,8 +135,10 @@ struct TenantCapacityLimits : TestWorkload {
 			try {
 				metacluster::MetaclusterTenantMapEntry entry;
 				entry.tenantName = "test_tenant_metacluster"_sr;
-				wait(metacluster::createTenant(
-				    self->managementDb, entry, metacluster::AssignClusterAutomatically::True));
+				wait(metacluster::createTenant(self->managementDb,
+				                               entry,
+				                               metacluster::AssignClusterAutomatically::True,
+				                               metacluster::IgnoreCapacityLimit::False));
 				ASSERT(false);
 			} catch (Error& e) {
 				ASSERT(e.code() == error_code_cluster_no_capacity);
