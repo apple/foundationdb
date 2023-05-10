@@ -537,7 +537,12 @@ private:
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
+		// FIXME: we could also just implement connection idle closing for sim http server instead
+		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
+			return Void();
+		}
 		wait(g_simulator->onProcess(self->process));
+
 		if (self->process->address.isPublic()) {
 			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
 			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
@@ -2424,8 +2429,6 @@ public:
 
 	void removeSimHTTPProcess() override {
 		ProcessInfo* p = getCurrentProcess();
-
-		httpServerIps.erase(p->address.ip);
 
 		bool found = false;
 		for (int i = 0; i < httpServerProcesses.size(); i++) {
