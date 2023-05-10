@@ -155,7 +155,8 @@ void processIntOption(const std::string& optionName, const std::string& value, i
 		throw TesterError(fmt::format("Invalid value {} for {}", value, optionName));
 	}
 	if (res < minValue || res > maxValue) {
-		throw TesterError(fmt::format("Value for {} must be between {} and {}", optionName, minValue, maxValue));
+		throw TesterError(fmt::format(
+		    "Value for {} must be between {} and {}. Input value {}.", optionName, minValue, maxValue, res));
 	}
 }
 
