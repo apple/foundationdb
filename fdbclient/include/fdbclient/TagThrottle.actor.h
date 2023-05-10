@@ -35,7 +35,6 @@
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/Tuple.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 typedef StringRef TransactionTagRef;
@@ -601,9 +600,8 @@ public:
 	int64_t reservedQuota{ 0 };
 	int64_t totalQuota{ 0 };
 	bool isValid() const;
-	Tuple pack() const;
-	static TagQuotaValue unpack(Tuple const& val);
-	bool operator==(TagQuotaValue const&) const;
+	Value toValue() const;
+	static TagQuotaValue fromValue(ValueRef);
 };
 
 Key getTagQuotaKey(TransactionTagRef);
@@ -616,7 +614,7 @@ void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota,
 	if (!tagQuotaValue.isValid()) {
 		throw invalid_throttle_quota_value();
 	}
-	tr->set(getTagQuotaKey(tag), tagQuotaValue.pack().pack());
+	tr->set(getTagQuotaKey(tag), tagQuotaValue.toValue());
 	signalThrottleChange(tr);
 }
 

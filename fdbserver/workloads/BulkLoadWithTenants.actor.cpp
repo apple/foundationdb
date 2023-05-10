@@ -105,8 +105,7 @@ struct BulkSetupWorkload : TestWorkload {
 			wait(waitForAll(tenantFutures));
 			for (auto& f : tenantFutures) {
 				ASSERT(f.get().present());
-				TenantLookupInfo const tenantLookupInfo(f.get().get().id, f.get().get().tenantGroup);
-				workload->tenants.push_back(makeReference<Tenant>(tenantLookupInfo, f.get().get().tenantName));
+				workload->tenants.push_back(makeReference<Tenant>(f.get().get().id, f.get().get().tenantName));
 				TraceEvent("BulkSetupCreatedTenant").detail("Tenant", workload->tenants.back());
 			}
 		}

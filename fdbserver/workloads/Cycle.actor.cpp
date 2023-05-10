@@ -328,8 +328,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 ACTOR Future<Void> prepareToken(Database cx, CycleWorkload<true>* self) {
 	cx->defaultTenant = self->tenant;
-	TenantLookupInfo tenantLookupInfo = wait(cx->lookupTenant(self->tenant));
-	self->tenantId = tenantLookupInfo.id;
+	int64_t tenantId = wait(cx->lookupTenant(self->tenant));
+	self->tenantId = tenantId;
 	ASSERT_NE(self->tenantId, TenantInfo::INVALID_TENANT);
 	// make the lifetime comfortably longer than the timeout of the workload
 	self->signedToken = g_simulator->makeToken(self->tenantId,

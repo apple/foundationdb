@@ -523,9 +523,6 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 				for (auto tag : req.tags) {
 					(*transactionTagCounter)[tag.first] += tag.second;
 				}
-				if (req.tenantGroup.present()) {
-					(*transactionTagCounter)[req.tenantGroup.get()] += req.transactionCount;
-				}
 
 				if (req.debugID.present())
 					g_traceBatch.addEvent("TransactionDebug",
