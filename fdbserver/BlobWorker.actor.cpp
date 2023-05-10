@@ -45,7 +45,7 @@
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"
@@ -5550,6 +5550,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			wait(self->storage->init());
 			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 			wait(self->storage->commit());
+			cx->storage = self->storage;
+			TraceEvent("BlobWorkerStorageInitComplete", self->id).log();
 		}
 
 		if (BW_DEBUG) {
@@ -5625,6 +5627,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	try {
 		wait(self->storage->init());
 		wait(self->storage->commit());
+		cx->storage = self->storage;
 		state UID previous = wait(restorePersistentState(self));
 
 		if (recovered.canBeSet()) {

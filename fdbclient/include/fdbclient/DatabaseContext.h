@@ -38,6 +38,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -516,6 +517,7 @@ public:
 	std::unordered_map<Key, KeyRange> changeFeedCache;
 	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
+	IKeyValueStore* storage = nullptr;
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 	Version getMinimumChangeFeedVersion();

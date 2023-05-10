@@ -18,19 +18,16 @@
  * limitations under the License.
  */
 
-#ifndef FDBSERVER_IKEYVALUESTORE_H
-#define FDBSERVER_IKEYVALUESTORE_H
+#ifndef FDBCLIENT_IKEYVALUESTORE_H
+#define FDBCLIENT_IKEYVALUESTORE_H
 #include "flow/Trace.h"
 #pragma once
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/Tenant.h"
-#include "fdbserver/Knobs.h"
-#include "fdbserver/IClosable.h"
-#include "fdbserver/IPageEncryptionKeyProvider.actor.h"
-#include "fdbserver/ServerDBInfo.h"
-#include "fdbserver/StorageMetrics.actor.h"
+#include "fdbclient/IClosable.h"
+#include "fdbclient/KeyRangeMap.h"
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
@@ -154,7 +151,7 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
                                            bool checkIntegrity = false);
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
-                                              Reference<AsyncVar<ServerDBInfo> const> db = {},
+                                              Reference<AsyncVar<struct ServerDBInfo> const> db = {},
                                               Optional<EncryptionAtRestMode> encryptionMode = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
@@ -172,7 +169,7 @@ extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
                                            std::string ext = "fdq",
                                            KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
 extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
-                                              Reference<AsyncVar<ServerDBInfo> const> db,
+                                              Reference<AsyncVar<struct ServerDBInfo> const> db,
                                               UID logID,
                                               int64_t memoryLimit,
                                               bool disableSnapshot,
@@ -187,50 +184,15 @@ extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          bool checkChecksums = false,
                                          bool checkIntegrity = false);
 
-inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
-                                   std::string const& filename,
-                                   UID logID,
-                                   int64_t memoryLimit,
-                                   bool checkChecksums = false,
-                                   bool checkIntegrity = false,
-                                   bool openRemotely = false,
-                                   Reference<AsyncVar<ServerDBInfo> const> db = {},
-                                   Optional<EncryptionAtRestMode> encryptionMode = {}) {
-	// Only Redwood support encryption currently.
-	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
-	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
-		TraceEvent(SevWarn, "KVStoreTypeNotSupportingEncryption")
-		    .detail("KVStoreType", storeType)
-		    .detail("EncryptionMode", encryptionMode);
-		throw encrypt_mode_mismatch();
-	}
-	if (openRemotely) {
-		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
-	}
-	switch (storeType) {
-	case KeyValueStoreType::SSD_BTREE_V1:
-		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V1, false, checkIntegrity);
-	case KeyValueStoreType::SSD_BTREE_V2:
-		return keyValueStoreSQLite(filename, logID, KeyValueStoreType::SSD_BTREE_V2, checkChecksums, checkIntegrity);
-	case KeyValueStoreType::MEMORY:
-		return keyValueStoreMemory(filename, logID, memoryLimit);
-	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode);
-	case KeyValueStoreType::SSD_ROCKSDB_V1:
-		return keyValueStoreRocksDB(filename, logID, storeType);
-	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:
-		return keyValueStoreShardedRocksDB(filename, logID, storeType, checkChecksums, checkIntegrity);
-	case KeyValueStoreType::MEMORY_RADIXTREE:
-		return keyValueStoreMemory(filename,
-		                           logID,
-		                           memoryLimit,
-		                           "fdr",
-		                           KeyValueStoreType::MEMORY_RADIXTREE); // for radixTree type, set file ext to "fdr"
-	default:
-		UNREACHABLE();
-	}
-	UNREACHABLE(); // FIXME: is this right?
-}
+IKeyValueStore* openKVStore(KeyValueStoreType storeType,
+                            std::string const& filename,
+                            UID logID,
+                            int64_t memoryLimit,
+                            bool checkChecksums = false,
+                            bool checkIntegrity = false,
+                            bool openRemotely = false,
+                            Reference<AsyncVar<struct ServerDBInfo> const> db = {},
+                            Optional<EncryptionAtRestMode> encryptionMode = {});
 
 void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
