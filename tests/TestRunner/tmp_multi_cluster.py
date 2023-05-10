@@ -29,13 +29,13 @@ from tmp_cluster import TempCluster
 
 if __name__ == "__main__":
     script_desc = """
-	This script automatically configures N temporary local clusters on the machine and then
-	calls a command while these clusters are running. As soon as the command returns, all
-	configured clusters are killed and all generated data is deleted.
+    This script automatically configures N temporary local clusters on the machine and then
+    calls a command while these clusters are running. As soon as the command returns, all
+    configured clusters are killed and all generated data is deleted.
 
-	The purpose of this is to support testing a set of integration tests using multiple clusters
-	(i.e. using the Multi-threaded client). 
-	"""
+    The purpose of this is to support testing a set of integration tests using multiple clusters
+    (i.e. using the Multi-threaded client).
+    """
 
     parser = CreateTmpFdbClusterArgParser(description=script_desc)
 

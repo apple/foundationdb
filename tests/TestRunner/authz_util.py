@@ -1,7 +1,16 @@
 from authlib.jose import JsonWebKey, KeySet, jwt
-from typing import List
+from typing import List, Union
+import base64
 import json
 import time
+
+from test_util import random_alphanum_string
+
+
+def to_str(s: Union[str, bytes]):
+    if isinstance(s, bytes):
+        s = s.decode("utf8")
+    return s
 
 
 def private_key_gen(kty: str, kid: str):
@@ -52,6 +61,6 @@ def token_claim_1h(tenant_id: int):
         "iat": now,
         "nbf": now - 1,
         "exp": now + 60 * 60,
-        "jti": random_alphanum_str(10),
+        "jti": random_alphanum_string(10),
         "tenants": [to_str(base64.b64encode(tenant_id.to_bytes(8, "big")))],
     }

@@ -1075,6 +1075,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	bool buggifyMediumGranules = simulationMediumShards || (randomize && BUGGIFY);
 	// BlobGranuleVerify* simulation tests use "knobs", BlobGranuleCorrectness* use "tenant", default in real clusters is "knobs"
 	init( BG_METADATA_SOURCE,                                "knobs" );
+	// All clients must be writing this before server can make use of it. FIXME: Enable in next release
+	init( BG_USE_BLOB_RANGE_CHANGE_LOG,                        false ); if ( randomize && BUGGIFY ) BG_USE_BLOB_RANGE_CHANGE_LOG = true;
 	init( BG_SNAPSHOT_FILE_TARGET_BYTES,                    20000000 ); if ( buggifySmallShards ) BG_SNAPSHOT_FILE_TARGET_BYTES = 50000 * deterministicRandom()->randomInt(1, 4); else if (buggifyMediumGranules) BG_SNAPSHOT_FILE_TARGET_BYTES = 50000 * deterministicRandom()->randomInt(1, 20);
 	init( BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,               64*1024 ); if ( randomize && BUGGIFY ) BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES = BG_SNAPSHOT_FILE_TARGET_BYTES / (1 << deterministicRandom()->randomInt(0, 8));
 	init( BG_DELTA_BYTES_BEFORE_COMPACT, BG_SNAPSHOT_FILE_TARGET_BYTES/2 ); if ( randomize && BUGGIFY ) BG_DELTA_BYTES_BEFORE_COMPACT *= (1.0 + deterministicRandom()->random01() * 3.0)/2.0;

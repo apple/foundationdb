@@ -68,7 +68,6 @@ class CommitDebugHandler(xml.sax.ContentHandler, object):
             if self._starttime is None:
                 self._starttime = float(attrs["Time"])
 
-            attr_id = attrs["ID"]
             # Trace viewer doesn't seem to care about types, so use host as pid and port as tid
             (pid, tid) = attrs["Machine"].split(":")
             traces = locationToPhase[attrs["Location"]]

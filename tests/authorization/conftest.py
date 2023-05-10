@@ -189,7 +189,7 @@ def cluster(
                 ):
                     apply_trace_time = float(entry.attrib["Time"])
                 if bad_trace_time is None and ev_type == bad_ev_type:
-                    bad_trace_found = float(entry.attrib["Time"])
+                    bad_trace_time = float(entry.attrib["Time"])
             if apply_trace_time is None:
                 pytest.fail(
                     f"failed to find '{keyset_apply_ev_type}' event with >0 public keys"
@@ -223,7 +223,7 @@ def cluster(
                             f"{ev_target} trace entry's FromAddr does not have a valid ':tls' suffix: found '{tls_suffix}'"
                         )
                     try:
-                        ip = ipaddress.ip_address(client_ip)
+                        ipaddress.ip_address(client_ip)
                     except ValueError as e:
                         pytest.fail(
                             f"{ev_target} trace entry's FromAddr '{client_ip}' has an invalid IP format: {e}"
