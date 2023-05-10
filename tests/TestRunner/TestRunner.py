@@ -280,7 +280,6 @@ def process_traces(
     cmake_seed,
 ):
     res = True
-    backtraces = []
     parser = None
     if log_format == "json":
         parser = JSONParser(

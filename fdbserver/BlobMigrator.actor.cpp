@@ -45,6 +45,7 @@
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "flow/genericactors.actor.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 #define ENABLE_DEBUG_MG true
@@ -59,7 +60,8 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
 class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
 public:
-	BlobMigrator(Database db, BlobMigratorInterface interf) : interf_(interf), actors_(false), db_(db) {
+	BlobMigrator(Database db, BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
+	  : interf_(interf), actors_(false), db_(db), dbInfo_(dbInfo) {
 		blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 	}
 	~BlobMigrator() {}
@@ -67,7 +69,7 @@ public:
 	// Start migration
 	ACTOR static Future<Void> start(Reference<BlobMigrator> self) {
 		wait(checkIfReadyForMigration(self));
-		wait(lockDatabase(self->db_, self->interf_.id()));
+		wait(checkRangeEmptyAndLockDb(self, normalKeys));
 		wait(prepare(self, normalKeys));
 		wait(advanceVersion(self));
 		wait(serverLoop(self));
@@ -75,6 +77,30 @@ public:
 	}
 
 private:
+	// check the restored range is empty before lock the database, maybe in the future we can just lock the range.
+	ACTOR static Future<Void> checkRangeEmptyAndLockDb(Reference<BlobMigrator> self, KeyRangeRef keys) {
+		state Transaction tr(self->db_);
+		UID debugID = deterministicRandom()->randomUniqueID();
+		tr.debugTransaction(debugID);
+		loop {
+			try {
+				// sanity check there's no data in the restored overlapped range
+				RangeResult rangeResult = wait(tr.getRange(keys, 1));
+				if (!rangeResult.empty()) {
+					throw restore_destination_not_empty();
+				}
+				wait(lockDatabase(&tr, self->interf_.id()));
+				wait(tr.commit());
+				TraceEvent("BlobRestorePrepare", self->interf_.id()).detail("State", "LockDatabase");
+				return Void();
+			} catch (Error& e) {
+				if (e.code() == error_code_database_locked)
+					throw e;
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Check if blob manifest is loaded so that blob migration can start
 	ACTOR static Future<Void> checkIfReadyForMigration(Reference<BlobMigrator> self) {
 		loop {
@@ -84,7 +110,8 @@ private:
 			ASSERT(restoreState.present());
 			state BlobRestorePhase phase = restoreState.get().phase;
 			if (phase == BlobRestorePhase::LOADED_MANIFEST) {
-				BlobGranuleRestoreVersionVector granules = wait(listBlobGranules(self->db_, self->blobConn_));
+				BlobGranuleRestoreVersionVector granules =
+				    wait(listBlobGranules(self->db_, self->dbInfo_, self->blobConn_));
 				if (!granules.empty()) {
 					self->blobGranules_ = granules;
 					for (BlobGranuleRestoreVersion granule : granules) {
@@ -117,112 +144,62 @@ private:
 
 	// Prepare for data migration for given key range.
 	ACTOR static Future<Void> prepare(Reference<BlobMigrator> self, KeyRangeRef keys) {
-		wait(waitForDataMover(self));
-		state int oldMode = wait(setDDMode(self->db_, 0));
-		// Register as a storage server, so that DataDistributor could start data movement after
-		std::pair<Version, Tag> verAndTag = wait(addStorageServer(self->db_, self->interf_.ssi));
-		dprint("Started storage server interface {} {}\n", verAndTag.first, verAndTag.second.toString());
-
-		// Reassign key ranges to the storage server
-		// It'll restart DataDistributor so that internal data structures like ShardTracker, ShardsAffectedByTeamFailure
-		// could be re-initialized. Ideally it should be done within DataDistributor, then we don't need to
-		// restart DataDistributor
-		wait(unassignServerKeys(self, keys));
-		wait(assignKeysToServer(self, keys, self->interf_.ssi.id()));
-		wait(success(setDDMode(self->db_, oldMode)));
-		return Void();
-	}
-
-	// Wait until all pending data moving is done before doing full restore.
-	ACTOR static Future<Void> waitForDataMover(Reference<BlobMigrator> self) {
+		state Future<ErrorOr<PrepareBlobRestoreReply>> replyFuture = Never();
+		state Future<Void> dbInfoChange = Void();
+		state Future<Void> delayTime = Void();
 		state int retries = 0;
+		state UID requestId;
 		loop {
-			state Transaction tr(self->db_);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				RangeResult dms = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
-				if (dms.size() == 0) {
-					return Void();
-				} else {
-					dprint("Wait pending data moving {}\n", dms.size());
-					wait(delay(2));
+			choose {
+				when(wait(dbInfoChange)) {
+					if (self->dbInfo_->get().distributor.present()) {
+						requestId = deterministicRandom()->randomUniqueID();
+						replyFuture =
+						    errorOr(timeoutError(self->dbInfo_->get().distributor.get().prepareBlobRestoreReq.getReply(
+						                             PrepareBlobRestoreRequest(requestId, self->interf_.ssi, keys)),
+						                         SERVER_KNOBS->BLOB_MIGRATOR_PREPARE_TIMEOUT));
+						dbInfoChange = Never();
+						TraceEvent("BlobRestorePrepare", self->interf_.id())
+						    .detail("State", "SendReq")
+						    .detail("ReqId", requestId);
+					} else {
+						replyFuture = Never();
+						dbInfoChange = self->dbInfo_->onChange();
+						TraceEvent(SevWarn, "BlobRestorePrepare", self->interf_.id()).detail("State", "WaitDD");
+					}
+				}
+				when(ErrorOr<PrepareBlobRestoreReply> reply = wait(replyFuture)) {
+					if (reply.isError()) {
+						TraceEvent("BlobRestorePrepare", self->interf_.id())
+						    .error(reply.getError())
+						    .detail("State", "Error")
+						    .detail("ReqId", requestId);
+
+						if (reply.getError().code() == error_code_restore_error) {
+							throw restore_error();
+						}
+					} else if (reply.get().res == PrepareBlobRestoreReply::SUCCESS) {
+						TraceEvent("BlobRestorePrepare", self->interf_.id())
+						    .detail("State", "Success")
+						    .detail("ReqId", requestId);
+						return Void();
+					} else {
+						TraceEvent("BlobRestorePrepare", self->interf_.id())
+						    .detail("State", "Failed")
+						    .detail("ReqId", requestId)
+						    .detail("Reply", reply.get().toString())
+						    .detail("Retries", retries);
+					}
+
 					if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
 						throw restore_error();
 					}
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	// Assign given key range to specified storage server.
-	ACTOR static Future<Void> assignKeysToServer(Reference<BlobMigrator> self, KeyRangeRef keys, UID serverUID) {
-		state Transaction tr(self->db_);
-		loop {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
-				wait(krmSetRangeCoalescing(&tr, keyServersPrefix, keys, allKeys, value));
-				wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
-				wait(tr.commit());
-				dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
-	// Unassign given key range from its current storage servers
-	ACTOR static Future<Void> unassignServerKeys(Reference<BlobMigrator> self, KeyRangeRef keys) {
-		state int retries = 0;
-		loop {
-			state Transaction tr(self->db_);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			try {
-				state RangeResult serverList =
-				    wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
-				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
-				for (auto& server : serverList) {
-					state UID id = decodeServerListValue(server.value).id();
-					Optional<Value> tag = wait(tr.get(serverTagKeyFor(id)));
-					if (!tag.present()) {
-						dprint("Server {} no tag\n", id.shortString());
-						continue;
-					}
-					if (id == self->interf_.id()) {
-						continue;
-					}
-					RangeResult ranges = wait(krmGetRanges(&tr, serverKeysPrefixFor(id), keys));
-
-					bool owning = false;
-					for (auto& r : ranges) {
-						if (r.value != serverKeysFalse) {
-							owning = true;
-							break;
-						}
-					}
-					if (owning) {
-						wait(krmSetRangeCoalescing(&tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
-						dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
-						TraceEvent("UnassignKeys", self->interf_.id()).detail("Keys", keys).detail("SS", id);
-					}
-				}
-				wait(tr.commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-				if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
-					throw restore_error();
+					delayTime = delayJittered(10.0);
+					dbInfoChange = Void();
 				}
 			}
+
+			wait(delayTime);
 		}
 	}
 
@@ -663,6 +640,7 @@ private:
 	BlobMigratorInterface interf_;
 	ActorCollection actors_;
 	FileBackupAgent backupAgent_;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo_;
 };
 
 // Main entry point
@@ -670,7 +648,7 @@ ACTOR Future<Void> blobMigrator(BlobMigratorInterface interf, Reference<AsyncVar
 	TraceEvent("StartBlobMigrator", interf.id()).detail("Interface", interf.id().toString());
 	dprint("Starting blob migrator {}\n", interf.id().toString());
 	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
-	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(db, interf);
+	state Reference<BlobMigrator> self = makeReference<BlobMigrator>(db, interf, dbInfo);
 	try {
 		wait(BlobMigrator::start(self));
 	} catch (Error& e) {

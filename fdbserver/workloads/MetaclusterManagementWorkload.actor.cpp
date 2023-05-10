@@ -1378,6 +1378,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			auto tenantData = self->createdTenants.find(tenant);
 			ASSERT(tenantData != self->createdTenants.end());
 
+			ASSERT(!tenantData->second->lockId.present() || lockId == tenantData->second->lockId.get());
+
 			auto& dataDb = self->dataDbs[tenantData->second->cluster];
 			ASSERT(dataDb->registered);
 
@@ -1398,11 +1400,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
 				return Void();
-			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(exists);
-				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
+				return Void();
+			} else if (e.code() == error_code_tenant_locked) {
+				ASSERT(exists);
+				auto tenantData = self->createdTenants.find(tenant);
+				ASSERT(tenantData != self->createdTenants.end());
+				ASSERT(tenantData->second->lockId.present() && lockId != tenantData->second->lockId.get());
 				return Void();
 			}
 

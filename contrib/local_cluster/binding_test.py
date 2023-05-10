@@ -218,7 +218,7 @@ class TestSet:
                 test_name=test_name,
                 additional_args=additional_args,
             )
-        except asyncio.TimeoutError as timeout:
+        except asyncio.TimeoutError:
             logger.exception(
                 f"Test API [{api_language}] Test name [{test_name}] failed due to timeout {self._timeout}"
             )
@@ -366,7 +366,7 @@ async def run_binding_tests(
 
         try:
             await run_test_cycles()
-        except:
+        except Exception:
             logger.exception("Error found during the binding test")
             raise
         finally:
@@ -405,7 +405,7 @@ def main() -> int:
         timeout=args.test_timeout,
     )
 
-    logger.info(f"Binding test start")
+    logger.info("Binding test start")
     num_failures = asyncio.run(
         run_binding_tests(test_set, args.num_cycles, args.stop_at_failure, args.random)
     )

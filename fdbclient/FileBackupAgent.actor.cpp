@@ -18,10 +18,12 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/TenantEntryCache.actor.h"
 #include "fdbclient/TenantManagement.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/simulator.h"
 #include "flow/EncryptUtils.h"
@@ -5291,7 +5293,8 @@ public:
 	                                       StopWhenDone stopWhenDone,
 	                                       UsePartitionedLog partitionedLog,
 	                                       IncrementalBackupOnly incrementalBackupOnly,
-	                                       Optional<std::string> encryptionKeyFileName) {
+	                                       Optional<std::string> encryptionKeyFileName,
+	                                       Optional<std::string> blobManifestUrl) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr->setOption(FDBTransactionOptions::COMMIT_ON_FIRST_PROXY);
@@ -5347,6 +5350,21 @@ public:
 			        "ERROR: The last backup `%s' happened in the future.\n",
 			        printable(lastBackupTimestamp.get()).c_str());
 			throw backup_error();
+		}
+
+		if (blobManifestUrl.present()) {
+			state BlobGranuleBackupConfig bgBackupConfig;
+			bool enabled = wait(bgBackupConfig.enabled().getD(tr));
+			if (enabled) {
+				fprintf(stderr, "ERROR: Abort existing blob manifest backup first before creating new one.\n");
+				throw backup_error();
+			} else {
+				bgBackupConfig.manifestUrl().set(tr, blobManifestUrl.get());
+				bgBackupConfig.mutationLogsUrl().set(tr, bc->getURL());
+				bgBackupConfig.enabled().set(tr, true);
+			}
+			// Allow only incremental backup
+			incrementalBackupOnly = IncrementalBackupOnly::True;
 		}
 
 		KeyRangeMap<int> backupRangeSet;
@@ -5411,6 +5429,7 @@ public:
 		config.partitionedLogEnabled().set(tr, partitionedLog);
 		config.incrementalBackupOnly().set(tr, incrementalBackupOnly);
 		config.enableSnapshotBackupEncryption().set(tr, encryptionEnabled);
+		config.blobBackupEnabled().set(tr, blobManifestUrl.present());
 
 		Key taskKey = wait(fileBackup::StartFullBackupTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5515,6 +5534,8 @@ public:
 
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
+
+		//
 
 		Key taskKey = wait(fileBackup::StartFullRestoreTaskFunc::addTask(
 		    tr, backupAgent->taskBucket, uid, TaskCompletionKey::noSignal()));
@@ -5648,6 +5669,12 @@ public:
 		TraceEvent(SevInfo, "FBA_AbortBackup")
 		    .detail("TagName", tagName.c_str())
 		    .detail("Status", BackupAgentBase::getStateText(status));
+
+		bool bgBackupEnabled = wait(config.blobBackupEnabled().getD(tr));
+		if (bgBackupEnabled) {
+			BlobGranuleBackupConfig bgbackupConfig;
+			bgbackupConfig.enabled().set(tr, false);
+		}
 
 		// Cancel backup task through tag
 		wait(tag.cancel(tr));
@@ -6171,6 +6198,7 @@ public:
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
 				                   randomUid));
+
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -6687,7 +6715,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
                                            StopWhenDone stopWhenDone,
                                            UsePartitionedLog partitionedLog,
                                            IncrementalBackupOnly incrementalBackupOnly,
-                                           Optional<std::string> const& encryptionKeyFileName) {
+                                           Optional<std::string> const& encryptionKeyFileName,
+                                           Optional<std::string> const& blobManifestUrl) {
 	return FileBackupAgentImpl::submitBackup(this,
 	                                         tr,
 	                                         outContainer,
@@ -6700,7 +6729,8 @@ Future<Void> FileBackupAgent::submitBackup(Reference<ReadYourWritesTransaction> 
 	                                         stopWhenDone,
 	                                         partitionedLog,
 	                                         incrementalBackupOnly,
-	                                         encryptionKeyFileName);
+	                                         encryptionKeyFileName,
+	                                         blobManifestUrl);
 }
 
 Future<Void> FileBackupAgent::discontinueBackup(Reference<ReadYourWritesTransaction> tr, Key tagName) {
