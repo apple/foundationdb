@@ -1025,6 +1025,11 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(self->metaclusterCreated);
 			ASSERT(!exists);
 			ASSERT(ignoreCapacityLimit || hasCapacity);
+			if (!hasCapacity) {
+				ASSERT(!tenantGroupExists);
+				ASSERT(ignoreCapacityLimit);
+				ASSERT(!assignClusterAutomatically);
+			}
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
@@ -1039,18 +1044,26 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			Optional<ClusterName> clusterAssignedToTenantGroup;
 			ASSERT(self->isValidVersion(assignedCluster->second));
 
+			bool allocationAdded = false;
 			if (tenantGroup.present()) {
-				auto tenantGroupData =
-				    self->tenantGroups
-				        .try_emplace(tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
-				        .first;
+				auto [tenantGroupData, _allocationAdded] = self->tenantGroups.try_emplace(
+				    tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster));
+
+				allocationAdded = _allocationAdded;
 				ASSERT(tenantGroupData->second->cluster == entry.assignedCluster);
 				clusterAssignedToTenantGroup = tenantGroupData->second->cluster;
 				tenantGroupData->second->tenants.insert(tenant);
 				assignedCluster->second->tenantGroups[tenantGroup.get()] = tenantGroupData->second;
 			} else {
+				allocationAdded = true;
 				self->ungroupedTenants.insert(tenant);
 				assignedCluster->second->ungroupedTenants.insert(tenant);
+			}
+
+			if (allocationAdded &&
+			    assignedCluster->second->ungroupedTenants.size() + assignedCluster->second->tenantGroups.size() >
+			        assignedCluster->second->tenantGroupCapacity) {
+				++self->totalTenantGroupCapacity;
 			}
 
 			// In two cases, we bypass the search on capacity index:
