@@ -61,7 +61,9 @@ ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID audi
 				// Clear audit metadata
 				tr.clear(auditKey(auditType, auditId));
 				// Clear progress metadata
-				clearAuditProgressMetadata(&tr, auditType, auditId);
+				if (clearProgressMetadata) {
+					clearAuditProgressMetadata(&tr, auditType, auditId);
+				}
 				wait(tr.commit());
 				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
 				    .detail("AuditKey", auditKey(auditType, auditId));
@@ -90,7 +92,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 	state Key readBegin;
 	state Key readEnd;
 	state RangeResult res;
-	TraceEvent(SevDebug, "AuditUtilGetAuditStates").detail("AuditType", auditType).detail("Num", num);
+	state Reverse reverse = newFirst ? Reverse::True : Reverse::False;
 
 	loop {
 		try {
@@ -103,16 +105,9 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				KeyRangeRef rangeToRead(readBegin, readEnd);
 				if (num.present()) {
-					wait(
-					    store(res,
-					          tr.getRange(
-					              rangeToRead, num.get(), Snapshot::False, newFirst ? Reverse::True : Reverse::False)));
+					wait(store(res, tr.getRange(rangeToRead, num.get(), Snapshot::False, reverse)));
 				} else {
-					wait(store(res,
-					           tr.getRange(rangeToRead,
-					                       GetRangeLimits(),
-					                       Snapshot::False,
-					                       newFirst ? Reverse::True : Reverse::False)));
+					wait(store(res, tr.getRange(rangeToRead, GetRangeLimits(), Snapshot::False, reverse)));
 				}
 				for (int i = 0; i < res.size(); ++i) {
 					auditStates.push_back(decodeAuditStorageState(res[i].value));
@@ -121,7 +116,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 					break;
 				}
 				if (newFirst) {
-					readEnd = res.back().key; // we are reversely reading the range
+					readEnd = res.front().key; // we are reversely reading the range
 				} else {
 					readBegin = keyAfter(res.back().key);
 				}

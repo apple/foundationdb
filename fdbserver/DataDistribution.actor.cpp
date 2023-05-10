@@ -334,13 +334,13 @@ public:
 
 	std::unordered_map<AuditType, std::unordered_map<UID, std::shared_ptr<DDAudit>>> audits;
 	Promise<Void> auditInitialized;
-	bool anyAuditStorageRunning;
+	std::unordered_map<AuditType, bool> anyAuditStorageLaunching;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
-	    anyAuditStorageRunning(false), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
@@ -2054,8 +2054,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		req.reply.sendError(not_implemented());
 		return Void();
 	}
-	ASSERT(!self->anyAuditStorageRunning);
-	self->anyAuditStorageRunning = true;
+	ASSERT(!self->anyAuditStorageLaunching.contains(req.getType()) || !self->anyAuditStorageLaunching[req.getType()]);
+	self->anyAuditStorageLaunching[req.getType()] = true;
 	state int retryCount = 0;
 	loop {
 		try {
@@ -2079,7 +2079,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("Range", req.range);
 			if (e.code() == error_code_actor_cancelled) {
 				req.reply.sendError(audit_storage_failed());
-				self->anyAuditStorageRunning = false;
+				self->anyAuditStorageLaunching[req.getType()] = false;
 				throw audit_storage_failed();
 			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
 				req.reply.sendError(audit_storage_exceeded_request_limit());
@@ -2095,7 +2095,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		}
 		break;
 	}
-	self->anyAuditStorageRunning = false;
+	self->anyAuditStorageLaunching[req.getType()] = false;
 	return Void();
 }
 
@@ -2559,7 +2559,8 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(getStorageWigglerStates(self));
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
-				if (!self->anyAuditStorageRunning) {
+				if (!self->anyAuditStorageLaunching.contains(req.getType()) ||
+				    !self->anyAuditStorageLaunching[req.getType()]) {
 					actors.add(auditStorage(self, req));
 				} else { // Only one audit storage is allowed at any time
 					req.reply.sendError(audit_storage_exceeded_request_limit());

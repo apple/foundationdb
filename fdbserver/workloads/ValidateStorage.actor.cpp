@@ -242,6 +242,14 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateStorageServerShard));
 		TraceEvent("TestValidateShardSSShardInfoDone");
 
+		std::vector<Future<Void>> fs;
+		fs.push_back(self->testAuditStorageForType(self, cx, AuditType::ValidateHA));
+		fs.push_back(self->testAuditStorageForType(self, cx, AuditType::ValidateReplica));
+		fs.push_back(self->testAuditStorageForType(self, cx, AuditType::ValidateLocationMetadata));
+		fs.push_back(self->testAuditStorageForType(self, cx, AuditType::ValidateStorageServerShard));
+		wait(waitForAll(fs));
+		TraceEvent("TestValidatesConcurrentRunDone");
+
 		return Void();
 	}
 
