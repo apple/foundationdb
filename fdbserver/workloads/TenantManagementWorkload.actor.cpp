@@ -399,12 +399,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!assign || !ignoreCapacityLimit);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_tenant_configuration) {
-					if (!entry.tenantGroup.present()) {
-						ASSERT(assign && ignoreCapacityLimit);
-					} else {
-						// TODO: to verify the assigned cluster is different from the tenant group's current assigned
-						// cluster, we need to track this info for each tenant group.
-					}
+					ASSERT(assign && ignoreCapacityLimit);
 				}
 				throw e;
 			}

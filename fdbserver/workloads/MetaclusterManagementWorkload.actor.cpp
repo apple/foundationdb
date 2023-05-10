@@ -1028,8 +1028,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			if (!hasCapacity) {
 				ASSERT(!tenantGroupExists);
 				ASSERT(ignoreCapacityLimit);
-				ASSERT(!assignClusterAutomatically);
 			}
+			ASSERT(!ignoreCapacityLimit || !assignClusterAutomatically);
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 

@@ -164,11 +164,6 @@ struct CreateTenantImpl {
 				throw cluster_no_capacity();
 			}
 			dataClusterNames.push_back(self->tenantEntry.assignedCluster);
-		} else if (self->ignoreCapacityLimit) {
-			TraceEvent("MetaclusterCreateTenantAutoAssignIgnoreCapLimit")
-			    .detail("TenantName", self->tenantEntry.tenantName)
-			    .detail("TenantGroup", self->tenantEntry.tenantGroup);
-			throw invalid_tenant_configuration();
 		} else {
 			state KeyBackedSet<Tuple>::RangeResultType availableClusters =
 			    wait(metadata::management::clusterCapacityIndex().getRange(
