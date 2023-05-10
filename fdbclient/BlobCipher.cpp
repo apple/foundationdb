@@ -1993,6 +1993,7 @@ Reference<BlobCipherKey> corruptCipherKey(const Reference<BlobCipherKey>& cipher
 using BaseKeyMap = std::unordered_map<EncryptCipherBaseKeyId, Reference<BaseCipher>>;
 using DomainKeyMap = std::unordered_map<EncryptCipherDomainId, BaseKeyMap>;
 
+// The following test functions wrap encryptInplace() and encrypt() and randomly decide which one to use for the test
 Reference<EncryptBuf> encryptTest(EncryptBlobCipherAes265Ctr& encryptor,
                                   const uint8_t* plaintext,
                                   const int plaintextLen,
@@ -2028,6 +2029,7 @@ StringRef encryptTest(EncryptBlobCipherAes265Ctr& encryptor,
 	return encrypted;
 }
 
+// The following test functions wrap decryptInplace() and decrypt() and randomly decide which one to use for the test
 Reference<EncryptBuf> decryptTest(DecryptBlobCipherAes256Ctr& decryptor,
                                   const uint8_t* ciphertext,
                                   const int ciphertextLen,
