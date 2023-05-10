@@ -24,45 +24,12 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
-namespace {
-
-// When enforcing tag throttling on proxies, only a single tag is used for throttling.
-// If a tenant group is associated with the request, this tenant group overrides any
-// tags for throttling purposes, so it is returned as the single "tag."
-//
-// Using multiple tags or both tags and a tenant group can lead to unexpected
-// behavior, because some tags will be ignored when throttling on proxies.
-// In this case, SevWarnAlways trace event is logged.
-TransactionTag getSingleTag(GetReadVersionRequest const& req) {
-	ASSERT(req.isTagged());
-	if (req.tenantGroup.present()) {
-		if (!req.tags.empty()) {
-			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerIgnoringTags")
-			    .suppressFor(60.0)
-			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()))
-			    .detail("FirstTag", printable(req.tags.begin()->first));
-		}
-		return req.tenantGroup.get();
-	} else {
-		auto const& tag = req.tags.begin()->first;
-		if (req.tags.size() > 1) {
-			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerMultipleTags")
-			    .suppressFor(60.0)
-			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTag", printable(tag));
-		}
-		return tag;
-	}
-}
-
-} // namespace
-
 uint64_t GrvProxyTagThrottler::DelayedRequest::lastSequenceNumber = 0;
 
 void GrvProxyTagThrottler::DelayedRequest::updateProxyTagThrottledDuration(LatencyBandsMap& latencyBandsMap) {
 	req.proxyTagThrottledDuration = now() - startTime;
-	latencyBandsMap.addMeasurement(getSingleTag(req), req.proxyTagThrottledDuration, req.transactionCount);
+	auto const& [tag, count] = *req.tags.begin();
+	latencyBandsMap.addMeasurement(tag, req.proxyTagThrottledDuration, count);
 }
 
 bool GrvProxyTagThrottler::DelayedRequest::isMaxThrottled(double maxThrottleDuration) const {
@@ -134,11 +101,20 @@ void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates
 	}
 }
 
-// First look at the tenant group for a request. If a tenant group exists,
-// use this to determine throttling. If no tenant group exists, use the
-// first transaction tag.
 void GrvProxyTagThrottler::addRequest(GetReadVersionRequest const& req) {
-	queues[getSingleTag(req)].requests.emplace_back(req);
+	ASSERT(req.isTagged());
+	auto const& tag = req.tags.begin()->first;
+	if (req.tags.size() > 1) {
+		// The GrvProxyTagThrottler assumes that each GetReadVersionRequest
+		// has at most one tag. If a transaction uses multiple tags and
+		// SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES is enabled, there may be
+		// unexpected behaviour, because only one tag is used for throttling.
+		TraceEvent(SevWarnAlways, "GrvProxyTagThrottler_MultipleTags")
+		    .suppressFor(60.0)
+		    .detail("NumTags", req.tags.size())
+		    .detail("UsingTag", printable(tag));
+	}
+	queues[tag].requests.emplace_back(req);
 }
 
 void GrvProxyTagThrottler::releaseTransactions(double elapsed,
@@ -195,7 +171,7 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 
 		while (!tagQueueHandle.queue->requests.empty()) {
 			auto& delayedReq = tagQueueHandle.queue->requests.front();
-			auto count = delayedReq.req.transactionCount;
+			auto count = delayedReq.req.tags.begin()->second;
 			ASSERT_EQ(tagQueueHandle.nextSeqNo, delayedReq.sequenceNumber);
 			if (tagQueueHandle.queue->rateInfo.present() &&
 			    !tagQueueHandle.queue->rateInfo.get().canStart(*(tagQueueHandle.numReleased), count)) {
@@ -267,12 +243,11 @@ ACTOR static Future<Void> mockClient(GrvProxyTagThrottler* throttler,
 	state Future<Void> timer;
 	state TransactionTagMap<uint32_t> tags;
 	for (const auto& tag : tagSet) {
-		tags[tag] = batchSize / tagSet.size();
+		tags[tag] = batchSize;
 	}
 	loop {
 		timer = delayJittered(static_cast<double>(batchSize) / desiredRate);
 		GetReadVersionRequest req;
-		req.transactionCount = batchSize;
 		req.tags = tags;
 		req.priority = priority;
 		throttler->addRequest(req);
@@ -417,8 +392,8 @@ TEST_CASE("/GrvProxyTagThrottler/MultiTag") {
 	}
 	tagSet1.addTag("sampleTag1"_sr);
 	tagSet2.addTag("sampleTag2"_sr);
-	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 1, 20.0, &counters);
-	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 1, 20.0, &counters);
+	state Future<Void> client1 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet1, 5, 20.0, &counters);
+	state Future<Void> client2 = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet2, 5, 20.0, &counters);
 	state Future<Void> server = mockServer(&throttler);
 	wait(timeout(client1 && client2 && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_MultiTag")

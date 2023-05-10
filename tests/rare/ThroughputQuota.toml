@@ -1,10 +1,9 @@
 [[test]]
-testTitle='TagThroughputQuotaTest'
+testTitle='ThroughputQuotaTest'
 
   [[test.workload]]
   testName='ThroughputQuota'
-  nameRepresentsTenantGroup=false
-  name='a'
+  transactionTag='a'
   totalQuota=16384
 
   [[test.workload]]

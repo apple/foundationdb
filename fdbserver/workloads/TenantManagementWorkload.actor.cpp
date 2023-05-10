@@ -64,8 +64,7 @@ struct TenantManagementWorkload : TestWorkload {
 		TenantTestData(int64_t id, Optional<TenantGroupName> tenantGroup, bool empty)
 		  : tenant(makeReference<Tenant>(id)), tenantGroup(tenantGroup), empty(empty) {}
 		TenantTestData(int64_t id, Optional<TenantName> tName, Optional<TenantGroupName> tenantGroup, bool empty)
-		  : tenant(makeReference<Tenant>(TenantLookupInfo(id, tenantGroup), tName)), tenantGroup(tenantGroup),
-		    empty(empty) {}
+		  : tenant(makeReference<Tenant>(id, tName)), tenantGroup(tenantGroup), empty(empty) {}
 	};
 
 	struct TenantGroupData {

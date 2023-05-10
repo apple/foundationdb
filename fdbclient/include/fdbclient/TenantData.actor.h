@@ -55,7 +55,6 @@ public:
 	std::map<TenantGroupName, typename TenantTypes::TenantGroupEntryT> tenantGroupMap;
 	std::map<TenantGroupName, std::set<int64_t>> tenantGroupIndex;
 	std::map<TenantGroupName, int64_t> storageQuotas;
-	std::map<TenantGroupName, ThrottleApi::TagQuotaValue> throughputQuotas;
 
 private:
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
@@ -70,7 +69,6 @@ private:
 		state KeyBackedRangeResult<std::pair<TenantGroupName, typename TenantTypes::TenantGroupEntryT>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, int64_t>> storageQuotaList;
-		state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::TagQuotaValue>> throughputQuotaList;
 
 		wait(store(self->metaclusterRegistration, metacluster::metadata::metaclusterRegistration().get(tr)));
 
@@ -88,9 +86,7 @@ private:
 		     store(tenantGroupTenantTuples,
 		           self->tenantMetadata->tenantGroupTenantIndex.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
 		     store(tenantGroupList, self->tenantMetadata->tenantGroupMap.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
-		     store(storageQuotaList, self->tenantMetadata->storageQuota.getRange(tr, {}, {}, metaclusterMaxTenants)) &&
-		     store(throughputQuotaList,
-		           self->tenantMetadata->throughputQuota.getRange(tr, {}, {}, metaclusterMaxTenants)));
+		     store(storageQuotaList, self->tenantMetadata->storageQuota.getRange(tr, {}, {}, metaclusterMaxTenants)));
 
 		ASSERT(!tenantList.more);
 		self->tenantMap = std::map<int64_t, typename TenantTypes::TenantMapEntryT>(tenantList.results.begin(),
@@ -111,10 +107,6 @@ private:
 		ASSERT(!storageQuotaList.more);
 		self->storageQuotas =
 		    std::map<TenantGroupName, int64_t>(storageQuotaList.results.begin(), storageQuotaList.results.end());
-
-		ASSERT(!throughputQuotaList.more);
-		self->throughputQuotas = std::map<TenantGroupName, ThrottleApi::TagQuotaValue>(
-		    throughputQuotaList.results.begin(), throughputQuotaList.results.end());
 
 		self->tenantGroupIndex.clear();
 		for (auto t : tenantGroupTenantTuples.results) {
@@ -163,7 +155,6 @@ public:
 		ASSERT(tenantGroupMap == other.tenantGroupMap);
 		ASSERT(tenantGroupIndex == other.tenantGroupIndex);
 		ASSERT(storageQuotas == other.storageQuotas);
-		ASSERT(throughputQuotas == other.throughputQuotas);
 	}
 
 	bool operator==(TenantData const& other) const {
@@ -172,7 +163,7 @@ public:
 		       lastTenantId == other.lastTenantId && tenantCount == other.tenantCount &&
 		       tenantTombstones == other.tenantTombstones && tombstoneCleanupData == other.tombstoneCleanupData &&
 		       tenantGroupMap == other.tenantGroupMap && tenantGroupIndex == other.tenantGroupIndex &&
-		       storageQuotas == other.storageQuotas && throughputQuotas == other.throughputQuotas;
+		       storageQuotas == other.storageQuotas;
 	}
 
 	bool operator!=(TenantData const& other) const { return !(*this == other); }

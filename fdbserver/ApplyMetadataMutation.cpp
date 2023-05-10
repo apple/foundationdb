@@ -154,7 +154,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
-	std::unordered_map<TenantName, TenantLookupInfo>* tenantNameIndex = nullptr;
+	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
 	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
@@ -698,7 +698,6 @@ private:
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
 				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
-				tenantEntry.tenantGroup = txnStateStoreEntry.group;
 			} else {
 				tenantEntry = TenantMapEntry::decode(m.param2);
 			}
@@ -708,14 +707,12 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantEntry.tenantName)
-				    .detail("Group", tenantEntry.tenantGroup)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
 				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantEntry.tenantName] =
-					    TenantLookupInfo(tenantEntry.id, tenantEntry.tenantGroup);
+					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
 				}
 			}
 			if (lockedTenants) {
