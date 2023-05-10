@@ -651,13 +651,14 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 }
 
 ACTOR Future<Void> runSimHTTPServer() {
+	TraceEvent("SimHTTPServerStarting");
 	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
 		wait(context->actors.getResult());
 	} catch (Error& e) {
-		TraceEvent("SimHTTPServerDied").error(e);
+		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
 		context->stop();
 		g_simulator->removeSimHTTPProcess();
 		throw e;

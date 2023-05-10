@@ -43,8 +43,12 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 			throw e;
 		}
 		// FIXME: other errors?
-		if (e.code() == error_code_http_request_failed || e.code() == error_code_http_bad_response ||
-		    e.code() == error_code_connection_failed) {
+		if (e.code() == error_code_connection_failed) {
+			TraceEvent(SevWarn, "HTTPServerConnHandlerFailed").error(e);
+			// return, client will retry
+			return Void();
+		}
+		if (e.code() == error_code_http_request_failed || e.code() == error_code_http_bad_response) {
 			TraceEvent(SevWarn, "HTTPServerConnHandlerInternalError").errorUnsuppressed(e);
 			// reset to empty error response
 			response->reset();
@@ -145,15 +149,21 @@ void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, Reference<HT
 }
 
 void HTTP::SimRegisteredHandlerContext::updateDNS() {
-	INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
+	// if addresses is empty, that violates the assumption that there is at least one address when doing resolution.
+	// Only update dns if we have at least one address
+	if (!addresses.empty()) {
+		INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
+	}
 }
 
 void HTTP::SimRegisteredHandlerContext::addAddress(NetworkAddress addr) {
 	addresses.push_back(addr);
+	fmt::print("HTTP: adding address {0} for {1}:{2}\n", addr.toString(), hostname, service);
 	updateDNS();
 }
 
 void HTTP::SimRegisteredHandlerContext::removeIp(IPAddress ip) {
+	fmt::print("HTTP: removing ip {0} for {1}:{2}\n", ip.toString(), hostname, service);
 	for (int i = 0; i < addresses.size(); i++) {
 		if (addresses[i].ip == ip) {
 			swapAndPop(&addresses, i);
