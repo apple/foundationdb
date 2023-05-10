@@ -1210,7 +1210,6 @@ static std::set<int> const& normalDataDistributorErrors() {
 		s.insert(error_code_data_move_dest_team_not_found);
 		s.insert(error_code_dd_config_changed);
 		s.insert(error_code_audit_storage_failed);
-		s.insert(error_code_persist_new_audit_metadata_error);
 	}
 	return s;
 }
@@ -2040,7 +2039,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 }
 
 // Handling audit requests
-// For each request, launch audit storage and reply to CC with following four replies:
+// For each request, launch audit storage and reply to CC with following three replies:
 // (1) auditID: reply auditID when the audit is successfully launch
 // (2) error_code_audit_storage_exceeded_request_limit: reply this error when dd
 // already has a running auditStorage
@@ -2067,7 +2066,7 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 			UID auditID = wait(launchAudit(self, req.range, req.getType()));
 			req.reply.send(auditID);
-			TraceEvent(SevDebug, "DDAuditStorageReply", self->ddId)
+			TraceEvent(SevVerbose, "DDAuditStorageReply", self->ddId)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range)
@@ -2081,8 +2080,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			if (e.code() == error_code_actor_cancelled) {
 				req.reply.sendError(audit_storage_failed());
 				self->anyAuditStorageRunning = false;
-				TraceEvent(SevDebug, "DDAuditStorageThrowError", self->ddId)
-				    .detail("Error", audit_storage_failed().name());
 				throw audit_storage_failed();
 			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
 				req.reply.sendError(audit_storage_exceeded_request_limit());
