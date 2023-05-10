@@ -853,14 +853,23 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& old : db->get().logSystemConfig.oldTLogs) {
-		for (auto& tLogSet : old.tLogs) {
+	state std::vector<OldTLogConf>::const_iterator oldTLogIter;
+	for (oldTLogIter = db->get().logSystemConfig.oldTLogs.begin();
+	     oldTLogIter != db->get().logSystemConfig.oldTLogs.end();
+	     ++oldTLogIter) {
+		for (auto& tLogSet : oldTLogIter->tLogs) {
+			for (auto& it : tLogSet.tLogs) {
+				if (it.present()) {
+					roles.addRole("log", it.interf());
+				}
+			}
 			for (auto& it : tLogSet.logRouters) {
 				if (it.present()) {
 					roles.addRole("router", it.interf());
 				}
 			}
 		}
+		wait(yield());
 	}
 
 	for (const auto& coordinator : coordinatorAddresses) {
