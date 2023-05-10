@@ -97,10 +97,10 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 			readBegin = auditKeyRange(auditType).begin;
 			readEnd = auditKeyRange(auditType).end;
 			auditStates.clear();
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			while (true) {
 				res.clear();
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				KeyRangeRef rangeToRead(readBegin, readEnd);
 				if (num.present()) {
 					wait(
@@ -125,6 +125,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 				} else {
 					readBegin = keyAfter(res.back().key);
 				}
+				tr.reset();
 			}
 			break;
 		} catch (Error& e) {
@@ -140,7 +141,9 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              int numFinishAuditToKeep) {
 	state Transaction tr(cx);
 	state int numFinishAuditCleaned = 0; // We regard "Complete" and "Failed" audits as finish audits
-	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataForTypeStart").detail("AuditType", auditType);
+	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataForTypeStart")
+	    .detail("AuditType", auditType)
+	    .detail("MaxAuditIdToClear", maxAuditIdToClear);
 
 	try {
 		loop { // Cleanup until succeed or facing unretriable error
@@ -280,7 +283,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				    wait(tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True));
 				ASSERT(res.size() == 0 || res.size() == 1);
 				uint64_t nextId = 1;
-				if (res.size() == 1) {
+				if (!res.empty() == 1) {
 					latestExistingAuditState = decodeAuditStorageState(res[0].value);
 					if (auditId.isValid()) { // new audit state persist gets failed last time
 						// Check to confirm no other actor can persist new audit state

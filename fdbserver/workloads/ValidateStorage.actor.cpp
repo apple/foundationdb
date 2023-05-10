@@ -22,6 +22,7 @@
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbserver/Knobs.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -74,6 +75,8 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<UID> auditStorageForType(Database cx, AuditType type, std::string context) {
+		// Check client API
+		// Send audit request until the server accepts the request
 		state UID auditId;
 		loop {
 			try {
@@ -95,6 +98,7 @@ struct ValidateStorage : TestWorkload {
 				wait(delay(1));
 			}
 		}
+		// Wait until the request completes
 		state AuditStorageState auditState;
 		loop {
 			try {
@@ -124,6 +128,65 @@ struct ValidateStorage : TestWorkload {
 				    .detail("AuditType", type)
 				    .detail("AuditState", auditState.toString());
 				wait(delay(1));
+			}
+		}
+		// Check internal persist state
+		// Check no audit is in Running or Error phase
+		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
+		state Transaction tr(cx);
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res = wait(tr.getRange(auditKeyRange(type), GetRangeLimits()));
+				ASSERT(!res.more);
+				for (int i = 0; i < res.size(); ++i) {
+					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
+					TraceEvent("TestAuditStorageCheckPersistStateExists")
+					    .detail("Context", context)
+					    .detail("ExistAuditID", existingAuditState.id)
+					    .detail("ExistAuditPhase", existingAuditState.getPhase())
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
+					       existingAuditState.getPhase() == AuditPhase::Failed);
+				}
+				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
+					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
+					    .detail("Context", context)
+					    .detail("AuditID", auditId)
+					    .detail("AuditType", type);
+					wait(delay(30));
+					tr.reset();
+					continue;
+				}
+				break;
+			} catch (Error& e) {
+				TraceEvent("TestAuditStorageCheckPersistStateError")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditID", auditId)
+				    .detail("AuditType", type);
+				wait(tr.onError(e));
+			}
+		}
+		// Check no audit progress metadata exists
+		tr.reset();
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				RangeResult res = wait(tr.getRange(auditRangeBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(res.empty() && !res.more);
+				RangeResult res = wait(tr.getRange(auditServerBasedProgressRangeFor(type), GetRangeLimits()));
+				ASSERT(res.empty() && !res.more);
+				break;
+
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "TestAuditStorageCheckPersistProgressStateError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditID", auditId);
+				wait(tr.onError(e));
 			}
 		}
 		TraceEvent("TestAuditStorageEnd")
