@@ -30,12 +30,12 @@ struct StorageServerShard {
 	constexpr static FileIdentifier file_identifier = 4028358;
 
 	enum ShardState {
-		NotAssigned = 0,
-		Adding = 1,
-		ReadWritePending = 2,
-		ReadWrite = 3,
-		MovingIn = 4,
-		Error = 5,
+		NotAssigned = 0, // The key range is not assiged to the storage server.
+		Adding = 1, // A new shard is being moved to the storage server.
+		ReadWritePending = 2, // The shard is waiting for the `ReadWrite` state to be persisted.
+		ReadWrite = 3, // Shard is read-write.
+		MovingIn = 4, // Same as `Adding`, but the shard is being moved in via physical shard move.
+		Error = 5, // Something is wrong.
 	};
 
 	StorageServerShard() = default;

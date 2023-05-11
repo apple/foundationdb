@@ -305,6 +305,7 @@ struct MoveInShard {
 	std::shared_ptr<MoveInShardMetaData> meta;
 	struct StorageServer* server;
 	std::shared_ptr<MoveInUpdates> updates;
+	bool isRestored;
 	Version transferredVersion;
 
 	Future<Void> fetchClient; // holds FetchShard() actor
@@ -8370,6 +8371,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	state Future<Void> warningLogger = logFetchKeysWarning(shard);
 	state const double startTime = now();
 	state Version fetchVersion = invalidVersion;
+	state int64_t totalBytes = 0;
 
 	state PromiseStream<Key> destroyedFeeds;
 	state FetchKeysMetricReporter metricReporter(fetchKeysID,
@@ -8588,6 +8590,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						}
 					}
 					metricReporter.addFetchedBytes(expectedBlockSize, this_block.size());
+					totalBytes += expectedBlockSize;
 
 					// Write this_block to storage
 					state Standalone<VectorRef<KeyValueRef>> blockData(this_block, this_block.arena());
@@ -8689,6 +8692,11 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 		// We have completed the fetch and write of the data, now we wait for MVCC window to pass.
 		//  As we have finished this work, we will allow more work to start...
 		shard->fetchComplete.send(Void());
+		const double duration = now() - startTime;
+		TraceEvent(SevInfo, "FetchKeysStats", data->thisServerID)
+		    .detail("TotalBytes", totalBytes)
+		    .detail("Duration", duration)
+		    .detail("Rate", static_cast<double>(totalBytes) / duration);
 
 		TraceEvent(SevDebug, "FKBeforeFinalCommit", data->thisServerID)
 		    .detail("FKID", interval.pairID)
@@ -9111,6 +9119,7 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointBegin", data->thisServerID)
 	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
 	ASSERT(moveInShard->getPhase() == MoveInPhase::Ingesting);
+	state double startTime = now();
 
 	try {
 		wait(
@@ -9174,8 +9183,13 @@ ACTOR Future<Void> fetchShardIngestCheckpoint(StorageServer* data, MoveInShard* 
 
 	moveInShard->fetchComplete.send(Void());
 
+	const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
+	const double duration = now() - startTime;
 	TraceEvent(SevInfo, "FetchShardIngestCheckpointEnd", data->thisServerID)
-	    .detail("Checkpoints", describe(moveInShard->checkpoints()));
+	    .detail("Checkpoints", describe(moveInShard->checkpoints()))
+	    .detail("Bytes", totalBytes)
+	    .detail("Duration", duration)
+	    .detail("Rate", static_cast<double>(totalBytes) / duration);
 
 	return Void();
 }
@@ -9186,9 +9200,12 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 	TraceEvent(SevInfo, "FetchShardApplyUpdatesBegin", data->thisServerID)
 	    .detail("MoveInShard", moveInShard->toString());
 	ASSERT(moveInShard->getPhase() == MoveInPhase::ApplyingUpdates);
+	state double startTime = now();
 
 	try {
-		wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
+		if (moveInShard->isRestored) {
+			wait(moveInUpdates->restore(moveInShard->meta->highWatermark));
+		}
 		if (moveInShard->failed()) {
 			return Void();
 		}
@@ -9262,8 +9279,14 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 		TraceEvent(moveInShard->logSev, "FetchShardApplyUpdatesSuccess", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString());
 
-		const double duration = now() - moveInShard->meta->startTime;
+		double duration = now() - startTime;
 		const int64_t totalBytes = getTotalFetchedBytes(moveInShard->checkpoints());
+		TraceEvent(SevInfo, "IngestShardStats", data->thisServerID)
+		    .detail("MoveInShard", moveInShard->toString())
+		    .detail("Duration", duration)
+		    .detail("TotalBytes", totalBytes)
+		    .detail("Rate", (double)totalBytes / duration);
+		duration = now() - moveInShard->meta->startTime;
 		TraceEvent(SevInfo, "FetchShardStats", data->thisServerID)
 		    .detail("MoveInShard", moveInShard->toString())
 		    .detail("Duration", duration)
@@ -9339,6 +9362,8 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	ASSERT(moveInShard->getPhase() != MoveInPhase::Pending);
 
 	wait(data->coreStarted.getFuture() && data->durableVersion.whenAtLeast(moveInShard->meta->createVersion + 1));
+	wait(data->fetchKeysParallelismLock.take(TaskPriority::DefaultYield));
+	state FlowLock::Releaser holdingFKPL(data->fetchKeysParallelismLock);
 
 	loop {
 		phase = moveInShard->getPhase();
@@ -9417,7 +9442,8 @@ MoveInShard::MoveInShard(StorageServer* server,
                          const Version version,
                          MoveInPhase phase)
   : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, phase)),
-    server(server), updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())) {
+    server(server), updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())),
+    isRestored(false) {
 	if (phase != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
@@ -9430,7 +9456,8 @@ MoveInShard::MoveInShard(StorageServer* server, const UID& id, const UID& dataMo
 
 MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
   : meta(std::make_shared<MoveInShardMetaData>(meta)), server(server),
-    updates(std::make_shared<MoveInUpdates>(meta.id, meta.createVersion, server, server->storage.getKeyValueStore())) {
+    updates(std::make_shared<MoveInUpdates>(meta.id, meta.createVersion, server, server->storage.getKeyValueStore())),
+    isRestored(true) {
 	if (getPhase() != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {

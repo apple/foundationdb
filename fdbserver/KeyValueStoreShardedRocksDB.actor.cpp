@@ -2020,11 +2020,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		for (const KeyRange& range : ranges) {
 			self->shardManager.addRange(range, shardId);
 		}
-		TraceEvent(SevDebug, "ShardedRocksRestoreAddRange", self->id)
+		const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
+		TraceEvent(sevDm, "ShardedRocksRestoreAddRange", self->id)
 		    .detail("Ranges", describe(ranges))
 		    .detail("ShardID", shardId)
 		    .detail("Checkpoints", describe(checkpoints));
-		auto a = new Writer::RestoreAction(&self->shardManager, self->path, shardId, ranges, checkpoints);
+		PhysicalShard* ps = self->shardManager.getPhysicalShardForAllRanges(ranges);
+		ASSERT(ps != nullptr);
+		auto a = new Writer::RestoreAction(&self->shardManager, ps, self->path, shardId, ranges, checkpoints);
 		auto res = a->done.getFuture();
 		self->writeThread->post(a);
 
@@ -2459,15 +2462,17 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct RestoreAction : TypedAction<Writer, RestoreAction> {
 			RestoreAction(ShardManager* shardManager,
+			              PhysicalShard* ps,
 			              const std::string& path,
 			              const std::string& shardId,
 			              const std::vector<KeyRange>& ranges,
 			              const std::vector<CheckpointMetaData>& checkpoints)
-			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
+			  : shardManager(shardManager), ps(ps), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
 			ShardManager* shardManager;
+			PhysicalShard* ps;
 			const std::string path;
 			const std::string shardId;
 			std::vector<KeyRange> ranges;
@@ -2482,7 +2487,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			// PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			PhysicalShard* ps = a.ps;
 			ASSERT(ps != nullptr);
 
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
