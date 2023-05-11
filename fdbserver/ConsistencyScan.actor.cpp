@@ -1121,6 +1121,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									// Be especially verbose if in simulation
 									if (g_network->isSimulated()) {
 										int invalidIndex = -1;
+										fmt::print("MISMATCH AT VERSION {0}\n", req.version);
 										printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
 										       "",
 										       j,
@@ -1212,7 +1213,13 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 										}
 									}
 
-									TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
+									bool isExpectedTSSMismatch =
+									    g_network->isSimulated() &&
+									    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
+									    (storageServerInterfaces[j].isTss() ||
+									     storageServerInterfaces[firstValidServer].isTss());
+									TraceEvent(isExpectedTSSMismatch ? SevWarn : SevError,
+									           "ConsistencyCheck_DataInconsistent")
 									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 									    .detail(format("StorageServer%d", firstValidServer).c_str(),
 									            storageServers[firstValidServer].toString())
@@ -1233,10 +1240,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									                ? "True"
 									                : "False");
 
-									if ((g_network->isSimulated() &&
-									     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
-									    (!storageServerInterfaces[j].isTss() &&
-									     !storageServerInterfaces[firstValidServer].isTss())) {
+									if (!isExpectedTSSMismatch) {
 										testFailure("Data inconsistent", performQuiescentChecks, success, true);
 									}
 								}
