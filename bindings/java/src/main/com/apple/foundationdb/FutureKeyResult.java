@@ -1,9 +1,9 @@
 /*
- * FutureResult.java
+ * FutureKeyResult.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,10 @@ import java.util.concurrent.Executor;
 
 import com.apple.foundationdb.EventKeeper.Events;
 
-class FutureResult extends NativeFuture<ResultBytes> {
+class FutureKeyResult extends NativeFuture<ResultBytes> {
 	private final EventKeeper eventKeeper;
 
-	FutureResult(long cPtr, Executor executor, EventKeeper eventKeeper) {
+	FutureKeyResult(long cPtr, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.eventKeeper = eventKeeper;
 		registerMarshalCallback(executor);
@@ -35,7 +35,7 @@ class FutureResult extends NativeFuture<ResultBytes> {
 
 	@Override
 	protected ResultBytes getIfDone_internal(long cPtr) throws FDBException {
-		return new FDBResultBytes(FutureResult_get(cPtr), 0.0f, 0.0f);
+		return new FDBResultBytes(FutureKeyResult_get(cPtr), 0.0f, 0.0f);
 	}
 
 	@Override
@@ -46,5 +46,5 @@ class FutureResult extends NativeFuture<ResultBytes> {
 		super.postMarshal(value);
 	}
 
-	private native byte[] FutureResult_get(long cPtr) throws FDBException;
+	private native byte[] FutureKeyResult_get(long cPtr) throws FDBException;
 }

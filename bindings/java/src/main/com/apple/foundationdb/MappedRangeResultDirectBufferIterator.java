@@ -56,10 +56,10 @@ class MappedRangeResultDirectBufferIterator extends DirectBufferIterator impleme
 		for (int i = 0; i < rangeResultSize; i++) {
 			final byte[] k = getString();
 			final byte[] v = getString();
-			rangeResult.add(new KeyValue(k, v));
+			rangeResult.add(new FDBKeyValue(k, v, 0.0f, 0.0f));
 		}
 		current += 1;
-		return new MappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
+		return new FDBMappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
 	}
 
 	private byte[] getString() {

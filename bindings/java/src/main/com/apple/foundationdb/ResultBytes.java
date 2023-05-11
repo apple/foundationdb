@@ -1,9 +1,9 @@
 /*
- * KeyValue.java
+ * ResultBytes.java
  *
  * This source file is part of the FoundationDB open source project
  *
- * Copyright 2013-2018 Apple Inc. and the FoundationDB project authors
+ * Copyright 2013-2023 Apple Inc. and the FoundationDB project authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,20 +21,13 @@
 package com.apple.foundationdb;
 
 /**
- * A key/value pair and associated metrics from a read operation.
+ * A byte string and associated metrics returned from a read operation.
  */
-public interface KeyValue extends ReadMetrics {
+public interface ResultBytes extends ReadMetrics {
 	/**
-	 * Gets the key from the pair.
+	 * Gets the returned bytes.
 	 *
-	 * @return the key
+	 * @return the bytes
 	 */
-	public byte[] getKey();
-
-	/**
-	 * Gets the value from the pair.
-	 *
-	 * @return the value
-	 */
-	public byte[] getValue();
+	public byte[] getBytes();
 }

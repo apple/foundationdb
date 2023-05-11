@@ -53,7 +53,7 @@ class RangeResult {
 			System.arraycopy(keyValues, offset + keyLength, v, 0, valueLength);
 
 			offset += keyLength + valueLength;
-			values.add(new KeyValue(k, v));
+			values.add(new FDBKeyValue(k, v, 0.0f, 0.0f));
 		}
 		this.more = more;
 	}

@@ -120,7 +120,7 @@ public class FakeFDBTransaction extends FDBTransaction {
 				int rowCount = 0;
 				int sizeBytes = 0;
 				for (Map.Entry<byte[], byte[]> kvEntry : retMap.entrySet()) {
-					kvs.add(new KeyValue(kvEntry.getKey(), kvEntry.getValue()));
+					kvs.add(new FDBKeyValue(kvEntry.getKey(), kvEntry.getValue(), 0.0f, 0.0f));
 					rowCount++;
 					if (rowLimit > 0 && rowCount == rowLimit) {
 						more = true;
