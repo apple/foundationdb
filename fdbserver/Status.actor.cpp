@@ -26,6 +26,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/Status.actor.h"
 #include "flow/ITrace.h"
 #include "flow/ProtocolVersion.h"
@@ -854,14 +855,23 @@ ACTOR static Future<JsonBuilderObject> processStatusFetcher(
 		}
 	}
 
-	for (auto& old : db->get().logSystemConfig.oldTLogs) {
-		for (auto& tLogSet : old.tLogs) {
+	state std::vector<OldTLogConf>::const_iterator oldTLogIter;
+	for (oldTLogIter = db->get().logSystemConfig.oldTLogs.begin();
+	     oldTLogIter != db->get().logSystemConfig.oldTLogs.end();
+	     ++oldTLogIter) {
+		for (auto& tLogSet : oldTLogIter->tLogs) {
+			for (auto& it : tLogSet.tLogs) {
+				if (it.present()) {
+					roles.addRole("log", it.interf());
+				}
+			}
 			for (auto& it : tLogSet.logRouters) {
 				if (it.present()) {
 					roles.addRole("router", it.interf());
 				}
 			}
 		}
+		wait(yield());
 	}
 
 	for (const auto& coordinator : coordinatorAddresses) {
@@ -2431,6 +2441,7 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 }
 
 ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
+    Database cx,
     Optional<BlobManagerInterface> managerIntf,
     std::vector<BlobWorkerInterface> workers,
     std::unordered_map<NetworkAddress, WorkerInterface> addressWorkersMap,
@@ -2441,6 +2452,8 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
+		bool backupEnabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
+		statusObj["blob_granules_backup_enabled"] = backupEnabled;
 		// Blob manager status
 		if (managerIntf.present()) {
 			Optional<TraceEventFields> fields = wait(timeoutError(
@@ -3500,10 +3513,10 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
 
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
-			JsonBuilderObject blobGranuelsStatus =
-			    wait(timeoutError(blobGranulesStatusFetcher(
-			                          db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
-			                      2.0));
+			JsonBuilderObject blobGranuelsStatus = wait(
+			    timeoutError(blobGranulesStatusFetcher(
+			                     cx, db->get().blobManager, blobWorkers, address_workers, &status_incomplete_reasons),
+			                 2.0));
 			statusObj["blob_granules"] = blobGranuelsStatus;
 			JsonBuilderObject blobRestoreStatus =
 			    wait(timeoutError(blobRestoreStatusFetcher(cx, &status_incomplete_reasons), 2.0));

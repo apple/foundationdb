@@ -1099,6 +1099,10 @@ public:
 	}
 
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
+		// If sim http connection, do connect instead of external connect
+		if (httpServerIps.count(toAddr.ip)) {
+			return connect(toAddr);
+		}
 		return SimExternalConnection::connect(toAddr);
 	}
 
@@ -2411,6 +2415,80 @@ public:
 		machines.erase(machineId);
 	}
 
+	// add a simulated http server process. New http servers called by registerHTTPServer will run on this process
+	void addSimHTTPProcess(Reference<HTTP::SimServerContext> context) override {
+		ProcessInfo* p = getCurrentProcess();
+		// make sure this process isn't already added
+		for (int i = 0; i < httpServerProcesses.size(); i++) {
+			ASSERT(p != httpServerProcesses[i].first);
+		}
+		httpServerProcesses.push_back({ p, context });
+		httpServerIps.insert(p->address.ip);
+	}
+
+	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
+	                                                     std::string hostname,
+	                                                     std::string service,
+	                                                     int numAddresses,
+	                                                     Reference<HTTP::IRequestHandler> requestHandler) {
+		// handle race where test client tries to register server before all processes are up, but time out eventually
+		// FIXME: make this so a server that starts after this or a server that restarts will automatically re-add
+		// itself, register the handler, and register with dns
+		state int checks = 0;
+		while (self->httpServerProcesses.empty()) {
+			TraceEvent(SevWarn, "NoAvailableHTTPServerProcesses").detail("Checks", checks);
+			checks++;
+			ASSERT(checks < 10);
+			wait(self->delay(1.0, TaskPriority::DefaultDelay));
+		}
+		ASSERT(!self->httpServerProcesses.empty());
+		ASSERT(!self->httpServerHostnames.count(hostname));
+		ASSERT(numAddresses > 0);
+
+		self->httpServerHostnames.insert(hostname);
+
+		state std::vector<NetworkAddress> addresses;
+		addresses.reserve(numAddresses);
+
+		// randomize order and round-robin servers among numAddresses
+		deterministicRandom()->randomShuffle(self->httpServerProcesses);
+
+		state ProcessInfo* callingProcess = self->getCurrentProcess();
+		state int i = 0;
+		for (; i < numAddresses; i++) {
+			state ProcessInfo* serverProcess = self->httpServerProcesses[i % self->httpServerProcesses.size()].first;
+			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
+			try {
+				auto& proc = self->httpServerProcesses[i % self->httpServerProcesses.size()].second;
+				NetworkAddress addr = proc->newAddress();
+				addresses.push_back(addr);
+				serverProcess->listenerMap[addr] = Reference<IListener>(new Sim2Listener(serverProcess, addr));
+				self->addressMap[addr] = serverProcess;
+
+				proc->registerNewServer(addr, requestHandler->clone());
+			} catch (Error& e) {
+				// this should never happen, but would cause weird behavior if it did like unintentionally switching
+				// processes, so just fail
+				TraceEvent(SevError, "UnexpectedErrorRegisteringHTTPServer").errorUnsuppressed(e);
+				ASSERT(false);
+			}
+		}
+
+		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
+
+		INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
+
+		return Void();
+	}
+
+	// starts a numAddresses http servers with the dns alias hostname:service with the provided server callback
+	Future<Void> registerSimHTTPServer(std::string hostname,
+	                                   std::string service,
+	                                   int numAddresses,
+	                                   Reference<HTTP::IRequestHandler> requestHandler) override {
+		return registerSimHTTPServerActor(this, hostname, service, numAddresses, requestHandler);
+	}
+
 	Sim2(bool printSimTime)
 	  : time(0.0), timerTime(0.0), currentTaskID(TaskPriority::Zero), yielded(false), yield_limit(0),
 	    printSimTime(printSimTime) {
@@ -2882,10 +2960,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			auto partFile = machineCache.find(actualFilename);
 			if (partFile != machineCache.end()) {
 				Future<Reference<IAsyncFile>> f = AsyncFileDetachable::open(partFile->second.get());
-				if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-					f = map(f, [=](Reference<IAsyncFile> r) {
-						return Reference<IAsyncFile>(new AsyncFileWriteChecker(r));
-					});
 				return f;
 			}
 		}
@@ -2897,11 +2971,15 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 			// This way, they can both keep up with the time to start the next operation
 			auto diskParameters =
 			    makeReference<DiskParameters>(FLOW_KNOBS->SIM_DISK_IOPS, FLOW_KNOBS->SIM_DISK_BANDWIDTH);
-			f = AsyncFileNonDurable::open(filename,
-			                              actualFilename,
-			                              SimpleFile::open(filename, flags, mode, diskParameters, false),
-			                              diskParameters,
-			                              (flags & IAsyncFile::OPEN_NO_AIO) == 0);
+
+			f = SimpleFile::open(filename, flags, mode, diskParameters, false);
+			if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0) {
+				f = map(f,
+				        [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
+			}
+
+			f = AsyncFileNonDurable::open(
+			    filename, actualFilename, f, diskParameters, (flags & IAsyncFile::OPEN_NO_AIO) == 0);
 
 			machineCache[actualFilename] = UnsafeWeakFutureReference<IAsyncFile>(f);
 		} else {
@@ -2909,8 +2987,6 @@ Future<Reference<class IAsyncFile>> Sim2FileSystem::open(const std::string& file
 		}
 
 		f = AsyncFileDetachable::open(f);
-		if (FLOW_KNOBS->PAGE_WRITE_CHECKSUM_HISTORY > 0)
-			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileWriteChecker(r)); });
 		if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES)
 			f = map(f, [=](Reference<IAsyncFile> r) { return Reference<IAsyncFile>(new AsyncFileChaos(r)); });
 		if (flags & IAsyncFile::OPEN_ENCRYPTED)

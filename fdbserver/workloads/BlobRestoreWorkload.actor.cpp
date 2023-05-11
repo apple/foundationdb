@@ -28,6 +28,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -77,10 +78,13 @@ struct BlobRestoreWorkload : TestWorkload {
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
 			// disable manifest backup and log truncation
-			KnobValueRef knobFalse = KnobValueRef::create(bool{ false });
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
+			wait(disableManifestBackup(cx));
 
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
+			if (self->restoreTargetVersion_ == invalidVersion) {
+				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs");
+				return Void();
+			}
 			fmt::print("Restore target version {}\n", self->restoreTargetVersion_);
 
 			// Only need to pass the version if we are trying to restore to a previous version
@@ -104,13 +108,15 @@ struct BlobRestoreWorkload : TestWorkload {
 		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
 		if (containers.size() == 0) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of missing log backups");
+			return invalidVersion;
 		}
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of invalid log backup");
+			return invalidVersion;
 		}
 		targetVersion = desc.contiguousLogEnd.get() - 1;
 		if (self->restoreToVersion_) {
@@ -118,6 +124,16 @@ struct BlobRestoreWorkload : TestWorkload {
 			targetVersion -= deterministicRandom()->randomInt(1, 100000);
 		}
 		return targetVersion;
+	}
+
+	static Future<Void> disableManifestBackup(Database cx) {
+		return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			BlobGranuleBackupConfig().enabled().set(tr, false);
+			return Void();
+		});
 	}
 
 	// Start backup agent on the extra db

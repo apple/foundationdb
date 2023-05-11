@@ -28,19 +28,18 @@ import unicodedata
 import math
 import uuid
 
-_range = range
+import fdb.tuple
+from fdb.tuple import pack, unpack, compare, SingleFloat
 
-from fdb.tuple import pack, unpack, range, compare, SingleFloat
 from fdb import six
-
 from fdb.six import u
 
 
 def randomUnicode():
     while True:
         c = random.randint(0, 0xFFFF)
-        if unicodedata.category(unichr(c))[0] in "LMNPSZ":
-            return unichr(c)
+        if unicodedata.category(six.unichr(c))[0] in "LMNPSZ":
+            return six.unichr(c)
 
 
 def randomElement():
@@ -48,14 +47,12 @@ def randomElement():
     if r == 0:
         if random.random() < 0.5:
             chars = [b"\x00", b"\x01", b"a", b"7", b"\xfe", b"\ff"]
-            return b"".join(
-                [random.choice(chars) for c in _range(random.randint(0, 5))]
-            )
+            return b"".join([random.choice(chars) for c in range(random.randint(0, 5))])
         else:
             return b"".join(
                 [
                     six.int2byte(random.randint(0, 255))
-                    for _ in _range(random.randint(0, 10))
+                    for _ in range(random.randint(0, 10))
                 ]
             )
     elif r == 1:
@@ -74,10 +71,10 @@ def randomElement():
                 u("\U0001f4a9"),
             ]
             return u("").join(
-                [random.choice(chars) for c in _range(random.randint(0, 10))]
+                [random.choice(chars) for c in range(random.randint(0, 10))]
             )
         else:
-            return u("").join([randomUnicode() for _ in _range(random.randint(0, 10))])
+            return u("").join([randomUnicode() for _ in range(random.randint(0, 10))])
     elif r == 2:
         return random.choice([-1, 1]) * min(
             2 ** random.randint(0, 2040) + random.randint(-10, 10), 2**2040 - 1
@@ -99,10 +96,7 @@ def randomElement():
     elif r == 6:
         is_double = random.random() < 0.5
         byte_str = b"".join(
-            [
-                six.int2byte(random.randint(0, 255))
-                for _ in _range(8 if is_double else 4)
-            ]
+            [six.int2byte(random.randint(0, 255)) for _ in range(8 if is_double else 4)]
         )
         if is_double:
             return struct.unpack(">d", byte_str)[0]
@@ -113,11 +107,11 @@ def randomElement():
     elif r == 8:
         return uuid.uuid4()
     elif r == 9:
-        return [randomElement() for _ in _range(random.randint(0, 5))]
+        return [randomElement() for _ in range(random.randint(0, 5))]
 
 
 def randomTuple():
-    return tuple(randomElement() for x in _range(random.randint(0, 4)))
+    return tuple(randomElement() for x in range(random.randint(0, 4)))
 
 
 def isprefix(a, b):
@@ -136,7 +130,7 @@ def equalEnough(t1, t2):
     if len(t1) != len(t2):
         return False
 
-    for i in _range(len(t1)):
+    for i in range(len(t1)):
         e1 = t1[i]
         e2 = t2[i]
 
@@ -157,7 +151,7 @@ def equalEnough(t1, t2):
 
 
 def tupleTest(N=10000):
-    someTuples = [randomTuple() for i in _range(N)]
+    someTuples = [randomTuple() for i in range(N)]
     a = sorted(someTuples, cmp=compare)
     b = sorted(someTuples, key=pack)
 
@@ -177,7 +171,7 @@ def tupleTest(N=10000):
 
     print("Sort %d OK" % N)
 
-    for i in _range(N):
+    for i in range(N):
         t = randomTuple()
         t2 = t + (randomElement(),)
         t3 = randomTuple()
@@ -189,7 +183,7 @@ def tupleTest(N=10000):
             )
             return False
 
-        r = range(t)
+        r = fdb.tuple.range(t)
         if r.start <= pack(t) < r.stop:
             print(
                 "element within own range:\n    Tuple: %s\n    Bytes: %s\n    Start: %s\n    Stop:  %s"

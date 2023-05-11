@@ -276,7 +276,8 @@ public:
 	                          StopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {});
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          Optional<std::string> const& blobManifestUrl = {});
 	Future<Void> submitBackup(Database cx,
 	                          Key outContainer,
 	                          Optional<std::string> proxy,
@@ -288,7 +289,8 @@ public:
 	                          StopWhenDone stopWhenDone = StopWhenDone::True,
 	                          UsePartitionedLog partitionedLog = UsePartitionedLog::False,
 	                          IncrementalBackupOnly incrementalBackupOnly = IncrementalBackupOnly::False,
-	                          Optional<std::string> const& encryptionKeyFileName = {}) {
+	                          Optional<std::string> const& encryptionKeyFileName = {},
+	                          Optional<std::string> const& blobManifestUrl = {}) {
 		return runRYWTransactionFailIfLocked(cx, [=](Reference<ReadYourWritesTransaction> tr) {
 			return submitBackup(tr,
 			                    outContainer,
@@ -301,7 +303,8 @@ public:
 			                    stopWhenDone,
 			                    partitionedLog,
 			                    incrementalBackupOnly,
-			                    encryptionKeyFileName);
+			                    encryptionKeyFileName,
+			                    blobManifestUrl);
 		});
 	}
 
@@ -960,6 +963,8 @@ public:
 
 		return updateErrorInfo(cx, e, details);
 	}
+
+	KeyBackedProperty<bool> blobBackupEnabled() { return configSpace.pack(__FUNCTION__sr); }
 };
 
 // Helper class for reading restore data from a buffer and throwing the right errors.

@@ -94,6 +94,7 @@ special_key_ranges = [
     ),
 ]
 
+
 # handler for when looping is assumed with usage
 # e.g. GRV cache enablement removes the guarantee that transaction always gets the latest read version before it starts,
 #      which could introduce arbitrary conflicts even on idle test clusters, and those need to be resolved via retrying.
@@ -332,7 +333,7 @@ def test_system_and_special_key_range_disallowed(db, tenant_tr_gen):
         tr.options.set_access_system_keys()
         del tr[b"\xff":b"\xff\xff"]
         tr.commit().wait()
-        assert False, f"disallowed system keyspace write has succeeded"
+        assert False, "disallowed system keyspace write has succeeded"
     except fdb.FDBError as e:
         assert e.code == 6000, f"expected permission_denied, got {e} instead"
 
@@ -383,11 +384,9 @@ def test_public_key_set_rollover(
     new_kid = random_alphanum_str(12)
     new_kty = "EC" if kty == "RSA" else "RSA"
     new_key = private_key_gen(kty=new_kty, kid=new_kid)
-    token_default = token_gen(cluster.private_key, token_claim_1h(default_tenant))
 
     second_tenant = random_alphanum_bytes(12)
     tenant_gen(second_tenant)
-    token_second = token_gen(new_key, token_claim_1h(second_tenant))
 
     interim_set = public_keyset_from_keys([new_key, cluster.private_key])
     max_repeat = 10
@@ -604,7 +603,7 @@ def test_bad_token(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
             )
             print(f"Trace check begin for '{case_name}': {checker.begin}")
             try:
-                value = tr[b"abc"].value
+                tr[b"abc"].wait()
                 assert (
                     False
                 ), f"expected permission_denied for case '{case_name}', but read transaction went through"
@@ -654,10 +653,10 @@ def test_bad_token(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
         tr = tenant_tr_gen(default_tenant)
         tr.options.set_authorization_token(unknown_key_token)
         try:
-            value = tr[b"abc"].value
+            tr[b"abc"].wait()
             assert (
                 False
-            ), f"expected permission_denied for 'unknown key' case, but read transaction went through"
+            ), "expected permission_denied for 'unknown key' case, but read transaction went through"
         except fdb.FDBError as e:
             assert (
                 e.code == 6000
@@ -669,7 +668,7 @@ def test_bad_token(cluster, default_tenant, tenant_tr_gen, token_claim_1h):
             tr.commit().wait()
             assert (
                 False
-            ), f"expected permission_denied for 'unknown key' case, but write transaction went through"
+            ), "expected permission_denied for 'unknown key' case, but write transaction went through"
         except fdb.FDBError as e:
             assert (
                 e.code == 6000

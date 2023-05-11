@@ -8,10 +8,10 @@
 # used and should not be changed from 0.
 #                                                          xyzdev
 #                                                          vvvv
-set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B072000000LL")
-set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B073000000LL")
-set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B071000000LL")
-set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B074000000LL")
+set(FDB_PV_DEFAULT_VERSION                      "0x0FDB00B073000000LL")
+set(FDB_PV_FUTURE_VERSION                       "0x0FDB00B074000000LL")
+set(FDB_PV_MIN_COMPATIBLE_VERSION               "0x0FDB00B072000000LL")
+set(FDB_PV_MIN_INVALID_VERSION                  "0x0FDB00B075000000LL")
 set(FDB_PV_LEFT_MOST_CHECK                      "0x0FDB00B100000000LL")
 set(FDB_PV_LSB_MASK                             "0xF0FFFFLL")
 
@@ -91,3 +91,4 @@ set(FDB_PV_BLOB_GRANULE_FILE                    "0x0FDB00B072000000LL")
 set(FDB_ENCRYPTED_SNAPSHOT_BACKUP_FILE          "0x0FDB00B072000000LL")
 set(FDB_PV_CLUSTER_ID_SPECIAL_KEY               "0x0FDB00B072000000LL")
 set(FDB_PV_BLOB_GRANULE_FILE_LOGICAL_SIZE       "0x0FDB00B072000000LL")
+set(FDB_PV_BLOB_RANGE_CHANGE_LOG                "0x0FDB00B072000000LL")

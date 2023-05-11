@@ -447,6 +447,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 	state Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig =
 	    wait(DDConfiguration().userRangeConfig().getSnapshot(
 	        SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end));
+	state int customReplicatedShards = 0;
+	state int underReplicatedShards = 0;
 
 	for (; i < ranges.size(); i++) {
 		state int shard = shardOrder[i];
@@ -465,7 +467,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		// If the destStorageServers is non-empty, then this shard is being relocated
 		state bool isRelocating = destStorageServers.size() > 0;
 
-		state int expectedReplicas = configuration.storageTeamSize;
+		int desiredReplicas = configuration.storageTeamSize;
 		if (ddLargeTeamEnabled()) {
 			// For every custom range that overlaps with this shard range, print it and update the replication count
 			// There should only be one custom range, possibly the default range with no custom configuration at all
@@ -498,14 +500,45 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					return Void();
 				}
 
-				expectedReplicas = std::max(expectedReplicas, it->value().replicationFactor.orDefault(0));
+				desiredReplicas = std::max(desiredReplicas, it->value().replicationFactor.orDefault(0));
+			}
+		}
+
+		int expectedReplicas = std::min(desiredReplicas, ssCount);
+
+		if (firstClient && performQuiescentChecks && configuration.usableRegions == 1 &&
+		    expectedReplicas > configuration.storageTeamSize) {
+			if (sourceStorageServers.size() < expectedReplicas) {
+				underReplicatedShards++;
+				TraceEvent("ConsistencyCheck_UnderReplicatedTeam")
+				    .detail("ShardBegin", printable(range.begin))
+				    .detail("ShardEnd", printable(range.end))
+				    .detail("SourceTeamSize", sourceStorageServers.size())
+				    .detail("DestServerSize", destStorageServers.size())
+				    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+				    .detail("DesiredReplicas", desiredReplicas)
+				    .detail("UsableRegions", configuration.usableRegions)
+				    .detail("SSCount", ssCount);
+			}
+			if (sourceStorageServers.size() > configuration.storageTeamSize) {
+				customReplicatedShards++;
+				TraceEvent("ConsistencyCheck_CustomReplicatedTeam")
+				    .detail("ShardBegin", printable(range.begin))
+				    .detail("ShardEnd", printable(range.end))
+				    .detail("SourceTeamSize", sourceStorageServers.size())
+				    .detail("DestServerSize", destStorageServers.size())
+				    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
+				    .detail("DesiredReplicas", desiredReplicas)
+				    .detail("UsableRegions", configuration.usableRegions)
+				    .detail("SSCount", ssCount);
 			}
 		}
 
 		// In a quiescent database, check that the team size is the same as the desired team size
 		// FIXME: when usable_regions=2, we need to determine how many storage servers are alive in each DC
 		if (firstClient && performQuiescentChecks &&
-		    ((configuration.usableRegions == 1 && sourceStorageServers.size() != std::min(ssCount, expectedReplicas)) ||
+		    ((configuration.usableRegions == 1 && (sourceStorageServers.size() > expectedReplicas ||
+		                                           sourceStorageServers.size() < configuration.storageTeamSize)) ||
 		     sourceStorageServers.size() < configuration.usableRegions * configuration.storageTeamSize ||
 		     sourceStorageServers.size() > configuration.usableRegions * expectedReplicas)) {
 			TraceEvent("ConsistencyCheck_InvalidTeamSize")
@@ -514,7 +547,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			    .detail("SourceTeamSize", sourceStorageServers.size())
 			    .detail("DestServerSize", destStorageServers.size())
 			    .detail("ConfigStorageTeamSize", configuration.storageTeamSize)
-			    .detail("ExpectedReplicas", expectedReplicas)
+			    .detail("DesiredReplicas", desiredReplicas)
 			    .detail("UsableRegions", configuration.usableRegions)
 			    .detail("SSCount", ssCount);
 			// Record the server reponsible for the problematic shards
@@ -1056,6 +1089,27 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			    .detail("Range", range)
 			    .detail("BytesRead", bytesReadInRange);
 		}
+	}
+
+	if (customReplicatedShards > SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+		TraceEvent(SevWarn, "ConsistencyCheck_TooManyShardsOnLargeTeams")
+		    .detail("ShardsOnLargeTeams", customReplicatedShards)
+		    .detail("Limit", SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS);
+		testFailure("Too many shards on large teams", performQuiescentChecks, success, failureIsError);
+		return Void();
+	}
+
+	if (customReplicatedShards < SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS && underReplicatedShards > 0) {
+		TraceEvent(SevWarn, "ConsistencyCheck_TooFewShardsOnLargeTeams")
+		    .detail("ShardsOnLargeTeams", customReplicatedShards)
+		    .detail("Limit", SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS)
+		    .detail("UnderReplicated", underReplicatedShards);
+		testFailure("Too few shards on large teams", performQuiescentChecks, success, failureIsError);
+		return Void();
+	}
+
+	if (customReplicatedShards == SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS && underReplicatedShards > 0) {
+		CODE_PROBE(true, "Reached max shard on large team limit");
 	}
 
 	*bytesReadInPrevRound = bytesReadInthisRound;

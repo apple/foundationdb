@@ -362,7 +362,7 @@ async def run_binding_tests(
 
         try:
             await run_test_cycles()
-        except:
+        except Exception:
             logger.exception("Error found during the binding test")
             raise
         finally:
