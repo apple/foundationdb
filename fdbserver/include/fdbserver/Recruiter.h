@@ -24,8 +24,12 @@
 
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/LogSystem.h"
+#include "fdbserver/WorkerInfo.h"
+
+// Forward declare types from other modules to avoid a circular dependency.
+class ClusterControllerData;
+struct ClusterRecoveryData;
 
 //
 // Handles recruitment for stateless roles plus the transaction logs.
@@ -37,13 +41,51 @@
 class Recruiter {
 	friend class RecruiterImpl;
 
+	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(
+	    ClusterControllerData* clusterControllerData,
+	    RecruitFromConfigurationRequest const& req,
+	    Optional<Key> dcId,
+	    bool checkGoodRecruitment);
+
 public:
 	// Create assignments for each worker and recruit commit proxies, GRV
 	// proxies, resolvers, and transaction logs.
 	Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
 	    std::vector<StorageServerInterface>* seedServers,
-	    Reference<ILogSystem> oldLogSystem) const;
+	    Reference<ILogSystem> oldLogSystem);
+
+	// TODO: Move functions in ClusterController.actor.cpp that recruit special
+	// roles like EKP into this class. Then, this function can be made private.
+	void updateKnownIds(ClusterControllerData* clusterControllerData,
+	                    std::map<Optional<Standalone<StringRef>>, int>* id_used);
+
+	RecruitFromConfigurationReply findWorkersForConfiguration(ClusterControllerData* clusterControllerData,
+	                                                          RecruitFromConfigurationRequest const& req);
+
+	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(ClusterControllerData* clusterControllerData,
+	                                                                  RecruitFromConfigurationRequest const& req,
+	                                                                  bool checkGoodRecruitment);
+
+	WorkerFitnessInfo getWorkerForRoleInDatacenter(ClusterControllerData* clusterControllerData,
+	                                               Optional<Standalone<StringRef>> const& dcId,
+	                                               ProcessClass::ClusterRole role,
+	                                               ProcessClass::Fitness unacceptableFitness,
+	                                               DatabaseConfiguration const& conf,
+	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
+	                                               bool checkStable = false);
+
+	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
+	    ClusterControllerData* clusterControllerData,
+	    Optional<Standalone<StringRef>> const& dcId,
+	    ProcessClass::ClusterRole role,
+	    int amount,
+	    DatabaseConfiguration const& conf,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
+	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
+	    bool checkStable = false);
 
 	// Get the encryption at rest mode from the database configuration.
 	EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) const;
