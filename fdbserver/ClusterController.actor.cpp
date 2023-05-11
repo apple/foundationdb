@@ -1943,11 +1943,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		if (e.code() == error_code_broken_promise) {
-			req.reply.sendError(request_maybe_delivered()); // we do not know whether the result is persist
-		} else {
-			req.reply.sendError(audit_storage_failed());
-		}
+		req.reply.sendError(audit_storage_failed());
 	}
 
 	return Void();

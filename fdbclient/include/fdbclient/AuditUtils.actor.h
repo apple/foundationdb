@@ -36,6 +36,7 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
+ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 ACTOR Future<Void> persistAuditState(Database cx,
                                      AuditStorageState auditState,
@@ -43,10 +44,12 @@ ACTOR Future<Void> persistAuditState(Database cx,
                                      MoveKeyLockInfo lock,
                                      bool ddEnabled);
 ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID id);
-ACTOR Future<std::vector<AuditStorageState>> getLatestAuditStates(Database cx, AuditType type, int num);
+ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
+                                                            AuditType auditType,
+                                                            bool newFirst,
+                                                            Optional<int> num);
 
 ACTOR Future<std::string> checkMigrationProgress(Database cx);
-
 ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
 ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
                                                                   AuditType type,
@@ -58,5 +61,9 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
                                                                    UID auditId,
                                                                    UID auditServerId,
                                                                    KeyRange range);
+ACTOR Future<Void> clearAuditMetadataForType(Database cx,
+                                             AuditType auditType,
+                                             UID maxAuditIdToClear,
+                                             int numFinishAuditToKeep);
 #include "flow/unactorcompiler.h"
 #endif

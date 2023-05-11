@@ -347,6 +347,14 @@ const KeyRange auditRangeBasedProgressRangeFor(const AuditType type, const UID& 
 	return prefixRange(wr.toValue());
 }
 
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
 const Key auditServerBasedProgressPrefixFor(const AuditType type, const UID& auditId, const UID& serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditServerPrefix);
@@ -365,6 +373,14 @@ const KeyRange auditServerBasedProgressRangeFor(const AuditType type, const UID&
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
 	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditServerPrefix);
+	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
 	return prefixRange(wr.toValue());
 }
