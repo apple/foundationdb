@@ -362,10 +362,6 @@ class DDTxnProcessorImpl {
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
 					auto auditState = decodeAuditStorageState(ads[i].value);
-					if (auditState.getPhase() == AuditPhase::Complete || auditState.getPhase() == AuditPhase::Failed ||
-					    auditState.getPhase() == AuditPhase::Error) {
-						continue;
-					}
 					result->auditStates.push_back(auditState);
 				}
 

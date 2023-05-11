@@ -4791,7 +4791,8 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				lastKey = localKV.key;
 			}
 
-			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageStatisticValidateUserData", data->thisServerID)
+			    .suppressFor(30.0)
 			    .detail("AuditType", auditState.getType())
 			    .detail("AuditId", auditState.id)
 			    .detail("AuditRange", auditState.range)
@@ -5396,7 +5397,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// Log statistic
 			cumulatedValidatedLocalShardsNum = cumulatedValidatedLocalShardsNum + ownRangesLocalView.size();
 			cumulatedValidatedServerKeysNum = cumulatedValidatedServerKeysNum + ownRangesSeenByServerKey.size();
-			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageStatisticShardInfo", data->thisServerID)
+			    .suppressFor(30.0)
 			    .detail("AuditType", req.getType())
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
@@ -5650,7 +5652,8 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			}
 
 			// Log statistic
-			TraceEvent(SevInfo, "AuditStorageStatistic", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageStatisticLocationMetadata", data->thisServerID)
+			    .suppressFor(30.0)
 			    .detail("AuditType", req.getType())
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
