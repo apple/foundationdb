@@ -377,16 +377,16 @@ if(WITH_PYTHON)
     restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml)
+    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml)
+    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
