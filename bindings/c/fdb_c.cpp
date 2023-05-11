@@ -30,6 +30,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
+#include "foundationdb/fdb_c_evolvable.h"
 
 int g_api_version = 0;
 
@@ -390,142 +391,20 @@ void parseGetEncryptionKeyCtx(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEnc
 	}
 }
 
-void setEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCipherKey& source) {
-	dest->domain_id = source.encryptDomainId;
-	dest->base_key_id = source.baseCipherId;
-	dest->base_kcv = source.baseCipherKCV;
-	dest->random_salt = source.salt;
-	dest->base_key.key = source.baseCipher.begin();
-	dest->base_key.key_length = source.baseCipher.size();
-}
-
-void setEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source) {
-	dest->present = true;
-	setEncryptionKey(&dest->textKey, source.textCipherKey);
-	dest->textKCV = source.textCipherKey.baseCipherKCV;
-	setEncryptionKey(&dest->headerKey, source.headerCipherKey);
-	dest->headerKCV = source.headerCipherKey.baseCipherKCV;
-	dest->iv.key = source.ivRef.begin();
-	dest->iv.key_length = source.ivRef.size();
-}
-
-void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
-	dest->filename_ptr = source.filename.begin();
-	dest->filename_length = source.filename.size();
-	dest->file_offset = source.offset;
-	dest->file_length = source.length;
-	dest->full_file_length = source.fullFileLength;
-	dest->file_version = source.fileVersion;
-
-	// handle encryption
-	if (source.cipherKeysCtx.present()) {
-		setEncryptionKeyCtx(&dest->encryption_ctx, source.cipherKeysCtx.get());
-	} else {
-		dest->encryption_ctx.present = false;
-	}
-}
-
-void setBGMutation(FDBBGMutation* dest,
-                   int64_t version,
-                   FDBBGTenantPrefix const* tenantPrefix,
-                   const MutationRef& source) {
-	dest->version = version;
-	dest->type = source.type;
-	dest->param1_ptr = source.param1.begin();
-	dest->param1_length = source.param1.size();
-	dest->param2_ptr = source.param2.begin();
-	dest->param2_length = source.param2.size();
-
-	if (tenantPrefix->present) {
-		dest->param1_ptr += tenantPrefix->prefix.key_length;
-		dest->param1_length -= tenantPrefix->prefix.key_length;
-		if (dest->type == FDB_BG_MUTATION_TYPE_CLEAR_RANGE) {
-			dest->param2_ptr += tenantPrefix->prefix.key_length;
-			dest->param2_length -= tenantPrefix->prefix.key_length;
-		}
-	}
-}
-
-void setBGMutations(FDBBGMutation** mutationsOut,
-                    int* mutationCountOut,
-                    FDBBGTenantPrefix const* tenantPrefix,
-                    Arena& ar,
-                    const GranuleDeltas& deltas) {
-	// convert mutations from MutationsAndVersionRef to single mutations
-	int mutationCount = 0;
-	for (auto& it : deltas) {
-		mutationCount += it.mutations.size();
-	}
-	*mutationCountOut = mutationCount;
-
-	if (mutationCount > 0) {
-		*mutationsOut = new (ar) FDBBGMutation[mutationCount];
-		mutationCount = 0;
-		for (auto& it : deltas) {
-			for (auto& m : it.mutations) {
-				setBGMutation(&((*mutationsOut)[mutationCount]), it.version, tenantPrefix, m);
-				mutationCount++;
-			}
-		}
-		ASSERT(mutationCount == *mutationCountOut);
-	}
-}
 } // namespace
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
-                                                                    FDBBGFileDescription** out,
+                                                                    FDBBGFileDescription*** out,
                                                                     int* desc_count) {
-	CATCH_AND_RETURN(
-	    Standalone<VectorRef<BlobGranuleChunkRef>> results = TSAV(Standalone<VectorRef<BlobGranuleChunkRef>>, f)->get();
-	    *desc_count = results.size();
-	    Arena ar;
-	    *out = new (ar) FDBBGFileDescription[results.size()];
-	    for (int chunkIdx = 0; chunkIdx < results.size(); chunkIdx++) {
-		    BlobGranuleChunkRef& chunk = results[chunkIdx];
-		    FDBBGFileDescription& desc = (*out)[chunkIdx];
 
-		    // set key range
-		    desc.key_range.begin_key = chunk.keyRange.begin.begin();
-		    desc.key_range.begin_key_length = chunk.keyRange.begin.size();
-		    desc.key_range.end_key = chunk.keyRange.end.begin();
-		    desc.key_range.end_key_length = chunk.keyRange.end.size();
-
-		    // set tenant metadata
-		    if (chunk.tenantPrefix.present()) {
-			    desc.tenant_prefix.present = true;
-			    desc.tenant_prefix.prefix.key = chunk.tenantPrefix.get().begin();
-			    desc.tenant_prefix.prefix.key_length = chunk.tenantPrefix.get().size();
-
-			    desc.key_range.begin_key += desc.tenant_prefix.prefix.key_length;
-			    desc.key_range.begin_key_length -= desc.tenant_prefix.prefix.key_length;
-			    desc.key_range.end_key += desc.tenant_prefix.prefix.key_length;
-			    desc.key_range.end_key_length -= desc.tenant_prefix.prefix.key_length;
-		    } else {
-			    desc.tenant_prefix.present = false;
-		    }
-
-		    // snapshot file
-		    desc.snapshot_present = chunk.snapshotFile.present();
-		    if (desc.snapshot_present) {
-			    setBlobFilePointer(&desc.snapshot_file_pointer, chunk.snapshotFile.get());
-		    }
-
-		    // delta files
-		    desc.delta_file_count = chunk.deltaFiles.size();
-		    if (chunk.deltaFiles.size()) {
-			    desc.delta_files = new (ar) FDBBGFilePointer[chunk.deltaFiles.size()];
-			    for (int d = 0; d < chunk.deltaFiles.size(); d++) {
-				    setBlobFilePointer(&desc.delta_files[d], chunk.deltaFiles[d]);
-			    }
-		    }
-
-		    setBGMutations(
-		        &desc.memory_mutations, &desc.memory_mutation_count, &desc.tenant_prefix, ar, chunk.newDeltas);
-	    }
-
-	    // make this memory owned by the arena of the object stored in the future
-	    results.arena()
-	        .dependsOn(ar););
+	FDBReadBGDescriptionResponse* response;
+	fdb_error_t err = fdb_future_get_read_bg_description_response(f, &response);
+	if (err) {
+		return err;
+	}
+	*out = response->desc_arr;
+	*desc_count = response->desc_count;
+	return 0;
 }
 
 extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
@@ -1379,26 +1258,23 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTrans
 	    return (FDBFuture*)(TXN(tr)->summarizeBlobGranules(range, sv, rangeLimit).extractPtr()););
 }
 
-// copied from read_blob_granules_start
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
                                                                                uint8_t const* begin_key_name,
                                                                                int begin_key_name_length,
                                                                                uint8_t const* end_key_name,
                                                                                int end_key_name_length,
                                                                                int64_t begin_version,
-                                                                               int64_t read_version,
-                                                                               int64_t* read_version_out) {
-	Optional<Version> rv;
-	if (read_version != latestVersion) {
-		rv = read_version;
-	}
-	return (FDBFuture*)(TXN(tr)
-	                        ->readBlobGranulesStart(KeyRangeRef(KeyRef(begin_key_name, begin_key_name_length),
-	                                                            KeyRef(end_key_name, end_key_name_length)),
-	                                                begin_version,
-	                                                rv,
-	                                                read_version_out)
-	                        .extractPtr());
+                                                                               int64_t read_version) {
+	FDBReadBGDescriptionRequest* request = fdb_create_read_bg_description_request(tr);
+	request->read_version = read_version;
+	request->begin_version = begin_version;
+	request->key_range.begin_key =
+	    (uint8_t*)fdb_copy_to_request(request->header, begin_key_name, begin_key_name_length);
+	request->key_range.begin_key_length = begin_key_name_length;
+	request->key_range.end_key = (uint8_t*)fdb_copy_to_request(request->header, end_key_name, end_key_name_length);
+	request->key_range.end_key_length = end_key_name_length;
+
+	return fdb_execute_read_bg_description_request(tr, request);
 }
 
 #include "fdb_c_function_pointers.g.h"

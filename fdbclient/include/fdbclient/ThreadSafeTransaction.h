@@ -241,6 +241,10 @@ public:
 	void debugTrace(BaseTraceEvent&&) override;
 	void debugPrint(std::string const& message) override;
 
+	ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
+
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
@@ -264,6 +268,7 @@ public:
 	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 private:
 	friend IClientApi* getLocalClientAPI();

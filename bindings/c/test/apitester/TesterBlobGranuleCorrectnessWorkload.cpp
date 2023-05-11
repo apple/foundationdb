@@ -497,14 +497,14 @@ private:
 		    [this, keyRange, tenantId, results, readVersionOut](auto ctx) {
 			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 
-			    int64_t* rvo = (int64_t*)readVersionOut.get();
 			    fdb::Future f =
-			        ctx->tx().readBlobGranulesDescription(keyRange.beginKey, keyRange.endKey, 0, -2, rvo).eraseType();
+			        ctx->tx().readBlobGranulesDescription(keyRange.beginKey, keyRange.endKey, 0, -2).eraseType();
 			    ctx->continueAfter(
 			        f,
 			        [this, ctx, keyRange, tenantId, results, readVersionOut, f]() {
-				        *results = copyGranuleDescriptionArray(f.get<fdb::future_var::GranuleDescriptionRefArray>());
-				        this->validateBlobGranuleDescriptions(ctx, *results, keyRange, tenantId, *readVersionOut);
+				        auto res = f.get<fdb::future_var::ReadBlobGranulesDescriptionResponse>();
+				        *results = copyGranuleDescriptionArray(res);
+				        this->validateBlobGranuleDescriptions(ctx, *results, keyRange, tenantId, res.read_version);
 				        ctx->done();
 			        },
 			        true);

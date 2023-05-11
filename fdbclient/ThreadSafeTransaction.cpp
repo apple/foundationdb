@@ -26,6 +26,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
+#include "fdbclient/EvolvableApiRequestHandler.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
@@ -797,6 +798,51 @@ void ThreadSafeTransaction::debugPrint(std::string const& message) {
 	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
+ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(const ApiRequestRef& request) {
+	if (!request.isValid()) {
+		return client_invalid_operation();
+	}
+	if (!request.isAllocatorCompatible(getAllocatorInterface())) {
+		// the request was allocated with a different client.
+		// The transaction must be retried and the request recreated.
+		return cluster_version_changed();
+	}
+	ISingleThreadTransaction* tr = this->tr;
+	ApiRequest req(request, request.getArena());
+	return onMainThread([tr, req]() -> Future<ApiResponse> {
+		tr->checkDeferredError();
+		return handleEvolvableApiRequest(tr, req);
+	});
+}
+
+namespace {
+
+void* allocatorAllocate(void** handle, uint64_t sz) {
+	Reference<ArenaBlock> ref((ArenaBlock*)*handle);
+	void* res = ArenaBlock::allocate(ref, sz);
+	*handle = ref.extractPtr();
+	return res;
+}
+
+void allocatorAddRef(void* handle) {
+	((ArenaBlock*)handle)->addref();
+}
+
+void allocatorDelRef(void* handle) {
+	((ArenaBlock*)handle)->delref();
+}
+
+FDBAllocatorIfc* localAllocatorInterface() {
+	static FDBAllocatorIfc interface = { allocatorAllocate, allocatorAddRef, allocatorDelRef };
+	return &interface;
+}
+
+} // namespace
+
+FDBAllocatorIfc* ThreadSafeTransaction::getAllocatorInterface() {
+	return localAllocatorInterface();
+}
+
 extern const char* getSourceVersion();
 
 ThreadSafeApi::ThreadSafeApi() : apiVersion(-1), transportId(0) {}
@@ -888,4 +934,8 @@ void ThreadSafeApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* ho
 	MutexHolder holder(lock); // We could use the network thread to protect this action, but then we can't guarantee
 	                          // upon return that the hook is set.
 	threadCompletionHooks.emplace_back(hook, hookParameter);
+}
+
+FDBAllocatorIfc* ThreadSafeApi::getAllocatorInterface() {
+	return localAllocatorInterface();
 }

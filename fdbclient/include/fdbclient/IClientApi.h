@@ -27,6 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
+#include "fdbclient/EvolvableApiTypes.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 
@@ -149,6 +150,10 @@ public:
 	void debugFmtPrint(std::string const& message, Args&&... args) {
 		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
 	};
+
+	virtual ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) = 0;
+
+	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };
 
 class ITenant {
@@ -252,6 +257,7 @@ public:
 	virtual Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) = 0;
 
 	virtual void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) = 0;
+	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };
 
 #endif

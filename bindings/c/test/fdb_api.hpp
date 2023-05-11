@@ -44,7 +44,8 @@ namespace fdb {
 // hide C API to discourage mixing C/C++ API
 namespace native {
 #include <foundationdb/fdb_c.h>
-}
+#include <foundationdb/fdb_c_evolvable.h>
+} // namespace native
 
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
@@ -142,6 +143,25 @@ struct GranuleDescription {
 		}
 		tenantPrefix = nativeDesc.tenant_prefix;
 	}
+};
+
+// fdb_future_readbg_get_descriptions
+
+struct GranuleDescriptionRef : native::FDBBGFileDescription {
+	fdb::KeyRef beginKey() const noexcept {
+		return fdb::KeyRef(native::FDBBGFileDescription::key_range.begin_key,
+		                   native::FDBBGFileDescription::key_range.begin_key_length);
+	}
+	fdb::KeyRef endKey() const noexcept {
+		return fdb::KeyRef(native::FDBBGFileDescription::key_range.end_key,
+		                   native::FDBBGFileDescription::key_range.end_key_length);
+	}
+};
+
+struct ReadBlobGranulesDescriptionResponse {
+	GranuleDescriptionRef** desc_arr;
+	int desc_count;
+	int read_version;
 };
 
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
@@ -320,25 +340,14 @@ struct GranuleSummaryRefArray {
 	}
 };
 
-// fdb_future_readbg_get_descriptions
-
-struct GranuleDescriptionRef : native::FDBBGFileDescription {
-	fdb::KeyRef beginKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.begin_key,
-		                   native::FDBBGFileDescription::key_range.begin_key_length);
-	}
-	fdb::KeyRef endKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.end_key,
-		                   native::FDBBGFileDescription::key_range.end_key_length);
-	}
-};
-
-struct GranuleDescriptionRefArray {
-	using Type = std::tuple<GranuleDescriptionRef*, int>;
+struct ReadBlobGranulesDescriptionResponse {
+	using Type = fdb::ReadBlobGranulesDescriptionResponse;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
-		auto& [out_desc, out_count] = out;
-		auto err = native::fdb_future_readbg_get_descriptions(
-		    f, reinterpret_cast<native::FDBBGFileDescription**>(&out_desc), &out_count);
+		native::FDBReadBGDescriptionResponse* resp;
+		auto err = native::fdb_future_get_read_bg_description_response(f, &resp);
+		out.desc_arr = reinterpret_cast<GranuleDescriptionRef**>(resp->desc_arr);
+		out.desc_count = resp->desc_count;
+		out.read_version = resp->read_version;
 		return Error(err);
 	}
 };
@@ -765,19 +774,12 @@ public:
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
 	}
 
-	TypedFuture<future_var::GranuleDescriptionRefArray> readBlobGranulesDescription(KeyRef begin,
-	                                                                                KeyRef end,
-	                                                                                int64_t beginVersion,
-	                                                                                int64_t readVersion,
-	                                                                                int64_t* readVersionOut) {
-		return native::fdb_transaction_read_blob_granules_description(tr.get(),
-		                                                              begin.data(),
-		                                                              intSize(begin),
-		                                                              end.data(),
-		                                                              intSize(end),
-		                                                              beginVersion,
-		                                                              readVersion,
-		                                                              readVersionOut);
+	TypedFuture<future_var::ReadBlobGranulesDescriptionResponse> readBlobGranulesDescription(KeyRef begin,
+	                                                                                         KeyRef end,
+	                                                                                         int64_t beginVersion,
+	                                                                                         int64_t readVersion) {
+		return native::fdb_transaction_read_blob_granules_description(
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), beginVersion, readVersion);
 	}
 
 	Result parseSnapshotFile(BytesRef fileData,

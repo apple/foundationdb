@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "foundationdb/fdb_c_evolvable_internal.h"
 #include <fcntl.h>
 
 #include "fdbclient/IClientApi.h"
@@ -513,6 +514,26 @@ ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
+ThreadFuture<ApiResponse> DLTransaction::execAsyncRequest(const ApiRequestRef& request) {
+	if (!api->transactionExecAsync) {
+		return unsupported_operation();
+	}
+	FdbCApi::FDBFuture* f = api->transactionExecAsync(tr, request.request);
+	return toThreadFuture<ApiResponse>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+		FDBResponse* response;
+		FdbCApi::fdb_error_t error = api->futureGetResponse(f, &response);
+		ASSERT(!error);
+		return ApiResponse(response, Arena());
+	});
+}
+
+FDBAllocatorIfc* DLTransaction::getAllocatorInterface() {
+	if (!api->getAllocatorInterface) {
+		throw unsupported_operation();
+	}
+	return api->getAllocatorInterface();
+}
+
 // DLTenant
 Reference<ITransaction> DLTenant::createTransaction() {
 	ASSERT(api->tenantCreateTransaction != nullptr);
@@ -1003,6 +1024,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_create_database_from_connection_string",
 	                   headerVersion >= ApiVersion::withCreateDBFromConnString().version());
+	loadClientFunction(&api->getAllocatorInterface,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_get_allocator_interface",
+	                   headerVersion >= ApiVersion::withEvolvableApi().version());
 
 	loadClientFunction(&api->databaseOpenTenant, lib, fdbCPath, "fdb_database_open_tenant", headerVersion >= 710);
 	loadClientFunction(
@@ -1201,6 +1227,11 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_summarize_blob_granules",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
+	loadClientFunction(&api->transactionExecAsync,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_transaction_exec_async",
+	                   headerVersion >= ApiVersion::withEvolvableApi().version());
 	loadClientFunction(&api->futureGetDouble,
 	                   lib,
 	                   fdbCPath,
@@ -1234,6 +1265,11 @@ void DLApi::init() {
 	                   "fdb_future_get_granule_summary_array",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
+	loadClientFunction(&api->futureGetResponse,
+	                   lib,
+	                   fdbCPath,
+	                   "fdb_future_get_response",
+	                   headerVersion >= ApiVersion::withEvolvableApi().version());
 	loadClientFunction(
 	    &api->futureGetReadBusyness, lib, fdbCPath, "fdb_future_get_read_busyness", headerVersion >= 800000);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
@@ -1371,6 +1407,13 @@ Reference<IDatabase> DLApi::createDatabaseFromConnectionString(const char* conne
 void DLApi::addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) {
 	MutexHolder holder(lock);
 	threadCompletionHooks.emplace_back(hook, hookParameter);
+}
+
+FDBAllocatorIfc* DLApi::getAllocatorInterface() {
+	if (!api->getAllocatorInterface) {
+		throw unsupported_operation();
+	}
+	return api->getAllocatorInterface();
 }
 
 // MultiVersionTransaction
@@ -1947,6 +1990,19 @@ void MultiVersionTransaction::debugTrace(BaseTraceEvent&& event) {
 void MultiVersionTransaction::debugPrint(std::string const& message) {
 	auto tr = getTransaction();
 	tr.transaction->debugPrint(message);
+}
+
+ThreadFuture<ApiResponse> MultiVersionTransaction::execAsyncRequest(const ApiRequestRef& request) {
+	return executeOperation<ApiResponse>(&ITransaction::execAsyncRequest, request);
+}
+
+FDBAllocatorIfc* MultiVersionTransaction::getAllocatorInterface() {
+	auto tr = getTransaction();
+	if (tr.transaction) {
+		return tr.transaction->getAllocatorInterface();
+	}
+
+	return MultiVersionApi::api->getAllocatorInterface();
 }
 
 // MultiVersionTenant
@@ -3332,6 +3388,10 @@ Reference<IDatabase> MultiVersionApi::createDatabase(const char* clusterFilePath
 
 Reference<IDatabase> MultiVersionApi::createDatabaseFromConnectionString(const char* connectionString) {
 	return createDatabase(ClusterConnectionRecord::fromConnectionString(connectionString));
+}
+
+FDBAllocatorIfc* MultiVersionApi::getAllocatorInterface() {
+	return localClient->api->getAllocatorInterface();
 }
 
 void MultiVersionApi::updateSupportedVersions() {

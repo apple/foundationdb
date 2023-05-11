@@ -112,13 +112,13 @@ GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefAr
 	return out;
 };
 
-GranuleDescriptionArray copyGranuleDescriptionArray(fdb::future_var::GranuleDescriptionRefArray::Type array) {
-	auto& [in_desc, in_count] = array;
+GranuleDescriptionArray copyGranuleDescriptionArray(const fdb::ReadBlobGranulesDescriptionResponse& resp) {
+	auto in_desc = resp.desc_arr;
 
 	GranuleDescriptionArray out;
 
-	for (int i = 0; i < in_count; ++i) {
-		fdb::native::FDBBGFileDescription nativeDesc = *in_desc++;
+	for (int i = 0; i < resp.desc_count; ++i) {
+		fdb::native::FDBBGFileDescription nativeDesc = **(in_desc++);
 		out.emplace_back(nativeDesc);
 	}
 	return out;

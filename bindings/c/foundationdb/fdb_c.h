@@ -101,29 +101,6 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_stop_network(void);
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_add_network_thread_completion_hook(void (*hook)(void*),
                                                                                 void* hook_parameter);
 
-#pragma pack(push, 4)
-typedef struct key {
-	const uint8_t* key;
-	int key_length;
-} FDBKey;
-#if FDB_API_VERSION >= 630
-typedef struct keyvalue {
-	const uint8_t* key;
-	int key_length;
-	const uint8_t* value;
-	int value_length;
-} FDBKeyValue;
-#else
-typedef struct keyvalue {
-	const void* key;
-	int key_length;
-	const void* value;
-	int value_length;
-} FDBKeyValue;
-#endif
-
-#pragma pack(pop)
-
 /* Memory layout of KeySelectorRef. */
 typedef struct keyselector {
 	FDBKey key;
@@ -178,23 +155,6 @@ typedef struct mappedkeyvalue {
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
 
-#pragma pack(push, 4)
-typedef struct keyrange {
-	const uint8_t* begin_key;
-	int begin_key_length;
-	const uint8_t* end_key;
-	int end_key_length;
-} FDBKeyRange;
-
-typedef struct granulesummary {
-	FDBKeyRange key_range;
-	int64_t snapshot_version;
-	int64_t snapshot_size;
-	int64_t delta_version;
-	int64_t delta_size;
-} FDBGranuleSummary;
-#pragma pack(pop)
-
 typedef struct readgranulecontext {
 	/* User context to pass along to functions */
 	void* userContext;
@@ -220,64 +180,6 @@ typedef struct readgranulecontext {
 	/* Number of granules to load in parallel */
 	int granuleParallelism;
 } FDBReadBlobGranuleContext;
-
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
-
-#pragma pack(push, 4)
-
-typedef struct bgtenantprefix {
-	fdb_bool_t present;
-	FDBKey prefix;
-} FDBBGTenantPrefix;
-
-/* encryption structs correspond to similar ones in BlobGranuleCommon.h */
-typedef struct bgencryptionkey {
-	int64_t domain_id;
-	uint64_t base_key_id;
-	uint32_t base_kcv;
-	uint64_t random_salt;
-	FDBKey base_key;
-} FDBBGEncryptionKey;
-
-typedef struct bgencryptionctx {
-	fdb_bool_t present;
-	FDBBGEncryptionKey textKey;
-	uint32_t textKCV;
-	FDBBGEncryptionKey headerKey;
-	uint32_t headerKCV;
-	FDBKey iv;
-} FDBBGEncryptionCtx;
-
-typedef struct bgfilepointer {
-	const uint8_t* filename_ptr;
-	int filename_length;
-	int64_t file_offset;
-	int64_t file_length;
-	int64_t full_file_length;
-	int64_t file_version;
-	FDBBGEncryptionCtx encryption_ctx;
-} FDBBGFilePointer;
-
-typedef struct bgmutation {
-	/* FDBBGMutationType */ uint8_t type;
-	int64_t version;
-	const uint8_t* param1_ptr;
-	int param1_length;
-	const uint8_t* param2_ptr;
-	int param2_length;
-} FDBBGMutation;
-
-typedef struct bgfiledescription {
-	FDBKeyRange key_range;
-	fdb_bool_t snapshot_present;
-	FDBBGFilePointer snapshot_file_pointer;
-	int delta_file_count;
-	FDBBGFilePointer* delta_files;
-	int memory_mutation_count;
-	FDBBGMutation* memory_mutations;
-	FDBBGTenantPrefix tenant_prefix;
-} FDBBGFileDescription;
-#pragma pack(pop)
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 
@@ -348,7 +250,7 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FD
 
 /* all for using future result from read_blob_granules_description */
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
-                                                                            FDBBGFileDescription** out,
+                                                                            FDBBGFileDescription*** out,
                                                                             int* desc_count);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
@@ -712,8 +614,7 @@ DLLEXPORT WARN_UNUSED_RESULT FDBFuture* fdb_transaction_read_blob_granules_descr
                                                                                        uint8_t const* end_key_name,
                                                                                        int end_key_name_length,
                                                                                        int64_t begin_version,
-                                                                                       int64_t read_version,
-                                                                                       int64_t* read_version_out);
+                                                                                       int64_t read_version);
 
 #define FDB_KEYSEL_LAST_LESS_THAN(k, l) k, l, 0, 0
 #define FDB_KEYSEL_LAST_LESS_OR_EQUAL(k, l) k, l, 1, 0

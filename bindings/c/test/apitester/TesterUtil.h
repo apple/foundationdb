@@ -137,7 +137,7 @@ using GranuleSummaryArray = std::vector<fdb::GranuleSummary>;
 GranuleSummaryArray copyGranuleSummaryArray(fdb::future_var::GranuleSummaryRefArray::Type array);
 
 using GranuleDescriptionArray = std::vector<fdb::GranuleDescription>;
-GranuleDescriptionArray copyGranuleDescriptionArray(fdb::future_var::GranuleDescriptionRefArray::Type array);
+GranuleDescriptionArray copyGranuleDescriptionArray(const fdb::ReadBlobGranulesDescriptionResponse& resp);
 
 using GranuleMutationArray = std::vector<fdb::GranuleMutation>;
 GranuleMutationArray copyGranuleMutationArray(fdb::future_var::GranuleMutationRefArray::Type array);
