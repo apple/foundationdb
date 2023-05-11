@@ -80,7 +80,7 @@
                "start_timestamp" : 0,
                "start_version" : 0
             }
-         ],
+         ]
       },
       "layers":{
          "_valid":true,

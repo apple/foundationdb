@@ -914,7 +914,7 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                "start_timestamp" : 0,
                "start_version" : 0
             }
-         ],
+         ]
       },
       "data":{
          "least_operating_space_bytes_log_server":0,
