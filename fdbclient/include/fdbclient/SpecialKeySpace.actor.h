@@ -303,9 +303,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { 
+	bool supportsTenants() const override {
 		CODE_PROBE(true, "Accessing conflicting keys in tenant");
-		return true; 
+		return true;
 	};
 };
 
@@ -315,9 +315,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { 
+	bool supportsTenants() const override {
 		CODE_PROBE(true, "Accessing read conflict ranges in tenant");
-		return true; 
+		return true;
 	};
 };
 
@@ -327,9 +327,9 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { 
+	bool supportsTenants() const override {
 		CODE_PROBE(true, "Accessing write conflict ranges in tenant");
-		return true; 
+		return true;
 	};
 };
 
