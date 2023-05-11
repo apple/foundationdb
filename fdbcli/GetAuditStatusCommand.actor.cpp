@@ -87,12 +87,8 @@ CommandFactory getAuditStatusFactory(
                 "Retrieve audit storage status",
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
-<<<<<<< HEAD
-                "Supported types include: 'ha', and `checkmigration`. If specified, `Count' is how many\n"
-=======
-                "Only 'ha' and `replica` and `locationmetadata` and "
-                "`ssshard` `Type' is supported currently. If specified, `Count' is how many\n"
->>>>>>> d6e7b5f73 (Audit storage: validate consistency of replica and shard location metadata (#9628))
+                "Supported types include: 'ha', `replica`, `locationmetadata`, "
+                "`ssshard` and `checkmigration`. If specified, `Count' is how many\n"
                 "rows to audit. If not specified, check all rows in audit.\n"
                 "get_audit_status checkmigration prints out the number of data shards and physical shards."
                 "Results have the following format: if not `checkmigration`\n"
