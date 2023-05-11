@@ -707,14 +707,9 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 					for (int s = 0; s < serverListValues.size(); s++) {
-						// We don't think this condition should be triggered, but we're not sure if there are conditions
-						// that might cause it to trigger. Adding this assertion to find any such cases via testing.
-						ASSERT_WE_THINK(serverListValues[s].present());
+						// This can happen if a SS is removed after a shard move. See comments on PR #10110.
 						if (!serverListValues[s].present()) {
-							// Attempt to move onto a server that isn't in serverList (removed or never added to the
-							// database) This can happen (why?) and is handled by the data distribution algorithm
-							// FIXME: Answer why this can happen?
-							// CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
+							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
