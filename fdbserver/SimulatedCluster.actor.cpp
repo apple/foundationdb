@@ -1317,10 +1317,12 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		auto tenantMode = ini.GetValue("META", "tenantMode");
 		if (tenantMode != nullptr) {
+			CODE_PROBE(true, "Restarting test with tenant mode set");
 			testConfig->tenantModes.push_back(tenantMode);
 		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
+			CODE_PROBE(true, "Restarting test with default tenant set");
 			testConfig->defaultTenant = defaultTenant;
 		}
 		if (tssModeStr != nullptr) {
