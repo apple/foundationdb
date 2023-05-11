@@ -46,6 +46,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+// TODO: test the test and write a canary key that the storage servers intentionally get wrong
 // Get database KV bytes size from Status JSON at cluster.data.total_kv_size_bytes
 ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, double interval) {
 	loop {
@@ -101,6 +102,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 
 	// Infrequently poll the database size to use in speed calculations.
 	state AsyncVar<int64_t> databaseSize = -1;
+	// TODO knob and buggify
 	state Future<Void> pollSize = pollDatabaseSize(db, &databaseSize, g_network->isSimulated() ? 15 : 900);
 
 	state int64_t readRateLimit = 0;
@@ -159,6 +161,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 				}
 
 				// Trim stats history based on configured round history
+				// FIXME: buggify trim history
 				cs.roundStatsHistory().erase(
 				    tr,
 				    0,
@@ -396,10 +399,85 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
 	} // Main loop
 }
 
+ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state ConsistencyScanState cs;
+	ASSERT(g_network->isSimulated());
+	TraceEvent("ConsistencyScan_SimEnable", csId).log();
+	loop {
+		try {
+			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
+			state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+
+			// Enable if disable, else set the scan min version to restart it
+			if (!config.enabled) {
+				config.enabled = true;
+			} else {
+				config.minStartVersion = tr->getReadVersion().get();
+			}
+			config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
+			config.targetRoundTimeSeconds = deterministicRandom()->randomSkewedUInt32(1, 200);
+			config.minRoundTimeSeconds = deterministicRandom()->randomSkewedUInt32(1, 200);
+
+			// TODO:  Reconfigure cs.rangeConfig() randomly
+
+			cs.config().set(tr, config);
+			wait(tr->commit());
+
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	TraceEvent("ConsistencyScan_SimEnabled", csId).log();
+	return Void();
+}
+
+ACTOR Future<Void> disableConsistencyScanInSim(Database db, UID csId) {
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state ConsistencyScanState cs;
+	TraceEvent("ConsistencyScan_SimDisableWaiting", csId).log();
+	// FIXME: also wait until we've scanned at least one round by checking stats
+	// FIXME: also wait until we've done the canary failure
+	ASSERT(g_network->isSimulated());
+	loop {
+		if (g_simulator->speedUpSimulation) {
+			break;
+		}
+		double delayTime = std::max(1.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
+		wait(delay(delayTime));
+	}
+	TraceEvent("ConsistencyScan_SimDisable", csId).log();
+	loop {
+		try {
+			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
+			state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+
+			// Enable if disable, else set the scan min version to restart it
+			if (config.enabled) {
+				config.enabled = false;
+			} else {
+				TraceEvent("ConsistencyScan_SimAlreadyDisabled", csId).log();
+				return Void();
+			}
+
+			cs.config().set(tr, config);
+			wait(tr->commit());
+
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+
+	TraceEvent("ConsistencyScan_SimDisabled", csId).log();
+	return Void();
+}
+
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	state ActorCollection actors;
-	state ConsistencyScanState cs;
 
 	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
@@ -408,33 +486,12 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 
 	// Randomly enable consistencyScan in simulation
 	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
-	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.25) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-
-		loop {
-			try {
-				SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
-				state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
-
-				// Enable if disable, else set the scan min version to restart it
-				if (!config.enabled) {
-					config.enabled = true;
-				} else {
-					config.minStartVersion = tr->getReadVersion().get();
-				}
-				config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
-				config.targetRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
-				config.minRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
-
-				// TODO:  Reconfigure cs.rangeConfig() randomly
-
-				cs.config().set(tr, config);
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
+	if (g_network->isSimulated()) {
+		if (deterministicRandom()->random01() < 0.25) {
+			wait(enableConsistencyScanInSim(db, csInterf.id()));
 		}
+		// even if we don't enable it, if a previous incarnation did, we still need to disable it
+		actors.add(disableConsistencyScanInSim(db, csInterf.id()));
 	}
 
 	loop {
