@@ -2441,7 +2441,6 @@ public:
 	// add a simulated http server process. New http servers called by registerHTTPServer will run on this process
 	void addSimHTTPProcess(Reference<HTTP::SimServerContext> context) override {
 		ProcessInfo* p = getCurrentProcess();
-		bool isProtected = false;
 
 		if (!g_simulator->httpProtected) {
 			// always protect one http server process so that if others are killed permanently, one will always be
