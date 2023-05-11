@@ -1918,9 +1918,6 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 }
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	TraceEvent(SevInfo, "CCTriggerAuditStorageBegin", self->id)
-	    .detail("Range", req.range)
-	    .detail("AuditType", req.type);
 	state UID auditId;
 
 	try {
@@ -1928,26 +1925,25 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 		       !self->db.serverInfo->get().distributor.present()) {
 			wait(self->db.serverInfo->onChange());
 		}
-
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageBegin", self->id)
+		    .detail("Range", req.range)
+		    .detail("AuditType", req.type)
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
 		TriggerAuditRequest fReq(req.getType(), req.range);
 		UID auditId_ = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		auditId = auditId_;
-		TraceEvent(SevDebug, "CCTriggerAuditStorageEnd", self->id)
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageEnd", self->id)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.send(auditId);
-		}
+		req.reply.send(auditId);
 	} catch (Error& e) {
-		TraceEvent(SevDebug, "CCTriggerAuditStorageError", self->id)
+		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);
-		if (!req.reply.isSet()) {
-			req.reply.sendError(audit_storage_failed());
-		}
+		req.reply.sendError(audit_storage_failed());
 	}
 
 	return Void();
@@ -1956,7 +1952,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
-		TraceEvent(SevDebug, "TriggerAuditStorageReceived", self->id)
+		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);

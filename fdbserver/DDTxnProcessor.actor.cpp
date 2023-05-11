@@ -361,7 +361,8 @@ class DDTxnProcessorImpl {
 				RangeResult ads = wait(tr.getRange(auditKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
-					result->auditStates.push_back(decodeAuditStorageState(ads[i].value));
+					auto auditState = decodeAuditStorageState(ads[i].value);
+					result->auditStates.push_back(auditState);
 				}
 
 				succeeded = true;

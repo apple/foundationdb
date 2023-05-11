@@ -36,20 +36,26 @@ enum class AuditPhase : uint8_t {
 enum class AuditType : uint8_t {
 	Invalid = 0,
 	ValidateHA = 1,
+	ValidateReplica = 2,
+	ValidateLocationMetadata = 3,
+	ValidateStorageServerShard = 4,
 	CheckMigrationStatus = 5,
 };
 
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	AuditStorageState() : type(0), phase(0) {}
-	AuditStorageState(UID id, AuditType type) : id(id), type(static_cast<uint8_t>(type)), phase(0) {}
+	AuditStorageState() : type(0), auditServerId(UID()), phase(0) {}
+	AuditStorageState(UID id, UID auditServerId, AuditType type)
+	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0) {}
 	AuditStorageState(UID id, KeyRange range, AuditType type)
-	  : id(id), range(range), type(static_cast<uint8_t>(type)), phase(0) {}
+	  : id(id), auditServerId(UID()), range(range), type(static_cast<uint8_t>(type)), phase(0) {}
+	AuditStorageState(UID id, AuditType type)
+	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, type, phase, error);
+		serializer(ar, id, auditServerId, range, type, phase, error);
 	}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -58,7 +64,8 @@ struct AuditStorageState {
 	void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }
 	AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
 
-	std::string toString() const {
+	// for fdbcli get_audit_status
+	std::string toStringForCLI() const {
 		std::string res = "AuditStorageState: [ID]: " + id.toString() +
 		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
 		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
@@ -69,7 +76,21 @@ struct AuditStorageState {
 		return res;
 	}
 
+	// for traceevent
+	std::string toString() const {
+		std::string res = "AuditStorageState: [ID]: " + id.toString() +
+		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase) +
+		                  ", [AuditServerID]: " + auditServerId.toString();
+		if (!error.empty()) {
+			res += "[Error]: " + error;
+		}
+
+		return res;
+	}
+
 	UID id;
+	UID auditServerId;
 	KeyRange range;
 	uint8_t type;
 	uint8_t phase;
@@ -80,6 +101,7 @@ struct AuditStorageRequest {
 	constexpr static FileIdentifier file_identifier = 13804341;
 
 	AuditStorageRequest() = default;
+	// for audit user data
 	AuditStorageRequest(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
 
@@ -106,20 +128,19 @@ struct TriggerAuditRequest {
 
 	TriggerAuditRequest() = default;
 	TriggerAuditRequest(AuditType type, KeyRange range)
-	  : type(static_cast<uint8_t>(type)), range(range), force(false), async(false) {}
+	  : type(static_cast<uint8_t>(type)), range(range), force(false) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, force, async, reply);
+		serializer(ar, type, range, force, reply);
 	}
 
 	uint8_t type;
 	KeyRange range;
 	bool force;
-	bool async;
 	ReplyPromise<UID> reply;
 };
 
