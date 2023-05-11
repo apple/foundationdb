@@ -1172,10 +1172,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FLOW_WITH_SWIFT,                                       false);
 	#ifdef WITH_SWIFT
 	FLOW_WITH_SWIFT = true;
-	fprintf(stderr, "Enabled Swift support knob default via build configuration: FLOW_WITH_SWIFT=%s\n",
+	printf("Enabled Swift support knob default via build configuration: FLOW_WITH_SWIFT=%s\n",
 		FLOW_WITH_SWIFT ? "ON" : "OFF");
 	#else
-	fprintf(stderr, "Swift support knob disabled by default (build with -DWITH_SWIFT to enable): FLOW_WITH_SWIFT=%s\n",
+	printf("Swift support knob disabled by default (build with -DWITH_SWIFT to enable): FLOW_WITH_SWIFT=%s\n",
 		FLOW_WITH_SWIFT ? "ON" : "OFF");
 	#endif // WITH_SWIFT
 
