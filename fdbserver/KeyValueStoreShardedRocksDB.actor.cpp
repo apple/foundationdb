@@ -678,7 +678,7 @@ struct PhysicalShard {
 				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
 				    .detail("Checkpoint", checkpoint.toString());
 			}
-			TraceEvent(SevInfo, "PhysicalShardRstoredFiles")
+			TraceEvent(SevInfo, "PhysicalShardRestoredFiles")
 			    .detail("Shard", id)
 			    .detail("CFName", cf->GetName())
 			    .detail("Checkpoint", checkpoint.toString())

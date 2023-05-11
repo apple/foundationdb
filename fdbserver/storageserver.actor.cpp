@@ -9428,6 +9428,13 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	return Void();
 }
 
+// It works in the following sequences:
+// 1. Look up the corresponding checkponts, based on key ranges and version.
+// 2. Fetch the checkpoints from the source storage servers
+// 3. Restore the checkpoints.
+// 4. Apply any new updates accumulated since the checkpoint version.
+// 5. Mark the new shard as read-write
+// 6. Clean up all the checkpoint files etc.
 ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 	TraceEvent(SevInfo, "FetchShardBegin", data->thisServerID).detail("MoveInShard", moveInShard->toString());
 	state std::shared_ptr<MoveInUpdates> moveInUpdates = moveInShard->updates;

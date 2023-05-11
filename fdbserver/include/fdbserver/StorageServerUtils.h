@@ -37,16 +37,18 @@ enum class MoveInPhase {
 	Error = 7,
 };
 
+// MoveInShardMetaData contains all the necessary infomation to start/resume fetching a physical
+// shard by a destination storage server.
 struct MoveInShardMetaData {
 	constexpr static FileIdentifier file_identifier = 3804366;
 
 	UID id;
 	UID dataMoveId;
-	std::vector<KeyRange> ranges;
+	std::vector<KeyRange> ranges; // The key ranges to be fetched.
 	Version createVersion;
 	Version highWatermark; // The highest version that has been applied to the MoveInShard.
-	int8_t phase;
-	std::vector<CheckpointMetaData> checkpoints;
+	int8_t phase; // MoveInPhase.
+	std::vector<CheckpointMetaData> checkpoints; // All related checkpoints, they should cover `ranges`.
 	Optional<std::string> error;
 	double startTime;
 
