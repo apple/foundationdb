@@ -51,7 +51,6 @@ struct ProcessClass {
 		EncryptKeyProxyClass,
 		ConsistencyScanClass,
 		BlobMigratorClass,
-		SimHTTPServerClass,
 		InvalidClass = -1
 	};
 
@@ -80,7 +79,6 @@ struct ProcessClass {
 	static_assert(ProcessClass::EncryptKeyProxyClass == 20);
 	static_assert(ProcessClass::ConsistencyScanClass == 21);
 	static_assert(ProcessClass::BlobMigratorClass == 22);
-	static_assert(ProcessClass::SimHTTPServerClass == 23);
 	static_assert(ProcessClass::InvalidClass == -1);
 
 	enum Fitness {
