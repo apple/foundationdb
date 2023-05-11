@@ -2632,8 +2632,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					if (lastError.code() == error_code_commit_unknown_result) {
 						// It means the commit was succeed last time
 						// For this case, safely do nothing
-						TraceEvent(sevDm, "CleanUpDataMoveHaveDoneExit", dataMoveId)
-						    .detail("DataMoveID", dataMoveId);
+						TraceEvent(sevDm, "CleanUpDataMoveHaveDoneExit", dataMoveId).detail("DataMoveID", dataMoveId);
 						return Void();
 					}
 					// If a normal cleanup sees nothing, triggers background cleanup
