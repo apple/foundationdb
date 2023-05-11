@@ -1285,8 +1285,17 @@ ACTOR Future<Void> testMultiValidationFileTokenFiles(Reference<RESTKmsConnectorC
 	state std::string tokenDetailsStr;
 	state bool newLineAppended = BUGGIFY ? true : false;
 
-	deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
-	std::string token((char*)buff.begin(), tokenLen);
+	std::string token;
+	// Construct token-value buffer ensuring it doesn't have trailing new-line character.
+	loop {
+		deterministicRandom()->randomBytes(mutateString(buff), tokenLen);
+		token = std::string((char*)buff.begin(), tokenLen);
+		removeTrailingChar(token, '\n');
+		if (token.size() > 0) {
+			break;
+		}
+	}
+	tokenLen = token.size();
 	std::string tokenWithNewLine(token);
 	tokenWithNewLine.push_back('\n');
 
