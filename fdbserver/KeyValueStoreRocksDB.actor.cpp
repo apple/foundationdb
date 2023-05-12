@@ -418,6 +418,9 @@ rocksdb::Options getOptions() {
 	//    checks will be performed with ttl being first.
 	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
 	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
+	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
+		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
+	}
 
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
