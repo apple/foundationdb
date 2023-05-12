@@ -42,6 +42,7 @@ TLSPolicy::~TLSPolicy() {}
 #include <sstream>
 #include <utility>
 #include <boost/asio/ssl/context.hpp>
+#include <boost/lexical_cast.hpp>
 
 #include "flow/Platform.h"
 #include "flow/IAsyncFile.h"
@@ -62,6 +63,10 @@ std::vector<std::string> LoadedTLSConfig::getVerifyPeers() const {
 	}
 
 	return { "Check.Valid=1" };
+}
+
+bool LoadedTLSConfig::getDisablePlainTextConnection() const {
+	return tlsDisablePlainTextConnection;
 }
 
 std::string LoadedTLSConfig::getPassword() const {
@@ -211,6 +216,22 @@ std::string TLSConfig::getCAPathSync() const {
 	return envCAPath;
 }
 
+bool TLSConfig::getDisablePlainTextConnection() const {
+	std::string envDisablePlainTextConnection;
+	if (platform::getEnvironmentVar("FDB_TLS_DISABLE_PLAINTEXT_CONNECTION", envDisablePlainTextConnection)) {
+		try {
+			return boost::lexical_cast<bool>(envDisablePlainTextConnection);
+		} catch (boost::bad_lexical_cast& e) {
+			fprintf(stderr,
+			        "Warning: Ignoring invalid FDB_TLS_DISABLE_PLAINTEXT_CONNECTION [%s]: %s\n",
+			        envDisablePlainTextConnection.c_str(),
+			        e.what());
+		}
+	}
+
+	return tlsDisablePlainTextConnection;
+}
+
 LoadedTLSConfig TLSConfig::loadSync() const {
 	LoadedTLSConfig loaded;
 
@@ -253,6 +274,7 @@ LoadedTLSConfig TLSConfig::loadSync() const {
 	loaded.tlsPassword = tlsPassword;
 	loaded.tlsVerifyPeers = tlsVerifyPeers;
 	loaded.endpointType = endpointType;
+	loaded.tlsDisablePlainTextConnection = tlsDisablePlainTextConnection;
 
 	return loaded;
 }
@@ -327,6 +349,7 @@ ACTOR Future<LoadedTLSConfig> TLSConfig::loadAsync(const TLSConfig* self) {
 	loaded.tlsPassword = self->tlsPassword;
 	loaded.tlsVerifyPeers = self->tlsVerifyPeers;
 	loaded.endpointType = self->endpointType;
+	loaded.tlsDisablePlainTextConnection = self->tlsDisablePlainTextConnection;
 
 	return loaded;
 }
