@@ -115,9 +115,9 @@ file(WRITE ${CMAKE_BINARY_DIR}/version.txt ${FDB_VERSION})
 
 set(FDB_CURRENT_VERSION ${PROJECT_VERSION})
 set(FDB_FUTURE_VERSION "8.0.0")
-set(FDB_PREV_RELEASE_VERSION "7.1.25")
-set(FDB_PREV2_RELEASE_VERSION "7.0.0")
-set(FDB_PREV3_RELEASE_VERSION "6.3.25")
+set(FDB_PREV_RELEASE_VERSION "71.2.3")
+set(FDB_PREV2_RELEASE_VERSION "7.1.4")
+set(FDB_PREV3_RELEASE_VERSION "7.0.1")
 
 ################################################################################
 # Flow
