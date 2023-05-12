@@ -2162,7 +2162,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	SimulationConfig simconfig(testConfig);
 	*tenantMode = simconfig.db.tenantMode;
 
-	if(testConfig.testClass == MOCK_DD_TEST_CLASS) {
+	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
 		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
 	}
 
