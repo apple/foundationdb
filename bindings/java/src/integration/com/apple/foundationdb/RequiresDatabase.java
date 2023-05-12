@@ -19,17 +19,14 @@
  */
 package com.apple.foundationdb;
 
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.BeforeAllCallback;
 import org.junit.jupiter.api.extension.ConditionEvaluationResult;
 import org.junit.jupiter.api.extension.ExecutionCondition;
 import org.junit.jupiter.api.extension.ExtensionContext;
-import org.opentest4j.TestAbortedException;
 
 /**
  * Rule to make it easy to write integration tests that only work when a running
@@ -47,6 +44,8 @@ import org.opentest4j.TestAbortedException;
  * be running a server and you don't want to deal with spurious test failures.
  */
 public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
+	private static boolean networkOptionsSet = false;
+
 	public static boolean canRunIntegrationTest() {
 		String prop = System.getProperty("run.integration.tests");
 		if (prop == null) {
@@ -79,20 +78,29 @@ public class RequiresDatabase implements ExecutionCondition, BeforeAllCallback {
 		 * assume that if we are here, then canRunIntegrationTest() is returning true and we don't have to bother
 		 * checking it.
 		 */
-		try (Database db = FDB.selectAPIVersion(ApiVersion.LATEST).open()) {
-			db.run(tr -> {
-				CompletableFuture<byte[]> future = tr.get("test".getBytes());
+		FDB fdb = FDB.selectAPIVersion(ApiVersion.LATEST);
+		if (!networkOptionsSet) {
+			networkOptionsSet = true;
+			Optional<String> externalClientLibrary = context.getConfigurationParameter("external_client_library");
+			if (externalClientLibrary.isPresent()) {
+				System.err.printf("external_client_library : %s\n", externalClientLibrary.get());
+				fdb.options().setExternalClientLibrary(externalClientLibrary.get());
+				fdb.options().setDisableLocalClient();
+			}
+		}
 
+		try (Database db = fdb.open()) {
+			db.run(tr -> {
+				tr.options().setTimeout(100);
+				CompletableFuture<byte[]> future = tr.get("test".getBytes());
 				try {
-					return future.get(100, TimeUnit.MILLISECONDS);
-				} catch (TimeoutException te) {
-					Assertions.fail("Test " + context.getDisplayName() +
-					                " failed to start: cannot to database within timeout");
-					return null; // should never happen
-				} catch (InterruptedException e) {
-					throw new TestAbortedException("Interrupted during setup, skipping test");
-				} catch (ExecutionException e) {
-					throw new RuntimeException(e.getCause());
+					return future.join();
+				} catch (FDBException e) {
+					if (e.getCode() == 1031) {
+						Assertions.fail("Test " + context.getDisplayName() +
+						                " failed to start: cannot to database within timeout");
+					}
+					throw e;
 				}
 			});
 		}
