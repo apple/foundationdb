@@ -281,9 +281,9 @@ public:
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId) = 0;
 
 	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
+	virtual void removeSimHTTPProcess() = 0;
 	virtual Future<Void> registerSimHTTPServer(std::string hostname,
 	                                           std::string service,
-	                                           int numAddresses,
 	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
 
 	int desiredCoordinators;
@@ -356,9 +356,10 @@ public:
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
 
-	std::set<std::string> httpServerHostnames;
+	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
 	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
 	std::set<IPAddress> httpServerIps;
+	bool httpProtected = false;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;
