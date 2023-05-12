@@ -662,6 +662,8 @@ Future<Void> DataDistributor::initDDConfigWatch() {
 }
 
 Future<Void> DataDistributor::initTenantCache() {
+	// SOMEDAY: support tenant cache in MockDD
+	ASSERT(!txnProcessor->isMocked());
 	ddTenantCache = makeReference<TenantCache>(txnProcessor->context(), ddId);
 	return ddTenantCache.get()->build();
 }
@@ -814,7 +816,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
 			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-				ASSERT(!isMocked);
 				wait(self->initTenantCache());
 			}
 

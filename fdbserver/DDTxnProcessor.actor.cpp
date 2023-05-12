@@ -1138,7 +1138,7 @@ Future<Void> DDMockTxnProcessor::waitForAllDataRemoved(
 	    SERVER_KNOBS->ALL_DATA_REMOVED_DELAY,
 	    [&, this]() -> bool {
 		    return mgs->allShardsRemovedFromServer(serverID) &&
-		           shardsAffectedByTeamFailure->getNumberOfShards(serverID);
+		           shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0;
 	    },
 	    TaskPriority::DataDistribution);
 }
