@@ -806,7 +806,7 @@ ACTOR Future<Void> saveMutationsToFile(BackupData* self,
 		if (!message.isCandidateBackupMessage(&m, cipherKeys))
 			continue;
 
-		DEBUG_MUTATION("addMutation", message.version.version, m)
+		DEBUG_MUTATION("addMutation", message.version.version, m, self->myId)
 		    .detail("KCV", self->minKnownCommittedVersion)
 		    .detail("SavedVersion", self->savedVersion);
 

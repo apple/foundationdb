@@ -8,7 +8,6 @@ storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
 bg_consistency_check_enabled = 0
-blob_manifest_backup = true
 shard_encode_location_metadata = false
 bw_throttling_enabled = false
 
@@ -22,7 +21,7 @@ waitForQuiescence = false
     [[test.workload]]
     testName = 'BlobRestoreWorkload'
     setupBlob = true
-    
+
 [[test]] 
 testTitle = 'BackupMutationLogs'
 simBackupAgents = 'BackupToFile'
@@ -32,9 +31,10 @@ waitForQuiescence = false
     [[test.workload]]
     testName = 'IncrementalBackup'
     tag = 'default'
+    blobManifestUrl = 'file://simfdb/fdbblob/manifest'
     submitOnly = true
     waitForBackup = true
-
+    
 [[test]]
 testTitle = 'CycleTest'
 simBackupAgents = 'BackupToFile'

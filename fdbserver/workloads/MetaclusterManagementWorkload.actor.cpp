@@ -75,6 +75,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		std::map<TenantGroupName, Reference<TenantGroupData>> tenantGroups;
 		std::set<TenantName> ungroupedTenants;
 
+		metacluster::AutoTenantAssignment autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
+
 		DataClusterData() {}
 		DataClusterData(Database db) : db(db) {}
 	};
@@ -320,6 +322,9 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		try {
 			state metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = deterministicRandom()->randomInt(0, 4);
+			if (deterministicRandom()->random01() < 0.25) {
+				entry.autoTenantAssignment = metacluster::AutoTenantAssignment::DISABLED;
+			}
 
 			loop {
 				try {
@@ -378,6 +383,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			self->totalTenantGroupCapacity += entry.capacity.numTenantGroups;
 			dataDb->registered = true;
 			dataDb->detached = false;
+			dataDb->autoTenantAssignment = entry.autoTenantAssignment;
 
 			// Get a version to know that the cluster has recovered
 			wait(success(runTransaction(dataDb->db.getReference(),
@@ -455,6 +461,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			    dataDb->tenantGroups.size() + dataDb->ungroupedTenants.size(), dataDb->tenantGroupCapacity);
 			dataDb->tenantGroupCapacity = 0;
 			dataDb->registered = false;
+			dataDb->autoTenantAssignment = metacluster::AutoTenantAssignment::ENABLED;
 
 			if (detachCluster) {
 				dataDb->detached = true;
@@ -747,6 +754,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(self->isValidVersion());
 			ASSERT(self->metaclusterCreated);
 			ASSERT(dataDb->db->getConnectionRecord()->getConnectionString() == clusterMetadata.connectionString);
+			ASSERT_EQ(dataDb->autoTenantAssignment, clusterMetadata.entry.autoTenantAssignment);
 		} catch (Error& e) {
 			if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!dataDb->registered);
@@ -771,7 +779,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	    ClusterName clusterName,
 	    Reference<DataClusterData> dataDb,
 	    Optional<int64_t> numTenantGroups,
-	    Optional<ClusterConnectionString> connectionString) {
+	    Optional<ClusterConnectionString> connectionString,
+	    Optional<metacluster::AutoTenantAssignment> autoTenantAssignment) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 		loop {
 			try {
@@ -782,8 +791,16 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 				if (clusterMetadata.present()) {
 					if (numTenantGroups.present()) {
-						entry = clusterMetadata.get().entry;
+						if (!entry.present()) {
+							entry = clusterMetadata.get().entry;
+						}
 						entry.get().capacity.numTenantGroups = numTenantGroups.get();
+					}
+					if (autoTenantAssignment.present()) {
+						if (!entry.present()) {
+							entry = clusterMetadata.get().entry;
+						}
+						entry.get().autoTenantAssignment = autoTenantAssignment.get();
 					}
 					metacluster::updateClusterMetadata(tr, clusterName, clusterMetadata.get(), connectionString, entry);
 
@@ -804,18 +821,24 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 		state Optional<int64_t> newNumTenantGroups;
 		state Optional<ClusterConnectionString> connectionString;
+		state Optional<metacluster::AutoTenantAssignment> autoTenantAssignment;
 		if (deterministicRandom()->coinflip()) {
 			newNumTenantGroups = deterministicRandom()->randomInt(0, 4);
 		}
 		if (deterministicRandom()->coinflip()) {
 			connectionString = dataDb->db->getConnectionRecord()->getConnectionString();
 		}
+		if (deterministicRandom()->coinflip()) {
+			autoTenantAssignment = deterministicRandom()->coinflip() ? metacluster::AutoTenantAssignment::DISABLED
+			                                                         : metacluster::AutoTenantAssignment::ENABLED;
+		}
 
 		try {
 			loop {
-				Optional<Optional<metacluster::DataClusterEntry>> result =
-				    wait(timeout(configureImpl(self, clusterName, dataDb, newNumTenantGroups, connectionString),
-				                 deterministicRandom()->randomInt(1, 30)));
+				Optional<Optional<metacluster::DataClusterEntry>> result = wait(
+				    timeout(configureImpl(
+				                self, clusterName, dataDb, newNumTenantGroups, connectionString, autoTenantAssignment),
+				            deterministicRandom()->randomInt(1, 30)));
 				if (result.present()) {
 					updatedEntry = result.get();
 					break;
@@ -833,6 +856,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 				self->totalTenantGroupCapacity += tenantGroupDelta;
 				dataDb->tenantGroupCapacity = updatedEntry.get().capacity.numTenantGroups;
+				dataDb->autoTenantAssignment = updatedEntry.get().autoTenantAssignment;
 			}
 		} catch (Error& e) {
 			if (e.code() == error_code_unsupported_metacluster_version) {
@@ -892,12 +916,34 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state metacluster::AssignClusterAutomatically assignClusterAutomatically(deterministicRandom()->coinflip());
+		state metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
 		state bool tenantGroupExists = tenantGroup.present() && self->tenantGroups.count(tenantGroup.get());
 		state bool hasCapacity = tenantGroupExists || self->ungroupedTenants.size() + self->tenantGroups.size() <
 		                                                  self->totalTenantGroupCapacity;
+
+		if (assignClusterAutomatically && !tenantGroupExists && hasCapacity) {
+			// In this case, the condition of `hasCapacity` will be further tightened since we will exclude those
+			// data clusters with autoTenantAssignment being false.
+			// It's possible that all the data clusters are excluded from the auto-assignment pool.
+			// Consequently, even if the the metacluster has capacity, the capacity index has no available data
+			// clusters. In this case, trying to assign a cluster to the tenant automatically will fail.
+			bool emptyCapacityIndex = true;
+			for (auto dataDb : self->dataDbs) {
+				if (metacluster::AutoTenantAssignment::DISABLED == dataDb.second->autoTenantAssignment ||
+				    !dataDb.second->registered || dataDb.second->detached) {
+					continue;
+				}
+				if (dataDb.second->ungroupedTenants.size() + dataDb.second->tenantGroups.size() <
+				    dataDb.second->tenantGroupCapacity) {
+					emptyCapacityIndex = false;
+					break;
+				}
+			}
+			hasCapacity = !emptyCapacityIndex;
+		}
 		state bool retried = false;
 
 		state metacluster::MetaclusterTenantMapEntry tenantMapEntry;
@@ -922,8 +968,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						preferredClusterIndex = deterministicRandom()->randomInt(0, preferredClusters.size());
 						tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
 					}
-					Future<Void> createFuture =
-					    metacluster::createTenant(self->managementDb, tenantMapEntry, assignClusterAutomatically);
+					Future<Void> createFuture = metacluster::createTenant(
+					    self->managementDb, tenantMapEntry, assignClusterAutomatically, ignoreCapacityLimit);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
 						break;
@@ -954,7 +1000,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 							preferredClusters.erase(preferredClusters.begin() + preferredClusterIndex);
 							preferredClusterIndex = 0;
 							tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
-
 							continue;
 						}
 
@@ -979,7 +1024,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			ASSERT(self->metaclusterCreated);
 			ASSERT(!exists);
-			ASSERT(hasCapacity);
+			ASSERT(ignoreCapacityLimit || hasCapacity);
+			if (!hasCapacity) {
+				ASSERT(!tenantGroupExists);
+				ASSERT(ignoreCapacityLimit);
+			}
+			ASSERT(!ignoreCapacityLimit || !assignClusterAutomatically);
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
@@ -991,22 +1041,40 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(assignedCluster != self->dataDbs.end());
 			ASSERT(assignedCluster->second->tenants.try_emplace(tenant, tenantData).second);
 
+			Optional<ClusterName> clusterAssignedToTenantGroup;
 			ASSERT(self->isValidVersion(assignedCluster->second));
 
+			bool allocationAdded = false;
 			if (tenantGroup.present()) {
-				auto tenantGroupData =
-				    self->tenantGroups
-				        .try_emplace(tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
-				        .first;
+				auto [tenantGroupData, _allocationAdded] = self->tenantGroups.try_emplace(
+				    tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster));
+
+				allocationAdded = _allocationAdded;
 				ASSERT(tenantGroupData->second->cluster == entry.assignedCluster);
+				clusterAssignedToTenantGroup = tenantGroupData->second->cluster;
 				tenantGroupData->second->tenants.insert(tenant);
 				assignedCluster->second->tenantGroups[tenantGroup.get()] = tenantGroupData->second;
 			} else {
+				allocationAdded = true;
 				self->ungroupedTenants.insert(tenant);
 				assignedCluster->second->ungroupedTenants.insert(tenant);
 			}
 
-			ASSERT(tenantGroupExists ||
+			if (allocationAdded &&
+			    assignedCluster->second->ungroupedTenants.size() + assignedCluster->second->tenantGroups.size() >
+			        assignedCluster->second->tenantGroupCapacity) {
+				++self->totalTenantGroupCapacity;
+			}
+
+			// In two cases, we bypass the search on capacity index:
+			// i. assignClusterAutomatically is false. This indicates that the user explicitly specifies which cluster
+			//    to assign to a tenant
+			// ii. the tenant belongs to a tenant group to which a cluster has already been assigned.
+			// Except for these two cases, any chosen cluster must have autoTenantAssignment enabled.
+			ASSERT(!assignClusterAutomatically || clusterAssignedToTenantGroup.present() ||
+			       assignedCluster->second->autoTenantAssignment == metacluster::AutoTenantAssignment::ENABLED);
+
+			ASSERT(tenantGroupExists || ignoreCapacityLimit ||
 			       assignedCluster->second->tenantGroupCapacity >=
 			           assignedCluster->second->tenantGroups.size() + assignedCluster->second->ungroupedTenants.size());
 		} catch (Error& e) {
@@ -1014,19 +1082,29 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				return Void();
 			} else if (e.code() == error_code_metacluster_no_capacity) {
-				ASSERT(!hasCapacity && !exists);
+				ASSERT(!exists && !hasCapacity);
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
 				ASSERT(!assignClusterAutomatically);
+				// When trying to create a new tenant, there are several cases in which "cluster_no_capacity" can be
+				// thrown. The only one case in which ignoreCapacityLimit is true is when the number of tenants exceed
+				// a threshold configured via knob. But this is not possible due to the way we pick tenant names in this
+				// test, thus we can have the following assertion.
+				ASSERT(!ignoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(tenantGroup.present());
-				auto itr = self->tenantGroups.find(tenantGroup.get());
-				ASSERT(itr != self->tenantGroups.end());
-				ASSERT(itr->second->cluster != tenantMapEntry.assignedCluster);
+				bool tenantGroupClusterMismatch = false;
+				if (tenantGroup.present()) {
+					auto itr = self->tenantGroups.find(tenantGroup.get());
+					if (itr != self->tenantGroups.end() && itr->second->cluster != tenantMapEntry.assignedCluster) {
+						tenantGroupClusterMismatch = true;
+					}
+				}
+				bool invalidIgnoreCapacityLimit = assignClusterAutomatically && ignoreCapacityLimit;
+				ASSERT(tenantGroupClusterMismatch || invalidIgnoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
@@ -1323,6 +1401,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			auto tenantData = self->createdTenants.find(tenant);
 			ASSERT(tenantData != self->createdTenants.end());
 
+			ASSERT(!tenantData->second->lockId.present() || lockId == tenantData->second->lockId.get());
+
 			auto& dataDb = self->dataDbs[tenantData->second->cluster];
 			ASSERT(dataDb->registered);
 
@@ -1343,11 +1423,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			if (e.code() == error_code_tenant_not_found) {
 				ASSERT(!exists);
 				return Void();
-			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(exists);
-				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
+				return Void();
+			} else if (e.code() == error_code_tenant_locked) {
+				ASSERT(exists);
+				auto tenantData = self->createdTenants.find(tenant);
+				ASSERT(tenantData != self->createdTenants.end());
+				ASSERT(tenantData->second->lockId.present() && lockId != tenantData->second->lockId.get());
 				return Void();
 			}
 
@@ -1659,6 +1742,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 					ASSERT(dataClusterItr != dataClusters.end());
 					ASSERT(dataClusterItr->second.entry.capacity.numTenantGroups ==
 					       dataClusterData->tenantGroupCapacity);
+					ASSERT_EQ(dataClusterItr->second.entry.autoTenantAssignment, dataClusterData->autoTenantAssignment);
 					totalTenantGroupsAllocated +=
 					    dataClusterData->tenantGroups.size() + dataClusterData->ungroupedTenants.size();
 				} else {

@@ -110,9 +110,15 @@ const Key auditKey(const AuditType type, const UID& auditId);
 // KeyRange for whole audit
 const KeyRange auditKeyRange(const AuditType type);
 // Prefix for audit work progress by range
-const Key auditRangePrefixFor(const AuditType type, const UID& auditId);
-// Prefix for audit work progress by audit server id
-const Key auditServerPrefixFor(const AuditType type, const UID& auditId, const UID& serverId);
+const Key auditRangeBasedProgressPrefixFor(const AuditType type, const UID& auditId);
+// Range for audit work progress by range
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type, const UID& auditId);
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type);
+// Prefix for audit work progress by server
+const Key auditServerBasedProgressPrefixFor(const AuditType type, const UID& auditId, const UID& serverId);
+// Range for audit work progress by server
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type, const UID& auditId);
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
@@ -639,6 +645,7 @@ extern const KeyRangeRef configClassKeys;
 // blob range special keys
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
+extern const KeyRangeRef blobRangeChangeLogKeys;
 extern const KeyRef blobManagerEpochKey;
 
 const Value blobManagerEpochValueFor(int64_t epoch);
@@ -649,6 +656,10 @@ extern const StringRef blobRangeActive;
 extern const StringRef blobRangeInactive;
 
 bool isBlobRangeActive(const ValueRef& blobRangeValue);
+
+const Key blobRangeChangeLogReadKeyFor(Version version);
+const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value);
+Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value);
 
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;

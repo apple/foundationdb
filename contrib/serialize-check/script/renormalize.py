@@ -90,11 +90,11 @@ class CompilationDatabase:
             if not any(
                 (prefix in key)
                 for prefix in [
-                     "flow/",
-                     "fdbcli/",
-                     "fdbserver/",
+                    "flow/",
+                    "fdbcli/",
+                    "fdbserver/",
                     "fdbclient/",
-                     "fdbrpc/",
+                    "fdbrpc/",
                 ]
             ):
                 continue
@@ -125,11 +125,11 @@ class SerializableObjectLibrary:
             classes = sorted(list(self._library[path].keys()))
             for class_ in classes:
                 stream.write(f"### `{class_}`\n")
-                stream.write(f"#### Member variables\n")
+                stream.write("#### Member variables\n")
                 for index, item in enumerate(self._library[path][class_]["fields"]):
                     # NOTE index starts with 0
                     stream.write(f"{index + 1}. `{item['name']}`: `{item['type']}`\n")
-                stream.write(f"#### Serialize code\n")
+                stream.write("#### Serialize code\n")
                 stream.write("```c++\n")
                 # This additional `\t` formats the source better.
                 stream.write("\t" + self._library[path][class_]["raw_serialize_code"])

@@ -98,7 +98,11 @@ def metacluster_create(logger, cluster_file, name, tenant_id_prefix):
 
 
 def metacluster_register(
-    management_cluster_file, data_cluster_file, name, max_tenant_groups
+    management_cluster_file,
+    data_cluster_file,
+    name,
+    max_tenant_groups,
+    auto_tenant_assignment,
 ):
     conn_str = get_cluster_connection_str(data_cluster_file)
     rc, out, err = run_fdbcli_command(
@@ -107,6 +111,7 @@ def metacluster_register(
         name,
         "connection_string={}".format(conn_str),
         "max_tenant_groups={}".format(max_tenant_groups),
+        "auto_tenant_assignment={}".format(auto_tenant_assignment),
     )
     if rc != 0:
         raise Exception(err)
@@ -120,17 +125,18 @@ def setup_metacluster(
     management_cluster_name = management_cluster[1]
     tenant_id_prefix = random.randint(0, 32767)
     logger.debug("management cluster: {}".format(management_cluster_name))
-    logger.debug("data clusters: {}".format([name for (_, name) in data_clusters]))
+    logger.debug("data clusters: {}".format([name for (_, name, _) in data_clusters]))
     metacluster_create(
         management_cluster_file, management_cluster_name, tenant_id_prefix
     )
     cluster_names_to_files[management_cluster_name] = management_cluster_file
-    for (cf, name) in data_clusters:
+    for (cf, name, auto_assignment) in data_clusters:
         metacluster_register(
             management_cluster_file,
             cf,
             name,
             max_tenant_groups=max_tenant_groups_per_cluster,
+            auto_tenant_assignment=auto_assignment,
         )
         cluster_names_to_files[name] = cf
     assert len(cluster_names_to_files) == len(data_clusters) + 1
@@ -163,12 +169,15 @@ def create_tenant(
     tenant,
     tenant_group=None,
     assigned_cluster=None,
+    ignore_capacity_limit=False,
 ):
     command = "tenant create {}".format(tenant)
     if tenant_group:
         command = command + " tenant_group={}".format(tenant_group)
     if assigned_cluster:
         command = command + " assigned_cluster={}".format(assigned_cluster)
+    if ignore_capacity_limit:
+        command = command + " ignore_capacity_limit"
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
@@ -319,6 +328,93 @@ def clear_kv_range_with_tenant(
 
 
 @enable_logging()
+def register_and_configure_data_clusters_test(logger, cluster_files):
+    logger.debug("Setting up a metacluster")
+    management_cluster_file = cluster_files[0]
+    tenant_id_prefix = random.randint(0, 32767)
+    logger.debug("management cluster: {}".format(management_cluster_name))
+    metacluster_create(
+        management_cluster_file, management_cluster_name, tenant_id_prefix
+    )
+    cluster_names_to_files[management_cluster_name] = management_cluster_file
+    conn_str = get_cluster_connection_str(cluster_files[1])
+
+    # Register a data cluster
+    rc, _, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster register",
+        data_cluster_names[0],
+        "connection_string={}".format(conn_str),
+        "max_tenant_groups={}".format(5),
+        "auto_tenant_assignment=disable",
+    )
+    assert rc != 0
+    assert err == "ERROR: invalid configuration `disable' for `auto_tenant_assignment'."
+    # Second attempt
+    rc, _, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster register",
+        data_cluster_names[0],
+        "connection_string={}".format(conn_str),
+        "max_tenant_groups={}".format(5),
+        "auto_tenant_assignment=enable",
+    )
+    assert rc != 0
+    assert err == "ERROR: invalid configuration `enable' for `auto_tenant_assignment'."
+    # Third attempt
+    rc, out, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster register",
+        data_cluster_names[0],
+        "connection_string={}".format(conn_str),
+        "max_tenant_groups=5",
+        "auto_tenant_assignment=disabled",
+    )
+    assert 0 == rc
+    rc, out, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster get",
+        data_cluster_names[0],
+    )
+    assert rc == 0
+
+    # Try creating a tenant without specifying data cluster
+    out, err = create_tenant(management_cluster_file, "tenant1")
+    assert (
+        err == "ERROR: Metacluster does not have capacity to create new tenants (2166)"
+    )
+    out, err = create_tenant(
+        management_cluster_file, "tenant1", assigned_cluster=data_cluster_names[0]
+    )
+    assert out == "The tenant `tenant1' has been created"
+    assert len(err) == 0
+
+    rc, out, err = run_fdbcli_command(
+        management_cluster_file,
+        "metacluster configure",
+        data_cluster_names[0],
+        "auto_tenant_assignment=enabled",
+    )
+    assert 0 == rc
+
+    out, err = create_tenant(management_cluster_file, "tenant2")
+    assert out == "The tenant `tenant2' has been created"
+    assert len(err) == 0
+
+    # clean up
+    out, err = delete_tenant(management_cluster_file, "tenant1")
+    assert len(err) == 0
+    out, err = delete_tenant(management_cluster_file, "tenant2")
+    assert len(err) == 0
+    rc, out, err = remove_data_cluster(management_cluster_file, data_cluster_names[0])
+    assert 0 == rc
+    rc, out, err = run_fdbcli_command(
+        management_cluster_file, "metacluster decommission"
+    )
+    assert 0 == rc
+
+
+@enable_logging()
 def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
     logger.debug("Verifying no cluster is part of a metacluster")
     for cf in cluster_files:
@@ -328,9 +424,10 @@ def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
     logger.debug("Verified")
     num_clusters = len(cluster_files)
     logger.debug("Setting up a metacluster")
+    auto_assignment = ["enabled"] * (num_clusters - 1)
     setup_metacluster(
         [cluster_files[0], management_cluster_name],
-        list(zip(cluster_files[1:], data_cluster_names)),
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
         max_tenant_groups_per_cluster=max_tenant_groups_per_cluster,
     )
 
@@ -353,6 +450,86 @@ number of data clusters: {}
             name, management_cluster_name
         )
         assert expected == output
+
+
+@enable_logging()
+def create_tenants_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+    logger.debug("Verified")
+    num_clusters = len(cluster_files)
+    logger.debug("Setting up a metacluster")
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster=1,
+    )
+
+    # On data_cluster[0]
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group=None,
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant11",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert (
+        err
+        == "ERROR: Cluster does not have capacity to perform the specified operation (2141)"
+    )
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+        ignore_capacity_limit=True,
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant13",
+        tenant_group="group1",
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    all_tenants = get_tenant_names(cluster_files[0])
+    assert all_tenants == ["tenant1", "tenant11", "tenant12"]
+
+    clear_all_tenants(cluster_files[0])
+    cleanup_after_test(cluster_files[0], data_cluster_names)
 
 
 @enable_logging()
@@ -483,9 +660,10 @@ def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
 @enable_logging()
 def test_main(logger):
     logger.debug("Tests start")
-    # This must be the first test to run, since it sets up the metacluster that
-    # will be used throughout the test. The cluster names to files mapping is also
-    # set up for testing purpose.
+    register_and_configure_data_clusters_test(cluster_files)
+
+    create_tenants_test(cluster_files)
+
     clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
 
     configure_tenants_test_disableClusterAssignment(cluster_files)
@@ -517,7 +695,7 @@ if __name__ == "__main__":
     # keep current environment variables
     fdbcli_env = os.environ.copy()
     cluster_files = fdbcli_env.get("FDB_CLUSTERS").split(";")
-    assert len(cluster_files) > 1
+    assert len(cluster_files) > 2
 
     fdbcli_bin = args.build_dir + "/bin/fdbcli"
 

@@ -21,6 +21,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -1073,11 +1074,14 @@ public:
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
-				status.isWrongConfiguration = false;
+				state bool isBm = BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
+				status.isUndesired =
+				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
+
+				status.isWrongConfiguration = isBm;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
@@ -1229,7 +1233,7 @@ public:
 						    .detail("Server", server->getId())
 						    .detail("Excluded", worstAddr.toString());
 						wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
-						while (!ddEnabledState->isDDEnabled()) {
+						while (!ddEnabledState->isEnabled()) {
 							wait(delay(1.0));
 						}
 						if (self->removeFailedServer.canBeSet()) {
@@ -1366,6 +1370,8 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
+								// TODO: Improve simulation testing to test locality changes. Until then, we
+								// realistically don't expect this code probe to be hit.
 								CODE_PROBE(true, "Server locality change created bad teams", probe::decoration::rare);
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
@@ -1391,8 +1397,7 @@ public:
 						recordTeamCollectionInfo = true;
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
-						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+						storageMetadataTracker = self->updateStorageMetadata(server);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -2567,7 +2572,6 @@ public:
 						// trigger restartRecruiting again, or the host will become healthy again, in which case we
 						// won't need to recruit on it and it would be counted with Excl1.
 						exclusions.insert(it.first);
-						CODE_PROBE(true, "DD excluding host with many failed storages", probe::decoration::rare);
 						TraceEvent(SevDebug, "DDRecruitExcl3")
 						    .detail("Primary", self->primary)
 						    .detail("Excluding", it.first.toString())
@@ -2893,11 +2897,14 @@ public:
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
+		state bool isTss = server->getLastKnownInterface().isTss();
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
-		state StorageMetadataType data(StorageMetadataType::currentTime(),
-		                               server->getStoreType(),
-		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+		state StorageMetadataType data(
+		    StorageMetadataType::currentTime(),
+		    server->getStoreType(),
+		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                      : self->configuration.storageServerStoreType));
 
 		// read storage metadata
 		loop {
@@ -2916,18 +2923,23 @@ public:
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
+		TraceEvent("UpdateStorageMetadata", self->getDistributorId())
+		    .detail("Server", server->getId())
+		    .detail("IsTss", isTss);
 
 		// wrong store type handler
-		if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
-		    self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
-		// add server to wiggler
-		if (self->storageWiggler->contains(server->getId())) {
-			self->storageWiggler->updateMetadata(server->getId(), data);
-		} else {
-			self->storageWiggler->addServer(server->getId(), data);
+		if (!isTss) {
+			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			    self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = removeWrongStoreType(self);
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
+			// add server to wiggler
+			if (self->storageWiggler->contains(server->getId())) {
+				self->storageWiggler->updateMetadata(server->getId(), data);
+			} else {
+				self->storageWiggler->addServer(server->getId(), data);
+			}
 		}
 
 		return Never();
@@ -3794,8 +3806,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
-	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
+	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
 void DDTeamCollection::resetLocalitySet() {

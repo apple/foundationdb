@@ -27,6 +27,7 @@ waitForQuiescence = false
     [[test.workload]]
     testName = 'IncrementalBackup'
     tag = 'default'
+    blobManifestUrl = 'file://simfdb/fdbblob/manifest'
     submitOnly = true
     waitForBackup = true
 

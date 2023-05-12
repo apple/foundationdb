@@ -49,7 +49,6 @@ def main_loop(main_pipe, pipe):
             pipe.send(TypeError("unexpected type {}".format(type(req))))
             continue
         op = req.op
-        args = req.args
         resp = True
         try:
             if op == "configure_client":
@@ -71,7 +70,6 @@ def main_loop(main_pipe, pipe):
                     resp = Exception("db not open")
                 else:
                     for tenant in req.args:
-                        tenant_str = to_str(tenant)
                         tenant_bytes = to_bytes(tenant)
                         fdb.tenant_management.create_tenant(db, tenant_bytes)
             elif op == "delete_tenant":
@@ -79,7 +77,6 @@ def main_loop(main_pipe, pipe):
                     resp = Exception("db not open")
                 else:
                     for tenant in req.args:
-                        tenant_str = to_str(tenant)
                         tenant_bytes = to_bytes(tenant)
                         cleanup_tenant(db, tenant_bytes)
             elif op == "cleanup_database":
@@ -149,7 +146,7 @@ class Server(object):
         try:
             self._main_pipe.send(req)
             resp = self._main_pipe.recv()
-            if resp != True:
+            if not resp:
                 print("{} failed: {}".format(req, resp))
                 raise resp
             else:
