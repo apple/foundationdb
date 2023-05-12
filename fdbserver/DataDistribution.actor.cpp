@@ -84,7 +84,7 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), anyChildAuditFailed(false), retryCount(0),
-	    cancelled(false) {}
+	    cancelled(false), issueDoAuditCount(0), completeDoAuditCount(0) {}
 
 	AuditStorageState coreState;
 	ActorCollection actors;
@@ -93,6 +93,8 @@ struct DDAudit {
 	int retryCount;
 	bool anyChildAuditFailed;
 	bool cancelled; // use to cancel any actor beyond auditActor
+	int64_t issueDoAuditCount;
+	int64_t completeDoAuditCount;
 
 	void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	Future<Void> getAuditRunActor() { return auditActor; }
@@ -1770,6 +1772,18 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		wait(audit->actors.getResult()); // goto exception handler if any actor is failed
+		TraceEvent(SevInfo, "DDAuditStorageCoreResult", self->ddId)
+		    .detail("AuditID", audit->coreState.id)
+		    .detail("Range", audit->coreState.range)
+		    .detail("AuditType", audit->coreState.getType())
+		    .detail("RetryCount", currentRetryCount)
+		    .detail("DDDoAuditTasksIssued", audit->issueDoAuditCount)
+		    .detail("DDDoAuditTasksComplete", audit->completeDoAuditCount);
+		ASSERT(audit->issueDoAuditCount >= audit->completeDoAuditCount);
+		ASSERT(audit->issueDoAuditCount == audit->completeDoAuditCount || audit->anyChildAuditFailed);
+		// reset issueDoAuditCount and completeDoAuditCount for future use
+		audit->issueDoAuditCount = 0;
+		audit->completeDoAuditCount = 0;
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
 		} else if (audit->anyChildAuditFailed) {
@@ -2359,7 +2373,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	    .detail("AuditType", auditType);
 	state Key begin = range.begin;
 	state KeyRange currentRange;
-	state int64_t issueDoAuditCount = 0;
 
 	try {
 		while (begin < range.end) {
@@ -2437,7 +2450,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 					self->remainingBudgetForAuditTasks[auditType].set(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX -
 					                                                  1);
 				}
-				issueDoAuditCount++;
 				audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 				// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 				begin = rangeLocations[i].range.end;
@@ -2449,7 +2461,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", range)
 		    .detail("AuditType", auditType)
-		    .detail("DoAuditCount", issueDoAuditCount);
+		    .detail("IssuedDoAuditCount", audit->issueDoAuditCount);
 
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "DDScheduleAuditOnRangeError", self->ddId)
@@ -2478,17 +2490,21 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	    .detail("TargetServers", describe(req.targetServers));
 
 	try {
+		audit->issueDoAuditCount++;
 		ErrorOr<AuditStorageState> vResult = wait(ssi.auditStorage.getReplyUnlessFailedFor(
 		    req, /*sustainedFailureDuration=*/2.0, /*sustainedFailureSlope=*/0));
 		if (vResult.isError()) {
 			throw vResult.getError();
 		}
-		TraceEvent(SevDebug, "DDDoAuditOnStorageServerEnd", self->ddId)
+		audit->completeDoAuditCount++;
+		TraceEvent(SevInfo, "DDDoAuditOnStorageServerResult", self->ddId)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.getType())
 		    .detail("StorageServer", ssi.toString())
-		    .detail("TargetServers", describe(req.targetServers));
+		    .detail("TargetServers", describe(req.targetServers))
+		    .detail("DDDoAuditTaskIssue", audit->issueDoAuditCount)
+		    .detail("DDDoAuditTaskComplete", audit->completeDoAuditCount);
 
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", req.id)
