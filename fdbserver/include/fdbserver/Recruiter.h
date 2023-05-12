@@ -51,19 +51,19 @@ public:
 
 	// TODO: Move functions in ClusterController.actor.cpp that recruit special
 	// roles like EKP into this class. Then, this function can be made private.
-	static void updateKnownIds(ClusterControllerData* clusterControllerData,
+	static void updateKnownIds(ClusterControllerData const* clusterControllerData,
 	                           std::map<Optional<Standalone<StringRef>>, int>* id_used);
 
 	static RecruitFromConfigurationReply findWorkersForConfiguration(ClusterControllerData* clusterControllerData,
 	                                                                 RecruitFromConfigurationRequest const& req);
 
 	static RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration(
-	    ClusterControllerData* clusterControllerData,
+	    ClusterControllerData const* clusterControllerData,
 	    RecruitRemoteFromConfigurationRequest const& req);
 
 	// TODO: Make these functions private after rewriting betterMasterExists
 	static WorkerFitnessInfo getWorkerForRoleInDatacenter(
-	    ClusterControllerData* clusterControllerData,
+	    ClusterControllerData const* clusterControllerData,
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    ProcessClass::Fitness unacceptableFitness,
@@ -73,7 +73,7 @@ public:
 	    bool checkStable = false);
 
 	static std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
-	    ClusterControllerData* clusterControllerData,
+	    ClusterControllerData const* clusterControllerData,
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    int amount,
@@ -85,7 +85,7 @@ public:
 
 	// Selects the best method for TLog recruitment based on the specified policy
 	static std::vector<WorkerDetails> getWorkersForTlogs(
-	    ClusterControllerData* clusterControllerData,
+	    ClusterControllerData const* clusterControllerData,
 	    DatabaseConfiguration const& conf,
 	    int32_t required,
 	    int32_t desired,
@@ -96,7 +96,7 @@ public:
 	    const std::vector<UID>& exclusionWorkerIds = {});
 
 	static std::vector<WorkerDetails> getWorkersForSatelliteLogs(
-	    ClusterControllerData* clusterControllerData,
+	    ClusterControllerData const* clusterControllerData,
 	    const DatabaseConfiguration& conf,
 	    const RegionInfo& region,
 	    const RegionInfo& remoteRegion,

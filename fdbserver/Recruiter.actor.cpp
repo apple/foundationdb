@@ -27,7 +27,7 @@
 
 namespace {
 
-bool isExcludedDegradedServer(ClusterControllerData* clusterControllerData, const NetworkAddressList& a) {
+bool isExcludedDegradedServer(ClusterControllerData const* clusterControllerData, const NetworkAddressList& a) {
 	for (const auto& server : clusterControllerData->excludedDegradedServers) {
 		if (a.contains(server))
 			return true;
@@ -42,7 +42,7 @@ void updateIdUsed(const std::vector<WorkerInterface>& workers,
 	}
 }
 
-void compareWorkers(ClusterControllerData* clusterControllerData,
+void compareWorkers(ClusterControllerData const* clusterControllerData,
                     const DatabaseConfiguration& conf,
                     const std::vector<WorkerInterface>& first,
                     const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
@@ -81,7 +81,7 @@ void compareWorkers(ClusterControllerData* clusterControllerData,
 }
 
 std::vector<WorkerDetails> getWorkersForSeedServers(
-    ClusterControllerData* clusterControllerData,
+    ClusterControllerData const* clusterControllerData,
     DatabaseConfiguration const& conf,
     Reference<IReplicationPolicy> const& policy,
     Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>()) {
@@ -129,7 +129,7 @@ std::vector<WorkerDetails> getWorkersForSeedServers(
 	return results;
 }
 
-bool isLongLivedStateless(ClusterControllerData* clusterControllerData, Optional<Key> const& processId) {
+bool isLongLivedStateless(ClusterControllerData const* clusterControllerData, Optional<Key> const& processId) {
 	return (clusterControllerData->db.serverInfo->get().distributor.present() &&
 	        clusterControllerData->db.serverInfo->get().distributor.get().locality.processId() == processId) ||
 	       (clusterControllerData->db.serverInfo->get().ratekeeper.present() &&
@@ -145,7 +145,7 @@ bool isLongLivedStateless(ClusterControllerData* clusterControllerData, Optional
 	        clusterControllerData->db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
 }
 
-std::set<Optional<Standalone<StringRef>>> getDatacenters(ClusterControllerData* clusterControllerData,
+std::set<Optional<Standalone<StringRef>>> getDatacenters(ClusterControllerData const* clusterControllerData,
                                                          DatabaseConfiguration const& conf,
                                                          bool checkStable = false) {
 	std::set<Optional<Standalone<StringRef>>> result;
@@ -205,7 +205,7 @@ std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<Re
 // Adds workers to the result such that each field is used in the result set as evenly as possible,
 // with a secondary criteria of minimizing the reuse of zoneIds
 // only add workers which have a field which is already in the result set
-void addWorkersByLowestField(ClusterControllerData* clusterControllerData,
+void addWorkersByLowestField(ClusterControllerData const* clusterControllerData,
                              StringRef field,
                              int desired,
                              const std::vector<WorkerDetails>& workers,
@@ -341,7 +341,7 @@ void addWorkersByLowestZone(int desired,
 
 // A TLog recruitment method specialized for single, double, and triple configurations
 // It recruits processes from with unique zoneIds until it reaches the desired amount
-std::vector<WorkerDetails> getWorkersForTlogsSimple(ClusterControllerData* clusterControllerData,
+std::vector<WorkerDetails> getWorkersForTlogsSimple(ClusterControllerData const* clusterControllerData,
                                                     DatabaseConfiguration const& conf,
                                                     int32_t required,
                                                     int32_t desired,
@@ -507,7 +507,7 @@ std::vector<WorkerDetails> getWorkersForTlogsSimple(ClusterControllerData* clust
 //   dcIds:       the target data centers the workers are in. The selected workers must all be from these
 //                data centers:
 //   exclusionWorkerIds: the workers to be excluded from the selection.
-std::vector<WorkerDetails> getWorkersForTlogsBackup(ClusterControllerData* clusterControllerData,
+std::vector<WorkerDetails> getWorkersForTlogsBackup(ClusterControllerData const* clusterControllerData,
                                                     DatabaseConfiguration const& conf,
                                                     int32_t required,
                                                     int32_t desired,
@@ -768,7 +768,7 @@ std::vector<WorkerDetails> getWorkersForTlogsBackup(ClusterControllerData* clust
 
 // A TLog recruitment method specialized for three_data_hall and three_datacenter configurations
 // It attempts to evenly recruit processes from across data_halls or datacenters
-std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData* clusterControllerData,
+std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData const* clusterControllerData,
                                                      DatabaseConfiguration const& conf,
                                                      int32_t desired,
                                                      std::map<Optional<Standalone<StringRef>>, int>& id_used,
@@ -981,7 +981,7 @@ std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData* clus
 }
 
 // Attempt to recruit TLogs without degraded processes and see if it improves the configuration
-std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData* clusterControllerData,
+std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData const* clusterControllerData,
                                                      DatabaseConfiguration const& conf,
                                                      int32_t desired,
                                                      std::map<Optional<Standalone<StringRef>>, int>& id_used,
@@ -1051,10 +1051,11 @@ std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData* clus
 	}
 }
 
-ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(ClusterControllerData* clusterControllerData,
-                                                                         RecruitFromConfigurationRequest const& req,
-                                                                         Optional<Key> dcId,
-                                                                         bool checkGoodRecruitment) {
+ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(
+    ClusterControllerData const* clusterControllerData,
+    RecruitFromConfigurationRequest const& req,
+    Optional<Key> dcId,
+    bool checkGoodRecruitment) {
 	RecruitFromConfigurationReply result;
 	std::map<Optional<Standalone<StringRef>>, int> id_used;
 	Recruiter::updateKnownIds(clusterControllerData, &id_used);
@@ -1914,7 +1915,7 @@ Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitEverythi
 	return RecruiterImpl::recruitEverything(clusterRecoveryData, seedServers, oldLogSystem);
 }
 
-void Recruiter::updateKnownIds(ClusterControllerData* clusterControllerData,
+void Recruiter::updateKnownIds(ClusterControllerData const* clusterControllerData,
                                std::map<Optional<Standalone<StringRef>>, int>* id_used) {
 	(*id_used)[clusterControllerData->masterProcessId]++;
 	(*id_used)[clusterControllerData->clusterControllerProcessId]++;
@@ -2023,7 +2024,7 @@ RecruitFromConfigurationReply Recruiter::findWorkersForConfiguration(ClusterCont
 }
 
 RecruitRemoteFromConfigurationReply Recruiter::findRemoteWorkersForConfiguration(
-    ClusterControllerData* clusterControllerData,
+    ClusterControllerData const* clusterControllerData,
     RecruitRemoteFromConfigurationRequest const& req) {
 	RecruitRemoteFromConfigurationReply result;
 	std::map<Optional<Standalone<StringRef>>, int> id_used;
@@ -2078,7 +2079,7 @@ RecruitRemoteFromConfigurationReply Recruiter::findRemoteWorkersForConfiguration
 }
 
 WorkerFitnessInfo Recruiter::getWorkerForRoleInDatacenter(
-    ClusterControllerData* clusterControllerData,
+    ClusterControllerData const* clusterControllerData,
     Optional<Standalone<StringRef>> const& dcId,
     ProcessClass::ClusterRole role,
     ProcessClass::Fitness unacceptableFitness,
@@ -2117,7 +2118,7 @@ WorkerFitnessInfo Recruiter::getWorkerForRoleInDatacenter(
 }
 
 std::vector<WorkerDetails> Recruiter::getWorkersForRoleInDatacenter(
-    ClusterControllerData* clusterControllerData,
+    ClusterControllerData const* clusterControllerData,
     Optional<Standalone<StringRef>> const& dcId,
     ProcessClass::ClusterRole role,
     int amount,
@@ -2167,7 +2168,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForRoleInDatacenter(
 	return results;
 }
 
-std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData* clusterControllerData,
+std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData const* clusterControllerData,
                                                          DatabaseConfiguration const& conf,
                                                          int32_t required,
                                                          int32_t desired,
@@ -2304,7 +2305,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData* 
 // FIXME: This logic will fallback unnecessarily when usable dcs > 1 because it does not check all combinations of
 // potential satellite locations
 std::vector<WorkerDetails> Recruiter::getWorkersForSatelliteLogs(
-    ClusterControllerData* clusterControllerData,
+    ClusterControllerData const* clusterControllerData,
     const DatabaseConfiguration& conf,
     const RegionInfo& region,
     const RegionInfo& remoteRegion,
