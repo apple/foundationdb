@@ -240,65 +240,42 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 
 	DisabledTraceEvent(SevDebug, "SetShardStatus", ssi.id()).detail("Range", range);
 
-	// change the old status
-	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end) {
+	// change the shard boundary if the status will change
+	if (ranges.begin().begin() < range.begin && ranges.begin().end() > range.end &&
+	    ranges.begin()->cvalue().status != status) {
 		CODE_PROBE(true, "Implicitly split single shard to 3 pieces");
 		threeWayShardSplitting(ranges.begin().range(), range, ranges.begin().cvalue().shardSize);
 	} else {
-		if (ranges.begin().begin() < range.begin) {
+		if (ranges.begin().begin() < range.begin && ranges.begin()->cvalue().status != status) {
 			CODE_PROBE(true, "Implicitly split begin range to 2 pieces");
 			twoWayShardSplitting(ranges.begin().range(), range.begin, ranges.begin().cvalue().shardSize);
 		}
 		if (ranges.end().begin() > range.end) {
-			CODE_PROBE(true, "Implicitly split end range to 2 pieces");
 			auto lastRange = ranges.end();
 			--lastRange;
-			twoWayShardSplitting(lastRange.range(), range.end, lastRange.cvalue().shardSize);
+			if (lastRange->cvalue().status != status) {
+				CODE_PROBE(true, "Implicitly split end range to 2 pieces");
+				twoWayShardSplitting(lastRange.range(), range.end, lastRange.cvalue().shardSize);
+			}
 		}
 	}
 	ranges = serverKeys.containedRanges(range);
-	// now the boundary must be aligned
-	ASSERT(ranges.begin().begin() == range.begin);
-	ASSERT(ranges.end().begin() == range.end);
 
-	// Double pointer indicating a range to coalesce
-	std::vector<std::pair<Key, Key>> coalesceRanges;
-	auto left = ranges.begin(), right = ranges.begin();
-	while (left != ranges.end()) {
-		uint64_t newSize = 0;
-		// advance right to the next different but compatible status
-		for (; right != ranges.end(); ++right) {
-			auto oldStatus = right->cvalue().status;
-			if (isStatusTransitionValid(oldStatus, status)) {
-				newSize += right->cvalue().shardSize;
-			} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
-			           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
-				CODE_PROBE(true, "Shard already on server");
-				break;
-			} else {
-				TraceEvent(SevError, "MockShardStatusTransitionError", id)
-				    .detail("From", oldStatus)
-				    .detail("To", status)
-				    .detail("KeyBegin", range.begin)
-				    .detail("KeyEnd", range.begin);
-				ASSERT(false);
-			}
+	for (auto it = ranges.begin(); it != ranges.end(); ++it) {
+		auto oldStatus = it->cvalue().status;
+		if (isStatusTransitionValid(oldStatus, status)) {
+			it->value().status = status;
+		} else if ((oldStatus == MockShardStatus::COMPLETED || oldStatus == MockShardStatus::FETCHED) &&
+		           (status == MockShardStatus::INFLIGHT || status == MockShardStatus::FETCHED)) {
+			CODE_PROBE(true, "Shard already on server");
+		} else {
+			TraceEvent(SevError, "MockShardStatusTransitionError", id)
+			    .detail("From", oldStatus)
+			    .detail("To", status)
+			    .detail("KeyBegin", range.begin)
+			    .detail("KeyEnd", range.begin);
+			ASSERT(false);
 		}
-
-		// set [left, right) to new value
-		auto leftKey = left.begin();
-		for (; left != right; ++left) {
-			left->value() = ShardInfo{ status, newSize };
-		}
-		coalesceRanges.emplace_back(leftKey, right.begin());
-		if (left != ranges.end()) {
-			++left;
-			right = left;
-		}
-	}
-
-	for (auto& p : coalesceRanges) {
-		serverKeys.coalesce(KeyRangeRef(p.first, p.second));
 	}
 }
 
@@ -1049,15 +1026,18 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	ASSERT_EQ(mss->sumRangeSize(allKeys), 1400);
 	ASSERT_EQ(mss->serverKeys.size(), 3);
 
-	// [allKeys.begin, a, ac, bc, allKeys.end]
+	// [allKeys.begin, a, b, bc, allKeys.end]
 	testRange = KeyRangeRef("ac"_sr, "bc"_sr);
 	mss->setShardStatus(testRange, MockShardStatus::INFLIGHT);
 	ASSERT(mss->allShardStatusEqual(testRange, MockShardStatus::INFLIGHT));
 	ASSERT_EQ(mss->sumRangeSize(allKeys), 1400);
 	ASSERT_EQ(mss->serverKeys.size(), 4);
+	testRange = KeyRangeRef("ab"_sr, "bb"_sr);
+	mss->setShardStatus(testRange, MockShardStatus::INFLIGHT);
+	ASSERT_EQ(mss->serverKeys.size(), 4);
 
 	testRange = KeyRangeRef("b"_sr, "bc"_sr);
-	// [allKeys.begin, a, ac, b, bc, allKeys.end]
+	// [allKeys.begin, a, b, bc, allKeys.end]
 	mss->setShardStatus(testRange, MockShardStatus::FETCHED);
 	ASSERT(mss->allShardStatusEqual(testRange, MockShardStatus::FETCHED));
 	mss->setShardStatus(testRange, MockShardStatus::COMPLETED);
@@ -1065,14 +1045,14 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	mss->setShardStatus(testRange, MockShardStatus::FETCHED);
 	ASSERT(mss->allShardStatusEqual(testRange, MockShardStatus::COMPLETED));
 	ASSERT_EQ(mss->sumRangeSize(allKeys), 1400);
-	ASSERT_EQ(mss->serverKeys.size(), 5);
+	ASSERT_EQ(mss->serverKeys.size(), 4);
 
-	testRange = KeyRangeRef("a"_sr, allKeys.end);
-	// [allKeys.begin, a, b, bc, allKeys.end]
+	testRange = KeyRangeRef("ac"_sr, allKeys.end);
+	// [allKeys.begin, a, ac, b, bc, allKeys.end]
 	mss->setShardStatus(testRange, MockShardStatus::FETCHED);
 	ASSERT_EQ(mss->sumRangeSize(allKeys), 1400);
-	ASSERT_EQ(mss->serverKeys.size(), 4);
-	ASSERT(mss->allShardStatusEqual(KeyRangeRef("a"_sr, "b"_sr), MockShardStatus::FETCHED));
+	ASSERT_EQ(mss->serverKeys.size(), 5);
+	ASSERT(mss->allShardStatusEqual(KeyRangeRef("ac"_sr, "b"_sr), MockShardStatus::FETCHED));
 	ASSERT(mss->allShardStatusEqual(KeyRangeRef("b"_sr, "bc"_sr), MockShardStatus::COMPLETED));
 	ASSERT(mss->allShardStatusEqual(KeyRangeRef("bc"_sr, allKeys.end), MockShardStatus::FETCHED));
 
