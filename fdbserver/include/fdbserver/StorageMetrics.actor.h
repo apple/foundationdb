@@ -255,7 +255,9 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 				self->metrics.getReadHotRanges(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
+				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
+				    (req.tenantInfo.hasTenant() &&
+				     !self->isReadable(req.keys.withPrefix(req.tenantInfo.prefix.get())))) {
 					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
