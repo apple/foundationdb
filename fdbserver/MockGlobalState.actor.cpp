@@ -279,6 +279,38 @@ void MockStorageServer::setShardStatus(const KeyRangeRef& range, MockShardStatus
 	}
 }
 
+void MockStorageServer::coalesceCompletedRange(const KeyRangeRef& range) {
+	auto ranges = serverKeys.intersectingRanges(range);
+	// ranges at least has allKeys
+	ASSERT(!ranges.empty());
+	auto allRanges = serverKeys.ranges();
+	auto left = ranges.begin(), right = ranges.end();
+	while (true) {
+		if (left->cvalue().status != MockShardStatus::COMPLETED) {
+			ASSERT(left != ranges.begin());
+			++left;
+			break;
+		}
+		if (left == allRanges.begin())
+			break;
+		--left;
+	}
+
+	while (right != allRanges.end() && right->cvalue().status == MockShardStatus::COMPLETED) {
+		++right;
+	}
+
+	int newSize = 0;
+	for (auto it = left; it != right; ++it) {
+		ASSERT(it->cvalue().status == MockShardStatus::COMPLETED);
+		newSize += it->cvalue().shardSize;
+		it->value().shardSize = 0;
+	}
+	auto beginKey = left.begin(), endKey = right.begin();
+	serverKeys.coalesce(KeyRangeRef(beginKey, endKey));
+	serverKeys[beginKey].shardSize = newSize;
+}
+
 // split the out range [a, d) based on the inner range's boundary [b, c). The result would be [a,b), [b,c), [c,d). The
 // size of the new shards are randomly split from old size of [a, d)
 void MockStorageServer::threeWayShardSplitting(const KeyRangeRef& outerRange,
@@ -1057,6 +1089,12 @@ TEST_CASE("/MockGlobalState/MockStorageServer/SetShardStatus") {
 	ASSERT(mss->allShardStatusEqual(KeyRangeRef("b"_sr, "bc"_sr), MockShardStatus::COMPLETED));
 	ASSERT(mss->allShardStatusEqual(KeyRangeRef("bc"_sr, allKeys.end), MockShardStatus::FETCHED));
 
+	mss->setShardStatus(allKeys, MockShardStatus::INFLIGHT);
+	mss->setShardStatus(allKeys, MockShardStatus::FETCHED);
+	mss->setShardStatus(allKeys, MockShardStatus::COMPLETED);
+	mss->coalesceCompletedRange(KeyRangeRef("a"_sr, "b"_sr));
+	ASSERT_EQ(mss->sumRangeSize(allKeys), 1400);
+	ASSERT_EQ(mss->serverKeys.size(), 1);
 	return Void();
 }
 

@@ -1074,7 +1074,9 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED);
+		auto server = mgs->allServers.at(id);
+		server->setShardStatus(keys, MockShardStatus::COMPLETED);
+		server->coalesceCompletedRange(keys);
 	}
 
 	// remove destination servers from source servers
