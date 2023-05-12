@@ -38,7 +38,6 @@ class FutureIntegrationTest {
   static class DirectExecutor implements Executor {
     @Override
     public void execute(Runnable command) {
-      System.out.println("Executing callback");
       command.run();
     }
   }
@@ -47,10 +46,8 @@ class FutureIntegrationTest {
   @Tag("SupportsExternalClient")
   public void testCancelFutureOnThreadPool() throws Exception {
     try (Database db = fdb.open()) {
-      System.out.println("Executing transaction");
       Transaction tr = db.createTransaction();
       CompletableFuture<byte[]> result = tr.get("hello".getBytes("US-ASCII"));
-      System.out.println("Cancelling future");
       result.cancel(true);
     }
   }
@@ -59,10 +56,8 @@ class FutureIntegrationTest {
   @Tag("SupportsExternalClient")
   public void testCancelFutureOnSameThread() throws Exception {
     try (Database db = fdb.open(null, new DirectExecutor())) {
-      System.out.println("Executing transaction");
       Transaction tr = db.createTransaction();
       CompletableFuture<Void> result = tr.watch("hello".getBytes("US-ASCII"));
-      System.out.println("Cancelling future");
       result.cancel(true);
     }
   }
