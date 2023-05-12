@@ -41,42 +41,38 @@ struct ClusterRecoveryData;
 class Recruiter {
 	friend class RecruiterImpl;
 
-	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(
-	    ClusterControllerData* clusterControllerData,
-	    RecruitFromConfigurationRequest const& req,
-	    Optional<Key> dcId,
-	    bool checkGoodRecruitment);
-
 public:
 	// Create assignments for each worker and recruit commit proxies, GRV
 	// proxies, resolvers, and transaction logs.
-	Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
+	static Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
 	    std::vector<StorageServerInterface>* seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 
 	// TODO: Move functions in ClusterController.actor.cpp that recruit special
 	// roles like EKP into this class. Then, this function can be made private.
-	void updateKnownIds(ClusterControllerData* clusterControllerData,
-	                    std::map<Optional<Standalone<StringRef>>, int>* id_used);
+	static void updateKnownIds(ClusterControllerData* clusterControllerData,
+	                           std::map<Optional<Standalone<StringRef>>, int>* id_used);
 
-	RecruitFromConfigurationReply findWorkersForConfiguration(ClusterControllerData* clusterControllerData,
-	                                                          RecruitFromConfigurationRequest const& req);
+	static RecruitFromConfigurationReply findWorkersForConfiguration(ClusterControllerData* clusterControllerData,
+	                                                                 RecruitFromConfigurationRequest const& req);
 
-	RecruitFromConfigurationReply findWorkersForConfigurationDispatch(ClusterControllerData* clusterControllerData,
-	                                                                  RecruitFromConfigurationRequest const& req,
-	                                                                  bool checkGoodRecruitment);
+	static RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration(
+	    ClusterControllerData* clusterControllerData,
+	    RecruitRemoteFromConfigurationRequest const& req);
 
-	WorkerFitnessInfo getWorkerForRoleInDatacenter(ClusterControllerData* clusterControllerData,
-	                                               Optional<Standalone<StringRef>> const& dcId,
-	                                               ProcessClass::ClusterRole role,
-	                                               ProcessClass::Fitness unacceptableFitness,
-	                                               DatabaseConfiguration const& conf,
-	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
-	                                               bool checkStable = false);
+	// TODO: Make these functions private after rewriting betterMasterExists
+	static WorkerFitnessInfo getWorkerForRoleInDatacenter(
+	    ClusterControllerData* clusterControllerData,
+	    Optional<Standalone<StringRef>> const& dcId,
+	    ProcessClass::ClusterRole role,
+	    ProcessClass::Fitness unacceptableFitness,
+	    DatabaseConfiguration const& conf,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
+	    bool checkStable = false);
 
-	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
+	static std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    ClusterControllerData* clusterControllerData,
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
@@ -87,6 +83,28 @@ public:
 	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false);
 
+	// Selects the best method for TLog recruitment based on the specified policy
+	static std::vector<WorkerDetails> getWorkersForTlogs(
+	    ClusterControllerData* clusterControllerData,
+	    DatabaseConfiguration const& conf,
+	    int32_t required,
+	    int32_t desired,
+	    Reference<IReplicationPolicy> const& policy,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    bool checkStable = false,
+	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
+	    const std::vector<UID>& exclusionWorkerIds = {});
+
+	static std::vector<WorkerDetails> getWorkersForSatelliteLogs(
+	    ClusterControllerData* clusterControllerData,
+	    const DatabaseConfiguration& conf,
+	    const RegionInfo& region,
+	    const RegionInfo& remoteRegion,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    bool& satelliteFallback,
+	    bool checkStable = false);
+
+	// TODO: Move this function to a superclass
 	// Get the encryption at rest mode from the database configuration.
-	EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) const;
+	static EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config);
 };

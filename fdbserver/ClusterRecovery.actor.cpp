@@ -86,12 +86,12 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = cluster->recruiter.getWorkerForRoleInDatacenter(cluster,
-		                                                               cluster->clusterControllerDcId,
-		                                                               ProcessClass::Master,
-		                                                               ProcessClass::NeverAssign,
-		                                                               db->config,
-		                                                               id_used);
+		masterWorker = Recruiter::getWorkerForRoleInDatacenter(cluster,
+		                                                       cluster->clusterControllerDcId,
+		                                                       ProcessClass::Master,
+		                                                       ProcessClass::NeverAssign,
+		                                                       db->config,
+		                                                       id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
@@ -175,13 +175,12 @@ ACTOR Future<Void> rejoinRequestHandler(Reference<ClusterRecoveryData> self) {
 }
 
 // Keeps the coordinated state (cstate) updated as the set of recruited tlogs change through recovery.
-ACTOR Future<Void> trackTlogRecovery(Recruiter recruiter,
-                                     Reference<ClusterRecoveryData> self,
+ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Reference<AsyncVar<Reference<ILogSystem>>> oldLogSystems,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
-	state EncryptionAtRestMode encryptionAtRestMode = recruiter.getEncryptionAtRest(self->configuration);
+	state EncryptionAtRestMode encryptionAtRestMode = Recruiter::getEncryptionAtRest(self->configuration);
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
@@ -997,8 +996,7 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
-ACTOR Future<Void> recoverFrom(Recruiter recruiter,
-                               Reference<ClusterRecoveryData> self,
+ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
                                Reference<ILogSystem> oldLogSystem,
                                std::vector<StorageServerInterface>* seedServers,
                                std::vector<Standalone<CommitTransactionRef>>* initialConfChanges,
@@ -1032,7 +1030,7 @@ ACTOR Future<Void> recoverFrom(Recruiter recruiter,
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
-	    recruiter.recruitEverything(self, seedServers, oldLogSystem);
+	    Recruiter::recruitEverything(self, seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
@@ -1073,7 +1071,7 @@ ACTOR Future<Void> recoverFrom(Recruiter recruiter,
 
 				if (self->configuration != oldConf) { // confChange does not trigger when including servers
 					self->dcId_locality = originalLocalityMap;
-					recruitments = recruiter.recruitEverything(self, seedServers, oldLogSystem);
+					recruitments = Recruiter::recruitEverything(self, seedServers, oldLogSystem);
 				}
 			}
 		}
@@ -1180,7 +1178,6 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 
 	self->recoveryState = RecoveryState::RECRUITING;
 
-	state Recruiter recruiter;
 	state std::vector<StorageServerInterface> seedServers;
 	state std::vector<Standalone<CommitTransactionRef>> initialConfChanges;
 	state Future<Void> logChanges;
@@ -1201,10 +1198,9 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 		self->registrationTrigger.trigger();
 
 		choose {
-			when(wait(
-			    oldLogSystem
-			        ? recoverFrom(recruiter, self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion)
-			        : Never())) {
+			when(wait(oldLogSystem
+			              ? recoverFrom(self, oldLogSystem, &seedServers, &initialConfChanges, poppedTxsVersion)
+			              : Never())) {
 				reg.cancel();
 				break;
 			}
@@ -1376,7 +1372,7 @@ ACTOR Future<Void> clusterRecoveryCore(Reference<ClusterRecoveryData> self) {
 	//     we made to the new Tlogs (self->recoveryTransactionVersion), and only our own semi-commits can come between
 	//     our first commit and the next new TLogs
 
-	self->addActor.send(trackTlogRecovery(recruiter, self, oldLogSystems, minRecoveryDuration));
+	self->addActor.send(trackTlogRecovery(self, oldLogSystems, minRecoveryDuration));
 	debug_advanceMaxCommittedVersion(UID(), self->recoveryTransactionVersion);
 	wait(self->cstateUpdated.getFuture());
 	debug_advanceMinCommittedVersion(UID(), self->recoveryTransactionVersion);

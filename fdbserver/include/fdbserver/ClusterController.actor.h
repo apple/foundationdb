@@ -246,21 +246,6 @@ public:
 		        (!checkStable || worker.reboots < 2));
 	}
 
-	bool isLongLivedStateless(Optional<Key> const& processId) const {
-		return (db.serverInfo->get().distributor.present() &&
-		        db.serverInfo->get().distributor.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().ratekeeper.present() &&
-		        db.serverInfo->get().ratekeeper.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobManager.present() &&
-		        db.serverInfo->get().blobManager.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().blobMigrator.present() &&
-		        db.serverInfo->get().blobMigrator.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().client.encryptKeyProxy.present() &&
-		        db.serverInfo->get().client.encryptKeyProxy.get().locality.processId() == processId) ||
-		       (db.serverInfo->get().consistencyScan.present() &&
-		        db.serverInfo->get().consistencyScan.get().locality.processId() == processId);
-	}
-
 	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
 		std::set<Optional<Standalone<StringRef>>> excludedMachines(req.excludeMachines.begin(),
 		                                                           req.excludeMachines.end());
@@ -320,1317 +305,6 @@ public:
 		throw no_more_servers();
 	}
 
-	std::vector<WorkerDetails> getWorkersForSeedServers(
-	    DatabaseConfiguration const& conf,
-	    Reference<IReplicationPolicy> const& policy,
-	    Optional<Optional<Standalone<StringRef>>> const& dcId = Optional<Optional<Standalone<StringRef>>>()) {
-		std::map<ProcessClass::Fitness, std::vector<WorkerDetails>> fitness_workers;
-		std::vector<WorkerDetails> results;
-		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
-		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
-		bool bCompleted = false;
-
-		for (auto& it : id_worker) {
-			auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-			    !isExcludedDegradedServer(it.second.details.interf.addresses()) &&
-			    fitness != ProcessClass::NeverAssign &&
-			    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
-				fitness_workers[fitness].push_back(it.second.details);
-			}
-		}
-
-		for (auto& it : fitness_workers) {
-			for (auto& worker : it.second) {
-				logServerMap->add(worker.interf.locality, &worker);
-			}
-
-			std::vector<LocalityEntry> bestSet;
-			if (logServerSet->selectReplicas(policy, bestSet)) {
-				results.reserve(bestSet.size());
-				for (auto& entry : bestSet) {
-					auto object = logServerMap->getObject(entry);
-					results.push_back(*object);
-				}
-				bCompleted = true;
-				break;
-			}
-		}
-
-		logServerSet->clear();
-		logServerSet.clear();
-
-		if (!bCompleted) {
-			throw no_more_servers();
-		}
-
-		return results;
-	}
-
-	// Adds workers to the result such that each field is used in the result set as evenly as possible,
-	// with a secondary criteria of minimizing the reuse of zoneIds
-	// only add workers which have a field which is already in the result set
-	void addWorkersByLowestField(StringRef field,
-	                             int desired,
-	                             const std::vector<WorkerDetails>& workers,
-	                             std::set<WorkerDetails>& resultSet) {
-		typedef Optional<Standalone<StringRef>> Field;
-		typedef Optional<Standalone<StringRef>> Zone;
-		typedef std::tuple<int, bool, Field> FieldCount;
-		typedef std::pair<int, Zone> ZoneCount;
-
-		std::priority_queue<FieldCount, std::vector<FieldCount>, std::greater<FieldCount>> fieldQueue;
-		std::map<Field, std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>>>
-		    field_zoneQueue;
-
-		std::map<Field, std::pair<int, bool>> field_count;
-		std::map<Zone, std::pair<int, Field>> zone_count;
-		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
-
-		// Count the amount of fields and zones already in the result set
-		for (auto& worker : resultSet) {
-			auto thisField = worker.interf.locality.get(field);
-			auto thisZone = worker.interf.locality.zoneId();
-			auto thisDc = worker.interf.locality.dcId();
-
-			auto& fitness = field_count[thisField];
-			fitness.first++;
-			fitness.second = thisDc == clusterControllerDcId;
-
-			auto& zc = zone_count[thisZone];
-			zc.first++;
-			zc.second = thisField;
-		}
-
-		for (auto& worker : workers) {
-			auto thisField = worker.interf.locality.get(field);
-			auto thisZone = worker.interf.locality.zoneId();
-
-			if (field_count.count(thisField)) {
-				zone_workers[thisZone].push_back(worker);
-				zone_count[thisZone].second = thisField;
-			}
-		}
-
-		// try to avoid fields in the cluster controller datacenter if everything else is equal
-		for (auto& it : field_count) {
-			fieldQueue.emplace(it.second.first, it.second.second, it.first);
-		}
-
-		for (auto& it : zone_count) {
-			field_zoneQueue[it.second.second].emplace(it.second.first, it.first);
-		}
-
-		// start with the least used field, and try to find a worker with that field
-		while (fieldQueue.size()) {
-			auto lowestField = fieldQueue.top();
-			auto& lowestZoneQueue = field_zoneQueue[std::get<2>(lowestField)];
-			bool added = false;
-			// start with the least used zoneId, and try and find a worker with that zone
-			while (lowestZoneQueue.size() && !added) {
-				auto lowestZone = lowestZoneQueue.top();
-				auto& zoneWorkers = zone_workers[lowestZone.second];
-
-				while (zoneWorkers.size() && !added) {
-					if (!resultSet.count(zoneWorkers.back())) {
-						resultSet.insert(zoneWorkers.back());
-						if (resultSet.size() == desired) {
-							return;
-						}
-						added = true;
-					}
-					zoneWorkers.pop_back();
-				}
-				lowestZoneQueue.pop();
-				if (added && zoneWorkers.size()) {
-					++lowestZone.first;
-					lowestZoneQueue.push(lowestZone);
-				}
-			}
-			fieldQueue.pop();
-			if (added) {
-				++std::get<0>(lowestField);
-				fieldQueue.push(lowestField);
-			}
-		}
-	}
-
-	// Adds workers to the result which minimize the reuse of zoneIds
-	void addWorkersByLowestZone(int desired,
-	                            const std::vector<WorkerDetails>& workers,
-	                            std::set<WorkerDetails>& resultSet) {
-		typedef Optional<Standalone<StringRef>> Zone;
-		typedef std::pair<int, Zone> ZoneCount;
-
-		std::map<Zone, int> zone_count;
-		std::map<Zone, std::vector<WorkerDetails>> zone_workers;
-		std::priority_queue<ZoneCount, std::vector<ZoneCount>, std::greater<ZoneCount>> zoneQueue;
-
-		for (const auto& worker : workers) {
-			auto thisZone = worker.interf.locality.zoneId();
-			zone_count[thisZone] = 0;
-			zone_workers[thisZone].push_back(worker);
-		}
-
-		for (auto& worker : resultSet) {
-			auto thisZone = worker.interf.locality.zoneId();
-			zone_count[thisZone]++;
-		}
-
-		for (auto& it : zone_count) {
-			zoneQueue.emplace(it.second, it.first);
-		}
-
-		while (zoneQueue.size()) {
-			auto lowestZone = zoneQueue.top();
-			auto& zoneWorkers = zone_workers[lowestZone.second];
-
-			bool added = false;
-			while (zoneWorkers.size() && !added) {
-				if (!resultSet.count(zoneWorkers.back())) {
-					resultSet.insert(zoneWorkers.back());
-					if (resultSet.size() == desired) {
-						return;
-					}
-					added = true;
-				}
-				zoneWorkers.pop_back();
-			}
-			zoneQueue.pop();
-			if (added && zoneWorkers.size()) {
-				++lowestZone.first;
-				zoneQueue.push(lowestZone);
-			}
-		}
-	}
-
-	// Log the reason why the worker is considered as unavailable.
-	void logWorkerUnavailable(const Severity severity,
-	                          const UID& id,
-	                          const std::string& method,
-	                          const std::string& reason,
-	                          const WorkerDetails& details,
-	                          const ProcessClass::Fitness& fitness,
-	                          const std::set<Optional<Key>>& dcIds) {
-		// Construct the list of DCs where the TLog recruitment is happening. This is mainly for logging purpose.
-		std::string dcList;
-		for (const auto& dc : dcIds) {
-			if (!dcList.empty()) {
-				dcList += ',';
-			}
-			dcList += printable(dc);
-		}
-		// Logging every possible options is a lot for every recruitment; logging all of the options with GoodFit or
-		// BestFit may work because there should only be like 30 tlog class processes. Plus, the recruitment happens
-		// only during initial database creation and recovery. So these trace events should be sparse.
-		if (fitness == ProcessClass::GoodFit || fitness == ProcessClass::BestFit ||
-		    fitness == ProcessClass::NeverAssign) {
-			TraceEvent(severity, "GetTLogTeamWorkerUnavailable", id)
-			    .detail("TLogRecruitMethod", method)
-			    .detail("Reason", reason)
-			    .detail("WorkerID", details.interf.id())
-			    .detail("WorkerDC", details.interf.locality.dcId())
-			    .detail("Address", details.interf.addresses().toString())
-			    .detail("Fitness", fitness)
-			    .detail("RecruitmentDcIds", dcList);
-		}
-	}
-
-	// A TLog recruitment method specialized for three_data_hall and three_datacenter configurations
-	// It attempts to evenly recruit processes from across data_halls or datacenters
-	std::vector<WorkerDetails> getWorkersForTlogsComplex(DatabaseConfiguration const& conf,
-	                                                     int32_t desired,
-	                                                     std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                                     StringRef field,
-	                                                     int minFields,
-	                                                     int minPerField,
-	                                                     bool allowDegraded,
-	                                                     bool checkStable,
-	                                                     const std::set<Optional<Key>>& dcIds,
-	                                                     const std::vector<UID>& exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool>, std::vector<WorkerDetails>> fitness_workers;
-
-		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
-			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
-
-			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			    exclusionWorkerIds.end()) {
-				logWorkerUnavailable(SevInfo, id, "complex", "Worker is excluded", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!workerAvailable(worker_info, checkStable)) {
-				logWorkerUnavailable(SevInfo, id, "complex", "Worker is not available", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "complex", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "complex",
-				                     "Worker server is excluded from the cluster",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "complex",
-				                     "Worker server is excluded from the cluster due to degradation",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (fitness == ProcessClass::NeverAssign) {
-				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
-				logWorkerUnavailable(
-				    SevDebug, id, "complex", "Worker is not in the target DC", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!allowDegraded && worker_details.degraded) {
-				logWorkerUnavailable(
-				    SevInfo, id, "complex", "Worker is degraded and not allowed", worker_details, fitness, dcIds);
-				continue;
-			}
-
-			fitness_workers[std::make_tuple(
-			                    fitness, id_used[worker_process_id], isLongLivedStateless(worker_process_id))]
-			    .push_back(worker_details);
-		}
-
-		auto requiredFitness = ProcessClass::NeverAssign;
-		int requiredUsed = 1e6;
-
-		typedef Optional<Standalone<StringRef>> Field;
-		typedef Optional<Standalone<StringRef>> Zone;
-		std::map<Field, std::pair<std::set<Zone>, std::vector<WorkerDetails>>> field_zones;
-		std::set<Field> fieldsWithMin;
-		std::map<Field, int> field_count;
-		std::map<Field, std::tuple<ProcessClass::Fitness, int, bool>> field_fitness;
-
-		// Determine the best required workers by finding the workers with enough unique zoneIds per field
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-			deterministicRandom()->randomShuffle(workerIter->second);
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-
-			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-				break;
-			}
-
-			for (auto& worker : workerIter->second) {
-				auto thisField = worker.interf.locality.get(field);
-				auto& zones = field_zones[thisField];
-				if (zones.first.insert(worker.interf.locality.zoneId()).second) {
-					zones.second.push_back(worker);
-					if (zones.first.size() == minPerField) {
-						fieldsWithMin.insert(thisField);
-					}
-				}
-				field_count[thisField]++;
-				field_fitness.insert(
-				    { thisField,
-				      std::make_tuple(fitness, used, worker.interf.locality.dcId() == clusterControllerDcId) });
-			}
-			if (fieldsWithMin.size() >= minFields) {
-				requiredFitness = fitness;
-				requiredUsed = used;
-			}
-		}
-
-		if (fieldsWithMin.size() < minFields) {
-			throw no_more_servers();
-		}
-
-		std::set<Field> chosenFields;
-		// If we cannot use all of the fields, use the fields which allow the best workers to be chosen
-		if (fieldsWithMin.size() * minPerField > desired) {
-			std::vector<std::tuple<ProcessClass::Fitness, int, bool, int, Field>> orderedFields;
-			for (auto& it : fieldsWithMin) {
-				auto& fitness = field_fitness[it];
-				orderedFields.emplace_back(
-				    std::get<0>(fitness), std::get<1>(fitness), std::get<2>(fitness), field_count[it], it);
-			}
-			std::sort(orderedFields.begin(), orderedFields.end());
-			int totalFields = desired / minPerField;
-			int maxCount = 0;
-			for (int i = 0; i < orderedFields.size() && chosenFields.size() < totalFields; i++) {
-				if (chosenFields.size() == totalFields - 1 && maxCount + std::get<3>(orderedFields[i]) < desired) {
-					for (int j = i + 1; j < orderedFields.size(); j++) {
-						if (maxCount + std::get<3>(orderedFields[j]) >= desired) {
-							chosenFields.insert(std::get<4>(orderedFields[j]));
-							break;
-						}
-					}
-				}
-				if (chosenFields.size() < totalFields) {
-					maxCount += std::get<3>(orderedFields[i]);
-					chosenFields.insert(std::get<4>(orderedFields[i]));
-				}
-			}
-		} else {
-			chosenFields = fieldsWithMin;
-		}
-
-		// Create a result set with fulfills the minField and minPerField requirements before adding more workers
-		std::set<WorkerDetails> resultSet;
-		for (auto& it : chosenFields) {
-			auto& w = field_zones[it].second;
-			for (int i = 0; i < minPerField; i++) {
-				resultSet.insert(w[i]);
-			}
-		}
-
-		// Continue adding workers to the result set until we reach the desired number of workers
-		for (auto workerIter = fitness_workers.begin();
-		     workerIter != fitness_workers.end() && resultSet.size() < desired;
-		     ++workerIter) {
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-
-			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-				break;
-			}
-			if (workerIter->second.size() + resultSet.size() <= desired) {
-				for (auto& worker : workerIter->second) {
-					if (chosenFields.count(worker.interf.locality.get(field))) {
-						resultSet.insert(worker);
-					}
-				}
-			} else {
-				addWorkersByLowestField(field, desired, workerIter->second, resultSet);
-			}
-		}
-
-		for (auto& result : resultSet) {
-			id_used[result.interf.locality.processId()]++;
-		}
-
-		return std::vector<WorkerDetails>(resultSet.begin(), resultSet.end());
-	}
-
-	// Attempt to recruit TLogs without degraded processes and see if it improves the configuration
-	std::vector<WorkerDetails> getWorkersForTlogsComplex(DatabaseConfiguration const& conf,
-	                                                     int32_t desired,
-	                                                     std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                                     StringRef field,
-	                                                     int minFields,
-	                                                     int minPerField,
-	                                                     bool checkStable,
-	                                                     const std::set<Optional<Key>>& dcIds,
-	                                                     const std::vector<UID>& exclusionWorkerIds) {
-		desired = std::max(desired, minFields * minPerField);
-		std::map<Optional<Standalone<StringRef>>, int> withDegradedUsed = id_used;
-		auto withDegraded = getWorkersForTlogsComplex(conf,
-		                                              desired,
-		                                              withDegradedUsed,
-		                                              field,
-		                                              minFields,
-		                                              minPerField,
-		                                              true,
-		                                              checkStable,
-		                                              dcIds,
-		                                              exclusionWorkerIds);
-		RoleFitness withDegradedFitness(withDegraded, ProcessClass::TLog, withDegradedUsed);
-		ASSERT(withDegraded.size() <= desired);
-
-		bool usedDegraded = false;
-		for (auto& it : withDegraded) {
-			if (it.degraded) {
-				usedDegraded = true;
-				break;
-			}
-		}
-
-		if (!usedDegraded) {
-			id_used = withDegradedUsed;
-			return withDegraded;
-		}
-
-		try {
-			std::map<Optional<Standalone<StringRef>>, int> withoutDegradedUsed = id_used;
-			auto withoutDegraded = getWorkersForTlogsComplex(conf,
-			                                                 desired,
-			                                                 withoutDegradedUsed,
-			                                                 field,
-			                                                 minFields,
-			                                                 minPerField,
-			                                                 false,
-			                                                 checkStable,
-			                                                 dcIds,
-			                                                 exclusionWorkerIds);
-			RoleFitness withoutDegradedFitness(withoutDegraded, ProcessClass::TLog, withoutDegradedUsed);
-			ASSERT(withoutDegraded.size() <= desired);
-
-			if (withDegradedFitness < withoutDegradedFitness) {
-				id_used = withDegradedUsed;
-				return withDegraded;
-			}
-			id_used = withoutDegradedUsed;
-			return withoutDegraded;
-		} catch (Error& e) {
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-			id_used = withDegradedUsed;
-			return withDegraded;
-		}
-	}
-
-	// A TLog recruitment method specialized for single, double, and triple configurations
-	// It recruits processes from with unique zoneIds until it reaches the desired amount
-	std::vector<WorkerDetails> getWorkersForTlogsSimple(DatabaseConfiguration const& conf,
-	                                                    int32_t required,
-	                                                    int32_t desired,
-	                                                    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                                    bool checkStable,
-	                                                    const std::set<Optional<Key>>& dcIds,
-	                                                    const std::vector<UID>& exclusionWorkerIds) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
-
-		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
-			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
-
-			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			    exclusionWorkerIds.end()) {
-				logWorkerUnavailable(SevInfo, id, "simple", "Worker is excluded", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!workerAvailable(worker_info, checkStable)) {
-				logWorkerUnavailable(SevInfo, id, "simple", "Worker is not available", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "simple", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "simple",
-				                     "Worker server is excluded from the cluster",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "simple",
-				                     "Worker server is excluded from the cluster due to degradation",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (fitness == ProcessClass::NeverAssign) {
-				logWorkerUnavailable(
-				    SevDebug, id, "simple", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
-				logWorkerUnavailable(
-				    SevDebug, id, "simple", "Worker is not in the target DC", worker_details, fitness, dcIds);
-				continue;
-			}
-
-			// This worker is a candidate for TLog recruitment.
-			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
-			// Prefer recruiting a TransactionClass non-degraded process over a LogClass degraded process
-			if (worker_details.degraded) {
-				fitness = std::max(fitness, ProcessClass::GoodFit);
-			}
-
-			fitness_workers[std::make_tuple(fitness,
-			                                id_used[worker_process_id],
-			                                worker_details.degraded,
-			                                isLongLivedStateless(worker_process_id),
-			                                inCCDC)]
-			    .push_back(worker_details);
-		}
-
-		auto requiredFitness = ProcessClass::BestFit;
-		int requiredUsed = 0;
-
-		std::set<Optional<Standalone<StringRef>>> zones;
-		std::set<WorkerDetails> resultSet;
-
-		// Determine the best required workers by finding the workers with enough unique zoneIds
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-			deterministicRandom()->randomShuffle(workerIter->second);
-			for (auto& worker : workerIter->second) {
-				if (!zones.count(worker.interf.locality.zoneId())) {
-					zones.insert(worker.interf.locality.zoneId());
-					resultSet.insert(worker);
-					if (resultSet.size() == required) {
-						break;
-					}
-				}
-			}
-			if (resultSet.size() == required) {
-				requiredFitness = fitness;
-				requiredUsed = used;
-				break;
-			}
-		}
-
-		if (resultSet.size() < required) {
-			throw no_more_servers();
-		}
-
-		// Continue adding workers to the result set until we reach the desired number of workers
-		for (auto workerIter = fitness_workers.begin();
-		     workerIter != fitness_workers.end() && resultSet.size() < desired;
-		     ++workerIter) {
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-				break;
-			}
-			if (workerIter->second.size() + resultSet.size() <= desired) {
-				for (auto& worker : workerIter->second) {
-					resultSet.insert(worker);
-				}
-			} else {
-				addWorkersByLowestZone(desired, workerIter->second, resultSet);
-			}
-		}
-
-		ASSERT(resultSet.size() >= required && resultSet.size() <= desired);
-
-		for (auto& result : resultSet) {
-			id_used[result.interf.locality.processId()]++;
-		}
-
-		return std::vector<WorkerDetails>(resultSet.begin(), resultSet.end());
-	}
-
-	// A backup method for TLog recruitment that is used for custom policies, but does a worse job
-	// selecting the best workers.
-	//   conf:        the database configuration.
-	//   required:    the required number of TLog workers to select.
-	//   desired:     the desired number of TLog workers to select.
-	//   policy:      the TLog replication policy the selection needs to satisfy.
-	//   id_used:     keep track of process IDs of selected workers.
-	//   checkStable: when true, only select from workers that are considered as stable worker (not rebooted more than
-	//                twice recently).
-	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
-	//                data centers:
-	//   exclusionWorkerIds: the workers to be excluded from the selection.
-	std::vector<WorkerDetails> getWorkersForTlogsBackup(
-	    DatabaseConfiguration const& conf,
-	    int32_t required,
-	    int32_t desired,
-	    Reference<IReplicationPolicy> const& policy,
-	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    bool checkStable = false,
-	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
-	    const std::vector<UID>& exclusionWorkerIds = {}) {
-		std::map<std::tuple<ProcessClass::Fitness, int, bool, bool>, std::vector<WorkerDetails>> fitness_workers;
-		std::vector<WorkerDetails> results;
-		Reference<LocalitySet> logServerSet = Reference<LocalitySet>(new LocalityMap<WorkerDetails>());
-		LocalityMap<WorkerDetails>* logServerMap = (LocalityMap<WorkerDetails>*)logServerSet.getPtr();
-		bool bCompleted = false;
-		desired = std::max(required, desired);
-
-		// Go through all the workers to list all the workers that can be recruited.
-		for (const auto& [worker_process_id, worker_info] : id_worker) {
-			const auto& worker_details = worker_info.details;
-			auto fitness = worker_details.processClass.machineClassFitness(ProcessClass::TLog);
-
-			if (std::find(exclusionWorkerIds.begin(), exclusionWorkerIds.end(), worker_details.interf.id()) !=
-			    exclusionWorkerIds.end()) {
-				logWorkerUnavailable(SevInfo, id, "deprecated", "Worker is excluded", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!workerAvailable(worker_info, checkStable)) {
-				logWorkerUnavailable(
-				    SevInfo, id, "deprecated", "Worker is not available", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!worker_details.recoveredDiskFiles) {
-				logWorkerUnavailable(
-				    SevInfo, id, "deprecated", "Worker disk file recovery unfinished", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (conf.isExcludedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "deprecated",
-				                     "Worker server is excluded from the cluster",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (isExcludedDegradedServer(worker_details.interf.addresses())) {
-				logWorkerUnavailable(SevInfo,
-				                     id,
-				                     "deprecated",
-				                     "Worker server is excluded from the cluster due to degradation",
-				                     worker_details,
-				                     fitness,
-				                     dcIds);
-				continue;
-			}
-			if (fitness == ProcessClass::NeverAssign) {
-				logWorkerUnavailable(
-				    SevDebug, id, "deprecated", "Worker's fitness is NeverAssign", worker_details, fitness, dcIds);
-				continue;
-			}
-			if (!dcIds.empty() && dcIds.count(worker_details.interf.locality.dcId()) == 0) {
-				logWorkerUnavailable(
-				    SevDebug, id, "deprecated", "Worker is not in the target DC", worker_details, fitness, dcIds);
-				continue;
-			}
-
-			// This worker is a candidate for TLog recruitment.
-			bool inCCDC = worker_details.interf.locality.dcId() == clusterControllerDcId;
-			// Prefer recruiting a TransactionClass non-degraded process over a LogClass degraded process
-			if (worker_details.degraded) {
-				fitness = std::max(fitness, ProcessClass::GoodFit);
-			}
-
-			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded, inCCDC)]
-			    .push_back(worker_details);
-		}
-
-		auto requiredFitness = ProcessClass::BestFit;
-		int requiredUsed = 0;
-		bool requiredDegraded = false;
-		bool requiredInCCDC = false;
-
-		// Determine the minimum fitness and used necessary to fulfill the policy
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-			if (fitness > requiredFitness || used > requiredUsed) {
-				if (logServerSet->size() >= required && logServerSet->validate(policy)) {
-					bCompleted = true;
-					break;
-				}
-				requiredFitness = fitness;
-				requiredUsed = used;
-			}
-
-			if (std::get<2>(workerIter->first)) {
-				requiredDegraded = true;
-			}
-			if (std::get<3>(workerIter->first)) {
-				requiredInCCDC = true;
-			}
-			for (auto& worker : workerIter->second) {
-				logServerMap->add(worker.interf.locality, &worker);
-			}
-		}
-
-		if (!bCompleted && !(logServerSet->size() >= required && logServerSet->validate(policy))) {
-			std::vector<LocalityData> tLocalities;
-			for (auto& object : logServerMap->getObjects()) {
-				tLocalities.push_back(object->interf.locality);
-			}
-
-			logServerSet->clear();
-			logServerSet.clear();
-			throw no_more_servers();
-		}
-
-		// If we have less than the desired amount, return all of the processes we have
-		if (logServerSet->size() <= desired) {
-			for (auto& object : logServerMap->getObjects()) {
-				results.push_back(*object);
-			}
-			for (auto& result : results) {
-				id_used[result.interf.locality.processId()]++;
-			}
-			return results;
-		}
-
-		// If we have added any degraded processes, try and remove them to see if we can still
-		// have the desired amount of processes
-		if (requiredDegraded) {
-			logServerMap->clear();
-			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-				auto fitness = std::get<0>(workerIter->first);
-				auto used = std::get<1>(workerIter->first);
-				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-					break;
-				}
-				auto addingDegraded = std::get<2>(workerIter->first);
-				if (addingDegraded) {
-					continue;
-				}
-				for (auto& worker : workerIter->second) {
-					logServerMap->add(worker.interf.locality, &worker);
-				}
-			}
-			if (logServerSet->size() >= desired && logServerSet->validate(policy)) {
-				requiredDegraded = false;
-			}
-		}
-
-		// If we have added any processes in the CC DC, try and remove them to see if we can still
-		// have the desired amount of processes
-		if (requiredInCCDC) {
-			logServerMap->clear();
-			for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-				auto fitness = std::get<0>(workerIter->first);
-				auto used = std::get<1>(workerIter->first);
-				if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-					break;
-				}
-				auto addingDegraded = std::get<2>(workerIter->first);
-				auto inCCDC = std::get<3>(workerIter->first);
-				if (inCCDC || (!requiredDegraded && addingDegraded)) {
-					continue;
-				}
-				for (auto& worker : workerIter->second) {
-					logServerMap->add(worker.interf.locality, &worker);
-				}
-			}
-			if (logServerSet->size() >= desired && logServerSet->validate(policy)) {
-				requiredInCCDC = false;
-			}
-		}
-
-		logServerMap->clear();
-		for (auto workerIter = fitness_workers.begin(); workerIter != fitness_workers.end(); ++workerIter) {
-			auto fitness = std::get<0>(workerIter->first);
-			auto used = std::get<1>(workerIter->first);
-			if (fitness > requiredFitness || (fitness == requiredFitness && used > requiredUsed)) {
-				break;
-			}
-			auto addingDegraded = std::get<2>(workerIter->first);
-			auto inCCDC = std::get<3>(workerIter->first);
-			if ((!requiredInCCDC && inCCDC) || (!requiredDegraded && addingDegraded)) {
-				continue;
-			}
-			for (auto& worker : workerIter->second) {
-				logServerMap->add(worker.interf.locality, &worker);
-			}
-		}
-
-		if (logServerSet->size() == desired) {
-			for (auto& object : logServerMap->getObjects()) {
-				results.push_back(*object);
-			}
-			for (auto& result : results) {
-				id_used[result.interf.locality.processId()]++;
-			}
-			return results;
-		}
-
-		std::vector<LocalityEntry> bestSet;
-		std::vector<LocalityData> tLocalities;
-
-		// We have more than the desired number of processes, so use the policy engine to
-		// pick a diverse subset of them
-		bCompleted = findBestPolicySet(bestSet,
-		                               logServerSet,
-		                               policy,
-		                               desired,
-		                               SERVER_KNOBS->POLICY_RATING_TESTS,
-		                               SERVER_KNOBS->POLICY_GENERATIONS);
-		ASSERT(bCompleted);
-		results.reserve(results.size() + bestSet.size());
-		for (auto& entry : bestSet) {
-			auto object = logServerMap->getObject(entry);
-			ASSERT(object);
-			results.push_back(*object);
-			tLocalities.push_back(object->interf.locality);
-		}
-		for (auto& result : results) {
-			id_used[result.interf.locality.processId()]++;
-		}
-		TraceEvent("GetTLogTeamDone")
-		    .detail("Policy", policy->info())
-		    .detail("Results", results.size())
-		    .detail("Processes", logServerSet->size())
-		    .detail("Workers", id_worker.size())
-		    .detail("Required", required)
-		    .detail("Desired", desired)
-		    .detail("Fitness", requiredFitness)
-		    .detail("Used", requiredUsed)
-		    .detail("AddingDegraded", requiredDegraded)
-		    .detail("InCCDC", requiredInCCDC)
-		    .detail("BestCount", bestSet.size())
-		    .detail("BestZones", ::describeZones(tLocalities))
-		    .detail("BestDataHalls", ::describeDataHalls(tLocalities));
-		return results;
-	}
-
-	// Selects the best method for TLog recruitment based on the specified policy
-	std::vector<WorkerDetails> getWorkersForTlogs(DatabaseConfiguration const& conf,
-	                                              int32_t required,
-	                                              int32_t desired,
-	                                              Reference<IReplicationPolicy> const& policy,
-	                                              std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                              bool checkStable = false,
-	                                              const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
-	                                              const std::vector<UID>& exclusionWorkerIds = {}) {
-		desired = std::max(required, desired);
-		bool useSimple = false;
-		if (policy->name() == "Across") {
-			PolicyAcross* pa1 = (PolicyAcross*)policy.getPtr();
-			Reference<IReplicationPolicy> embedded = pa1->embeddedPolicy();
-			if (embedded->name() == "Across") {
-				PolicyAcross* pa2 = (PolicyAcross*)embedded.getPtr();
-				if (pa2->attributeKey() == "zoneid" && pa2->embeddedPolicyName() == "One") {
-					std::map<Optional<Standalone<StringRef>>, int> testUsed = id_used;
-
-					auto workers = getWorkersForTlogsComplex(conf,
-					                                         desired,
-					                                         id_used,
-					                                         pa1->attributeKey(),
-					                                         pa1->getCount(),
-					                                         pa2->getCount(),
-					                                         checkStable,
-					                                         dcIds,
-					                                         exclusionWorkerIds);
-
-					if (g_network->isSimulated()) {
-						try {
-							auto testWorkers = getWorkersForTlogsBackup(
-							    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-							RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-							RoleFitness fitness(workers, ProcessClass::TLog, id_used);
-
-							std::map<Optional<Standalone<StringRef>>, int> field_count;
-							std::set<Optional<Standalone<StringRef>>> zones;
-							for (auto& worker : testWorkers) {
-								if (!zones.count(worker.interf.locality.zoneId())) {
-									field_count[worker.interf.locality.get(pa1->attributeKey())]++;
-									zones.insert(worker.interf.locality.zoneId());
-								}
-							}
-							// backup recruitment is not required to use degraded processes that have better fitness
-							// so we cannot compare degraded between the two methods
-							testFitness.degraded = fitness.degraded;
-
-							int minField = 100;
-
-							for (auto& f : field_count) {
-								minField = std::min(minField, f.second);
-							}
-
-							if (fitness > testFitness && minField > 1) {
-								for (auto& w : testWorkers) {
-									TraceEvent("TestTLogs").detail("Interf", w.interf.address());
-								}
-								for (auto& w : workers) {
-									TraceEvent("RealTLogs").detail("Interf", w.interf.address());
-								}
-								TraceEvent("FitnessCompare")
-								    .detail("TestF", testFitness.toString())
-								    .detail("RealF", fitness.toString());
-								ASSERT(false);
-							}
-						} catch (Error& e) {
-							ASSERT(false); // Simulation only validation should not throw errors
-						}
-					}
-
-					return workers;
-				}
-			} else if (pa1->attributeKey() == "zoneid" && embedded->name() == "One") {
-				ASSERT(pa1->getCount() == required);
-				useSimple = true;
-			}
-		} else if (policy->name() == "One") {
-			useSimple = true;
-		}
-		if (useSimple) {
-			std::map<Optional<Standalone<StringRef>>, int> testUsed = id_used;
-
-			auto workers =
-			    getWorkersForTlogsSimple(conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
-
-			if (g_network->isSimulated()) {
-				try {
-					auto testWorkers = getWorkersForTlogsBackup(
-					    conf, required, desired, policy, testUsed, checkStable, dcIds, exclusionWorkerIds);
-					RoleFitness testFitness(testWorkers, ProcessClass::TLog, testUsed);
-					RoleFitness fitness(workers, ProcessClass::TLog, id_used);
-					// backup recruitment is not required to use degraded processes that have better fitness
-					// so we cannot compare degraded between the two methods
-					testFitness.degraded = fitness.degraded;
-
-					if (fitness > testFitness) {
-						for (auto& w : testWorkers) {
-							TraceEvent("TestTLogs").detail("Interf", w.interf.address());
-						}
-						for (auto& w : workers) {
-							TraceEvent("RealTLogs").detail("Interf", w.interf.address());
-						}
-						TraceEvent("FitnessCompare")
-						    .detail("TestF", testFitness.toString())
-						    .detail("RealF", fitness.toString());
-						ASSERT(false);
-					}
-				} catch (Error& e) {
-					ASSERT(false); // Simulation only validation should not throw errors
-				}
-			}
-			return workers;
-		}
-		TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "PolicyEngineNotOptimized");
-		return getWorkersForTlogsBackup(
-		    conf, required, desired, policy, id_used, checkStable, dcIds, exclusionWorkerIds);
-	}
-
-	// FIXME: This logic will fallback unnecessarily when usable dcs > 1 because it does not check all combinations of
-	// potential satellite locations
-	std::vector<WorkerDetails> getWorkersForSatelliteLogs(const DatabaseConfiguration& conf,
-	                                                      const RegionInfo& region,
-	                                                      const RegionInfo& remoteRegion,
-	                                                      std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                                      bool& satelliteFallback,
-	                                                      bool checkStable = false) {
-		int startDC = 0;
-		loop {
-			if (startDC > 0 && startDC >= region.satellites.size() + 1 -
-			                                  (satelliteFallback ? region.satelliteTLogUsableDcsFallback
-			                                                     : region.satelliteTLogUsableDcs)) {
-				if (satelliteFallback || region.satelliteTLogUsableDcsFallback == 0) {
-					throw no_more_servers();
-				} else {
-					if (!goodRecruitmentTime.isReady()) {
-						throw operation_failed();
-					}
-					satelliteFallback = true;
-					startDC = 0;
-				}
-			}
-
-			try {
-				bool remoteDCUsedAsSatellite = false;
-				std::set<Optional<Key>> satelliteDCs;
-				int32_t desiredSatelliteTLogs = 0;
-				for (int s = startDC;
-				     s < std::min<int>(startDC + (satelliteFallback ? region.satelliteTLogUsableDcsFallback
-				                                                    : region.satelliteTLogUsableDcs),
-				                       region.satellites.size());
-				     s++) {
-					satelliteDCs.insert(region.satellites[s].dcId);
-					if (region.satellites[s].satelliteDesiredTLogCount == -1 || desiredSatelliteTLogs == -1) {
-						desiredSatelliteTLogs = -1;
-					} else {
-						desiredSatelliteTLogs += region.satellites[s].satelliteDesiredTLogCount;
-					}
-					if (region.satellites[s].dcId == remoteRegion.dcId) {
-						remoteDCUsedAsSatellite = true;
-					}
-				}
-				std::vector<UID> exclusionWorkerIds;
-				// FIXME: If remote DC is used as satellite then this logic only ensures that required number of remote
-				// TLogs can be recruited. It does not balance the number of desired TLogs across the satellite and
-				// remote sides.
-				if (remoteDCUsedAsSatellite) {
-					std::map<Optional<Standalone<StringRef>>, int> tmpIdUsed;
-					auto remoteLogs = getWorkersForTlogs(conf,
-					                                     conf.getRemoteTLogReplicationFactor(),
-					                                     conf.getRemoteTLogReplicationFactor(),
-					                                     conf.getRemoteTLogPolicy(),
-					                                     tmpIdUsed,
-					                                     false,
-					                                     { remoteRegion.dcId },
-					                                     {});
-					std::transform(remoteLogs.begin(),
-					               remoteLogs.end(),
-					               std::back_inserter(exclusionWorkerIds),
-					               [](const WorkerDetails& in) { return in.interf.id(); });
-				}
-				if (satelliteFallback) {
-					return getWorkersForTlogs(conf,
-					                          region.satelliteTLogReplicationFactorFallback,
-					                          desiredSatelliteTLogs > 0 ? desiredSatelliteTLogs
-					                                                    : conf.getDesiredSatelliteLogs(region.dcId) *
-					                                                          region.satelliteTLogUsableDcsFallback /
-					                                                          region.satelliteTLogUsableDcs,
-					                          region.satelliteTLogPolicyFallback,
-					                          id_used,
-					                          checkStable,
-					                          satelliteDCs,
-					                          exclusionWorkerIds);
-				} else {
-					return getWorkersForTlogs(conf,
-					                          region.satelliteTLogReplicationFactor,
-					                          desiredSatelliteTLogs > 0 ? desiredSatelliteTLogs
-					                                                    : conf.getDesiredSatelliteLogs(region.dcId),
-					                          region.satelliteTLogPolicy,
-					                          id_used,
-					                          checkStable,
-					                          satelliteDCs,
-					                          exclusionWorkerIds);
-				}
-			} catch (Error& e) {
-				if (e.code() != error_code_no_more_servers) {
-					throw;
-				}
-			}
-
-			startDC++;
-		}
-	}
-
-	ProcessClass::Fitness getBestFitnessForRoleInDatacenter(ProcessClass::ClusterRole role) {
-		ProcessClass::Fitness bestFitness = ProcessClass::NeverAssign;
-		for (const auto& it : id_worker) {
-			if (it.second.priorityInfo.isExcluded ||
-			    it.second.details.interf.locality.dcId() != clusterControllerDcId) {
-				continue;
-			}
-			bestFitness = std::min(bestFitness, it.second.details.processClass.machineClassFitness(role));
-		}
-		return bestFitness;
-	}
-
-	std::set<Optional<Standalone<StringRef>>> getDatacenters(DatabaseConfiguration const& conf,
-	                                                         bool checkStable = false) {
-		std::set<Optional<Standalone<StringRef>>> result;
-		for (auto& it : id_worker)
-			if (workerAvailable(it.second, checkStable) &&
-			    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
-			    !isExcludedDegradedServer(it.second.details.interf.addresses()))
-				result.insert(it.second.details.interf.locality.dcId());
-		return result;
-	}
-
-	RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration(
-	    RecruitRemoteFromConfigurationRequest const& req) {
-		RecruitRemoteFromConfigurationReply result;
-		std::map<Optional<Standalone<StringRef>>, int> id_used;
-
-		recruiter.updateKnownIds(this, &id_used);
-
-		if (req.dbgId.present()) {
-			TraceEvent(SevDebug, "FindRemoteWorkersForConf", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("Configuration", req.configuration.toString())
-			    .detail("Policy", req.configuration.getRemoteTLogPolicy()->name());
-		}
-
-		std::set<Optional<Key>> remoteDC;
-		remoteDC.insert(req.dcId);
-
-		auto remoteLogs = getWorkersForTlogs(req.configuration,
-		                                     req.configuration.getRemoteTLogReplicationFactor(),
-		                                     req.configuration.getDesiredRemoteLogs(),
-		                                     req.configuration.getRemoteTLogPolicy(),
-		                                     id_used,
-		                                     false,
-		                                     remoteDC,
-		                                     req.exclusionWorkerIds);
-		for (int i = 0; i < remoteLogs.size(); i++) {
-			result.remoteTLogs.push_back(remoteLogs[i].interf);
-		}
-
-		auto logRouters = recruiter.getWorkersForRoleInDatacenter(
-		    this, req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
-		for (int i = 0; i < logRouters.size(); i++) {
-			result.logRouters.push_back(logRouters[i].interf);
-		}
-
-		if (!goodRemoteRecruitmentTime.isReady() &&
-		    ((RoleFitness(
-		          SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredRemoteLogs(), ProcessClass::TLog)
-		          .betterCount(RoleFitness(remoteLogs, ProcessClass::TLog, id_used))) ||
-		     (RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount, ProcessClass::LogRouter)
-		          .betterCount(RoleFitness(logRouters, ProcessClass::LogRouter, id_used))))) {
-			throw operation_failed();
-		}
-
-		if (req.dbgId.present()) {
-			TraceEvent(SevDebug, "FindRemoteWorkersForConf_ReturnResult", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("ResultRemoteLogs", result.remoteTLogs.size());
-			result.dbgId = req.dbgId;
-		}
-
-		return result;
-	}
-
-	// Given datacenter ID, returns the primary and remote regions.
-	std::pair<RegionInfo, RegionInfo> getPrimaryAndRemoteRegion(const std::vector<RegionInfo>& regions,
-	                                                            Key dcId) const {
-		RegionInfo region;
-		RegionInfo remoteRegion;
-		for (const auto& r : regions) {
-			if (r.dcId == dcId) {
-				region = r;
-			} else {
-				remoteRegion = r;
-			}
-		}
-		return std::make_pair(region, remoteRegion);
-	}
-
-	ErrorOr<RecruitFromConfigurationReply> findWorkersForConfigurationFromDC(RecruitFromConfigurationRequest const& req,
-	                                                                         Optional<Key> dcId,
-	                                                                         bool checkGoodRecruitment) {
-		RecruitFromConfigurationReply result;
-		std::map<Optional<Standalone<StringRef>>, int> id_used;
-		recruiter.updateKnownIds(this, &id_used);
-
-		ASSERT(dcId.present());
-
-		std::set<Optional<Key>> primaryDC;
-		primaryDC.insert(dcId);
-		result.dcId = dcId;
-
-		auto [region, remoteRegion] = getPrimaryAndRemoteRegion(req.configuration.regions, dcId.get());
-
-		if (req.recruitSeedServers) {
-			auto primaryStorageServers =
-			    getWorkersForSeedServers(req.configuration, req.configuration.storagePolicy, dcId);
-			for (int i = 0; i < primaryStorageServers.size(); i++) {
-				result.storageServers.push_back(primaryStorageServers[i].interf);
-			}
-		}
-
-		auto tlogs = getWorkersForTlogs(req.configuration,
-		                                req.configuration.tLogReplicationFactor,
-		                                req.configuration.getDesiredLogs(),
-		                                req.configuration.tLogPolicy,
-		                                id_used,
-		                                false,
-		                                primaryDC);
-		for (int i = 0; i < tlogs.size(); i++) {
-			result.tLogs.push_back(tlogs[i].interf);
-		}
-
-		std::vector<WorkerDetails> satelliteLogs;
-		if (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1) {
-			satelliteLogs =
-			    getWorkersForSatelliteLogs(req.configuration, region, remoteRegion, id_used, result.satelliteFallback);
-			for (int i = 0; i < satelliteLogs.size(); i++) {
-				result.satelliteTLogs.push_back(satelliteLogs[i].interf);
-			}
-		}
-
-		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-		auto first_commit_proxy = recruiter.getWorkerForRoleInDatacenter(this,
-		                                                                 dcId,
-		                                                                 ProcessClass::CommitProxy,
-		                                                                 ProcessClass::ExcludeFit,
-		                                                                 req.configuration,
-		                                                                 id_used,
-		                                                                 preferredSharing);
-		preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-		auto first_grv_proxy = recruiter.getWorkerForRoleInDatacenter(
-		    this, dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-		auto first_resolver = recruiter.getWorkerForRoleInDatacenter(
-		    this, dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, req.configuration, id_used, preferredSharing);
-		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
-
-		// If one of the first process recruitments is forced to share a process, allow all of next recruitments
-		// to also share a process.
-		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
-		first_commit_proxy.used = maxUsed;
-		first_grv_proxy.used = maxUsed;
-		first_resolver.used = maxUsed;
-
-		auto commit_proxies = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                              dcId,
-		                                                              ProcessClass::CommitProxy,
-		                                                              req.configuration.getDesiredCommitProxies(),
-		                                                              req.configuration,
-		                                                              id_used,
-		                                                              preferredSharing,
-		                                                              first_commit_proxy);
-		auto grv_proxies = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                           dcId,
-		                                                           ProcessClass::GrvProxy,
-		                                                           req.configuration.getDesiredGrvProxies(),
-		                                                           req.configuration,
-		                                                           id_used,
-		                                                           preferredSharing,
-		                                                           first_grv_proxy);
-		auto resolvers = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                         dcId,
-		                                                         ProcessClass::Resolver,
-		                                                         req.configuration.getDesiredResolvers(),
-		                                                         req.configuration,
-		                                                         id_used,
-		                                                         preferredSharing,
-		                                                         first_resolver);
-		for (int i = 0; i < commit_proxies.size(); i++)
-			result.commitProxies.push_back(commit_proxies[i].interf);
-		for (int i = 0; i < grv_proxies.size(); i++)
-			result.grvProxies.push_back(grv_proxies[i].interf);
-		for (int i = 0; i < resolvers.size(); i++)
-			result.resolvers.push_back(resolvers[i].interf);
-
-		if (req.maxOldLogRouters > 0) {
-			if (tlogs.size() == 1) {
-				result.oldLogRouters.push_back(tlogs[0].interf);
-			} else {
-				for (int i = 0; i < tlogs.size(); i++) {
-					if (tlogs[i].interf.locality.processId() != clusterControllerProcessId) {
-						result.oldLogRouters.push_back(tlogs[i].interf);
-					}
-				}
-			}
-		}
-
-		if (req.configuration.backupWorkerEnabled) {
-			const int nBackup = std::max<int>(
-			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
-			    req.maxOldLogRouters);
-			auto backupWorkers = recruiter.getWorkersForRoleInDatacenter(
-			    this, dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
-			std::transform(backupWorkers.begin(),
-			               backupWorkers.end(),
-			               std::back_inserter(result.backupWorkers),
-			               [](const WorkerDetails& w) { return w.interf; });
-		}
-
-		if (!goodRecruitmentTime.isReady() && checkGoodRecruitment &&
-		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
-		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
-		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
-		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS,
-		                  req.configuration.getDesiredSatelliteLogs(dcId),
-		                  ProcessClass::TLog)
-		          .betterCount(RoleFitness(satelliteLogs, ProcessClass::TLog, id_used))) ||
-		     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS,
-		                 req.configuration.getDesiredCommitProxies(),
-		                 ProcessClass::CommitProxy)
-		         .betterCount(RoleFitness(commit_proxies, ProcessClass::CommitProxy, id_used)) ||
-		     RoleFitness(SERVER_KNOBS->EXPECTED_GRV_PROXY_FITNESS,
-		                 req.configuration.getDesiredGrvProxies(),
-		                 ProcessClass::GrvProxy)
-		         .betterCount(RoleFitness(grv_proxies, ProcessClass::GrvProxy, id_used)) ||
-		     RoleFitness(SERVER_KNOBS->EXPECTED_RESOLVER_FITNESS,
-		                 req.configuration.getDesiredResolvers(),
-		                 ProcessClass::Resolver)
-		         .betterCount(RoleFitness(resolvers, ProcessClass::Resolver, id_used)))) {
-			return operation_failed();
-		}
-
-		return result;
-	}
-
 	// Check if txn system is recruited successfully in each region
 	void checkRegions(const std::vector<RegionInfo>& regions) {
 		if (desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 &&
@@ -1641,42 +315,44 @@ public:
 
 		try {
 			std::map<Optional<Standalone<StringRef>>, int> id_used;
-			recruiter.getWorkerForRoleInDatacenter(this,
-			                                       regions[0].dcId,
-			                                       ProcessClass::ClusterController,
-			                                       ProcessClass::ExcludeFit,
-			                                       db.config,
-			                                       id_used,
-			                                       {},
-			                                       true);
-			recruiter.getWorkerForRoleInDatacenter(
+			Recruiter::getWorkerForRoleInDatacenter(this,
+			                                        regions[0].dcId,
+			                                        ProcessClass::ClusterController,
+			                                        ProcessClass::ExcludeFit,
+			                                        db.config,
+			                                        id_used,
+			                                        {},
+			                                        true);
+			Recruiter::getWorkerForRoleInDatacenter(
 			    this, regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			std::set<Optional<Key>> primaryDC;
 			primaryDC.insert(regions[0].dcId);
-			getWorkersForTlogs(db.config,
-			                   db.config.tLogReplicationFactor,
-			                   db.config.getDesiredLogs(),
-			                   db.config.tLogPolicy,
-			                   id_used,
-			                   true,
-			                   primaryDC);
+			Recruiter::getWorkersForTlogs(this,
+			                              db.config,
+			                              db.config.tLogReplicationFactor,
+			                              db.config.getDesiredLogs(),
+			                              db.config.tLogPolicy,
+			                              id_used,
+			                              true,
+			                              primaryDC);
 			if (regions[0].satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
 				bool satelliteFallback = false;
-				getWorkersForSatelliteLogs(db.config, regions[0], regions[1], id_used, satelliteFallback, true);
+				Recruiter::getWorkersForSatelliteLogs(
+				    this, db.config, regions[0], regions[1], id_used, satelliteFallback, true);
 			}
 
-			recruiter.getWorkerForRoleInDatacenter(
+			Recruiter::getWorkerForRoleInDatacenter(
 			    this, regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-			recruiter.getWorkerForRoleInDatacenter(this,
-			                                       regions[0].dcId,
-			                                       ProcessClass::CommitProxy,
-			                                       ProcessClass::ExcludeFit,
-			                                       db.config,
-			                                       id_used,
-			                                       {},
-			                                       true);
-			recruiter.getWorkerForRoleInDatacenter(
+			Recruiter::getWorkerForRoleInDatacenter(this,
+			                                        regions[0].dcId,
+			                                        ProcessClass::CommitProxy,
+			                                        ProcessClass::ExcludeFit,
+			                                        db.config,
+			                                        id_used,
+			                                        {},
+			                                        true);
+			Recruiter::getWorkerForRoleInDatacenter(
 			    this, regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
 
 			std::vector<Optional<Key>> dcPriority;
@@ -1890,7 +566,7 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> old_id_used;
 		id_used[clusterControllerProcessId]++;
 		old_id_used[clusterControllerProcessId]++;
-		WorkerFitnessInfo mworker = recruiter.getWorkerForRoleInDatacenter(
+		WorkerFitnessInfo mworker = Recruiter::getWorkerForRoleInDatacenter(
 		    this, clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, {}, true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness(ProcessClass::Master);
 		if (db.config.isExcludedServer(mworker.worker.interf.addresses())) {
@@ -1939,13 +615,14 @@ public:
 		// Check tLog fitness
 		updateIdUsed(tlogs, old_id_used);
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog, old_id_used);
-		auto newTLogs = getWorkersForTlogs(db.config,
-		                                   db.config.tLogReplicationFactor,
-		                                   db.config.getDesiredLogs(),
-		                                   db.config.tLogPolicy,
-		                                   id_used,
-		                                   true,
-		                                   primaryDC);
+		auto newTLogs = Recruiter::getWorkersForTlogs(this,
+		                                              db.config,
+		                                              db.config.tLogReplicationFactor,
+		                                              db.config.getDesiredLogs(),
+		                                              db.config.tLogPolicy,
+		                                              id_used,
+		                                              true,
+		                                              primaryDC);
 		RoleFitness newTLogFit(newTLogs, ProcessClass::TLog, id_used);
 
 		bool oldSatelliteFallback = false;
@@ -1968,8 +645,8 @@ public:
 		auto newSatelliteTLogs = satellite_tlogs;
 		RoleFitness newSatelliteTLogFit = oldSatelliteTLogFit;
 		if (region.satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
-			newSatelliteTLogs =
-			    getWorkersForSatelliteLogs(db.config, region, remoteRegion, id_used, newSatelliteFallback, true);
+			newSatelliteTLogs = Recruiter::getWorkersForSatelliteLogs(
+			    this, db.config, region, remoteRegion, id_used, newSatelliteFallback, true);
 			newSatelliteTLogFit = RoleFitness(newSatelliteTLogs, ProcessClass::TLog, id_used);
 		}
 
@@ -2031,14 +708,15 @@ public:
 		RoleFitness newRemoteTLogFit = oldRemoteTLogFit;
 		if (db.config.usableRegions > 1 && (dbi.recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
 		                                    dbi.recoveryState == RecoveryState::FULLY_RECOVERED)) {
-			newRemoteTLogFit = RoleFitness(getWorkersForTlogs(db.config,
-			                                                  db.config.getRemoteTLogReplicationFactor(),
-			                                                  db.config.getDesiredRemoteLogs(),
-			                                                  db.config.getRemoteTLogPolicy(),
-			                                                  id_used,
-			                                                  true,
-			                                                  remoteDC,
-			                                                  exclusionWorkerIds),
+			newRemoteTLogFit = RoleFitness(Recruiter::getWorkersForTlogs(this,
+			                                                             db.config,
+			                                                             db.config.getRemoteTLogReplicationFactor(),
+			                                                             db.config.getDesiredRemoteLogs(),
+			                                                             db.config.getRemoteTLogPolicy(),
+			                                                             id_used,
+			                                                             true,
+			                                                             remoteDC,
+			                                                             exclusionWorkerIds),
 			                               ProcessClass::TLog,
 			                               id_used);
 		}
@@ -2050,15 +728,15 @@ public:
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter, old_id_used);
 		RoleFitness newLogRoutersFit = oldLogRoutersFit;
 		if (db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
-			newLogRoutersFit = RoleFitness(recruiter.getWorkersForRoleInDatacenter(this,
-			                                                                       *remoteDC.begin(),
-			                                                                       ProcessClass::LogRouter,
-			                                                                       newRouterCount,
-			                                                                       db.config,
-			                                                                       id_used,
-			                                                                       {},
-			                                                                       Optional<WorkerFitnessInfo>(),
-			                                                                       true),
+			newLogRoutersFit = RoleFitness(Recruiter::getWorkersForRoleInDatacenter(this,
+			                                                                        *remoteDC.begin(),
+			                                                                        ProcessClass::LogRouter,
+			                                                                        newRouterCount,
+			                                                                        db.config,
+			                                                                        id_used,
+			                                                                        {},
+			                                                                        Optional<WorkerFitnessInfo>(),
+			                                                                        true),
 			                               ProcessClass::LogRouter,
 			                               id_used);
 		}
@@ -2079,64 +757,64 @@ public:
 		RoleFitness oldResolverFit(resolverClasses, ProcessClass::Resolver, old_id_used);
 
 		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-		auto first_commit_proxy = recruiter.getWorkerForRoleInDatacenter(this,
-		                                                                 clusterControllerDcId,
-		                                                                 ProcessClass::CommitProxy,
-		                                                                 ProcessClass::ExcludeFit,
-		                                                                 db.config,
-		                                                                 id_used,
-		                                                                 preferredSharing,
-		                                                                 true);
+		auto first_commit_proxy = Recruiter::getWorkerForRoleInDatacenter(this,
+		                                                                  clusterControllerDcId,
+		                                                                  ProcessClass::CommitProxy,
+		                                                                  ProcessClass::ExcludeFit,
+		                                                                  db.config,
+		                                                                  id_used,
+		                                                                  preferredSharing,
+		                                                                  true);
 		preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-		auto first_grv_proxy = recruiter.getWorkerForRoleInDatacenter(this,
+		auto first_grv_proxy = Recruiter::getWorkerForRoleInDatacenter(this,
+		                                                               clusterControllerDcId,
+		                                                               ProcessClass::GrvProxy,
+		                                                               ProcessClass::ExcludeFit,
+		                                                               db.config,
+		                                                               id_used,
+		                                                               preferredSharing,
+		                                                               true);
+		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
+		auto first_resolver = Recruiter::getWorkerForRoleInDatacenter(this,
 		                                                              clusterControllerDcId,
-		                                                              ProcessClass::GrvProxy,
+		                                                              ProcessClass::Resolver,
 		                                                              ProcessClass::ExcludeFit,
 		                                                              db.config,
 		                                                              id_used,
 		                                                              preferredSharing,
 		                                                              true);
-		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-		auto first_resolver = recruiter.getWorkerForRoleInDatacenter(this,
-		                                                             clusterControllerDcId,
-		                                                             ProcessClass::Resolver,
-		                                                             ProcessClass::ExcludeFit,
-		                                                             db.config,
-		                                                             id_used,
-		                                                             preferredSharing,
-		                                                             true);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
 		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
-		auto commit_proxies = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                              clusterControllerDcId,
-		                                                              ProcessClass::CommitProxy,
-		                                                              db.config.getDesiredCommitProxies(),
-		                                                              db.config,
-		                                                              id_used,
-		                                                              preferredSharing,
-		                                                              first_commit_proxy,
-		                                                              true);
-		auto grv_proxies = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                           clusterControllerDcId,
-		                                                           ProcessClass::GrvProxy,
-		                                                           db.config.getDesiredGrvProxies(),
-		                                                           db.config,
-		                                                           id_used,
-		                                                           preferredSharing,
-		                                                           first_grv_proxy,
-		                                                           true);
-		auto resolvers = recruiter.getWorkersForRoleInDatacenter(this,
-		                                                         clusterControllerDcId,
-		                                                         ProcessClass::Resolver,
-		                                                         db.config.getDesiredResolvers(),
-		                                                         db.config,
-		                                                         id_used,
-		                                                         preferredSharing,
-		                                                         first_resolver,
-		                                                         true);
+		auto commit_proxies = Recruiter::getWorkersForRoleInDatacenter(this,
+		                                                               clusterControllerDcId,
+		                                                               ProcessClass::CommitProxy,
+		                                                               db.config.getDesiredCommitProxies(),
+		                                                               db.config,
+		                                                               id_used,
+		                                                               preferredSharing,
+		                                                               first_commit_proxy,
+		                                                               true);
+		auto grv_proxies = Recruiter::getWorkersForRoleInDatacenter(this,
+		                                                            clusterControllerDcId,
+		                                                            ProcessClass::GrvProxy,
+		                                                            db.config.getDesiredGrvProxies(),
+		                                                            db.config,
+		                                                            id_used,
+		                                                            preferredSharing,
+		                                                            first_grv_proxy,
+		                                                            true);
+		auto resolvers = Recruiter::getWorkersForRoleInDatacenter(this,
+		                                                          clusterControllerDcId,
+		                                                          ProcessClass::Resolver,
+		                                                          db.config.getDesiredResolvers(),
+		                                                          db.config,
+		                                                          id_used,
+		                                                          preferredSharing,
+		                                                          first_resolver,
+		                                                          true);
 
 		RoleFitness newCommitProxyFit(commit_proxies, ProcessClass::CommitProxy, id_used);
 		RoleFitness newGrvProxyFit(grv_proxies, ProcessClass::GrvProxy, id_used);
@@ -2146,15 +824,15 @@ public:
 		updateIdUsed(backup_workers, old_id_used);
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup, old_id_used);
 		const int nBackup = backup_addresses.size();
-		RoleFitness newBackupWorkersFit(recruiter.getWorkersForRoleInDatacenter(this,
-		                                                                        clusterControllerDcId,
-		                                                                        ProcessClass::Backup,
-		                                                                        nBackup,
-		                                                                        db.config,
-		                                                                        id_used,
-		                                                                        {},
-		                                                                        Optional<WorkerFitnessInfo>(),
-		                                                                        true),
+		RoleFitness newBackupWorkersFit(Recruiter::getWorkersForRoleInDatacenter(this,
+		                                                                         clusterControllerDcId,
+		                                                                         ProcessClass::Backup,
+		                                                                         nBackup,
+		                                                                         db.config,
+		                                                                         id_used,
+		                                                                         {},
+		                                                                         Optional<WorkerFitnessInfo>(),
+		                                                                         true),
 		                                ProcessClass::Backup,
 		                                id_used);
 
@@ -2276,7 +954,7 @@ public:
 	// Returns a map of <pid, numRolesUsingPid> for all non-singleton roles
 	std::map<Optional<Standalone<StringRef>>, int> getUsedIds() {
 		std::map<Optional<Standalone<StringRef>>, int> idUsed;
-		recruiter.updateKnownIds(this, &idUsed);
+		Recruiter::updateKnownIds(this, &idUsed);
 
 		auto& dbInfo = db.serverInfo->get();
 		for (const auto& tlogset : dbInfo.logSystemConfig.tLogs) {
@@ -2674,14 +1352,6 @@ public:
 		return recentHealthTriggeredRecoveryTime.size();
 	}
 
-	bool isExcludedDegradedServer(const NetworkAddressList& a) const {
-		for (const auto& server : excludedDegradedServers) {
-			if (a.contains(server))
-				return true;
-		}
-		return false;
-	}
-
 	std::map<Optional<Standalone<StringRef>>, WorkerInfo> id_worker;
 	std::map<Optional<Standalone<StringRef>>, ProcessClass>
 	    id_class; // contains the mapping from process id to process class from the database
@@ -2722,8 +1392,6 @@ public:
 
 	bool remoteDCMonitorStarted;
 	bool remoteTransactionSystemDegraded;
-
-	Recruiter recruiter;
 
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
