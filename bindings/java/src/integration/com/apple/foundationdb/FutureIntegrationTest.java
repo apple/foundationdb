@@ -21,11 +21,11 @@ package com.apple.foundationdb;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.extension.ExtendWith;
 
 /**
@@ -44,21 +44,71 @@ class FutureIntegrationTest {
 
   @Test
   @Tag("SupportsExternalClient")
-  public void testCancelFutureOnThreadPool() throws Exception {
-    try (Database db = fdb.open()) {
-      Transaction tr = db.createTransaction();
-      CompletableFuture<byte[]> result = tr.get("hello".getBytes("US-ASCII"));
+  public void testCancelFuture() throws Exception {
+    testTransaction(tr -> {
+      CompletableFuture<byte[]> result = tr.get("hello".getBytes());
       result.cancel(true);
-    }
+      return null;
+    });
   }
 
   @Test
   @Tag("SupportsExternalClient")
-  public void testCancelFutureOnSameThread() throws Exception {
-    try (Database db = fdb.open(null, new DirectExecutor())) {
-      Transaction tr = db.createTransaction();
-      CompletableFuture<Void> result = tr.watch("hello".getBytes("US-ASCII"));
+  public void testCancelWithCallbackSet() throws Exception {
+    testTransaction(tr -> {
+      CompletableFuture<byte[]> result = tr.get("hello".getBytes());
+      result.thenAcceptAsync(val -> {
+        Assertions.assertNull(val);
+        CompletableFuture<byte[]> res2 = tr.get("world".getBytes());
+        res2.join();
+      });
       result.cancel(true);
+      return null;
+    });
+  }
+
+  @Test
+  @Tag("SupportsExternalClient")
+  public void testSetCallbackAfterJoin() throws Exception {
+    testTransaction(tr -> {
+      CompletableFuture<byte[]> result = tr.get("hello".getBytes());
+      result.join();
+      result.thenAcceptAsync(val -> {
+        Assertions.assertNull(val);
+        CompletableFuture<byte[]> res2 = tr.get("world".getBytes());
+        res2.join();
+      });
+      return null;
+    });
+  }
+
+  @Test
+  @Tag("SupportsExternalClient")
+  public void testCancelFromCallback() throws Exception {
+    testTransaction(tr -> {
+      CompletableFuture<byte[]> result = tr.get("hello".getBytes());
+      result.thenAcceptAsync(val -> {
+        Assertions.assertNull(val);
+        CompletableFuture<byte[]> res2 = tr.get("world".getBytes());
+        result.cancel(true);
+        res2.cancel(true);
+      });
+      return null;
+    });
+  }
+
+  private <T> void testTransaction(Function<? super Transaction, T> retryable) {
+    // Test with a thread pool for callbacks
+    try (Database db = fdb.open()) {
+      for (int i = 0; i < 10; i++) {
+        db.run(retryable);
+      }
+    }
+    // Test with a direct executor for callbacks
+    try (Database db = fdb.open(null, new DirectExecutor())) {
+      for (int i = 0; i < 10; i++) {
+        db.run(retryable);
+      }
     }
   }
 
