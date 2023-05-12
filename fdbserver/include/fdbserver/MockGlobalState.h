@@ -135,6 +135,8 @@ public:
 	// and range.end. If split happened, the shard size will be equally split.
 	void setShardStatus(const KeyRangeRef& range, MockShardStatus status);
 
+	void coalesceCompletedRange(const KeyRangeRef& range);
+
 	// this function removed an aligned range from server
 	void removeShard(const KeyRangeRef& range);
 
