@@ -5804,15 +5804,16 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(monitorClientRanges(self));
 		self->addActor.send(monitorTenants(self));
 		self->addActor.send(monitorPurgeKeys(self));
-		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
-			self->addActor.send(bgConsistencyCheck(self));
-		}
+
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
 			self->addActor.send(granuleMergeChecker(self));
 		}
 		self->addActor.send(backupManifest(self));
 		self->addActor.send(truncateMutationLogs(self));
 
+		if (!BUGGIFY && !self->isFullRestoreMode) {
+			self->addActor.send(bgConsistencyCheck(self));
+		}
 		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
 		}
