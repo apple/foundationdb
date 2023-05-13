@@ -744,15 +744,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
-ACTOR Future<Void> runAuditJobOnOneRandomServer(Reference<DataDistributor> self,
-                                                std::shared_ptr<DDAudit> audit,
-                                                KeyRange range);
 ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor> self,
                                                       std::shared_ptr<DDAudit> audit,
                                                       KeyRange range);
-ACTOR Future<Void> partitionAuditJobByKeyServerSpace(Reference<DataDistributor> self,
-                                                     std::shared_ptr<DDAudit> audit,
-                                                     KeyRange range);
 ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
                                              std::shared_ptr<DDAudit> audit,
                                              KeyRange range,
