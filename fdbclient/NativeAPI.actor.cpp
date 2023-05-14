@@ -4914,7 +4914,7 @@ static Future<Void> tssStreamComparison(Request request,
 
 			// skip tss comparison if both are end of stream
 			if ((!ssEndOfStream || !tssEndOfStream) && !TSS_doCompare(ssReply.get(), tssReply.get())) {
-				CODE_PROBE(true, "TSS mismatch in stream comparison", probe::decoration::rare);
+				CODE_PROBE(true, "tssStreamComparison: TSS mismatch in stream comparison", probe::decoration::rare);
 				TraceEvent mismatchEvent(
 				    (g_network->isSimulated() && g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations)
 				        ? SevWarnAlways
@@ -9534,7 +9534,7 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		// this as a mismatch when !req.canReadPopped
 		return;
 	}
-	CODE_PROBE(true, "TSS mismatch in stream comparison");
+	CODE_PROBE(true, "handleTSSChangeFeedMismatch: TSS mismatch in stream comparison", probe::decoration::rare);
 
 	if (tssData.metrics->shouldRecordDetailedMismatch()) {
 		TraceEvent mismatchEvent(
@@ -9565,7 +9565,8 @@ void handleTSSChangeFeedMismatch(const ChangeFeedStreamRequest& request,
 		           "Tracing Full TSS Feed Mismatch in stream comparison",
 		           probe::decoration::rare);
 		CODE_PROBE(!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL,
-		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB");
+		           "Tracing Partial TSS Feed Mismatch in stream comparison and storing the rest in FDB",
+		           probe::decoration::rare);
 
 		if (!FLOW_KNOBS->LOAD_BALANCE_TSS_MISMATCH_TRACE_FULL) {
 			mismatchEvent.disable();
