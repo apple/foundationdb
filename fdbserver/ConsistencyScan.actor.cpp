@@ -18,6 +18,11 @@
  * limitations under the License.
  */
 
+#include "fdbclient/JSONDoc.h"
+#include "fdbclient/SystemData.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
+#include "fdbclient/json_spirit/json_spirit_writer_options.h"
+#include "fdbclient/json_spirit/json_spirit_writer_template.h"
 #include "fdbrpc/TenantInfo.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "flow/IRandom.h"
@@ -41,30 +46,434 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-// Core of the data consistency checking (checkDataConsistency) and many of the supporting functions are shared between
-// the ConsistencyScan role and the ConsistencyCheck workload. They are currently part of this file. ConsistencyScan
-// role's main goal is to simply validate data across all shards, while ConsistencyCheck workload does more than that.
-// Potentially a re-factor candidate!
+// Get database KV bytes size from Status JSON at cluster.data.total_kv_size_bytes
+ACTOR Future<Void> pollDatabaseSize(Database db, AsyncVar<int64_t>* pSize, double interval) {
+	loop {
+		try {
+			// TODO:  Get DataDistribution worker somehow and just get the one number we need from DDTrackerStats
+			// directly instead of reading the entire Status document unless there are more things in Status to make use
+			// of. Something like this.. WorkerDetails ddWorker = .... TraceEventFields event =
+			// 	  wait(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
+			// pSize->set(event.getInt64("TotalSizeBytes"));
 
-struct ConsistencyScanData {
-	UID id;
-	Database db;
+			// TODO:  This does not work for some reason, the value always comes back !present().
+			state Optional<Value> status =
+			    wait(runTransaction(db.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				    return tr->get("\xff\xff/status/json"_sr);
+			    }));
 
-	DatabaseConfiguration configuration;
-	PromiseStream<Future<Void>> addActor;
+			if (status.present()) {
+				json_spirit::mValue mv;
+				json_spirit::read_string(status->toString(), mv);
+				JSONDoc doc(mv);
+				int64_t space;
+				if (doc.tryGet("cluster.data.total_kv_size_bytes", space)) {
+					pSize->set(space);
 
-	// TODO: Consider holding a ConsistencyScanInfo object to use as its state, as many of the members are the same.
-	int64_t restart = 1;
-	int64_t maxRate = 0;
-	int64_t targetInterval = 0;
-	int64_t bytesReadInPrevRound = 0;
-	int finishedRounds = 0;
-	KeyRef progressKey;
-	AsyncVar<bool> consistencyScanEnabled = false;
-	bool success = true;
+					// If the above did not throw, we succesfully updated the size so wait interval
+					wait(delay(interval));
+				}
+			}
 
-	ConsistencyScanData(UID id, Database db) : id(id), db(db) {}
-};
+			// TODO: Remove this when getting the actual db size works
+			if (true) {
+				pSize->set(10e6);
+				wait(delay(interval));
+			}
+
+		} catch (Error& e) {
+			TraceEvent("ConsistencyScan_PollDBSizeError").error(e);
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
+		}
+
+		wait(delay(1.0));
+	}
+}
+
+ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanState cs) {
+	TraceEvent("ConsistencyScanCoreStart").log();
+
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state Reference<SystemTransactionGenerator<DatabaseContext>> systemDB = SystemDBWriteLockedNow(db.getReference());
+
+	// Infrequently poll the database size to use in speed calculations.
+	state AsyncVar<int64_t> databaseSize = -1;
+	state Future<Void> pollSize = pollDatabaseSize(db, &databaseSize, g_network->isSimulated() ? 15 : 900);
+
+	state int64_t readRateLimit = 0;
+	state Reference<IRateControl> readRateControl;
+
+	// Main loop, this is safe to restart at any time.
+	loop {
+		// The last known config and its read version
+		state ConsistencyScanState::Config config;
+		state Optional<Versionstamp> configVersion;
+
+		state ConsistencyScanState::LifetimeStats statsLifetime;
+		state ConsistencyScanState::RoundStats statsCurrentRound;
+
+		// Read/watch the config until the scan is enabled.
+		tr->reset();
+		loop {
+			try {
+				systemDB->setOptions(tr);
+
+				// Get the config and store the cs trigger version so we can detect updates later.
+				// Get the ConsistencyScanState config andThe ConsistencyScanState trigger will update when any of its
+				// configuration members change.
+				wait(store(config, cs.config().getD(tr)));
+				wait(store(configVersion, cs.trigger.get(tr)));
+
+				// If the scan is enabled, read the current round stats and lifetime stats.  After This point this actor
+				// *owns* these things and will update them but not read them again because nothing else should be
+				// writing them.
+				if (config.enabled) {
+					wait(store(statsLifetime, cs.lifetimeStats().getD(tr)) &&
+					     store(statsCurrentRound, cs.currentRoundStats().getD(tr)));
+
+					// If the current round is complete OR
+					// If the current round has a nonzero start version but it is < minStartVersion
+					// Then save the current round to history and reset the current round.
+					if (statsCurrentRound.complete || (statsCurrentRound.startVersion != 0 &&
+					                                   statsCurrentRound.startVersion < config.minStartVersion)) {
+						// If not complete then end the round
+						if (!statsCurrentRound.complete) {
+							statsCurrentRound.endVersion = tr->getReadVersion().get();
+							// Note: Not clearing progress key since it is useful to indicate how far the scan got.
+							statsCurrentRound.endTime = now();
+						}
+						cs.roundStatsHistory().set(tr, statsCurrentRound.startVersion, statsCurrentRound);
+						statsCurrentRound = ConsistencyScanState::RoundStats();
+					}
+
+					// If the current round has not started yet, initialize it.
+					// This works for the first ever round, or a new round created above.
+					if (statsCurrentRound.startVersion == 0) {
+						statsCurrentRound.startVersion = tr->getReadVersion().get();
+						statsCurrentRound.startTime = now();
+						cs.currentRoundStats().set(tr, statsCurrentRound);
+					}
+				}
+
+				// Trim stats history based on configured round history
+				cs.roundStatsHistory().erase(
+				    tr,
+				    0,
+				    std::max<Version>(0,
+				                      tr->getReadVersion().get() - (CLIENT_KNOBS->CORE_VERSIONSPERSECOND * 60 * 60 *
+				                                                    24 * config.roundHistoryDays)));
+
+				state Future<Void> watch = config.enabled ? Void() : cs.trigger.watch(tr);
+				wait(tr->commit());
+
+				if (config.enabled) {
+					break;
+				}
+
+				wait(watch);
+				tr->reset();
+			} catch (Error& e) {
+				TraceEvent("ConsistencyScan_MainLoopError").error(e);
+				wait(tr->onError(e));
+			}
+		}
+
+		// Wait for disk usage if we don't know it yet
+		if (databaseSize.get() < 0) {
+			wait(databaseSize.onChange());
+		}
+
+		state bool restartMainLoop = false;
+		state Future<Void> delayBeforeMainLoopRestart = Void();
+
+		// Scan loop.  Each iteration makes incremental, durable progress on the scan.
+		loop {
+			// Calculate the rate we should read at
+			int configuredRate;
+
+			// If the round is overdue to be finished, use the max rate allowed.
+			if (now() - statsCurrentRound.startTime > config.targetRoundTimeSeconds) {
+				configuredRate = config.maxReadByteRate;
+			} else {
+				// Otherwise, use databaseSize * replicationFactor / targetCompletionTimeSeconds,
+				// with a max of maxReadByteRate and a reasonable min of 100e3.  Also, avoid divide by zero.
+				// Estimate average replication factor from the current round stats or default to 3.
+				double replicationFactor =
+				    (statsCurrentRound.logicalBytesScanned == 0)
+				        ? 3
+				        : ((double)statsCurrentRound.replicatedBytesRead / statsCurrentRound.logicalBytesScanned);
+				configuredRate = std::max<int>(
+				    100e3,
+				    std::min<int>(config.maxReadByteRate,
+				                  databaseSize.get() * replicationFactor /
+				                      (config.targetRoundTimeSeconds > 0 ? config.targetRoundTimeSeconds : 1)));
+			}
+
+			// The rateControl has an accumulated budget so we only want to reset it if the configured rate has changed.
+			if (readRateLimit != configuredRate) {
+				readRateLimit = configuredRate;
+				readRateControl = Reference<IRateControl>(new SpeedLimit(readRateLimit, 1));
+			}
+
+			// This will store how many total bytes we read from all replicas in this loop iteration, including retries,
+			// because that's what our bandwidth limiting should be based on. We will wait on the rate control *after*
+			// reading using the actual amount that we read
+			state int totalReadBytesFromStorageServers = 0;
+
+			// We only want to update initialRoundState with *durable* progess, so if the loop below retries it must
+			// start from the same initial state, so save it here and restore it at the start of the transaction.
+			state ConsistencyScanState::RoundStats savedCurrentRoundState = statsCurrentRound;
+
+			tr->reset();
+			loop {
+				try {
+					statsCurrentRound = savedCurrentRoundState;
+					systemDB->setOptions(tr);
+
+					// The shard boundaries for the shard that lastEndKey is in
+					state RangeResult shardBoundaries;
+					// The consistency scan config update version
+					state Optional<Versionstamp> csVersion;
+					// The range config for the range that we're about to read
+					state Optional<ConsistencyScanState::RangeConfigMap::RangeValue> configRange;
+
+					GetRangeLimits limits;
+					limits.minRows = 2;
+					limits.rows = 2;
+					// Read these things in parallel
+					wait(store(shardBoundaries,
+					           tr->getRange(lastLessOrEqual(statsCurrentRound.lastEndKey.withPrefix(keyServersPrefix)),
+					                        firstGreaterThan(allKeys.end.withPrefix(keyServersPrefix)),
+					                        limits,
+					                        Snapshot::True)) &&
+					     store(csVersion, cs.trigger.get(tr)) &&
+					     store(configRange, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
+
+					// Check for a config version change
+					// If there is one, skip the commit and break to the main loop
+					if (csVersion != configVersion) {
+						restartMainLoop = true;
+						break;
+					}
+
+					state KeyRange targetRange = KeyRangeRef(shardBoundaries[0].key.removePrefix(keyServersPrefix),
+					                                         shardBoundaries[1].key.removePrefix(keyServersPrefix));
+					bool scanRange = true;
+
+					// Check if we are supposed to scan this range by finding the range that contains the start
+					// key in the Consistency Scan range config
+					// The default for a range with no options set is to scan it.
+					if (configRange.present()) {
+						auto val = configRange->value;
+
+						// If included is unspecified for the range, the default is true
+						// If skip is unspecified for the range, the default is false
+						// If not included, or included but currently skipped...
+						if (!val.included.orDefault(true) || val.skip.orDefault(false)) {
+							// If we aren't supposed to scan this range, advance lastEndKey forward to the end of this
+							// configured range which is the next point that will have a different RangeConfig value
+							// which could result in a different evaluation of this conditional
+
+							// If the range is configured to be skipped, increment counter
+							if (val.skip.orDefault(false)) {
+								++statsCurrentRound.skippedRanges;
+							}
+
+							// Advance lastEndKey to the end of the range
+							statsCurrentRound.lastEndKey = configRange->range.begin;
+							scanRange = false;
+						} else {
+							// We are supposed to scan the range that contains lastEndKey, but we may not be supposed to
+							// scan the entire shard that this key is in.  At the end key boundary of the range config
+							// map entry, the range configuration changes, so clip targetRange.end to the range config
+							// entry end if it is lower than the shard range end which targetRange was initialized to.
+							if (configRange->range.end < targetRange.end) {
+								targetRange = KeyRangeRef(targetRange.begin, configRange->range.end);
+							}
+						}
+					}
+
+					// If we've skipped to the end of all records then there are no more records to scan
+					state bool noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
+
+					if (scanRange) {
+						// Stats for *this unit of durable progress only*, which will be committed atomically with the
+						// endKey update. Total bytes from all replicas read
+						state int replicatedBytesRead = 0;
+						// Logical KV bytes scanned regardless of how many replicas exist of each key
+						state int logicalBytesRead = 0;
+						// Number of key differences found (essentially a count of comparisons that failed)
+						state int errors = 0;
+
+						// TODO:  Decode the shard KV pairs and get storage interfaces
+
+						// We must read at the same version from all replicas before the version is too old, so read in
+						// reasonable chunks of size CLIENT_KNOBS->REPLY_BYTE_LIMIT from each replica before reading
+						// more, but read more in a loop here so we are not committing every 80k of progress. Or
+						// ideally, use streaming read and target some total amount that can be read within a few
+						// seconds.
+
+						ReadOptions readOptions;
+						readOptions.cacheResult = CacheResult::False;
+						readOptions.type = ReadType::LOW;
+						readOptions.consistencyCheckStartVersion = statsCurrentRound.startVersion;
+
+						// TODO: Remove this block, do real reads
+						// TODO: Verify change feed consistency?
+						// TODO: Also read from blob as one of the replicas?  If so, maybe separately track blob errors
+						// where blob disagrees from the other replicas, which would also be a general ++error
+
+						if (true) {
+							state int bytes = deterministicRandom()->randomInt(0, 1e6);
+							logicalBytesRead += bytes;
+							replicatedBytesRead += 3 * bytes;
+							wait(delay(deterministicRandom()->random01() * .1));
+							if (deterministicRandom()->random01() < .01) {
+								throw transaction_too_old();
+							}
+							statsCurrentRound.lastEndKey = targetRange.end;
+							noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
+						}
+
+						// TODO: Do real reads using readOptions, compare results
+						// TODO: update statsCurrentRound.lastEndKey to the next *start* key
+						// TODO: update noMoreRecords
+
+						statsCurrentRound.errorCount += errors;
+						statsLifetime.errorCount += errors;
+
+						statsCurrentRound.logicalBytesScanned += logicalBytesRead;
+						statsCurrentRound.replicatedBytesRead += replicatedBytesRead;
+
+						statsLifetime.logicalBytesScanned += logicalBytesRead;
+						statsLifetime.replicatedBytesRead += replicatedBytesRead;
+
+						totalReadBytesFromStorageServers += replicatedBytesRead;
+					}
+
+					// If we reached the end of the database then end the round
+					if (noMoreRecords) {
+						// Complete the current round and write it to history
+						statsCurrentRound.endVersion = tr->getReadVersion().get();
+						statsCurrentRound.endTime = now();
+						statsCurrentRound.lastEndKey = Key();
+						statsCurrentRound.complete = true;
+
+						// Return to main loop after this commit, but delay first for the difference between the time
+						// the round took and minRoundTimeSeconds
+						restartMainLoop = true;
+						delayBeforeMainLoopRestart = delay(std::max<double>(
+						    config.minRoundTimeSeconds - (statsCurrentRound.endTime - statsCurrentRound.startTime),
+						    0.0));
+					}
+
+					// Save updated stats.
+					cs.currentRoundStats().set(tr, statsCurrentRound);
+					cs.lifetimeStats().set(tr, statsLifetime);
+
+					wait(tr->commit());
+					// fmt::print("CONSISTENCY SCAN PROGRESS: {}\n",
+					//            json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON())));
+					break;
+				} catch (Error& e) {
+					TraceEvent("ConsistencyScan_ScanLoopError").error(e);
+					wait(tr->onError(e));
+				}
+			} // Transaction retry loop for making one increment of durable progress
+
+			// Wait for the rate control to generate enough budget to match what we read.
+			wait(readRateControl->getAllowance(totalReadBytesFromStorageServers));
+
+			if (restartMainLoop) {
+				wait(delayBeforeMainLoopRestart);
+				break;
+			}
+
+		} // Scan loop
+	} // Main loop
+}
+
+ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
+	state ActorCollection actors;
+	state ConsistencyScanState cs;
+
+	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
+	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
+	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
+	state Future<Void> core = consistencyScanCore(db, ConsistencyScanState());
+
+	// Randomly enable consistencyScan in simulation
+	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
+	if (g_network->isSimulated() && deterministicRandom()->random01() < 0.25) {
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+
+		loop {
+			try {
+				SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
+				state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+
+				// Enable if disable, else set the scan min version to restart it
+				if (!config.enabled) {
+					config.enabled = true;
+				} else {
+					config.minStartVersion = tr->getReadVersion().get();
+				}
+				config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
+				config.targetRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
+				config.minRoundTimeSeconds = deterministicRandom()->randomInt(1, 200);
+
+				// TODO:  Reconfigure cs.rangeConfig() randomly
+
+				cs.config().set(tr, config);
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	loop {
+		try {
+			// TODO:  Verify that this loop is doing what it should.  In the original, it would respond to a Halt
+			// request on the interface by killing the scan actor and then immediately check if the configuration for
+			// the scan is enabled, which it often is, so then it would start the scan again.  This seemed to result in
+			// rapid loops of constant Halt, start, Halt events.
+			// In this version, the ConsistencyScan role will stop the scan actor if it gets a Halt request, and since
+			// there is no Start request, that is a final state. Similar to the old version, the scan enabled state is
+			// in the database, but unlike the old version in this version the ConsistencyScanCore is meant to run *all
+			// the time*, it will do no work if it is disabled and it will follow the configuration in the given
+			// ConsistencyScanState as it changes.
+			loop choose {
+				when(wait(core)) {
+					// This actor never returns so the only way out is throwing an exception.
+					ASSERT(false);
+				}
+				when(HaltConsistencyScanRequest req = waitNext(csInterf.haltConsistencyScan.getFuture())) {
+					req.reply.send(Void());
+					core = Void();
+					TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
+					wait(Never());
+				}
+				when(wait(actors.getResult())) {
+					ASSERT(false);
+					throw internal_error();
+				}
+			}
+		} catch (Error& err) {
+			TraceEvent("ConsistencyScan_Error", csInterf.id()).errorUnsuppressed(err);
+			throw;
+		}
+	}
+}
+
+///////////////////////////////////////////////////////
+// Everything below this line is not relevant to the ConsistencyScan Role anymore.
+// It is only used by workloads/ConsistencyCheck
 
 // Gets a version at which to read from the storage servers
 ACTOR Future<Version> getVersion(Database cx) {
@@ -347,6 +756,9 @@ ACTOR Future<std::pair<std::vector<int64_t>, StorageMetrics>> getStorageSizeEsti
 }
 
 ACTOR Future<int64_t> getDatabaseSize(Database cx) {
+	// This is too expensive and probably won't complete fast enough on a real cluster
+	ASSERT(g_network->isSimulated());
+
 	state Transaction tr(cx);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
@@ -382,7 +794,6 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
                                         int restart,
                                         int64_t maxRate,
                                         int64_t targetInterval,
-                                        KeyRef progressKey,
                                         bool* success) {
 	// Stores the total number of bytes on each storage server
 	// In a distributed test, this will be an estimated size
@@ -403,7 +814,6 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 	state Reference<IRateControl> rateLimiter = Reference<IRateControl>(new SpeedLimit(rateLimitForThisRound, 1));
 	state double rateLimiterStartTime = now();
 	state int64_t bytesReadInthisRound = 0;
-	state bool resume = !(restart || shuffleShards);
 
 	state double dbSize = 100e12;
 	state int ssCount = 1e6;
@@ -423,14 +833,6 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 	state std::vector<KeyRangeRef> ranges;
 
 	for (int k = 0; k < keyLocations.size() - 1; k++) {
-		// TODO: check if this is sufficient
-		if (resume && keyLocations[k].key < progressKey) {
-			TraceEvent("ConsistencyCheck_SkippingRange")
-			    .detail("KeyBegin", keyLocations[k].key.toString())
-			    .detail("KeyEnd", keyLocations[k + 1].key.toString())
-			    .detail("PrevKey", progressKey.toString());
-			continue;
-		}
 		KeyRangeRef range(keyLocations[k].key, keyLocations[k + 1].key);
 		ranges.push_back(range);
 	}
@@ -786,7 +1188,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 										}
 									}
 
-									TraceEvent("ConsistencyCheck_DataInconsistent")
+									TraceEvent(SevError, "ConsistencyCheck_DataInconsistent")
 									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 									    .detail(format("StorageServer%d", firstValidServer).c_str(),
 									            storageServers[firstValidServer].toString())
@@ -850,35 +1252,6 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 					if (firstValidServer >= 0) {
 						state VectorRef<KeyValueRef> data = keyValueFutures[firstValidServer].get().get().data;
-
-						// Persist the last key of the range we just verified as the progressKey
-						if (data.size()) {
-							state Reference<ReadYourWritesTransaction> csInfoTr =
-							    makeReference<ReadYourWritesTransaction>(cx);
-							progressKey = data[data.size() - 1].key;
-							loop {
-								try {
-									csInfoTr->reset();
-									csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-									state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
-									wait(csInfoTr->commit());
-									if (val.present()) {
-										ConsistencyScanInfo consistencyScanInfo =
-										    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(),
-										                                                     IncludeVersion());
-										consistencyScanInfo.progress_key = progressKey;
-										csInfoTr->reset();
-										csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-										wait(ConsistencyScanInfo::setInfo(csInfoTr, consistencyScanInfo));
-										wait(csInfoTr->commit());
-									}
-									break;
-								} catch (Error& e) {
-									wait(csInfoTr->onError(e));
-								}
-							}
-						}
 
 						// Calculate the size of the shard, the variance of the shard size estimate, and the correct
 						// shard size estimate
@@ -1113,197 +1486,4 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 	*bytesReadInPrevRound = bytesReadInthisRound;
 	return Void();
-}
-
-ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-	state ConsistencyScanInfo csInfo = ConsistencyScanInfo();
-	csInfo.consistency_scan_enabled = true;
-	csInfo.restart = self->restart;
-	csInfo.max_rate = self->maxRate;
-	csInfo.target_interval = self->targetInterval;
-	csInfo.last_round_start = StorageMetadataType::currentTime();
-	try {
-		// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
-		state Promise<std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>>> keyServerPromise;
-		state std::map<UID, StorageServerInterface> tssMapping;
-		bool keyServerResult =
-		    wait(getKeyServers(self->db, keyServerPromise, keyServersKeys, false, false, &self->success));
-		if (keyServerResult) {
-			state std::vector<std::pair<KeyRange, std::vector<StorageServerInterface>>> keyServers =
-			    keyServerPromise.getFuture().get();
-
-			// Get the locations of all the shards in the database
-			state Promise<Standalone<VectorRef<KeyValueRef>>> keyLocationPromise;
-			bool keyLocationResult =
-			    wait(getKeyLocations(self->db, keyServers, keyLocationPromise, false, &self->success));
-			if (keyLocationResult) {
-				state Standalone<VectorRef<KeyValueRef>> keyLocations = keyLocationPromise.getFuture().get();
-
-				// Check that each shard has the same data on all storage servers that it resides on
-				wait(checkDataConsistency(self->db,
-				                          keyLocations,
-				                          self->configuration,
-				                          tssMapping,
-				                          false /* quiescentCheck */,
-				                          false /* tssCheck */,
-				                          true /* firstClient */,
-				                          false /* failureIsError */,
-				                          0 /* clientId */,
-				                          1 /* clientCount */,
-				                          false /* distributed */,
-				                          false /* shuffleShards */,
-				                          1 /* shardSampleFactor */,
-				                          deterministicRandom()->randomInt64(0, 10000000),
-				                          self->finishedRounds /* repetitions */,
-				                          &(self->bytesReadInPrevRound),
-				                          self->restart,
-				                          self->maxRate,
-				                          self->targetInterval,
-				                          self->progressKey,
-				                          &self->success));
-			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_transaction_too_old || e.code() == error_code_future_version ||
-		    e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed ||
-		    e.code() == error_code_process_behind || e.code() == error_code_actor_cancelled)
-			TraceEvent("ConsistencyScan_Retry").error(e); // FIXME: consistency check does not retry in this case
-		else
-			throw;
-	}
-
-	TraceEvent("ConsistencyScan_FinishedCheck");
-
-	//  Update the ConsistencyScanInfo object and persist to the database
-	csInfo.last_round_finish = StorageMetadataType::currentTime();
-	csInfo.finished_rounds = self->finishedRounds + 1;
-	auto duration = csInfo.last_round_finish - csInfo.last_round_start;
-	csInfo.smoothed_round_duration.setTotal((double)duration);
-	csInfo.progress_key = self->progressKey;
-	csInfo.bytes_read_prev_round = self->bytesReadInPrevRound;
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			wait(ConsistencyScanInfo::setInfo(tr, csInfo));
-			wait(tr->commit());
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	return Void();
-}
-
-ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->db);
-
-	loop {
-		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-
-			state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(tr));
-			if (val.present()) {
-				ConsistencyScanInfo consistencyScanInfo =
-				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());
-				self->restart = consistencyScanInfo.restart;
-				self->maxRate = consistencyScanInfo.max_rate;
-				self->targetInterval = consistencyScanInfo.target_interval;
-				self->progressKey = consistencyScanInfo.progress_key;
-				self->bytesReadInPrevRound = consistencyScanInfo.bytes_read_prev_round;
-				self->finishedRounds = consistencyScanInfo.finished_rounds;
-				self->consistencyScanEnabled.set(consistencyScanInfo.consistency_scan_enabled);
-				//TraceEvent("ConsistencyScan_WatchGotVal", self->id)
-				//  .detail("Enabled", consistencyScanInfo.consistency_scan_enabled)
-				//  .detail("MaxRateRead", consistencyScanInfo.max_rate)
-				//  .detail("MaxRateSelf", self->maxRate);
-			}
-			state Future<Void> watch = tr->watch(consistencyScanInfoKey);
-			wait(tr->commit());
-			wait(watch);
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
-ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
-	state ConsistencyScanData self(csInterf.id(),
-	                               openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True));
-	state Future<Void> collection = actorCollection(self.addActor.getFuture());
-	state ConsistencyScanInfo csInfo = ConsistencyScanInfo();
-
-	TraceEvent("ConsistencyScan_Starting", csInterf.id()).log();
-
-	// Randomly enable consistencyScan in simulation
-	if (g_network->isSimulated()) {
-		if (deterministicRandom()->random01() < 0.5) {
-			csInfo.consistency_scan_enabled = false;
-		} else {
-			csInfo.consistency_scan_enabled = true;
-			csInfo.restart = false;
-			csInfo.max_rate = 50e6;
-			csInfo.target_interval = 24 * 7 * 60 * 60;
-		}
-		TraceEvent("SimulatedConsistencyScanConfigRandom")
-		    .detail("ConsistencyScanEnabled", csInfo.consistency_scan_enabled)
-		    .detail("MaxRate", csInfo.max_rate)
-		    .detail("Interval", csInfo.target_interval);
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self.db);
-		loop {
-			try {
-				tr->reset();
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				wait(ConsistencyScanInfo::setInfo(tr, csInfo));
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-
-	self.addActor.send(waitFailureServer(csInterf.waitFailure.getFuture()));
-	self.addActor.send(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
-	self.addActor.send(watchConsistencyScanInfoKey(&self));
-
-	loop {
-		if (self.consistencyScanEnabled.get()) {
-			try {
-				loop choose {
-					when(wait(runDataValidationCheck(&self))) {
-						if (self.success) {
-							TraceEvent("ConsistencyScan_Done", csInterf.id()).log();
-							return Void();
-						} else {
-							self.success = true;
-							TraceEvent("ConsistencyScan_Failed", csInterf.id()).log();
-							wait(delay(1.0));
-						}
-					}
-					when(HaltConsistencyScanRequest req = waitNext(csInterf.haltConsistencyScan.getFuture())) {
-						req.reply.send(Void());
-						TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-						break;
-					}
-					when(wait(collection)) {
-						ASSERT(false);
-						throw internal_error();
-					}
-				}
-			} catch (Error& err) {
-				if (err.code() == error_code_actor_cancelled) {
-					TraceEvent("ConsistencyScan_ActorCanceled", csInterf.id()).errorUnsuppressed(err);
-					return Void();
-				}
-				TraceEvent("ConsistencyScan_Died", csInterf.id()).errorUnsuppressed(err);
-			}
-		} else {
-			TraceEvent("ConsistencyScan_WaitingForConfigChange", self.id).log();
-			wait(self.consistencyScanEnabled.onChange());
-		}
-	}
 }

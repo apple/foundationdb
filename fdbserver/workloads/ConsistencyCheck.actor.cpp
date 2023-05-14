@@ -383,7 +383,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						                          true,
 						                          self->rateLimitMax,
 						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
-						                          KeyRef(),
 						                          &self->success));
 
 						// Cache consistency check
