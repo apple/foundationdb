@@ -744,17 +744,14 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
-ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor> self,
-                                                      std::shared_ptr<DDAudit> audit,
-                                                      KeyRange range);
+ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
                                              std::shared_ptr<DDAudit> audit,
                                              KeyRange range,
-                                             StorageServerInterface ssi,
-                                             bool makeProgressbyServer);
-ACTOR Future<Void> makeAuditProgressOnRange(Reference<DataDistributor> self,
-                                            std::shared_ptr<DDAudit> audit,
-                                            KeyRange range);
+                                             StorageServerInterface ssi);
+ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
+                                        std::shared_ptr<DDAudit> audit,
+                                        KeyRange range);
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
@@ -2115,25 +2112,24 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType());
 	if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-		audit->actors.add(auditInputRangeOnAllStorageServers(self, audit, allKeys));
+		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-		audit->actors.add(makeAuditProgressOnRange(self, audit, allKeys));
+		audit->actors.add(dispatchAuditStorage(self, audit, allKeys));
 	} else if (audit->coreState.getType() == AuditType::ValidateHA ||
 	           audit->coreState.getType() == AuditType::ValidateReplica) {
-		audit->actors.add(makeAuditProgressOnRange(self, audit, range));
+		audit->actors.add(dispatchAuditStorage(self, audit, range));
 	} else {
 		UNREACHABLE();
 	}
 	return;
 }
 
-// For each of storage servers, run an audit on the input range
-ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor> self,
-                                                      std::shared_ptr<DDAudit> audit,
-                                                      KeyRange range) {
+// This function dedicates to audit ssshard
+// For each of storage servers, audits allKeys
+ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
-	TraceEvent(SevInfo, "DDAuditInputRangeOnAllStorageServersBegin", self->ddId)
+	TraceEvent(SevInfo, "DDDispatchAuditStorageServerShardBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", auditType);
 	try {
@@ -2153,16 +2149,15 @@ ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor>
 					ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
 				}
 			}
-			audit->actors.add(
-			    makeAuditProgressOnServer(self, audit, range, targetServer, /*makeProgressByServer=*/true));
+			audit->actors.add(makeAuditProgressOnServer(self, audit, allKeys, targetServer));
 			wait(delay(0.1));
 		}
-		TraceEvent(SevInfo, "DDAuditInputRangeOnAllStorageServersEnd", self->ddId)
+		TraceEvent(SevInfo, "DDDispatchAuditStorageServerShardEnd", self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "DDAuditInputRangeOnAllStorageServersError", self->ddId)
+		TraceEvent(SevWarn, "DDDispatchAuditStorageServerShardError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
@@ -2173,16 +2168,10 @@ ACTOR Future<Void> auditInputRangeOnAllStorageServers(Reference<DataDistributor>
 }
 
 // Schedule audit task on the input storage server (ssi)
-// Option makeProgressbyServer:
-// If we store the progress of complete range for each individual server,
-// we should set makeProgressbyServer == true. Then, we load the progress on each server
-// If we store the progress of complete range without distinguishing servers,
-// we should set makeProgressbyServer == false. Then, we load the progress globally
 ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
                                              std::shared_ptr<DDAudit> audit,
                                              KeyRange range,
-                                             StorageServerInterface ssi,
-                                             bool makeProgressbyServer) {
+                                             StorageServerInterface ssi) {
 	state UID serverId = ssi.uniqueID;
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
@@ -2199,17 +2188,9 @@ ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
 	try {
 		while (begin < range.end) {
 			currentRange = KeyRangeRef(begin, range.end);
-			if (makeProgressbyServer) {
-				ASSERT(auditType == AuditType::ValidateStorageServerShard);
-				wait(store(auditStates,
-				           getAuditStateByServer(
-				               self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange)));
-			} else {
-				ASSERT(auditType == AuditType::ValidateLocationMetadata);
-				wait(store(
-				    auditStates,
-				    getAuditStateByRange(self->txnProcessor->context(), auditType, audit->coreState.id, currentRange)));
-			}
+			wait(store(auditStates,
+			           getAuditStateByServer(
+			               self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange)));
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
 			TraceEvent(SevInfo, "DDMakeAuditProgressOnServerDispatch", self->ddId)
@@ -2271,14 +2252,15 @@ ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
 	return Void();
 }
 
+// This function is for ha, replica, and locationmetadata
 // Schedule audit task on the input range
-ACTOR Future<Void> makeAuditProgressOnRange(Reference<DataDistributor> self,
-                                            std::shared_ptr<DDAudit> audit,
-                                            KeyRange range) {
+ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
+                                        std::shared_ptr<DDAudit> audit,
+                                        KeyRange range) {
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateHA || auditType == AuditType::ValidateReplica ||
 	       auditType == AuditType::ValidateLocationMetadata);
-	TraceEvent(SevInfo, "DDMakeAuditProgressOnRangeBegin", self->ddId)
+	TraceEvent(SevInfo, "DDDispatchAuditStorageBegin", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
 	    .detail("AuditType", auditType);
@@ -2293,7 +2275,7 @@ ACTOR Future<Void> makeAuditProgressOnRange(Reference<DataDistributor> self,
 			    wait(getAuditStateByRange(self->txnProcessor->context(), auditType, audit->coreState.id, currentRange));
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
-			TraceEvent(SevInfo, "DDMakeAuditProgressOnRangeDispatch", self->ddId)
+			TraceEvent(SevInfo, "DDDispatchAuditStorageDispatch", self->ddId)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("CurrentRange", currentRange)
 			    .detail("AuditType", auditType)
@@ -2323,7 +2305,7 @@ ACTOR Future<Void> makeAuditProgressOnRange(Reference<DataDistributor> self,
 			}
 			wait(delay(0.1));
 		}
-		TraceEvent(SevInfo, "DDMakeAuditProgressOnRangeEnd", self->ddId)
+		TraceEvent(SevInfo, "DDDispatchAuditStorageEnd", self->ddId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", range)
 		    .detail("AuditType", auditType)
@@ -2332,7 +2314,7 @@ ACTOR Future<Void> makeAuditProgressOnRange(Reference<DataDistributor> self,
 		    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "DDMakeAuditProgressOnRangeError", self->ddId)
+		TraceEvent(SevWarn, "DDDispatchAuditStorageError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
