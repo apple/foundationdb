@@ -184,7 +184,9 @@ void StorageServerMetrics::notifyBytes(
 
 	StorageMetrics notifyMetrics;
 	notifyMetrics.bytes = bytes;
-	for (int i = 0; i < shard.value().size(); i++) {
+	auto size = shard->cvalue().size();
+	for (int i = 0; i < size; i++) {
+		// fmt::print("NotifyBytes {} {}\n", shard->value().size(), shard->range().toString());
 		CODE_PROBE(true, "notifyBytes");
 		shard.value()[i].send(notifyMetrics);
 	}

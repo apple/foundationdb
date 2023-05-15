@@ -10882,8 +10882,8 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 	state Error error = success();
 	state bool timedout = false;
 
-	// state UID metricReqId = deterministicRandom()->randomUniqueID();
-	DisabledTraceEvent(SevDebug, "WaitMetrics", metricReqId)
+	state UID metricReqId = deterministicRandom()->randomUniqueID();
+	TraceEvent(SevDebug, "WaitMetrics", metricReqId)
 	    .detail("Keys", req.keys)
 	    .detail("Metrics", metrics.toString())
 	    .detail("ReqMin", req.min.toString())
@@ -10954,7 +10954,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 		wait(delay(0)); // prevent iterator invalidation of functions sending changes
 	}
-
+	// fmt::print("PopWaitMetricsMap {}\n", req.keys.toString());
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
 		auto& x = i->value();
