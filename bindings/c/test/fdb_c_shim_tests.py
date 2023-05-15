@@ -107,7 +107,10 @@ class FdbCShimTests:
         self.api_test_dir = Path(args.api_test_dir).resolve()
         assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
-        self.test_prev_versions = not args.disable_prev_version_tests
+        self.test_prev_versions = (
+            not args.disable_prev_version_tests
+            and self.downloader.old_binaries_available
+        )
         if self.test_prev_versions:
             self.downloader.download_old_binaries(PREV_RELEASE_VERSION)
             self.downloader.download_old_binaries("7.0.1")

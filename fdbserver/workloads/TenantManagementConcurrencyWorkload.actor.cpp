@@ -189,8 +189,10 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 				    .detail("TenantName", entry.tenantName)
 				    .detail("TenantGroup", entry.tenantGroup);
 				Future<Void> createFuture =
-				    self->useMetacluster ? metacluster::createTenant(
-				                               self->managementDb, entry, metacluster::AssignClusterAutomatically::True)
+				    self->useMetacluster ? metacluster::createTenant(self->managementDb,
+				                                                     entry,
+				                                                     metacluster::AssignClusterAutomatically::True,
+				                                                     metacluster::IgnoreCapacityLimit::False)
 				                         : success(TenantAPI::createTenant(
 				                               self->standaloneDb.getReference(), tenant, entry.toTenantMapEntry()));
 				Optional<Void> result = wait(timeout(createFuture, 30));

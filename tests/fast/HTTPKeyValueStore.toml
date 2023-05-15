@@ -1,15 +1,13 @@
-[configuration]
-blobGranulesEnabled = true 
-allowDefaultTenant = false
-injectTargetedSSRestart = true
-injectSSDelay = true
-tenantModes = ['optional', 'required']
+# FIXME: in theory it would be good to enable this at some point
+# [[ knobs ]]
+# http_request_id_header=1
 
 [[test]]
-testTitle = 'BlobGranuleRanges'
+testTitle = 'HTTPKeyValueStoreTest'
+timeout = 1000
 
     [[test.workload]]
-    testName = 'BlobGranuleRanges'
+    testName = 'HTTPKeyValueStore'
     testDuration = 30.0
 
     [[test.workload]]
@@ -17,11 +15,6 @@ testTitle = 'BlobGranuleRanges'
     testDuration = 30.0
 
     [[test.workload]]
-    testName = 'Rollback'
-    meanDelay = 20.0
-    testDuration = 30.0
-
-    [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
@@ -33,9 +26,5 @@ testTitle = 'BlobGranuleRanges'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 30.0
-
-    [[test.workload]]
-    testName = 'BlobFailureInjection'
     testDuration = 30.0
 

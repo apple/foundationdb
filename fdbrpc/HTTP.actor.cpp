@@ -19,12 +19,16 @@
  */
 
 #include "fdbrpc/HTTP.h"
+#include "fdbrpc/simulator.h"
 
+#include "flow/IRandom.h"
+#include "flow/Net2Packet.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "flow/Knobs.h"
 #include <cctype>
 #include "flow/IConnection.h"
+#include <unordered_map>
 
 #include "flow/actorcompiler.h" // has to be last include
 
@@ -62,46 +66,73 @@ std::string urlEncode(const std::string& s) {
 	return o;
 }
 
-bool Response::verifyMD5(bool fail_if_header_missing, Optional<std::string> content_sum) {
-	auto i = headers.find("Content-MD5");
-	if (i != headers.end()) {
+template <typename T>
+std::string ResponseBase<T>::getCodeDescription() {
+	if (code == HTTP_STATUS_CODE_OK) {
+		return "OK";
+	} else if (code == HTTP_STATUS_CODE_CREATED) {
+		return "Created";
+	} else if (code == HTTP_STATUS_CODE_ACCEPTED) {
+		return "Accepted";
+	} else if (code == HTTP_STATUS_CODE_NO_CONTENT) {
+		return "No Content";
+	} else if (code == HTTP_STATUS_CODE_UNAUTHORIZED) {
+		return "Unauthorized";
+	} else if (code == HTTP_STATUS_CODE_NOT_ACCEPTABLE) {
+		return "Not Acceptable";
+	} else if (code == HTTP_STATUS_CODE_TIMEOUT) {
+		return "Timeout";
+	} else if (code == HTTP_STATUS_CODE_TOO_MANY_REQUESTS) {
+		return "Too Many Requests";
+	} else if (code == HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR) {
+		return "Internal Server Error";
+	} else if (code == HTTP_STATUS_CODE_BAD_GATEWAY) {
+		return "Bad Gateway";
+	} else if (code == HTTP_STATUS_CODE_SERVICE_UNAVAILABLE) {
+		return "Service Unavailable";
+	} else if (code == HTTP_STATUS_CODE_GATEWAY_TIMEOUT) {
+		return "Gateway Timeout";
+	} else {
+		throw internal_error();
+	}
+}
+
+std::string computeMD5Sum(std::string content) {
+	MD5_CTX sum;
+	::MD5_Init(&sum);
+	::MD5_Update(&sum, content.data(), content.size());
+	std::string sumBytes;
+	sumBytes.resize(16);
+	::MD5_Final((unsigned char*)sumBytes.data(), &sum);
+	std::string sumStr = base64::encoder::from_string(sumBytes);
+	sumStr.resize(sumStr.size() - 1);
+	return sumStr;
+}
+
+bool verifyMD5(HTTPData<std::string>* data, bool fail_if_header_missing, Optional<std::string> content_sum) {
+	auto i = data->headers.find("Content-MD5");
+	if (i != data->headers.end()) {
 		// If a content sum is not provided, calculate one from the response content
 		if (!content_sum.present()) {
-			MD5_CTX sum;
-			::MD5_Init(&sum);
-			::MD5_Update(&sum, content.data(), content.size());
-			std::string sumBytes;
-			sumBytes.resize(16);
-			::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-			std::string sumStr = base64::encoder::from_string(sumBytes);
-			sumStr.resize(sumStr.size() - 1);
-			content_sum = sumStr;
+			content_sum = computeMD5Sum(data->content);
 		}
 		return i->second == content_sum.get();
 	}
 	return !fail_if_header_missing;
 }
 
-std::string Response::toString() {
-	std::string r = format("Response Code: %d\n", code);
-	r += format("Response ContentLen: %lld\n", contentLen);
-	for (auto h : headers)
-		r += format("Reponse Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+std::string IncomingResponse::toString() const {
+	std::string r = fmt::format("Response Code: {0}\n", code);
+	r += fmt::format("Response ContentLen: {0}\n", data.contentLen);
+	for (auto h : data.headers)
+		r += fmt::format("Reponse Header: {0}: {1}\n", h.first, h.second);
 	r.append("-- RESPONSE CONTENT--\n");
-	r.append(content);
+	r.append(data.content);
 	r.append("\n--------\n");
 	return r;
 }
 
-PacketBuffer* writeRequestHeader(std::string const& verb,
-                                 std::string const& resource,
-                                 HTTP::Headers const& headers,
-                                 PacketBuffer* dest) {
-	PacketWriter writer(dest, nullptr, Unversioned());
-	writer.serializeBytes(verb);
-	writer.serializeBytes(" ", 1);
-	writer.serializeBytes(resource);
-	writer.serializeBytes(" HTTP/1.1\r\n"_sr);
+void writeHeaders(HTTP::Headers const& headers, PacketWriter& writer) {
 	for (auto h : headers) {
 		writer.serializeBytes(h.first);
 		writer.serializeBytes(": "_sr);
@@ -109,7 +140,56 @@ PacketBuffer* writeRequestHeader(std::string const& verb,
 		writer.serializeBytes("\r\n"_sr);
 	}
 	writer.serializeBytes("\r\n"_sr);
+}
+
+PacketBuffer* writeRequestHeader(Reference<OutgoingRequest> req, PacketBuffer* dest) {
+	PacketWriter writer(dest, nullptr, Unversioned());
+	writer.serializeBytes(req->verb);
+	writer.serializeBytes(" ", 1);
+	writer.serializeBytes(req->resource);
+	writer.serializeBytes(" HTTP/1.1\r\n"_sr);
+
+	writeHeaders(req->data.headers, writer);
+
 	return writer.finish();
+}
+
+PacketBuffer* writeResponseHeader(Reference<OutgoingResponse> response, PacketBuffer* dest) {
+	PacketWriter writer(dest, nullptr, Unversioned());
+	writer.serializeBytes("HTTP/1.1 "_sr);
+	writer.serializeBytes(std::to_string(response->code));
+	writer.serializeBytes(" ", 1);
+	writer.serializeBytes(response->getCodeDescription());
+	writer.serializeBytes("\r\n"_sr);
+
+	writeHeaders(response->data.headers, writer);
+
+	return writer.finish();
+}
+
+ACTOR Future<Void> writeResponse(Reference<IConnection> conn, Reference<OutgoingResponse> response) {
+
+	// Write headers to a packet buffer chain
+	ASSERT(response.isValid());
+	response->data.headers["Content-Length"] = std::to_string(response->data.contentLen);
+	PacketBuffer* pFirst = PacketBuffer::create();
+	PacketBuffer* pLast = writeResponseHeader(response, pFirst);
+	// Prepend headers to content packer buffer chain
+	response->data.content->prependWriteBuffer(pFirst, pLast);
+	loop {
+		int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
+		if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+			trySend = deterministicRandom()->randomInt(1, 10);
+		}
+		int len = conn->write(response->data.content->getUnsent(), trySend);
+		response->data.content->sent(len);
+		if (response->data.content->empty()) {
+			return Void();
+		}
+
+		wait(conn->onWritable());
+		wait(yield(TaskPriority::WriteSocket));
+	}
 }
 
 // Read at least 1 bytes from conn and up to maxlen in a single read, append read data into *buf
@@ -120,6 +200,7 @@ ACTOR Future<int> read_into_string(Reference<IConnection> conn, std::string* buf
 		int originalSize = buf->size();
 		// TODO:  resize is zero-initializing the space we're about to overwrite, so do something else, which probably
 		// means not using a string for this buffer
+		// FIXME: buggify read size as well
 		buf->resize(originalSize + maxlen);
 		uint8_t* wptr = (uint8_t*)buf->data() + originalSize;
 		int len = conn->read(wptr, wptr + maxlen);
@@ -148,11 +229,13 @@ ACTOR Future<size_t> read_delimited_into_string(Reference<IConnection> conn,
 
 	loop {
 		size_t endPos = buf->find(delim, sPos);
-		if (endPos != std::string::npos)
+		if (endPos != std::string::npos) {
 			return endPos - pos;
+		}
 		// Next search will start at the current end of the buffer - delim size + 1
-		if (sPos >= lookBack)
-			sPos -= lookBack;
+		if (buf->size() >= lookBack) {
+			sPos = buf->size() - lookBack;
+		}
 		wait(success(read_into_string(conn, buf, FLOW_KNOBS->HTTP_READ_SIZE)));
 	}
 }
@@ -219,28 +302,18 @@ ACTOR Future<Void> read_http_response_headers(Reference<IConnection> conn,
 	}
 }
 
-// Reads an HTTP response from a network connection
-// If the connection fails while being read the exception will emitted
-// If the response is not parsable or complete in some way, http_bad_response will be thrown
-ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<IConnection> conn, bool header_only) {
-	state std::string buf;
-	state size_t pos = 0;
-
-	// Read HTTP response code and version line
-	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
-
-	int reachedEnd = -1;
-	sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd);
-	if (reachedEnd < 0)
-		throw http_bad_response();
-
-	// Move position past the line found and the delimiter length
-	pos += lineLen + 2;
-
+// FIXME: should this throw a different error for http requests? Or should we rename http_bad_response to
+// http_bad_<something>?
+ACTOR Future<Void> readHTTPData(HTTPData<std::string>* r,
+                                Reference<IConnection> conn,
+                                std::string* buf,
+                                size_t* pos,
+                                bool content_optional,
+                                bool skipCheckMD5) {
 	// Read headers
 	r->headers.clear();
 
-	wait(read_http_response_headers(conn, &r->headers, &buf, &pos));
+	wait(read_http_response_headers(conn, &r->headers, buf, pos));
 
 	auto i = r->headers.find("Content-Length");
 	if (i != r->headers.end())
@@ -255,20 +328,21 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 
 	r->content.clear();
 
-	// If this is supposed to be a header-only response and the buffer has been fully processed then stop.  Otherwise,
+	// If this is allowed to be a header-only response and the buffer has been fully processed then stop.  Otherwise,
 	// there must be response content.
-	if (header_only && pos == buf.size())
+	if (content_optional && *pos == buf->size()) {
 		return Void();
+	}
 
 	// There should be content (or at least metadata describing that there is no content.
 	// Chunked transfer and 'normal' mode (content length given, data in one segment after headers) are supported.
 	if (r->contentLen >= 0) {
 		// Use response content as the buffer so there's no need to copy it later.
-		r->content = buf.substr(pos);
-		pos = 0;
+		r->content = buf->substr(*pos);
+		*pos = 0;
 
 		// Read until there are at least contentLen bytes available at pos
-		wait(read_fixed_into_string(conn, r->contentLen, &r->content, pos));
+		wait(read_fixed_into_string(conn, r->contentLen, &r->content, *pos));
 
 		// There shouldn't be any bytes after content.
 		if (r->content.size() != r->contentLen)
@@ -277,47 +351,47 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 		// Copy remaining buffer data to content which will now be the read buffer for the chunk encoded data.
 		// Overall this will be fairly efficient since most bytes will only be written once but some bytes will
 		// have to be copied forward in the buffer when removing chunk overhead bytes.
-		r->content = buf.substr(pos);
-		pos = 0;
+		r->content = buf->substr(*pos);
+		*pos = 0;
 
 		loop {
 			{
 				// Read the line that contains the chunk length as text in hex
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
-				state int chunkLen = strtol(r->content.substr(pos, lineLen).c_str(), nullptr, 16);
+				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, *pos));
+				state int chunkLen = strtol(r->content.substr(*pos, lineLen).c_str(), nullptr, 16);
 
 				// Instead of advancing pos, erase the chunk length header line (line length + delimiter size) from the
 				// content buffer
-				r->content.erase(pos, lineLen + 2);
+				r->content.erase(*pos, lineLen + 2);
 
 				// If chunkLen is 0 then this marks the end of the content chunks.
 				if (chunkLen == 0)
 					break;
 
 				// Read (if needed) until chunkLen bytes are available at pos, then advance pos by chunkLen
-				wait(read_fixed_into_string(conn, chunkLen, &r->content, pos));
-				pos += chunkLen;
+				wait(read_fixed_into_string(conn, chunkLen, &r->content, *pos));
+				*pos += chunkLen;
 			}
 
 			{
 				// Read the final empty line at the end of the chunk (the required "\r\n" after the chunk bytes)
-				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, pos));
+				size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &r->content, *pos));
 				if (lineLen != 0)
 					throw http_bad_response();
 
 				// Instead of advancing pos, erase the empty line from the content buffer
-				r->content.erase(pos, 2);
+				r->content.erase(*pos, 2);
 			}
 		}
 
 		// The content buffer now contains the de-chunked, contiguous content at position 0 to pos.  Save this length.
-		r->contentLen = pos;
+		r->contentLen = *pos;
 
 		// Next is the post-chunk header block, so read that.
-		wait(read_http_response_headers(conn, &r->headers, &r->content, &pos));
+		wait(read_http_response_headers(conn, &r->headers, &r->content, pos));
 
 		// If the header parsing did not consume all of the buffer then something is wrong
-		if (pos != r->content.size())
+		if (*pos != r->content.size())
 			throw http_bad_response();
 
 		// Now truncate the buffer to just the dechunked contiguous content.
@@ -329,11 +403,11 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 
 	// If there is actual response content, check the MD5 sum against the Content-MD5 response header
 	if (r->content.size() > 0) {
-		if (r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT) {
+		if (skipCheckMD5) {
 			return Void();
 		}
 
-		if (!r->verifyMD5(false)) { // false arg means do not fail if the Content-MD5 header is missing.
+		if (!HTTP::verifyMD5(r, false)) { // false arg means do not fail if the Content-MD5 header is missing.
 			throw http_bad_response();
 		}
 	}
@@ -341,35 +415,116 @@ ACTOR Future<Void> read_http_response(Reference<HTTP::Response> r, Reference<ICo
 	return Void();
 }
 
-Future<Void> HTTP::Response::read(Reference<IConnection> conn, bool header_only) {
-	return read_http_response(Reference<HTTP::Response>::addRef(this), conn, header_only);
+// Reads an HTTP request from a network connection
+// If the connection fails while being read the exception will emitted
+// If the response is not parsable or complete in some way, http_bad_response will be thrown
+ACTOR Future<Void> read_http_request(Reference<HTTP::IncomingRequest> r, Reference<IConnection> conn) {
+	state std::string buf;
+	state size_t pos = 0;
+
+	// Read HTTP response code and version line
+	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
+
+	// FIXME: this is pretty inefficient with 2 copies, but sscanf isn't the best with strings
+	std::string requestLine = buf.substr(0, lineLen);
+	std::stringstream ss(requestLine);
+
+	// read verb
+	ss >> r->verb;
+	if (ss.fail()) {
+		throw http_bad_response();
+	}
+
+	// read resource
+	ss >> r->resource;
+	if (ss.fail()) {
+		throw http_bad_response();
+	}
+
+	// read http version
+	std::string httpVersion;
+	ss >> httpVersion;
+	if (ss.fail()) {
+		throw http_bad_response();
+	}
+
+	if (ss && !ss.eof()) {
+		throw http_bad_response();
+	}
+
+	float version;
+	sscanf(httpVersion.c_str(), "HTTP/%f", &version);
+	if (version < 1.1) {
+		throw http_bad_response();
+	}
+
+	// Move position past the line found and the delimiter length
+	pos += lineLen + 2;
+
+	wait(readHTTPData(&r->data, conn, &buf, &pos, false, false));
+
+	return Void();
+}
+
+Future<Void> HTTP::IncomingRequest::read(Reference<IConnection> conn, bool header_only) {
+	return read_http_request(Reference<HTTP::IncomingRequest>::addRef(this), conn);
+}
+
+Future<Void> HTTP::OutgoingResponse::write(Reference<IConnection> conn) {
+	return writeResponse(conn, Reference<HTTP::OutgoingResponse>::addRef(this));
+}
+
+void HTTP::OutgoingResponse::reset() {
+	data.headers = HTTP::Headers();
+	data.content->discardAll();
+	data.contentLen = 0;
+}
+
+// Reads an HTTP response from a network connection
+// If the connection fails while being read the exception will emitted
+// If the response is not parsable or complete in some way, http_bad_response will be thrown
+ACTOR Future<Void> read_http_response(Reference<HTTP::IncomingResponse> r,
+                                      Reference<IConnection> conn,
+                                      bool header_only) {
+	state std::string buf;
+	state size_t pos = 0;
+
+	// Read HTTP request line
+	size_t lineLen = wait(read_delimited_into_string(conn, "\r\n", &buf, pos));
+
+	int reachedEnd = -1;
+	sscanf(buf.c_str() + pos, "HTTP/%f %d%n", &r->version, &r->code, &reachedEnd);
+	if (reachedEnd < 0)
+		throw http_bad_response();
+
+	// Move position past the line found and the delimiter length
+	pos += lineLen + 2;
+
+	bool skipCheckMD5 = r->code == 206 && FLOW_KNOBS->HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT;
+
+	wait(readHTTPData(&r->data, conn, &buf, &pos, header_only, skipCheckMD5));
+
+	return Void();
+}
+
+Future<Void> HTTP::IncomingResponse::read(Reference<IConnection> conn, bool header_only) {
+	return read_http_response(Reference<HTTP::IncomingResponse>::addRef(this), conn, header_only);
 }
 
 // Do a request, get a Response.
-// Request content is provided as UnsentPacketQueue *pContent which will be depleted as bytes are sent but the queue
+// Request content is provided as UnsentPacketQueue in req, which will be depleted as bytes are sent but the queue
 // itself must live for the life of this actor and be destroyed by the caller
 // TODO:  pSent is very hackish, do something better.
-ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
-                                                  std::string verb,
-                                                  std::string resource,
-                                                  HTTP::Headers headers,
-                                                  UnsentPacketQueue* pContent,
-                                                  int contentLen,
-                                                  Reference<IRateControl> sendRate,
-                                                  int64_t* pSent,
-                                                  Reference<IRateControl> recvRate,
-                                                  std::string requestIDHeader) {
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnection> conn,
+                                                               Reference<OutgoingRequest> request,
+                                                               Reference<IRateControl> sendRate,
+                                                               int64_t* pSent,
+                                                               Reference<IRateControl> recvRate) {
 	state TraceEvent event(SevDebug, "HTTPRequest");
-
-	state UnsentPacketQueue empty;
-	if (pContent == nullptr)
-		pContent = &empty;
 
 	// There is no standard http request id header field, so either a global default can be set via a knob
 	// or it can be set per-request with the requestIDHeader argument (which overrides the default)
-	if (requestIDHeader.empty()) {
-		requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
-	}
+	state std::string requestIDHeader = FLOW_KNOBS->HTTP_REQUEST_ID_HEADER;
 
 	state bool earlyResponse = false;
 	state int total_sent = 0;
@@ -377,9 +532,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 
 	event.detail("DebugID", conn->getDebugID());
 	event.detail("RemoteAddress", conn->getPeerAddress());
-	event.detail("Verb", verb);
-	event.detail("Resource", resource);
-	event.detail("RequestContentLen", contentLen);
+	event.detail("Verb", request->verb);
+	event.detail("Resource", request->resource);
+	event.detail("RequestContentLen", request->data.contentLen);
 
 	try {
 		state std::string requestID;
@@ -390,52 +545,57 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			requestID = requestID.insert(12, "-");
 			requestID = requestID.insert(8, "-");
 
-			headers[requestIDHeader] = requestID;
+			request->data.headers[requestIDHeader] = requestID;
 			event.detail("RequestIDSent", requestID);
 		}
+		request->data.headers["Content-Length"] = std::to_string(request->data.contentLen);
 
 		// Write headers to a packet buffer chain
 		PacketBuffer* pFirst = PacketBuffer::create();
-		PacketBuffer* pLast = writeRequestHeader(verb, resource, headers, pFirst);
+		PacketBuffer* pLast = writeRequestHeader(request, pFirst);
 		// Prepend headers to content packer buffer chain
-		pContent->prependWriteBuffer(pFirst, pLast);
+		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
 			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
 			       conn->getDebugID().toString().c_str(),
-			       verb.c_str(),
-			       resource.c_str(),
-			       contentLen);
+			       request->verb.c_str(),
+			       request->resource.c_str(),
+			       request->data.contentLen);
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
-			for (auto h : headers)
+			for (auto h : request->data.headers)
 				printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
 		}
 
-		state Reference<HTTP::Response> r(new HTTP::Response());
-		state Future<Void> responseReading = r->read(conn, verb == "HEAD" || verb == "DELETE" || verb == "CONNECT");
+		state Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
+		state Future<Void> responseReading = r->read(conn, request->isHeaderOnlyResponse());
 
 		send_start = timer();
 
+		// too many state things here to refactor this with writing the response
 		loop {
 			// If we already got a response, before finishing sending the request, then close the connection,
 			// set the Connection header to "close" as a hint to the caller that this connection can't be used
 			// again, and break out of the send loop.
 			if (responseReading.isReady()) {
 				conn->close();
-				r->headers["Connection"] = "close";
+				r->data.headers["Connection"] = "close";
 				earlyResponse = true;
 				break;
 			}
 
 			state int trySend = FLOW_KNOBS->HTTP_SEND_SIZE;
+			if ((!g_network->isSimulated() || !g_simulator->speedUpSimulation) && BUGGIFY_WITH_PROB(0.01)) {
+				trySend = deterministicRandom()->randomInt(1, 10);
+			}
 			wait(sendRate->getAllowance(trySend));
-			int len = conn->write(pContent->getUnsent(), trySend);
+			int len = conn->write(request->data.content->getUnsent(), trySend);
 			if (pSent != nullptr)
 				*pSent += len;
 			sendRate->returnUnused(trySend - len);
 			total_sent += len;
-			pContent->sent(len);
-			if (pContent->empty())
+			request->data.content->sent(len);
+			if (request->data.content->empty())
 				break;
 
 			wait(conn->onWritable());
@@ -446,14 +606,14 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 		double elapsed = timer() - send_start;
 
 		event.detail("ResponseCode", r->code);
-		event.detail("ResponseContentLen", r->contentLen);
+		event.detail("ResponseContentLen", r->data.contentLen);
 		event.detail("Elapsed", elapsed);
 
 		Optional<Error> err;
 		if (!requestIDHeader.empty()) {
 			std::string responseID;
-			auto iid = r->headers.find(requestIDHeader);
-			if (iid != r->headers.end()) {
+			auto iid = r->data.headers.find(requestIDHeader);
+			if (iid != r->data.headers.end()) {
 				responseID = iid->second;
 			}
 			event.detail("RequestIDReceived", responseID);
@@ -471,11 +631,11 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 				    .error(err.get())
 				    .detail("DebugID", conn->getDebugID())
 				    .detail("RemoteAddress", conn->getPeerAddress())
-				    .detail("Verb", verb)
-				    .detail("Resource", resource)
-				    .detail("RequestContentLen", contentLen)
+				    .detail("Verb", request->verb)
+				    .detail("Resource", request->resource)
+				    .detail("RequestContentLen", request->data.contentLen)
 				    .detail("ResponseCode", r->code)
-				    .detail("ResponseContentLen", r->contentLen)
+				    .detail("ResponseContentLen", r->data.contentLen)
 				    .detail("RequestIDSent", requestID)
 				    .detail("RequestIDReceived", responseID);
 			}
@@ -489,17 +649,17 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			           r->code,
 			           earlyResponse,
 			           elapsed,
-			           verb,
-			           resource,
-			           contentLen,
+			           request->verb,
+			           request->resource,
+			           request->data.contentLen,
 			           total_sent,
-			           r->contentLen);
+			           r->data.contentLen);
 		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",
 			       conn->getDebugID().toString().c_str(),
-			       verb.c_str(),
-			       resource.c_str(),
+			       request->verb.c_str(),
+			       request->resource.c_str(),
 			       r->toString().c_str());
 		}
 
@@ -517,9 +677,9 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 			       e.name(),
 			       earlyResponse,
 			       elapsed,
-			       verb.c_str(),
-			       resource.c_str(),
-			       contentLen,
+			       request->verb.c_str(),
+			       request->resource.c_str(),
+			       request->data.contentLen,
 			       total_sent);
 		}
 		event.errorUnsuppressed(e);
@@ -527,13 +687,18 @@ ACTOR Future<Reference<HTTP::Response>> doRequest(Reference<IConnection> conn,
 	}
 }
 
+// IDE build didn't like the actor conversion i guess
+Future<Reference<IncomingResponse>> doRequest(Reference<IConnection> conn,
+                                              Reference<OutgoingRequest> request,
+                                              Reference<IRateControl> sendRate,
+                                              int64_t* pSent,
+                                              Reference<IRateControl> recvRate) {
+	return doRequestActor(conn, request, sendRate, pSent, recvRate);
+}
+
 ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
                                            std::string remoteHost,
                                            std::string remoteService) {
-	state Headers headers;
-	headers["Host"] = remoteHost + ":" + remoteService;
-	headers["Accept"] = "application/xml";
-	headers["Proxy-Connection"] = "Keep-Alive";
 	state int requestTimeout = 60;
 	state int maxTries = FLOW_KNOBS->RESTCLIENT_CONNECT_TRIES;
 	state int thisTry = 1;
@@ -541,21 +706,23 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
 	state int64_t bytes_sent = 0;
 
+	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+	req->verb = HTTP_VERB_CONNECT;
+	req->resource = remoteHost + ":" + remoteService;
+	req->data.content = nullptr;
+	req->data.contentLen = 0;
+	req->data.headers["Host"] = req->resource;
+	req->data.headers["Accept"] = "application/xml";
+	req->data.headers["Proxy-Connection"] = "Keep-Alive";
 	loop {
 		state Optional<Error> err;
-		state Reference<Response> r;
+
+		state Reference<HTTP::IncomingResponse> r;
 
 		try {
-			Reference<Response> _r = wait(timeoutError(doRequest(conn,
-			                                                     "CONNECT",
-			                                                     remoteHost + ":" + remoteService,
-			                                                     headers,
-			                                                     nullptr,
-			                                                     0,
-			                                                     sendReceiveRate,
-			                                                     &bytes_sent,
-			                                                     sendReceiveRate),
-			                                           requestTimeout));
+			Future<Reference<HTTP::IncomingResponse>> f =
+			    HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate);
+			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(f, requestTimeout));
 			r = _r;
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled)
@@ -601,8 +768,8 @@ ACTOR Future<Void> sendProxyConnectRequest(Reference<IConnection> conn,
 		if (retryable) {
 			// If r is valid then obey the Retry-After response header if present.
 			if (r) {
-				auto iRetryAfter = r->headers.find("Retry-After");
-				if (iRetryAfter != r->headers.end()) {
+				auto iRetryAfter = r->data.headers.find("Retry-After");
+				if (iRetryAfter != r->data.headers.end()) {
 					event.detail("RetryAfterHeader", iRetryAfter->second);
 					char* pEnd;
 					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);

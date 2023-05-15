@@ -88,9 +88,7 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		nextKey = 10000000 * clientId;
 
 		stopUnitClient = false;
-		if (deterministicRandom()->coinflip()) {
-			tenantName = StringRef("bgrwTenant" + std::to_string(clientId));
-		}
+		tenantName = StringRef("bgrwTenant" + std::to_string(clientId));
 
 		TraceEvent("BlobGranuleRangesWorkloadInit").detail("TargetRanges", targetRanges);
 	}
@@ -189,8 +187,11 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 		// set up blob granules
 		wait(success(ManagementAPI::changeConfig(cx.getReference(), "blob_granules_enabled=1", true)));
 
+		if (cx->clientInfo->get().tenantMode != TenantMode::REQUIRED && deterministicRandom()->coinflip()) {
+			self->tenantName.reset();
+		}
+
 		if (self->tenantName.present()) {
-			wait(success(ManagementAPI::changeConfig(cx.getReference(), "tenant_mode=optional_experimental", true)));
 			wait(success(self->setupTenant(cx, self->tenantName.get())));
 
 			self->tenant = makeReference<Tenant>(cx, self->tenantName.get());
@@ -314,6 +315,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	}
 
 	ACTOR Future<bool> _check(Database cx, BlobGranuleRangesWorkload* self) {
+		if (deterministicRandom()->coinflip()) {
+			cx->internal = IsInternal::False;
+		}
 		TraceEvent("BlobGranuleRangesCheck")
 		    .detail("ActiveRanges", self->activeRanges.size())
 		    .detail("InactiveRanges", self->inactiveRanges.size())
@@ -342,6 +346,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 
 	ACTOR Future<Void> blobGranuleRangesClient(Database cx, BlobGranuleRangesWorkload* self) {
+		if (deterministicRandom()->coinflip()) {
+			cx->internal = IsInternal::False;
+		}
 		state double last = now();
 		loop {
 			state Future<Void> waitNextOp = poisson(&last, 1.0 / self->operationsPerSecond);
@@ -804,6 +811,9 @@ struct BlobGranuleRangesWorkload : TestWorkload {
 	};
 
 	ACTOR Future<Void> blobGranuleRangesUnitTests(Database cx, BlobGranuleRangesWorkload* self) {
+		if (deterministicRandom()->coinflip()) {
+			cx->internal = IsInternal::False;
+		}
 		loop {
 			if (self->stopUnitClient) {
 				return Void();

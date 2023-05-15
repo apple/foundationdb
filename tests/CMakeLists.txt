@@ -172,6 +172,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -188,6 +189,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/MockDDTrackerWorkload.toml)
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
   add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
@@ -338,6 +341,12 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/ConfigureTestRestart-1.toml
     restarting/from_71.3.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
@@ -382,6 +391,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
+   add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
