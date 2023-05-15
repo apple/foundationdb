@@ -51,48 +51,60 @@
 // State that is explicitly not persisted anywhere for this consistency scan. Includes things like caches of system
 // information
 struct ConsistencyScanMemoryState {
+	UID csId;
 	AsyncVar<int64_t> databaseSize = -1;
+	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+
+	explicit ConsistencyScanMemoryState(Reference<AsyncVar<ServerDBInfo> const> dbInfo, UID csId)
+	  : dbInfo(dbInfo), csId(csId) {}
 };
 
 // TODO: test the test and write a canary key that the storage servers intentionally get wrong
 // Get database KV bytes size from Status JSON at cluster.data.total_kv_size_bytes
-ACTOR Future<Void> pollDatabaseSize(Database db, ConsistencyScanMemoryState* memState, double interval) {
+ACTOR Future<Void> pollDatabaseSize(ConsistencyScanMemoryState* memState, double interval) {
 	loop {
+		loop {
+			if (memState->dbInfo->get().distributor.present()) {
+				break;
+			}
+			wait(memState->dbInfo->onChange());
+		}
+
 		try {
-			// TODO:  Get DataDistribution worker somehow and just get the one number we need from DDTrackerStats
-			// directly instead of reading the entire Status document unless there are more things in Status to make use
-			// of. Something like this.. WorkerDetails ddWorker = .... TraceEventFields event =
-			// 	  wait(timeoutError(ddWorker.interf.eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
-			// pSize->set(event.getInt64("TotalSizeBytes"));
-
-			// TODO:  This does not work for some reason, the value always comes back !present().
-			state Optional<Value> status =
-			    wait(runTransaction(db.getReference(), [](Reference<ReadYourWritesTransaction> tr) {
-				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				    return tr->get("\xff\xff/status/json"_sr);
-			    }));
-
-			if (status.present()) {
-				json_spirit::mValue mv;
-				json_spirit::read_string(status->toString(), mv);
-				JSONDoc doc(mv);
-				int64_t space;
-				if (doc.tryGet("cluster.data.total_kv_size_bytes", space)) {
-					memState->databaseSize.set(space);
-
-					// If the above did not throw, we succesfully updated the size so wait interval
-					wait(delay(interval));
+			std::vector<WorkerDetails> workers = wait(getWorkers(memState->dbInfo));
+			state Optional<WorkerInterface> ddWorkerInterf;
+			// dbInfo could have changed while getting workers
+			if (memState->dbInfo->get().distributor.present()) {
+				for (int i = 0; i < workers.size(); i++) {
+					if (workers[i].interf.address() == memState->dbInfo->get().distributor.get().address()) {
+						// TODO REMOVE trace eventually
+						TraceEvent("GetDataDistributorWorker", memState->csId)
+						    .detail("Stage", "GotWorkers")
+						    .detail("DataDistributorId", memState->dbInfo->get().distributor.get().id())
+						    .detail("WorkerId", workers[i].interf.id());
+						ddWorkerInterf = workers[i].interf;
+						break;
+					}
 				}
 			}
 
-			// TODO: Remove this when getting the actual db size works
-			if (true) {
-				memState->databaseSize.set(10e6);
+			CODE_PROBE(ddWorkerInterf.present(), "Consistency Scan found DD worker");
+			CODE_PROBE(!ddWorkerInterf.present(), "Consistency Scan couldn't find DD worker");
+
+			if (ddWorkerInterf.present()) {
+				TraceEventFields md = wait(timeoutError(
+				    ddWorkerInterf.get().eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
+				memState->databaseSize.set(md.getInt64("TotalSizeBytes"));
+				CODE_PROBE(true, "Consistency Scan got DB size from DD Worker");
+
+				TraceEvent("ConsistencyScan_DatabaseSize", memState->csId)
+				    .detail("EstimatedSize", memState->databaseSize.get());
+
 				wait(delay(interval));
 			}
 
 		} catch (Error& e) {
-			TraceEvent("ConsistencyScan_PollDBSizeError").error(e);
+			TraceEvent("ConsistencyScan_PollDBSizeError", memState->csId).error(e);
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
@@ -138,7 +150,7 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Consistenc
 	return storageServerInterfaces;
 }
 
-ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* memState, ConsistencyScanState cs, UID csId) {
+ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* memState, ConsistencyScanState cs) {
 	TraceEvent("ConsistencyScanCoreStart").log();
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
@@ -146,7 +158,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 
 	// Infrequently poll the database size to use in speed calculations.
 	// TODO knob and buggify
-	state Future<Void> pollSize = pollDatabaseSize(db, memState, g_network->isSimulated() ? 15 : 900);
+	state Future<Void> pollSize = pollDatabaseSize(memState, g_network->isSimulated() ? 15 : 900);
 
 	state int64_t readRateLimit = 0;
 	state Reference<IRateControl> readRateControl;
@@ -163,7 +175,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 		state ConsistencyScanState::RoundStats statsCurrentRound;
 
 		if (DEBUG_SCAN_PROGRESS) {
-			TraceEvent(SevDebug, "ConsistencyScanProgressLoopStart", csId);
+			TraceEvent(SevDebug, "ConsistencyScanProgressLoopStart", memState->csId);
 		}
 
 		// Read/watch the config until the scan is enabled.
@@ -228,13 +240,13 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 				wait(watch);
 				tr->reset();
 			} catch (Error& e) {
-				TraceEvent("ConsistencyScan_MainLoopError", csId).error(e);
+				TraceEvent("ConsistencyScan_MainLoopError", memState->csId).error(e);
 				wait(tr->onError(e));
 			}
 		}
 
 		if (DEBUG_SCAN_PROGRESS) {
-			TraceEvent(SevDebug, "ConsistencyScanProgressEnabled", csId);
+			TraceEvent(SevDebug, "ConsistencyScanProgressEnabled", memState->csId);
 		}
 
 		// Wait for disk usage if we don't know it yet
@@ -243,7 +255,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 		}
 
 		if (DEBUG_SCAN_PROGRESS) {
-			TraceEvent(SevDebug, "ConsistencyScanProgressGotDBSize", csId);
+			TraceEvent(SevDebug, "ConsistencyScanProgressGotDBSize", memState->csId);
 		}
 
 		state bool restartMainLoop = false;
@@ -252,7 +264,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 		// Scan loop.  Each iteration makes incremental, durable progress on the scan.
 		loop {
 			if (DEBUG_SCAN_PROGRESS) {
-				TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopStart", csId);
+				TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopStart", memState->csId);
 			}
 			// Calculate the rate we should read at
 			int configuredRate;
@@ -305,7 +317,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 					state Optional<ConsistencyScanState::RangeConfigMap::RangeValue> configRange;
 
 					if (DEBUG_SCAN_PROGRESS) {
-						TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopLoadingState", csId);
+						TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopLoadingState", memState->csId);
 					}
 
 					GetRangeLimits limits;
@@ -322,14 +334,14 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 					     store(configRange, cs.rangeConfig().getRangeForKey(tr, statsCurrentRound.lastEndKey)));
 
 					if (DEBUG_SCAN_PROGRESS) {
-						TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopLoadedState", csId);
+						TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopLoadedState", memState->csId);
 					}
 
 					// Check for a config version change
 					// If there is one, skip the commit and break to the main loop
 					if (csVersion != configVersion) {
 						if (DEBUG_SCAN_PROGRESS) {
-							TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopVersionMismatch", csId);
+							TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopVersionMismatch", memState->csId);
 						}
 						restartMainLoop = true;
 						break;
@@ -382,7 +394,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 
 					if (scanRange) {
 						if (DEBUG_SCAN_PROGRESS) {
-							TraceEvent(SevDebug, "ConsistencyScanProgressScanRangeStart", csId);
+							TraceEvent(SevDebug, "ConsistencyScanProgressScanRangeStart", memState->csId);
 						}
 						// Stats for *this unit of durable progress only*, which will be committed atomically with the
 						// endKey update. Total bytes from all replicas read
@@ -439,7 +451,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 
 						totalReadBytesFromStorageServers += replicatedBytesRead;
 						if (DEBUG_SCAN_PROGRESS) {
-							TraceEvent(SevDebug, "ConsistencyScanProgressScanRangeEnd", csId);
+							TraceEvent(SevDebug, "ConsistencyScanProgressScanRangeEnd", memState->csId);
 						}
 					}
 
@@ -469,25 +481,25 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 					//            json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON())));
 					break;
 				} catch (Error& e) {
-					TraceEvent("ConsistencyScan_ScanLoopError", csId).error(e);
+					TraceEvent("ConsistencyScan_ScanLoopError", memState->csId).error(e);
 					wait(tr->onError(e));
 				}
 			} // Transaction retry loop for making one increment of durable progress
 
 			if (DEBUG_SCAN_PROGRESS) {
-				TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopDurable", csId);
+				TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopDurable", memState->csId);
 			}
 
 			// Wait for the rate control to generate enough budget to match what we read.
 			wait(readRateControl->getAllowance(totalReadBytesFromStorageServers));
 
 			if (DEBUG_SCAN_PROGRESS) {
-				TraceEvent(SevDebug, "ConsistencyScanProgressRateLimited", csId);
+				TraceEvent(SevDebug, "ConsistencyScanProgressRateLimited", memState->csId);
 			}
 
 			if (restartMainLoop) {
 				if (DEBUG_SCAN_PROGRESS) {
-					TraceEvent(SevDebug, "ConsistencyScanProgressWait", csId);
+					TraceEvent(SevDebug, "ConsistencyScanProgressWait", memState->csId);
 				}
 				wait(delayBeforeMainLoopRestart);
 				break;
@@ -532,10 +544,10 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 	return Void();
 }
 
-ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemoryState* memState, UID csId) {
+ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemoryState* memState) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state ConsistencyScanState cs;
-	TraceEvent("ConsistencyScan_SimDisableWaiting", csId).log();
+	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
 	// FIXME: also wait until we've scanned at least one round by checking stats
 	state bool waitForRoundComplete = true;
 	// FIXME: also wait until we've done the canary failure
@@ -547,7 +559,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 		double delayTime = std::max(1.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
 		wait(delay(delayTime));
 	}
-	TraceEvent("ConsistencyScan_SimDisable", csId).log();
+	TraceEvent("ConsistencyScan_SimDisable", memState->csId).log();
 	loop {
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
@@ -559,7 +571,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 				ConsistencyScanState::StatsHistoryMap::RangeResultType olderStats =
 				    wait(cs.roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False));
 				if (olderStats.results.empty()) {
-					TraceEvent("ConsistencyScan_SimDisable_NoRoundsCompleted", csId).log();
+					TraceEvent("ConsistencyScan_SimDisable_NoRoundsCompleted", memState->csId).log();
 					skipDisable = true;
 				}
 			}
@@ -568,7 +580,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 			if (config.enabled) {
 				config.enabled = false;
 			} else {
-				TraceEvent("ConsistencyScan_SimAlreadyDisabled", csId).log();
+				TraceEvent("ConsistencyScan_SimAlreadyDisabled", memState->csId).log();
 				return Void();
 			}
 
@@ -586,19 +598,19 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 		}
 	}
 
-	TraceEvent("ConsistencyScan_SimDisabled", csId).log();
+	TraceEvent("ConsistencyScan_SimDisabled", memState->csId).log();
 	return Void();
 }
 
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	state ActorCollection actors;
-	state ConsistencyScanMemoryState memState;
+	state ConsistencyScanMemoryState memState(dbInfo, csInterf.id());
 
 	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
-	state Future<Void> core = consistencyScanCore(db, &memState, ConsistencyScanState(), csInterf.id());
+	state Future<Void> core = consistencyScanCore(db, &memState, ConsistencyScanState());
 
 	// Randomly enable consistencyScan in simulation
 	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
@@ -607,7 +619,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 			wait(enableConsistencyScanInSim(db, csInterf.id()));
 		}
 		// even if we don't enable it, if a previous incarnation did, we still need to disable it
-		actors.add(disableConsistencyScanInSim(db, &memState, csInterf.id()));
+		actors.add(disableConsistencyScanInSim(db, &memState));
 	}
 
 	loop {
