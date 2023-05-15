@@ -812,6 +812,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					TraceEvent("RebootProcessAndSwitchLateReboot").detail("Address", process->address);
 					g_simulator->switchCluster(process->address);
 					process->shutdownSignal.send(ISimulator::KillType::RebootProcessAndSwitch);
+					// Need to set the rebooting flag to true to keep the same behavior as MachineAttrition
+					// Otherwise, a protected process, like a coordinator process can execute this code path but the
+					// rebooting flag is still false, which breaks the assertion in g_simulator->destroyProcess
+					process->rebooting = true;
 				}
 				wait(waitForAny(futures));
 			} catch (Error& e) {
