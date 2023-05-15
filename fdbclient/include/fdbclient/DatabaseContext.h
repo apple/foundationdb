@@ -420,7 +420,8 @@ public:
 	                                                                Optional<Reference<Tenant>> tenant = {});
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
-	                                Optional<Reference<Tenant>> tenant = {});
+	                                Optional<Reference<Tenant>> tenant = {},
+	                                UseRawAccess = UseRawAccess::False);
 	Future<bool> flushBlobRange(const KeyRange& range,
 	                            bool compact,
 	                            Optional<Version> version,

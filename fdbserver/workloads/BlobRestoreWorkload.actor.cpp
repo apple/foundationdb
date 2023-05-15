@@ -182,6 +182,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			state Standalone<VectorRef<KeyValueRef>> rows;
 			loop {
 				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					GetRangeLimits limits(self->readBatchSize_);
 					limits.minRows = 0;
 					state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
@@ -221,6 +222,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			state KeyRangeRef range = range_;
 			loop {
 				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 					    wait(tr.readBlobGranules(range, 0, readVersion));
 					state int i;

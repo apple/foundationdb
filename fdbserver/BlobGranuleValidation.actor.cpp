@@ -195,6 +195,7 @@ ACTOR Future<Void> clearAndAwaitMerge(Database cx, KeyRange range) {
 	state int reClearInterval = 1; // do quadratic backoff on clear rate, b/c large keys can keep it not write-cold
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			Standalone<VectorRef<KeyRangeRef>> ranges = wait(tr.getBlobGranuleRanges(range, 2));
 			if (ranges.size() == 1) {
 				return Void();
@@ -354,7 +355,7 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 
 	// verify range first to make sure it's active
 	loop {
-		Version v = wait(cx->verifyBlobRange(range, {}, {}));
+		Version v = wait(cx->verifyBlobRange(range, {}, {}, UseRawAccess::True));
 		if (v != invalidVersion) {
 			TraceEvent("ValidateForceFlushVerified").detail("Range", range).detail("Version", v);
 			break;
@@ -537,6 +538,7 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 	state Transaction tr(cx);
 	loop {
 		try {
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			// get set of current granules. if different than last set of granules
 			state Standalone<VectorRef<KeyRangeRef>> granules = wait(tr.getBlobGranuleRanges(normalKeys, 10000));
 			state std::vector<std::pair<Key, KeyRange>> activeFeeds = wait(getActiveFeeds(&tr));

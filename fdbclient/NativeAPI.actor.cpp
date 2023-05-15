@@ -8530,7 +8530,8 @@ ACTOR Future<Version> setPerpetualStorageWiggle(Database cx, bool enable, LockAw
 ACTOR Future<Version> checkBlobSubrange(Database db,
                                         Optional<Reference<Tenant>> tenant,
                                         KeyRange keyRange,
-                                        Optional<Version> version) {
+                                        Optional<Version> version,
+                                        UseRawAccess useRawAccess) {
 	state Transaction tr(db, tenant);
 	state Optional<Version> summaryVersion;
 	if (version.present()) {
@@ -8538,6 +8539,9 @@ ACTOR Future<Version> checkBlobSubrange(Database db,
 	}
 	loop {
 		try {
+			if (useRawAccess) {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+			}
 			if (!summaryVersion.present()) {
 				// fill summary version at the start, so that retries use the same version
 				Version summaryVersion_ = wait(tr.getReadVersion());
@@ -8556,7 +8560,8 @@ ACTOR Future<Version> checkBlobSubrange(Database db,
 ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
                                            KeyRange range,
                                            Optional<Version> version,
-                                           Optional<Reference<Tenant>> tenant) {
+                                           Optional<Reference<Tenant>> tenant,
+                                           UseRawAccess useRawAccess) {
 	state Database db(cx);
 	state Transaction tr(db, tenant);
 	state Standalone<VectorRef<KeyRangeRef>> allRanges;
@@ -8569,6 +8574,9 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 		if (version.get() == latestVersion) {
 			loop {
 				try {
+					if (useRawAccess) {
+						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					}
 					Version _version = wait(tr.getReadVersion());
 					version = _version;
 					break;
@@ -8593,6 +8601,9 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 		}
 		loop {
 			try {
+				if (useRawAccess) {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+				}
 				wait(store(allRanges, tr.getBlobGranuleRanges(KeyRangeRef(curRegion.begin, range.end), loadSize)));
 				break;
 			} catch (Error& e) {
@@ -8619,13 +8630,13 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 			batchCount++;
 
 			if (batchCount == batchSize) {
-				checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version));
+				checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version, useRawAccess));
 				batchCount = 0;
 				curRegion = KeyRangeRef(curRegion.end, curRegion.end);
 			}
 		}
 		if (!curRegion.empty()) {
-			checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version));
+			checkParts.push_back(checkBlobSubrange(db, tenant, curRegion, version, useRawAccess));
 		}
 
 		try {
@@ -8644,8 +8655,9 @@ ACTOR Future<Version> verifyBlobRangeActor(Reference<DatabaseContext> cx,
 
 Future<Version> DatabaseContext::verifyBlobRange(const KeyRange& range,
                                                  Optional<Version> version,
-                                                 Optional<Reference<Tenant>> tenant) {
-	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenant);
+                                                 Optional<Reference<Tenant>> tenant,
+                                                 UseRawAccess useRawAccess) {
+	return verifyBlobRangeActor(Reference<DatabaseContext>::addRef(this), range, version, tenant, useRawAccess);
 }
 
 ACTOR Future<bool> flushBlobRangeActor(Reference<DatabaseContext> cx,
