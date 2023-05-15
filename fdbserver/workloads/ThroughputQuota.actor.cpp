@@ -25,20 +25,40 @@
 
 // This workload sets the throughput quota of a tag during the setup phase
 class ThroughputQuotaWorkload : public TestWorkload {
-	TransactionTag transactionTag;
+	bool nameRepresentsTenantGroup{ false };
+	Standalone<StringRef> name;
 	int64_t reservedQuota{ 0 };
 	int64_t totalQuota{ 0 };
+
+	void setTagQuota(Reference<ReadYourWritesTransaction> tr) {
+		TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
+		    .detail("Tag", printable(name))
+		    .detail("ReservedQuota", reservedQuota)
+		    .detail("TotalQuota", totalQuota);
+		ThrottleApi::setTagQuota(tr, name, reservedQuota, totalQuota);
+	}
+
+	void setTenantGroupQuota(Reference<ReadYourWritesTransaction> tr) {
+		TraceEvent("ThroughputQuotaWorkload_SettingTenantGruopQuota")
+		    .detail("TenantGroup", printable(name))
+		    .detail("ReservedQuota", reservedQuota)
+		    .detail("TotalQuota", totalQuota);
+		ThrottleApi::TagQuotaValue tagQuotaValue;
+		tagQuotaValue.reservedQuota = reservedQuota;
+		tagQuotaValue.totalQuota = totalQuota;
+		TenantMetadata::throughputQuota().set(tr, name, tagQuotaValue);
+	}
 
 	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				TraceEvent("ThroughputQuotaWorkload_SettingTagQuota")
-				    .detail("Tag", printable(self->transactionTag))
-				    .detail("ReservedQuota", self->reservedQuota)
-				    .detail("TotalQuota", self->totalQuota);
-				ThrottleApi::setTagQuota(tr, self->transactionTag, self->reservedQuota, self->totalQuota);
+				if (self->nameRepresentsTenantGroup) {
+					self->setTenantGroupQuota(tr);
+				} else {
+					self->setTagQuota(tr);
+				}
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {
@@ -51,7 +71,8 @@ class ThroughputQuotaWorkload : public TestWorkload {
 public:
 	static constexpr auto NAME = "ThroughputQuota";
 	explicit ThroughputQuotaWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		transactionTag = getOption(options, "transactionTag"_sr, "sampleTag"_sr);
+		nameRepresentsTenantGroup = getOption(options, "nameRepresentsTenantGroup"_sr, false);
+		name = getOption(options, "name"_sr, nameRepresentsTenantGroup ? "sampleTenantGroup"_sr : "sampleTag"_sr);
 		reservedQuota = getOption(options, "reservedQuota"_sr, 0.0);
 		totalQuota = getOption(options, "totalQuota"_sr, 0.0);
 	}

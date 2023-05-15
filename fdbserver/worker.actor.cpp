@@ -2877,7 +2877,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.getStorageServerRejoinInfo);
 				DUMPTOKEN(recruited.waitFailure);
 				DUMPTOKEN(recruited.txnState);
-				DUMPTOKEN(recruited.getTenantId);
+				DUMPTOKEN(recruited.tenantLookup);
 
 				errorForwarders.add(zombie(recruited,
 				                           forwardError(errors,
