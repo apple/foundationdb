@@ -5811,7 +5811,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(backupManifest(self));
 		self->addActor.send(truncateMutationLogs(self));
 
-		if (!BUGGIFY && !self->isFullRestoreMode) {
+		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED && !self->isFullRestoreMode) {
 			self->addActor.send(bgConsistencyCheck(self));
 		}
 		if (BUGGIFY && !self->isFullRestoreMode) {
