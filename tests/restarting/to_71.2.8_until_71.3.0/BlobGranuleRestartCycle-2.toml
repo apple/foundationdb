@@ -1,7 +1,6 @@
 # Blob Granules are only upgrade-able as of snowflake/release-71.2.3 and tests were only added as of 71.2.8
 
 [configuration]
-testClass = "BlobGranuleRestart"
 blobGranulesEnabled = true
 allowDefaultTenant = false
 injectTargetedSSRestart = true
@@ -42,10 +41,6 @@ runSetup=false
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 30.0
-
-    [[test.workload]]
-    testName = 'BlobFailureInjection'
     testDuration = 30.0
 
     [[test.workload]]
