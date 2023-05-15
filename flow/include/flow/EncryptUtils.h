@@ -43,6 +43,8 @@ using EncryptCipherBaseKeyId = uint64_t;
 using EncryptCipherRandomSalt = uint64_t;
 using EncryptCipherKeyCheckValue = uint32_t;
 
+using EncryptCipherDomainIdVec = std::vector<EncryptCipherDomainId>;
+
 constexpr const int MAX_BASE_CIPHER_LEN = EVP_MAX_KEY_LENGTH - sizeof(EncryptCipherRandomSalt);
 
 constexpr const EncryptCipherDomainId INVALID_ENCRYPT_DOMAIN_ID = -1;

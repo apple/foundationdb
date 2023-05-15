@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'RESTSimKmsVaultTest'
+useDB = false
+startDelay = 0
+
+    [[test.workload]]
+    testName = 'UnitTests'
+    testsMatching = '/restSimKmsVault/'
