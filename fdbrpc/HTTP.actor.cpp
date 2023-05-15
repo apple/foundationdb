@@ -97,20 +97,24 @@ std::string ResponseBase<T>::getCodeDescription() {
 	}
 }
 
+std::string computeMD5Sum(std::string content) {
+	MD5_CTX sum;
+	::MD5_Init(&sum);
+	::MD5_Update(&sum, content.data(), content.size());
+	std::string sumBytes;
+	sumBytes.resize(16);
+	::MD5_Final((unsigned char*)sumBytes.data(), &sum);
+	std::string sumStr = base64::encoder::from_string(sumBytes);
+	sumStr.resize(sumStr.size() - 1);
+	return sumStr;
+}
+
 bool verifyMD5(HTTPData<std::string>* data, bool fail_if_header_missing, Optional<std::string> content_sum) {
 	auto i = data->headers.find("Content-MD5");
 	if (i != data->headers.end()) {
 		// If a content sum is not provided, calculate one from the response content
 		if (!content_sum.present()) {
-			MD5_CTX sum;
-			::MD5_Init(&sum);
-			::MD5_Update(&sum, data->content.data(), data->content.size());
-			std::string sumBytes;
-			sumBytes.resize(16);
-			::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-			std::string sumStr = base64::encoder::from_string(sumBytes);
-			sumStr.resize(sumStr.size() - 1);
-			content_sum = sumStr;
+			content_sum = computeMD5Sum(data->content);
 		}
 		return i->second == content_sum.get();
 	}

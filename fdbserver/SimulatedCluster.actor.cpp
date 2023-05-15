@@ -434,7 +434,7 @@ public:
 	Optional<std::string> config;
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
-	bool simHTTPServerEnabled = false; // TODO default to true
+	bool simHTTPServerEnabled = true;
 
 	bool allowDefaultTenant = true;
 	bool allowCreatingTenants = true;
@@ -648,14 +648,16 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 }
 
 ACTOR Future<Void> runSimHTTPServer() {
+	TraceEvent("SimHTTPServerStarting");
 	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
 		wait(context->actors.getResult());
 	} catch (Error& e) {
-		TraceEvent(SevError, "SimHTTPServerDied").error(e);
+		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
 		context->stop();
+		g_simulator->removeSimHTTPProcess();
 		throw e;
 	}
 	throw internal_error();
@@ -798,7 +800,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					futures.push_back(runDr(connRecord));
 				}
 				if (processRunHTTPServer(processMode)) {
-					fmt::print("Process run http server\n");
+					fmt::print("Process {0} run http server\n", ip.toString());
 					futures.push_back(runSimHTTPServer());
 				}
 
@@ -1010,8 +1012,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
 				platform::createDirectory(myFolders[i]);
 
-				if (!useSeedFile)
+				if (!useSeedFile) {
 					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+				}
 			}
 		}
 
@@ -1019,12 +1022,21 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
-				                : new ClusterConnectionFile(path));
-				const int listenPort = i * listenPerProcess + 1;
 				ProcessMode ipProcessMode =
 				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;
+
+				// for some reason http servers are having issues with seed files which doesn't matter because they
+				// don't use the db
+				Reference<IClusterConnectionRecord> clusterFile;
+				if (ipProcessMode != SimHTTPServer) {
+					// Fall back to use seed string if fdb.cluster not present
+					// It can happen when a process failed before it persisted the connection string to disk
+					clusterFile = Reference<IClusterConnectionRecord>(
+					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
+					                                     : new ClusterConnectionFile(path));
+				}
+				const int listenPort = i * listenPerProcess + 1;
+
 				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
@@ -1429,7 +1441,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     baseFolder,
 			                     true,
 			                     i == useSeedForMachine,
-			                     FDBDAndBackupAgent,
+			                     processClass == ProcessClass::SimHTTPServerClass ? SimHTTPServer : FDBDAndBackupAgent,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
@@ -2428,9 +2440,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
 		if (testConfig.simHTTPServerEnabled) {
-			// FIXME: more eventually?
-			fmt::print("sim http machines = 1\n");
-			simHTTPMachines = 1;
+			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
+			fmt::print("sim http machines = {0}\n", simHTTPMachines);
 		}
 
 		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
