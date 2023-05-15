@@ -2174,7 +2174,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 	state UID serverId = ssi.uniqueID;
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
-	TraceEvent(SevInfo, "DDMakeAuditProgressOnServerBegin", self->ddId)
+	TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerBegin", self->ddId)
 	    .detail("ServerID", serverId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", auditType);
@@ -2191,7 +2191,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 			               self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange)));
 			ASSERT(!auditStates.empty());
 			begin = auditStates.back().range.end;
-			TraceEvent(SevInfo, "DDMakeAuditProgressOnServerDispatch", self->ddId)
+			TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerDispatch", self->ddId)
 			    .detail("ServerID", serverId)
 			    .detail("AuditID", audit->coreState.id)
 			    .detail("CurrentRange", currentRange)
@@ -2230,7 +2230,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 			}
 			wait(delay(0.1));
 		}
-		TraceEvent(SevInfo, "DDMakeAuditProgressOnServerEnd", self->ddId)
+		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerEnd", self->ddId)
 		    .detail("ServerID", serverId)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
@@ -2239,7 +2239,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 
 	} catch (Error& e) {
-		TraceEvent(SevWarn, "DDMakeAuditProgressOnServerError", self->ddId)
+		TraceEvent(SevWarn, "DDScheduleAuditStorageShardOnServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
