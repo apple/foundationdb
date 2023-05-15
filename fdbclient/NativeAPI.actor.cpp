@@ -2404,7 +2404,7 @@ Database Database::createDatabase(std::string connFileName,
 
 Database Database::createSimulatedExtraDatabase(std::string connectionString, Optional<TenantName> defaultTenant) {
 	auto extraFile = makeReference<ClusterConnectionMemoryRecord>(ClusterConnectionString(connectionString));
-	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION);
+	Database db = Database::createDatabase(extraFile, ApiVersion::LATEST_VERSION, IsInternal::False);
 	db->defaultTenant = defaultTenant;
 	return db;
 }
