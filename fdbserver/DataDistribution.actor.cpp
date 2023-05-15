@@ -745,10 +745,9 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
-ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
-                                             std::shared_ptr<DDAudit> audit,
-                                             KeyRange range,
-                                             StorageServerInterface ssi);
+ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
+                                                     std::shared_ptr<DDAudit> audit,
+                                                     StorageServerInterface ssi);
 ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range);
@@ -2149,7 +2148,7 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 					ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
 				}
 			}
-			audit->actors.add(makeAuditProgressOnServer(self, audit, allKeys, targetServer));
+			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, targetServer));
 			wait(delay(0.1));
 		}
 		TraceEvent(SevInfo, "DDDispatchAuditStorageServerShardEnd", self->ddId)
@@ -2167,27 +2166,26 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 	return Void();
 }
 
-// Schedule audit task on the input storage server (ssi)
-ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
-                                             std::shared_ptr<DDAudit> audit,
-                                             KeyRange range,
-                                             StorageServerInterface ssi) {
+// Schedule audit ssshard task on the input storage server (ssi)
+// Do audit on allKeys
+ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
+                                                     std::shared_ptr<DDAudit> audit,
+                                                     StorageServerInterface ssi) {
 	state UID serverId = ssi.uniqueID;
 	state const AuditType auditType = audit->coreState.getType();
 	ASSERT(auditType == AuditType::ValidateStorageServerShard);
 	TraceEvent(SevInfo, "DDMakeAuditProgressOnServerBegin", self->ddId)
 	    .detail("ServerID", serverId)
 	    .detail("AuditID", audit->coreState.id)
-	    .detail("Range", range)
 	    .detail("AuditType", auditType);
-	state Key begin = range.begin;
-	state KeyRange currentRange = range;
+	state Key begin = allKeys.begin;
+	state KeyRange currentRange = allKeys;
 	state int64_t completedCount = 0;
 	state int64_t totalCount = 0;
 	state std::vector<AuditStorageState> auditStates;
 	try {
-		while (begin < range.end) {
-			currentRange = KeyRangeRef(begin, range.end);
+		while (begin < allKeys.end) {
+			currentRange = KeyRangeRef(begin, allKeys.end);
 			wait(store(auditStates,
 			           getAuditStateByServer(
 			               self->txnProcessor->context(), auditType, audit->coreState.id, serverId, currentRange)));
@@ -2199,7 +2197,7 @@ ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
 			    .detail("CurrentRange", currentRange)
 			    .detail("AuditType", auditType)
 			    .detail("NextBegin", begin)
-			    .detail("RangeEnd", range.end);
+			    .detail("RangeEnd", allKeys.end);
 			state int i = 0;
 			for (; i < auditStates.size(); i++) {
 				state AuditPhase phase = auditStates[i].getPhase();
@@ -2235,7 +2233,6 @@ ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
 		TraceEvent(SevInfo, "DDMakeAuditProgressOnServerEnd", self->ddId)
 		    .detail("ServerID", serverId)
 		    .detail("AuditID", audit->coreState.id)
-		    .detail("Range", range)
 		    .detail("AuditType", auditType)
 		    .detail("TotalRanges", totalCount)
 		    .detail("TotalComplete", completedCount)
@@ -2252,7 +2249,7 @@ ACTOR Future<Void> makeAuditProgressOnServer(Reference<DataDistributor> self,
 	return Void();
 }
 
-// This function is for ha, replica, and locationmetadata
+// This function is for ha/replica/locationmetadata audits
 // Schedule audit task on the input range
 ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
@@ -2325,7 +2322,7 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 }
 
 // Partition the input range into multiple subranges according to the range ownership, and
-// schedule audit tasks of each subrange on the server which owns the subrange
+// schedule ha/replica/locationmetadata audit tasks of each subrange on the server which owns the subrange
 ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
                                         std::shared_ptr<DDAudit> audit,
                                         KeyRange range) {
