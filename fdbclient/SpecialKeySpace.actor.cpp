@@ -137,6 +137,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	// Throw error if module doesn't support tenants and we have a tenant
 	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		CODE_PROBE(true, "Illegal tenant access to special keys module");
 		throw illegal_tenant_access();
 	}
 
@@ -372,6 +373,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				continue;
 			}
 			if (!iter->value()->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant access to special keys module");
 				throw illegal_tenant_access();
 			}
 		}
@@ -503,6 +505,7 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		throw special_keys_no_write_module_found();
 	}
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant write to special keys module");
 		throw illegal_tenant_access();
 	}
 	return impl->set(ryw, key, value);
@@ -523,6 +526,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		throw special_keys_no_write_module_found();
 	}
 	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear range to special keys module");
 		throw illegal_tenant_access();
 	}
 	return begin->clear(ryw, range);
@@ -535,6 +539,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear to special keys module", probe::decoration::rare);
 		throw illegal_tenant_access();
 	}
 	return impl->clear(ryw, key);
@@ -629,6 +634,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	if (ryw->getTenant().present()) {
 		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 			if (!(*it)->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant commit to special keys module", probe::decoration::rare);
 				throw illegal_tenant_access();
 			}
 		}

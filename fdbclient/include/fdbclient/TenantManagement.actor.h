@@ -115,8 +115,10 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 	if (actualClusterType != expectedClusterType) {
+		CODE_PROBE(true, "Attempting tenant operation on wrong cluster type");
 		throw invalid_metacluster_operation();
 	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
+		CODE_PROBE(true, "Attempting tenant operation on cluster with tenants disabled", probe::decoration::rare);
 		throw tenants_disabled();
 	}
 
@@ -141,10 +143,12 @@ Future<bool> checkTombstone(Transaction tr, int64_t id) {
 	// with an error.
 	Optional<TenantTombstoneCleanupData> tombstoneCleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
 	if (tombstoneCleanupData.present() && tombstoneCleanupData.get().tombstonesErasedThrough >= id) {
+		CODE_PROBE(true, "Tenant creation permanently failed");
 		throw tenant_creation_permanently_failed();
 	}
 
 	state bool hasTombstone = wait(tombstoneFuture);
+
 	return hasTombstone;
 }
 
@@ -157,9 +161,11 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 	ASSERT(tenantEntry.id >= 0);
 
 	if (tenantEntry.tenantName.startsWith("\xff"_sr)) {
+		CODE_PROBE(true, "Invalid tenant name");
 		throw invalid_tenant_name();
 	}
 	if (tenantEntry.tenantGroup.present() && tenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+		CODE_PROBE(true, "Invalid tenant group name");
 		throw invalid_tenant_group_name();
 	}
 
@@ -177,11 +183,13 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 	wait(tenantModeCheck);
 	Optional<TenantMapEntry> existingEntry = wait(existingEntryFuture);
 	if (existingEntry.present()) {
+		CODE_PROBE(true, "Create tenant already exists");
 		return std::make_pair(existingEntry.get(), false);
 	}
 
 	state bool hasTombstone = wait(tombstoneFuture);
 	if (hasTombstone) {
+		CODE_PROBE(hasTombstone, "Tenant creation blocked by tombstone");
 		return std::make_pair(Optional<TenantMapEntry>(), false);
 	}
 
@@ -190,6 +198,7 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 
 	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
+		CODE_PROBE(hasTombstone, "Tenant creation conflict with existing data", probe::decoration::rare);
 		throw tenant_prefix_allocator_conflict();
 	}
 
@@ -215,6 +224,7 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 	// tenants in the same transaction are properly reflected.
 	int64_t tenantCount = wait(TenantMetadata::tenantCount().getD(tr, Snapshot::False, 0));
 	if (tenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+		CODE_PROBE(true, "Tenant creation would exceed cluster capacity");
 		throw cluster_no_capacity();
 	}
 
@@ -248,6 +258,8 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 	state bool checkExistence = clusterType != ClusterType::METACLUSTER_DATA;
 	state bool generateTenantId = tenantEntry.id < 0;
+
+	CODE_PROBE(generateTenantId, "Create tenant with generated ID");
 
 	ASSERT(clusterType == ClusterType::STANDALONE || !generateTenantId);
 
@@ -295,6 +307,7 @@ Future<Optional<TenantMapEntry>> createTenant(Reference<DB> db,
 
 			return newTenant.first;
 		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_commit_unknown_result, "Create tenant maybe committed");
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -313,6 +326,7 @@ Future<Void> markTenantTombstones(Transaction tr, int64_t tenantId) {
 		state int64_t deleteThroughId = cleanupData.present() ? cleanupData.get().nextTombstoneEraseId : -1;
 		// Delete all tombstones up through the one currently marked in the cleanup data
 		if (deleteThroughId >= 0) {
+			CODE_PROBE(true, "Deleting tenant tombstones");
 			TenantMetadata::tenantTombstones().erase(tr, 0, deleteThroughId + 1);
 		}
 
@@ -366,6 +380,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 		RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 		if (!contents.empty()) {
+			CODE_PROBE(true, "Attempt deletion of non-empty tenant");
 			throw tenant_not_empty();
 		}
 
@@ -386,9 +401,12 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 			        2));
 			if (tenantsInGroup.results.empty() ||
 			    (tenantsInGroup.results.size() == 1 && tenantsInGroup.results[0].getInt(2) == tenantId)) {
+				CODE_PROBE(true, "Deleting tenant results in empty group");
 				TenantMetadata::tenantGroupMap().erase(tr, tenantEntry.get().tenantGroup.get());
 			}
 		}
+	} else {
+		CODE_PROBE(true, "Delete non-existent tenant");
 	}
 
 	if (clusterType == ClusterType::METACLUSTER_DATA) {
@@ -416,6 +434,8 @@ Future<Void> deleteTenant(Reference<DB> db,
 			if (checkExistence) {
 				Optional<int64_t> actualId = wait(TenantMetadata::tenantNameIndex().get(tr, name));
 				if (!actualId.present() || (tenantId.present() && tenantId != actualId)) {
+					CODE_PROBE(!actualId.present(), "Delete non-existing tenant");
+					CODE_PROBE(actualId.present(), "Delete tenant with incorrect ID", probe::decoration::rare);
 					throw tenant_not_found();
 				}
 
@@ -432,6 +452,7 @@ Future<Void> deleteTenant(Reference<DB> db,
 			    .detail("Version", tr->getCommittedVersion());
 			return Void();
 		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_commit_unknown_result, "Delete tenant maybe committed");
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}
@@ -453,9 +474,11 @@ Future<Void> configureTenantTransaction(Transaction tr,
 	// If the tenant group was changed, we need to update the tenant group metadata structures
 	if (originalEntry.tenantGroup != updatedTenantEntry.tenantGroup) {
 		if (updatedTenantEntry.tenantGroup.present() && updatedTenantEntry.tenantGroup.get().startsWith("\xff"_sr)) {
+			CODE_PROBE(true, "Configure with invalid group name");
 			throw invalid_tenant_group_name();
 		}
 		if (originalEntry.tenantGroup.present()) {
+			CODE_PROBE(true, "Change tenant group of tenant already in group");
 			// Remove this tenant from the original tenant group index
 			TenantMetadata::tenantGroupTenantIndex().erase(
 			    tr, Tuple::makeTuple(originalEntry.tenantGroup.get(), originalEntry.tenantName, updatedTenantEntry.id));
@@ -469,6 +492,7 @@ Future<Void> configureTenantTransaction(Transaction tr,
 
 			if (tenants.results.empty() ||
 			    (tenants.results.size() == 1 && tenants.results[0].getInt(2) == updatedTenantEntry.id)) {
+				CODE_PROBE(true, "Changing tenant group results in empty group");
 				TenantMetadata::tenantGroupMap().erase(tr, originalEntry.tenantGroup.get());
 			}
 		}
@@ -477,7 +501,10 @@ Future<Void> configureTenantTransaction(Transaction tr,
 			Optional<TenantGroupEntry> entry =
 			    wait(TenantMetadata::tenantGroupMap().get(tr, updatedTenantEntry.tenantGroup.get()));
 			if (!entry.present()) {
+				CODE_PROBE(true, "Change tenant group to a new group");
 				TenantMetadata::tenantGroupMap().set(tr, updatedTenantEntry.tenantGroup.get(), TenantGroupEntry());
+			} else {
+				CODE_PROBE(true, "Change tenant group to an existing group");
 			}
 
 			// Insert this tenant in the tenant group index
@@ -497,10 +524,12 @@ Future<Void> configureTenantTransaction(Transaction tr,
 template <class TenantMapEntryT>
 bool checkLockState(TenantMapEntryT entry, TenantLockState desiredLockState, UID lockId) {
 	if (entry.tenantLockId == lockId && entry.tenantLockState == desiredLockState) {
+		CODE_PROBE(true, "Attempting lock change to same state");
 		return true;
 	}
 
 	if (entry.tenantLockId.present() && entry.tenantLockId.get() != lockId) {
+		CODE_PROBE(true, "Attempting invalid lock change");
 		throw tenant_locked();
 	}
 
@@ -634,6 +663,7 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	if (!tenantId.present()) {
 		wait(store(tenantId, oldNameIdFuture));
 		if (!tenantId.present()) {
+			CODE_PROBE(true, "Tenant rename transaction tenant not found");
 			throw tenant_not_found();
 		}
 	}
@@ -641,14 +671,17 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	state TenantMapEntry entry = wait(getTenantTransaction(tr, tenantId.get()));
 	Optional<int64_t> newNameId = wait(newNameIdFuture);
 	if (entry.tenantName != oldName) {
+		CODE_PROBE(true, "Tenant rename transaction ID/name mismatch");
 		throw tenant_not_found();
 	}
 	if (newNameId.present()) {
+		CODE_PROBE(true, "Tenant rename transaction new name already exists");
 		throw tenant_already_exists();
 	}
 
 	if (configureSequenceNum.present()) {
 		if (entry.configurationSequenceNum > configureSequenceNum.get()) {
+			CODE_PROBE(true, "Tenant rename transaction already applied", probe::decoration::rare);
 			return Void();
 		}
 		entry.configurationSequenceNum = configureSequenceNum.get();
@@ -661,6 +694,7 @@ Future<Void> renameTenantTransaction(Transaction tr,
 	TenantMetadata::tenantNameIndex().erase(tr, oldName);
 
 	if (entry.tenantGroup.present()) {
+		CODE_PROBE(true, "Tenant rename transaction inside group");
 		TenantMetadata::tenantGroupTenantIndex().erase(
 		    tr, Tuple::makeTuple(entry.tenantGroup.get(), oldName, tenantId.get()));
 		TenantMetadata::tenantGroupTenantIndex().insert(
@@ -692,6 +726,7 @@ Future<Void> renameTenant(Reference<DB> db,
 			if (!tenantId.present()) {
 				wait(store(tenantId, TenantMetadata::tenantNameIndex().get(tr, oldName)));
 				if (!tenantId.present()) {
+					CODE_PROBE(true, "Tenant rename tenant not found");
 					throw tenant_not_found();
 				}
 			}
@@ -702,10 +737,13 @@ Future<Void> renameTenant(Reference<DB> db,
 
 			if (!firstTry && entry.tenantName == newName) {
 				// On a retry, the rename may have already occurred
+				CODE_PROBE(true, "Tenant rename retried and already succeeded");
 				return Void();
 			} else if (entry.tenantName != oldName) {
+				CODE_PROBE(true, "Tenant rename ID/name mismatch");
 				throw tenant_not_found();
 			} else if (newNameId.present() && newNameId.get() != tenantId.get()) {
+				CODE_PROBE(true, "Tenant rename new name already exists");
 				throw tenant_already_exists();
 			}
 

@@ -37,12 +37,14 @@ namespace metacluster {
 
 template <class Transaction>
 Future<Optional<MetaclusterTenantMapEntry>> tryGetTenantTransaction(Transaction tr, int64_t tenantId) {
+	CODE_PROBE(true, "Try get tenant by ID");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	return metadata::management::tenantMetadata().tenantMap.get(tr, tenantId);
 }
 
 ACTOR template <class Transaction>
 Future<Optional<MetaclusterTenantMapEntry>> tryGetTenantTransaction(Transaction tr, TenantName name) {
+	CODE_PROBE(true, "Try get tenant by name");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	Optional<int64_t> tenantId = wait(metadata::management::tenantMetadata().tenantNameIndex.get(tr, name));
 	if (tenantId.present()) {

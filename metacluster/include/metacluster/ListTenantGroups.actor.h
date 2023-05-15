@@ -38,6 +38,7 @@ namespace metacluster {
 ACTOR template <class Transaction>
 Future<std::vector<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>>>
 listTenantGroupsTransaction(Transaction tr, TenantGroupName begin, TenantGroupName end, int limit) {
+	CODE_PROBE(true, "List tenant groups");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 	KeyBackedRangeResult<std::pair<TenantGroupName, MetaclusterTenantGroupEntry>> results =

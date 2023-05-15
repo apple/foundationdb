@@ -285,7 +285,11 @@ struct ProxyCommitData {
 		return false;
 	}
 
-	TenantMode getTenantMode() const { return db->get().client.tenantMode; }
+	TenantMode getTenantMode() const {
+		CODE_PROBE(db->get().client.grvProxies.empty() || db->get().client.grvProxies[0].provisional,
+		           "Accessing tenant mode in provisional ClientDBInfo");
+		return db->get().client.tenantMode;
+	}
 
 	void updateLatencyBandConfig(Optional<LatencyBandConfig> newLatencyBandConfig) {
 		if (newLatencyBandConfig.present() != latencyBandConfig.present() ||
