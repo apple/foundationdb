@@ -722,7 +722,12 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
-	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
+	TenantMode getTenantMode() const {
+		CODE_PROBE(clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional,
+		           "Accessing tenant mode in provisional ClientDBInfo",
+		           probe::decoration::rare);
+		return clientInfo->get().tenantMode;
+	}
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;

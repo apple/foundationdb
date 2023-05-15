@@ -115,6 +115,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			int64_t newPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 			                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
 			if (allowTenantIdPrefixReuse || !usedPrefixes.count(newPrefix)) {
+				CODE_PROBE(usedPrefixes.count(newPrefix), "Reusing tenant ID prefix", probe::decoration::rare);
 				return newPrefix;
 			}
 		}
@@ -189,6 +190,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		bool dataValid = !dataDb.present() || (dataDb.get()->version >= MetaclusterVersion::MIN_SUPPORTED &&
 		                                       dataDb.get()->version <= MetaclusterVersion::MAX_SUPPORTED);
 
+		CODE_PROBE(!managementValid, "Management cluster invalid version");
+		CODE_PROBE(!dataValid, "Data cluster invalid version");
 		return managementValid && dataValid;
 	}
 
@@ -573,6 +576,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			}
 		}
 
+		CODE_PROBE(foundTenantCollision, "Resolved tenant collision for restore", probe::decoration::rare);
+		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore");
 		return foundTenantCollision || foundGroupCollision;
 	}
 
@@ -664,6 +669,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						ASSERT(self->allowTenantIdPrefixReuse);
 						ASSERT(!messages.empty());
 						ASSERT(messages[0].find("has the same ID"));
+						CODE_PROBE(true, "Reused tenant ID", probe::decoration::rare);
 						return Void();
 					}
 				} else if (error.code() == error_code_invalid_metacluster_configuration) {

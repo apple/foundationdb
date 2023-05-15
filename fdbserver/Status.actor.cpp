@@ -3386,6 +3386,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 					tenants["tenant_group_capacity"] = metaclusterMetrics.tenantGroupCapacity;
 					tenants["tenant_groups_allocated"] = metaclusterMetrics.tenantGroupsAllocated;
 				} else {
+					CODE_PROBE(true, "Failed to fetch metacluster metrics", probe::decoration::rare);
 					messages.push_back(JsonString::makeMessage(
 					    "metacluster_metrics_missing",
 					    fmt::format("Failed to fetch metacluster metrics: {}.", metaclusterMetrics.error.get())

@@ -192,7 +192,7 @@ struct TenantManagementWorkload : TestWorkload {
 		});
 	}
 
-	// load test parameters from meta-cluster
+	// load test parameters from metacluster
 	ACTOR static Future<Void> loadTestParameters(Database cx, TenantManagementWorkload* self) {
 		state Transaction tr(cx);
 		// Read the parameters chosen and saved by client 0
@@ -1073,6 +1073,7 @@ struct TenantManagementWorkload : TestWorkload {
 				// A non-empty tenant should have our single key. The value of that key should be the name of the
 				// tenant.
 				else {
+					CODE_PROBE(true, "Check tenant contents with data");
 					ASSERT(result.size() == 1);
 					ASSERT(result[0].key == self->keyName);
 					ASSERT(result[0].value == tenantName);
@@ -1270,6 +1271,8 @@ struct TenantManagementWorkload : TestWorkload {
 		// "tenants" exhausted to end. If tenantGroup was specified,
 		// continue iterating localItr until end to verify there are no matches
 		if (tenantGroup.present() && tenants.size() < limit) {
+			CODE_PROBE(localItr != self->createdTenants.end() && localItr->first < endTenant,
+			           "Listed range contained extra tenants not in group");
 			while (localItr != self->createdTenants.end() && localItr->first < endTenant) {
 				ASSERT(localItr->second.tenantGroup != tenantGroup);
 				++localItr;
@@ -1469,6 +1472,8 @@ struct TenantManagementWorkload : TestWorkload {
 				tenantExists = true;
 			}
 		}
+
+		CODE_PROBE(tenantOverlap, "Attempting overlapping tenant renames");
 
 		state Version originalReadVersion = wait(self->getLatestReadVersion(self, operationType));
 		loop {
@@ -1913,8 +1918,10 @@ struct TenantManagementWorkload : TestWorkload {
 				if (readKey) {
 					Optional<Value> val = wait(tr->get(self->keyName));
 					if (val.present()) {
+						CODE_PROBE(true, "Read tenant key has value");
 						ASSERT((keyPresent && val.get() == tName) || (maybeCommitted && writeKey && !clearKey));
 					} else {
+						CODE_PROBE(true, "Read tenant key is empty");
 						ASSERT((tenantPresent && tData.empty) || (maybeCommitted && writeKey && clearKey));
 					}
 
@@ -1928,6 +1935,8 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					wait(tr->commit());
+					CODE_PROBE(clearKey, "Clear tenant key");
+					CODE_PROBE(!clearKey, "Set tenant key");
 
 					ASSERT(lockAware || lockState == TenantAPI::TenantLockState::UNLOCKED);
 					self->createdTenants[tName].empty = clearKey;
@@ -1953,6 +1962,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 				try {
 					maybeCommitted = maybeCommitted || err.code() == error_code_commit_unknown_result;
+					CODE_PROBE(maybeCommitted, "Modify tenant key maybe committed");
 					wait(tr->onError(err));
 				} catch (Error& error) {
 					TraceEvent(SevError, "ReadKeyFailure").errorUnsuppressed(error).detail("TenantName", tenant);
@@ -2219,9 +2229,11 @@ struct TenantManagementWorkload : TestWorkload {
 				    wait(TenantMetadata::tombstoneCleanupData().get(tr));
 
 				if (self->oldestDeletionVersion != 0) {
+					CODE_PROBE(true, "Tenant tombstone oldest deletion version non-zero");
 					ASSERT(tombstoneCleanupData.present());
 					if (self->newestDeletionVersion - self->oldestDeletionVersion >
 					    CLIENT_KNOBS->TENANT_TOMBSTONE_CLEANUP_INTERVAL * CLIENT_KNOBS->VERSIONS_PER_SECOND) {
+						CODE_PROBE(tombstoneCleanupData.get().tombstonesErasedThrough > 0, "Tenant tombstones erased");
 						ASSERT(tombstoneCleanupData.get().tombstonesErasedThrough >= 0);
 					}
 				}
