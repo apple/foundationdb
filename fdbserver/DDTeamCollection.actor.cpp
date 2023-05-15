@@ -294,7 +294,8 @@ public:
 				if (sourceTeam.present()) {
 					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevDebug, "GetTeamReturnSourceTeam", self->distributorId)
-					    .detail("CompleteSources", req.completeSources)
+					    .detail("ReqSources", req.src)
+					    .detail("ReqCompleteSources", req.completeSources)
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
 					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
 					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
