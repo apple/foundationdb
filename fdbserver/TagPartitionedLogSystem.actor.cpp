@@ -3000,6 +3000,13 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	// Should be sorted by decending orders of versions.
 	state std::vector<Version> oldGenerationRecoverAtVersions;
 	for (const auto& oldLogGen : logSystem->oldLogData) {
+		if (oldLogGen.recoverAt <= 0) {
+			// When we have an invalid recover at value, it's possible that the previous generations' recover at is not
+			// properly recorded in cstate. Therefore, we skip tracking old tlog generation recovery.
+			oldGenerationRecoverAtVersions.clear();
+			TraceEvent("DisableTrackingOldGenerationRecovery").log();
+			break;
+		}
 		oldGenerationRecoverAtVersions.push_back(oldLogGen.recoverAt);
 	}
 
