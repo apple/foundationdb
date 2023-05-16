@@ -45,17 +45,17 @@ enum class AuditType : uint8_t {
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	AuditStorageState() : type(0), auditServerId(UID()), phase(0) {}
+	AuditStorageState() : type(0), auditServerId(UID()), phase(0), ddAuditId(UID()) {}
 	AuditStorageState(UID id, UID auditServerId, AuditType type)
-	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0) {}
+	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
 	AuditStorageState(UID id, KeyRange range, AuditType type)
-	  : id(id), auditServerId(UID()), range(range), type(static_cast<uint8_t>(type)), phase(0) {}
+	  : id(id), auditServerId(UID()), range(range), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
 	AuditStorageState(UID id, AuditType type)
-	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0) {}
+	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error);
+		serializer(ar, id, auditServerId, range, type, phase, error, ddAuditId);
 	}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -90,6 +90,7 @@ struct AuditStorageState {
 	}
 
 	UID id;
+	UID ddAuditId;
 	UID auditServerId;
 	KeyRange range;
 	uint8_t type;
@@ -110,10 +111,11 @@ struct AuditStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, type, targetServers, reply);
+		serializer(ar, id, range, type, targetServers, reply, ddAuditId);
 	}
 
 	UID id;
+	UID ddAuditId; // UID of DD who claims the audit
 	KeyRange range;
 	uint8_t type;
 	std::vector<UID> targetServers;

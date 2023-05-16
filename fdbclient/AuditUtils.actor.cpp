@@ -330,6 +330,38 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 	return auditId;
 }
 
+ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			// Persist audit result
+			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
+			wait(tr.commit());
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditState", auditState.id)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
+			break;
+
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditStateError", auditState.id)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> persistAuditState(Database cx,
                                      AuditStorageState auditState,
                                      std::string context,
@@ -458,6 +490,14 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			ASSERT(res_.present());
+			AuditStorageState existState = decodeAuditStorageState(res_.get());
+			ASSERT(existState.ddAuditId.isValid());
+			if (existState.ddAuditId != auditState.ddAuditId) {
+				throw audit_storage_failed(); // give up
+			}
+
 			wait(krmSetRange(&tr,
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
@@ -523,6 +563,14 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			ASSERT(res_.present());
+			AuditStorageState existState = decodeAuditStorageState(res_.get());
+			ASSERT(existState.ddAuditId.isValid());
+			if (existState.ddAuditId != auditState.ddAuditId) {
+				throw audit_storage_failed(); // give up
+			}
+
 			wait(krmSetRange(
 			    &tr,
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),

@@ -1753,6 +1753,12 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 
 	try {
 		ASSERT(audit != nullptr);
+		if (context == "ResumeAudit") {
+			ASSERT(audit->coreState.ddAuditId == self->ddId);
+			wait(updateAuditState(
+			    self->txnProcessor->context(), audit->coreState, lockInfo, self->context->isDDEnabled()));
+		}
+
 		loadAndDispatchAudit(self, audit, audit->coreState.range);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", context)
@@ -1938,6 +1944,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	ASSERT(auditState.id.isValid());
 	ASSERT(!auditState.range.empty());
 	ASSERT(auditState.getPhase() == AuditPhase::Running);
+	auditState.ddAuditId = self->ddId;
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
 	audit->retryCount = retryCount;
 	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
@@ -2225,6 +2232,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 						    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
 					}
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
+					req.ddAuditId = self->ddId;
 					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
 				}
 			}
@@ -2347,6 +2355,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			state int i = 0;
 			for (i = 0; i < rangeLocations.size(); ++i) {
 				state AuditStorageRequest req(audit->coreState.id, rangeLocations[i].range, auditType);
+				req.ddAuditId = self->ddId;
 				state StorageServerInterface targetServer;
 				// Set req.targetServers and targetServer, which will be
 				// used to doAuditOnStorageServer

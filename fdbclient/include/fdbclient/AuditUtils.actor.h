@@ -65,5 +65,6 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              AuditType auditType,
                                              UID maxAuditIdToClear,
                                              int numFinishAuditToKeep);
+ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 #include "flow/unactorcompiler.h"
 #endif
