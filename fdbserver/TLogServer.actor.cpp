@@ -2598,15 +2598,15 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 
 ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
 	loop {
-		Version oldestGenerationStartVersion = MAX_VERSION;
+		Version oldestGenerationRecoverAtVersion = MAX_VERSION;
 		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
-			oldestGenerationStartVersion = std::min(genVersions.back(), oldestGenerationStartVersion);
+			oldestGenerationRecoverAtVersion = std::min(genVersions.back(), oldestGenerationRecoverAtVersion);
 		}
 
-		if (req.oldestGenStartVersion < oldestGenerationStartVersion) {
+		if (req.oldestGenRecoverAtVersion < oldestGenerationRecoverAtVersion) {
 			TraceEvent("TLogRespondRecoveredVersion", tli.id())
-			    .detail("RecoveredVersion", oldestGenerationStartVersion);
-			req.reply.send(TrackTLogRecoveryReply(oldestGenerationStartVersion));
+			    .detail("RecoveredVersion", oldestGenerationRecoverAtVersion);
+			req.reply.send(TrackTLogRecoveryReply(oldestGenerationRecoverAtVersion));
 			break;
 		}
 
@@ -3582,7 +3582,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
 			for (const auto& tag : req.allTags) {
-				logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationStartVersions);
+				logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationRecoverAtVersions);
 			}
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
 			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
@@ -3596,7 +3596,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			    .detail("Tags", describe(req.recoverTags))
 			    .detail("Locality", req.locality)
 			    .detail("LogRouterTags", logData->logRouterTags)
-			    .detail("OldGenerationStartVersions", describe(req.oldGenerationStartVersions));
+			    .detail("oldGenerationRecoverAtVersions", describe(req.oldGenerationRecoverAtVersions));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
