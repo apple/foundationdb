@@ -2506,6 +2506,10 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
 		} else {
+			ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
+			self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
+			ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <=
+			       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 			throw audit_storage_failed();
 		}
 	}
