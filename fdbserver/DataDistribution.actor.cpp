@@ -83,7 +83,7 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
-	  : coreState(coreState), actors(true), foundError(false), anyChildAuditFailed(false), retryCount(0),
+	  : coreState(coreState), actors(true), foundError(false), requestAuditCoreRetry(false), retryCount(0),
 	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0) {}
 
 	AuditStorageState coreState;
@@ -91,7 +91,7 @@ struct DDAudit {
 	Future<Void> auditActor;
 	bool foundError;
 	int retryCount;
-	bool anyChildAuditFailed;
+	bool requestAuditCoreRetry;
 	bool cancelled; // use to cancel any actor beyond auditActor
 	int64_t overallIssuedDoAuditCount;
 	int64_t overallCompleteDoAuditCount;
@@ -1775,8 +1775,8 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 
 		if (audit->foundError) {
 			audit->coreState.setPhase(AuditPhase::Error);
-		} else if (audit->anyChildAuditFailed) {
-			audit->anyChildAuditFailed = false;
+		} else if (audit->requestAuditCoreRetry) {
+			audit->requestAuditCoreRetry = false;
 			throw retry();
 		} else {
 			audit->coreState.setPhase(AuditPhase::Complete);
@@ -2153,7 +2153,7 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		audit->anyChildAuditFailed = true;
+		audit->requestAuditCoreRetry = true;
 	}
 
 	return Void();
@@ -2240,11 +2240,13 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
+		} else if (e.code() == error_code_broken_promise) {
+			audit->requestAuditCoreRetry = true; // ssi is failure, so we need audit core retry
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			audit->retryCount++;
 			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
 		} else {
-			audit->anyChildAuditFailed = true;
+			audit->requestAuditCoreRetry = true;
 		}
 	}
 
@@ -2317,7 +2319,7 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		audit->anyChildAuditFailed = true;
+		audit->requestAuditCoreRetry = true;
 	}
 
 	return Void();
@@ -2444,7 +2446,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			audit->retryCount++;
 			audit->actors.add(scheduleAuditOnRange(self, audit, range));
 		} else {
-			audit->anyChildAuditFailed = true;
+			audit->requestAuditCoreRetry = true;
 		}
 	}
 
@@ -2495,7 +2497,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
-		if (e.code() == error_code_actor_cancelled) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
 			ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
 			self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 			ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <=
