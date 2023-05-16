@@ -148,6 +148,7 @@ struct MetaclusterRegistrationEntryImpl {
 		serializer(ar, clusterType, metaclusterName, name, metaclusterId, id, version);
 		if constexpr (Ar::isDeserializing && Versioned) {
 			if (version < MetaclusterVersion::MIN_SUPPORTED || version > MetaclusterVersion::MAX_SUPPORTED) {
+				CODE_PROBE(true, "Load unsupported metacluster registration");
 				throw unsupported_metacluster_version();
 			}
 		}

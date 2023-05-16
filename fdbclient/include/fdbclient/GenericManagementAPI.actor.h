@@ -499,6 +499,7 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						Optional<MetaclusterRegistrationEntry> metaclusterRegistration =
 						    wait(metacluster::metadata::metaclusterRegistration().get(tr));
 						if (metaclusterRegistration.present()) {
+							CODE_PROBE(true, "Attempt to change tenant mode in a metacluster", probe::decoration::rare);
 							return ConfigurationResult::DATABASE_IS_REGISTERED;
 						}
 					}
