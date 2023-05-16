@@ -2431,7 +2431,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", range)
 		    .detail("AuditType", auditType)
-		    .detail("IssuedDoAuditCount", issueDoAuditCount);
+		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDScheduleAuditOnRangeError", self->ddId)
