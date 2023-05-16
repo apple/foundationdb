@@ -219,6 +219,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 		int64_t replicatedBytesRead = 0;
 		int64_t errorCount = 0;
 		int64_t skippedRanges = 0;
+		// FIXME: add failed request count that we periodically save even if no progress too?
 
 		Key lastEndKey = ""_sr;
 
