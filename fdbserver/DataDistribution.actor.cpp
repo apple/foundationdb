@@ -2241,7 +2241,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_broken_promise) {
-			audit->requestAuditCoreRetry = true; // ssi is failure, so we need audit core retry
+			audit->requestAuditCoreRetry = true; // ssi may be failure, so we need audit core retry
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			audit->retryCount++;
 			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
@@ -2486,6 +2486,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
+		ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
+		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
+		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", req.id)
@@ -2497,25 +2500,19 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_broken_promise) {
-			ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
-			self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
-			ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <=
-			       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
+		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
+		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
+		} else if (e.code() != error_code_audit_storage_failed) {
+			throw broken_promise();
 		} else {
-			ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
-			self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
-			ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <=
-			       SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 			throw audit_storage_failed();
 		}
 	}
-	ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
-	self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
-	ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 	return Void();
 }
 
