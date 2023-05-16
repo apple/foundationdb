@@ -3596,7 +3596,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			    .detail("Tags", describe(req.recoverTags))
 			    .detail("Locality", req.locality)
 			    .detail("LogRouterTags", logData->logRouterTags)
-			    .detail("oldGenerationRecoverAtVersions", describe(req.oldGenerationRecoverAtVersions));
+			    .detail("OldGenerationRecoverAtVersions", describe(req.oldGenerationRecoverAtVersions));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();
