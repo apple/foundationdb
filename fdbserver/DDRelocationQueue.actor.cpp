@@ -20,6 +20,7 @@
 
 #include <limits>
 #include <numeric>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -548,7 +549,8 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
     retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL) {}
+    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL), relocateTotalCount(0), relocateToSourceCount(0) {
+}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,
@@ -1190,7 +1192,8 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 	    .detail("KeyEnd", decision.rd.keys.end)
 	    .detail("Reason", decision.rd.reason.toString())
 	    .detail("SourceServers", describe(decision.rd.src))
-	    .detail("DestinationTeam", describe(decision.destIds))
+	    .detail("CompleteSources", describe(decision.rd.completeSources))
+	    .detail("DestinationServers", describe(decision.destIds))
 	    .detail("ExtraIds", describe(decision.extraIds));
 	if (SERVER_KNOBS->DD_ENABLE_VERBOSE_TRACING) {
 		// StorageMetrics is the rd shard's metrics, e.g., bytes and write bandwidth
@@ -1368,17 +1371,18 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						} else {
 							destTeamSelect = TeamSelect::ANY;
 						}
-						auto req = GetTeamRequest(destTeamSelect,
-						                          PreferLowerDiskUtil::True,
-						                          TeamMustHaveShards::False,
-						                          PreferLowerReadUtil::True,
-						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
-						                          inflightPenalty,
-						                          rd.keys);
+						destTeamSelect.setForRelocateShard(ForRelocateShard::True);
+						state GetTeamRequest req =
+						    GetTeamRequest(destTeamSelect,
+						                   PreferLowerDiskUtil::True,
+						                   TeamMustHaveShards::False,
+						                   PreferLowerReadUtil::True,
+						                   ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
+						                   inflightPenalty,
+						                   rd.keys);
 
 						req.src = rd.src;
 						req.completeSources = rd.completeSources;
-
 						if (enableShardMove && tciIndex == 1) {
 							ASSERT(physicalShardIDCandidate != UID().first() &&
 							       physicalShardIDCandidate != anonymousShardId.first());
@@ -1399,7 +1403,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 								req.keys = rd.keys;
 							}
 						}
-
 						// bestTeam.second = false if the bestTeam in the teamCollection (in the DC) does not have any
 						// server that hosts the relocateData. This is possible, for example, in a fearless
 						// configuration when the remote DC is just brought up.
@@ -1840,6 +1843,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					// lists, while rd.src would be the union set.
 					// FIXME. It is a bit over-estimated here with rd.completeSources.
 					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
+					self->relocateTotalCount++;
+					if (nonOverlappingCount == 0) {
+						self->relocateToSourceCount++;
+					}
 					self->bytesWritten += metrics.bytes;
 					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
@@ -2358,6 +2365,8 @@ struct DDQueueImpl {
 						    .detail("HighestPriority", highestPriorityRelocation)
 						    .detail("BytesWritten", self->moveBytesRate.getTotal())
 						    .detail("BytesWrittenAverageRate", self->moveBytesRate.getAverage())
+						    .detail("RelocatorTotalCount", self->relocateTotalCount)
+						    .detail("RelocatorToSourceTeamCount", self->relocateToSourceCount)
 						    .detail("PriorityRecoverMove",
 						            self->priority_relocations[SERVER_KNOBS->PRIORITY_RECOVER_MOVE])
 						    .detail("PriorityRebalanceUnderutilizedTeam",

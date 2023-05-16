@@ -196,11 +196,19 @@ public:
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
+	// DD won't move out a shard from its source team, if the utilization of source team meets two criterias:
+	// 1. The available space ratio is above strict pivot space ratio, where using DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO
+	// to calculate pivot space ratio.
+	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU.
+	double DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO;
+	double DD_STRICT_CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;
 	// The constant interval DD update pivot values for team selection. It should be >=
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
+	// DD would re-evaluate the CPU and AvailableSpace stats of source team when relocating a shard
+	bool DD_REEVALUATION_ENABLED;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
