@@ -2233,7 +2233,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerUpdate", self->ddId)
+		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
