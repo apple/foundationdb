@@ -14,6 +14,7 @@ bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_configurable_encryption = true
 enable_rest_kms_communication = true
+bg_consistency_check_enabled = 0
 blob_manifest_backup = true
 shard_encode_location_metadata = false
 bw_throttling_enabled = false
