@@ -9525,7 +9525,7 @@ MoveInShard::MoveInShard(StorageServer* server,
                          MoveInPhase phase)
   : meta(std::make_shared<MoveInShardMetaData>(id, dataMoveId, std::vector<KeyRange>(), version, phase)),
     server(server), updates(std::make_shared<MoveInUpdates>(id, version, server, server->storage.getKeyValueStore())),
-    isRestored(false) {
+    isRestored(true) {
 	if (phase != MoveInPhase::Pending) {
 		fetchClient = fetchShard(server, this);
 	} else {
@@ -10261,6 +10261,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 						    .detail("Range", range)
 						    .detailf("TargetShard", "%016llx", desiredId)
 						    .detailf("CurrentShard", "%016llx", shard->desiredShardId)
+						    .detail("IsTSS", data->isTss())
 						    .detail("Version", cVer);
 						// TODO(heliu): Mark the data move as failed locally, instead of crashing ss.
 						ASSERT(false);
