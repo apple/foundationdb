@@ -5813,7 +5813,6 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(backupManifest(self));
 		self->addActor.send(truncateMutationLogs(self));
 
-
 		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
 		}
