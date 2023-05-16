@@ -131,8 +131,13 @@ private:
 		}
 
 		try {
-			wait(self->cstate.setExclusive(
-			    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
+			if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
+				wait(self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withGcTxnGenerations()))));
+			} else {
+				wait(self->cstate.setExclusive(
+				    BinaryWriter::toValue(newState, IncludeVersion(ProtocolVersion::withEncryptionAtRest()))));
+			}
 		} catch (Error& e) {
 			CODE_PROBE(true, "Master displaced during writeMasterState");
 			throw;
