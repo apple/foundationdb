@@ -1077,7 +1077,9 @@ struct WriteDuringReadWorkload : TestWorkload {
 				self->changeCount.insert(allKeys, 0);
 				doingCommit = false;
 				//TraceEvent("WDRError").errorUnsuppressed(e);
-				if (e.code() == error_code_database_locked) {
+				// When the database is locked, it is still possible to receive a tenant_not_found
+				// error, so treat these errors as if the database was locked
+				if (e.code() == error_code_database_locked || e.code() == error_code_tenant_not_found) {
 					self->memoryDatabase = self->lastCommittedDatabase;
 					self->addedConflicts.insert(allKeys, false);
 					return Void();

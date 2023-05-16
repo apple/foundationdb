@@ -23,6 +23,7 @@
 #include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/Tenant.h"
 
 class TransactionTagCounter {
 	PImpl<class TransactionTagCounterImpl> impl;
@@ -32,11 +33,11 @@ public:
 	~TransactionTagCounter();
 
 	// Update counters tracking the busyness of each tag in the current interval
-	void addRequest(Optional<TagSet> const& tags, int64_t bytes);
+	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);
 
 	// Save current set of busy tags and reset counters for next interval
 	void startNewInterval();
 
 	// Returns the set of busiest tags as of the end of the last interval
-	std::vector<StorageQueuingMetricsReply::TagInfo> const& getBusiestTags() const;
+	std::vector<BusyTagInfo> const& getBusiestTags() const;
 };

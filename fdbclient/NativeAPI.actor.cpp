@@ -2867,31 +2867,39 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 	}
 }
 
-Tenant::Tenant(Database cx, TenantName name) : idFuture(cx->lookupTenant(name)), name(name) {}
-Tenant::Tenant(int64_t id) : idFuture(id) {}
-Tenant::Tenant(Future<int64_t> id, Optional<TenantName> name) : idFuture(id), name(name) {}
+Tenant::Tenant(Database cx, TenantName name) : lookupFuture(cx->lookupTenant(name)), name(name) {}
+Tenant::Tenant(int64_t id) : lookupFuture(id) {}
+Tenant::Tenant(Future<TenantLookupInfo> tenantLookupInfo, Optional<TenantName> name)
+  : lookupFuture(tenantLookupInfo), name(name) {}
 
 int64_t Tenant::id() const {
-	ASSERT(idFuture.isReady());
-	return idFuture.get();
+	ASSERT(lookupFuture.isReady());
+	return lookupFuture.get().id;
 }
 
-Future<int64_t> Tenant::getIdFuture() const {
-	return idFuture;
+Optional<TenantGroupName> Tenant::tenantGroup() const {
+	if (!lookupFuture.isReady()) {
+		return {};
+	}
+	return lookupFuture.get().group;
+}
+
+Future<TenantLookupInfo> Tenant::getLookupFuture() const {
+	return lookupFuture;
 }
 
 KeyRef Tenant::prefix() const {
-	ASSERT(idFuture.isReady());
+	ASSERT(lookupFuture.isReady());
 	if (bigEndianId == -1) {
-		bigEndianId = bigEndian64(idFuture.get());
+		bigEndianId = bigEndian64(id());
 	}
 	return StringRef(reinterpret_cast<const uint8_t*>(&bigEndianId), TenantAPI::PREFIX_SIZE);
 }
 
 std::string Tenant::description() const {
 	StringRef nameStr = name.castTo<TenantNameRef>().orDefault("<unspecified>"_sr);
-	if (idFuture.canGet()) {
-		return format("%.*s (%lld)", nameStr.size(), nameStr.begin(), idFuture.get());
+	if (lookupFuture.canGet()) {
+		return format("%.*s (%lld)", nameStr.size(), nameStr.begin(), id());
 	} else {
 		return format("%.*s", nameStr.size(), nameStr.begin());
 	}
@@ -3385,23 +3393,23 @@ SpanContext generateSpanID(bool transactionTracingSample, SpanContext parentCont
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 }
 
-ACTOR Future<int64_t> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
+ACTOR Future<TenantLookupInfo> lookupTenantImpl(DatabaseContext* cx, TenantName tenant) {
 	loop {
 		++cx->transactionTenantLookupRequests;
 		choose {
 			when(wait(cx->onProxiesChanged())) {}
-			when(GetTenantIdReply rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
-			                                                  &CommitProxyInterface::getTenantId,
-			                                                  GetTenantIdRequest(tenant, latestVersion),
+			when(TenantLookupInfo rep = wait(basicLoadBalance(cx->getCommitProxies(UseProvisionalProxies::False),
+			                                                  &CommitProxyInterface::tenantLookup,
+			                                                  TenantLookupRequest(tenant, latestVersion),
 			                                                  TaskPriority::DefaultPromiseEndpoint))) {
 				++cx->transactionTenantLookupRequestsCompleted;
-				return rep.tenantId;
+				return rep;
 			}
 		}
 	}
 }
 
-Future<int64_t> DatabaseContext::lookupTenant(TenantName tenant) {
+Future<TenantLookupInfo> DatabaseContext::lookupTenant(TenantName tenant) {
 	return lookupTenantImpl(this, tenant);
 }
 
@@ -3828,7 +3836,8 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 ACTOR Future<Void> readVersionBatcher(
     DatabaseContext* cx,
     FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
-    uint32_t flags);
+    uint32_t flags,
+    Optional<TenantGroupName> tenantGroup);
 
 ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> parameters) {
 	state Span span("NAPI:watchValue"_loc, parameters->spanContext);
@@ -7162,6 +7171,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
                                                            TransactionPriority priority,
                                                            uint32_t flags,
                                                            TransactionTagMap<uint32_t> tags,
+                                                           Optional<TenantGroupName> tenantGroup,
                                                            Optional<UID> debugID) {
 	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
 
@@ -7176,6 +7186,7 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 			                                cx->ssVersionVectorCache.getMaxVersion(),
 			                                flags,
 			                                tags,
+			                                tenantGroup,
 			                                debugID);
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
@@ -7243,7 +7254,8 @@ ACTOR Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpa
 ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
                                       FutureStream<DatabaseContext::VersionRequest> versionStream,
                                       TransactionPriority priority,
-                                      uint32_t flags) {
+                                      uint32_t flags,
+                                      Optional<TenantGroupName> tenantGroup) {
 	state std::vector<Promise<GetReadVersionReply>> requests;
 	state PromiseStream<Future<Void>> addActor;
 	state Future<Void> collection = actorCollection(addActor.getFuture());
@@ -7318,7 +7330,8 @@ ACTOR Future<Void> readVersionBatcher(DatabaseContext* cx,
 			addActor.send(ready(timeReply(GRVReply.getFuture(), replyTimes)));
 
 			Future<Void> batch = incrementalBroadcastWithError(
-			    getConsistentReadVersion(span.context, cx, count, priority, flags, std::move(tags), std::move(debugID)),
+			    getConsistentReadVersion(
+			        span.context, cx, count, priority, flags, std::move(tags), tenantGroup, std::move(debugID)),
 			    std::move(requests),
 			    CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
@@ -7504,9 +7517,14 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 		}
 	}
 
-	auto& batcher = cx->versionBatcher[flags];
+	Optional<TenantGroupName> tenantGroup;
+	if (tenant().present()) {
+		tenantGroup = tenant().get()->tenantGroup();
+	}
+	auto& batcher = cx->versionBatcher[std::make_pair(flags, tenantGroup)];
 	if (!batcher.actor.isValid()) {
-		batcher.actor = readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), options.priority, flags);
+		batcher.actor =
+		    readVersionBatcher(cx.getPtr(), batcher.stream.getFuture(), options.priority, flags, tenantGroup);
 	}
 
 	Location location = "NAPI:getReadVersion"_loc;

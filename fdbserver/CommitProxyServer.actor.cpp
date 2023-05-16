@@ -2581,7 +2581,7 @@ void addTagMapping(GetKeyServerLocationsReply& reply, ProxyCommitData* commitDat
 	}
 }
 
-ACTOR static Future<Void> doTenantIdRequest(GetTenantIdRequest req, ProxyCommitData* commitData) {
+ACTOR static Future<Void> doTenantLookupRequest(TenantLookupRequest req, ProxyCommitData* commitData) {
 	// We can't respond to these requests until we have valid txnStateStore
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
@@ -2606,39 +2606,39 @@ ACTOR static Future<Void> doTenantIdRequest(GetTenantIdRequest req, ProxyCommitD
 		when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
 		when(wait(futureVersionDelay)) {
 			req.reply.sendError(future_version());
-			++commitData->stats.tenantIdRequestOut;
-			++commitData->stats.tenantIdRequestErrors;
+			++commitData->stats.tenantLookupRequestOut;
+			++commitData->stats.tenantLookupRequestErrors;
 			return Void();
 		}
 	}
 
 	auto itr = commitData->tenantNameIndex.find(req.tenantName);
 	if (itr != commitData->tenantNameIndex.end()) {
-		req.reply.send(GetTenantIdReply(itr->second));
+		req.reply.send(itr->second);
 	} else {
 		TraceEvent(SevWarn, "CommitProxyTenantNotFound", commitData->dbgid).detail("TenantName", req.tenantName);
-		++commitData->stats.tenantIdRequestErrors;
+		++commitData->stats.tenantLookupRequestErrors;
 		req.reply.sendError(tenant_not_found());
 	}
 
-	++commitData->stats.tenantIdRequestOut;
+	++commitData->stats.tenantLookupRequestOut;
 	return Void();
 }
 
-ACTOR static Future<Void> tenantIdServer(CommitProxyInterface proxy,
-                                         PromiseStream<Future<Void>> addActor,
-                                         ProxyCommitData* commitData) {
+ACTOR static Future<Void> tenantLookupServer(CommitProxyInterface proxy,
+                                             PromiseStream<Future<Void>> addActor,
+                                             ProxyCommitData* commitData) {
 	loop {
-		GetTenantIdRequest req = waitNext(proxy.getTenantId.getFuture());
+		TenantLookupRequest req = waitNext(proxy.tenantLookup.getFuture());
 		// WARNING: this code is run at a high priority, so it needs to do as little work as possible
-		if (commitData->stats.tenantIdRequestIn.getValue() - commitData->stats.tenantIdRequestOut.getValue() >
+		if (commitData->stats.tenantLookupRequestIn.getValue() - commitData->stats.tenantLookupRequestOut.getValue() >
 		    SERVER_KNOBS->TENANT_ID_REQUEST_MAX_QUEUE_SIZE) {
-			++commitData->stats.tenantIdRequestErrors;
+			++commitData->stats.tenantLookupRequestErrors;
 			req.reply.sendError(commit_proxy_memory_limit_exceeded());
 			TraceEvent(SevWarnAlways, "ProxyGetTenantRequestThresholdExceeded").suppressFor(60);
 		} else {
-			++commitData->stats.tenantIdRequestIn;
-			addActor.send(doTenantIdRequest(req, commitData));
+			++commitData->stats.tenantLookupRequestIn;
+			addActor.send(doTenantLookupRequest(req, commitData));
 		}
 	}
 }
@@ -3679,7 +3679,7 @@ ACTOR Future<Void> commitProxyServerCore(CommitProxyInterface proxy,
 	TraceEvent(SevInfo, "CommitBatchesMemoryLimit").detail("BytesLimit", commitBatchesMemoryLimit);
 
 	addActor.send(monitorRemoteCommitted(&commitData));
-	addActor.send(tenantIdServer(proxy, addActor, &commitData));
+	addActor.send(tenantLookupServer(proxy, addActor, &commitData));
 	addActor.send(readRequestServer(proxy, addActor, &commitData));
 	addActor.send(bgReadRequestServer(proxy, addActor, &commitData));
 	addActor.send(rejoinServer(proxy, &commitData));
