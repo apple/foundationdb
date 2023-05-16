@@ -29,6 +29,7 @@
 #include "fdbserver/LogSystemConfig.h"
 #include "fdbserver/MasterInterface.h"
 #include "flow/ObjectSerializerTraits.h"
+#include "fdbserver/Knobs.h"
 
 class LogSet;
 struct OldLogData;
@@ -95,16 +96,23 @@ struct OldTLogCoreData {
 	int32_t logRouterTags;
 	int32_t txsTags;
 	Version epochBegin, epochEnd;
+	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
+	OldTLogCoreData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
 	explicit OldTLogCoreData(const OldLogData&);
 
 	bool operator==(const OldTLogCoreData& rhs) const {
-		return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
-		       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && pseudoLocalities == rhs.pseudoLocalities &&
-		       epoch == rhs.epoch;
+		if (SERVER_KNOBS->RECORD_RECOVER_AT_IN_CSTATE) {
+			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd && recoverAt == rhs.recoverAt &&
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+		} else {
+			return tLogs == rhs.tLogs && logRouterTags == rhs.logRouterTags && txsTags == rhs.txsTags &&
+			       epochBegin == rhs.epochBegin && epochEnd == rhs.epochEnd &&
+			       pseudoLocalities == rhs.pseudoLocalities && epoch == rhs.epoch;
+		}
 	}
 
 	template <class Archive>
@@ -130,6 +138,9 @@ struct OldTLogCoreData {
 		}
 		if (ar.protocolVersion().hasBackupWorker()) {
 			serializer(ar, epoch, epochBegin);
+		}
+		if (ar.protocolVersion().hasGcTxnGenerations()) {
+			serializer(ar, recoverAt);
 		}
 	}
 };

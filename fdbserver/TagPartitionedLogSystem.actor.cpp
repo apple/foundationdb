@@ -81,8 +81,9 @@ TLogSet::TLogSet(const LogSet& rhs)
 }
 
 OldTLogConf::OldTLogConf(const OldLogData& oldLogData)
-  : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), logRouterTags(oldLogData.logRouterTags),
-    txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities), epoch(oldLogData.epoch) {
+  : epochBegin(oldLogData.epochBegin), epochEnd(oldLogData.epochEnd), recoverAt(oldLogData.recoverAt),
+    logRouterTags(oldLogData.logRouterTags), txsTags(oldLogData.txsTags), pseudoLocalities(oldLogData.pseudoLocalities),
+    epoch(oldLogData.epoch) {
 	for (const Reference<LogSet>& logSet : oldLogData.tLogs) {
 		tLogs.emplace_back(*logSet);
 	}
@@ -101,7 +102,8 @@ CoreTLogSet::CoreTLogSet(const LogSet& logset)
 
 OldTLogCoreData::OldTLogCoreData(const OldLogData& oldData)
   : logRouterTags(oldData.logRouterTags), txsTags(oldData.txsTags), epochBegin(oldData.epochBegin),
-    epochEnd(oldData.epochEnd), pseudoLocalities(oldData.pseudoLocalities), epoch(oldData.epoch) {
+    epochEnd(oldData.epochEnd), recoverAt(oldData.recoverAt), pseudoLocalities(oldData.pseudoLocalities),
+    epoch(oldData.epoch) {
 	for (const Reference<LogSet>& logSet : oldData.tLogs) {
 		if (logSet->logServers.size()) {
 			tLogs.emplace_back(*logSet);
@@ -316,10 +318,17 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerations() {
 		// Remove earlier generation that TLog data are
 		//  - consumed by all storage servers
 		//  - no longer used by backup workers
-		if (oldData.epochBegin < oldestGenerationStartVersion && oldData.epoch < oldestBackupEpoch) {
+		if (oldData.recoverAt < oldestGenerationStartVersion && oldData.epoch < oldestBackupEpoch) {
 			if (g_network->isSimulated()) {
+				for (int j = 0; j < oldLogData.size(); ++j) {
+					TraceEvent("AllOldGenerations")
+					    .detail("Index", j)
+					    .detail("Purge", i + 1)
+					    .detail("Begin", oldLogData[j].epochBegin)
+					    .detail("RecoverAt", oldLogData[j].recoverAt);
+				}
 				for (int j = i + 1; j < oldLogData.size(); ++j) {
-					ASSERT(oldLogData[j].epochBegin < oldestGenerationStartVersion);
+					ASSERT(oldLogData[j].recoverAt < oldestGenerationStartVersion);
 					ASSERT(oldData.tLogs[0]->backupWorkers.size() == 0 || oldLogData[j].epoch < oldestBackupEpoch);
 				}
 			}
@@ -328,6 +337,7 @@ void TagPartitionedLogSystem::purgeOldRecoveredGenerations() {
 				    .detail("Begin", oldLogData[j].epochBegin)
 				    .detail("End", oldLogData[j].epochEnd)
 				    .detail("Epoch", oldLogData[j].epoch)
+				    .detail("RecoverAt", oldLogData[j].recoverAt)
 				    .detail("Index", j);
 			}
 			oldLogData.resize(i);
@@ -2873,6 +2883,7 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 		logSystem->oldLogData[0].tLogs = oldLogSystem->tLogs;
 		logSystem->oldLogData[0].epochBegin = oldLogSystem->tLogs[0]->startVersion;
 		logSystem->oldLogData[0].epochEnd = oldLogSystem->knownCommittedVersion + 1;
+		logSystem->oldLogData[0].recoverAt = oldLogSystem->recoverAt.get();
 		logSystem->oldLogData[0].logRouterTags = oldLogSystem->logRouterTags;
 		logSystem->oldLogData[0].txsTags = oldLogSystem->txsTags;
 		logSystem->oldLogData[0].pseudoLocalities = oldLogSystem->pseudoLocalities;
@@ -2989,7 +3000,9 @@ ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
 	// Should be sorted by decending orders of versions.
 	state std::vector<Version> oldGenerationStartVersions;
 	for (const auto& oldLogGen : logSystem->oldLogData) {
-		oldGenerationStartVersions.push_back(oldLogGen.epochBegin);
+		// if (oldLogGen.recoverAt > 0) {
+		oldGenerationStartVersions.push_back(oldLogGen.recoverAt);
+		//}
 	}
 
 	for (int i = 0; i < recr.tLogs.size(); i++) {
