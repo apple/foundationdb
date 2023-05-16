@@ -9,6 +9,7 @@ disableTss = true
 storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
+bg_consistency_check_enabled = 0
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
 enable_configurable_encryption = true
