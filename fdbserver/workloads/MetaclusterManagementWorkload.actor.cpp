@@ -69,7 +69,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		bool registered = false;
 		bool detached = false;
 		int tenantGroupCapacity = 0;
-		MetaclusterVersion version;
+		MetaclusterVersion version = MetaclusterVersion::BEGIN;
 
 		std::map<TenantName, Reference<TenantTestData>> tenants;
 		std::map<TenantGroupName, Reference<TenantGroupData>> tenantGroups;
