@@ -722,7 +722,7 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 					wait(tr->commit());
 					if (DEBUG_SCAN_PROGRESS) {
 						TraceEvent(SevDebug, "ConsistencyScanProgress_RoundComplete", memState->csId)
-						    .detail("BytesRead", logicalBytesRead)
+						    .detail("BytesRead", statsCurrentRound.logicalBytesScanned)
 						    .detail("ProgressKey", statsCurrentRound.lastEndKey);
 					}
 					// fmt::print("CONSISTENCY SCAN PROGRESS: {}\n",
