@@ -117,7 +117,7 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 		json_spirit::mObject toJSON() const {
 			json_spirit::mObject doc;
-			doc["enabled"] = true;
+			doc["enabled"] = enabled;
 			doc["max_rate_bytes_per_second"] = maxReadByteRate;
 			doc["target_interval_seconds"] = targetRoundTimeSeconds;
 			doc["min_interval_seconds"] = minRoundTimeSeconds;
