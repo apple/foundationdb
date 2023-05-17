@@ -46,7 +46,7 @@
 #include "fdbserver/QuietDatabase.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-#define DEBUG_SCAN_PROGRESS true
+#define DEBUG_SCAN_PROGRESS false
 
 // State that is explicitly not persisted anywhere for this consistency scan. Includes things like caches of system
 // information
@@ -77,11 +77,6 @@ ACTOR Future<Void> pollDatabaseSize(ConsistencyScanMemoryState* memState, double
 			if (memState->dbInfo->get().distributor.present()) {
 				for (int i = 0; i < workers.size(); i++) {
 					if (workers[i].interf.address() == memState->dbInfo->get().distributor.get().address()) {
-						// TODO REMOVE trace eventually
-						TraceEvent("GetDataDistributorWorker", memState->csId)
-						    .detail("Stage", "GotWorkers")
-						    .detail("DataDistributorId", memState->dbInfo->get().distributor.get().id())
-						    .detail("WorkerId", workers[i].interf.id());
 						ddWorkerInterf = workers[i].interf;
 						break;
 					}
@@ -188,8 +183,7 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 
 	req.options = readOptions;
 
-	// TODO REMOVE
-	TraceEvent("ConsistencyCheck_ReadDataStart").detail("Range", range).detail("Version", version);
+	DisabledTraceEvent("ConsistencyCheck_ReadDataStart").detail("Range", range).detail("Version", version);
 
 	// Try getting the entries in the specified range
 
@@ -351,8 +345,7 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 		}
 	}
 
-	// TODO REMOVE
-	TraceEvent("ConsistencyCheck_ReadDataDone")
+	DisabledTraceEvent("ConsistencyCheck_ReadDataDone")
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("FirstValidServer", firstValidServer->present() ? firstValidServer->get() : -1);
@@ -505,7 +498,9 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 			if (readRateLimit != configuredRate) {
 				readRateLimit = configuredRate;
 				CODE_PROBE(true, "Consistency Scan changing rate");
-				TraceEvent("ConsistencyScan_ChangeRate", memState->csId).detail("RateBytes", readRateLimit);
+				if (DEBUG_SCAN_PROGRESS) {
+					TraceEvent("ConsistencyScan_ChangeRate", memState->csId).detail("RateBytes", readRateLimit);
+				}
 				readRateControl = Reference<IRateControl>(new SpeedLimit(readRateLimit, 1));
 			}
 
@@ -665,8 +660,6 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 								if (!rangeResult.more) {
 									statsCurrentRound.lastEndKey = targetRange.end;
 									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
-									// TODO REMOVE
-									TraceEvent("ConsistencyScan_ShardFinished", memState->csId);
 									break;
 								} else {
 									VectorRef<KeyValueRef> result =
@@ -675,11 +668,8 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 									statsCurrentRound.lastEndKey = keyAfter(result[result.size() - 1].key);
 									targetRange = KeyRangeRef(statsCurrentRound.lastEndKey, targetRange.end);
 									if (targetRange.empty()) {
-										TraceEvent("ConsistencyScan_ShardFinished2", memState->csId);
 										break;
 									}
-									TraceEvent("ConsistencyScan_ShardProgress", memState->csId)
-									    .detail("NextRange", targetRange);
 								}
 							} else {
 								TraceEvent("ConsistencyScan_FailedRequest", memState->csId)
@@ -816,11 +806,11 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 				wait(tr->commit());
 
 				g_simulator->consistencyScanState = ISimulator::SimConsistencyScanState::Enabled;
-
-				TraceEvent("ConsistencyScan_Enable")
+				TraceEvent("ConsistencyScan_SimEnabled")
 				    .detail("MaxReadByteRate", config.maxReadByteRate)
 				    .detail("TargetRoundTimeSeconds", config.targetRoundTimeSeconds)
 				    .detail("MinRoundTimeSeconds", config.minRoundTimeSeconds);
+				CODE_PROBE(true, "Consistency Scan enabled in simulation");
 			}
 
 			break;
@@ -829,7 +819,6 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 		}
 	}
 
-	TraceEvent("ConsistencyScan_SimEnabled", csId).log();
 	return Void();
 }
 
@@ -878,9 +867,6 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 			} else {
 				cs.config().set(tr, config);
 				wait(tr->commit());
-
-				g_simulator->consistencyScanState = ISimulator::SimConsistencyScanState::DisabledEnd;
-
 				break;
 			}
 		} catch (Error& e) {
@@ -888,6 +874,8 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 		}
 	}
 
+	g_simulator->consistencyScanState = ISimulator::SimConsistencyScanState::DisabledEnd;
+	CODE_PROBE(true, "Consistency Scan disabled in simulation");
 	TraceEvent("ConsistencyScan_SimDisabled", memState->csId).log();
 	return Void();
 }
@@ -912,15 +900,6 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 
 	loop {
 		try {
-			// TODO:  Verify that this loop is doing what it should.  In the original, it would respond to a Halt
-			// request on the interface by killing the scan actor and then immediately check if the configuration for
-			// the scan is enabled, which it often is, so then it would start the scan again.  This seemed to result in
-			// rapid loops of constant Halt, start, Halt events.
-			// In this version, the ConsistencyScan role will stop the scan actor if it gets a Halt request, and since
-			// there is no Start request, that is a final state. Similar to the old version, the scan enabled state is
-			// in the database, but unlike the old version in this version the ConsistencyScanCore is meant to run *all
-			// the time*, it will do no work if it is disabled and it will follow the configuration in the given
-			// ConsistencyScanState as it changes.
 			loop choose {
 				when(wait(core)) {
 					// This actor never returns so the only way out is throwing an exception.
@@ -930,7 +909,6 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 					req.reply.send(Void());
 					core = Void();
 					TraceEvent("ConsistencyScan_Halted", csInterf.id()).detail("ReqID", req.requesterID);
-					// wait(Never());
 					return Void();
 				}
 				when(wait(actors.getResult())) {
