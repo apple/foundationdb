@@ -557,7 +557,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
+			printf("[%s] HTTP starting %s %s ContentLen:%lld\n",
 			       conn->getDebugID().toString().c_str(),
 			       request->verb.c_str(),
 			       request->resource.c_str(),
@@ -672,7 +672,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
-			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
+			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%lld [%d out]\n",
 			       conn->getDebugID().toString().c_str(),
 			       e.name(),
 			       earlyResponse,
