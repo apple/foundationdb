@@ -404,7 +404,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				//    meaningless, or
 				// 2) the data cluster is already registered and invalid.
 				// If the data cluster is not registered, we shouldn't check its version.
-				ASSERT(!self->isValidVersion(dataDb->registered ? dataDb : Optional<decltype(dataDb)>()));
+				ASSERT(!self->isValidVersion(dataDb->registered ? dataDb : Optional<Reference<DataClusterData>>()));
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
