@@ -1,5 +1,6 @@
 [configuration]
 config = 'triple'
+# generateFearless = false
 storageEngineType = 5
 processesPerMachine = 1
 coordinators = 3
@@ -10,6 +11,7 @@ allowDefaultTenant = false
 shard_encode_location_metadata = true
 enable_dd_physical_shard = true
 min_byte_sampling_probability = 0.99
+# storage_shard_consistency_check_interval = 0.0
 
 [[test]]
 testTitle = 'PhysicalShardMove'
