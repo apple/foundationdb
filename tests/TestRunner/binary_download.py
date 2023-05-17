@@ -43,11 +43,6 @@ class FdbBinaryDownloader:
         self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
         if not self.local_binary_repo.exists():
             self.local_binary_repo = None
-        self.old_binaries_available = self.check_s3_release_repo_availability()
-
-    def check_s3_release_repo_availability(self):
-        retcode = os.system("aws s3 ls {}".format(FDB_DOWNLOAD_ROOT))
-        return retcode == 0
 
     # Check if the binaries for the given version are available in the local old binaries repository
     def version_in_local_repo(self, version):
