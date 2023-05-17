@@ -399,7 +399,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(clusterName.startsWith("\xff"_sr));
 				return Void();
 			} else if (e.code() == error_code_unsupported_metacluster_version) {
-				ASSERT(!self->isValidVersion(dataDb));
+				// If we reach here, it is either because
+				// 1) the management cluster version is invalid and the registration failed, thus the version is
+				//    meaningless, or
+				// 2) the data cluster is already registered and invalid.
+				// If the data cluster is not registered, we shouldn't check its version.
+				ASSERT(!self->isValidVersion(dataDb->registered ? dataDb : Optional<decltype(dataDb)>()));
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
