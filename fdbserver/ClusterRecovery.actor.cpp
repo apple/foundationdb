@@ -26,17 +26,11 @@
 #include "fdbserver/ClusterRecovery.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/MasterInterface.h"
+#include "fdbserver/Recruiter.h"
 #include "fdbserver/WaitFailure.h"
 #include "flow/ProtocolVersion.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-namespace {
-EncryptionAtRestMode getEncryptionAtRest(DatabaseConfiguration config) {
-	TraceEvent(SevDebug, "CREncryptionAtRestMode").detail("Mode", config.encryptionAtRestMode.toString());
-	return config.encryptionAtRestMode;
-}
-} // namespace
 
 static std::set<int> const& normalClusterRecoveryErrors() {
 	static std::set<int> s;
@@ -79,6 +73,7 @@ ACTOR Future<Void> recoveryTerminateOnConflict(UID dbgid,
 	}
 }
 
+// TODO: Move to Recruitment class
 ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
                                     ClusterControllerData::DBInfo* db,
                                     MasterInterface* newMaster) {
@@ -91,8 +86,12 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = cluster->getWorkerForRoleInDatacenter(
-		    cluster->clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db->config, id_used);
+		masterWorker = Recruiter::getWorkerForRoleInDatacenter(cluster,
+		                                                       cluster->clusterControllerDcId,
+		                                                       ProcessClass::Master,
+		                                                       ProcessClass::NeverAssign,
+		                                                       db->config,
+		                                                       id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
@@ -126,277 +125,6 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 			wait(delay(SERVER_KNOBS->MASTER_SPIN_DELAY));
 		}
 	}
-}
-
-ACTOR Future<Void> clusterRecruitFromConfiguration(ClusterControllerData* self, Reference<RecruitWorkersInfo> req) {
-	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
-	loop {
-		try {
-			req->rep = self->findWorkersForConfiguration(req->req);
-			return Void();
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && self->goodRecruitmentTime.isReady()) {
-				self->outstandingRecruitmentRequests.push_back(req);
-				TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", self->id).error(e);
-				wait(req->waitForCompletion.onTrigger());
-				return Void();
-			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
-				// recruitment not good enough, try again
-				TraceEvent("RecruitFromConfigurationRetry", self->id)
-				    .error(e)
-				    .detail("GoodRecruitmentTimeReady", self->goodRecruitmentTime.isReady());
-				while (!self->goodRecruitmentTime.isReady()) {
-					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-				}
-			} else {
-				TraceEvent(SevError, "RecruitFromConfigurationError", self->id).error(e);
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
-}
-
-ACTOR Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
-    ClusterControllerData* self,
-    Reference<RecruitRemoteWorkersInfo> req) {
-	// At the moment this doesn't really need to be an actor (it always completes immediately)
-	CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
-	loop {
-		try {
-			auto rep = self->findRemoteWorkersForConfiguration(req->req);
-			return rep;
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers && self->goodRemoteRecruitmentTime.isReady()) {
-				self->outstandingRemoteRecruitmentRequests.push_back(req);
-				TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", self->id).error(e);
-				wait(req->waitForCompletion.onTrigger());
-				return req->rep;
-			} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
-				// recruitment not good enough, try again
-				TraceEvent("RecruitRemoteFromConfigurationRetry", self->id)
-				    .error(e)
-				    .detail("GoodRecruitmentTimeReady", self->goodRemoteRecruitmentTime.isReady());
-				while (!self->goodRemoteRecruitmentTime.isReady()) {
-					wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-				}
-			} else {
-				TraceEvent(SevError, "RecruitRemoteFromConfigurationError", self->id).error(e);
-				throw;
-			}
-		}
-		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-	}
-}
-
-ACTOR Future<Void> newCommitProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
-	std::vector<Future<CommitProxyInterface>> initializationReplies;
-	for (int i = 0; i < recr.commitProxies.size(); i++) {
-		InitializeCommitProxyRequest req;
-		req.master = self->masterInterface;
-		req.masterLifetime = self->masterLifetime;
-		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		req.recoveryTransactionVersion = self->recoveryTransactionVersion;
-		req.firstProxy = i == 0;
-		req.encryptMode = getEncryptionAtRest(self->configuration);
-		TraceEvent("CommitProxyReplies", self->dbgid)
-		    .detail("WorkerID", recr.commitProxies[i].id())
-		    .detail("RecoveryTxnVersion", self->recoveryTransactionVersion)
-		    .detail("EncryptMode", req.encryptMode.toString())
-		    .detail("FirstProxy", req.firstProxy ? "True" : "False");
-		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(recr.commitProxies[i].commitProxy.getReplyUnlessFailedFor(
-		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    commit_proxy_failed()));
-	}
-
-	std::vector<CommitProxyInterface> newRecruits = wait(getAll(initializationReplies));
-	TraceEvent("CommitProxyInitializationComplete", self->dbgid).log();
-	// It is required for the correctness of COMMIT_ON_FIRST_PROXY that self->commitProxies[0] is the firstCommitProxy.
-	self->commitProxies = newRecruits;
-
-	return Void();
-}
-
-ACTOR Future<Void> newGrvProxies(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
-	std::vector<Future<GrvProxyInterface>> initializationReplies;
-	for (int i = 0; i < recr.grvProxies.size(); i++) {
-		InitializeGrvProxyRequest req;
-		req.master = self->masterInterface;
-		req.masterLifetime = self->masterLifetime;
-		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		TraceEvent("GrvProxyReplies", self->dbgid).detail("WorkerID", recr.grvProxies[i].id());
-		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(recr.grvProxies[i].grvProxy.getReplyUnlessFailedFor(
-		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    grv_proxy_failed()));
-	}
-
-	std::vector<GrvProxyInterface> newRecruits = wait(getAll(initializationReplies));
-	TraceEvent("GrvProxyInitializationComplete", self->dbgid).log();
-	self->grvProxies = newRecruits;
-	return Void();
-}
-
-ACTOR Future<Void> newResolvers(Reference<ClusterRecoveryData> self, RecruitFromConfigurationReply recr) {
-	std::vector<Future<ResolverInterface>> initializationReplies;
-	for (int i = 0; i < recr.resolvers.size(); i++) {
-		InitializeResolverRequest req;
-		req.masterLifetime = self->masterLifetime;
-		req.recoveryCount = self->cstate.myDBState.recoveryCount + 1;
-		req.commitProxyCount = recr.commitProxies.size();
-		req.resolverCount = recr.resolvers.size();
-		req.encryptMode = getEncryptionAtRest(self->configuration);
-		TraceEvent("ResolverReplies", self->dbgid).detail("WorkerID", recr.resolvers[i].id());
-		initializationReplies.push_back(
-		    transformErrors(throwErrorOr(recr.resolvers[i].resolver.getReplyUnlessFailedFor(
-		                        req, SERVER_KNOBS->TLOG_TIMEOUT, SERVER_KNOBS->MASTER_FAILURE_SLOPE_DURING_RECOVERY)),
-		                    resolver_failed()));
-	}
-
-	std::vector<ResolverInterface> newRecruits = wait(getAll(initializationReplies));
-	TraceEvent("ResolverInitializationComplete", self->dbgid).log();
-	self->resolvers = newRecruits;
-
-	return Void();
-}
-
-ACTOR Future<Void> newTLogServers(Reference<ClusterRecoveryData> self,
-                                  RecruitFromConfigurationReply recr,
-                                  Reference<ILogSystem> oldLogSystem,
-                                  std::vector<Standalone<CommitTransactionRef>>* initialConfChanges) {
-	if (self->configuration.usableRegions > 1) {
-		state Optional<Key> remoteDcId = self->remoteDcIds.size() ? self->remoteDcIds[0] : Optional<Key>();
-		if (!self->dcId_locality.count(recr.dcId)) {
-			int8_t loc = self->getNextLocality();
-			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(recr.dcId), tagLocalityListValue(loc));
-			initialConfChanges->push_back(tr);
-			self->dcId_locality[recr.dcId] = loc;
-			TraceEvent(SevWarn, "UnknownPrimaryDCID", self->dbgid).detail("PrimaryId", recr.dcId).detail("Loc", loc);
-		}
-
-		if (!self->dcId_locality.count(remoteDcId)) {
-			int8_t loc = self->getNextLocality();
-			Standalone<CommitTransactionRef> tr;
-			tr.set(tr.arena(), tagLocalityListKeyFor(remoteDcId), tagLocalityListValue(loc));
-			initialConfChanges->push_back(tr);
-			self->dcId_locality[remoteDcId] = loc;
-			TraceEvent(SevWarn, "UnknownRemoteDCID", self->dbgid).detail("RemoteId", remoteDcId).detail("Loc", loc);
-		}
-
-		std::vector<UID> exclusionWorkerIds;
-		std::transform(recr.tLogs.begin(),
-		               recr.tLogs.end(),
-		               std::back_inserter(exclusionWorkerIds),
-		               [](const WorkerInterface& in) { return in.id(); });
-		std::transform(recr.satelliteTLogs.begin(),
-		               recr.satelliteTLogs.end(),
-		               std::back_inserter(exclusionWorkerIds),
-		               [](const WorkerInterface& in) { return in.id(); });
-
-		RecruitRemoteFromConfigurationRequest remoteRecruitReq(
-		    self->configuration,
-		    remoteDcId,
-		    recr.tLogs.size() *
-		        std::max<int>(1, self->configuration.desiredLogRouterCount / std::max<int>(1, recr.tLogs.size())),
-		    exclusionWorkerIds);
-		remoteRecruitReq.dbgId = self->dbgid;
-		state Reference<RecruitRemoteWorkersInfo> recruitWorkersInfo =
-		    makeReference<RecruitRemoteWorkersInfo>(remoteRecruitReq);
-		recruitWorkersInfo->dbgId = self->dbgid;
-		Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers =
-		    clusterRecruitRemoteFromConfiguration(self->controllerData, recruitWorkersInfo);
-
-		self->primaryLocality = self->dcId_locality[recr.dcId];
-		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
-		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
-		                                                                 fRemoteWorkers,
-		                                                                 self->configuration,
-		                                                                 self->cstate.myDBState.recoveryCount + 1,
-		                                                                 self->recoveryTransactionVersion,
-		                                                                 self->primaryLocality,
-		                                                                 self->dcId_locality[remoteDcId],
-		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
-		self->logSystem = newLogSystem;
-	} else {
-		self->primaryLocality = tagLocalitySpecial;
-		self->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
-		Reference<ILogSystem> newLogSystem = wait(oldLogSystem->newEpoch(recr,
-		                                                                 Never(),
-		                                                                 self->configuration,
-		                                                                 self->cstate.myDBState.recoveryCount + 1,
-		                                                                 self->recoveryTransactionVersion,
-		                                                                 self->primaryLocality,
-		                                                                 tagLocalitySpecial,
-		                                                                 self->allTags,
-		                                                                 self->recruitmentStalled));
-		self->logSystem = newLogSystem;
-	}
-	return Void();
-}
-
-ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
-                                  RecruitFromConfigurationReply recruits,
-                                  std::vector<StorageServerInterface>* servers) {
-	// This is only necessary if the database is at version 0
-	servers->clear();
-	if (self->lastEpochEnd)
-		return Void();
-
-	state int idx = 0;
-	state std::map<Optional<Value>, Tag> dcId_tags;
-	state int8_t nextLocality = 0;
-	while (idx < recruits.storageServers.size()) {
-		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_SS_RECRUITMENT_EVENT_NAME).c_str(),
-		           self->dbgid)
-		    .detail("CandidateWorker", recruits.storageServers[idx].locality.toString());
-
-		InitializeStorageRequest isr;
-		isr.seedTag = dcId_tags.count(recruits.storageServers[idx].locality.dcId())
-		                  ? dcId_tags[recruits.storageServers[idx].locality.dcId()]
-		                  : Tag(nextLocality, 0);
-		isr.storeType = self->configuration.storageServerStoreType;
-		isr.reqId = deterministicRandom()->randomUniqueID();
-		isr.interfaceId = deterministicRandom()->randomUniqueID();
-		isr.initialClusterVersion = self->recoveryTransactionVersion;
-		isr.encryptMode = self->configuration.encryptionAtRestMode;
-
-		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
-
-		if (newServer.isError()) {
-			if (!newServer.isError(error_code_recruitment_failed) &&
-			    !newServer.isError(error_code_request_maybe_delivered))
-				throw newServer.getError();
-
-			CODE_PROBE(true, "initial storage recuitment loop failed to get new server");
-			wait(delay(SERVER_KNOBS->STORAGE_RECRUITMENT_DELAY));
-		} else {
-			if (!dcId_tags.count(recruits.storageServers[idx].locality.dcId())) {
-				dcId_tags[recruits.storageServers[idx].locality.dcId()] = Tag(nextLocality, 0);
-				nextLocality++;
-			}
-
-			Tag& tag = dcId_tags[recruits.storageServers[idx].locality.dcId()];
-			tag.id++;
-			idx++;
-
-			servers->push_back(newServer.get().interf);
-		}
-	}
-
-	self->dcId_locality.clear();
-	for (auto& it : dcId_tags) {
-		self->dcId_locality[it.first] = it.second.locality;
-	}
-
-	TraceEvent("ClusterRecoveryRecruitedInitialStorageServers", self->dbgid)
-	    .detail("TargetCount", self->configuration.storageTeamSize)
-	    .detail("Servers", describe(*servers));
-
-	return Void();
 }
 
 Future<Void> waitCommitProxyFailure(std::vector<CommitProxyInterface> const& commitProxies) {
@@ -452,7 +180,7 @@ ACTOR Future<Void> trackTlogRecovery(Reference<ClusterRecoveryData> self,
                                      Future<Void> minRecoveryDuration) {
 	state Future<Void> rejoinRequests = Never();
 	state DBRecoveryCount recoverCount = self->cstate.myDBState.recoveryCount + 1;
-	state EncryptionAtRestMode encryptionAtRestMode = getEncryptionAtRest(self->configuration);
+	state EncryptionAtRestMode encryptionAtRestMode = Recruiter::getEncryptionAtRest(self->configuration);
 	state DatabaseConfiguration configuration =
 	    self->configuration; // self-configuration can be changed by configurationMonitor so we need a copy
 	loop {
@@ -933,120 +661,6 @@ ACTOR Future<Standalone<CommitTransactionRef>> provisionalMaster(Reference<Clust
 	}
 }
 
-ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
-    Reference<ClusterRecoveryData> self,
-    std::vector<StorageServerInterface>* seedServers,
-    Reference<ILogSystem> oldLogSystem) {
-	if (!self->configuration.isValid()) {
-		RecoveryStatus::RecoveryStatus status;
-		if (self->configuration.initialized) {
-			TraceEvent(
-			    SevWarn,
-			    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_INVALID_CONFIG_EVENT_NAME).c_str(),
-			    self->dbgid)
-			    .setMaxEventLength(11000)
-			    .setMaxFieldLength(10000)
-			    .detail("Conf", self->configuration.toString());
-			status = RecoveryStatus::configuration_invalid;
-		} else if (!self->cstate.prevDBState.tLogs.size()) {
-			status = RecoveryStatus::configuration_never_created;
-			self->neverCreated = true;
-		} else {
-			status = RecoveryStatus::configuration_missing;
-		}
-		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
-		           self->dbgid)
-		    .detail("StatusCode", status)
-		    .detail("Status", RecoveryStatus::names[status])
-		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-		return Never();
-	} else {
-		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
-		           self->dbgid)
-		    .setMaxFieldLength(-1)
-		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
-		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
-		    .detail("Conf", self->configuration.toString())
-		    .detail("RequiredCommitProxies", 1)
-		    .detail("RequiredGrvProxies", 1)
-		    .detail("RequiredResolvers", 1)
-		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-		// The cluster's EncryptionAtRest status is now readable.
-		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
-			self->controllerData->encryptionAtRestMode.send(getEncryptionAtRest(self->configuration));
-		}
-	}
-
-	// FIXME: we only need log routers for the same locality as the master
-	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
-	for (auto& old : self->cstate.prevDBState.oldTLogData) {
-		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
-	}
-
-	RecruitFromConfigurationRequest recruitReq(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
-	state Reference<RecruitWorkersInfo> recruitWorkersInfo = makeReference<RecruitWorkersInfo>(recruitReq);
-	recruitWorkersInfo->dbgId = self->dbgid;
-	wait(clusterRecruitFromConfiguration(self->controllerData, recruitWorkersInfo));
-	state RecruitFromConfigurationReply recruits = recruitWorkersInfo->rep;
-
-	std::string primaryDcIds, remoteDcIds;
-
-	self->primaryDcId.clear();
-	self->remoteDcIds.clear();
-	if (recruits.dcId.present()) {
-		self->primaryDcId.push_back(recruits.dcId);
-		if (!primaryDcIds.empty()) {
-			primaryDcIds += ',';
-		}
-		primaryDcIds += printable(recruits.dcId);
-		if (self->configuration.regions.size() > 1) {
-			Key remoteDcId = recruits.dcId.get() == self->configuration.regions[0].dcId
-			                     ? self->configuration.regions[1].dcId
-			                     : self->configuration.regions[0].dcId;
-			self->remoteDcIds.push_back(remoteDcId);
-			if (!remoteDcIds.empty()) {
-				remoteDcIds += ',';
-			}
-			remoteDcIds += printable(remoteDcId);
-		}
-	}
-	self->backupWorkers.swap(recruits.backupWorkers);
-
-	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
-	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
-	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
-	    .detail("CommitProxies", recruits.commitProxies.size())
-	    .detail("GrvProxies", recruits.grvProxies.size())
-	    .detail("TLogs", recruits.tLogs.size())
-	    .detail("Resolvers", recruits.resolvers.size())
-	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
-	    .detail("OldLogRouters", recruits.oldLogRouters.size())
-	    .detail("StorageServers", recruits.storageServers.size())
-	    .detail("BackupWorkers", self->backupWorkers.size())
-	    .detail("PrimaryDcIds", primaryDcIds)
-	    .detail("RemoteDcIds", remoteDcIds)
-	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
-
-	// Actually, newSeedServers does both the recruiting and initialization of the seed servers; so if this is a brand
-	// new database we are sort of lying that we are past the recruitment phase.  In a perfect world we would split that
-	// up so that the recruitment part happens above (in parallel with recruiting the transaction servers?).
-	wait(newSeedServers(self, recruits, seedServers));
-	state std::vector<Standalone<CommitTransactionRef>> confChanges;
-	wait(newCommitProxies(self, recruits) && newGrvProxies(self, recruits) && newResolvers(self, recruits) &&
-	     newTLogServers(self, recruits, oldLogSystem, &confChanges));
-
-	// Update recovery related information to the newly elected sequencer (master) process.
-	wait(brokenPromiseToNever(
-	    self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(self->recoveryTransactionVersion,
-	                                                                                self->lastEpochEnd,
-	                                                                                self->commitProxies,
-	                                                                                self->resolvers,
-	                                                                                self->versionEpoch,
-	                                                                                self->primaryLocality))));
-
-	return confChanges;
-}
-
 ACTOR Future<Void> updateLocalityForDcId(Optional<Key> dcId,
                                          Reference<ILogSystem> oldLogSystem,
                                          Reference<AsyncVar<PeekTxsInfo>> locality) {
@@ -1416,7 +1030,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
-	    recruitEverything(self, seedServers, oldLogSystem);
+	    Recruiter::recruitEverything(self, seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
@@ -1457,7 +1071,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 				if (self->configuration != oldConf) { // confChange does not trigger when including servers
 					self->dcId_locality = originalLocalityMap;
-					recruitments = recruitEverything(self, seedServers, oldLogSystem);
+					recruitments = Recruiter::recruitEverything(self, seedServers, oldLogSystem);
 				}
 			}
 		}
