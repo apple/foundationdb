@@ -97,7 +97,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
+		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1, IsInternal::False);
 		switchConnFileDb->defaultTenant = cx->defaultTenant;
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),

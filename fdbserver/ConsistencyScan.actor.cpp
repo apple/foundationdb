@@ -70,6 +70,7 @@ struct ConsistencyScanData {
 ACTOR Future<Version> getVersion(Database cx) {
 	loop {
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			Version version = wait(tr.getReadVersion());
@@ -345,6 +346,7 @@ ACTOR Future<std::vector<int64_t>> getStorageSizeEstimate(std::vector<StorageSer
 
 ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 	state Transaction tr(cx);
+	tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 	loop {
 		try {
@@ -454,6 +456,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		state std::vector<UID> sourceStorageServers;
 		state std::vector<UID> destStorageServers;
 		state Transaction tr(cx);
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		state int bytesReadInRange = 0;
 
@@ -853,6 +856,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 							loop {
 								try {
 									csInfoTr->reset();
+									csInfoTr->setOption(FDBTransactionOptions::RAW_ACCESS);
 									csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 									state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
@@ -863,6 +867,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 										                                                     IncludeVersion());
 										consistencyScanInfo.progress_key = progressKey;
 										csInfoTr->reset();
+										csInfoTr->setOption(FDBTransactionOptions::RAW_ACCESS);
 										csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 										wait(ConsistencyScanInfo::setInfo(csInfoTr, consistencyScanInfo));
 										wait(csInfoTr->commit());
@@ -1162,6 +1167,7 @@ ACTOR Future<Void> runDataValidationCheck(ConsistencyScanData* self) {
 	loop {
 		try {
 			tr->reset();
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			wait(ConsistencyScanInfo::setInfo(tr, csInfo));
 			wait(tr->commit());
@@ -1180,6 +1186,7 @@ ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
 	loop {
 		try {
 			tr->reset();
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(tr));
@@ -1233,6 +1240,7 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 		loop {
 			try {
 				tr->reset();
+				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				wait(ConsistencyScanInfo::setInfo(tr, csInfo));
 				wait(tr->commit());

@@ -48,6 +48,7 @@
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
 FDB_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseRawAccess);
 
 // Incomplete types that are reference counted
 class DatabaseContext;

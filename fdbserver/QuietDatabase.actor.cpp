@@ -675,6 +675,7 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 		try {
 			TraceEvent("GetVersionOffset").detail("Stage", "ReadingVersionEpoch");
 
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Version rv = wait(tr.getReadVersion());
 			Optional<Standalone<StringRef>> versionEpochValue = wait(tr.get(versionEpochKey));

@@ -481,6 +481,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 		state int rowCount = 0;
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				RangeResult existingRows = wait(tr.getRange(normalKeys, 1));
 				rowCount = existingRows.size();
 				break;
@@ -880,6 +881,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 			// Ensure that there is no left over key within the backup subspace
 			loop {
 				state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
+				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 				TraceEvent("BARW_CheckLeftoverKeys", randomID).detail("BackupTag", printable(self->backupTag));
 
@@ -916,6 +918,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						wait(delay(5.0));
 
 						tr = makeReference<ReadYourWritesTransaction>(cx);
+						tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 						wait(store(taskCount, backupAgent.getTaskCount(tr)));
 					}
 

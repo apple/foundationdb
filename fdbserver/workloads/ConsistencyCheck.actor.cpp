@@ -239,6 +239,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state std::map<UID, StorageServerInterface> tssMapping;
 
 				state Transaction tr(cx);
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
@@ -1324,6 +1325,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
 

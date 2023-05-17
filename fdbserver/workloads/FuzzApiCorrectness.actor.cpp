@@ -65,7 +65,8 @@ struct ExceptionContract {
 		    e.code() == error_code_future_version || e.code() == error_code_transaction_cancelled ||
 		    e.code() == error_code_key_too_large || e.code() == error_code_value_too_large ||
 		    e.code() == error_code_process_behind || e.code() == error_code_batch_transaction_throttled ||
-		    e.code() == error_code_tag_throttled || e.code() == error_code_grv_proxy_memory_limit_exceeded) {
+		    e.code() == error_code_tag_throttled || e.code() == error_code_grv_proxy_memory_limit_exceeded ||
+		    e.code() == error_code_tenant_name_required) {
 			return;
 		}
 
@@ -273,12 +274,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		return Void();
 	}
 
-	Future<bool> check(Database const& cx) override {
-		if (!writeSystemKeys) { // there must be illegal access during data load
-			return illegalTenantAccess;
-		}
-		return success;
-	}
+	Future<bool> check(Database const& cx) override { return success; }
 
 	Key getKeyForIndex(int tenantNum, int idx) {
 		idx += minNode;
@@ -347,8 +343,11 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 							if (now() - startTime > self->testDuration)
 								return Void();
 							try {
-								if (self->useSystemKeys && tenantNum == -1) {
-									tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+								if (tenantNum == -1) {
+									tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+									if (self->useSystemKeys) {
+										tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+									}
 								}
 								if (self->specialKeysRelaxed)
 									tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
@@ -363,6 +362,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								tr->clear(KeyRangeRef(self->getKeyForIndex(tenantNum, i),
 								                      self->getKeyForIndex(tenantNum, end)));
 
+								state bool wroteKeys = false;
 								for (int j = i; j < end; j++) {
 									if (deterministicRandom()->random01() < self->initialKeyDensity) {
 										Key key = self->getKeyForIndex(tenantNum, j);
@@ -370,17 +370,21 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 											Value value = self->getRandomValue();
 											value = value.substr(
 											    0, std::min<int>(value.size(), CLIENT_KNOBS->VALUE_SIZE_LIMIT));
+											wroteKeys = true;
 											tr->set(key, value);
 										}
 									}
 								}
 								wait(unsafeThreadFutureToFuture(tr->commit()));
+								ASSERT(tenantNum != -1 || self->writeSystemKeys ||
+								       cx->getTenantMode() != TenantMode::REQUIRED || !wroteKeys);
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
 							} catch (Error& e) {
 								if (e.code() == error_code_illegal_tenant_access) {
 									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
+									ASSERT(cx->getTenantMode() == TenantMode::REQUIRED);
 									self->illegalTenantAccess = true;
 									break;
 								}
@@ -495,9 +499,13 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 
 				if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result || cancelled) {
 					throw not_committed();
-				} else if (e.code() == error_code_illegal_tenant_access) {
+				} else if (e.code() == error_code_illegal_tenant_access ||
+				           e.code() == error_code_tenant_name_required) {
 					ASSERT_EQ(tenantNum, -1);
 					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
+					if (e.code() == error_code_tenant_name_required) {
+						ASSERT(!rawAccess && !self->useSystemKeys);
+					}
 					return Void();
 				}
 
