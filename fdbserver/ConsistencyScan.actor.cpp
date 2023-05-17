@@ -393,6 +393,11 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 				wait(store(config, cs.config().getD(tr)));
 				wait(store(configVersion, cs.trigger.get(tr)));
 
+				if (DEBUG_SCAN_PROGRESS) {
+					TraceEvent(SevDebug, "ConsistencyScanProgressGotConfig", memState->csId)
+					    .detail("Enabled", config.enabled);
+				}
+
 				// If the scan is enabled, read the current round stats and lifetime stats.  After This point this actor
 				// *owns* these things and will update them but not read them again because nothing else should be
 				// writing them.
@@ -438,6 +443,10 @@ ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* 
 
 				if (config.enabled) {
 					break;
+				}
+
+				if (DEBUG_SCAN_PROGRESS) {
+					TraceEvent(SevDebug, "ConsistencyScanProgressDisabledWatching", memState->csId);
 				}
 
 				wait(watch);

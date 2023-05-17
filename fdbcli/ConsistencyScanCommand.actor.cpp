@@ -80,6 +80,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 			if (error) {
 				break;
 			}
+			cs.config().set(tr, config);
 			wait(tr->commit());
 			break;
 		} catch (Error& e) {
