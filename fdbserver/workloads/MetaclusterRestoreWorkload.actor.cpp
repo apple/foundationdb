@@ -418,7 +418,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				    .detail("TenantGroup", *collisionItr);
 				std::unordered_set<int64_t> tenantsInGroup =
 				    wait(runTransaction(self->managementDb, [collisionItr = collisionItr](Reference<ITransaction> tr) {
-						tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+					    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 					    return getTenantsInGroup(
 					        tr, metacluster::metadata::management::tenantMetadata(), *collisionItr);
 				    }));
@@ -484,7 +484,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		    self->managementDb,
 		    [managementTenantList = &managementTenantList,
 		     managementGroupList = &managementGroupList](Reference<ITransaction> tr) {
-				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    return store(*managementTenantList,
 			                 metacluster::metadata::management::tenantMetadata().tenantNameIndex.getRange(
 			                     tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)) &&
@@ -1142,7 +1142,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	ACTOR static Future<Void> checkTenants(MetaclusterRestoreWorkload* self) {
 		state KeyBackedRangeResult<std::pair<int64_t, metacluster::MetaclusterTenantMapEntry>> tenants =
 		    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
-				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+			    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			    return metacluster::metadata::management::tenantMetadata().tenantMap.getRange(
 			        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
 		    }));
