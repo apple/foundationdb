@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/RESTKmsConnectorUtils.h"
+#include "fdbrpc/HTTP.h"
 #include "flow/EncryptUtils.h"
 
 namespace RESTKmsConnectorUtils {
@@ -51,6 +52,14 @@ const char* BLOB_METADATA_LOCATION_ID_TAG = "id";
 const char* BLOB_METADATA_LOCATION_PATH_TAG = "path";
 
 const int INVALID_REQUEST_VERSION = 0;
+
+HTTP::Headers getHTTPHeaders() {
+	HTTP::Headers headers;
+	headers["Content-type"] = "application/json";
+	headers["Accept"] = "application/json";
+
+	return headers;
+}
 
 void addVersionToDoc(rapidjson::Document& doc, const int requestVersion) {
 	rapidjson::Value version;

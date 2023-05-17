@@ -74,6 +74,10 @@ int64_t getExpireInterval(const int64_t refTS, const int64_t defaultTtl) {
 	return (refTS + defaultTtl);
 }
 
+void validateHeaders(const HTTP::Headers& toCompare) {
+	ASSERT(toCompare == RESTKmsConnectorUtils::getHTTPHeaders());
+}
+
 void addErrorToDoc(rapidjson::Document& doc, const ErrorDetail& details) {
 	rapidjson::Value errorDetail(rapidjson::kObjectType);
 	if (!details.errorMsg.empty()) {
@@ -321,6 +325,8 @@ ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> re
 	wait(delay(0));
 	ASSERT_EQ(request->verb, HTTP::HTTP_VERB_POST);
 
+	validateHeaders(request->data.headers);
+
 	state VaultResponse vaultResponse;
 	if (request->resource.compare("/get-encryption-keys-by-key-ids") == 0) {
 		vaultResponse = handleFetchKeysByKeyIds(request->data.content);
@@ -493,11 +499,29 @@ TEST_CASE("/restSimKmsVault/invalidResource") {
 
 	request->verb = HTTP::HTTP_VERB_POST;
 	request->resource = "/whatever";
+	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
 	try {
 		wait(simKmsVaultRequestHandler(request, response));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_http_bad_response);
+	}
+	return Void();
+}
+
+TEST_CASE("/restSimKmsVault/invalidHeader") {
+	state Reference<HTTP::IncomingRequest> request = makeReference<HTTP::IncomingRequest>();
+	state Reference<HTTP::OutgoingResponse> response = makeReference<HTTP::OutgoingResponse>();
+
+	request->verb = HTTP::HTTP_VERB_POST;
+	request->resource = "/whatever";
+	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
+	request->data.headers["Foo"] = "Bar";
+	try {
+		wait(simKmsVaultRequestHandler(request, response));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_internal_error);
 	}
 	return Void();
 }

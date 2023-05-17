@@ -637,12 +637,8 @@ Future<T> kmsRequestImpl(
 					    .detail("FullUrl", kmsEncryptionFullUrl);
 				}
 
-				HTTP::Headers headers;
-				headers["Content-type"] = "application/json";
-				headers["Accept"] = "application/json";
-
-				Reference<HTTP::IncomingResponse> resp =
-				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
+				Reference<HTTP::IncomingResponse> resp = wait(ctx->restClient.doPost(
+				    kmsEncryptionFullUrl, requestBodyRef.toString(), RESTKmsConnectorUtils::getHTTPHeaders()));
 				curUrl->nRequests++;
 
 				try {

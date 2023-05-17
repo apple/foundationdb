@@ -22,6 +22,7 @@
 #define FDBSERVER_REST_KMS_CONNECTOR_UTILS_H
 #pragma once
 
+#include "fdbrpc/HTTP.h"
 #include "flow/EncryptUtils.h"
 #include "flow/flow.h"
 
@@ -92,6 +93,8 @@ private:
 	double readTS; // Approach assists refreshing token based on time of creation
 };
 using ValidationTokenMap = std::unordered_map<std::string, ValidationTokenCtx>;
+
+HTTP::Headers getHTTPHeaders();
 
 void addVersionToDoc(rapidjson::Document& doc, const int requestVersion);
 void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
