@@ -5806,7 +5806,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(monitorClientRanges(self));
 		self->addActor.send(monitorTenants(self));
 		self->addActor.send(monitorPurgeKeys(self));
-		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
+		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED && !self->isFullRestoreMode) {
 			self->addActor.send(bgConsistencyCheck(self));
 		}
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {
