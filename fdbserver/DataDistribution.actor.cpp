@@ -708,7 +708,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 			if (self->context->ddEnabledState->sameId(req.requesterID) &&
 			    self->context->ddEnabledState->isBlobRestorePreparing()) {
 				// the sender use at-least once model, so we need to guarantee the idempotence
-				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
+				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest", probe::decoration::rare);
 				continue;
 			}
 			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
