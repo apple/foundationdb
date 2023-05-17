@@ -314,6 +314,7 @@ public:
 
 	// REST KMS configurations
 	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
+	int SIM_KMS_VAULT_MAX_KEYS;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

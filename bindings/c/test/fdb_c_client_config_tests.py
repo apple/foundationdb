@@ -613,6 +613,7 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
+        # disable because older version does not guarantee trace flush before network::stop() returns
         # prev_ver_trace = self.find_trace_file(
         #   with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
         # )
