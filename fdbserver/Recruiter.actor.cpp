@@ -42,7 +42,13 @@ void updateIdUsed(const std::vector<WorkerInterface>& workers,
 	}
 }
 
-void compareWorkers(ClusterControllerData const* clusterControllerData,
+bool workerAvailable(WorkerInfo const& worker, double startTime, bool checkStable) {
+	return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
+	       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
+	        (!checkStable || worker.reboots < 2));
+}
+
+void compareWorkers(std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
                     const DatabaseConfiguration& conf,
                     const std::vector<WorkerInterface>& first,
                     const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
@@ -52,8 +58,8 @@ void compareWorkers(ClusterControllerData const* clusterControllerData,
                     std::string description) {
 	std::vector<WorkerDetails> firstDetails;
 	for (auto& worker : first) {
-		auto w = clusterControllerData->id_worker.find(worker.locality.processId());
-		ASSERT(w != clusterControllerData->id_worker.end());
+		auto w = id_worker.find(worker.locality.processId());
+		ASSERT(w != id_worker.end());
 		auto const& [_, workerInfo] = *w;
 		ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
 		firstDetails.push_back(workerInfo.details);
@@ -63,8 +69,8 @@ void compareWorkers(ClusterControllerData const* clusterControllerData,
 
 	std::vector<WorkerDetails> secondDetails;
 	for (auto& worker : second) {
-		auto w = clusterControllerData->id_worker.find(worker.locality.processId());
-		ASSERT(w != clusterControllerData->id_worker.end());
+		auto w = id_worker.find(worker.locality.processId());
+		ASSERT(w != id_worker.end());
 		auto const& [_, workerInfo] = *w;
 		ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
 		secondDetails.push_back(workerInfo.details);
@@ -93,8 +99,8 @@ std::vector<WorkerDetails> getWorkersForSeedServers(
 
 	for (auto& it : clusterControllerData->id_worker) {
 		auto fitness = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-		if (clusterControllerData->workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-		    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
+		if (workerAvailable(it.second, clusterControllerData->startTime, false) &&
+		    it.second.details.recoveredDiskFiles && !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 		    !isExcludedDegradedServer(clusterControllerData, it.second.details.interf.addresses()) &&
 		    fitness != ProcessClass::NeverAssign &&
 		    (!dcId.present() || it.second.details.interf.locality.dcId() == dcId.get())) {
@@ -150,7 +156,7 @@ std::set<Optional<Standalone<StringRef>>> getDatacenters(ClusterControllerData c
                                                          bool checkStable = false) {
 	std::set<Optional<Standalone<StringRef>>> result;
 	for (auto& it : clusterControllerData->id_worker)
-		if (clusterControllerData->workerAvailable(it.second, checkStable) &&
+		if (workerAvailable(it.second, clusterControllerData->startTime, checkStable) &&
 		    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 		    !isExcludedDegradedServer(clusterControllerData, it.second.details.interf.addresses()))
 			result.insert(it.second.details.interf.locality.dcId());
@@ -362,7 +368,7 @@ std::vector<WorkerDetails> getWorkersForTlogsSimple(ClusterControllerData const*
 			    SevInfo, clusterControllerData->id, "simple", "Worker is excluded", worker_details, fitness, dcIds);
 			continue;
 		}
-		if (!clusterControllerData->workerAvailable(worker_info, checkStable)) {
+		if (!workerAvailable(worker_info, clusterControllerData->startTime, checkStable)) {
 			logWorkerUnavailable(SevInfo,
 			                     clusterControllerData->id,
 			                     "simple",
@@ -534,7 +540,7 @@ std::vector<WorkerDetails> getWorkersForTlogsBackup(ClusterControllerData const*
 			    SevInfo, clusterControllerData->id, "deprecated", "Worker is excluded", worker_details, fitness, dcIds);
 			continue;
 		}
-		if (!clusterControllerData->workerAvailable(worker_info, checkStable)) {
+		if (!workerAvailable(worker_info, clusterControllerData->startTime, checkStable)) {
 			logWorkerUnavailable(SevInfo,
 			                     clusterControllerData->id,
 			                     "deprecated",
@@ -792,7 +798,7 @@ std::vector<WorkerDetails> getWorkersForTlogsComplex(ClusterControllerData const
 			    SevInfo, clusterControllerData->id, "complex", "Worker is excluded", worker_details, fitness, dcIds);
 			continue;
 		}
-		if (!clusterControllerData->workerAvailable(worker_info, checkStable)) {
+		if (!workerAvailable(worker_info, clusterControllerData->startTime, checkStable)) {
 			logWorkerUnavailable(SevInfo,
 			                     clusterControllerData->id,
 			                     "complex",
@@ -1496,6 +1502,69 @@ RecruitFromConfigurationReply findWorkersForConfigurationDispatch(ClusterControl
 	}
 }
 
+WorkerDetails getStorageWorker(RecruitStorageRequest const& req,
+                               std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+                               double startTime) {
+	std::set<Optional<Standalone<StringRef>>> excludedMachines(req.excludeMachines.begin(), req.excludeMachines.end());
+	std::set<Optional<Standalone<StringRef>>> includeDCs(req.includeDCs.begin(), req.includeDCs.end());
+	std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
+
+	for (auto& it : id_worker)
+		if (workerAvailable(it.second, startTime, false) && it.second.details.recoveredDiskFiles &&
+		    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
+		    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+		    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
+		    (!it.second.details.interf.secondaryAddress().present() ||
+		     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
+		    it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::UnsetFit) {
+			return it.second.details;
+		}
+
+	if (req.criticalRecruitment) {
+		ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
+		Optional<WorkerDetails> bestInfo;
+		for (auto& it : id_worker) {
+			ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
+			if (workerAvailable(it.second, startTime, false) && it.second.details.recoveredDiskFiles &&
+			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
+			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
+			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
+				bestFit = fit;
+				bestInfo = it.second.details;
+			}
+		}
+
+		if (bestInfo.present()) {
+			return bestInfo.get();
+		}
+	}
+
+	throw no_more_servers();
+}
+
+// Returns a worker that can be used by a blob worker
+// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
+WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req,
+                            std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+                            double startTime,
+                            Optional<Standalone<StringRef>> clusterControllerDcId) {
+	std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
+	for (auto& it : id_worker) {
+		// the worker must be available, have the same dcID as CC,
+		// not be one of the excluded addrs from req and have the approriate fitness
+		if (workerAvailable(it.second, startTime, false) &&
+		    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
+		    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
+		    (!it.second.details.interf.secondaryAddress().present() ||
+		     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
+		    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
+			return it.second.details;
+		}
+	}
+
+	throw no_more_servers();
+}
+
 } // namespace
 
 class RecruiterImpl {
@@ -1536,7 +1605,7 @@ public:
 
 					updateIdUsed(rep.tLogs, firstUsed);
 					updateIdUsed(compare.tLogs, secondUsed);
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.tLogs,
 					               firstUsed,
@@ -1546,7 +1615,7 @@ public:
 					               "TLog");
 					updateIdUsed(rep.satelliteTLogs, firstUsed);
 					updateIdUsed(compare.satelliteTLogs, secondUsed);
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.satelliteTLogs,
 					               firstUsed,
@@ -1560,7 +1629,7 @@ public:
 					updateIdUsed(compare.grvProxies, secondUsed);
 					updateIdUsed(rep.resolvers, firstUsed);
 					updateIdUsed(compare.resolvers, secondUsed);
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.commitProxies,
 					               firstUsed,
@@ -1568,7 +1637,7 @@ public:
 					               secondUsed,
 					               ProcessClass::CommitProxy,
 					               "CommitProxy");
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.grvProxies,
 					               firstUsed,
@@ -1576,7 +1645,7 @@ public:
 					               secondUsed,
 					               ProcessClass::GrvProxy,
 					               "GrvProxy");
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.resolvers,
 					               firstUsed,
@@ -1586,7 +1655,7 @@ public:
 					               "Resolver");
 					updateIdUsed(rep.backupWorkers, firstUsed);
 					updateIdUsed(compare.backupWorkers, secondUsed);
-					compareWorkers(clusterControllerData,
+					compareWorkers(clusterControllerData->id_worker,
 					               req.configuration,
 					               rep.backupWorkers,
 					               firstUsed,
@@ -2079,6 +2148,55 @@ Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitEverythi
 	return RecruiterImpl::recruitEverything(this, clusterRecoveryData, seedServers, oldLogSystem);
 }
 
+void Recruiter::clusterRecruitStorage(RecruitStorageRequest req,
+                                      bool gotProcessClasses,
+                                      std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+                                      double startTime) {
+	try {
+		if (!gotProcessClasses && !req.criticalRecruitment)
+			throw no_more_servers();
+		auto worker = getStorageWorker(req, id_worker, startTime);
+		RecruitStorageReply rep;
+		rep.worker = worker.interf;
+		rep.processClass = worker.processClass;
+		req.reply.send(rep);
+	} catch (Error& e) {
+		if (e.code() == error_code_no_more_servers) {
+			this->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
+			TraceEvent(SevWarn, "RecruitStorageNotAvailable", this->id)
+			    .error(e)
+			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
+		} else {
+			TraceEvent(SevError, "RecruitStorageError", this->id).error(e);
+			throw; // Any other error will bring down the cluster controller
+		}
+	}
+}
+
+void Recruiter::clusterRecruitBlobWorker(RecruitBlobWorkerRequest req,
+                                         bool gotProcessClasses,
+                                         std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+                                         double startTime,
+                                         Optional<Standalone<StringRef>> clusterControllerDcId) {
+	try {
+		if (!gotProcessClasses)
+			throw no_more_servers();
+		auto worker = getBlobWorker(req, id_worker, startTime, clusterControllerDcId);
+		RecruitBlobWorkerReply rep;
+		rep.worker = worker.interf;
+		rep.processClass = worker.processClass;
+		req.reply.send(rep);
+	} catch (Error& e) {
+		if (e.code() == error_code_no_more_servers) {
+			this->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
+			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", this->id).error(e);
+		} else {
+			TraceEvent(SevError, "RecruitBlobWorkerError", this->id).error(e);
+			throw; // Any other error will bring down the cluster controller
+		}
+	}
+}
+
 void Recruiter::checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions) {
 	if (clusterControllerData->desiredDcIds.get().present() &&
 	    clusterControllerData->desiredDcIds.get().get().size() == 2 &&
@@ -2207,6 +2325,81 @@ void Recruiter::checkOutstandingRemoteRecruitmentRequests(ClusterControllerData 
 	}
 }
 
+void Recruiter::checkOutstandingStorageRequests(bool gotProcessClasses,
+                                                std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+                                                double startTime) {
+	for (int i = 0; i < this->outstandingStorageRequests.size(); i++) {
+		auto& req = this->outstandingStorageRequests[i];
+		try {
+			if (req.second < now()) {
+				req.first.reply.sendError(timed_out());
+				swapAndPop(&this->outstandingStorageRequests, i--);
+			} else {
+				if (!gotProcessClasses && !req.first.criticalRecruitment)
+					throw no_more_servers();
+
+				auto worker = getStorageWorker(req.first, id_worker, startTime);
+				RecruitStorageReply rep;
+				rep.worker = worker.interf;
+				rep.processClass = worker.processClass;
+				req.first.reply.send(rep);
+				swapAndPop(&this->outstandingStorageRequests, i--);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_no_more_servers) {
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", this->id)
+				    .errorUnsuppressed(e)
+				    .suppressFor(1.0)
+				    .detail("OutstandingReq", i)
+				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
+			} else {
+				TraceEvent(SevError, "RecruitStorageError", this->id).error(e);
+				throw;
+			}
+		}
+	}
+}
+
+// When workers aren't available at the time of request, the request
+// gets added to a list of outstanding reqs. Here, we try to resolve these
+// outstanding requests.
+void Recruiter::checkOutstandingBlobWorkerRequests(
+    bool gotProcessClasses,
+    std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+    double startTime,
+    Optional<Standalone<StringRef>> clusterControllerDcId) {
+	for (int i = 0; i < this->outstandingBlobWorkerRequests.size(); i++) {
+		auto& req = this->outstandingBlobWorkerRequests[i];
+		try {
+			if (req.second < now()) {
+				req.first.reply.sendError(timed_out());
+				swapAndPop(&this->outstandingBlobWorkerRequests, i--);
+			} else {
+				if (!gotProcessClasses)
+					throw no_more_servers();
+
+				auto worker = getBlobWorker(req.first, id_worker, startTime, clusterControllerDcId);
+				RecruitBlobWorkerReply rep;
+				rep.worker = worker.interf;
+				rep.processClass = worker.processClass;
+				req.first.reply.send(rep);
+				// can remove it once we know the worker was found
+				swapAndPop(&this->outstandingBlobWorkerRequests, i--);
+			}
+		} catch (Error& e) {
+			if (e.code() == error_code_no_more_servers) {
+				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", this->id)
+				    .errorUnsuppressed(e)
+				    .suppressFor(1.0)
+				    .detail("OutstandingReq", i);
+			} else {
+				TraceEvent(SevError, "RecruitBlobWorkerError", this->id).error(e);
+				throw;
+			}
+		}
+	}
+}
+
 void Recruiter::updateKnownIds(ClusterControllerData const* clusterControllerData,
                                std::map<Optional<Standalone<StringRef>>, int>* id_used) {
 	(*id_used)[clusterControllerData->masterProcessId]++;
@@ -2230,8 +2423,8 @@ WorkerFitnessInfo Recruiter::getWorkerForRoleInDatacenter(
 		    isExcludedDegradedServer(clusterControllerData, it.second.details.interf.addresses())) {
 			fitness = std::max(fitness, ProcessClass::ExcludeFit);
 		}
-		if (clusterControllerData->workerAvailable(it.second, checkStable) && fitness < unacceptableFitness &&
-		    it.second.details.interf.locality.dcId() == dcId) {
+		if (workerAvailable(it.second, clusterControllerData->startTime, checkStable) &&
+		    fitness < unacceptableFitness && it.second.details.interf.locality.dcId() == dcId) {
 			auto sharing = preferredSharing.find(it.first);
 			fitness_workers[std::make_tuple(fitness,
 			                                id_used[it.first],
@@ -2273,7 +2466,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForRoleInDatacenter(
 
 	for (auto& it : clusterControllerData->id_worker) {
 		auto fitness = it.second.details.processClass.machineClassFitness(role);
-		if (clusterControllerData->workerAvailable(it.second, checkStable) &&
+		if (workerAvailable(it.second, clusterControllerData->startTime, checkStable) &&
 		    !conf.isExcludedServer(it.second.details.interf.addresses()) &&
 		    !isExcludedDegradedServer(clusterControllerData, it.second.details.interf.addresses()) &&
 		    it.second.details.interf.locality.dcId() == dcId &&

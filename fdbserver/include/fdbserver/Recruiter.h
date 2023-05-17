@@ -45,6 +45,8 @@ class Recruiter {
 
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
+	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
+	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 
 public:
 	explicit Recruiter(UID const& id);
@@ -56,12 +58,32 @@ public:
 	    std::vector<StorageServerInterface>* seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 
-	// Check if txn system is recruited successfully in each region.
-	void checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions);
+	void clusterRecruitStorage(RecruitStorageRequest req,
+	                           bool gotProcessClasses,
+	                           std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                           double startTime);
+
+	// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
+	// Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
+	void clusterRecruitBlobWorker(RecruitBlobWorkerRequest req,
+	                              bool gotProcessClasses,
+	                              std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                              double startTime,
+	                              Optional<Standalone<StringRef>> clusterControllerDcId);
 
 	// TODO: Make private eventually
 	void checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData);
 	void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData);
+	void checkOutstandingStorageRequests(bool gotProcessClasses,
+	                                     std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                                     double startTime);
+	void checkOutstandingBlobWorkerRequests(bool gotProcessClasses,
+	                                        std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                                        double startTime,
+	                                        Optional<Standalone<StringRef>> clusterControllerDcId);
+
+	// Check if txn system is recruited successfully in each region.
+	void checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions);
 
 	// TODO: Move functions in ClusterController.actor.cpp that recruit special
 	// roles like EKP into this class. Then, this function can be made private.

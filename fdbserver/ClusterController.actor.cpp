@@ -283,75 +283,6 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	return Void();
 }
 
-void checkOutstandingStorageRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingStorageRequests.size(); i++) {
-		auto& req = self->outstandingStorageRequests[i];
-		try {
-			if (req.second < now()) {
-				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingStorageRequests, i--);
-			} else {
-				if (!self->gotProcessClasses && !req.first.criticalRecruitment)
-					throw no_more_servers();
-
-				auto worker = self->getStorageWorker(req.first);
-				RecruitStorageReply rep;
-				rep.worker = worker.interf;
-				rep.processClass = worker.processClass;
-				req.first.reply.send(rep);
-				swapAndPop(&self->outstandingStorageRequests, i--);
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i)
-				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
-			} else {
-				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
-// When workers aren't available at the time of request, the request
-// gets added to a list of outstanding reqs. Here, we try to resolve these
-// outstanding requests.
-void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingBlobWorkerRequests.size(); i++) {
-		auto& req = self->outstandingBlobWorkerRequests[i];
-		try {
-			if (req.second < now()) {
-				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
-			} else {
-				if (!self->gotProcessClasses)
-					throw no_more_servers();
-
-				auto worker = self->getBlobWorker(req.first);
-				RecruitBlobWorkerReply rep;
-				rep.worker = worker.interf;
-				rep.processClass = worker.processClass;
-				req.first.reply.send(rep);
-				// can remove it once we know the worker was found
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
-				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i);
-			} else {
-				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
@@ -647,10 +578,11 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 		}
 
 		self->recruiter.checkOutstandingRecruitmentRequests(self);
-		checkOutstandingStorageRequests(self);
+		self->recruiter.checkOutstandingStorageRequests(self->gotProcessClasses, self->id_worker, self->startTime);
 
 		if (self->db.blobGranulesEnabled.get()) {
-			checkOutstandingBlobWorkerRequests(self);
+			self->recruiter.checkOutstandingBlobWorkerRequests(
+			    self->gotProcessClasses, self->id_worker, self->startTime, self->clusterControllerDcId);
 		}
 		checkBetterSingletons(self);
 
@@ -789,50 +721,6 @@ ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<
 		out.insert(out.end(), x.get().begin(), x.get().end());
 	}
 	return out;
-}
-
-void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest req) {
-	try {
-		if (!self->gotProcessClasses && !req.criticalRecruitment)
-			throw no_more_servers();
-		auto worker = self->getStorageWorker(req);
-		RecruitStorageReply rep;
-		rep.worker = worker.interf;
-		rep.processClass = worker.processClass;
-		req.reply.send(rep);
-	} catch (Error& e) {
-		if (e.code() == error_code_no_more_servers) {
-			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-			    .error(e)
-			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
-		} else {
-			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
-			throw; // Any other error will bring down the cluster controller
-		}
-	}
-}
-
-// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
-// Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
-void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequest req) {
-	try {
-		if (!self->gotProcessClasses)
-			throw no_more_servers();
-		auto worker = self->getBlobWorker(req);
-		RecruitBlobWorkerReply rep;
-		rep.worker = worker.interf;
-		rep.processClass = worker.processClass;
-		req.reply.send(rep);
-	} catch (Error& e) {
-		if (e.code() == error_code_no_more_servers) {
-			self->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
-		} else {
-			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
-			throw; // Any other error will bring down the cluster controller
-		}
-	}
 }
 
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
@@ -2912,10 +2800,11 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterOpenDatabase(&self.db, req));
 		}
 		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
-			clusterRecruitStorage(&self, req);
+			self.recruiter.clusterRecruitStorage(req, self.gotProcessClasses, self.id_worker, self.startTime);
 		}
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
-			clusterRecruitBlobWorker(&self, req);
+			self.recruiter.clusterRecruitBlobWorker(
+			    req, self.gotProcessClasses, self.id_worker, self.startTime, self.clusterControllerDcId);
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;

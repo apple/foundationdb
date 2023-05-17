@@ -240,71 +240,6 @@ public:
 		}
 	};
 
-	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
-		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
-		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
-		        (!checkStable || worker.reboots < 2));
-	}
-
-	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
-		std::set<Optional<Standalone<StringRef>>> excludedMachines(req.excludeMachines.begin(),
-		                                                           req.excludeMachines.end());
-		std::set<Optional<Standalone<StringRef>>> includeDCs(req.includeDCs.begin(), req.includeDCs.end());
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-
-		for (auto& it : id_worker)
-			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::UnsetFit) {
-				return it.second.details;
-			}
-
-		if (req.criticalRecruitment) {
-			ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
-			Optional<WorkerDetails> bestInfo;
-			for (auto& it : id_worker) {
-				ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-				    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-				    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
-				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
-					bestFit = fit;
-					bestInfo = it.second.details;
-				}
-			}
-
-			if (bestInfo.present()) {
-				return bestInfo.get();
-			}
-		}
-
-		throw no_more_servers();
-	}
-
-	// Returns a worker that can be used by a blob worker
-	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
-	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-		for (auto& it : id_worker) {
-			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the approriate fitness
-			if (workerAvailable(it.second, false) &&
-			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
-				return it.second.details;
-			}
-		}
-
-		throw no_more_servers();
-	}
-
 	void checkRecoveryStalled() {
 		if ((db.serverInfo->get().recoveryState == RecoveryState::RECRUITING ||
 		     db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS ||
@@ -1308,8 +1243,6 @@ public:
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	const UID id;
 	Reference<AsyncVar<Optional<UID>>> clusterId;
-	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
-	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
