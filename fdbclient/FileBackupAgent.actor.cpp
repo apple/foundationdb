@@ -6256,7 +6256,7 @@ public:
 
 		// Update applyMutationsKeyVersionMap
 		state int i;
-		state int stepSize = 1000;
+		state int stepSize = CLIENT_KNOBS->RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 		for (i = 0; i < ranges.size(); i += stepSize) {
 			int end = std::min(i + stepSize, ranges.size());
 			wait(preloadApplyMutationsKeyVersionMap(cx, uid, ranges, versions, i, end));
