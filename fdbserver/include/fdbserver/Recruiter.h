@@ -113,7 +113,7 @@ public:
 	    bool checkStable = false);
 
 	// Selects the best method for TLog recruitment based on the specified policy
-	std::vector<WorkerDetails> getWorkersForTlogs(ClusterControllerData const* clusterControllerData,
+	std::vector<WorkerDetails> getWorkersForTLogs(ClusterControllerData const* clusterControllerData,
 	                                              DatabaseConfiguration const& conf,
 	                                              int32_t required,
 	                                              int32_t desired,

@@ -489,7 +489,7 @@ public:
 		// Check tLog fitness
 		updateIdUsed(tlogs, old_id_used);
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog, old_id_used);
-		auto newTLogs = recruiter.getWorkersForTlogs(this,
+		auto newTLogs = recruiter.getWorkersForTLogs(this,
 		                                             db.config,
 		                                             db.config.tLogReplicationFactor,
 		                                             db.config.getDesiredLogs(),
@@ -582,7 +582,7 @@ public:
 		RoleFitness newRemoteTLogFit = oldRemoteTLogFit;
 		if (db.config.usableRegions > 1 && (dbi.recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
 		                                    dbi.recoveryState == RecoveryState::FULLY_RECOVERED)) {
-			newRemoteTLogFit = RoleFitness(recruiter.getWorkersForTlogs(this,
+			newRemoteTLogFit = RoleFitness(recruiter.getWorkersForTLogs(this,
 			                                                            db.config,
 			                                                            db.config.getRemoteTLogReplicationFactor(),
 			                                                            db.config.getDesiredRemoteLogs(),

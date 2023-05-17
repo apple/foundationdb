@@ -353,7 +353,7 @@ public:
 
 	// A TLog recruitment method specialized for single, double, and triple configurations
 	// It recruits processes from with unique zoneIds until it reaches the desired amount
-	static std::vector<WorkerDetails> getWorkersForTlogsSimple(Recruiter* self,
+	static std::vector<WorkerDetails> getWorkersForTLogsSimple(Recruiter* self,
 	                                                           ClusterControllerData const* clusterControllerData,
 	                                                           DatabaseConfiguration const& conf,
 	                                                           int32_t required,
@@ -521,7 +521,7 @@ public:
 	//   dcIds:       the target data centers the workers are in. The selected workers must all be from these
 	//                data centers:
 	//   exclusionWorkerIds: the workers to be excluded from the selection.
-	static std::vector<WorkerDetails> getWorkersForTlogsBackup(
+	static std::vector<WorkerDetails> getWorkersForTLogsBackup(
 	    Recruiter* self,
 	    ClusterControllerData const* clusterControllerData,
 	    DatabaseConfiguration const& conf,
@@ -793,7 +793,7 @@ public:
 
 	// A TLog recruitment method specialized for three_data_hall and three_datacenter configurations
 	// It attempts to evenly recruit processes from across data_halls or datacenters
-	static std::vector<WorkerDetails> getWorkersForTlogsComplex(Recruiter* self,
+	static std::vector<WorkerDetails> getWorkersForTLogsComplex(Recruiter* self,
 	                                                            ClusterControllerData const* clusterControllerData,
 	                                                            DatabaseConfiguration const& conf,
 	                                                            int32_t desired,
@@ -1014,7 +1014,7 @@ public:
 	}
 
 	// Attempt to recruit TLogs without degraded processes and see if it improves the configuration
-	static std::vector<WorkerDetails> getWorkersForTlogsComplex(Recruiter* self,
+	static std::vector<WorkerDetails> getWorkersForTLogsComplex(Recruiter* self,
 	                                                            ClusterControllerData const* clusterControllerData,
 	                                                            DatabaseConfiguration const& conf,
 	                                                            int32_t desired,
@@ -1027,7 +1027,7 @@ public:
 	                                                            const std::vector<UID>& exclusionWorkerIds) {
 		desired = std::max(desired, minFields * minPerField);
 		std::map<Optional<Standalone<StringRef>>, int> withDegradedUsed = id_used;
-		auto withDegraded = getWorkersForTlogsComplex(self,
+		auto withDegraded = getWorkersForTLogsComplex(self,
 		                                              clusterControllerData,
 		                                              conf,
 		                                              desired,
@@ -1057,7 +1057,7 @@ public:
 
 		try {
 			std::map<Optional<Standalone<StringRef>>, int> withoutDegradedUsed = id_used;
-			auto withoutDegraded = getWorkersForTlogsComplex(self,
+			auto withoutDegraded = getWorkersForTLogsComplex(self,
 			                                                 clusterControllerData,
 			                                                 conf,
 			                                                 desired,
@@ -1280,7 +1280,7 @@ public:
 			}
 		}
 
-		auto tlogs = self->getWorkersForTlogs(clusterControllerData,
+		auto tLogs = self->getWorkersForTLogs(clusterControllerData,
 		                                      req.configuration,
 		                                      req.configuration.tLogReplicationFactor,
 		                                      req.configuration.getDesiredLogs(),
@@ -1288,8 +1288,8 @@ public:
 		                                      id_used,
 		                                      false,
 		                                      primaryDC);
-		for (int i = 0; i < tlogs.size(); i++) {
-			result.tLogs.push_back(tlogs[i].interf);
+		for (int i = 0; i < tLogs.size(); i++) {
+			result.tLogs.push_back(tLogs[i].interf);
 		}
 
 		std::vector<WorkerDetails> satelliteLogs;
@@ -1366,12 +1366,12 @@ public:
 			result.resolvers.push_back(resolvers[i].interf);
 
 		if (req.maxOldLogRouters > 0) {
-			if (tlogs.size() == 1) {
-				result.oldLogRouters.push_back(tlogs[0].interf);
+			if (tLogs.size() == 1) {
+				result.oldLogRouters.push_back(tLogs[0].interf);
 			} else {
-				for (int i = 0; i < tlogs.size(); i++) {
-					if (tlogs[i].interf.locality.processId() != clusterControllerData->clusterControllerProcessId) {
-						result.oldLogRouters.push_back(tlogs[i].interf);
+				for (int i = 0; i < tLogs.size(); i++) {
+					if (tLogs[i].interf.locality.processId() != clusterControllerData->clusterControllerProcessId) {
+						result.oldLogRouters.push_back(tLogs[i].interf);
 					}
 				}
 			}
@@ -1379,7 +1379,7 @@ public:
 
 		if (req.configuration.backupWorkerEnabled) {
 			const int nBackup = std::max<int>(
-			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tlogs.size()),
+			    (req.configuration.desiredLogRouterCount > 0 ? req.configuration.desiredLogRouterCount : tLogs.size()),
 			    req.maxOldLogRouters);
 			auto backupWorkers = self->getWorkersForRoleInDatacenter(
 			    clusterControllerData, dcId, ProcessClass::Backup, nBackup, req.configuration, id_used);
@@ -1391,7 +1391,7 @@ public:
 
 		if (!clusterControllerData->goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 		    (RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
-		         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
+		         .betterCount(RoleFitness(tLogs, ProcessClass::TLog, id_used)) ||
 		     (region.satelliteTLogReplicationFactor > 0 && req.configuration.usableRegions > 1 &&
 		      RoleFitness(SERVER_KNOBS->EXPECTED_TLOG_FITNESS,
 		                  req.configuration.getDesiredSatelliteLogs(dcId),
@@ -1518,23 +1518,23 @@ public:
 			RecruitFromConfigurationReply result;
 			std::map<Optional<Standalone<StringRef>>, int> id_used;
 			Recruiter::updateKnownIds(clusterControllerData, &id_used);
-			auto tlogs = self->getWorkersForTlogs(clusterControllerData,
+			auto tLogs = self->getWorkersForTLogs(clusterControllerData,
 			                                      req.configuration,
 			                                      req.configuration.tLogReplicationFactor,
 			                                      req.configuration.getDesiredLogs(),
 			                                      req.configuration.tLogPolicy,
 			                                      id_used);
-			for (int i = 0; i < tlogs.size(); i++) {
-				result.tLogs.push_back(tlogs[i].interf);
+			for (int i = 0; i < tLogs.size(); i++) {
+				result.tLogs.push_back(tLogs[i].interf);
 			}
 
 			if (req.maxOldLogRouters > 0) {
-				if (tlogs.size() == 1) {
-					result.oldLogRouters.push_back(tlogs[0].interf);
+				if (tLogs.size() == 1) {
+					result.oldLogRouters.push_back(tLogs[0].interf);
 				} else {
-					for (int i = 0; i < tlogs.size(); i++) {
-						if (tlogs[i].interf.locality.processId() != clusterControllerData->clusterControllerProcessId) {
-							result.oldLogRouters.push_back(tlogs[i].interf);
+					for (int i = 0; i < tLogs.size(); i++) {
+						if (tLogs[i].interf.locality.processId() != clusterControllerData->clusterControllerProcessId) {
+							result.oldLogRouters.push_back(tLogs[i].interf);
 						}
 					}
 				}
@@ -1637,7 +1637,7 @@ public:
 						}
 
 						if (req.configuration.backupWorkerEnabled) {
-							const int nBackup = std::max<int>(tlogs.size(), req.maxOldLogRouters);
+							const int nBackup = std::max<int>(tLogs.size(), req.maxOldLogRouters);
 							auto backupWorkers = self->getWorkersForRoleInDatacenter(
 							    clusterControllerData, dcId, ProcessClass::Backup, nBackup, req.configuration, used);
 							std::transform(backupWorkers.begin(),
@@ -1687,7 +1687,7 @@ public:
 			if (!clusterControllerData->goodRecruitmentTime.isReady() && checkGoodRecruitment &&
 			    (RoleFitness(
 			         SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredLogs(), ProcessClass::TLog)
-			         .betterCount(RoleFitness(tlogs, ProcessClass::TLog, id_used)) ||
+			         .betterCount(RoleFitness(tLogs, ProcessClass::TLog, id_used)) ||
 			     RoleFitness(SERVER_KNOBS->EXPECTED_COMMIT_PROXY_FITNESS,
 			                 req.configuration.getDesiredCommitProxies(),
 			                 ProcessClass::CommitProxy)
@@ -1726,7 +1726,7 @@ public:
 		std::set<Optional<Key>> remoteDC;
 		remoteDC.insert(req.dcId);
 
-		auto remoteLogs = self->getWorkersForTlogs(clusterControllerData,
+		auto remoteLogs = self->getWorkersForTLogs(clusterControllerData,
 		                                           req.configuration,
 		                                           req.configuration.getRemoteTLogReplicationFactor(),
 		                                           req.configuration.getDesiredRemoteLogs(),
@@ -2261,7 +2261,7 @@ void Recruiter::checkRegions(ClusterControllerData* clusterControllerData, const
 
 		std::set<Optional<Key>> primaryDC;
 		primaryDC.insert(regions[0].dcId);
-		Recruiter::getWorkersForTlogs(clusterControllerData,
+		Recruiter::getWorkersForTLogs(clusterControllerData,
 		                              clusterControllerData->db.config,
 		                              clusterControllerData->db.config.tLogReplicationFactor,
 		                              clusterControllerData->db.config.getDesiredLogs(),
@@ -2530,7 +2530,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForRoleInDatacenter(
 	return results;
 }
 
-std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData const* clusterControllerData,
+std::vector<WorkerDetails> Recruiter::getWorkersForTLogs(ClusterControllerData const* clusterControllerData,
                                                          DatabaseConfiguration const& conf,
                                                          int32_t required,
                                                          int32_t desired,
@@ -2549,7 +2549,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData c
 			if (pa2->attributeKey() == "zoneid" && pa2->embeddedPolicyName() == "One") {
 				std::map<Optional<Standalone<StringRef>>, int> testUsed = id_used;
 
-				auto workers = RecruiterImpl::getWorkersForTlogsComplex(this,
+				auto workers = RecruiterImpl::getWorkersForTLogsComplex(this,
 				                                                        clusterControllerData,
 				                                                        conf,
 				                                                        desired,
@@ -2563,7 +2563,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData c
 
 				if (g_network->isSimulated()) {
 					try {
-						auto testWorkers = RecruiterImpl::getWorkersForTlogsBackup(this,
+						auto testWorkers = RecruiterImpl::getWorkersForTLogsBackup(this,
 						                                                           clusterControllerData,
 						                                                           conf,
 						                                                           required,
@@ -2623,12 +2623,12 @@ std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData c
 	if (useSimple) {
 		std::map<Optional<Standalone<StringRef>>, int> testUsed = id_used;
 
-		auto workers = RecruiterImpl::getWorkersForTlogsSimple(
+		auto workers = RecruiterImpl::getWorkersForTLogsSimple(
 		    this, clusterControllerData, conf, required, desired, id_used, checkStable, dcIds, exclusionWorkerIds);
 
 		if (g_network->isSimulated()) {
 			try {
-				auto testWorkers = RecruiterImpl::getWorkersForTlogsBackup(this,
+				auto testWorkers = RecruiterImpl::getWorkersForTLogsBackup(this,
 				                                                           clusterControllerData,
 				                                                           conf,
 				                                                           required,
@@ -2663,7 +2663,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForTlogs(ClusterControllerData c
 		return workers;
 	}
 	TraceEvent(g_network->isSimulated() ? SevError : SevWarnAlways, "PolicyEngineNotOptimized");
-	return RecruiterImpl::getWorkersForTlogsBackup(
+	return RecruiterImpl::getWorkersForTLogsBackup(
 	    this, clusterControllerData, conf, required, desired, policy, id_used, checkStable, dcIds, exclusionWorkerIds);
 }
 
@@ -2717,7 +2717,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForSatelliteLogs(
 			// remote sides.
 			if (remoteDCUsedAsSatellite) {
 				std::map<Optional<Standalone<StringRef>>, int> tmpIdUsed;
-				auto remoteLogs = getWorkersForTlogs(clusterControllerData,
+				auto remoteLogs = getWorkersForTLogs(clusterControllerData,
 				                                     conf,
 				                                     conf.getRemoteTLogReplicationFactor(),
 				                                     conf.getRemoteTLogReplicationFactor(),
@@ -2732,7 +2732,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForSatelliteLogs(
 				               [](const WorkerDetails& in) { return in.interf.id(); });
 			}
 			if (satelliteFallback) {
-				return getWorkersForTlogs(clusterControllerData,
+				return getWorkersForTLogs(clusterControllerData,
 				                          conf,
 				                          region.satelliteTLogReplicationFactorFallback,
 				                          desiredSatelliteTLogs > 0 ? desiredSatelliteTLogs
@@ -2745,7 +2745,7 @@ std::vector<WorkerDetails> Recruiter::getWorkersForSatelliteLogs(
 				                          satelliteDCs,
 				                          exclusionWorkerIds);
 			} else {
-				return getWorkersForTlogs(clusterControllerData,
+				return getWorkersForTLogs(clusterControllerData,
 				                          conf,
 				                          region.satelliteTLogReplicationFactor,
 				                          desiredSatelliteTLogs > 0 ? desiredSatelliteTLogs
