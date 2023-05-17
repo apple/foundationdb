@@ -2350,75 +2350,102 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			    .detail("AuditType", auditType);
 			state std::vector<IDDTxnProcessor::DDRangeLocations> rangeLocations =
 			    wait(self->txnProcessor->getSourceServerInterfacesForRange(currentRange));
-
+			// Divide the audit job in to tasks according to KeyServers system mapping
 			state int i = 0;
 			for (i = 0; i < rangeLocations.size(); ++i) {
-				state AuditStorageRequest req(audit->coreState.id, rangeLocations[i].range, auditType);
-				state StorageServerInterface targetServer;
-				// Set req.targetServers and targetServer, which will be
-				// used to doAuditOnStorageServer
-				// Different audit types have different settings
-				if (auditType == AuditType::ValidateHA) {
-					if (rangeLocations[i].servers.size() < 2) {
-						TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-						    .detail("Reason", "Single replica, ignore")
-						    .detail("AuditID", audit->coreState.id)
-						    .detail("Range", range)
-						    .detail("AuditType", auditType);
-						return Void();
-					}
-					// pick a server from primary DC
-					auto it = rangeLocations[i].servers.begin();
-					const int idx = deterministicRandom()->randomInt(0, it->second.size());
-					targetServer = it->second[idx];
-					++it;
-					// pick a server from each remote DC
-					for (; it != rangeLocations[i].servers.end(); ++it) {
-						const int idx = deterministicRandom()->randomInt(0, it->second.size());
-						req.targetServers.push_back(it->second[idx].id());
-					}
-				} else if (auditType == AuditType::ValidateReplica) {
-					auto it = rangeLocations[i].servers.begin(); // always compare primary DC
-					if (it->second.size() == 1) {
-						TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
-						    .detail("Reason", "Single replica, ignore")
-						    .detail("AuditID", audit->coreState.id)
-						    .detail("Range", range)
-						    .detail("AuditType", auditType);
-						return Void();
-					}
-					ASSERT(it->second.size() >= 2);
-					const int idx = deterministicRandom()->randomInt(0, it->second.size());
-					targetServer = it->second[idx];
-					for (int i = 0; i < it->second.size(); ++i) {
-						if (i == idx) {
+				// For each task, check the progress, and create task request for the unfinished range
+				state KeyRange taskRange = rangeLocations[i].range;
+				state Key taskRangeBegin = taskRange.begin;
+				while (taskRangeBegin < taskRange.end) {
+					state std::vector<AuditStorageState> auditStates =
+					    wait(getAuditStateByRange(self->txnProcessor->context(),
+					                              auditType,
+					                              audit->coreState.id,
+					                              KeyRangeRef(taskRangeBegin, taskRange.end)));
+					ASSERT(!auditStates.empty());
+					taskRangeBegin = auditStates.back().range.end;
+					state int j = 0;
+					for (j = 0; j < auditStates.size(); ++j) {
+						state AuditPhase phase = auditStates[j].getPhase();
+						ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
+						if (phase == AuditPhase::Complete) {
+							continue;
+						} else if (phase == AuditPhase::Error) {
+							audit->foundError = true;
 							continue;
 						}
-						req.targetServers.push_back(it->second[i].id());
+						// Create audit task for the range where the phase is Invalid which indicates
+						// this range has not been audited
+						ASSERT(phase == AuditPhase::Invalid);
+						state AuditStorageRequest req(audit->coreState.id, auditStates[j].range, auditType);
+						state StorageServerInterface targetServer;
+						// Set req.targetServers and targetServer, which will be
+						// used to doAuditOnStorageServer
+						// Different audit types have different settings
+						if (auditType == AuditType::ValidateHA) {
+							if (rangeLocations[i].servers.size() < 2) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								    .detail("Reason", "Single replica, ignore")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("Range", range)
+								    .detail("AuditType", auditType);
+								return Void();
+							}
+							// pick a server from primary DC
+							auto it = rangeLocations[i].servers.begin();
+							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							targetServer = it->second[idx];
+							++it;
+							// pick a server from each remote DC
+							for (; it != rangeLocations[i].servers.end(); ++it) {
+								const int idx = deterministicRandom()->randomInt(0, it->second.size());
+								req.targetServers.push_back(it->second[idx].id());
+							}
+						} else if (auditType == AuditType::ValidateReplica) {
+							auto it = rangeLocations[i].servers.begin(); // always compare primary DC
+							if (it->second.size() == 1) {
+								TraceEvent(SevInfo, "DDScheduleAuditOnRangeEnd", self->ddId)
+								    .detail("Reason", "Single replica, ignore")
+								    .detail("AuditID", audit->coreState.id)
+								    .detail("Range", range)
+								    .detail("AuditType", auditType);
+								return Void();
+							}
+							ASSERT(it->second.size() >= 2);
+							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							targetServer = it->second[idx];
+							for (int i = 0; i < it->second.size(); ++i) {
+								if (i == idx) {
+									continue;
+								}
+								req.targetServers.push_back(it->second[i].id());
+							}
+						} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
+							auto it = rangeLocations[i].servers.begin(); // always do in primary DC
+							const int idx = deterministicRandom()->randomInt(0, it->second.size());
+							targetServer = it->second[idx];
+						} else {
+							UNREACHABLE();
+						}
+						// Set doAuditOnStorageServer
+						if (self->remainingBudgetForAuditTasks.contains(auditType)) {
+							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
+							while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
+								wait(self->remainingBudgetForAuditTasks[auditType].onChange());
+								ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
+							}
+							self->remainingBudgetForAuditTasks[auditType].set(
+							    self->remainingBudgetForAuditTasks[auditType].get() - 1);
+							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
+						} else {
+							self->remainingBudgetForAuditTasks[auditType].set(
+							    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
+						}
+						issueDoAuditCount++;
+						doAuditTasks.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
-				} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
-					auto it = rangeLocations[i].servers.begin(); // always do in primary DC
-					const int idx = deterministicRandom()->randomInt(0, it->second.size());
-					targetServer = it->second[idx];
-				} else {
-					UNREACHABLE();
 				}
-				// Set doAuditOnStorageServer
-				if (self->remainingBudgetForAuditTasks.contains(auditType)) {
-					ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-					while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
-						wait(self->remainingBudgetForAuditTasks[auditType].onChange());
-						ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-					}
-					self->remainingBudgetForAuditTasks[auditType].set(
-					    self->remainingBudgetForAuditTasks[auditType].get() - 1);
-					ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-				} else {
-					self->remainingBudgetForAuditTasks[auditType].set(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX -
-					                                                  1);
-				}
-				issueDoAuditCount++;
-				doAuditTasks.add(doAuditOnStorageServer(self, audit, targetServer, req));
+
 				// Proceed to the next range if getSourceServerInterfacesForRange is partially read
 				begin = rangeLocations[i].range.end;
 				wait(delay(0.1));
