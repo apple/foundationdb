@@ -213,7 +213,7 @@ public:
 	void update(Transaction tr, AddConflictRange conflict = AddConflictRange::False) {
 		std::array<uint8_t, 14> value;
 		value.fill(0);
-		tr->atomicOp(key, StringRef(value.begin(), value.size()), MutationRef::SetVersionstampedValue);
+		tr->atomicOp(key, StringRef(value.data(), value.size()), MutationRef::SetVersionstampedValue);
 		if (conflict) {
 			tr->addReadConflictRange(singleKeyRange(key));
 		}
