@@ -2079,6 +2079,90 @@ Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitEverythi
 	return RecruiterImpl::recruitEverything(this, clusterRecoveryData, seedServers, oldLogSystem);
 }
 
+void Recruiter::checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions) {
+	if (clusterControllerData->desiredDcIds.get().present() &&
+	    clusterControllerData->desiredDcIds.get().get().size() == 2 &&
+	    clusterControllerData->desiredDcIds.get().get()[0].get() == regions[0].dcId &&
+	    clusterControllerData->desiredDcIds.get().get()[1].get() == regions[1].dcId) {
+		return;
+	}
+
+	try {
+		std::map<Optional<Standalone<StringRef>>, int> id_used;
+		Recruiter::getWorkerForRoleInDatacenter(clusterControllerData,
+		                                        regions[0].dcId,
+		                                        ProcessClass::ClusterController,
+		                                        ProcessClass::ExcludeFit,
+		                                        clusterControllerData->db.config,
+		                                        id_used,
+		                                        {},
+		                                        true);
+		Recruiter::getWorkerForRoleInDatacenter(clusterControllerData,
+		                                        regions[0].dcId,
+		                                        ProcessClass::Master,
+		                                        ProcessClass::ExcludeFit,
+		                                        clusterControllerData->db.config,
+		                                        id_used,
+		                                        {},
+		                                        true);
+
+		std::set<Optional<Key>> primaryDC;
+		primaryDC.insert(regions[0].dcId);
+		Recruiter::getWorkersForTlogs(clusterControllerData,
+		                              clusterControllerData->db.config,
+		                              clusterControllerData->db.config.tLogReplicationFactor,
+		                              clusterControllerData->db.config.getDesiredLogs(),
+		                              clusterControllerData->db.config.tLogPolicy,
+		                              id_used,
+		                              true,
+		                              primaryDC);
+		if (regions[0].satelliteTLogReplicationFactor > 0 && clusterControllerData->db.config.usableRegions > 1) {
+			bool satelliteFallback = false;
+			Recruiter::getWorkersForSatelliteLogs(clusterControllerData,
+			                                      clusterControllerData->db.config,
+			                                      regions[0],
+			                                      regions[1],
+			                                      id_used,
+			                                      satelliteFallback,
+			                                      true);
+		}
+
+		Recruiter::getWorkerForRoleInDatacenter(clusterControllerData,
+		                                        regions[0].dcId,
+		                                        ProcessClass::Resolver,
+		                                        ProcessClass::ExcludeFit,
+		                                        clusterControllerData->db.config,
+		                                        id_used,
+		                                        {},
+		                                        true);
+		Recruiter::getWorkerForRoleInDatacenter(clusterControllerData,
+		                                        regions[0].dcId,
+		                                        ProcessClass::CommitProxy,
+		                                        ProcessClass::ExcludeFit,
+		                                        clusterControllerData->db.config,
+		                                        id_used,
+		                                        {},
+		                                        true);
+		Recruiter::getWorkerForRoleInDatacenter(clusterControllerData,
+		                                        regions[0].dcId,
+		                                        ProcessClass::GrvProxy,
+		                                        ProcessClass::ExcludeFit,
+		                                        clusterControllerData->db.config,
+		                                        id_used,
+		                                        {},
+		                                        true);
+
+		std::vector<Optional<Key>> dcPriority;
+		dcPriority.push_back(regions[0].dcId);
+		dcPriority.push_back(regions[1].dcId);
+		clusterControllerData->desiredDcIds.set(dcPriority);
+	} catch (Error& e) {
+		if (e.code() != error_code_no_more_servers) {
+			throw;
+		}
+	}
+}
+
 void Recruiter::checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData) {
 	for (int i = 0; i < this->outstandingRecruitmentRequests.size(); i++) {
 		Reference<RecruitWorkersInfo> info = this->outstandingRecruitmentRequests[i];

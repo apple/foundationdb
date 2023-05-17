@@ -305,67 +305,6 @@ public:
 		throw no_more_servers();
 	}
 
-	// Check if txn system is recruited successfully in each region
-	void checkRegions(const std::vector<RegionInfo>& regions) {
-		if (desiredDcIds.get().present() && desiredDcIds.get().get().size() == 2 &&
-		    desiredDcIds.get().get()[0].get() == regions[0].dcId &&
-		    desiredDcIds.get().get()[1].get() == regions[1].dcId) {
-			return;
-		}
-
-		try {
-			std::map<Optional<Standalone<StringRef>>, int> id_used;
-			Recruiter::getWorkerForRoleInDatacenter(this,
-			                                        regions[0].dcId,
-			                                        ProcessClass::ClusterController,
-			                                        ProcessClass::ExcludeFit,
-			                                        db.config,
-			                                        id_used,
-			                                        {},
-			                                        true);
-			Recruiter::getWorkerForRoleInDatacenter(
-			    this, regions[0].dcId, ProcessClass::Master, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-
-			std::set<Optional<Key>> primaryDC;
-			primaryDC.insert(regions[0].dcId);
-			Recruiter::getWorkersForTlogs(this,
-			                              db.config,
-			                              db.config.tLogReplicationFactor,
-			                              db.config.getDesiredLogs(),
-			                              db.config.tLogPolicy,
-			                              id_used,
-			                              true,
-			                              primaryDC);
-			if (regions[0].satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
-				bool satelliteFallback = false;
-				Recruiter::getWorkersForSatelliteLogs(
-				    this, db.config, regions[0], regions[1], id_used, satelliteFallback, true);
-			}
-
-			Recruiter::getWorkerForRoleInDatacenter(
-			    this, regions[0].dcId, ProcessClass::Resolver, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-			Recruiter::getWorkerForRoleInDatacenter(this,
-			                                        regions[0].dcId,
-			                                        ProcessClass::CommitProxy,
-			                                        ProcessClass::ExcludeFit,
-			                                        db.config,
-			                                        id_used,
-			                                        {},
-			                                        true);
-			Recruiter::getWorkerForRoleInDatacenter(
-			    this, regions[0].dcId, ProcessClass::GrvProxy, ProcessClass::ExcludeFit, db.config, id_used, {}, true);
-
-			std::vector<Optional<Key>> dcPriority;
-			dcPriority.push_back(regions[0].dcId);
-			dcPriority.push_back(regions[1].dcId);
-			desiredDcIds.set(dcPriority);
-		} catch (Error& e) {
-			if (e.code() != error_code_no_more_servers) {
-				throw;
-			}
-		}
-	}
-
 	void checkRecoveryStalled() {
 		if ((db.serverInfo->get().recoveryState == RecoveryState::RECRUITING ||
 		     db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS ||
@@ -377,7 +316,7 @@ public:
 					std::swap(regions[0], regions[1]);
 				}
 				ASSERT(regions[1].priority < 0 || clusterControllerDcId.get() == regions[1].dcId);
-				checkRegions(regions);
+				recruiter.checkRegions(this, regions);
 			}
 		}
 	}
@@ -410,7 +349,7 @@ public:
 		if (db.config.regions.size() > 1 && db.config.regions[0].priority > db.config.regions[1].priority &&
 		    db.config.regions[0].dcId != clusterControllerDcId.get() && versionDifferenceUpdated &&
 		    datacenterVersionDifference < SERVER_KNOBS->MAX_VERSION_DIFFERENCE && remoteDCIsHealthy()) {
-			checkRegions(db.config.regions);
+			recruiter.checkRegions(this, db.config.regions);
 		}
 
 		// Get master process

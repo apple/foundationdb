@@ -56,6 +56,9 @@ public:
 	    std::vector<StorageServerInterface>* seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 
+	// Check if txn system is recruited successfully in each region.
+	void checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions);
+
 	// TODO: Make private eventually
 	void checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData);
 	void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData);
