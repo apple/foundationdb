@@ -281,50 +281,6 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	return Void();
 }
 
-void checkOutstandingRecruitmentRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingRecruitmentRequests.size(); i++) {
-		Reference<RecruitWorkersInfo> info = self->outstandingRecruitmentRequests[i];
-		try {
-			info->rep = Recruiter::findWorkersForConfiguration(self, info->req);
-			if (info->dbgId.present()) {
-				TraceEvent("CheckOutstandingRecruitment", info->dbgId.get())
-				    .detail("Request", info->req.configuration.toString());
-			}
-			info->waitForCompletion.trigger();
-			swapAndPop(&self->outstandingRecruitmentRequests, i--);
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", self->id).error(e);
-			} else {
-				TraceEvent(SevError, "RecruitTLogsRequestError", self->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
-void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingRemoteRecruitmentRequests.size(); i++) {
-		Reference<RecruitRemoteWorkersInfo> info = self->outstandingRemoteRecruitmentRequests[i];
-		try {
-			info->rep = Recruiter::findRemoteWorkersForConfiguration(self, info->req);
-			if (info->dbgId.present()) {
-				TraceEvent("CheckOutstandingRemoteRecruitment", info->dbgId.get())
-				    .detail("Request", info->req.configuration.toString());
-			}
-			info->waitForCompletion.trigger();
-			swapAndPop(&self->outstandingRemoteRecruitmentRequests, i--);
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", self->id).error(e);
-			} else {
-				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", self->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
 void checkOutstandingStorageRequests(ClusterControllerData* self) {
 	for (int i = 0; i < self->outstandingStorageRequests.size(); i++) {
 		auto& req = self->outstandingStorageRequests[i];
@@ -688,7 +644,7 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			}
 		}
 
-		checkOutstandingRecruitmentRequests(self);
+		self->recruiter.checkOutstandingRecruitmentRequests(self);
 		checkOutstandingStorageRequests(self);
 
 		if (self->db.blobGranulesEnabled.get()) {
@@ -716,7 +672,7 @@ ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self)
 			wait(self->goodRemoteRecruitmentTime);
 		}
 
-		checkOutstandingRemoteRecruitmentRequests(self);
+		self->recruiter.checkOutstandingRemoteRecruitmentRequests(self);
 	} catch (Error& e) {
 		if (e.code() != error_code_no_more_servers) {
 			TraceEvent(SevError, "CheckOutstandingError").error(e);

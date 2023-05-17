@@ -41,25 +41,29 @@ struct ClusterRecoveryData;
 class Recruiter {
 	friend class RecruiterImpl;
 
+	const UID id;
+
+	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
+	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
+
 public:
+	explicit Recruiter(UID const& id);
+
 	// Create assignments for each worker and recruit commit proxies, GRV
 	// proxies, resolvers, and transaction logs.
-	static Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
+	Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
 	    std::vector<StorageServerInterface>* seedServers,
 	    Reference<ILogSystem> oldLogSystem);
+
+	// TODO: Make private eventually
+	void checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData);
+	void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData);
 
 	// TODO: Move functions in ClusterController.actor.cpp that recruit special
 	// roles like EKP into this class. Then, this function can be made private.
 	static void updateKnownIds(ClusterControllerData const* clusterControllerData,
 	                           std::map<Optional<Standalone<StringRef>>, int>* id_used);
-
-	static RecruitFromConfigurationReply findWorkersForConfiguration(ClusterControllerData* clusterControllerData,
-	                                                                 RecruitFromConfigurationRequest const& req);
-
-	static RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration(
-	    ClusterControllerData const* clusterControllerData,
-	    RecruitRemoteFromConfigurationRequest const& req);
 
 	// TODO: Make these functions private after rewriting betterMasterExists
 	static WorkerFitnessInfo getWorkerForRoleInDatacenter(

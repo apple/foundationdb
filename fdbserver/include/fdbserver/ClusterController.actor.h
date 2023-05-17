@@ -1369,8 +1369,6 @@ public:
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	const UID id;
 	Reference<AsyncVar<Optional<UID>>> clusterId;
-	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
-	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
 	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
@@ -1392,6 +1390,8 @@ public:
 
 	bool remoteDCMonitorStarted;
 	bool remoteTransactionSystemDegraded;
+
+	Recruiter recruiter;
 
 	// recruitX is used to signal when role X needs to be (re)recruited.
 	// recruitingXID is used to track the ID of X's interface which is being recruited.
@@ -1453,7 +1453,7 @@ public:
 	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
 	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
 	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
-	    remoteTransactionSystemDegraded(false), recruitDistributor(false), recruitRatekeeper(false),
+	    remoteTransactionSystemDegraded(false), recruiter(id), recruitDistributor(false), recruitRatekeeper(false),
 	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
 	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),

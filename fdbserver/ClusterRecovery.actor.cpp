@@ -1030,7 +1030,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
-	    Recruiter::recruitEverything(self, seedServers, oldLogSystem);
+	    self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
@@ -1071,7 +1071,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 				if (self->configuration != oldConf) { // confChange does not trigger when including servers
 					self->dcId_locality = originalLocalityMap;
-					recruitments = Recruiter::recruitEverything(self, seedServers, oldLogSystem);
+					recruitments = self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
 				}
 			}
 		}
