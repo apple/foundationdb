@@ -86,12 +86,12 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = Recruiter::getWorkerForRoleInDatacenter(cluster,
-		                                                       cluster->clusterControllerDcId,
-		                                                       ProcessClass::Master,
-		                                                       ProcessClass::NeverAssign,
-		                                                       db->config,
-		                                                       id_used);
+		masterWorker = cluster->recruiter.getWorkerForRoleInDatacenter(cluster,
+		                                                               cluster->clusterControllerDcId,
+		                                                               ProcessClass::Master,
+		                                                               ProcessClass::NeverAssign,
+		                                                               db->config,
+		                                                               id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
