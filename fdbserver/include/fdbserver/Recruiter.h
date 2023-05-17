@@ -32,8 +32,7 @@ class ClusterControllerData;
 struct ClusterRecoveryData;
 
 //
-// Handles recruitment for stateless roles plus the transaction logs.
-// Recruitment consists of two main phases:
+// Handles recruitment for all roles. Recruitment consists of two main phases:
 //
 //   1. Find an optimal assignment of roles to workers
 //   2. Send recruitment messages to the assigned workers
