@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/RESTKmsConnectorUtils.h"
+#include "fdbserver/RESTKmsConnectorUtils.h"
 #include "flow/EncryptUtils.h"
 
 namespace RESTKmsConnectorUtils {
@@ -79,6 +79,30 @@ void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
 	doc.AddMember(memberKey, keyIdDetails, doc.GetAllocator());
 }
 
+void addBaseCipherIdDomIdToDoc(rapidjson::Document& doc,
+                               rapidjson::Value& keyIdDetails,
+                               const EncryptCipherBaseKeyId baseCipherId,
+                               const Optional<EncryptCipherDomainId> domainId) {
+	rapidjson::Value keyIdDetail(rapidjson::kObjectType);
+
+	// Add 'base_cipher_id'
+	rapidjson::Value key(BASE_CIPHER_ID_TAG, doc.GetAllocator());
+	rapidjson::Value baseKeyId;
+	baseKeyId.SetUint64(baseCipherId);
+	keyIdDetail.AddMember(key, baseKeyId, doc.GetAllocator());
+
+	if (domainId.present()) {
+		// Add 'encrypt_domain_id'
+		key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
+		rapidjson::Value domId;
+		domId.SetInt64(domainId.get());
+		keyIdDetail.AddMember(key, domId, doc.GetAllocator());
+	}
+
+	// push above object to the array
+	keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
+}
+
 void addValidationTokensSectionToJsonDoc(rapidjson::Document& doc, const ValidationTokenMap& tokenMap) {
 	// Append "validationTokens" as json array
 	rapidjson::Value validationTokens(rapidjson::kArrayType);
@@ -126,6 +150,28 @@ void addDebugUidSectionToJsonDoc(rapidjson::Document& doc, Optional<UID> dbgId) 
 
 	// Append 'debug_uid' object to the parent document
 	doc.AddMember(key, debugIdVal, doc.GetAllocator());
+}
+
+Optional<ErrorDetail> getError(const rapidjson::Document& doc) {
+	// Check if response has error
+	if (doc.HasMember(ERROR_TAG) && !doc[ERROR_TAG].IsNull()) {
+		ErrorDetail details;
+
+		if (doc[ERROR_TAG].HasMember(ERROR_MSG_TAG) && doc[ERROR_TAG][ERROR_MSG_TAG].IsString()) {
+			details.errorMsg.resize(doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+			memcpy(const_cast<char*>(details.errorMsg.data()),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
+		}
+		if (doc[ERROR_TAG].HasMember(ERROR_CODE_TAG) && doc[ERROR_TAG][ERROR_CODE_TAG].IsString()) {
+			details.errorCode.resize(doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+			memcpy(const_cast<char*>(details.errorCode.data()),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetString(),
+			       doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
+		}
+		return details;
+	}
+	return Optional<ErrorDetail>();
 }
 
 } // namespace RESTKmsConnectorUtils

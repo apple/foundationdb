@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_REST_KMS_CONNECTOR_UTILS_H
-#define FDBCLIENT_REST_KMS_CONNECTOR_UTILS_H
+#ifndef FDBSERVER_REST_KMS_CONNECTOR_UTILS_H
+#define FDBSERVER_REST_KMS_CONNECTOR_UTILS_H
 #pragma once
 
 #include "flow/EncryptUtils.h"
@@ -66,6 +66,18 @@ enum class ValidationTokenSource {
 	VALIDATION_TOKEN_SOURCE_LAST // Always the last element
 };
 
+struct ErrorDetail {
+	std::string errorCode;
+	std::string errorMsg;
+
+	ErrorDetail() {}
+	ErrorDetail(const std::string& code, const std::string& msg) : errorCode(code), errorMsg(msg) {}
+
+	bool isEqual(const ErrorDetail& toCompare) const {
+		return errorCode.compare(toCompare.errorCode) == 0 && errorMsg.compare(toCompare.errorMsg) == 0;
+	}
+};
+
 struct ValidationTokenCtx {
 	std::string name;
 	std::string value;
@@ -86,9 +98,15 @@ void addLatestDomainDetailsToDoc(rapidjson::Document& doc,
                                  const char* rootTagName,
                                  const char* idTagName,
                                  const EncryptCipherDomainIdVec& domainIds);
+void addBaseCipherIdDomIdToDoc(rapidjson::Document& doc,
+                               rapidjson::Value& keyIdDetails,
+                               const EncryptCipherBaseKeyId baseCipherId,
+                               const Optional<EncryptCipherDomainId> domainId);
 void addValidationTokensSectionToJsonDoc(rapidjson::Document& doc, const ValidationTokenMap& tokenMap);
 void addRefreshKmsUrlsSectionToJsonDoc(rapidjson::Document& doc, const bool refreshKmsUrls);
 void addDebugUidSectionToJsonDoc(rapidjson::Document& doc, Optional<UID> dbgId);
+
+Optional<ErrorDetail> getError(const rapidjson::Document& doc);
 
 } // namespace RESTKmsConnectorUtils
 

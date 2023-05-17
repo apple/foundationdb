@@ -23,12 +23,12 @@
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/RESTClient.h"
-#include "fdbclient/RESTKmsConnectorUtils.h"
 
 #include "fdbrpc/HTTP.h"
 
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/RESTKmsConnectorUtils.h"
 
 #include "flow/Arena.h"
 #include "flow/ActorCollection.h"
@@ -278,31 +278,11 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 	}
 
 	// Check if response has error
-	if (doc.HasMember(ERROR_TAG) && !doc[ERROR_TAG].IsNull()) {
-		Standalone<StringRef> errMsgRef;
-		Standalone<StringRef> errCodeRef;
-
-		if (doc[ERROR_TAG].HasMember(ERROR_MSG_TAG) && doc[ERROR_TAG][ERROR_MSG_TAG].IsString()) {
-			errMsgRef = makeString(doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
-			memcpy(mutateString(errMsgRef),
-			       doc[ERROR_TAG][ERROR_MSG_TAG].GetString(),
-			       doc[ERROR_TAG][ERROR_MSG_TAG].GetStringLength());
-		}
-		if (doc[ERROR_TAG].HasMember(ERROR_CODE_TAG) && doc[ERROR_TAG][ERROR_CODE_TAG].IsString()) {
-			errMsgRef = makeString(doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
-			memcpy(mutateString(errMsgRef),
-			       doc[ERROR_TAG][ERROR_CODE_TAG].GetString(),
-			       doc[ERROR_TAG][ERROR_CODE_TAG].GetStringLength());
-		}
-
-		if (!errCodeRef.empty() || !errMsgRef.empty()) {
-			TraceEvent("RESTKMSErrorResponse", ctx->uid)
-			    .detail("ErrorMsg", errMsgRef.empty() ? "" : errMsgRef.toString())
-			    .detail("ErrorCode", errCodeRef.empty() ? "" : errCodeRef.toString());
-		} else {
-			TraceEvent("RESTKMSErrorResponseEmptyDetails", ctx->uid).log();
-		}
-
+	Optional<ErrorDetail> errorDetails = RESTKmsConnectorUtils::getError(doc);
+	if (errorDetails.present()) {
+		TraceEvent("RESTKMSErrorResponse", ctx->uid)
+		    .detail("ErrorMsg", errorDetails->errorMsg)
+		    .detail("ErrorCode", errorDetails->errorCode);
 		throw encrypt_keys_fetch_failed();
 	}
 }
@@ -599,24 +579,7 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 	// Append 'cipher_key_details' as json array
 	rapidjson::Value keyIdDetails(rapidjson::kArrayType);
 	for (const auto& detail : req.encryptKeyInfos) {
-		rapidjson::Value keyIdDetail(rapidjson::kObjectType);
-
-		// Add 'base_cipher_id'
-		rapidjson::Value key(BASE_CIPHER_ID_TAG, doc.GetAllocator());
-		rapidjson::Value baseKeyId;
-		baseKeyId.SetUint64(detail.baseCipherId);
-		keyIdDetail.AddMember(key, baseKeyId, doc.GetAllocator());
-
-		if (detail.domainId.present()) {
-			// Add 'encrypt_domain_id'
-			key.SetString(ENCRYPT_DOMAIN_ID_TAG, doc.GetAllocator());
-			rapidjson::Value domainId;
-			domainId.SetInt64(detail.domainId.get());
-			keyIdDetail.AddMember(key, domainId, doc.GetAllocator());
-		}
-
-		// push above object to the array
-		keyIdDetails.PushBack(keyIdDetail, doc.GetAllocator());
+		addBaseCipherIdDomIdToDoc(doc, keyIdDetails, detail.baseCipherId, detail.domainId);
 	}
 	rapidjson::Value memberKey(CIPHER_KEY_DETAILS_TAG, doc.GetAllocator());
 	doc.AddMember(memberKey, keyIdDetails, doc.GetAllocator());

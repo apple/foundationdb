@@ -18,8 +18,8 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_REST_SIM_KMS_VAULT_H
-#define FDBCLIENT_REST_SIM_KMS_VAULT_H
+#ifndef FDBSERVER_REST_SIM_KMS_VAULT_H
+#define FDBSERVER_REST_SIM_KMS_VAULT_H
 #pragma once
 
 #include "fdbrpc/HTTP.h"
