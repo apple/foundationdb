@@ -233,7 +233,7 @@ struct BlobRestoreWorkload : TestWorkload {
 					if (!result.more) {
 						break;
 					}
-                    begin = result.nextBeginKeySelector();
+					begin = result.nextBeginKeySelector();
 				} catch (Error& e) {
 					wait(tr.onError(e));
 				}

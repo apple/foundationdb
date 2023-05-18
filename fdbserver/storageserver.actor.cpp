@@ -6634,9 +6634,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = false;
 			} else {
 				rows.more = true;
-				// no need to set readThrough, as the next read key range has to be the next chunkRange
 			}
-			ASSERT(!rows.readThrough.present());
 			results.send(rows);
 		}
 
@@ -7576,7 +7574,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					state KeyRangeRef range(std::max(keys.begin, normalKeys.begin), std::min(keys.end, normalKeys.end));
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
 					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
-					rangeEnd = rangeStatus.first.end;
+					rangeEnd = range.end;
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 					rangeEnd = keys.end;
@@ -7632,10 +7630,10 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 						}
 					}
 					if (this_block.more) {
-						blockBegin = this_block.getReadThrough();
+						nfk = this_block.getReadThrough();
 					} else {
 						ASSERT(!this_block.readThrough.present());
-						blockBegin = rangeEnd;
+						nfk = rangeEnd;
 					}
 					this_block = RangeResult();
 
