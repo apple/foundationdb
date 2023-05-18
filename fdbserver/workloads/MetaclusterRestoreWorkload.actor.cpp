@@ -103,12 +103,16 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 	double endTime = std::numeric_limits<double>::max();
 
 	MetaclusterRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
+		maxTenants =
+		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
 		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
-		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
+		maxTenantGroups = deterministicRandom()->randomInt(
+		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		postBackupDuration = getOption(options, "postBackupDuration"_sr, 30);
 
-		tenantGroupCapacity = (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size();
+		tenantGroupCapacity =
+		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
+
 		int mode = deterministicRandom()->randomInt(0, 3);
 		recoverManagementCluster = (mode != 2);
 		recoverDataClusters = (mode != 1);

@@ -3461,10 +3461,10 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidTena
 		CODE_PROBE(true, "Get tenant info raw access transaction");
 		return TenantInfo();
 	} else if (!cx->internal && cx->clientInfo->get().clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
-		CODE_PROBE(true, "Get tenant info invalid management cluster access", probe::decoration::rare);
+		CODE_PROBE(true, "Get tenant info invalid management cluster access");
 		throw management_cluster_invalid_access();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
-		CODE_PROBE(true, "Get tenant info tenant name required", probe::decoration::rare);
+		CODE_PROBE(true, "Get tenant info tenant name required");
 		throw tenant_name_required();
 	} else if (!t.present()) {
 		CODE_PROBE(true, "Get tenant info without tenant");
@@ -3474,7 +3474,7 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidTena
 		// mode. Such a transaction would not be allowed to commit without enabling provisional commits because either
 		// the commit proxies will be provisional or the read version will be too old.
 		if (!cx->clientInfo->get().grvProxies.empty() && !cx->clientInfo->get().grvProxies[0].provisional) {
-			CODE_PROBE(true, "Get tenant info use tenant in disabled tenant mode", probe::decoration::rare);
+			CODE_PROBE(true, "Get tenant info use tenant in disabled tenant mode");
 			throw tenants_disabled();
 		} else {
 			CODE_PROBE(true, "Get tenant info provisional proxies");
@@ -6772,7 +6772,8 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
 			    e.code() != error_code_tenant_not_found && e.code() != error_code_illegal_tenant_access &&
 			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
-			    e.code() != error_code_tenant_locked && e.code() != error_code_tenant_name_required) {
+			    e.code() != error_code_tenant_locked && e.code() != error_code_tenant_name_required &&
+			    e.code() != error_code_management_cluster_invalid_access && e.code() != error_code_tenants_disabled) {
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)

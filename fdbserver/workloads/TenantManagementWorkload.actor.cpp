@@ -106,10 +106,12 @@ struct TenantManagementWorkload : TestWorkload {
 	Version oldestDeletionVersion = 0;
 	Version newestDeletionVersion = 0;
 
-	Reference<IDatabase> mvDb;
+	Reference<IDatabase> managementDb;
+	Database managementDbInternal;
 	Database dataDb;
 	bool hasNoTenantKey = false; // whether this workload has non-tenant key
 	int64_t tenantIdPrefix = 0;
+	bool supportsTenantOperations = true;
 
 	// This test exercises multiple different ways to work with tenants
 	enum class OperationType {
@@ -135,8 +137,10 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	TenantManagementWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
-		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
+		maxTenants =
+		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
+		maxTenantGroups = deterministicRandom()->randomInt(
+		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		singleClient = getOption(options, "singleClient"_sr, false);
 
@@ -247,6 +251,8 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(loadTestParameters(cx, self));
 		}
 
+		self->supportsTenantOperations = self->useMetacluster || cx->getTenantMode() != TenantMode::DISABLED;
+
 		metacluster::util::SkipMetaclusterCreation skipMetaclusterCreation(!self->useMetacluster ||
 		                                                                   self->clientId != 0);
 		Optional<metacluster::DataClusterEntry> entry;
@@ -258,7 +264,8 @@ struct TenantManagementWorkload : TestWorkload {
 		state metacluster::util::SimulatedMetacluster simMetacluster = wait(
 		    metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry, skipMetaclusterCreation));
 
-		self->mvDb = simMetacluster.managementDb;
+		self->managementDb = simMetacluster.managementDb;
+		self->managementDbInternal = cx;
 
 		if (self->useMetacluster) {
 			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
@@ -311,7 +318,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	static Future<Versionstamp> getLastTenantModification(TenantManagementWorkload* self, OperationType type) {
 		if (type == OperationType::METACLUSTER) {
-			return getLastTenantModification(self->mvDb, type);
+			return getLastTenantModification(self->managementDb, type);
 		} else {
 			return getLastTenantModification(self->dataDb.getReference(), type);
 		}
@@ -319,7 +326,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 	static Future<Version> getLatestReadVersion(TenantManagementWorkload* self, OperationType type) {
 		if (type == OperationType::METACLUSTER) {
-			return getLatestReadVersion(self->mvDb, type);
+			return getLatestReadVersion(self->managementDb, type);
 		} else {
 			return getLatestReadVersion(self->dataDb.getReference(), type);
 		}
@@ -396,7 +403,7 @@ struct TenantManagementWorkload : TestWorkload {
 			}
 
 			try {
-				wait(metacluster::createTenant(self->mvDb, entry, assign, ignoreCapacityLimit));
+				wait(metacluster::createTenant(self->managementDb, entry, assign, ignoreCapacityLimit));
 				ASSERT(!assign || !ignoreCapacityLimit);
 			} catch (Error& e) {
 				if (e.code() == error_code_invalid_tenant_configuration) {
@@ -443,7 +450,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		// For transaction-based operations, test creating multiple tenants in the same transaction
 		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
-			numTenants = deterministicRandom()->randomInt(1, 5);
+			numTenants = deterministicRandom()->randomInt(1, std::min(5, self->maxTenants + 1));
 		}
 
 		// Tracks whether any tenant exists in the database or not. This variable is updated if we have to retry
@@ -540,7 +547,7 @@ struct TenantManagementWorkload : TestWorkload {
 					// Check the state of the first created tenant
 					if (operationType == OperationType::METACLUSTER) {
 						Optional<metacluster::MetaclusterTenantMapEntry> resultEntry =
-						    wait(metacluster::tryGetTenant(self->mvDb, tenantsToCreate.begin()->first));
+						    wait(metacluster::tryGetTenant(self->managementDb, tenantsToCreate.begin()->first));
 						if (resultEntry.present()) {
 							if (resultEntry.get().tenantState == metacluster::TenantState::READY) {
 								// The tenant now exists, so we will retry and expect the creation to react accordingly
@@ -566,6 +573,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 				// Check that using the wrong creation type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
+				ASSERT(self->supportsTenantOperations);
 
 				// Database-based creation modes will fail if the tenant already existed
 				if (operationType == OperationType::MANAGEMENT_DATABASE ||
@@ -588,7 +596,7 @@ struct TenantManagementWorkload : TestWorkload {
 					state StringRef tPrefix;
 					if (operationType == OperationType::METACLUSTER) {
 						state Optional<metacluster::MetaclusterTenantMapEntry> metaEntry =
-						    wait(metacluster::tryGetTenant(self->mvDb, tenantItr->first));
+						    wait(metacluster::tryGetTenant(self->managementDb, tenantItr->first));
 						wait(verifyTenantCreate<metacluster::MetaclusterTenantMapEntry>(
 						    self, metaEntry, tenantItr->first, tenantItr->second.tenantGroup));
 						ASSERT(metaEntry.get().tenantState == metacluster::TenantState::READY);
@@ -664,6 +672,9 @@ struct TenantManagementWorkload : TestWorkload {
 					    operationType == OperationType::SPECIAL_KEYS) {
 						ASSERT(finalTenantCount + newTenants > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 					}
+					return Void();
+				} else if (e.code() == error_code_tenants_disabled) {
+					ASSERT(!self->supportsTenantOperations);
 					return Void();
 				}
 
@@ -787,12 +798,12 @@ struct TenantManagementWorkload : TestWorkload {
 			// by runManagementTransaction. For such cases, fall back to delete by name and allow
 			// the errors to flow through there
 			Optional<metacluster::MetaclusterTenantMapEntry> entry =
-			    wait(metacluster::tryGetTenant(self->mvDb, beginTenant));
+			    wait(metacluster::tryGetTenant(self->managementDb, beginTenant));
 			if (entry.present() && deterministicRandom()->coinflip()) {
-				wait(metacluster::deleteTenant(self->mvDb, entry.get().id));
+				wait(metacluster::deleteTenant(self->managementDb, entry.get().id));
 				CODE_PROBE(true, "Deleted tenant by ID");
 			} else {
-				wait(metacluster::deleteTenant(self->mvDb, beginTenant));
+				wait(metacluster::deleteTenant(self->managementDb, beginTenant));
 			}
 		}
 
@@ -938,7 +949,7 @@ struct TenantManagementWorkload : TestWorkload {
 						if (operationType == OperationType::METACLUSTER) {
 							// Check the state of the first deleted tenant
 							Optional<metacluster::MetaclusterTenantMapEntry> resultEntry =
-							    wait(metacluster::tryGetTenant(self->mvDb, tenants.begin()->first));
+							    wait(metacluster::tryGetTenant(self->managementDb, tenants.begin()->first));
 							if (!resultEntry.present()) {
 								alreadyExists = false;
 							} else {
@@ -969,6 +980,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 				// Check that using the wrong deletion type fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
+				ASSERT(self->supportsTenantOperations);
 
 				// Transaction-based operations do not fail if the tenant isn't present. If we attempted to delete a
 				// single tenant that didn't exist, we can just return.
@@ -1019,6 +1031,9 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (e.code() == error_code_invalid_metacluster_operation) {
 					ASSERT(operationType == OperationType::METACLUSTER != self->useMetacluster);
+					return Void();
+				} else if (e.code() == error_code_tenants_disabled) {
+					ASSERT(!self->supportsTenantOperations);
 					return Void();
 				}
 
@@ -1176,7 +1191,7 @@ struct TenantManagementWorkload : TestWorkload {
 				state Optional<TenantGroupName> tGroup;
 				if (operationType == OperationType::METACLUSTER) {
 					state metacluster::MetaclusterTenantMapEntry metaEntry =
-					    wait(metacluster::getTenant(self->mvDb, tenant));
+					    wait(metacluster::getTenant(self->managementDb, tenant));
 					entryId = metaEntry.id;
 					tGroup = metaEntry.tenantGroup;
 				} else {
@@ -1303,7 +1318,7 @@ struct TenantManagementWorkload : TestWorkload {
 			try {
 				if (self->useMetacluster) {
 					state std::vector<std::pair<TenantName, metacluster::MetaclusterTenantMapEntry>> metaTenants =
-					    wait(metacluster::listTenantMetadata(self->mvDb,
+					    wait(metacluster::listTenantMetadata(self->managementDb,
 					                                         beginTenant,
 					                                         endTenant,
 					                                         limit,
@@ -1314,8 +1329,9 @@ struct TenantManagementWorkload : TestWorkload {
 					    self, metaTenants, limit, beginTenant, endTenant, tGroup);
 				} else {
 					if (tGroup.present()) {
-						state std::vector<std::pair<TenantName, int64_t>> tenantsFiltered = wait(
-						    TenantAPI::listTenantGroupTenants(self->mvDb, tGroup.get(), beginTenant, endTenant, limit));
+						state std::vector<std::pair<TenantName, int64_t>> tenantsFiltered =
+						    wait(TenantAPI::listTenantGroupTenants(
+						        self->managementDb, tGroup.get(), beginTenant, endTenant, limit));
 						verifyTenantList<int64_t>(self, tenantsFiltered, limit, beginTenant, endTenant, tGroup);
 					} else {
 						state std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
@@ -1426,7 +1442,7 @@ struct TenantManagementWorkload : TestWorkload {
 		} else { // operationType == OperationType::METACLUSTER
 			ASSERT(tenantRenames.size() == 1);
 			auto iter = tenantRenames.begin();
-			wait(metacluster::renameTenant(self->mvDb, iter->first, iter->second));
+			wait(metacluster::renameTenant(self->managementDb, iter->first, iter->second));
 		}
 		return Void();
 	}
@@ -1436,8 +1452,13 @@ struct TenantManagementWorkload : TestWorkload {
 		state int numTenants = 1;
 		state Reference<ReadYourWritesTransaction> tr = self->dataDb->createTransaction();
 
+		// We don't support testing renames if there is only one tenant allowed
+		if (self->maxTenants == 1) {
+			return Void();
+		}
+
 		if (operationType == OperationType::SPECIAL_KEYS || operationType == OperationType::MANAGEMENT_TRANSACTION) {
-			numTenants = deterministicRandom()->randomInt(1, 5);
+			numTenants = deterministicRandom()->randomInt(1, std::min(5, self->maxTenants / 2 + 1));
 		}
 
 		state std::map<TenantName, TenantName> tenantRenames;
@@ -1484,6 +1505,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT_GT(currentVersionstamp.version, originalReadVersion);
 				// Check that using the wrong rename API fails depending on whether we are using a metacluster
 				ASSERT(self->useMetacluster == (operationType == OperationType::METACLUSTER));
+				ASSERT(self->supportsTenantOperations);
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_tenant_not_found) {
@@ -1510,6 +1532,9 @@ struct TenantManagementWorkload : TestWorkload {
 					// This error should only occur on metacluster due to the multi-stage process.
 					// Having temporary tenants may exceed capacity, so we disallow the rename.
 					ASSERT(operationType == OperationType::METACLUSTER);
+					return Void();
+				} else if (e.code() == error_code_tenants_disabled) {
+					ASSERT(!self->supportsTenantOperations);
 					return Void();
 				} else {
 					try {
@@ -1576,7 +1601,7 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(tr->commit());
 			ASSERT(!specialKeysUseInvalidTuple);
 		} else if (operationType == OperationType::METACLUSTER) {
-			wait(metacluster::configureTenant(self->mvDb,
+			wait(metacluster::configureTenant(self->managementDb,
 			                                  tenant,
 			                                  configParameters,
 			                                  metacluster::IgnoreCapacityLimit(deterministicRandom()->coinflip())));
@@ -1653,6 +1678,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(!specialKeysUseInvalidTuple);
 				ASSERT(!assignToDifferentCluster);
 				ASSERT_EQ(operationType == OperationType::METACLUSTER, self->useMetacluster);
+				ASSERT(self->supportsTenantOperations);
 				Versionstamp currentVersionstamp = wait(getLastTenantModification(self, operationType));
 				if (configurationChanging) {
 					ASSERT_GT(currentVersionstamp.version, originalReadVersion);
@@ -1689,6 +1715,9 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (e.code() == error_code_invalid_tenant_group_name) {
 					ASSERT(hasSystemTenantGroup);
+					return Void();
+				} else if (e.code() == error_code_tenants_disabled) {
+					ASSERT(!self->supportsTenantOperations);
 					return Void();
 				}
 
@@ -1740,7 +1769,7 @@ struct TenantManagementWorkload : TestWorkload {
 				// Get the tenant group metadata and check that it matches our local state
 				if (operationType == OperationType::METACLUSTER) {
 					state Optional<metacluster::MetaclusterTenantGroupEntry> mEntry =
-					    wait(metacluster::tryGetTenantGroup(self->mvDb, tenantGroup));
+					    wait(metacluster::tryGetTenantGroup(self->managementDb, tenantGroup));
 					ASSERT(alreadyExists == mEntry.present());
 				} else {
 					state Optional<TenantGroupEntry> entry =
@@ -1838,8 +1867,8 @@ struct TenantManagementWorkload : TestWorkload {
 				// Attempt to read the chosen list of tenant groups
 				if (operationType == OperationType::METACLUSTER) {
 					state std::vector<std::pair<TenantGroupName, metacluster::MetaclusterTenantGroupEntry>>
-					    mTenantGroups =
-					        wait(metacluster::listTenantGroups(self->mvDb, beginTenantGroup, endTenantGroup, limit));
+					    mTenantGroups = wait(
+					        metacluster::listTenantGroups(self->managementDb, beginTenantGroup, endTenantGroup, limit));
 					// Attempting to read the list of tenant groups using the metacluster API in a non-metacluster
 					// should return nothing in this test
 					if (!self->useMetacluster) {
@@ -1881,32 +1910,43 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> operateOnTenantKey(TenantManagementWorkload* self) {
-		if (self->allTestTenants.size() == 0) {
-			return Void();
+		// Choose a previously created tenant 90% of the time. Otherwise, choose no tenant or an arbitrary tenant ID
+		// with equal probability.
+		state Optional<Reference<Tenant>> tenant;
+		if (!self->allTestTenants.empty() && deterministicRandom()->random01() < 0.90) {
+			tenant = deterministicRandom()->randomChoice(self->allTestTenants);
+		} else if (deterministicRandom()->coinflip()) {
+			tenant = makeReference<Tenant>(std::numeric_limits<int64_t>::max());
 		}
 
-		state Reference<Tenant> tenant = deterministicRandom()->randomChoice(self->allTestTenants);
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dataDb, tenant);
-		state TenantName tName = tenant->name.get();
+		state bool useManagementCluster = self->useMetacluster && deterministicRandom()->random01() < 0.05;
+		state Database db = useManagementCluster ? self->managementDbInternal : self->dataDb;
+
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db, tenant);
+		state Optional<TenantName> tName = tenant.flatMapRef(&Tenant::name);
 		state bool tenantPresent = false;
 		state TenantTestData tData = TenantTestData();
 
 		int mode = deterministicRandom()->randomInt(0, 3);
 		state bool readKey = mode == 0 || mode == 2;
 		state bool writeKey = mode == 1 || mode == 2;
-		state bool clearKey = deterministicRandom()->coinflip();
+		state bool clearKey = tenant.present() && deterministicRandom()->coinflip();
 		state bool lockAware = deterministicRandom()->coinflip();
 		state TenantAPI::TenantLockState lockState = TenantAPI::TenantLockState::UNLOCKED;
 
-		auto itr = self->createdTenants.find(tName);
-		if (itr != self->createdTenants.end() && itr->second.tenant->id() == tenant->id()) {
-			tenantPresent = true;
-			tData = itr->second;
-			lockState = itr->second.lockState;
+		if (tName.present()) {
+			auto itr = self->createdTenants.find(tName.get());
+			if (itr != self->createdTenants.end() && itr->second.tenant->id() == tenant.get()->id()) {
+				tenantPresent = true;
+				tData = itr->second;
+				lockState = itr->second.lockState;
+			}
 		}
 
-		state bool keyPresent = tenantPresent && !tData.empty;
+		state bool keyPresent =
+		    (!tenant.present() && db->getTenantMode() != TenantMode::REQUIRED) || (tenantPresent && !tData.empty);
 		state bool maybeCommitted = false;
+		state StringRef expectedValue = tName.orDefault(self->noTenantValue);
 
 		loop {
 			try {
@@ -1919,10 +1959,16 @@ struct TenantManagementWorkload : TestWorkload {
 					Optional<Value> val = wait(tr->get(self->keyName));
 					if (val.present()) {
 						CODE_PROBE(true, "Read tenant key has value");
-						ASSERT((keyPresent && val.get() == tName) || (maybeCommitted && writeKey && !clearKey));
+						ASSERT((keyPresent && val.get() == expectedValue) ||
+						       (tenant.present() && maybeCommitted && writeKey && !clearKey));
 					} else {
 						CODE_PROBE(true, "Read tenant key is empty");
-						ASSERT((tenantPresent && tData.empty) || (maybeCommitted && writeKey && clearKey));
+						// If the value isn't present, then either we read a tenant that is empty, we did a raw read in
+						// required mode, or this transaction is retrying and previously cleared the key with an unknown
+						// result
+						ASSERT((tenantPresent && tData.empty) ||
+						       (!tenant.present() && db->getTenantMode() == TenantMode::REQUIRED) ||
+						       (maybeCommitted && writeKey && clearKey));
 					}
 
 					ASSERT(lockAware || lockState != TenantAPI::TenantLockState::LOCKED);
@@ -1931,7 +1977,7 @@ struct TenantManagementWorkload : TestWorkload {
 					if (clearKey) {
 						tr->clear(self->keyName);
 					} else {
-						tr->set(self->keyName, tName);
+						tr->set(self->keyName, expectedValue);
 					}
 
 					wait(tr->commit());
@@ -1939,9 +1985,14 @@ struct TenantManagementWorkload : TestWorkload {
 					CODE_PROBE(!clearKey, "Set tenant key");
 
 					ASSERT(lockAware || lockState == TenantAPI::TenantLockState::UNLOCKED);
-					self->createdTenants[tName].empty = clearKey;
+					if (tName.present()) {
+						self->createdTenants[tName.get()].empty = clearKey;
+					}
 				}
 
+				ASSERT(tenant.present() || db->getTenantMode() != TenantMode::REQUIRED);
+				ASSERT(!tenant.present() || db->getTenantMode() != TenantMode::DISABLED);
+				ASSERT(!useManagementCluster);
 				break;
 			} catch (Error& e) {
 				state Error err = e;
@@ -1958,6 +2009,17 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 
 					return Void();
+				} else if (err.code() == error_code_tenant_name_required) {
+					ASSERT(!tenant.present());
+					ASSERT(db->getTenantMode() == TenantMode::REQUIRED);
+					return Void();
+				} else if (err.code() == error_code_tenants_disabled) {
+					ASSERT(tenant.present());
+					ASSERT_EQ(db->getTenantMode(), TenantMode::DISABLED);
+					return Void();
+				} else if (err.code() == error_code_management_cluster_invalid_access) {
+					ASSERT(useManagementCluster);
+					return Void();
 				}
 
 				try {
@@ -1965,7 +2027,7 @@ struct TenantManagementWorkload : TestWorkload {
 					CODE_PROBE(maybeCommitted, "Modify tenant key maybe committed");
 					wait(tr->onError(err));
 				} catch (Error& error) {
-					TraceEvent(SevError, "ReadKeyFailure").errorUnsuppressed(error).detail("TenantName", tenant);
+					TraceEvent(SevError, "ReadKeyFailure").errorUnsuppressed(error).detail("Tenant", tenant);
 					ASSERT(false);
 				}
 			}
@@ -1985,7 +2047,7 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(TenantAPI::changeLockState(tr, entry.id, lockState, lockId));
 			wait(tr->commit());
 		} else if (operationType == OperationType::METACLUSTER) {
-			wait(metacluster::changeTenantLockState(self->mvDb, tenant, lockState, lockId));
+			wait(metacluster::changeTenantLockState(self->managementDb, tenant, lockState, lockId));
 		} else {
 			// We don't have a special keys or database variant of this function
 			ASSERT(false);
@@ -2020,6 +2082,7 @@ struct TenantManagementWorkload : TestWorkload {
 				ASSERT(exists);
 				ASSERT(legalLockChange);
 				ASSERT_EQ(operationType == OperationType::METACLUSTER, self->useMetacluster);
+				ASSERT(self->supportsTenantOperations);
 
 				auto itr = self->createdTenants.find(tenant);
 				ASSERT(itr != self->createdTenants.end());
@@ -2045,14 +2108,15 @@ struct TenantManagementWorkload : TestWorkload {
 				} else if (e.code() == error_code_tenant_locked) {
 					ASSERT(!legalLockChange);
 					return Void();
+				} else if (e.code() == error_code_tenants_disabled) {
+					ASSERT(!self->supportsTenantOperations);
+					return Void();
 				}
 
 				try {
 					wait(tr->onError(e));
 				} catch (Error&) {
-					TraceEvent(SevError, "ConfigureTenantFailure")
-					    .errorUnsuppressed(error)
-					    .detail("TenantName", tenant);
+					TraceEvent(SevError, "LockTenantFailure").errorUnsuppressed(error).detail("TenantName", tenant);
 					ASSERT(false);
 				}
 			}
@@ -2261,7 +2325,7 @@ struct TenantManagementWorkload : TestWorkload {
 		if (self->useMetacluster) {
 			// The metacluster consistency check runs the tenant consistency check for each cluster
 			state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-			    self->mvDb, metacluster::util::AllowPartialMetaclusterOperations::False);
+			    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
 			wait(metaclusterConsistencyCheck.run());
 			wait(checkTombstoneCleanup(self));
 		} else {

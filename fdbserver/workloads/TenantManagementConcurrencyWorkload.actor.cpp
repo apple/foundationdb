@@ -57,8 +57,10 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	Database standaloneDb;
 
 	TenantManagementConcurrencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100));
-		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
+		maxTenants =
+		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
+		maxTenantGroups = deterministicRandom()->randomInt(
+		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		createMetacluster = getOption(options, "createMetacluster"_sr, true);
 
