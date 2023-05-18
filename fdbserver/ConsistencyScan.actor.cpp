@@ -326,14 +326,13 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 					// response from a different region returned with a lower version (because
 					// of the rollback of the forced recovery). In this case, we should not fail
 					// the test. So we double check both process are live.
-					bool isFailed = g_network->isSimulated() &&
-										    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())
-										         ->failed ||
-										    g_simulator
-										         ->getProcessByAddress(
-										             (*storageServerInterfaces)[firstValidServer->get()].address())
-										         ->failed);
-					TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError, "ConsistencyCheck_DataInconsistent")
+					bool isFailed =
+					    g_network->isSimulated() &&
+					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
+					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+					         ->failed);
+					TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
+					           "ConsistencyCheck_DataInconsistent")
 					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
 					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
 					            (*storageServerInterfaces)[firstValidServer->get()].id())
@@ -852,8 +851,6 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state ConsistencyScanState cs;
 	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
-	// Also wait until we've scanned at least one round by checking stats
-	state bool waitForRoundComplete = true;
 	// FIXME: also wait until we've done the canary failure
 	ASSERT(g_network->isSimulated());
 	loop {
