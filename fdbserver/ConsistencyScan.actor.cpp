@@ -330,7 +330,10 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 					    g_network->isSimulated() &&
 					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
 					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
-					         ->failed);
+					         ->failed) &&
+					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->locality.dcId() !=
+					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+					         ->locality.dcId());
 					TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
 					           "ConsistencyCheck_DataInconsistent")
 					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
