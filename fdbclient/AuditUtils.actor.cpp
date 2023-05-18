@@ -73,7 +73,7 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 		}
 	}
 
-	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedEnd").detail("StorageServer", ssid).detail("Valid", res);
+	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedEnd").detail("StorageServer", ssid).detail("Removed", res);
 	return res;
 }
 
