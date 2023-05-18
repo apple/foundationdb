@@ -79,7 +79,9 @@ int64_t getExpireInterval(const int64_t refTS, const int64_t defaultTtl) {
 }
 
 void validateHeaders(const HTTP::Headers& toCompare) {
-	ASSERT(toCompare == RESTKmsConnectorUtils::getHTTPHeaders());
+	if (toCompare != RESTKmsConnectorUtils::getHTTPHeaders()) {
+		throw rest_malformed_response();
+	}
 }
 
 void addErrorToDoc(rapidjson::Document& doc, const ErrorDetail& details) {
@@ -663,7 +665,7 @@ TEST_CASE("/restSimKmsVault/invalidHeader") {
 		wait(simKmsVaultRequestHandler(request, response));
 		ASSERT(false);
 	} catch (Error& e) {
-		ASSERT_EQ(e.code(), error_code_internal_error);
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 	return Void();
 }
