@@ -28,6 +28,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -1511,17 +1512,174 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 					state Optional<int> firstValidServer;
 
 					totalReadAmount = 0;
-					int failures = wait(consistencyCheckReadData(cx,
-					                                             readRange,
-					                                             version,
-					                                             &storageServerInterfaces,
-					                                             &keyValueFutures,
-					                                             &firstValidServer,
-					                                             &totalReadAmount,
-					                                             {}));
-					if (failures > 0) {
-						testFailure("Data inconsistent", performQuiescentChecks, success, true);
-					}
+					for (j = 0; j < storageServerInterfaces.size(); j++) {
+						ErrorOr<GetKeyValuesReply> rangeResult = keyValueFutures[j].get();
+
+						// Compare the results with other storage servers
+						if (rangeResult.present() && !rangeResult.get().error.present()) {
+							state GetKeyValuesReply current = rangeResult.get();
+							TraceEvent("ConsistencyCheck_GetKeyValuesStream")
+							    .detail("DataSize", current.data.size())
+							    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString());
+							totalReadAmount += current.data.expectedSize();
+							// If we haven't encountered a valid storage server yet, then mark this as the baseline
+							// to compare against
+							if (firstValidServer == -1) {
+								TraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
+								firstValidServer = j;
+								// Compare this shard against the first
+							} else {
+								GetKeyValuesReply reference = keyValueFutures[firstValidServer].get().get();
+
+								if (current.data != reference.data || current.more != reference.more) {
+									// Be especially verbose if in simulation
+									if (g_network->isSimulated()) {
+										int invalidIndex = -1;
+										printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+										       "",
+										       j,
+										       storageServerInterfaces[j].address().toString().c_str(),
+										       printable(req.begin.getKey()).c_str(),
+										       printable(req.end.getKey()).c_str());
+										for (int k = 0; k < current.data.size(); k++) {
+											printf("%d. %s => %s\n",
+											       k,
+											       printable(current.data[k].key).c_str(),
+											       printable(current.data[k].value).c_str());
+											if (invalidIndex < 0 && (k >= reference.data.size() ||
+											                         current.data[k].key != reference.data[k].key ||
+											                         current.data[k].value != reference.data[k].value))
+												invalidIndex = k;
+										}
+
+										printf("\n%sSERVER %d (%s); shard = %s - %s:\n",
+										       "",
+										       firstValidServer,
+										       storageServerInterfaces[firstValidServer].address().toString().c_str(),
+										       printable(req.begin.getKey()).c_str(),
+										       printable(req.end.getKey()).c_str());
+										for (int k = 0; k < reference.data.size(); k++) {
+											printf("%d. %s => %s\n",
+											       k,
+											       printable(reference.data[k].key).c_str(),
+											       printable(reference.data[k].value).c_str());
+											if (invalidIndex < 0 && (k >= current.data.size() ||
+											                         reference.data[k].key != current.data[k].key ||
+											                         reference.data[k].value != current.data[k].value))
+												invalidIndex = k;
+										}
+
+										printf("\nMISMATCH AT %d\n\n", invalidIndex);
+									}
+
+									// Data for trace event
+									// The number of keys unique to the current shard
+									int currentUniques = 0;
+									// The number of keys unique to the reference shard
+									int referenceUniques = 0;
+									// The number of keys in both shards with conflicting values
+									int valueMismatches = 0;
+									// The number of keys in both shards with matching values
+									int matchingKVPairs = 0;
+									// Last unique key on the current shard
+									KeyRef currentUniqueKey;
+									// Last unique key on the reference shard
+									KeyRef referenceUniqueKey;
+									// Last value mismatch
+									KeyRef valueMismatchKey;
+
+									// Loop indeces
+									int currentI = 0;
+									int referenceI = 0;
+									while (currentI < current.data.size() || referenceI < reference.data.size()) {
+										if (currentI >= current.data.size()) {
+											referenceUniqueKey = reference.data[referenceI].key;
+											referenceUniques++;
+											referenceI++;
+										} else if (referenceI >= reference.data.size()) {
+											currentUniqueKey = current.data[currentI].key;
+											currentUniques++;
+											currentI++;
+										} else {
+											KeyValueRef currentKV = current.data[currentI];
+											KeyValueRef referenceKV = reference.data[referenceI];
+
+											if (currentKV.key == referenceKV.key) {
+												if (currentKV.value == referenceKV.value)
+													matchingKVPairs++;
+												else {
+													valueMismatchKey = currentKV.key;
+													valueMismatches++;
+												}
+
+												currentI++;
+												referenceI++;
+											} else if (currentKV.key < referenceKV.key) {
+												currentUniqueKey = currentKV.key;
+												currentUniques++;
+												currentI++;
+											} else {
+												referenceUniqueKey = referenceKV.key;
+												referenceUniques++;
+												referenceI++;
+											}
+										}
+									}
+
+									TraceEvent("ConsistencyCheck_DataInconsistent")
+									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
+									    .detail(format("StorageServer%d", firstValidServer).c_str(),
+									            storageServers[firstValidServer].toString())
+									    .detail("ShardBegin", req.begin.getKey())
+									    .detail("ShardEnd", req.end.getKey())
+									    .detail("VersionNumber", req.version)
+									    .detail(format("Server%dUniques", j).c_str(), currentUniques)
+									    .detail(format("Server%dUniqueKey", j).c_str(), currentUniqueKey)
+									    .detail(format("Server%dUniques", firstValidServer).c_str(), referenceUniques)
+									    .detail(format("Server%dUniqueKey", firstValidServer).c_str(),
+									            referenceUniqueKey)
+									    .detail("ValueMismatches", valueMismatches)
+									    .detail("ValueMismatchKey", valueMismatchKey)
+									    .detail("MatchingKVPairs", matchingKVPairs)
+									    .detail("IsTSS",
+									            storageServerInterfaces[j].isTss() ||
+									                    storageServerInterfaces[firstValidServer].isTss()
+									                ? "True"
+									                : "False");
+
+									if ((g_network->isSimulated() &&
+									     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
+									    (!storageServerInterfaces[j].isTss() &&
+									     !storageServerInterfaces[firstValidServer].isTss())) {
+										// It's possible that the storage servers are inconsistent in KillRegion
+										// workload where a forced recovery is performed. The killed storage server
+										// in the killed region returned first with a higher version, and a later
+										// response from a different region returned with a lower version (because
+										// of the rollback of the forced recovery). In this case, we should not fail
+										// the test. So we double check both process are live.
+										if (!g_network->isSimulated() &&
+										    !g_simulator->getProcessByAddress(storageServerInterfaces[j].address())
+										         ->failed &&
+										    !g_simulator
+										         ->getProcessByAddress(
+										             storageServerInterfaces[firstValidServer].address())
+										         ->failed) {
+											testFailure("Data inconsistent", performQuiescentChecks, success, true);
+										} else {
+											// If the storage servers are not live, we should retry.
+											TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+											    .detail("StorageServer0",
+											            storageServerInterfaces[firstValidServer].id())
+											    .detail("StorageServer1", storageServerInterfaces[j].id())
+											    .detail("ShardBegin", printable(range.begin))
+											    .detail("ShardEnd", printable(range.end));
+											*success = false;
+											return Void();
+										}
+									}
+								}
+							}
+						}
 
 					// If the data is not available and we aren't relocating this shard
 					for (int i = 0; i < storageServerInterfaces.size(); i++) {
@@ -1721,6 +1879,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				            failureIsError);
 			}
 
+			TraceEvent("ConsistencyCheck_CheckSplits").detail("Range", range).detail("CanSplit", canSplit);
 			// Check if the storage server returns split point for the shard. There are cases where
 			// the split point returned by storage server is discarded because it's an unfair split.
 			// See splitStorageMetrics() in NativeAPI.actor.cpp.
