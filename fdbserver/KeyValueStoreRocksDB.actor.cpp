@@ -2506,7 +2506,7 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestore") {
 TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/RocksDBTypes") {
 	// If the following assertion fails, update SstFileMetaData and LiveFileMetaData in RocksDBCheckpointUtils.actor.h
 	// to be the same as rocksdb::SstFileMetaData and rocksdb::LiveFileMetaData.
-	ASSERT_EQ(sizeof(rocksdb::LiveFileMetaData), 192);
+	ASSERT_EQ(sizeof(rocksdb::LiveFileMetaData), 208);
 	ASSERT_EQ(sizeof(rocksdb::ExportImportFilesMetaData), 32);
 	return Void();
 }
