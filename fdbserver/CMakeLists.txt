@@ -43,6 +43,7 @@ set(FDBSERVER_SRCS
   EncryptKeyProxyInterface.h
   FDBExecHelper.actor.cpp
   FDBExecHelper.actor.h
+  FDBRocksDBVersion.h
   fdbserver.actor.cpp
   GrvProxyServer.actor.cpp
   IConfigConsumer.cpp
