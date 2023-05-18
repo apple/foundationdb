@@ -59,7 +59,7 @@ public:
 	// proxies, resolvers, and transaction logs.
 	Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
-	    std::vector<StorageServerInterface>* seedServers,
+	    std::vector<StorageServerInterface>& seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 
 	void clusterRecruitStorage(RecruitStorageRequest req,

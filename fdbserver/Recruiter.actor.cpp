@@ -97,7 +97,7 @@ bool isLongLivedStateless(ClusterControllerData const* clusterControllerData, Op
 }
 
 // Log the reason why the worker is considered as unavailable.
-void logWorkerUnavailable(const Severity severity,
+void logWorkerUnavailable(Severity severity,
                           const UID& id,
                           const std::string& method,
                           const std::string& reason,
@@ -2180,9 +2180,9 @@ Recruiter::Recruiter(UID const& id) : id(id), startTime(now()) {}
 
 Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitEverything(
     Reference<ClusterRecoveryData> clusterRecoveryData,
-    std::vector<StorageServerInterface>* seedServers,
+    std::vector<StorageServerInterface>& seedServers,
     Reference<ILogSystem> oldLogSystem) {
-	return RecruiterImpl::recruitEverything(this, clusterRecoveryData, seedServers, oldLogSystem);
+	return RecruiterImpl::recruitEverything(this, clusterRecoveryData, &seedServers, oldLogSystem);
 }
 
 void Recruiter::clusterRecruitStorage(RecruitStorageRequest req,
