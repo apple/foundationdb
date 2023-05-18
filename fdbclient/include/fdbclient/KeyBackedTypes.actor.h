@@ -537,20 +537,6 @@ public:
 	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
 	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
 
-	template <class DB>
-	Future<RangeResultType> getRange(Optional<KeyType> const& begin,
-	                                 Optional<KeyType> const& end,
-	                                 int limit,
-	                                 Reference<DB> db,
-	                                 Snapshot snapshot = Snapshot::False,
-	                                 Reverse reverse = Reverse::False) const {
-		return runTransaction(db, [=, this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			return this->getRange(tr, begin, end, limit, snapshot, reverse);
-		});
-	}
-
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
@@ -559,25 +545,34 @@ public:
 	                                 int limit,
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
-		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
-		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.getRange(tr, begin, end, limit, snapshot, reverse);
+			});
+		} else {
+			Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
+			Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture),
-		        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
-			        RangeResultType rangeResult;
-			        for (int i = 0; i < kvs.size(); ++i) {
-				        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				        ValueType val = valueCodec.unpack(kvs[i].value);
-				        rangeResult.results.push_back(PairType(key, val));
-			        }
-			        rangeResult.more = kvs.more;
-			        return rangeResult;
-		        }));
+			typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+			    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+			return holdWhile(
+			    getRangeFuture,
+			    map(safeThreadFutureToFuture(getRangeFuture),
+			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+				        RangeResultType rangeResult;
+				        for (int i = 0; i < kvs.size(); ++i) {
+					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+					        ValueType val = valueCodec.unpack(kvs[i].value);
+					        rangeResult.results.push_back(PairType(key, val));
+				        }
+				        rangeResult.more = kvs.more;
+				        return rangeResult;
+			        }));
+		}
 	}
 
 	ACTOR template <class Transaction>
