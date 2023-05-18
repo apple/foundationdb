@@ -1181,6 +1181,9 @@ struct BusyTagInfo {
 	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
 	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
 
+	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, tag, rate, fractionalBusyness);
