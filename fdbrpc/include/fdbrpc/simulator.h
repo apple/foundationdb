@@ -207,6 +207,17 @@ public:
 		return roleText;
 	}
 
+	bool hasRole(NetworkAddress const& address, std::string const& role) const {
+		auto addressIt = roleAddresses.find(address);
+		if (addressIt != roleAddresses.end()) {
+			auto rolesIt = addressIt->second.find(role);
+			if (rolesIt != addressIt->second.end()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void clearAddress(NetworkAddress const& address) {
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
