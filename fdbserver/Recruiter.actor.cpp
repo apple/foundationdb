@@ -2447,7 +2447,7 @@ WorkerFitnessInfo Recruiter::getWorkerForRoleInDatacenter(
     ProcessClass::Fitness unacceptableFitness,
     DatabaseConfiguration const& conf,
     std::map<Optional<Standalone<StringRef>>, int>& id_used,
-    std::map<Optional<Standalone<StringRef>>, int> preferredSharing,
+    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing,
     bool checkStable) {
 	std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
 
@@ -2486,8 +2486,8 @@ std::vector<WorkerDetails> Recruiter::getWorkersForRoleInDatacenter(
     int amount,
     DatabaseConfiguration const& conf,
     std::map<Optional<Standalone<StringRef>>, int>& id_used,
-    std::map<Optional<Standalone<StringRef>>, int> preferredSharing,
-    Optional<WorkerFitnessInfo> minWorker,
+    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing,
+    Optional<WorkerFitnessInfo> const& minWorker,
     bool checkStable) {
 	std::map<std::tuple<ProcessClass::Fitness, int, bool, int>, std::vector<WorkerDetails>> fitness_workers;
 	std::vector<WorkerDetails> results;

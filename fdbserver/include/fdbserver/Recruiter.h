@@ -91,14 +91,15 @@ public:
 	                           std::map<Optional<Standalone<StringRef>>, int>* id_used);
 
 	// TODO: Make these functions private after rewriting betterMasterExists
-	WorkerFitnessInfo getWorkerForRoleInDatacenter(ClusterControllerData const* clusterControllerData,
-	                                               Optional<Standalone<StringRef>> const& dcId,
-	                                               ProcessClass::ClusterRole role,
-	                                               ProcessClass::Fitness unacceptableFitness,
-	                                               DatabaseConfiguration const& conf,
-	                                               std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	                                               std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
-	                                               bool checkStable = false);
+	WorkerFitnessInfo getWorkerForRoleInDatacenter(
+	    ClusterControllerData const* clusterControllerData,
+	    Optional<Standalone<StringRef>> const& dcId,
+	    ProcessClass::ClusterRole role,
+	    ProcessClass::Fitness unacceptableFitness,
+	    DatabaseConfiguration const& conf,
+	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing = {},
+	    bool checkStable = false);
 
 	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    ClusterControllerData const* clusterControllerData,
@@ -107,8 +108,8 @@ public:
 	    int amount,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
-	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
+	    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing = {},
+	    Optional<WorkerFitnessInfo> const& minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false);
 
 	// Selects the best method for TLog recruitment based on the specified policy
