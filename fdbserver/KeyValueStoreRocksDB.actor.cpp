@@ -262,10 +262,12 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
 	}
 
+	options.max_log_file_size = SERVER_KNOBS->ROCKSDB_MAX_LOG_FILE_SIZE;
+	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
+
 	if (!SERVER_KNOBS->ROCKSDB_MUTE_LOGS) {
 		options.info_log = std::make_shared<RocksDBLogForwarder>(id, options.info_log_level);
 	}
-
 	return options;
 }
 
