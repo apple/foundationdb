@@ -230,6 +230,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 					}
 					CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
 					const Key key = checkpointKeyFor(checkpoint.checkpointID);
+					// Setting the state as CheckpointMetaData::Deleting will trigger private mutations to instruct
+					// all storage servers to delete their local checkpoints.
 					checkpoint.setState(CheckpointMetaData::Deleting);
 					tr.set(key, checkpointValue(checkpoint));
 					tr.clear(singleKeyRange(key));
@@ -518,9 +520,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		return version;
 	}
 
-	// Move keys to a random selected team consisting of a single SS, after disabling DD, so that keys won't be
-	// kept in the new team until DD is enabled.
-	// Returns the address of the single SS of the new team.
+	// Move keys to a random selected team consisting of a single SS, this requires DD is disabled to prevent shards
+	// being moved by DD automatically. Returns the address of the single SS of the new team.
 	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
 	                                         Database cx,
 	                                         UID dataMoveId,
