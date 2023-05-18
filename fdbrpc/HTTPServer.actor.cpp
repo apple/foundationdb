@@ -43,8 +43,12 @@ ACTOR Future<Void> callbackHandler(Reference<IConnection> conn,
 			throw e;
 		}
 		// FIXME: other errors?
-		if (e.code() == error_code_http_request_failed || e.code() == error_code_http_bad_response ||
-		    e.code() == error_code_connection_failed) {
+		if (e.code() == error_code_connection_failed) {
+			TraceEvent(SevWarn, "HTTPServerConnHandlerFailed").error(e);
+			// return, client will retry
+			return Void();
+		}
+		if (e.code() == error_code_http_request_failed || e.code() == error_code_http_bad_response) {
 			TraceEvent(SevWarn, "HTTPServerConnHandlerInternalError").errorUnsuppressed(e);
 			// reset to empty error response
 			response->reset();
@@ -144,6 +148,31 @@ void HTTP::SimServerContext::registerNewServer(NetworkAddress addr, Reference<HT
 	actors.add(listenActor(Reference<HTTP::SimServerContext>::addRef(this), requestHandler, addr, listeners.back()));
 }
 
+void HTTP::SimRegisteredHandlerContext::updateDNS() {
+	// if addresses is empty, that violates the assumption that there is at least one address when doing resolution.
+	// Only update dns if we have at least one address
+	if (!addresses.empty()) {
+		INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
+	}
+}
+
+void HTTP::SimRegisteredHandlerContext::addAddress(NetworkAddress addr) {
+	addresses.push_back(addr);
+	fmt::print("HTTP: adding address {0} for {1}:{2}\n", addr.toString(), hostname, service);
+	updateDNS();
+}
+
+void HTTP::SimRegisteredHandlerContext::removeIp(IPAddress ip) {
+	fmt::print("HTTP: removing ip {0} for {1}:{2}\n", ip.toString(), hostname, service);
+	for (int i = 0; i < addresses.size(); i++) {
+		if (addresses[i].ip == ip) {
+			swapAndPop(&addresses, i);
+			i--;
+		}
+	}
+	updateDNS();
+}
+
 // unit test stuff
 
 ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req,
@@ -164,6 +193,8 @@ ACTOR Future<Void> helloWorldServerCallback(Reference<HTTP::IncomingRequest> req
 	response->data.headers["Hello"] = "World";
 
 	std::string hello = "Hello World Response!";
+	response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(hello);
+
 	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
 	pw.serializeBytes(hello);
 	response->data.contentLen = hello.size();
@@ -203,6 +234,44 @@ struct HelloErrorRequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloE
 	void delref() override { ReferenceCounted<HelloErrorRequestHandler>::delref(); }
 };
 
+ACTOR Future<Void> helloBadMD5ServerCallback(Reference<HTTP::IncomingRequest> req,
+                                             Reference<HTTP::OutgoingResponse> response) {
+	wait(delay(0));
+	ASSERT_EQ(req->verb, HTTP::HTTP_VERB_GET);
+	ASSERT_EQ(req->resource, "/hello-world");
+	ASSERT_EQ(req->data.headers.size(), 1);
+	ASSERT(req->data.headers.count("Content-Length"));
+	ASSERT_EQ(req->data.headers["Content-Length"], std::to_string(req->data.content.size()));
+	ASSERT_EQ(req->data.contentLen, req->data.content.size());
+	ASSERT_EQ(req->data.content, "Hello Bad MD5 Request!");
+
+	response->code = 200;
+	response->data.headers["Hello"] = "World";
+
+	std::string hello = "Hello World Response!";
+	response->data.headers["Content-MD5"] = HTTP::computeMD5Sum(hello);
+
+	// change content to not match md5 sum!
+	hello = "Hello Bad MD5 Response";
+
+	PacketWriter pw(response->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
+	pw.serializeBytes(hello);
+	response->data.contentLen = hello.size();
+
+	return Void();
+}
+
+struct HelloBadMD5RequestHandler : HTTP::IRequestHandler, ReferenceCounted<HelloBadMD5RequestHandler> {
+	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
+	                           Reference<HTTP::OutgoingResponse> response) override {
+		return helloBadMD5ServerCallback(req, response);
+	}
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<HelloBadMD5RequestHandler>(); }
+
+	void addref() override { ReferenceCounted<HelloBadMD5RequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<HelloBadMD5RequestHandler>::delref(); }
+};
+
 typedef std::function<Future<Reference<HTTP::IncomingResponse>>(Reference<IConnection> conn)> DoRequestFunction;
 
 // handles retrying on timeout and reinitializing connection like other users of HTTP (S3BlobStore, RestClient)
@@ -211,23 +280,26 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostna
                                                               DoRequestFunction reqFunction) {
 	state Reference<IConnection> conn;
 	loop {
-		if (!conn) {
-			wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
-			ASSERT(conn.isValid());
-			wait(conn->connectHandshake());
-		}
-
 		try {
+			if (!conn) {
+				wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
+				ASSERT(conn.isValid());
+				wait(conn->connectHandshake());
+			}
+
 			Future<Reference<HTTP::IncomingResponse>> f = reqFunction(conn);
 			Reference<HTTP::IncomingResponse> response = wait(f);
 			conn->close();
 			return response;
 		} catch (Error& e) {
-			conn->close();
-			if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed) {
+			if (conn) {
+				conn->close();
+			}
+			if (e.code() != error_code_timed_out && e.code() != error_code_connection_failed &&
+			    e.code() != error_code_lookup_failed) {
 				throw e;
 			}
-			// request got stuck, close conn and try again
+			// request got timed out or connection could not be established, close conn and try again
 			conn.clear();
 			wait(delay(0.1));
 		}
@@ -256,14 +328,18 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldReq(Reference<IConne
 	Reference<HTTP::IncomingResponse> response =
 	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
 
+	std::string expectedContent = "Hello World Response!";
+
 	ASSERT_EQ(response->code, 200);
-	ASSERT_EQ(response->data.headers.size(), 2);
+	ASSERT_EQ(response->data.headers.size(), 3);
 	ASSERT(response->data.headers.count("Hello"));
 	ASSERT_EQ(response->data.headers["Hello"], "World");
 	ASSERT(response->data.headers.count("Content-Length"));
 	ASSERT_EQ(response->data.headers["Content-Length"], std::to_string(response->data.content.size()));
+	ASSERT(response->data.headers.count("Content-MD5"));
+	ASSERT_EQ(response->data.headers["Content-MD5"], HTTP::computeMD5Sum(expectedContent));
 	ASSERT_EQ(response->data.contentLen, response->data.content.size());
-	ASSERT_EQ(response->data.content, "Hello World Response!");
+	ASSERT_EQ(response->data.content, expectedContent);
 
 	return response;
 }
@@ -289,27 +365,75 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloWorldErrorReq(Reference<I
 	return response;
 }
 
+ACTOR Future<Reference<HTTP::IncomingResponse>> doHelloBadMD5Req(Reference<IConnection> conn) {
+	state UnsentPacketQueue content;
+	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
+
+	state Reference<IRateControl> sendReceiveRate = makeReference<Unlimited>();
+	state int64_t bytes_sent = 0;
+
+	req->verb = HTTP::HTTP_VERB_GET;
+	req->resource = "/hello-world";
+
+	std::string hello = "Hello Bad MD5 Request!";
+
+	req->data.content = &content;
+	req->data.contentLen = hello.size();
+
+	PacketWriter pw(req->data.content->getWriteBuffer(hello.size()), nullptr, Unversioned());
+	pw.serializeBytes(hello);
+
+	Reference<HTTP::IncomingResponse> response =
+	    wait(timeoutError(HTTP::doRequest(conn, req, sendReceiveRate, &bytes_sent, sendReceiveRate), 30.0));
+
+	// should have gotten error
+	ASSERT(false);
+
+	return response;
+}
+
 // can't run as regular unit test right now because it needs special setup
-TEST_CASE("!/HTTP/Server/HelloWorld") {
+TEST_CASE("/HTTP/Server/HelloWorld") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloworld", "80", 1, makeReference<HelloWorldRequestHandler>()));
+	state std::string hostname = "helloworld-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloWorldRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloworld", "80", doHelloWorldReq)));
+	wait(success(doRequestTest(hostname, "80", doHelloWorldReq)));
 
-	fmt::print("Done\n");
+	fmt::print("Done Hello\n");
 	return Void();
 }
 
-TEST_CASE("!/HTTP/Server/HelloError") {
+TEST_CASE("/HTTP/Server/HelloError") {
 	ASSERT(g_network->isSimulated());
 	fmt::print("Registering sim server\n");
-	wait(g_simulator->registerSimHTTPServer("helloerror", "80", 1, makeReference<HelloErrorRequestHandler>()));
+	state std::string hostname = "helloerror-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloErrorRequestHandler>()));
 	fmt::print("Registered sim server\n");
 
-	wait(success(doRequestTest("helloerror", "80", doHelloWorldErrorReq)));
+	wait(success(doRequestTest(hostname, "80", doHelloWorldErrorReq)));
 
-	fmt::print("Done\n");
+	fmt::print("Done Error\n");
+	return Void();
+}
+
+TEST_CASE("/HTTP/Server/HelloBadMD5") {
+	ASSERT(g_network->isSimulated());
+	fmt::print("Registering sim server\n");
+	state std::string hostname = "hellobadmd5-" + deterministicRandom()->randomUniqueID().toString();
+	wait(g_simulator->registerSimHTTPServer(hostname, "80", makeReference<HelloBadMD5RequestHandler>()));
+	fmt::print("Registered sim server\n");
+
+	// TODO refactor this into ASSERT_ERROR()?
+	try {
+		wait(success(doRequestTest(hostname, "80", doHelloBadMD5Req)));
+		ASSERT(false);
+	} catch (Error& e) {
+		ASSERT(e.code() == error_code_http_bad_response);
+	}
+
+	fmt::print("Done Bad MD5\n");
 	return Void();
 }

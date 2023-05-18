@@ -479,6 +479,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_DISABLE_WAL_EXPERIMENTAL,                    false );
 	init( ROCKSDB_WAL_TTL_SECONDS,                                 0 );
 	init( ROCKSDB_WAL_SIZE_LIMIT_MB,                               0 );
+	init( ROCKSDB_LOG_LEVEL_DEBUG,                             false );
 	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS knob.
 	// These knobs have contrary functionality.
 	init( ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE,              true );
@@ -755,8 +756,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( STORAGE_DURABILITY_LAG_HARD_MAX,                    2000e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_HARD_MAX = 100e6;
 	init( STORAGE_DURABILITY_LAG_SOFT_MAX,                     250e6 ); if( smallStorageTarget ) STORAGE_DURABILITY_LAG_SOFT_MAX = 10e6;
 	init( STORAGE_INCLUDE_FEED_STORAGE_QUEUE,                   true ); if ( randomize && BUGGIFY ) STORAGE_INCLUDE_FEED_STORAGE_QUEUE = false;
-	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,              0.0 ); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
-	init (STORAGE_FETCH_KEYS_DELAY,	                             0.0 ); if ( randomize && BUGGIFY ) STORAGE_FETCH_KEYS_DELAY = deterministicRandom()->random01() * 100;
+	init( STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL,                     0.0); if ( isSimulated ) STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL = 5.0;
+	init (STORAGE_FETCH_KEYS_DELAY,	                             0.0 ); if ( randomize && BUGGIFY ) { STORAGE_FETCH_KEYS_DELAY = deterministicRandom()->random01() * 5.0; }
 
 	//FIXME: Low priority reads are disabled by assigning very high knob values, reduce knobs for 7.0
 	init( LOW_PRIORITY_STORAGE_QUEUE_BYTES,                    775e8 ); if( smallStorageTarget ) LOW_PRIORITY_STORAGE_QUEUE_BYTES = 1750e3;
@@ -870,6 +871,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = 1;
 	init( AUDIT_RETRY_COUNT_MAX,                                 100 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
 	init( SS_AUDIT_AUTO_PROCEED_COUNT_MAX,                         5 );
+	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        50 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;

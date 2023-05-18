@@ -2329,8 +2329,10 @@ void StorageServer::checkTenantEntry(Version version, TenantInfo tenantInfo, boo
 			TraceEvent(SevWarn, "StorageTenantNotFound", thisServerID)
 			    .detail("Tenant", tenantInfo.tenantId)
 			    .backtrace();
+			CODE_PROBE(true, "Storage server tenant not found");
 			throw tenant_not_found();
 		} else if (!lockAware && itr->lockState == TenantAPI::TenantLockState::LOCKED) {
+			CODE_PROBE(true, "Storage server access locked tenant without lock awareness");
 			throw tenant_locked();
 		}
 	}
@@ -2531,6 +2533,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			if (tenantId != TenantInfo::INVALID_TENANT) {
 				auto view = data->tenantMap.at(latestVersion);
 				if (view.find(tenantId) == view.end()) {
+					CODE_PROBE(true, "Watched tenant removed");
 					throw tenant_removed();
 				}
 			}

@@ -1289,6 +1289,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
+			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
 				if (!workerAddresses.count(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);

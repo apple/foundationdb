@@ -97,20 +97,24 @@ std::string ResponseBase<T>::getCodeDescription() {
 	}
 }
 
+std::string computeMD5Sum(std::string content) {
+	MD5_CTX sum;
+	::MD5_Init(&sum);
+	::MD5_Update(&sum, content.data(), content.size());
+	std::string sumBytes;
+	sumBytes.resize(16);
+	::MD5_Final((unsigned char*)sumBytes.data(), &sum);
+	std::string sumStr = base64::encoder::from_string(sumBytes);
+	sumStr.resize(sumStr.size() - 1);
+	return sumStr;
+}
+
 bool verifyMD5(HTTPData<std::string>* data, bool fail_if_header_missing, Optional<std::string> content_sum) {
 	auto i = data->headers.find("Content-MD5");
 	if (i != data->headers.end()) {
 		// If a content sum is not provided, calculate one from the response content
 		if (!content_sum.present()) {
-			MD5_CTX sum;
-			::MD5_Init(&sum);
-			::MD5_Update(&sum, data->content.data(), data->content.size());
-			std::string sumBytes;
-			sumBytes.resize(16);
-			::MD5_Final((unsigned char*)sumBytes.data(), &sum);
-			std::string sumStr = base64::encoder::from_string(sumBytes);
-			sumStr.resize(sumStr.size() - 1);
-			content_sum = sumStr;
+			content_sum = computeMD5Sum(data->content);
 		}
 		return i->second == content_sum.get();
 	}
@@ -553,7 +557,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
+			printf("[%s] HTTP starting %s %s ContentLen:%lld\n",
 			       conn->getDebugID().toString().c_str(),
 			       request->verb.c_str(),
 			       request->resource.c_str(),
@@ -668,7 +672,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
-			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
+			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%lld [%d out]\n",
 			       conn->getDebugID().toString().c_str(),
 			       e.name(),
 			       earlyResponse,

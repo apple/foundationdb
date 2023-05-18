@@ -918,6 +918,8 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 				}
 			}
 
+			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
+
 			wait(waitForAll(deleteFutures));
 			wait(tr.commit());
 

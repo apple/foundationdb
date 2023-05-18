@@ -208,17 +208,33 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 
 	wait(delay(deterministicRandom()->random01())); // simulate network delay
 
-	// buggify errors or omitted tenants in response
+	// buggify omitted tenants, errors, or unexpectedly ordered locations in response
 	if (g_network->isSimulated() && !g_simulator->speedUpSimulation && BUGGIFY_WITH_PROB(0.01)) {
-		if (deterministicRandom()->coinflip()) {
+		int bug = deterministicRandom()->randomInt(0, 3);
+		if (bug == 0) {
 			// remove some number of tenants from the response
 			int targetSize = deterministicRandom()->randomInt(0, rep.metadataDetails.size());
 			while (rep.metadataDetails.size() > targetSize) {
 				swapAndPop(&rep.metadataDetails, deterministicRandom()->randomInt(0, rep.metadataDetails.size()));
 			}
-		} else {
+		} else if (bug == 1) {
+			// send error
 			req.reply.sendError(connection_failed());
 			return Void();
+		} else if (bug == 2) {
+			int targetDetail = deterministicRandom()->randomInt(0, rep.metadataDetails.size());
+			auto& locs = rep.metadataDetails[targetDetail].locations;
+			if (locs.size() > 1) {
+				int targetIdx1 = deterministicRandom()->randomInt(0, locs.size());
+				int targetIdx2 = targetIdx1;
+				while (targetIdx2 == targetIdx1) {
+					targetIdx2 = deterministicRandom()->randomInt(0, locs.size());
+				}
+				std::swap(locs[targetIdx1], locs[targetIdx2]);
+			}
+		} else {
+			// developer forgot to update cases
+			ASSERT(false);
 		}
 	}
 

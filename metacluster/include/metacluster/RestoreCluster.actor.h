@@ -103,6 +103,7 @@ struct RestoreClusterImpl {
 		if (!self->restoreDryRun) {
 			Optional<UID> activeRestoreId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 			if (!activeRestoreId.present() || activeRestoreId.get() != self->restoreId) {
+				CODE_PROBE(true, "Conflicting restore detected");
 				throw conflicting_restore();
 			}
 		}
@@ -115,8 +116,10 @@ struct RestoreClusterImpl {
 	static Future<bool> eraseRestoreId(RestoreClusterImpl* self, Transaction tr) {
 		Optional<UID> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 		if (!transactionId.present()) {
+			CODE_PROBE(true, "Erasing non-existent restore ID");
 			return false;
 		} else if (transactionId.get() != self->restoreId) {
+			CODE_PROBE(true, "Conflicting restore detected while erasing restore ID");
 			throw conflicting_restore();
 		} else {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
@@ -158,12 +161,14 @@ struct RestoreClusterImpl {
 				    wait(metadata::metaclusterRegistration().get(tr));
 
 				if (!metaclusterRegistration.present()) {
+					CODE_PROBE(true, "Restore non-data cluster");
 					throw invalid_data_cluster();
 				} else if (!metaclusterRegistration.get().matches(self->ctx.metaclusterRegistration.get())) {
 					if (!self->forceJoin) {
 						TraceEvent(SevWarn, "MetaclusterRestoreClusterMismatch")
 						    .detail("ExistingRegistration", metaclusterRegistration.get())
 						    .detail("ManagementClusterRegistration", self->ctx.metaclusterRegistration.get());
+						CODE_PROBE(true, "Restore cluster that is already registered");
 						throw cluster_already_registered();
 					} else if (!self->restoreDryRun) {
 						ASSERT(self->ctx.metaclusterRegistration.get().clusterType == ClusterType::METACLUSTER_DATA);
@@ -179,6 +184,7 @@ struct RestoreClusterImpl {
 					TraceEvent(SevWarn, "MetaclusterRestoreClusterNameMismatch")
 					    .detail("ExistingName", metaclusterRegistration.get().name)
 					    .detail("ManagementClusterRegistration", self->clusterName);
+					CODE_PROBE(true, "Restore cluster with incorrect name");
 					throw cluster_already_registered();
 				}
 
@@ -204,6 +210,7 @@ struct RestoreClusterImpl {
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
 		     !self->dataClusterId.isValid() || dataClusterMetadata.get().entry.id != self->dataClusterId)) {
 			TraceEvent("RestoredClusterAlreadyExists").detail("ClusterName", self->clusterName);
+			CODE_PROBE(true, "Restoring cluster that already exists");
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
@@ -251,6 +258,7 @@ struct RestoreClusterImpl {
 				// Check if the cluster was removed concurrently
 				bool tombstone = wait(tombstoneFuture);
 				if (tombstone) {
+					CODE_PROBE(true, "Restored cluster removed concurrently");
 					throw cluster_removed();
 				}
 
@@ -268,6 +276,7 @@ struct RestoreClusterImpl {
 					TraceEvent(SevWarn, "MetaclusterRestoreClusterAlreadyRegistered")
 					    .detail("ExistingRegistration", metaclusterRegistration.get())
 					    .detail("NewRegistration", dataClusterEntry);
+					CODE_PROBE(true, "Restored cluster already registered");
 					throw cluster_already_registered();
 				}
 
@@ -302,6 +311,8 @@ struct RestoreClusterImpl {
 			DataClusterEntry noCapacityEntry = updatedEntry;
 			noCapacityEntry.capacity.numTenantGroups = 0;
 			internal::updateClusterCapacityIndex(tr, self->clusterName, updatedEntry, noCapacityEntry);
+		} else {
+			CODE_PROBE(true, "Mark cluster restoring already complete");
 		}
 
 		wait(store(self->lastManagementClusterTenantId, metadata::management::tenantMetadata().lastTenantId.get(tr)));
@@ -323,6 +334,8 @@ struct RestoreClusterImpl {
 			internal::updateClusterCapacityIndex(tr, clusterName, noCapacityEntry, updatedEntry);
 
 			return success(eraseRestoreId(this, tr));
+		} else {
+			CODE_PROBE(true, "Mark cluster ready already complete");
 		}
 
 		return Void();
@@ -348,6 +361,8 @@ struct RestoreClusterImpl {
 			entry.tenantState = TenantState::ERROR;
 			entry.error = "The tenant is missing after restoring its data cluster";
 			metadata::management::tenantMetadata().tenantMap.set(tr, entry.id, entry);
+
+			CODE_PROBE(true, "Mark management tenant in error state");
 		}
 
 		return Void();
@@ -391,6 +406,7 @@ struct RestoreClusterImpl {
 			               [self = self, beginTenant = beginTenant](Reference<typename DB::TransactionT> tr) {
 				               return getTenantsFromManagementCluster(self, tr, beginTenant.get());
 			               })));
+			CODE_PROBE(beginTenant.present(), "Multiple management cluster tenant batches");
 		}
 
 		return Void();
@@ -416,9 +432,11 @@ struct RestoreClusterImpl {
 				                                        tenantId,
 				                                        ClusterType::METACLUSTER_DATA,
 				                                        configurationSequenceNum));
+				CODE_PROBE(true, "Rename tenant during cluster restore");
 				return Void();
 			} else if (entry.get().tenantName == newTenantName && newId.present() && newId.get() == tenantId) {
 				// The tenant has already been renamed
+				CODE_PROBE(true, "Rename tenant during cluster restore already completed");
 				return Void();
 			}
 		}
@@ -432,12 +450,14 @@ struct RestoreClusterImpl {
 		    .detail("NewEntryPresent", newId.present());
 
 		if (newId.present()) {
+			CODE_PROBE(true, "Rename tenant already exists");
 			self->messages.push_back(
 			    fmt::format("Failed to rename the tenant `{}' to `{}' because the new name is already in use",
 			                printable(oldTenantName),
 			                printable(newTenantName)));
 			throw tenant_already_exists();
 		} else {
+			CODE_PROBE(true, "Rename tenant wrong ID");
 			self->messages.push_back(fmt::format(
 			    "Failed to rename the tenant `{}' to `{}' because the tenant did not have the expected ID {}",
 			    printable(oldTenantName),
@@ -459,13 +479,16 @@ struct RestoreClusterImpl {
 		if (existingEntry.tenantName != updatedEntry.tenantName) {
 			if (!existingEntry.tenantName.startsWith(metaclusterTemporaryRenamePrefix)) {
 				// This transaction is going to fail due to the restore ID check, so we don't need to do anything
-				CODE_PROBE(true, "tenant restore rename mismatch due to concurrency", probe::decoration::rare);
+				CODE_PROBE(true, "Tenant restore rename mismatch due to concurrency", probe::decoration::rare);
 				return Void();
 			}
+
+			CODE_PROBE(true, "Configure tenant update to temporary name");
 			updatedEntry.tenantName = existingEntry.tenantName;
 		}
 
 		if (existingEntry.configurationSequenceNum <= updatedEntry.configurationSequenceNum) {
+			CODE_PROBE(true, "Configure tenant during restore");
 			wait(TenantAPI::configureTenantTransaction(tr, existingEntry, updatedEntry));
 		}
 
@@ -502,6 +525,7 @@ struct RestoreClusterImpl {
 					                tenantEntry.id));
 				}
 			} else {
+				CODE_PROBE(true, "Delete tenant during restore");
 				wait(self->runRestoreDataClusterTransaction([tenantEntry = tenantEntry](Reference<ITransaction> tr) {
 					return TenantAPI::deleteTenantTransaction(tr, tenantEntry.id, ClusterType::METACLUSTER_DATA);
 				}));
@@ -521,6 +545,7 @@ struct RestoreClusterImpl {
 				state TenantName temporaryName;
 				state bool usingTemporaryName = self->dataClusterTenantNames.count(managementTenantName) > 0;
 				if (usingTemporaryName) {
+					CODE_PROBE(true, "Restore break tenant rename cycle");
 					temporaryName = metaclusterTemporaryRenamePrefix.withSuffix(managementTenantName);
 				} else {
 					temporaryName = managementTenantName;
@@ -665,6 +690,7 @@ struct RestoreClusterImpl {
 					if (managementTenant.tenantState != TenantState::ERROR) {
 						missingTenants.push_back(tenantId);
 						if (missingTenants.size() == CLIENT_KNOBS->METACLUSTER_RESTORE_BATCH_SIZE) {
+							CODE_PROBE(true, "Mark tenants as error batch");
 							wait(self->runRestoreManagementTransaction([self = self, missingTenants = missingTenants](
 							                                               Reference<typename DB::TransactionT> tr) {
 								return markManagementTenantsAsError(self, tr, missingTenants);
@@ -713,6 +739,7 @@ struct RestoreClusterImpl {
 			if (existingEntry.get().assignedCluster == self->clusterName) {
 				if (existingEntry.get().id != tenantEntry.id ||
 				    !existingEntry.get().matchesConfiguration(tenantEntry)) {
+					CODE_PROBE(true, "Tenant modified during restore dry-run");
 					ASSERT(self->restoreDryRun);
 					self->messages.push_back(
 					    fmt::format("The tenant `{}' was modified concurrently with the restore dry-run",
@@ -723,6 +750,7 @@ struct RestoreClusterImpl {
 				// This is a retry, so return success
 				return false;
 			} else {
+				CODE_PROBE(true, "Tenant exists on different cluster");
 				self->messages.push_back(fmt::format("The tenant `{}' already exists on cluster `{}'",
 				                                     printable(tenantEntry.tenantName),
 				                                     printable(existingEntry.get().assignedCluster)));
@@ -755,6 +783,7 @@ struct RestoreClusterImpl {
 			                printable(managementEntry.tenantName),
 			                printable(managementEntry.tenantGroup.get()),
 			                printable(tenantGroupEntry.get().get().assignedCluster)));
+			CODE_PROBE(true, "Tenant group exists on different cluster");
 			throw invalid_tenant_configuration();
 		}
 
@@ -804,6 +833,7 @@ struct RestoreClusterImpl {
 			if (numGroupsCreated > 0) {
 				DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 				if (updatedEntry.clusterState != DataClusterState::RESTORING) {
+					CODE_PROBE(true, "Conflicting restore");
 					throw conflicting_restore();
 				}
 				updatedEntry.allocated.numTenantGroups += numGroupsCreated;
@@ -845,11 +875,14 @@ struct RestoreClusterImpl {
 				self->messages.push_back(fmt::format(
 				    "The data cluster being added is using the same tenant ID prefix {} as the management cluster.",
 				    tenantIdPrefix));
+				CODE_PROBE(true, "Reusing tenant ID without force reuse option");
 				throw invalid_metacluster_configuration();
 			} else if (!self->restoreDryRun && self->lastDataClusterTenantId.get() > lastTenantId.orDefault(-1)) {
+				CODE_PROBE(true, "Reusing tenant ID prefix and increase existing ID");
 				metadata::management::tenantMetadata().lastTenantId.set(tr, self->lastDataClusterTenantId.get());
 			}
 
+			CODE_PROBE(true, "Reusing tenant ID prefix");
 			self->newLastDataClusterTenantId = self->lastDataClusterTenantId;
 		}
 
@@ -879,6 +912,7 @@ struct RestoreClusterImpl {
 				                itr->second.id,
 				                printable(managementEntry->second.tenantName),
 				                printable(managementEntry->second.assignedCluster)));
+				CODE_PROBE(true, "Restoring tenant with duplicate ID");
 				throw tenant_already_exists();
 			}
 
@@ -926,6 +960,9 @@ struct RestoreClusterImpl {
 	}
 
 	ACTOR static Future<Void> runDataClusterRestore(RestoreClusterImpl* self) {
+		CODE_PROBE(self->restoreDryRun, "Data cluster restore dry-run");
+		CODE_PROBE(self->forceJoin, "Data cluster restore force join");
+
 		// Run a management transaction to populate the data cluster metadata
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return self->ctx.setCluster(tr, self->clusterName);
@@ -993,6 +1030,9 @@ struct RestoreClusterImpl {
 	}
 
 	ACTOR static Future<Void> runManagementClusterRepopulate(RestoreClusterImpl* self) {
+		CODE_PROBE(self->restoreDryRun, "Management cluster restore dry-run");
+		CODE_PROBE(self->forceReuseTenantIdPrefix, "Management cluster restore force reuse tenant ID prefix");
+
 		// Record the data cluster in the management cluster
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return registerRestoringClusterInManagementCluster(self, tr);
