@@ -1,6 +1,5 @@
 [configuration]
 config = 'triple'
-# generateFearless = false
 storageEngineType = 5
 processesPerMachine = 1
 coordinators = 3
