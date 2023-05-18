@@ -591,7 +591,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		}
 
 		CODE_PROBE(foundTenantCollision, "Resolved tenant collision for restore", probe::decoration::rare);
-		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore");
+		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore", probe::decoration::rare);
 		return foundTenantCollision || foundGroupCollision;
 	}
 
