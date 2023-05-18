@@ -8452,7 +8452,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 						if (!results.empty() && results.back().keyRange.end != chunk.keyRange.begin) {
 							ASSERT(results.back().keyRange.end > chunk.keyRange.begin);
 							ASSERT(results.back().keyRange.end <= chunk.keyRange.end);
-							CODE_PROBE(true, "Merge while reading granule range", probe::decoration::rare);
+							CODE_PROBE(true, "Merge while reading granule range");
 							while (!results.empty() && results.back().keyRange.begin >= chunk.keyRange.begin) {
 								// TODO: we can't easily un-depend the arenas for these guys, but that's ok as this
 								// should be rare

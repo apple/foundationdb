@@ -2537,7 +2537,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.initEndpoints();
 				if (blobMigratorInterf->get().present()) {
 					recruited = blobMigratorInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
+					CODE_PROBE(true, "Recruited while already a blob migrator.");
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.haltBlobMigrator);

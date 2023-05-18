@@ -1764,7 +1764,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				if (retried && prevOwnerEpoch == bmData->epoch && prevGranuleID == granuleID &&
 				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
-					CODE_PROBE(true, "split too big adjustment succeeded after retry", probe::decoration::rare);
+					CODE_PROBE(true, "split too big adjustment succeeded after retry");
 					break;
 				}
 				CODE_PROBE(true, "split too big was since moved to another worker", probe::decoration::rare);

@@ -4200,7 +4200,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				// if it's the first snapshot of a new granule, history won't be present
 				if (info.history.present()) {
 					if (info.granuleID != info.history.get().value.granuleID) {
-						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit", probe::decoration::rare);
+						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit");
 						// The only case this can happen is when a granule was merged into a larger granule,
 						// then split back out to the same one. Validate that this is a new granule that was
 						// split previously. Just check lock based on epoch, since seqno is intentionally
