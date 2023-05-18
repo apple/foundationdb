@@ -95,8 +95,7 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 			} else {
 				partitionName = deterministicRandom()->randomUniqueID().shortString();
 			}
-			std::string partition =
-			    partitionName + "-" + std::to_string(domainId) + "/";
+			std::string partition = partitionName + "-" + std::to_string(domainId) + "/";
 			metadata.locations.emplace_back_deep(
 			    metadata.arena(), locIdBase + i, buildPartitionPath(baseUrl, partition));
 			ev.detail("P" + std::to_string(i), metadata.locations.back().path);
