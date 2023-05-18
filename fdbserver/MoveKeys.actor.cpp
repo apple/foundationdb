@@ -1512,23 +1512,25 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-						const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
-						CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
-						                              DataMoveRocksCF,
-						                              src,
-						                              checkpointId,
-						                              dataMoveId);
-						checkpoint.setState(CheckpointMetaData::Pending);
-						tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
-						TraceEvent(sevDm, "InitiatedCheckpoint")
-						    .detail("CheckpointID", checkpointId.toString())
-						    .detail("Range", rangeIntersectKeys)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("SrcServers", describe(src))
-						    .detail("ReadVersion", tr.getReadVersion().get());
-
 						dataMove.src.insert(src.begin(), src.end());
-						dataMove.checkpoints.insert(checkpointId);
+
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
+							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
+							                              DataMoveRocksCF,
+							                              src,
+							                              checkpointId,
+							                              dataMoveId);
+							checkpoint.setState(CheckpointMetaData::Pending);
+							tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
+							TraceEvent(sevDm, "InitiatedCheckpoint")
+							    .detail("CheckpointID", checkpointId.toString())
+							    .detail("Range", rangeIntersectKeys)
+							    .detail("DataMoveID", dataMoveId)
+							    .detail("SrcServers", describe(src))
+							    .detail("ReadVersion", tr.getReadVersion().get());
+							dataMove.checkpoints.insert(checkpointId);
+						}
 					}
 
 					// Remove old dests from serverKeys.
@@ -1945,7 +1947,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+							wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						}
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
 						TraceEvent(SevDebug, "FinishMoveShardsDeleteMetaData", dataMoveId)
@@ -2697,7 +2701,9 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
-					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					}
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
 					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId)
@@ -2757,15 +2763,18 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
 		if (e.code() == error_code_retry_clean_up_datamove_tombstone_added) {
-			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
-			ASSERT_WE_THINK(addCleanUpDataMoveActor.present());
-			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-			                                                             dataMoveId,
-			                                                             lock,
-			                                                             cleanUpDataMoveParallelismLock,
-			                                                             keys,
-			                                                             ddEnabledState,
-			                                                             /*backgroundDelaySeconds=*/10));
+			if (addCleanUpDataMoveActor.present()) {
+				TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
+				addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
+				                                                             dataMoveId,
+				                                                             lock,
+				                                                             cleanUpDataMoveParallelismLock,
+				                                                             keys,
+				                                                             ddEnabledState,
+				                                                             /*backgroundDelaySeconds=*/10));
+			} else {
+				TraceEvent(SevWarn, "CleanUpDataMoveNotFound", dataMoveId).errorUnsuppressed(e);
+			}
 		} else {
 			TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
 			throw e;
