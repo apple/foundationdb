@@ -1261,10 +1261,6 @@ struct RawCursor {
 			}
 		}
 		result.more = rowLimit == 0 || accumulatedBytes >= byteLimit;
-		if (result.more) {
-			ASSERT(result.size() > 0);
-			result.readThrough = result[result.size() - 1].key;
-		}
 		// AccumulatedBytes includes KeyValueRef overhead so subtract it
 		kvBytesRead += (accumulatedBytes - result.size() * sizeof(KeyValueRef));
 		return result;
