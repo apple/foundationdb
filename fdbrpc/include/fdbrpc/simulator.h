@@ -347,6 +347,9 @@ public:
 	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
+	enum SimConsistencyScanState { DisabledStart = 0, Enabling = 1, Enabled = 2, Complete = 3, DisabledEnd = 4 };
+	SimConsistencyScanState consistencyScanState = SimConsistencyScanState::DisabledStart;
+
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
