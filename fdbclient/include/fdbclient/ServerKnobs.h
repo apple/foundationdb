@@ -227,6 +227,9 @@ public:
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
 	                                     // be considered hot
+	// When the sampled read operations changes more than this threshold, the
+	// shard metrics will update immediately
+	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
