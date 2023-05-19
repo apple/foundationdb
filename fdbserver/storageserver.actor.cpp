@@ -5266,7 +5266,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", data->thisServerID)
+	TraceEvent(SevInfo, "AuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
 	state AuditStorageState res(req.id, data->thisServerID, req.getType());
@@ -5342,7 +5342,15 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				ownRangesSeenByServerKey = serverKeyRes.ownRanges;
 			} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
 			ASSERT(serverKeyReadAtVersion >= localShardInfoReadAtVersion);
-			wait(data->version.whenAtLeast(serverKeyReadAtVersion));
+			try {
+				wait(timeoutError(data->version.whenAtLeast(serverKeyReadAtVersion), 30));
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "AuditStorageSsShardWaitSSVersionTooLong", data->thisServerID)
+				    .detail("ServerKeyReadAtVersion", serverKeyReadAtVersion)
+				    .detail("SSVersion", data->version.get());
+				failureReason = "SS version takes long time to catch up with serverKeyReadAtVersion";
+				throw audit_storage_failed();
+			}
 			// At this point, shard assignment history guarantees to contain assignments
 			// upto serverKeyReadAtVersion
 
@@ -5353,7 +5361,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
 			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
 			    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageSsShardGetHistory", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
@@ -5379,7 +5387,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				}
 				ownRangesLocalView.push_back(overlappingRange);
 			}
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageSsShardReadDone", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ClaimRange", claimRange)
@@ -5412,7 +5420,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				           data->thisServerID.toString().c_str(),
 				           mismatchedRangeByServerKey.toString().c_str(),
 				           mismatchedRangeByLocalView.toString().c_str());
-				TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
+				TraceEvent(SevError, "AuditStorageSsShardError", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("ClaimRange", claimRange)
@@ -5425,7 +5433,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			// Return result
 			if (!errors.empty()) {
-				TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardErrorEnd", data->thisServerID)
+				TraceEvent(SevVerbose, "AuditStorageSsShardErrorEnd", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditServer", data->thisServerID);
@@ -5439,7 +5447,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
 				wait(persistAuditStateByServer(data->cx, res));
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardDone", data->thisServerID)
+				TraceEvent(SevInfo, "AuditStorageSsShardDone", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditServer", data->thisServerID)
@@ -5457,7 +5465,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
+		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)

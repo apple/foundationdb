@@ -6,7 +6,7 @@ machineCount = 18
 
 [[knobs]]
 shard_encode_location_metadata = true
-testing_audit_storage_throttling = true
+concurrent_audit_task_count_max = 1
 
 [[test]]
 testTitle = 'ValidateStorageWorkload'

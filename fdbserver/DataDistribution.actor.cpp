@@ -2201,7 +2201,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 				state AuditPhase phase = auditStates[i].getPhase();
 				ASSERT(phase != AuditPhase::Running && phase != AuditPhase::Failed);
 				if (phase == AuditPhase::Complete) {
-					// pass
+					continue; // pass
 				} else if (phase == AuditPhase::Error) {
 					audit->foundError = true;
 				} else {
