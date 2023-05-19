@@ -129,6 +129,12 @@ struct SstFileMetaData {
 	// DEPRECATED: replaced by `directory` in base struct
 	std::string db_path;
 
+	// These bounds define the effective key range for range tombstones
+	// in this file.
+	// Currently only used by CreateColumnFamilyWithImport().
+	std::string smallest{}; // Smallest internal key served by table
+	std::string largest{}; // Largest internal key served by table
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar,
@@ -153,7 +159,9 @@ struct SstFileMetaData {
 		           file_creation_time,
 		           epoch_number,
 		           name,
-		           db_path);
+		           db_path,
+		           smallest,
+		           largest);
 	}
 };
 
@@ -192,7 +200,9 @@ struct LiveFileMetaData : public SstFileMetaData {
 		           SstFileMetaData::db_path,
 		           column_family_name,
 		           level,
-		           fetched);
+		           fetched,
+		           SstFileMetaData::smallest,
+		           SstFileMetaData::largest);
 	}
 };
 
