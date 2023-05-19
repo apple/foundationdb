@@ -191,8 +191,8 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( LOW_PRIORITY_MAX_DELAY,                              5.0 );
 
 	// HTTP
-	init( HTTP_READ_SIZE,                                 128*1024 );
-	init( HTTP_SEND_SIZE,                                  32*1024 );
+	init( HTTP_READ_SIZE,                                 128*1024 ); if (randomize && BUGGIFY) HTTP_READ_SIZE = deterministicRandom()->randomSkewedUInt32(1024, 2 * HTTP_READ_SIZE);
+	init( HTTP_SEND_SIZE,                                  32*1024 ); if (randomize && BUGGIFY) HTTP_SEND_SIZE = deterministicRandom()->randomSkewedUInt32(1024, 2 * HTTP_SEND_SIZE);
 	init( HTTP_VERBOSE_LEVEL,                                    0 );
 	init( HTTP_REQUEST_ID_HEADER,                               "" );
 	init( HTTP_RESPONSE_SKIP_VERIFY_CHECKSUM_FOR_PARTIAL_CONTENT, false );

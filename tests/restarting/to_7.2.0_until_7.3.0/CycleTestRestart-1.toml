@@ -4,6 +4,7 @@ disableTss = true
 disableHostname = true
 encryptModes = ['disabled']
 tenantModes=['disabled']
+simHTTPServerEnabled=false
 
 [[test]]
 testTitle = 'Clogged'

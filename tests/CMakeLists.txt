@@ -171,6 +171,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -247,6 +248,7 @@ if(WITH_PYTHON)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
+  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml)
   add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
@@ -313,20 +315,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
     restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -381,6 +371,18 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
     restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.txt
+    restarting/from_7.3.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.txt
+    restarting/from_7.3.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.txt
+    restarting/from_7.3.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.txt
+    restarting/from_7.3.0/SnapTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)

@@ -1092,6 +1092,8 @@ public:
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
+	bool BG_USE_BLOB_RANGE_CHANGE_LOG;
+
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;

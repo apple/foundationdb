@@ -1,46 +1,44 @@
+# FIXME: delete this test after next release when change log is always true
 [configuration]
 blobGranulesEnabled = true 
 allowDefaultTenant = false
-tenantModes = ['optional', 'required']
 injectTargetedSSRestart = true
 injectSSDelay = true
 
 [[knobs]]
-bg_metadata_source = "tenant"
-bg_key_tuple_truncate_offset = 1
-enable_configurable_encryption = true
-enable_rest_kms_communication = true
+bg_use_blob_range_change_log = true
 
 [[test]]
-testTitle = 'BlobGranuleCorrectness'
+testTitle = 'BlobGranuleRanges'
 
     [[test.workload]]
-    testName = 'BlobGranuleCorrectnessWorkload'
-    testDuration = 240.0
+    testName = 'BlobGranuleRanges'
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'RandomClogging'
-    testDuration = 120.0
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'Rollback'
-    meanDelay = 30.0
-    testDuration = 120.0
+    meanDelay = 20.0
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'Attrition'
     machinesToKill = 10
     machinesToLeave = 3
     reboot = true
-    testDuration = 120.0
+    testDuration = 30.0
 
     [[test.workload]]
     testName = 'BlobFailureInjection'
-    testDuration = 120.0
+    testDuration = 30.0
+
