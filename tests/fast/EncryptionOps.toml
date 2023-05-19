@@ -3,9 +3,6 @@ buggify = false
 testClass = "Encryption"
 encryptModes = ['disabled']
 
-[[knobs]]
-enable_configurable_encryption = true
-
 [[test]]
 testTitle = 'EncryptDecrypt'
 

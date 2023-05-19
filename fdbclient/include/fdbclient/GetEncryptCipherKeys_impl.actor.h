@@ -355,8 +355,6 @@ ACTOR template <class T>
 Future<TextAndHeaderCipherKeys> _getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
                                                       BlobCipherEncryptHeaderRef header,
                                                       BlobCipherMetrics::UsageType usageType) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	state bool authenticatedEncryption = header.getAuthTokenMode() != ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE;
 	state EncryptHeaderCipherDetails details = header.getCipherDetails();
 

@@ -11,7 +11,6 @@ storageEngineExcludeTypes = [4, 5]
 [[knobs]]
 bg_metadata_source = "tenant"
 bg_key_tuple_truncate_offset = 1
-enable_configurable_encryption = true
 enable_rest_kms_communication = true
 bg_consistency_check_enabled = 0
 shard_encode_location_metadata = false
