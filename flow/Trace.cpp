@@ -170,6 +170,7 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
+		ASSERT(!isOpen());
 		SevErrorNames.init("TraceEvents.SevError"_sr);
 		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
 		SevWarnNames.init("TraceEvents.SevWarn"_sr);
@@ -431,8 +432,7 @@ public:
 	}
 
 	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		if (!logTraceEventMetrics)
-			return;
+		ASSERT(TraceEvent::isNetworkThread() && !logTraceEventMetrics);
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch (severity) {
@@ -1340,7 +1340,7 @@ void BaseTraceEvent::log() {
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
-					if (g_traceLog.logTraceEventMetrics && isNetworkThread()) {
+					if (isNetworkThread() && g_traceLog.logTraceEventMetrics) {
 						// Get the persistent Event Metric representing this trace event and push the fields (details)
 						// accumulated in *this to it and then log() it. Note that if the event metric is disabled it
 						// won't actually be logged BUT any new fields added to it will be registered. If the event IS

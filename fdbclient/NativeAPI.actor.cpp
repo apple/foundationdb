@@ -2299,6 +2299,8 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		                              FDB_VT_VERSION,
 		                              deterministicRandom()->randomUInt64()));
 
+		initTraceEventMetrics();
+
 		std::string identifier = networkOptions.traceFileIdentifier;
 		openTraceFile(localAddress,
 		              networkOptions.traceRollSize,
@@ -2322,7 +2324,6 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 		g_network->initMetrics();
 		FlowTransport::transport().initMetrics();
-		initTraceEventMetrics();
 	}
 
 	// Initialize system monitoring once the local IP is available
