@@ -19,12 +19,15 @@
  */
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <string>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/Knobs.h"
 #include "fdbserver/RestoreCommon.actor.h"
 #include "fdbserver/RestoreUtil.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "flow/CodeProbe.h"
+#include "flow/Error.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -63,7 +66,7 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 
 // BlobMigrator offers APIs to migrate data from blob storage to storage server. It implements a minimal set of
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
-class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
+class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
 public:
 	BlobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : interf_(interf), actors_(false), dbInfo_(dbInfo) {
@@ -73,6 +76,7 @@ public:
 
 	// Start migration
 	ACTOR static Future<Void> start(Reference<BlobMigrator> self) {
+		self->setReferencedSelf(self);
 		wait(initialize(self));
 		wait(serverLoop(self));
 		return Void();
@@ -119,7 +123,7 @@ private:
 					wait(prepare(self, normalKeys));
 					wait(advanceVersion(self));
 					wait(BlobRestoreController::setPhase(controller, COPYING_DATA, self->interf_.id()));
-					self->actors_.add(logProgress(self));
+					self->addActor(logProgress(self));
 					TraceEvent("BlobMigratorStartCopying", self->interf_.id()).log();
 				} catch (Error& e) {
 					TraceEvent("BlobMigratorStartCopyingError", self->interf_.id()).error(e);
@@ -132,7 +136,7 @@ private:
 					dprint("Replace storage server interface {}\n", self->interf_.ssi.id().toString());
 					TraceEvent("ReplacedStorageInterface", self->interf_.id()).log();
 
-					self->actors_.add(logProgress(self));
+					self->addActor(logProgress(self));
 				} catch (Error& e) {
 					TraceEvent("ReplacedStorageInterfaceError", self->interf_.id()).error(e);
 					throw e;
@@ -522,9 +526,10 @@ private:
 
 	// Main server loop
 	ACTOR static Future<Void> serverLoop(Reference<BlobMigrator> self) {
-		self->actors_.add(waitFailureServer(self->interf_.waitFailure.getFuture()));
-		self->actors_.add(handleRequest(self));
-		self->actors_.add(handleUnsupportedRequest(self));
+		ASSERT(self->referencedSelf_.isValid());
+		self->addActor(waitFailureServer(self->interf_.waitFailure.getFuture()));
+		self->addActor(handleRequest(self));
+		self->addActor(handleUnsupportedRequest(self));
 		loop {
 			try {
 				choose {
@@ -560,23 +565,14 @@ private:
 					}
 					when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
 						// dprint("Handle WaitMetricsRequest\n");
-						self->actors_.add(processWaitMetricsRequest(self, req));
+						self->addActor(self->waitMetricsTenantAware(req));
 					}
 					when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
 						// dprint("Handle SplitMetrics {} limit {} bytes\n", req.keys.toString(), req.limits.bytes);
 						processSplitMetricsRequest(self, req);
 					}
 					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						StorageMetrics metrics;
-						metrics.bytes = sizeInBytes(self);
-						GetStorageMetricsReply resp;
-						resp.load = metrics;
-						resp.available = StorageMetrics();
-						resp.capacity = StorageMetrics();
-						resp.bytesInputRate = 0;
-						resp.versionLag = 0;
-						resp.lastUpdate = now();
-						req.reply.send(resp);
+						self->getStorageMetrics(req);
 					}
 					when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
 						dprint("Handle KeyValueStoreType\n");
@@ -598,10 +594,10 @@ private:
 				choose {
 					when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 						dprint("Unsupported SplitRangeRequest\n");
-						req.reply.sendError(broken_promise());
+						self->getSplitPoints(req);
 					}
 					when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
-						self->actors_.add(processStorageQueuingMetricsRequest(req));
+						self->addActor(processStorageQueuingMetricsRequest(req));
 					}
 					when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
 						dprint("Unsupported ReadHotSubRange\n");
@@ -723,6 +719,36 @@ private:
 		return max;
 	}
 
+private: // Methods for IStorageMetricsService
+	void setReferencedSelf(Reference<BlobMigrator> self) {
+		this->referencedSelf_ = self;
+	}
+
+	void addActor(Future<Void> future) override {
+		actors_.add(future);
+	}
+
+	void getSplitPoints(SplitRangeRequest const& req) override {
+		req.reply.sendError(broken_promise());
+	}
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest &req) override {
+		return processWaitMetricsRequest(this->referencedSelf_, req);
+	}
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
+		StorageMetrics metrics;
+						metrics.bytes = sizeInBytes(this->referencedSelf_);
+						GetStorageMetricsReply resp;
+						resp.load = metrics;
+						resp.available = StorageMetrics();
+						resp.capacity = StorageMetrics();
+						resp.bytesInputRate = 0;
+						resp.versionLag = 0;
+						resp.lastUpdate = now();
+						req.reply.send(resp);
+	}
+
 private:
 	Database db_;
 	BlobGranuleRestoreVersionVector blobGranules_;
@@ -735,6 +761,7 @@ private:
 	Standalone<VectorRef<KeyRangeRef>> mlogRestoreRanges_;
 	Standalone<VectorRef<Version>> mlogRestoreBeginVersions_;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo_;
+	Reference<BlobMigrator> referencedSelf_ = Reference<BlobMigrator>();
 };
 
 // Main entry point

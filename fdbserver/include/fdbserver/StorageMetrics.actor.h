@@ -209,16 +209,22 @@ public:
 	StorageServerMetrics metrics;
 
 	// penalty used by loadBalance() to balance requests among service instances
+	// just here for the use of serveStorageMetricsRequests
 	virtual double getPenalty() const { return 1; }
 
+	// tell whether the keys are readable now, just here for the use of serveStorageMetricsRequests
 	virtual bool isReadable(KeyRangeRef const& keys) const { return true; }
 
+	// to prolong life cycle of the actor, just here for the use of serveStorageMetricsRequests
 	virtual void addActor(Future<Void> future) = 0;
 
+	// further split key range into sub key ranges
 	virtual void getSplitPoints(SplitRangeRequest const& req) = 0;
 
+	// get bytes count for load in the requested key range
 	virtual Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) = 0;
 
+	// get bytes count for load in the request
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
 
 	// NOTE: also need to have this function but template can't be a virtual so...
