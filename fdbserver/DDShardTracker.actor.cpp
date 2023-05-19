@@ -140,10 +140,13 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 		auto bytes = shardMetrics->get().get().metrics.bytes;
 		auto readBandwidthStatus = getReadBandwidthStatus(shardMetrics->get().get().metrics);
 
+		// 1. bytes bound
 		bounds.max.bytes = std::max(int64_t(bytes * 1.1), (int64_t)SERVER_KNOBS->MIN_SHARD_BYTES);
 		bounds.min.bytes = std::min(int64_t(bytes * 0.9),
 		                            std::max(int64_t(bytes - (SERVER_KNOBS->MIN_SHARD_BYTES * 0.1)), (int64_t)0));
 		bounds.permittedError.bytes = bytes * 0.1;
+
+		// 2. bytes written bound
 		if (bandwidthStatus == BandwidthStatusNormal) { // Not high or low
 			bounds.max.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MAX_BYTES_PER_KSEC;
 			bounds.min.bytesWrittenPerKSecond = SERVER_KNOBS->SHARD_MIN_BYTES_PER_KSEC;
@@ -160,7 +163,8 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 		} else {
 			ASSERT(false);
 		}
-		// handle read bandwidth status
+
+		// 3. rand bandwidth bound
 		if (readBandwidthStatus == ReadBandwidthStatusNormal) {
 			bounds.max.bytesReadPerKSecond =
 			    std::max((int64_t)(SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
@@ -180,6 +184,17 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 		} else {
 			ASSERT(false);
 		}
+
+		// 4. read ops bound
+		if (shardMetrics->get()->metrics.opsReadPerKSecond > SERVER_KNOBS->SHARD_MAX_READ_OPS_PER_KSEC) {
+			readHotShard = true;
+		}
+		// update when the read ops changed drastically
+		int64_t currentReadOps = shardMetrics->get()->metrics.opsReadPerKSecond;
+		bounds.max.opsReadPerKSecond = currentReadOps + SERVER_KNOBS->SHARD_READ_OPS_CHANGE_THRESHOLD;
+		bounds.min.opsReadPerKSecond =
+		    std::max((int64_t)0, currentReadOps - SERVER_KNOBS->SHARD_READ_OPS_CHANGE_THRESHOLD);
+		bounds.permittedError.opsReadPerKSecond = currentReadOps * 0.25;
 	}
 	return { bounds, readHotShard };
 }
@@ -234,9 +249,11 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 
 					/*TraceEvent("ShardSizeUpdate")
 					    .detail("Keys", keys)
-					    .detail("UpdatedSize", metrics.metrics.bytes)
-					    .detail("WriteBandwidth", metrics.metrics.bytesWrittenPerKSecond)
-					    .detail("BandwidthStatus", getBandwidthStatus(metrics))
+					    .detail("UpdatedSize", metrics.first.get().bytes)
+					    .detail("WriteBandwidth", metrics.first.get().bytesWrittenPerKSecond)
+					    .detail("BandwidthStatus", bandwidthStatus)
+					    .detail("ReadBandWidth", metrics.first.get().bytesReadPerKSecond)
+					    .detail("ReadOps", metrics.first.get().opsReadPerKSecond)
 					    .detail("BytesLower", bounds.min.bytes)
 					    .detail("BytesUpper", bounds.max.bytes)
 					    .detail("WriteBandwidthLower", bounds.min.bytesWrittenPerKSecond)
