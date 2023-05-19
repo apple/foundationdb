@@ -201,7 +201,8 @@ public:
 	                        UnlockDB = UnlockDB::True,
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
 
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
@@ -218,7 +219,8 @@ public:
 	                        OnlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
 
 	Future<Version> restore(Database cx,
 	                        Optional<Database> cxOrig,
@@ -236,7 +238,8 @@ public:
 	                        OnlyApplyMutationLogs onlyApplyMutationLogs = OnlyApplyMutationLogs::False,
 	                        InconsistentSnapshotOnly inconsistentSnapshotOnly = InconsistentSnapshotOnly::False,
 	                        Version beginVersion = ::invalidVersion,
-	                        Optional<std::string> const& encryptionKeyFileName = {});
+	                        Optional<std::string> const& encryptionKeyFileName = {},
+	                        Optional<std::string> blobManifestUrl = {});
 
 	Future<Version> atomicRestore(Database cx,
 	                              Key tagName,

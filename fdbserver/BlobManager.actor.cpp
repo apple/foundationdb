@@ -385,7 +385,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	BlobManagerStats stats;
 
 	Reference<BlobConnectionProvider> bstore;
-	Reference<BlobConnectionProvider> manifestStore;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
@@ -452,9 +451,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 			if (BM_DEBUG) {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
-		}
-		if (SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL != "") {
-			manifestStore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 		}
 	}
 
@@ -3663,16 +3659,18 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
-		ASSERT(restoreState.present());
-		state BlobRestorePhase phase = restoreState.get().phase;
+		state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
 		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
-			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
+			wait(BlobRestoreController::setPhase(restoreController, LOADING_MANIFEST, {}));
 			try {
-				wait(loadManifest(bmData->db, bmData->dbInfo, bmData->manifestStore));
-				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, bmData->manifestStore));
+				auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+				std::string url = wait(BlobGranuleRestoreConfig().manifestUrl().getD(db));
+				state Reference<BlobConnectionProvider> manifestStore =
+				    BlobConnectionProvider::newBlobConnectionProvider(url);
+				wait(loadManifest(bmData->db, bmData->dbInfo, manifestStore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
-				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
+				wait(BlobRestoreController::setPhase(restoreController, LOADED_MANIFEST, {}));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
@@ -3682,7 +3680,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
 				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
-				wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
+				wait(BlobRestoreController::setError(restoreController, errorMessage));
 			}
 		}
 	}
@@ -5625,6 +5623,19 @@ ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
 	return false;
 }
 
+ACTOR Future<std::string> getMutationLogBackupContainer(Database db) {
+	std::string url = wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(db.getReference())));
+	if (url.starts_with("file://")) {
+		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(url, {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		return containers.back();
+	} else {
+		return url;
+	}
+}
+
 ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	loop {
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
@@ -5641,7 +5652,7 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 				return Void();
 			}
 
-			state std::string mlogsUrl = wait(getMutationLogUrl());
+			state std::string mlogsUrl = wait(getMutationLogBackupContainer(bmData->db));
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 			state BackupDescription desc = wait(bc->describeBackup());
 			if (!desc.contiguousLogEnd.present()) {
@@ -5686,12 +5697,6 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	}
 }
 
-ACTOR Future<Reference<BlobConnectionProvider>> initManifestStore(Reference<BlobManagerData> bmData) {
-	auto db = SystemDBWriteLockedNow(bmData->db.getReference());
-	std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
-	return BlobConnectionProvider::newBlobConnectionProvider(url);
-}
-
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
@@ -5703,18 +5708,20 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 			// Skip backup if no active blob ranges
 			bool shouldBackup = wait(shouldBackupManifest(bmData));
 			if (shouldBackup) {
-				if (bmData->manifestStore.isValid()) {
-					int64_t bytes = wait(dumpManifest(bmData->db,
-					                                  bmData->dbInfo,
-					                                  bmData->manifestStore,
-					                                  bmData->epoch,
-					                                  bmData->manifestDumperSeqNo,
-					                                  bmData->enableManifestEncryption));
-					bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
-					bmData->stats.manifestSizeInBytes += bytes;
-					bmData->stats.lastManifestDumpTs = now();
-					bmData->manifestDumperSeqNo++;
-				}
+				auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+				std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
+				Reference<BlobConnectionProvider> manifestStore =
+				    BlobConnectionProvider::newBlobConnectionProvider(url);
+				int64_t bytes = wait(dumpManifest(bmData->db,
+				                                  bmData->dbInfo,
+				                                  manifestStore,
+				                                  bmData->epoch,
+				                                  bmData->manifestDumperSeqNo,
+				                                  bmData->enableManifestEncryption));
+				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
+				bmData->stats.manifestSizeInBytes += bytes;
+				bmData->stats.lastManifestDumpTs = now();
+				bmData->manifestDumperSeqNo++;
 			}
 		} catch (Error& e) {
 			TraceEvent("BackupManifestError").error(e);
