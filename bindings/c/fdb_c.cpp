@@ -344,6 +344,13 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 	                 *out_count = na.size(););
 }
 
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
+                                                              float* server_busyness,
+                                                              float* range_busyness) {
+	CATCH_AND_RETURN(*server_busyness = 0.0f;
+	                 *range_busyness = 0.0f;);
+}
+
 namespace {
 
 void parseGetTenant(Optional<KeyRef>& dest, FDBBGTenantPrefix const* source) {

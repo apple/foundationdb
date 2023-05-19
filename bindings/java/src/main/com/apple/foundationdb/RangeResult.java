@@ -33,7 +33,7 @@ class RangeResult {
 		this.more = more;
 	}
 
-	RangeResult(byte[] keyValues, int[] lengths, boolean more) {
+	RangeResult(byte[] keyValues, int[] lengths, boolean more, float serverBusyness, float rangeBusyness) {
 		if(lengths.length % 2 != 0) {
 			throw new IllegalArgumentException("There needs to be an even number of lenghts!");
 		}
@@ -53,7 +53,7 @@ class RangeResult {
 			System.arraycopy(keyValues, offset + keyLength, v, 0, valueLength);
 
 			offset += keyLength + valueLength;
-			values.add(new FDBKeyValue(k, v, 0.0f, 0.0f));
+			values.add(new FDBKeyValue(k, v, serverBusyness, rangeBusyness));
 		}
 		this.more = more;
 	}

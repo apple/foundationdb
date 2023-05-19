@@ -347,6 +347,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBF
                                                                             FDBBGFileDescription** out,
                                                                             int* desc_count);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
+                                                                      float* server_busyness,
+                                                                      float* range_busyness);
+
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
                                                                        int file_len,
                                                                        FDBBGTenantPrefix const* tenant_prefix,

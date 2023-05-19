@@ -35,16 +35,16 @@ class FutureKeyResult extends NativeFuture<ResultBytes> {
 
 	@Override
 	protected ResultBytes getIfDone_internal(long cPtr) throws FDBException {
-		return new FDBResultBytes(FutureKeyResult_get(cPtr), 0.0f, 0.0f);
+		return FutureKeyResult_get(cPtr);
 	}
 
 	@Override
 	protected void postMarshal(ResultBytes value){
-		if(value!=null && eventKeeper!=null){
+		if(value != null && eventKeeper != null){
 			eventKeeper.count(Events.BYTES_FETCHED, value.getBytes().length);
 		}
 		super.postMarshal(value);
 	}
 
-	private native byte[] FutureKeyResult_get(long cPtr) throws FDBException;
+	private native ResultBytes FutureKeyResult_get(long cPtr) throws FDBException;
 }
