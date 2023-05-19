@@ -2044,6 +2044,8 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
+			initTraceEventMetrics();
+
 			openTraceFile(
 			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
@@ -2089,7 +2091,6 @@ int main(int argc, char* argv[]) {
 			                              opts.fileSystemPath);
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
 		}
 
 		double start = timer(), startNow = now();
