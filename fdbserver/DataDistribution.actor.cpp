@@ -2103,13 +2103,15 @@ void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAud
 	TraceEvent(SevInfo, "DDLoadAndDispatchAudit", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("AuditType", audit->coreState.getType());
-	if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
-		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
+
+	if (audit->coreState.getType() == AuditType::ValidateHA) {
+		audit->actors.add(dispatchAuditStorage(self, audit, range));
+	} else if (audit->coreState.getType() == AuditType::ValidateReplica) {
+		audit->actors.add(dispatchAuditStorage(self, audit, range));
 	} else if (audit->coreState.getType() == AuditType::ValidateLocationMetadata) {
 		audit->actors.add(dispatchAuditStorage(self, audit, allKeys));
-	} else if (audit->coreState.getType() == AuditType::ValidateHA ||
-	           audit->coreState.getType() == AuditType::ValidateReplica) {
-		audit->actors.add(dispatchAuditStorage(self, audit, range));
+	} else if (audit->coreState.getType() == AuditType::ValidateStorageServerShard) {
+		audit->actors.add(dispatchAuditStorageServerShard(self, audit));
 	} else {
 		UNREACHABLE();
 	}
@@ -2222,7 +2224,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					}
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
 					// Since remaining part is always successcive
-					// We always issue one audit task (for the remaining part) when schedule
+					// We always issue exactly one audit task (for the remaining part) when schedule
 					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
 					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));

@@ -484,6 +484,15 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!ddAuditState_.present()) {
+				throw audit_storage_failed();
+			}
+			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
+			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
+			if (ddAuditState.getPhase() != AuditPhase::Running) {
+				throw audit_storage_failed();
+			}
 			wait(krmSetRange(&tr,
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
@@ -549,6 +558,15 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!ddAuditState_.present()) {
+				throw audit_storage_failed();
+			}
+			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
+			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
+			if (ddAuditState.getPhase() != AuditPhase::Running) {
+				throw audit_storage_failed();
+			}
 			wait(krmSetRange(
 			    &tr,
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
