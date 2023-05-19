@@ -78,7 +78,7 @@ extern "C" DLLEXPORT void* fdb_copy_to_request(FDBRequestHeader* request_header,
 }
 
 extern "C" DLLEXPORT FDBReadBGDescriptionRequest* fdb_create_read_bg_description_request(FDBTransaction* tr) {
-	return create_request_impl<FDBReadBGDescriptionRequest>(tr, FDB_API_READ_BG_DESCRIPTION_REQUEST);
+	return create_request_impl<FDBReadBGDescriptionRequest>(tr, FDBApiRequest_ReadBGDescriptionRequest);
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_execute_read_bg_description_request(FDBTransaction* tr,

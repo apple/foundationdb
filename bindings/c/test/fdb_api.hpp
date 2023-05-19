@@ -96,7 +96,7 @@ struct GranuleFilePointer {
 		length = nativePointer.file_length;
 		fullFileLength = nativePointer.full_file_length;
 		fileVersion = nativePointer.file_version;
-		encryptionCtx = nativePointer.encryption_ctx;
+		encryptionCtx = *nativePointer.encryption_ctx;
 	}
 };
 
@@ -127,18 +127,18 @@ struct GranuleDescription {
 		keyRange.beginKey = fdb::Key(nativeDesc.key_range.begin_key, nativeDesc.key_range.begin_key_length);
 		keyRange.endKey = fdb::Key(nativeDesc.key_range.end_key, nativeDesc.key_range.end_key_length);
 		if (nativeDesc.snapshot_present) {
-			snapshotFile = GranuleFilePointer(nativeDesc.snapshot_file_pointer);
+			snapshotFile = GranuleFilePointer(*nativeDesc.snapshot_file_pointer);
 		}
 		if (nativeDesc.delta_file_count > 0) {
 			deltaFiles.reserve(nativeDesc.delta_file_count);
 			for (int i = 0; i < nativeDesc.delta_file_count; i++) {
-				deltaFiles.emplace_back(nativeDesc.delta_files[i]);
+				deltaFiles.emplace_back(*nativeDesc.delta_files[i]);
 			}
 		}
 		if (nativeDesc.memory_mutation_count > 0) {
 			memoryMutations.reserve(nativeDesc.memory_mutation_count);
 			for (int i = 0; i < nativeDesc.memory_mutation_count; i++) {
-				memoryMutations.emplace_back(nativeDesc.memory_mutations[i]);
+				memoryMutations.emplace_back(*nativeDesc.memory_mutations[i]);
 			}
 		}
 		tenantPrefix = nativeDesc.tenant_prefix;

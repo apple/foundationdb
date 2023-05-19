@@ -106,9 +106,9 @@ typedef struct FDBBGEncryptionKey_ {
 
 typedef struct FDBBGEncryptionCtx_ {
 	fdb_bool_t present;
-	FDBBGEncryptionKey textKey;
+	FDBBGEncryptionKey* textKey;
 	uint32_t textKCV;
-	FDBBGEncryptionKey headerKey;
+	FDBBGEncryptionKey* headerKey;
 	uint32_t headerKCV;
 	FDBKey iv;
 } FDBBGEncryptionCtx;
@@ -120,8 +120,10 @@ typedef struct FDBBGFilePointer_ {
 	int64_t file_length;
 	int64_t full_file_length;
 	int64_t file_version;
-	FDBBGEncryptionCtx encryption_ctx;
+	FDBBGEncryptionCtx* encryption_ctx;
 } FDBBGFilePointer;
+
+typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
 
 typedef struct FDBBGMutation_ {
 	/* FDBBGMutationType */ uint8_t type;
@@ -135,17 +137,15 @@ typedef struct FDBBGMutation_ {
 typedef struct FDBBGFileDescription_ {
 	FDBKeyRange key_range;
 	fdb_bool_t snapshot_present;
-	FDBBGFilePointer snapshot_file_pointer;
+	FDBBGFilePointer* snapshot_file_pointer;
 	int delta_file_count;
-	FDBBGFilePointer* delta_files;
+	FDBBGFilePointer** delta_files;
 	int memory_mutation_count;
-	FDBBGMutation* memory_mutations;
+	FDBBGMutation** memory_mutations;
 	FDBBGTenantPrefix tenant_prefix;
 } FDBBGFileDescription;
 
 #pragma pack(pop)
-
-typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
 
 #ifdef __cplusplus
 }

@@ -24,8 +24,10 @@
 extern "C" {
 #endif
 
-#define FDB_API_INVALID_REQUEST (0)
-#define FDB_API_READ_BG_DESCRIPTION_REQUEST (1)
+enum FDBApiRequestType {
+	FDBApiRequest_Invalid = 0, //
+	FDBApiRequest_ReadBGDescriptionRequest = 1 //
+};
 
 typedef struct FDBRequestHeader_ FDBRequestHeader;
 typedef struct FDBResponseHeader_ FDBResponseHeader;

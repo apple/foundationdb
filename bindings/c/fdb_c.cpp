@@ -385,8 +385,8 @@ void parseGetEncryptionKey(BlobGranuleCipherKey& dest, FDBBGEncryptionKey const*
 void parseGetEncryptionKeyCtx(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEncryptionCtx const* source) {
 	if (source->present) {
 		dest = BlobGranuleCipherKeysCtx();
-		parseGetEncryptionKey(dest.get().textCipherKey, &source->textKey);
-		parseGetEncryptionKey(dest.get().headerCipherKey, &source->headerKey);
+		parseGetEncryptionKey(dest.get().textCipherKey, source->textKey);
+		parseGetEncryptionKey(dest.get().headerCipherKey, source->headerKey);
 		dest.get().ivRef = StringRef(source->iv.key, source->iv.key_length);
 	}
 }

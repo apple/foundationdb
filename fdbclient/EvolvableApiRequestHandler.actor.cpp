@@ -20,17 +20,19 @@ void setEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCipherKey& sour
 	dest->base_key.key_length = source.baseCipher.size();
 }
 
-void setEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source) {
+void setEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source, Arena& ar) {
 	dest->present = true;
-	setEncryptionKey(&dest->textKey, source.textCipherKey);
+	dest->textKey = new (ar) FDBBGEncryptionKey();
+	setEncryptionKey(dest->textKey, source.textCipherKey);
 	dest->textKCV = source.textCipherKey.baseCipherKCV;
-	setEncryptionKey(&dest->headerKey, source.headerCipherKey);
+	dest->headerKey = new (ar) FDBBGEncryptionKey();
+	setEncryptionKey(dest->headerKey, source.headerCipherKey);
 	dest->headerKCV = source.headerCipherKey.baseCipherKCV;
 	dest->iv.key = source.ivRef.begin();
 	dest->iv.key_length = source.ivRef.size();
 }
 
-void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source) {
+void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source, Arena& ar) {
 	dest->filename_ptr = source.filename.begin();
 	dest->filename_length = source.filename.size();
 	dest->file_offset = source.offset;
@@ -39,10 +41,11 @@ void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source
 	dest->file_version = source.fileVersion;
 
 	// handle encryption
+	dest->encryption_ctx = new (ar) FDBBGEncryptionCtx();
 	if (source.cipherKeysCtx.present()) {
-		setEncryptionKeyCtx(&dest->encryption_ctx, source.cipherKeysCtx.get());
+		setEncryptionKeyCtx(dest->encryption_ctx, source.cipherKeysCtx.get(), ar);
 	} else {
-		dest->encryption_ctx.present = false;
+		dest->encryption_ctx->present = false;
 	}
 }
 
@@ -67,7 +70,7 @@ void setBGMutation(FDBBGMutation* dest,
 	}
 }
 
-void setBGMutations(FDBBGMutation** mutationsOut,
+void setBGMutations(FDBBGMutation*** mutationsOut,
                     int* mutationCountOut,
                     FDBBGTenantPrefix const* tenantPrefix,
                     Arena& ar,
@@ -78,17 +81,17 @@ void setBGMutations(FDBBGMutation** mutationsOut,
 		mutationCount += it.mutations.size();
 	}
 	*mutationCountOut = mutationCount;
-
 	if (mutationCount > 0) {
-		*mutationsOut = new (ar) FDBBGMutation[mutationCount];
-		mutationCount = 0;
+		*mutationsOut = new (ar) FDBBGMutation*[mutationCount];
+		int mutationIdx = 0;
 		for (auto& it : deltas) {
 			for (auto& m : it.mutations) {
-				setBGMutation(&((*mutationsOut)[mutationCount]), it.version, tenantPrefix, m);
-				mutationCount++;
+				(*mutationsOut)[mutationIdx] = new (ar) FDBBGMutation();
+				setBGMutation((*mutationsOut)[mutationIdx], it.version, tenantPrefix, m);
+				mutationIdx++;
 			}
 		}
-		ASSERT(mutationCount == *mutationCountOut);
+		ASSERT(mutationIdx == *mutationCountOut);
 	}
 }
 
@@ -149,15 +152,17 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 		// snapshot file
 		desc.snapshot_present = chunk.snapshotFile.present();
 		if (desc.snapshot_present) {
-			setBlobFilePointer(&desc.snapshot_file_pointer, chunk.snapshotFile.get());
+			desc.snapshot_file_pointer = new (res.arena()) FDBBGFilePointer();
+			setBlobFilePointer(desc.snapshot_file_pointer, chunk.snapshotFile.get(), res.arena());
 		}
 
 		// delta files
 		desc.delta_file_count = chunk.deltaFiles.size();
 		if (chunk.deltaFiles.size()) {
-			desc.delta_files = new (res.arena()) FDBBGFilePointer[chunk.deltaFiles.size()];
+			desc.delta_files = new (res.arena()) FDBBGFilePointer*[chunk.deltaFiles.size()];
 			for (int d = 0; d < chunk.deltaFiles.size(); d++) {
-				setBlobFilePointer(&desc.delta_files[d], chunk.deltaFiles[d]);
+				desc.delta_files[d] = new (res.arena()) FDBBGFilePointer();
+				setBlobFilePointer(desc.delta_files[d], chunk.deltaFiles[d], res.arena());
 			}
 		}
 
@@ -171,7 +176,7 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 
 Future<ApiResponse> handleEvolvableApiRequest(ISingleThreadTransaction* tr, ApiRequest req) {
 	switch (req.getType()) {
-	case FDB_API_READ_BG_DESCRIPTION_REQUEST:
+	case FDBApiRequest_ReadBGDescriptionRequest:
 		return handleReadBgDescriptionRequest(tr, req);
 		break;
 	default:
