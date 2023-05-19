@@ -6646,6 +6646,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 
 		if (chunks.size() == 0) {
 			RangeResult rows;
+			rows.readThrough = KeyRef(rows.arena(), keys.end);
 			results.send(rows);
 		}
 
