@@ -2153,7 +2153,11 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		audit->auditStorageAnyChildFailed = true;
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		} else {
+			audit->auditStorageAnyChildFailed = true;
+		}
 	}
 
 	return Void();
@@ -2217,9 +2221,12 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 						self->remainingBudgetForAuditTasks[auditType].set(
 						    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
 					}
-					issueDoAuditCount++;
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
+					// Since remaining part is always successcive
+					// We always issue one audit task (for the remaining part) when schedule
+					ASSERT(issueDoAuditCount == 0);
 					doAuditTasks.add(doAuditOnStorageServer(self, audit, ssi, req));
+					issueDoAuditCount++;
 				}
 			}
 			wait(delay(0.1));
@@ -2240,25 +2247,6 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
-		} else if (e.code() == error_code_broken_promise) {
-			try {
-				bool ssRemoved = wait(checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID));
-				if (ssRemoved) {
-					// It is possible that the input ss has been removed, then silently exit
-					return Void();
-				}
-			} catch (Error& e) {
-				// pass
-			}
-			if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-				audit->retryCount++;
-				audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
-			} else {
-				audit->auditStorageAnyChildFailed = true;
-			}
-		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-			audit->retryCount++;
-			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
 		} else {
 			audit->auditStorageAnyChildFailed = true;
 		}
@@ -2333,7 +2321,11 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		audit->auditStorageAnyChildFailed = true;
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		} else {
+			audit->auditStorageAnyChildFailed = true;
+		}
 	}
 
 	return Void();
@@ -2483,9 +2475,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
-		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-			audit->retryCount++;
-			audit->actors.add(scheduleAuditOnRange(self, audit, range));
 		} else {
 			audit->auditStorageAnyChildFailed = true;
 		}
@@ -2544,14 +2533,32 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
 		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
-		} else if (e.code() != error_code_audit_storage_failed) {
-			throw broken_promise();
-		} else {
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 			throw audit_storage_failed();
+		} else {
+			if (req.getType() == AuditType::ValidateStorageServerShard) {
+				if (e.code() != error_code_audit_storage_failed) {
+					try {
+						bool ssRemoved = wait(checkStorageServerRemoved(self->txnProcessor->context(), ssi.uniqueID));
+						if (ssRemoved) {
+							// It is possible that the input ss has been removed, then silently exit
+							return Void();
+						}
+					} catch (Error& e) {
+						// retry
+					}
+				}
+				audit->retryCount++;
+				audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, ssi));
+			} else {
+				audit->retryCount++;
+				audit->actors.add(scheduleAuditOnRange(self, audit, req.range));
+			}
 		}
 	}
 	return Void();
