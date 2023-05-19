@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
 #include "flow/Util.h"
@@ -29,6 +30,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -3016,6 +3018,13 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			wait(checkPersistentMoveKeysLock(&tr, lock));
+			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
+			if (currentOwnerId != bmId) {
+				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
+				dprint("Blob migrator {} is replaced by {}\n", bmId.toString(), currentOwnerId.toString());
+				TraceEvent("BlobMigratorReplaced", traceId).detail("Current", currentOwnerId).detail("BM", bmId);
+				throw blob_migrator_replaced();
+			}
 			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
 			wait(assignKeysToServer(traceId, &tr, keys, bmId));
 			wait(tr.commit());
