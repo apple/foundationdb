@@ -738,15 +738,15 @@ private: // Methods for IStorageMetricsService
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
 		StorageMetrics metrics;
-						metrics.bytes = sizeInBytes(this->referencedSelf_);
-						GetStorageMetricsReply resp;
-						resp.load = metrics;
-						resp.available = StorageMetrics();
-						resp.capacity = StorageMetrics();
-						resp.bytesInputRate = 0;
-						resp.versionLag = 0;
-						resp.lastUpdate = now();
-						req.reply.send(resp);
+		metrics.bytes = sizeInBytes(this->referencedSelf_);
+		GetStorageMetricsReply resp;
+		resp.load = metrics;
+		resp.available = StorageMetrics();
+		resp.capacity = StorageMetrics();
+		resp.bytesInputRate = 0;
+		resp.versionLag = 0;
+		resp.lastUpdate = now();
+		req.reply.send(resp);
 	}
 
 private:
