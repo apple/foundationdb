@@ -109,8 +109,8 @@ struct TenantManagementWorkload : TestWorkload {
 	Reference<IDatabase> managementDb;
 	Database managementDbInternal;
 	Database dataDb;
-	bool hasNoTenantKey = false; // whether this workload has non-tenant key
 	int64_t tenantIdPrefix = 0;
+	TenantMode tenantMode;
 	bool supportsTenantOperations = true;
 
 	// This test exercises multiple different ways to work with tenants
@@ -239,8 +239,7 @@ struct TenantManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> firstClientSetup(Database cx, TenantManagementWorkload* self) {
 		wait(sendTestParameters(cx, self));
 
-		if (self->dataDb->getTenantMode() != TenantMode::REQUIRED) {
-			self->hasNoTenantKey = true;
+		if (self->tenantMode != TenantMode::REQUIRED) {
 			wait(self->writeNonTenantKey());
 		}
 		return Void();
@@ -251,7 +250,21 @@ struct TenantManagementWorkload : TestWorkload {
 			wait(loadTestParameters(cx, self));
 		}
 
-		self->supportsTenantOperations = self->useMetacluster || cx->getTenantMode() != TenantMode::DISABLED;
+		if (self->useMetacluster) {
+			self->tenantMode = TenantMode::REQUIRED;
+		} else {
+			loop {
+				Optional<TenantMode> tenantMode = cx->getTenantMode();
+				if (tenantMode.present()) {
+					self->tenantMode = tenantMode.get();
+					break;
+				}
+
+				wait(cx->clientInfo->onChange());
+			}
+		}
+
+		self->supportsTenantOperations = self->tenantMode != TenantMode::DISABLED;
 
 		metacluster::util::SkipMetaclusterCreation skipMetaclusterCreation(!self->useMetacluster ||
 		                                                                   self->clientId != 0);
@@ -1924,7 +1937,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db, tenant);
 		state Optional<TenantName> tName = tenant.flatMapRef(&Tenant::name);
-		state bool tenantPresent = false;
+		state bool tenantExists = false;
 		state TenantTestData tData = TenantTestData();
 
 		int mode = deterministicRandom()->randomInt(0, 3);
@@ -1937,14 +1950,14 @@ struct TenantManagementWorkload : TestWorkload {
 		if (tName.present()) {
 			auto itr = self->createdTenants.find(tName.get());
 			if (itr != self->createdTenants.end() && itr->second.tenant->id() == tenant.get()->id()) {
-				tenantPresent = true;
+				tenantExists = true;
 				tData = itr->second;
 				lockState = itr->second.lockState;
 			}
 		}
 
 		state bool keyPresent =
-		    (!tenant.present() && db->getTenantMode() != TenantMode::REQUIRED) || (tenantPresent && !tData.empty);
+		    (!tenant.present() && self->tenantMode != TenantMode::REQUIRED) || (tenantExists && !tData.empty);
 		state bool maybeCommitted = false;
 		state StringRef expectedValue = tName.orDefault(self->noTenantValue);
 
@@ -1963,11 +1976,11 @@ struct TenantManagementWorkload : TestWorkload {
 						       (tenant.present() && maybeCommitted && writeKey && !clearKey));
 					} else {
 						CODE_PROBE(true, "Read tenant key is empty");
-						// If the value isn't present, then either we read a tenant that is empty, we did a raw read in
-						// required mode, or this transaction is retrying and previously cleared the key with an unknown
-						// result
-						ASSERT((tenantPresent && tData.empty) ||
-						       (!tenant.present() && db->getTenantMode() == TenantMode::REQUIRED) ||
+						// If the value isn't present, then either we read a tenant that is empty, we did a raw read
+						// in required tenant mode, or this transaction is retrying and previously cleared the key with
+						// an unknown result
+						ASSERT((tenantExists && tData.empty) ||
+						       (!tenant.present() && self->tenantMode == TenantMode::REQUIRED) ||
 						       (maybeCommitted && writeKey && clearKey));
 					}
 
@@ -1990,14 +2003,14 @@ struct TenantManagementWorkload : TestWorkload {
 					}
 				}
 
-				ASSERT(tenant.present() || db->getTenantMode() != TenantMode::REQUIRED);
-				ASSERT(!tenant.present() || db->getTenantMode() != TenantMode::DISABLED);
+				ASSERT(tenant.present() || self->tenantMode != TenantMode::REQUIRED);
+				ASSERT(!tenant.present() || self->tenantMode != TenantMode::DISABLED);
 				ASSERT(!useManagementCluster);
 				break;
 			} catch (Error& e) {
 				state Error err = e;
 				if (err.code() == error_code_tenant_not_found) {
-					ASSERT(!tenantPresent);
+					ASSERT(!tenantExists);
 					CODE_PROBE(true, "Attempted to read key from non-existent tenant");
 					return Void();
 				} else if (err.code() == error_code_tenant_locked) {
@@ -2011,11 +2024,11 @@ struct TenantManagementWorkload : TestWorkload {
 					return Void();
 				} else if (err.code() == error_code_tenant_name_required) {
 					ASSERT(!tenant.present());
-					ASSERT(db->getTenantMode() == TenantMode::REQUIRED);
+					ASSERT_EQ(self->tenantMode, TenantMode::REQUIRED);
 					return Void();
 				} else if (err.code() == error_code_tenants_disabled) {
 					ASSERT(tenant.present());
-					ASSERT_EQ(db->getTenantMode(), TenantMode::DISABLED);
+					ASSERT_EQ(self->tenantMode, TenantMode::DISABLED);
 					return Void();
 				} else if (err.code() == error_code_management_cluster_invalid_access) {
 					ASSERT(useManagementCluster);
@@ -2338,8 +2351,9 @@ struct TenantManagementWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> checkNonTenantKey(const TenantManagementWorkload* self) {
-		if (!self->hasNoTenantKey)
+		if (self->tenantMode == TenantMode::REQUIRED) {
 			return Void();
+		}
 
 		state Transaction tr(self->dataDb);
 

@@ -723,10 +723,16 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
-	TenantMode getTenantMode() const {
-		CODE_PROBE(clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional,
-		           "Accessing tenant mode in provisional ClientDBInfo",
-		           probe::decoration::rare);
+	// Gets the tenant mode stored in the DatabaseContext's ClientDBInfo
+	// If the ClientDBInfo is provisional, it is possible we don't actually know the tenant mode, in which case we
+	// return an empty optional
+	Optional<TenantMode> getTenantMode() const {
+		if (clientInfo->get().tenantMode == TenantMode::DISABLED &&
+		    (clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional)) {
+			CODE_PROBE(true, "Accessing tenant mode in provisional ClientDBInfo", probe::decoration::rare);
+			return {};
+		}
+
 		return clientInfo->get().tenantMode;
 	}
 
