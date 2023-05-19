@@ -244,8 +244,8 @@ public:
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
+					auto& firstFailureTime = self->firstLargeTeamFailure[customReplicas];
 					if (newTeam) {
-						auto& firstFailureTime = self->firstLargeTeamFailure[newTeam->size()];
 						if (newTeam->size() < customReplicas) {
 							if (!firstFailureTime.present()) {
 								firstFailureTime = now();
@@ -266,7 +266,6 @@ public:
 						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
-						auto& firstFailureTime = self->firstLargeTeamFailure[customReplicas];
 						if (!firstFailureTime.present()) {
 							firstFailureTime = now();
 						}
