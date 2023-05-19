@@ -11292,42 +11292,6 @@ Future<Standalone<VectorRef<KeyRangeRef>>> DatabaseContext::listBlobbifiedRanges
 	return listBlobbifiedRangesActor(Reference<DatabaseContext>::addRef(this), range, rangeLimit, tenant);
 }
 
-ACTOR Future<bool> blobRestoreActor(Reference<DatabaseContext> cx, KeyRange range, Optional<Version> version) {
-	state Database db(cx);
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state Key key = blobRestoreCommandKeyFor(range);
-			Optional<Value> value = wait(tr->get(key));
-			if (value.present()) {
-				Standalone<BlobRestoreState> restoreState = decodeBlobRestoreState(value.get());
-				if (restoreState.phase < BlobRestorePhase::DONE) {
-					return false; // stop if there is in-progress restore.
-				}
-			}
-			BlobRestoreState restoreState(BlobRestorePhase::INIT);
-			Value newValue = blobRestoreCommandValueFor(restoreState);
-			tr->set(key, newValue);
-
-			BlobRestoreArg arg(version);
-			Value argValue = blobRestoreArgValueFor(arg);
-			tr->set(blobRestoreArgKeyFor(range), argValue);
-
-			wait(tr->commit());
-			return true;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-}
-
-Future<bool> DatabaseContext::blobRestore(KeyRange range, Optional<Version> version) {
-	return blobRestoreActor(Reference<DatabaseContext>::addRef(this), range, version);
-}
-
 ACTOR static Future<Standalone<VectorRef<ReadHotRangeWithMetrics>>>
 getHotRangeMetricsActor(Reference<DatabaseContext> db, StorageServerInterface ssi, ReadHotSubRangeRequest req) {
 

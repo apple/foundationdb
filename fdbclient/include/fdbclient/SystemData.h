@@ -25,7 +25,6 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/Tenant.h"
@@ -753,17 +752,6 @@ UID decodeBlobWorkerAffinityKey(KeyRef const& key);
 const Value blobWorkerAffinityValue(UID const& id);
 UID decodeBlobWorkerAffinityValue(ValueRef const& value);
 
-// Blob restore command
-extern const KeyRangeRef blobRestoreCommandKeys;
-const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
-const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
-const Value blobRestoreCommandValueFor(BlobRestoreState restoreState);
-Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value);
-extern const KeyRangeRef blobRestoreArgKeys;
-const Value blobRestoreArgKeyFor(const KeyRangeRef range);
-const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
-const Value blobRestoreArgValueFor(BlobRestoreArg args);
-Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
 extern const Key blobManifestVersionKey;
 extern const Key blobGranulesLastFlushKey;
 
