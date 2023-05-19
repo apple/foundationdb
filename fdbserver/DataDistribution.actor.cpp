@@ -2179,7 +2179,6 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 	state Key begin = allKeys.begin;
 	state KeyRange currentRange = allKeys;
 	state std::vector<AuditStorageState> auditStates;
-	state ActorCollection doAuditTasks(true);
 	state int64_t issueDoAuditCount = 0;
 
 	try {
@@ -2225,14 +2224,13 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					// Since remaining part is always successcive
 					// We always issue one audit task (for the remaining part) when schedule
 					ASSERT(issueDoAuditCount == 0);
-					doAuditTasks.add(doAuditOnStorageServer(self, audit, ssi, req));
 					issueDoAuditCount++;
+					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
 				}
 			}
 			wait(delay(0.1));
 		}
 
-		wait(doAuditTasks.getResult());
 		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerEnd", self->ddId)
 		    .detail("ServerID", serverId)
 		    .detail("AuditID", audit->coreState.id)
@@ -2344,7 +2342,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 	    .detail("AuditType", auditType);
 	state Key begin = range.begin;
 	state KeyRange currentRange;
-	state ActorCollection doAuditTasks(true);
 	state int64_t issueDoAuditCount = 0;
 
 	try {
@@ -2448,7 +2445,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
 						}
 						issueDoAuditCount++;
-						doAuditTasks.add(doAuditOnStorageServer(self, audit, targetServer, req));
+						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
 				}
 
@@ -2458,7 +2455,6 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 			}
 		}
 
-		wait(doAuditTasks.getResult());
 		TraceEvent(SevDebug, "DDScheduleAuditOnRangeEnd", self->ddId)
 		    .detail("Reason", "End")
 		    .detail("AuditID", audit->coreState.id)
