@@ -421,6 +421,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_DISABLE_WAL_EXPERIMENTAL,                    false );
 	init( ROCKSDB_WAL_TTL_SECONDS,                                 0 );
 	init( ROCKSDB_WAL_SIZE_LIMIT_MB,                               0 );
+	init( ROCKSDB_LOG_LEVEL_DEBUG,                             false );
 	// If ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE is enabled, disable ROCKSDB_ENABLE_CLEAR_RANGE_EAGER_READS knob.
 	// These knobs have contrary functionality.
 	init( ROCKSDB_SINGLEKEY_DELETES_ON_CLEARRANGE,              true );
