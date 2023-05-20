@@ -380,6 +380,11 @@ rocksdb::Options getOptions() {
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
+	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
+		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
+	}
+	options.max_log_file_size = SERVER_KNOBS->ROCKSDB_MAX_LOG_FILE_SIZE;
+	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
 	return options;
 }
 
@@ -612,7 +617,7 @@ struct PhysicalShard {
 	std::shared_ptr<ReadIteratorPool> readIterPool;
 	bool deletePending = false;
 	std::atomic<bool> isInitialized;
-	uint64_t numRangeDeletions;
+	uint64_t numRangeDeletions = 0;
 	double deleteTimeSec;
 };
 
@@ -705,7 +710,7 @@ public:
 		try {
 			wait(openFuture);
 			loop {
-				wait(delay(SERVER_KNOBS->ROCKSDB_METRICS_DELAY));
+				wait(delay(SERVER_KNOBS->ROCKSDB_CF_METRICS_DELAY));
 				if (rState->closing) {
 					break;
 				}
@@ -717,6 +722,13 @@ public:
 					if (!shard->initialized()) {
 						continue;
 					}
+					uint64_t liveDataSize = 0;
+					ASSERT(shard->db->GetIntProperty(
+					    shard->cf, rocksdb::DB::Properties::kEstimateLiveDataSize, &liveDataSize));
+					TraceEvent(SevInfo, "PhysicalShardCFSize")
+					    .detail("ShardId", id)
+					    .detail("LiveDataSize", liveDataSize);
+
 					std::string propValue = "";
 					ASSERT(shard->db->GetProperty(shard->cf, rocksdb::DB::Properties::kCFStats, &propValue));
 					TraceEvent(SevInfo, "PhysicalShardCFStats").detail("ShardId", id).detail("Detail", propValue);
@@ -1233,7 +1245,7 @@ public:
 		}
 		rocksdb::FlushOptions fOptions;
 		fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-		fOptions.allow_write_stall = true;
+		fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 		db->Flush(fOptions, it->second->cf);
 	}
@@ -2113,7 +2125,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0) {
 				rocksdb::FlushOptions fOptions;
 				fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-				fOptions.allow_write_stall = true;
+				fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 				for (auto shard : (*a.dirtyShards)) {
 					if (shard->shouldFlush()) {
