@@ -91,8 +91,7 @@ public actor MasterDataActor {
     nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID], result promise: PromiseVoid) {
         Task {
             await registerLastCommitProxyVersionReplies(uids: uids)
-            var result = Flow.Void()
-            promise.send(&result)
+            promise.send(Flow.Void())
         }
     }
     nonisolated public func registerLastCommitProxyVersionReplies(uids: [Flow.UID]) -> FutureVoid {
@@ -180,13 +179,12 @@ public actor MasterDataActor {
     nonisolated public func getVersion(myself: MasterData, req: GetCommitVersionRequest,
                                        result promise: PromiseVoid) {
         Task {
-            if var rep = await getVersion(myself: myself, req: req) {
-                req.reply.send(&rep)
+            if let rep = await getVersion(myself: myself, req: req) {
+                req.reply.send(rep)
             } else {
                 req.reply.sendNever()
             }
-            var result = Flow.Void()
-            promise.send(&result)
+            promise.send(Flow.Void())
         }
     }
     nonisolated public func getVersion(myself: MasterData, req: GetCommitVersionRequest) -> FutureVoid {
@@ -218,9 +216,9 @@ public actor MasterDataActor {
     nonisolated public func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest,
                                         result promise: PromiseVoid) {
         Task {
-            var rep = await waitForPrev(myself: myself, req: req)
-            req.reply.send(&rep)
-            promise.send(&rep)
+            let rep = await waitForPrev(myself: myself, req: req)
+            req.reply.send(rep)
+            promise.send(rep)
         }
     }
     nonisolated public func waitForPrev(myself: MasterData, req: ReportRawCommittedVersionRequest) -> FutureVoid {
@@ -243,8 +241,8 @@ public actor MasterDataActor {
             // TODO(swift): the only throw here is from the Sequence, but can it actually ever happen...?
             for try await req in myself.myInterface.getCommitVersion.getFuture() {
                 _ = group.addTaskUnlessCancelled {
-                    if var rep = await self.getVersion(myself: myself, req: req) {
-                        req.reply.send(&rep)
+                    if let rep = await self.getVersion(myself: myself, req: req) {
+                        req.reply.send(rep)
                     } else {
                         req.reply.sendNever()
                     }
@@ -262,8 +260,8 @@ public actor MasterDataActor {
     nonisolated public func provideVersions(myself: MasterData, result promise: PromiseVoid) {
         Task {
             // TODO(swift): handle the error
-            var void = try await self.provideVersions(myself: myself)
-            promise.send(&void)
+            let void = try await self.provideVersions(myself: myself)
+            promise.send(void)
         }
     }
     nonisolated public func provideVersions(myself: MasterData) -> FutureVoid {
@@ -320,16 +318,16 @@ public actor MasterDataActor {
             // getLiveCommittedVersion
             group.addTask {
                 for try await req in myself.myInterface.getLiveCommittedVersion.getFuture() {
-                    var rep = await self.getLiveCommittedVersion(myself: myself, req)
-                    req.reply.send(&rep)
+                    let rep = await self.getLiveCommittedVersion(myself: myself, req)
+                    req.reply.send(rep)
                 }
             }
 
             // reportLiveCommittedVersion
             group.addTask {
                 for try await req in myself.myInterface.reportLiveCommittedVersion.getFuture() {
-                    var rep = await self.reportLiveCommittedVersion(myself: myself, req: req)
-                    req.reply.send(&rep)
+                    let rep = await self.reportLiveCommittedVersion(myself: myself, req: req)
+                    req.reply.send(rep)
                 }
             }
         }
@@ -339,8 +337,8 @@ public actor MasterDataActor {
 
     nonisolated public func serveLiveCommittedVersion(myself: MasterData, result promise: PromiseVoid) {
         Task {
-            var void = await self.serveLiveCommittedVersion(myself: myself)
-            promise.send(&void)
+            let void = await self.serveLiveCommittedVersion(myself: myself)
+            promise.send(void)
         }
     }
     nonisolated public func serveLiveCommittedVersion(myself: MasterData) -> FutureVoid {
@@ -397,8 +395,8 @@ public actor MasterDataActor {
             // Note: this is an example of one-by-one handling requests, notice the group.next() below.
             for try await req in myself.myInterface.updateRecoveryData.getFuture() {
                 group.addTask {
-                    var rep = await self.updateRecoveryData(myself: myself, req: req)
-                    req.reply.send(&rep)
+                    let rep = await self.updateRecoveryData(myself: myself, req: req)
+                    req.reply.send(rep)
                 }
 
                 try await group.next()
@@ -411,8 +409,8 @@ public actor MasterDataActor {
     nonisolated public func serveUpdateRecoveryData(myself: MasterData, result promise: PromiseVoid) {
         Task {
             // TODO(swift): handle the error
-            var void = try await self.serveUpdateRecoveryData(myself: myself)
-            promise.send(&void)
+            let void = try await self.serveUpdateRecoveryData(myself: myself)
+            promise.send(void)
         }
     }
     nonisolated public func serveUpdateRecoveryData(myself: MasterData) -> FutureVoid {
@@ -489,8 +487,7 @@ public func masterServerSwift(
             print("Failure: \(error)")
         }
 
-        var void = Void()
-        promise.send(&void)
+        promise.send(Void())
     }
 }
 

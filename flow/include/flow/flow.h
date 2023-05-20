@@ -51,6 +51,8 @@
 #include "flow/FileIdentifier.h"
 #include "flow/WriteOnlySet.h"
 
+#include <swift/bridging>
+
 // Flow_CheckedContinuation.h depends on this header, so we first parse it
 // without relying on any imported Swift types.
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
@@ -1118,8 +1120,11 @@ public:
 		sav->send(std::forward<U>(value));
 	}
 
-	// Workaround for Swift's send && issue.
-	void sendCopy(const T& valueCopy) const { sav->send(valueCopy); }
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+	void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
+        sav->send(valueCopy);
+    }
 
 	template <class E>
 	void sendError(const E& exc) const {

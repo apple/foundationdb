@@ -41,8 +41,7 @@ public func swiftyTestRunner(p: PromiseVoid) {
             print("[swift] Test suite failed: \(error)".red)
         }
 
-        var void = Flow.Void()
-        p.send(&void)
+        p.send(Flow.Void())
     }
 }
 

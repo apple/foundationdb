@@ -29,12 +29,12 @@ struct StreamTests: SimpleSwiftTestSuite {
             var fs: FutureStreamCInt = ps.getFuture()
 
             var i: CInt = 1
-            ps.send(&i)
+            ps.send(i)
             precondition(ps.getFuture().isReady())
             precondition(fs.pop() == 1)
 
             i += 1
-            ps.send(&i)
+            ps.send(i)
 
             let element = try? await fs.waitNext
             precondition(element == 2)
@@ -49,15 +49,15 @@ struct StreamTests: SimpleSwiftTestSuite {
 
                 var i: CInt = 1
                 await sleepALittleBit()
-                ps.send(&i)
+                ps.send(i)
 
                 i = 2
                 await sleepALittleBit()
-                ps.send(&i)
+                ps.send(i)
 
                 i = 3
                 await sleepALittleBit()
-                ps.send(&i)
+                ps.send(i)
 
                 ps.sendError(end_of_stream())
             }
@@ -97,8 +97,7 @@ struct StreamTests: SimpleSwiftTestSuite {
             Task {
                 try? await FlowClock.sleep(for: .seconds(1))
                 pprint("[stream] Complete promise...")
-                var void = Void()
-                promise.send(&void)
+                promise.send(Void())
             }
 
             enum Action {
@@ -179,8 +178,7 @@ struct StreamTests: SimpleSwiftTestSuite {
 
                     completed += 1
                     if completed >= expected {
-                        var void = Flow.Void()
-                        p.send(&void)
+                        p.send(Flow.Void())
                     }
 
                     return "done:\(task)"

@@ -28,8 +28,7 @@ struct TaskTests: SimpleSwiftTestSuite {
             let p = PromiseVoid()
             let voidF = p.getFuture()
 
-            var void = Flow.Void()
-            p.send(&void)
+            p.send(Flow.Void())
             _ = try await voidF.value()
         }
 
@@ -37,8 +36,8 @@ struct TaskTests: SimpleSwiftTestSuite {
             let p = PromiseCInt()
             let intF: FutureCInt = p.getFuture()
 
-            var value: CInt = 42
-            p.send(&value)
+            let value: CInt = 42
+            p.send(value)
             let got = try await intF.value()
             precondition(got == value, "\(got) did not equal \(value)")
         }
@@ -50,9 +49,9 @@ struct TaskTests: SimpleSwiftTestSuite {
             pprint("got PromiseCInt")
             precondition(!f.isReady(), "Future should not be ready yet")
 
-            var num = 1111
+            let num: CInt = 1111
             pprint("send \(num)")
-            p.send(&num) // FIXME: rdar://99583467 ([C++ interop][fdb] Support xvalues, so we can use Future.send(U&& value))
+            p.send(num)
             pprint("without wait, f.get(): \(f.__getUnsafe().pointee)")
 
             pprint("wait...")
@@ -66,13 +65,12 @@ struct TaskTests: SimpleSwiftTestSuite {
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2 --------------------")
             let p2 = PromiseCInt()
             let f2: FutureCInt = p2.getFuture()
-            let num2 = 2222
+            let num2: CInt = 2222
             Task { [num2] in
                 assertOnNet2EventLoop()
 
                 pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: send \(num2)")
-                var workaroundVar = num2 // FIXME workaround since we need inout xvalue for the C++ send()
-                p2.send(&workaroundVar)
+                p2.send(num2)
             }
             pprint("[swift][tid:\(_tid())][\(#fileID):\(#line)](\(#function)) future 2: waiting...")
             let got2: CInt? = try? await f2.value()

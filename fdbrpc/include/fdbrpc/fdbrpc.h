@@ -29,6 +29,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/networksender.actor.h"
 #include "fdbrpc/simulator.h"
+#include <swift/bridging>
 
 // Common endpoint code for NetSAV<> and NetNotifiedQueue<>
 class FlowReceiver : public NetworkMessageReceiver, public NonCopyable {
@@ -131,8 +132,9 @@ public:
 	void send(U&& value) const {
 		sav->send(std::forward<U>(value));
 	}
-    // Workaround for Swift's send && issue.
-    void sendCopy(const T& valueCopy) const {
+    // Swift can't call method that takes in a universal references (U&&),
+    // so provide a callable `send` method that copies the value.
+    void sendCopy(const T& valueCopy) const SWIFT_NAME(send(_:)) {
         sav->send(valueCopy);
     }
 	template <class E>
