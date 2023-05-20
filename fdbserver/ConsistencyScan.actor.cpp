@@ -51,8 +51,8 @@
 
 // State that is explicitly not persisted anywhere for this consistency scan. Includes things like caches of system
 // information
-struct ConsistencyScanMemoryState {
-	UID csId;
+struct ConsistencyScanMemoryState : public ReferenceCounted<ConsistencyScanMemoryState> {
+	UID csId{};
 	AsyncVar<int64_t> databaseSize = -1;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
 
@@ -62,7 +62,7 @@ struct ConsistencyScanMemoryState {
 
 // TODO: test the test and write a canary key that the storage servers intentionally get wrong
 // Get database KV bytes size from Status JSON at cluster.data.total_kv_size_bytes
-ACTOR Future<Void> pollDatabaseSize(ConsistencyScanMemoryState* memState, double interval) {
+ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memState, double interval) {
 	loop {
 		loop {
 			if (memState->dbInfo->get().distributor.present()) {
@@ -110,7 +110,7 @@ ACTOR Future<Void> pollDatabaseSize(ConsistencyScanMemoryState* memState, double
 	}
 }
 
-ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(ConsistencyScanMemoryState* memState,
+ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ConsistencyScanMemoryState> memState,
                                                                       Reference<ReadYourWritesTransaction> tr,
                                                                       Future<RangeResult> readShardBoundaries) {
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
@@ -372,7 +372,9 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 	return 0;
 }
 
-ACTOR Future<Void> consistencyScanCore(Database db, ConsistencyScanMemoryState* memState, ConsistencyScanState cs) {
+ACTOR Future<Void> consistencyScanCore(Database db,
+                                       Reference<ConsistencyScanMemoryState> memState,
+                                       ConsistencyScanState cs) {
 	TraceEvent("ConsistencyScanCoreStart").log();
 
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
@@ -850,7 +852,7 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 	return Void();
 }
 
-ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemoryState* memState) {
+ACTOR Future<Void> disableConsistencyScanInSim(Database db, Reference<ConsistencyScanMemoryState> memState) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state ConsistencyScanState cs;
 	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
@@ -909,19 +911,20 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, ConsistencyScanMemor
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state Database db = openDBOnServer(dbInfo, TaskPriority::DefaultEndpoint, LockAware::True);
 	state ActorCollection actors;
-	state ConsistencyScanMemoryState memState(dbInfo, csInterf.id());
+	state Reference<ConsistencyScanMemoryState> memState =
+	    makeReference<ConsistencyScanMemoryState>(dbInfo, csInterf.id());
 
 	TraceEvent("ConsistencyScan_Start", csInterf.id()).log();
 	actors.add(traceRole(Role::CONSISTENCYSCAN, csInterf.id()));
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
-	state Future<Void> core = consistencyScanCore(db, &memState, ConsistencyScanState());
+	state Future<Void> core = consistencyScanCore(db, memState, ConsistencyScanState());
 
 	// Enable consistencyScan in simulation
 	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
 	if (g_network->isSimulated()) {
 		wait(enableConsistencyScanInSim(db, csInterf.id()));
 		// even if we don't enable it, if a previous incarnation did, we still need to disable it
-		actors.add(disableConsistencyScanInSim(db, &memState));
+		actors.add(disableConsistencyScanInSim(db, memState));
 	}
 
 	loop {
