@@ -1,0 +1,8 @@
+[[test]]
+testTitle = 'WatchLeak'
+
+    [[test.workload]]
+    testName = 'WatchLeak'
+    numActiveWatches = 100
+    numBatches = 100
+    delayBetweenBatches = 5.0
