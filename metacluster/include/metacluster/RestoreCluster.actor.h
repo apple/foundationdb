@@ -184,7 +184,7 @@ struct RestoreClusterImpl {
 					TraceEvent(SevWarn, "MetaclusterRestoreClusterNameMismatch")
 					    .detail("ExistingName", metaclusterRegistration.get().name)
 					    .detail("ManagementClusterRegistration", self->clusterName);
-					CODE_PROBE(true, "Restore cluster with incorrect name");
+					CODE_PROBE(true, "Restore cluster with incorrect name", probe::decoration::rare);
 					throw cluster_already_registered();
 				}
 
@@ -385,7 +385,7 @@ struct RestoreClusterImpl {
 	                                                                       int64_t initialTenantId) {
 		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 		    wait(metadata::management::tenantMetadata().tenantMap.getRange(
-		        tr, initialTenantId, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
+		        tr, initialTenantId, {}, BUGGIFY ? 1 : CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
 
 		for (auto const& t : tenants.results) {
 			self->mgmtClusterTenantMap.emplace(t.first, t.second);
@@ -450,14 +450,14 @@ struct RestoreClusterImpl {
 		    .detail("NewEntryPresent", newId.present());
 
 		if (newId.present()) {
-			CODE_PROBE(true, "Rename tenant already exists");
+			CODE_PROBE(true, "Rename tenant already exists", probe::decoration::rare);
 			self->messages.push_back(
 			    fmt::format("Failed to rename the tenant `{}' to `{}' because the new name is already in use",
 			                printable(oldTenantName),
 			                printable(newTenantName)));
 			throw tenant_already_exists();
 		} else {
-			CODE_PROBE(true, "Rename tenant wrong ID");
+			CODE_PROBE(true, "Rename tenant wrong ID", probe::decoration::rare);
 			self->messages.push_back(fmt::format(
 			    "Failed to rename the tenant `{}' to `{}' because the tenant did not have the expected ID {}",
 			    printable(oldTenantName),
@@ -483,7 +483,7 @@ struct RestoreClusterImpl {
 				return Void();
 			}
 
-			CODE_PROBE(true, "Configure tenant update to temporary name");
+			CODE_PROBE(true, "Configure tenant update to temporary name", probe::decoration::rare);
 			updatedEntry.tenantName = existingEntry.tenantName;
 		}
 
@@ -739,7 +739,7 @@ struct RestoreClusterImpl {
 			if (existingEntry.get().assignedCluster == self->clusterName) {
 				if (existingEntry.get().id != tenantEntry.id ||
 				    !existingEntry.get().matchesConfiguration(tenantEntry)) {
-					CODE_PROBE(true, "Tenant modified during restore dry-run");
+					CODE_PROBE(true, "Tenant modified during restore dry-run", probe::decoration::rare);
 					ASSERT(self->restoreDryRun);
 					self->messages.push_back(
 					    fmt::format("The tenant `{}' was modified concurrently with the restore dry-run",
@@ -833,7 +833,7 @@ struct RestoreClusterImpl {
 			if (numGroupsCreated > 0) {
 				DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 				if (updatedEntry.clusterState != DataClusterState::RESTORING) {
-					CODE_PROBE(true, "Conflicting restore");
+					CODE_PROBE(true, "Conflicting restore", probe::decoration::rare);
 					throw conflicting_restore();
 				}
 				updatedEntry.allocated.numTenantGroups += numGroupsCreated;
@@ -912,7 +912,7 @@ struct RestoreClusterImpl {
 				                itr->second.id,
 				                printable(managementEntry->second.tenantName),
 				                printable(managementEntry->second.assignedCluster)));
-				CODE_PROBE(true, "Restoring tenant with duplicate ID");
+				CODE_PROBE(true, "Restoring tenant with duplicate ID", probe::decoration::rare);
 				throw tenant_already_exists();
 			}
 

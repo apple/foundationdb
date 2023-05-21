@@ -118,7 +118,7 @@ Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 		CODE_PROBE(true, "Attempting tenant operation on wrong cluster type");
 		throw invalid_metacluster_operation();
 	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
-		CODE_PROBE(true, "Attempting tenant operation on cluster with tenants disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Attempting tenant operation on cluster with tenants disabled");
 		throw tenants_disabled();
 	}
 

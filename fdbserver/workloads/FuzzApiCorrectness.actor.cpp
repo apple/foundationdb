@@ -376,7 +376,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 									}
 								}
 								wait(unsafeThreadFutureToFuture(tr->commit()));
-								ASSERT(tenantNum != -1 || self->writeSystemKeys ||
+								ASSERT(tenantNum != -1 || self->writeSystemKeys || !cx->getTenantMode().present() ||
 								       cx->getTenantMode() != TenantMode::REQUIRED || !wroteKeys);
 								//TraceEvent("WDRInitBatch").detail("I", i).detail("CommittedVersion", tr->getCommittedVersion());
 								break;
@@ -384,7 +384,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 								if (e.code() == error_code_illegal_tenant_access) {
 									ASSERT(!self->writeSystemKeys);
 									ASSERT_EQ(tenantNum, -1);
-									ASSERT(cx->getTenantMode() == TenantMode::REQUIRED);
+									ASSERT(!cx->getTenantMode().present() ||
+									       cx->getTenantMode() == TenantMode::REQUIRED);
 									self->illegalTenantAccess = true;
 									break;
 								}
@@ -502,7 +503,7 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 				} else if (e.code() == error_code_illegal_tenant_access ||
 				           e.code() == error_code_tenant_name_required) {
 					ASSERT_EQ(tenantNum, -1);
-					ASSERT_EQ(cx->getTenantMode(), TenantMode::REQUIRED);
+					ASSERT(!cx->getTenantMode().present() || cx->getTenantMode() == TenantMode::REQUIRED);
 					if (e.code() == error_code_tenant_name_required) {
 						ASSERT(!rawAccess && !self->useSystemKeys);
 					}

@@ -103,24 +103,31 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), metaclusterCreated(deterministicRandom()->coinflip()) {
-		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
-		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
+		maxTenants =
+		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
+		maxTenantGroups = deterministicRandom()->randomInt(
+		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		allowTenantIdPrefixReuse = deterministicRandom()->coinflip();
 		MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites = true;
 	}
 
 	Optional<int64_t> generateTenantIdPrefix() {
-		for (int i = 0; i < 20; ++i) {
-			int64_t newPrefix = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
-			                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
-			if (allowTenantIdPrefixReuse || !usedPrefixes.count(newPrefix)) {
-				CODE_PROBE(usedPrefixes.count(newPrefix), "Reusing tenant ID prefix", probe::decoration::rare);
-				return newPrefix;
+		Optional<int64_t> newPrefix;
+		if (allowTenantIdPrefixReuse && deterministicRandom()->coinflip()) {
+			newPrefix = 0;
+		} else {
+			for (int i = 0; i < 20 && !newPrefix.present(); ++i) {
+				int64_t candidate = deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+				                                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1);
+				if (allowTenantIdPrefixReuse || !usedPrefixes.count(candidate)) {
+					newPrefix = candidate;
+				}
 			}
 		}
 
-		return false;
+		CODE_PROBE(newPrefix.present() && usedPrefixes.count(newPrefix.get()), "Reusing tenant ID prefix");
+		return newPrefix;
 	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("Attrition"); }
@@ -473,6 +480,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			if (detachCluster) {
 				dataDb->detached = true;
+				CODE_PROBE(!dataDb->ungroupedTenants.empty(), "Detach ungrouped tenants");
+				CODE_PROBE(!dataDb->tenantGroups.empty(), "Detach tenant groups");
 				for (auto const& t : dataDb->ungroupedTenants) {
 					self->ungroupedTenants.erase(t);
 				}
@@ -582,7 +591,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		}
 
 		CODE_PROBE(foundTenantCollision, "Resolved tenant collision for restore", probe::decoration::rare);
-		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore");
+		CODE_PROBE(foundGroupCollision, "Resolved group collision for restore", probe::decoration::rare);
 		return foundTenantCollision || foundGroupCollision;
 	}
 
