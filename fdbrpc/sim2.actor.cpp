@@ -116,6 +116,29 @@ bool simulator_should_inject_fault(const char* context, const char* file, int li
 	return false;
 }
 
+bool simulator_should_inject_blob_fault(const char* context, const char* file, int line, int error_code) {
+	if (!g_network->isSimulated() || !faultInjectionActivated)
+		return false;
+
+	auto p = g_simulator->getCurrentProcess();
+
+	if (!g_simulator->speedUpSimulation && deterministicRandom()->random01() < p->blob_inject_failure_rate) {
+		CODE_PROBE(true, "A blob fault was injected", probe::assert::simOnly, probe::context::sim2);
+		CODE_PROBE(error_code == error_code_http_request_failed,
+		           "A failed http request was injected",
+		           probe::assert::simOnly,
+		           probe::context::sim2);
+		TraceEvent("BlobFaultInjected")
+		    .detail("Context", context)
+		    .detail("File", file)
+		    .detail("Line", line)
+		    .detail("ErrorCode", error_code);
+		return true;
+	}
+
+	return false;
+}
+
 void ISimulator::disableFor(const std::string& desc, double time) {
 	disabledMap[desc] = time;
 }
@@ -537,7 +560,12 @@ private:
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
+		// FIXME: we could also just implement connection idle closing for sim http server instead
+		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
+			return Void();
+		}
 		wait(g_simulator->onProcess(self->process));
+
 		if (self->process->address.isPublic()) {
 			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
 			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
@@ -1076,6 +1104,10 @@ public:
 	}
 
 	Future<Reference<IConnection>> connectExternal(NetworkAddress toAddr) override {
+		// If sim http connection, do connect instead of external connect
+		if (httpServerIps.count(toAddr.ip)) {
+			return connect(toAddr);
+		}
 		return SimExternalConnection::connect(toAddr);
 	}
 
@@ -1492,6 +1524,7 @@ public:
 	// The following function will determine if a machine can be remove in case when it has a blob worker
 	bool canKillMachineWithBlobWorkers(Optional<Standalone<StringRef>> machineId, KillType kt, KillType* ktFinal) {
 		// Allow if no blob workers, or it's a reboot(without removing the machine)
+		// FIXME: this should be ||
 		if (!blobGranulesEnabled && kt >= KillType::RebootAndDelete) {
 			return true;
 		}
@@ -2339,6 +2372,18 @@ public:
 		g_clogging.unclogPair(from, to);
 	}
 
+	void processInjectBlobFault(ProcessInfo* machine, double failureRate) override {
+		CODE_PROBE(true, "Simulated process beginning blob fault", probe::context::sim2, probe::assert::simOnly);
+		should_inject_blob_fault = simulator_should_inject_blob_fault;
+		ASSERT(machine->blob_inject_failure_rate == 0.0);
+		machine->blob_inject_failure_rate = failureRate;
+	}
+
+	void processStopInjectBlobFault(ProcessInfo* machine) override {
+		CODE_PROBE(true, "Simulated process stopping blob fault", probe::context::sim2, probe::assert::simOnly);
+		machine->blob_inject_failure_rate = 0.0;
+	}
+
 	std::vector<ProcessInfo*> getAllProcesses() const override {
 		std::vector<ProcessInfo*> processes;
 		for (auto& c : machines) {
@@ -2373,6 +2418,105 @@ public:
 			killProcess_internal(machine.machineProcess, KillType::KillInstantly);
 		}
 		machines.erase(machineId);
+	}
+
+	// Assumes the simulator is already onProcess for proc
+	void startRequestHandlerOnProcess(ProcessInfo* process,
+	                                  Reference<HTTP::SimServerContext> serverContext,
+	                                  Reference<HTTP::SimRegisteredHandlerContext> handlerContext) {
+		try {
+			NetworkAddress addr = serverContext->newAddress();
+			process->listenerMap[addr] = Reference<IListener>(new Sim2Listener(process, addr));
+			addressMap[addr] = process;
+			handlerContext->addAddress(addr);
+			serverContext->registerNewServer(addr, handlerContext->requestHandler->clone());
+		} catch (Error& e) {
+			// this should never happen, but would cause weird behavior if it did like unintentionally switching
+			// processes, so just fail
+			TraceEvent(SevError, "UnexpectedErrorRegisteringHTTPServer").errorUnsuppressed(e);
+			ASSERT(false);
+		}
+	}
+
+	// add a simulated http server process. New http servers called by registerHTTPServer will run on this process
+	void addSimHTTPProcess(Reference<HTTP::SimServerContext> context) override {
+		ProcessInfo* p = getCurrentProcess();
+
+		if (!g_simulator->httpProtected) {
+			// always protect one http server process so that if others are killed permanently, one will always be
+			// rebooted
+			fmt::print("SimHTTPServer protecting {0}\n", p->address.toString());
+			TraceEvent(SevDebug, "HTTPProcessProtected").detail("Address", p->address);
+			g_simulator->httpProtected = true;
+			protectedAddresses.insert(p->address);
+		}
+		// make sure this process isn't already added
+		for (int i = 0; i < httpServerProcesses.size(); i++) {
+			ASSERT(p != httpServerProcesses[i].first);
+		}
+		httpServerProcesses.push_back({ p, context });
+		httpServerIps.insert(p->address.ip);
+
+		for (auto& it : httpHandlers) {
+			startRequestHandlerOnProcess(p, context, it.second);
+		}
+	}
+
+	void removeSimHTTPProcess() override {
+		ProcessInfo* p = getCurrentProcess();
+
+		bool found = false;
+		for (int i = 0; i < httpServerProcesses.size(); i++) {
+			if (p == httpServerProcesses[i].first) {
+				swapAndPop(&httpServerProcesses, i);
+				found = true;
+				break;
+			}
+		}
+		ASSERT(found);
+
+		// FIXME: potentially instead delay removing from DNS for a bit so we still briefly try to talk to dead server
+		for (auto& it : httpHandlers) {
+			it.second->removeIp(p->address.ip);
+		}
+	}
+
+	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
+	                                                     std::string hostname,
+	                                                     std::string service,
+	                                                     Reference<HTTP::IRequestHandler> requestHandler) {
+		// handle race where test client tries to register server before all processes are up, but time out eventually
+		// FIXME: make this so a server that starts after this or a server that restarts will automatically re-add
+		// itself, register the handler, and register with dns
+		std::string id = hostname + ":" + service;
+		ASSERT(!self->httpHandlers.count(id));
+
+		state Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
+		    makeReference<HTTP::SimRegisteredHandlerContext>(hostname, service, requestHandler);
+		self->httpHandlers.insert({ id, handlerContext });
+
+		// start process on all running HTTP servers
+		state ProcessInfo* callingProcess = self->getCurrentProcess();
+		state int i = 0;
+		// copy the processes before waits just to ensure no races with addSimHTTPProcess
+		state std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy =
+		    self->httpServerProcesses;
+		for (; i < procsCopy.size(); i++) {
+			state ProcessInfo* serverProcess = procsCopy[i].first;
+			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
+			self->startRequestHandlerOnProcess(serverProcess, procsCopy[i].second, handlerContext);
+		}
+
+		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
+
+		return Void();
+	}
+
+	// starts a numAddresses http servers with the dns alias hostname:service with the provided server callback
+	Future<Void> registerSimHTTPServer(std::string hostname,
+	                                   std::string service,
+	                                   Reference<HTTP::IRequestHandler> requestHandler) override {
+		return registerSimHTTPServerActor(this, hostname, service, requestHandler);
 	}
 
 	Sim2(bool printSimTime)

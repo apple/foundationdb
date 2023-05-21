@@ -206,7 +206,7 @@ bool shouldRefreshKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
 
 void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
                     const rapidjson::Document& doc,
-                    Reference<HTTP::Response> httpResp) {
+                    Reference<HTTP::IncomingResponse> httpResp) {
 	// Refresh KmsUrls cache
 	dropCachedKmsUrls(ctx);
 	ASSERT(ctx->kmsUrlHeap.empty());
@@ -310,6 +310,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 	// check version tag sanity
 	if (!doc.HasMember(REQUEST_VERSION_TAG) || !doc[REQUEST_VERSION_TAG].IsInt()) {
 		TraceEvent(SevWarnAlways, "RESTKMSResponseMissingVersion", ctx->uid).log();
+		CODE_PROBE(true, "KMS response missing version");
 		throw rest_malformed_response();
 	}
 
@@ -320,6 +321,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 		TraceEvent(SevWarnAlways, "RESTKMSResponseInvalidVersion", ctx->uid)
 		    .detail("Version", version)
 		    .detail("MaxSupportedVersion", maxSupportedVersion);
+		CODE_PROBE(true, "KMS response invalid version");
 		throw rest_malformed_response();
 	}
 
@@ -354,7 +356,7 @@ void checkResponseForError(Reference<RESTKmsConnectorCtx> ctx,
 }
 
 void checkDocForNewKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
-                           Reference<HTTP::Response> resp,
+                           Reference<HTTP::IncomingResponse> resp,
                            const rapidjson::Document& doc) {
 	if (doc.HasMember(KMS_URLS_TAG) && !doc[KMS_URLS_TAG].IsNull()) {
 		try {
@@ -367,7 +369,7 @@ void checkDocForNewKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 }
 
 Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Reference<RESTKmsConnectorCtx> ctx,
-                                                                             Reference<HTTP::Response> resp) {
+                                                                             Reference<HTTP::IncomingResponse> resp) {
 	// Acceptable response payload json format:
 	//
 	// response_json_payload {
@@ -403,7 +405,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	}
 
 	rapidjson::Document doc;
-	doc.Parse(resp->content.data());
+	doc.Parse(resp->data.content.data());
 
 	checkResponseForError(ctx, doc, IsCipherType::True);
 
@@ -413,14 +415,16 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	if (!doc.HasMember(CIPHER_KEY_DETAILS_TAG) || !doc[CIPHER_KEY_DETAILS_TAG].IsArray()) {
 		TraceEvent(SevWarn, "RESTParseEncryptCipherResponseFailed", ctx->uid)
 		    .detail("Reason", "MissingCipherKeyDetails");
+		CODE_PROBE(true, "REST CipherKeyDetails not array");
 		throw rest_malformed_response();
 	}
 
 	for (const auto& cipherDetail : doc[CIPHER_KEY_DETAILS_TAG].GetArray()) {
 		if (!cipherDetail.IsObject()) {
 			TraceEvent(SevWarn, "RESTParseEncryptCipherResponseFailed", ctx->uid)
-			    .detail("Type", cipherDetail.GetType())
+			    .detail("CipherDetailType", cipherDetail.GetType())
 			    .detail("Reason", "EncryptKeyDetailsNotObject");
+			CODE_PROBE(true, "REST CipherKeyDetail not object");
 			throw rest_malformed_response();
 		}
 
@@ -433,6 +437,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 			    .detail("BaseCipherIdPresent", isBaseCipherIdPresent)
 			    .detail("BaseCipherPresent", isBaseCipherPresent)
 			    .detail("EncryptDomainIdPresent", isEncryptDomainIdPresent);
+			CODE_PROBE(true, "REST CipherKeyDetail malformed");
 			throw rest_malformed_response();
 		}
 
@@ -495,7 +500,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 }
 
 Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Reference<RESTKmsConnectorCtx> ctx,
-                                                                        Reference<HTTP::Response> resp) {
+                                                                        Reference<HTTP::IncomingResponse> resp) {
 	// Acceptable response payload json format:
 	// (baseLocation and partitions follow the same properties as described in BlobMetadataUtils.h)
 	//
@@ -531,7 +536,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	}
 
 	rapidjson::Document doc;
-	doc.Parse(resp->content.data());
+	doc.Parse(resp->data.content.data());
 
 	checkResponseForError(ctx, doc, IsCipherType::False);
 
@@ -540,14 +545,16 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 	// Extract CipherKeyDetails
 	if (!doc.HasMember(BLOB_METADATA_DETAILS_TAG) || !doc[BLOB_METADATA_DETAILS_TAG].IsArray()) {
 		TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureMissingDetails", ctx->uid).log();
-		throw operation_failed();
+		CODE_PROBE(true, "REST BlobMedata details missing or not-array");
+		throw rest_malformed_response();
 	}
 
 	for (const auto& detail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
 		if (!detail.IsObject()) {
 			TraceEvent(SevWarn, "ParseBlobMetadataResponseFailureDetailsNotObject", ctx->uid)
-			    .detail("Type", detail.GetType());
-			throw operation_failed();
+			    .detail("CipherDetailType", detail.GetType());
+			CODE_PROBE(true, "REST BlobMedata detail not-object");
+			throw rest_malformed_response();
 		}
 
 		const bool isDomainIdPresent = detail.HasMember(BLOB_METADATA_DOMAIN_ID_TAG);
@@ -558,7 +565,8 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			    .detail("DomainIdPresent", isDomainIdPresent)
 			    .detail("BaseLocationPresent", isBasePresent)
 			    .detail("PartitionsPresent", isPartitionsPresent);
-			throw operation_failed();
+			CODE_PROBE(true, "REST BlobMedata detail malformed");
+			throw rest_malformed_response();
 		}
 
 		std::unique_ptr<uint8_t[]> baseStr;
@@ -576,7 +584,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 			for (const auto& partition : detail[BLOB_METADATA_PARTITIONS_TAG].GetArray()) {
 				if (!partition.IsString()) {
 					TraceEvent("ParseBlobMetadataResponseFailurePartitionNotString", ctx->uid)
-					    .detail("Type", partition.GetType());
+					    .detail("PartitionType", partition.GetType());
 					throw operation_failed();
 				}
 				const int partitionLen = partition.GetStringLength();
@@ -760,10 +768,11 @@ StringRef getEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx,
 }
 
 ACTOR template <class T>
-Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
-                         std::string urlSuffix,
-                         StringRef requestBodyRef,
-                         std::function<T(Reference<RESTKmsConnectorCtx>, Reference<HTTP::Response>)> parseFunc) {
+Future<T> kmsRequestImpl(
+    Reference<RESTKmsConnectorCtx> ctx,
+    std::string urlSuffix,
+    StringRef requestBodyRef,
+    std::function<T(Reference<RESTKmsConnectorCtx>, Reference<HTTP::IncomingResponse>)> parseFunc) {
 	state UID requestID = deterministicRandom()->randomUniqueID();
 
 	// Follow 2-phase scheme:
@@ -796,7 +805,7 @@ Future<T> kmsRequestImpl(Reference<RESTKmsConnectorCtx> ctx,
 				headers["Content-type"] = "application/json";
 				headers["Accept"] = "application/json";
 
-				Reference<HTTP::Response> resp =
+				Reference<HTTP::IncomingResponse> resp =
 				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
 				curUrl->nRequests++;
 
@@ -851,7 +860,7 @@ ACTOR Future<Void> fetchEncryptionKeysByKeyIds(Reference<RESTKmsConnectorCtx> ct
 		bool refreshKmsUrls = shouldRefreshKmsUrls(ctx);
 		StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 		std::function<Standalone<VectorRef<EncryptCipherKeyDetailsRef>>(Reference<RESTKmsConnectorCtx>,
-		                                                                Reference<HTTP::Response>)>
+		                                                                Reference<HTTP::IncomingResponse>)>
 		    f = &parseEncryptCipherResponse;
 		wait(store(
 		    reply.cipherKeyDetails,
@@ -933,7 +942,7 @@ ACTOR Future<Void> fetchEncryptionKeysByDomainIds(Reference<RESTKmsConnectorCtx>
 		StringRef requestBodyRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, req.arena);
 
 		std::function<Standalone<VectorRef<EncryptCipherKeyDetailsRef>>(Reference<RESTKmsConnectorCtx>,
-		                                                                Reference<HTTP::Response>)>
+		                                                                Reference<HTTP::IncomingResponse>)>
 		    f = &parseEncryptCipherResponse;
 
 		wait(store(reply.cipherKeyDetails,
@@ -1018,7 +1027,7 @@ ACTOR Future<Void> fetchBlobMetadata(Reference<RESTKmsConnectorCtx> ctx, KmsConn
 		// for some reason the compiler can't handle just passing &parseBlobMetadata, so you have to explicitly
 		// declare its templated return type as part of an std::function first
 		std::function<Standalone<VectorRef<BlobMetadataDetailsRef>>(Reference<RESTKmsConnectorCtx>,
-		                                                            Reference<HTTP::Response>)>
+		                                                            Reference<HTTP::IncomingResponse>)>
 		    f = &parseBlobMetadataResponse;
 		wait(
 		    store(reply.metadataDetails,
@@ -1377,7 +1386,7 @@ void addFakeKmsUrls(const rapidjson::Document& reqDoc, rapidjson::Document& resD
 
 void getFakeEncryptCipherResponse(StringRef jsonReqRef,
                                   const bool baseCipherIdPresent,
-                                  Reference<HTTP::Response> httpResponse) {
+                                  Reference<HTTP::IncomingResponse> httpResponse) {
 	rapidjson::Document reqDoc;
 	reqDoc.Parse(jsonReqRef.toString().data());
 
@@ -1428,14 +1437,14 @@ void getFakeEncryptCipherResponse(StringRef jsonReqRef,
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	resDoc.Accept(writer);
-	httpResponse->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResponse->content.data(), sb.GetString(), sb.GetSize());
-	httpResponse->contentLen = sb.GetSize();
+	httpResponse->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResponse->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResponse->data.contentLen = sb.GetSize();
 }
 
 void getFakeBlobMetadataResponse(StringRef jsonReqRef,
                                  const bool baseCipherIdPresent,
-                                 Reference<HTTP::Response> httpResponse) {
+                                 Reference<HTTP::IncomingResponse> httpResponse) {
 	rapidjson::Document reqDoc;
 	reqDoc.Parse(jsonReqRef.toString().data());
 
@@ -1491,8 +1500,8 @@ void getFakeBlobMetadataResponse(StringRef jsonReqRef,
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	resDoc.Accept(writer);
-	httpResponse->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResponse->content.data(), sb.GetString(), sb.GetSize());
+	httpResponse->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResponse->data.content.data(), sb.GetString(), sb.GetSize());
 }
 
 void validateKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
@@ -1518,10 +1527,10 @@ void testGetEncryptKeysByKeyIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx, A
 
 	StringRef requestBodyRef = getEncryptKeysByKeyIdsRequestBody(ctx, req, refreshKmsUrls, arena);
 	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("JsonReqStr", requestBodyRef.toString());
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	getFakeEncryptCipherResponse(requestBodyRef, true, httpResp);
-	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->content);
+	TraceEvent("FetchKeysByKeyIds", ctx->uid).setMaxFieldLength(100000).detail("HttpRespStr", httpResp->data.content);
 
 	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> cipherDetails = parseEncryptCipherResponse(ctx, httpResp);
 	ASSERT_EQ(cipherDetails.size(), keyMap.size());
@@ -1551,10 +1560,10 @@ void testGetEncryptKeysByDomainIdsRequestBody(Reference<RESTKmsConnectorCtx> ctx
 
 	StringRef jsonReqRef = getEncryptKeysByDomainIdsRequestBody(ctx, req, refreshKmsUrls, arena);
 	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("JsonReqStr", jsonReqRef.toString());
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	getFakeEncryptCipherResponse(jsonReqRef, false, httpResp);
-	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->content);
+	TraceEvent("FetchKeysByDomainIds", ctx->uid).detail("HttpRespStr", httpResp->data.content);
 
 	Standalone<VectorRef<EncryptCipherKeyDetailsRef>> cipherDetails = parseEncryptCipherResponse(ctx, httpResp);
 	ASSERT_EQ(domainIds.size(), cipherDetails.size());
@@ -1584,10 +1593,10 @@ void testGetBlobMetadataRequestBody(Reference<RESTKmsConnectorCtx> ctx) {
 	TraceEvent("FetchBlobMetadataStart", ctx->uid);
 	StringRef jsonReqRef = getBlobMetadataRequestBody(ctx, req, refreshKmsUrls);
 	TraceEvent("FetchBlobMetadataReq", ctx->uid).detail("JsonReqStr", jsonReqRef.toString());
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	getFakeBlobMetadataResponse(jsonReqRef, false, httpResp);
-	TraceEvent("FetchBlobMetadataResp", ctx->uid).detail("HttpRespStr", httpResp->content);
+	TraceEvent("FetchBlobMetadataResp", ctx->uid).detail("HttpRespStr", httpResp->data.content);
 
 	Standalone<VectorRef<BlobMetadataDetailsRef>> details = parseBlobMetadataResponse(ctx, httpResp);
 
@@ -1633,15 +1642,15 @@ void testMissingOrInvalidVersion(Reference<RESTKmsConnectorCtx> ctx, bool isCiph
 	versionValue.SetInt(version);
 	doc.AddMember(versionKey, versionValue, doc.GetAllocator());
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
-	httpResp->contentLen = 0;
-	httpResp->content = "";
+	httpResp->data.contentLen = 0;
+	httpResp->data.content = "";
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
 
 	try {
 		if (isCipher) {
@@ -1663,14 +1672,14 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	refreshUrl.SetBool(true);
 	doc.AddMember(key, refreshUrl, doc.GetAllocator());
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
-	httpResp->contentLen = sb.GetSize();
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1678,12 +1687,14 @@ void testMissingDetailsTag(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
 }
 
 void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailsStart");
 	rapidjson::Document doc;
 	doc.SetObject();
 
@@ -1692,14 +1703,16 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	details.SetBool(true);
 	doc.AddMember(key, details, doc.GetAllocator());
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	addVersionToDoc(doc, 1);
+
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
-	httpResp->contentLen = sb.GetSize();
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1707,12 +1720,54 @@ void testMalformedDetails(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
+	TraceEvent("TestMalformedDetailsEnd");
+}
+
+void testMalformedDetailNotObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailNotObjStart");
+	rapidjson::Document doc;
+	doc.SetObject();
+
+	rapidjson::Value cDetails(rapidjson::kArrayType);
+	rapidjson::Value detail;
+	rapidjson::Value key(isCipher ? BASE_CIPHER_ID_TAG : BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
+	rapidjson::Value id;
+	id.SetUint(12345);
+	detail.AddMember(key, id, doc.GetAllocator());
+	cDetails.PushBack(detail, doc.GetAllocator());
+	key.SetString(isCipher ? CIPHER_KEY_DETAILS_TAG : BLOB_METADATA_DETAILS_TAG, doc.GetAllocator());
+	doc.AddMember(key, cDetails, doc.GetAllocator());
+
+	addVersionToDoc(doc, 1);
+
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
+	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
+	rapidjson::StringBuffer sb;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+	doc.Accept(writer);
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
+
+	try {
+		if (isCipher) {
+			parseEncryptCipherResponse(ctx, httpResp);
+		} else {
+			parseBlobMetadataResponse(ctx, httpResp);
+		}
+		ASSERT(false); // error expected
+	} catch (Error& e) {
+		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
+	}
+	TraceEvent("TestMalformedDetailNotObjEnd");
 }
 
 void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
+	TraceEvent("TestMalformedDetailObjStart");
 	rapidjson::Document doc;
 	doc.SetObject();
 
@@ -1726,14 +1781,16 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	key.SetString(isCipher ? CIPHER_KEY_DETAILS_TAG : BLOB_METADATA_DETAILS_TAG, doc.GetAllocator());
 	doc.AddMember(key, cDetails, doc.GetAllocator());
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	addVersionToDoc(doc, 1);
+
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
-	httpResp->contentLen = sb.GetSize();
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1741,9 +1798,11 @@ void testMalformedDetailObj(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);
 	}
+	TraceEvent("TestMalformedDetailObjEnd");
 }
 
 void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
@@ -1775,14 +1834,14 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 	key.SetString(ERROR_TAG, doc.GetAllocator());
 	doc.AddMember(key, errorTag, doc.GetAllocator());
 
-	Reference<HTTP::Response> httpResp = makeReference<HTTP::Response>();
+	Reference<HTTP::IncomingResponse> httpResp = makeReference<HTTP::IncomingResponse>();
 	httpResp->code = HTTP::HTTP_STATUS_CODE_OK;
 	rapidjson::StringBuffer sb;
 	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
 	doc.Accept(writer);
-	httpResp->content.resize(sb.GetSize(), '\0');
-	memcpy(httpResp->content.data(), sb.GetString(), sb.GetSize());
-	httpResp->contentLen = sb.GetSize();
+	httpResp->data.content.resize(sb.GetSize(), '\0');
+	memcpy(httpResp->data.content.data(), sb.GetString(), sb.GetSize());
+	httpResp->data.contentLen = sb.GetSize();
 
 	try {
 		if (isCipher) {
@@ -1790,6 +1849,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 		} else {
 			parseBlobMetadataResponse(ctx, httpResp);
 		}
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_keys_fetch_failed);
 	}
@@ -1798,6 +1858,7 @@ void testKMSErrorResponse(Reference<RESTKmsConnectorCtx> ctx, bool isCipher) {
 ACTOR Future<Void> testParseDiscoverKmsUrlFileNotFound(Reference<RESTKmsConnectorCtx> ctx) {
 	try {
 		wait(parseDiscoverKmsUrlFile(ctx, "/imaginary-dir/dream/phantom-file"));
+		ASSERT(false); // error expected
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_encrypt_invalid_kms_config);
 	}
@@ -1900,6 +1961,7 @@ TEST_CASE("/KmsConnector/REST/ParseEncryptCipherResponse") {
 	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, true);
 	testMalformedDetails(ctx, true);
+	testMalformedDetailNotObj(ctx, true);
 	testMalformedDetailObj(ctx, true);
 	testKMSErrorResponse(ctx, true);
 	return Void();
@@ -1914,6 +1976,7 @@ TEST_CASE("/KmsConnector/REST/ParseBlobMetadataResponse") {
 	testMissingOrInvalidVersion(ctx, true);
 	testMissingDetailsTag(ctx, false);
 	testMalformedDetails(ctx, false);
+	testMalformedDetailNotObj(ctx, false);
 	testMalformedDetailObj(ctx, true);
 	testKMSErrorResponse(ctx, false);
 	return Void();

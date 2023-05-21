@@ -164,14 +164,13 @@ public:
 
 	template <class C>
 	void randomShuffle(C& container) {
-		randomShuffle(container, container.size());
+		randomShuffle(container, 0, container.size());
 	}
 
 	template <class C>
-	void randomShuffle(C& container, size_t shuffleLen) {
-		int s = shuffleLen > container.size() ? container.size() : shuffleLen;
-		for (int i = 0; i < s; i++) {
-			int j = randomInt(i, s);
+	void randomShuffle(C& container, size_t start, size_t end) {
+		for (int i = start; i < end; i++) {
+			int j = randomInt(i, end);
 			if (i != j) {
 				std::swap(container[i], container[j]);
 			}

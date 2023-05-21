@@ -645,6 +645,7 @@ extern const KeyRangeRef configClassKeys;
 // blob range special keys
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
+extern const KeyRangeRef blobRangeChangeLogKeys;
 extern const KeyRef blobManagerEpochKey;
 
 const Value blobManagerEpochValueFor(int64_t epoch);
@@ -653,6 +654,12 @@ int64_t decodeBlobManagerEpochValue(ValueRef const& value);
 // blob granule keys
 extern const StringRef blobRangeActive;
 extern const StringRef blobRangeInactive;
+
+bool isBlobRangeActive(const ValueRef& blobRangeValue);
+
+const Key blobRangeChangeLogReadKeyFor(Version version);
+const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value);
+Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value);
 
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;

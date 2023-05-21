@@ -472,6 +472,8 @@ rocksdb::Options getOptions() {
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::kExceptHistogramOrTimers);
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
+	options.max_log_file_size = SERVER_KNOBS->ROCKSDB_MAX_LOG_FILE_SIZE;
+	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
 	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
 		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
 	}
@@ -1495,7 +1497,7 @@ public:
 		}
 		rocksdb::FlushOptions fOptions;
 		fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-		fOptions.allow_write_stall = true;
+		fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 		db->Flush(fOptions, it->second->cf);
 	}
@@ -2446,7 +2448,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (SERVER_KNOBS->ROCKSDB_CF_RANGE_DELETION_LIMIT > 0) {
 				rocksdb::FlushOptions fOptions;
 				fOptions.wait = SERVER_KNOBS->ROCKSDB_WAIT_ON_CF_FLUSH;
-				fOptions.allow_write_stall = true;
+				fOptions.allow_write_stall = SERVER_KNOBS->ROCKSDB_ALLOW_WRITE_STALL_ON_FLUSH;
 
 				for (auto shard : (*a.dirtyShards)) {
 					if (shard->shouldFlush()) {
