@@ -50,13 +50,15 @@ class WatchLeakWorkload : public TestWorkload {
 	int numBatches;
 	int numActiveWatches;
 	double delayBetweenBatches;
+	bool reuseKeys;
 
 	ACTOR static Future<Void> _start(WatchLeakWorkload const* self, Database cx) {
 		state std::vector<Future<Void>> activeWatches;
 		state int batchIndex = 0;
 		for (; batchIndex < self->numBatches; ++batchIndex) {
 			for (int i = 0; i < self->numActiveWatches; ++i) {
-				activeWatches.push_back(getWatch(cx, batchIndex * self->numActiveWatches + i));
+				int keyIndex = self->reuseKeys ? i : (batchIndex * self->numActiveWatches + i);
+				activeWatches.push_back(getWatch(cx, keyIndex));
 			}
 			wait(delay(self->delayBetweenBatches));
 			// All outstanding watches should be cancelled here:
@@ -72,6 +74,7 @@ public:
 		numBatches = getOption(options, LiteralStringRef("numBatches"), 100);
 		numActiveWatches = getOption(options, LiteralStringRef("numActiveWatches"), 100);
 		delayBetweenBatches = getOption(options, LiteralStringRef("delayBetweenBatches"), 5.0);
+		reuseKeys = getOption(options, LiteralStringRef("reuseKeys"), false);
 	}
 
 	Future<Void> setup(Database const&) override { return Void(); }
