@@ -1170,15 +1170,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 
 	init( FLOW_WITH_SWIFT,                                       false);
-	#ifdef WITH_SWIFT
-	FLOW_WITH_SWIFT = true;
-	printf("Enabled Swift support knob default via build configuration: FLOW_WITH_SWIFT=%s\n",
-		FLOW_WITH_SWIFT ? "ON" : "OFF");
-	#else
-	printf("Swift support knob disabled by default (build with -DWITH_SWIFT to enable): FLOW_WITH_SWIFT=%s\n",
-		FLOW_WITH_SWIFT ? "ON" : "OFF");
-	#endif // WITH_SWIFT
-
 
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.

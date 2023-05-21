@@ -540,46 +540,6 @@ static std::set<int> const& normalMasterErrors() {
 	return s;
 }
 
-SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
-									  Reference<AsyncVar<ServerDBInfo> const> db,
- 									  Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
- 									  ServerCoordinators coordinators,
- 									  LifetimeToken lifetime,
-									  bool forceRecovery) {
-
-	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
-	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
-		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
-		if (ccTimeout.isReady()) {
-			TraceEvent("MasterTerminated", mi.id())
-			    .detail("Reason", "Timeout")
-			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
-			    .detail("DBInfoInterface", db->get().clusterInterface.id());
-			return Void();
-		}
-	}
-
-	state Future<Void> onDBChange = Void();
-	wait(onDBChange);
-	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(new MasterData(
-	    db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-
-	auto promise = Promise<Void>();
-	fdbserver_swift::masterServerSwift(
-	    mi,
-	    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
-	    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
-	    coordinators,
-	    lifetime,
-	    forceRecovery,
-	    self.getPtr(),
-	    /*result=*/promise);
-	Future<Void> f = promise.getFuture();
-	wait(f);
-	return Void();
-}
-
 ACTOR Future<Void> masterServerCxx(MasterInterface mi,
                                    Reference<AsyncVar<ServerDBInfo> const> db,
                                    Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
@@ -665,6 +625,52 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 		throw err;
 	}
 }
+
+SWIFT_ACTOR Future<Void> masterServer(MasterInterface mi,
+                                      Reference<AsyncVar<ServerDBInfo> const> db,
+                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                      ServerCoordinators coordinators,
+                                      LifetimeToken lifetime,
+                                      bool forceRecovery) {
+
+	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
+	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
+		wait(ccInterface->onChange() || db->onChange() || ccTimeout);
+		if (ccTimeout.isReady()) {
+			TraceEvent("MasterTerminated", mi.id())
+			    .detail("Reason", "Timeout")
+			    .detail("CCInterface", ccInterface->get().present() ? ccInterface->get().get().id() : UID())
+			    .detail("DBInfoInterface", db->get().clusterInterface.id());
+			return Void();
+		}
+	}
+
+	state Future<Void> onDBChange = Void();
+	wait(onDBChange);
+	state PromiseStream<Future<Void>> addActor;
+	state Reference<MasterData> self(
+	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
+
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+		auto promise = Promise<Void>();
+		fdbserver_swift::masterServerSwift(
+		    mi,
+		    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
+		    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
+		    coordinators,
+		    lifetime,
+		    forceRecovery,
+		    self.getPtr(),
+		    /*result=*/promise);
+		Future<Void> f = promise.getFuture();
+		wait(f);
+		return Void();
+	} else {
+		wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
+	}
+	return Void();
+}
+
 
 TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
 	ASSERT_EQ(
