@@ -51,7 +51,7 @@ class RangeQueryIntegrationTest {
 		 */
 		try (Database db = fdb.open()) {
 			db.run(tr -> {
-				tr.clear(Range.startsWith(new byte[] { (byte)0x00 }));
+				tr.clear(new Range(new byte[] { (byte)0x00 }, new byte[] { (byte)0xff }));
 				return null;
 			});
 		}
