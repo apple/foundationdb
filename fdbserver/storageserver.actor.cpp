@@ -7453,9 +7453,8 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = false;
 			} else {
 				rows.more = true;
-				// no need to set readThrough, as the next read key range has to be the next chunkRange
+				rows.readThrough = KeyRef(rows.arena(), chunkRange.end);
 			}
-			ASSERT(!rows.readThrough.present());
 			results.send(rows);
 		}
 		results.sendError(end_of_stream()); // end of range read
