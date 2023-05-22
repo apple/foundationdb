@@ -55,13 +55,13 @@ TEST_CASE("/randomKeyValueUtils/generate") {
 
 	printNextN(RandomKeyTupleSetGenerator(
 	               RandomIntGenerator(10),
-	               RandomKeyTupleGenerator(
-	                   { RandomKeySetGenerator(
-	                         RandomIntGenerator(5),
-	                         RandomStringGenerator(RandomIntGenerator(5), RandomIntGenerator('a', 'c', false))),
-	                     RandomKeySetGenerator(RandomIntGenerator(5),
-	                                           RandomStringGenerator(RandomIntGenerator(3, 10, true),
-	                                                                 RandomIntGenerator('d', 'f', false))) })),
+	               RandomKeyTupleGenerator(std::vector<RandomKeySetGenerator>{
+	                   RandomKeySetGenerator(
+	                       RandomIntGenerator(5),
+	                       RandomStringGenerator(RandomIntGenerator(5), RandomIntGenerator('a', 'c', false))),
+	                   RandomKeySetGenerator(RandomIntGenerator(5),
+	                                         RandomStringGenerator(RandomIntGenerator(3, 10, true),
+	                                                               RandomIntGenerator('d', 'f', false))) })),
 	           10);
 
 	// Same as above in string form
