@@ -798,6 +798,8 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	void initializeSpecialCounters();
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
