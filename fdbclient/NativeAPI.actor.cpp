@@ -1441,6 +1441,11 @@ ACTOR Future<UID> getClusterId(Database db) {
 	return db->clientInfo->get().clusterId;
 }
 
+void DatabaseContext::initializeSpecialCounters() {
+	specialCounter(cc, "OutstandingWatches", [this] { return outstandingWatches; });
+	specialCounter(cc, "WatchMapSize", [this] { return watchMap.size(); });
+}
+
 DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnectionRecord>>> connectionRecord,
                                  Reference<AsyncVar<ClientDBInfo>> clientInfo,
                                  Reference<AsyncVar<Optional<ClientLeaderRegInterface>> const> coordinator,
@@ -1748,6 +1753,8 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	if (BUGGIFY) {
 		DatabaseContext::debugUseTags = true;
 	}
+
+	initializeSpecialCounters();
 }
 
 DatabaseContext::DatabaseContext(const Error& err)
@@ -1787,9 +1794,11 @@ DatabaseContext::DatabaseContext(const Error& err)
     feedErrors("FeedErrors", ccFeed), feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed),
     feedPops("FeedPops", ccFeed), feedPopsFallback("FeedPopsFallback", ccFeed), latencies(1000), readLatencies(1000),
     commitLatencies(1000), GRVLatencies(1000), mutationsPerCommit(1000), bytesPerCommit(1000), bgLatencies(1000),
-    bgGranulesPerRequest(1000), sharedStatePtr(nullptr), transactionTracingSample(false),
+    bgGranulesPerRequest(1000), outstandingWatches(0), sharedStatePtr(nullptr), transactionTracingSample(false),
     smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {}
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
+	initializeSpecialCounters();
+}
 
 // Static constructor used by server processes to create a DatabaseContext
 // For internal (fdbserver) use only
