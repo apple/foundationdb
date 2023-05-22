@@ -431,8 +431,8 @@ public:
 		}
 	}
 
-	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		ASSERT(TraceEvent::isNetworkThread() && !logTraceEventMetrics);
+	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
+		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch (severity) {
