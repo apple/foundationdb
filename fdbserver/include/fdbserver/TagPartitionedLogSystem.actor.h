@@ -46,16 +46,17 @@ struct OldLogData {
 	int32_t logRouterTags;
 	int32_t txsTags; // The number of txsTags, which may change across generations.
 	Version epochBegin, epochEnd;
+	Version recoverAt;
 	std::set<int8_t> pseudoLocalities;
 	LogEpoch epoch;
 
-	OldLogData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), epoch(0) {}
+	OldLogData() : logRouterTags(0), txsTags(0), epochBegin(0), epochEnd(0), recoverAt(0), epoch(0) {}
 
 	// Constructor for T of OldTLogConf and OldTLogCoreData
 	template <class T>
 	explicit OldLogData(const T& conf)
 	  : logRouterTags(conf.logRouterTags), txsTags(conf.txsTags), epochBegin(conf.epochBegin), epochEnd(conf.epochEnd),
-	    pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
+	    recoverAt(conf.recoverAt), pseudoLocalities(conf.pseudoLocalities), epoch(conf.epoch) {
 		tLogs.resize(conf.tLogs.size());
 		for (int j = 0; j < conf.tLogs.size(); j++) {
 			auto logSet = makeReference<LogSet>(conf.tLogs[j]);
@@ -363,7 +364,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         Version recoveryTransactionVersion,
 	                                         int8_t remoteLocality,
 	                                         std::vector<Tag> allTags,
-	                                         std::vector<Version> oldGenerationStartVersions);
+	                                         std::vector<Version> oldGenerationRecoverAtVersions);
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                                    RecruitFromConfigurationReply recr,
