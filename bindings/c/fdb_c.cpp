@@ -346,7 +346,8 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
                                                               float* server_busyness,
                                                               float* range_busyness) {
-	CATCH_AND_RETURN(ReadResultBase rr = TSAV(ReadResultBase, f)->get();
+	CATCH_AND_RETURN(ThreadSingleAssignmentVarBase* tsav = TSAVB(f);
+	                 ReadResultBase const& rr = tsav->getAndCast<ReadResultBase>();
 	                 ReadMetrics const& readMetrics = rr.getReadMetrics();
 	                 *server_busyness = readMetrics.getServerBusyness();
 	                 *range_busyness = readMetrics.getRangeBusyness(););

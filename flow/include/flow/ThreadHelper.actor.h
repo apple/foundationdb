@@ -334,6 +334,17 @@ public:
 			callback->destroy();
 	}
 
+	template <class T>
+	T getAndCast() {
+		ThreadSpinLockHolder holder(mutex);
+		if (!isReadyUnsafe())
+			throw future_not_set();
+		if (isErrorUnsafe())
+			throw error;
+
+		return *static_cast<const T*>(getValuePtrUnsafe());
+	}
+
 	virtual void addref() = 0;
 	virtual void delref() = 0;
 
@@ -501,6 +512,10 @@ protected:
 		this->addref();
 		cancel();
 	}
+
+	// Get a pointer to the value held by the subclass. This can be used to access the underlying value with a
+	// polymorphic type.
+	virtual const void* getValuePtrUnsafe() = 0;
 };
 
 template <class T>
@@ -523,6 +538,8 @@ public:
 		addValueReferenceUnsafe();
 		return value;
 	}
+
+	const void* getValuePtrUnsafe() override { return static_cast<void*>(&value); }
 
 	void addref() override { ThreadSafeReferenceCounted<ThreadSingleAssignmentVar<T>>::addref(); }
 

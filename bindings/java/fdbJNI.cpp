@@ -508,13 +508,13 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResults_FutureResult
 		return JNI_NULL;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
+	float serverBusyness = 0.0;
+	float rangeBusyness = 0.0;
+	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return JNI_NULL;
-	}
+	    safeThrow(jenv, getThrowable(jenv, err));
+	    return JNI_NULL;
+	}*/
 
 	int totalKeyValueSize = 0;
 	for (int i = 0; i < count; i++) {
@@ -617,13 +617,13 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureMappedResults_Future
 		return JNI_NULL;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
+	float serverBusyness = 0.0;
+	float rangeBusyness = 0.0;
+	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return JNI_NULL;
-	}
+	    safeThrow(jenv, getThrowable(jenv, err));
+	    return JNI_NULL;
+	}*/
 
 	jobjectArray mrr_values = jenv->NewObjectArray(count, mapped_key_value_class, NULL);
 	if (!mrr_values) {
@@ -803,13 +803,13 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyResult_FutureKeyR
 		return JNI_NULL;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
+	float serverBusyness = 0.0;
+	float rangeBusyness = 0.0;
+	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return JNI_NULL;
-	}
+	    safeThrow(jenv, getThrowable(jenv, err));
+	    return JNI_NULL;
+	}*/
 
 	jbyteArray key = jenv->NewByteArray(length);
 	if (!key) {
@@ -1776,13 +1776,13 @@ JNIEXPORT void JNICALL Java_com_apple_foundationdb_FutureResults_FutureResults_1
 		return;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
+	float serverBusyness = 0.0;
+	float rangeBusyness = 0.0;
+	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return;
-	}
+	    safeThrow(jenv, getThrowable(jenv, err));
+	    return;
+	}*/
 
 	// Capacity for Metadata+Keys+Values
 	//  => sizeof(jint) for total key/value pairs
@@ -1869,13 +1869,13 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 		return;
 	}
 
-	float serverBusyness;
-	float rangeBusyness;
-	err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
+	float serverBusyness = 0.0;
+	float rangeBusyness = 0.0;
+	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
 		safeThrow(jenv, getThrowable(jenv, err));
 		return;
-	}
+	}*/
 
 	int totalCapacityNeeded = 2 * sizeof(jint) + 2 * sizeof(jfloat);
 	for (int i = 0; i < count; i++) {
