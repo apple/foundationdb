@@ -171,8 +171,19 @@ Version figureVersion(Version current,
 
 
 SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
-	wait(future);
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+		auto future = self->swiftImpl->waitForPrev(self.getPtr(), req);
+		wait(future);
+	} else {
+		state double startTime = now();
+		wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+		double latency = now() - startTime;
+		self->waitForPrevLatencies.addMeasurement(latency);
+		++self->waitForPrevCommitRequests;
+		updateLiveCommittedVersion(self, req);
+		req.reply.send(Void());
+	}
+
 	return Void();
 }
 
