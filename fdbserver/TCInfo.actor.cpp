@@ -416,7 +416,7 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 }
 
 double TCTeamInfo::getAverageCPU() const {
-	return servers.empty() ? 0.0 : smoothCPU.smoothTotal();
+	return smoothCPU.smoothTotal();
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
