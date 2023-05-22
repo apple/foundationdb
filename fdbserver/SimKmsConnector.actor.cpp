@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/SimKmsVault.h"
 
 #include "fdbrpc/sim_validation.h"
@@ -53,10 +54,6 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #define DEBUG_SIM_KEY_CIPHER DEBUG_ENCRYPT_KEY_CIPHER
-
-// The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
-// restarts. Keep it as global static state in simulation.
-static std::unordered_map<BlobMetadataDomainId, Standalone<BlobMetadataDetailsRef>> simBlobMetadataStore;
 
 namespace {
 Optional<int64_t> getRefreshInterval(const int64_t now, const int64_t defaultTtl) {
@@ -192,18 +189,9 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 	}
 
 	for (auto const domainId : req.domainIds) {
-		auto it = simBlobMetadataStore.find(domainId);
-		if (it == simBlobMetadataStore.end()) {
-			// construct new blob metadata
-			it = simBlobMetadataStore.insert({ domainId, createRandomTestBlobMetadata(SERVER_KNOBS->BG_URL, domainId) })
-			         .first;
-		} else if (now() >= it->second.expireAt) {
-			// update random refresh and expire time
-			it->second.refreshAt = now() + deterministicRandom()->random01() * 30;
-			it->second.expireAt = it->second.refreshAt + deterministicRandom()->random01() * 10;
-		}
-		rep.metadataDetails.arena().dependsOn(it->second.arena());
-		rep.metadataDetails.push_back(rep.metadataDetails.arena(), it->second);
+		Standalone<BlobMetadataDetailsRef> metadataRef = SimKmsVault::getBlobMetadata(domainId, SERVER_KNOBS->BG_URL);
+		rep.metadataDetails.arena().dependsOn(metadataRef.arena());
+		rep.metadataDetails.push_back(rep.metadataDetails.arena(), metadataRef);
 	}
 
 	wait(delay(deterministicRandom()->random01())); // simulate network delay
