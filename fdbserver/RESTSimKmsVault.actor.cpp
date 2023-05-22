@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbserver/RESTSimKmsVault.h"
 #include "fdbclient/SimKmsVault.h"
 #include "fdbrpc/HTTP.h"
@@ -35,6 +36,7 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
+#include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using DomIdVec = std::vector<EncryptCipherDomainId>;
@@ -49,6 +51,8 @@ const std::string invalidVersionMsg = "Invalid version";
 const std::string invalidVersionCode = "5678";
 const std::string missingTokensMsg = "Missing validation tokens";
 const std::string missingTokenCode = "0123";
+
+const std::string bgUrl = "file://simfdb/fdbblob/";
 
 struct VaultResponse {
 	bool failed;
@@ -127,7 +131,6 @@ void prepareErrorResponse(VaultResponse* response,
 bool extractVersion(const rapidjson::Document& doc, VaultResponse* response, int* version) {
 	// check version tag sanityrest_malformed_response
 	if (!doc.HasMember(REQUEST_VERSION_TAG) || !doc[REQUEST_VERSION_TAG].IsInt()) {
-		TraceEvent("What").detail("One", doc.HasMember(REQUEST_VERSION_TAG));
 		prepareErrorResponse(response, ErrorDetail(missingVersionCode, missingVersionMsg));
 		CODE_PROBE(true, "RESTSimKmsVault missing version");
 		return false;
@@ -201,6 +204,39 @@ void addCipherDetailToRespDoc(rapidjson::Document& doc,
 	cipherDetails.PushBack(cipherDetail, doc.GetAllocator());
 }
 
+void addBlobMetadaToResDoc(rapidjson::Document& doc, rapidjson::Value& blobDetails, const EncryptCipherDomainId domId) {
+	Standalone<BlobMetadataDetailsRef> detailsRef = SimKmsVault::getBlobMetadata(domId, bgUrl);
+	rapidjson::Value blobDetail(rapidjson::kObjectType);
+
+	rapidjson::Value key(BLOB_METADATA_DOMAIN_ID_TAG, doc.GetAllocator());
+	rapidjson::Value domainId;
+	domainId.SetInt64(domId);
+	blobDetail.AddMember(key, domainId, doc.GetAllocator());
+
+	rapidjson::Value locations(rapidjson::kArrayType);
+	for (const auto& loc : detailsRef.locations) {
+		rapidjson::Value location(rapidjson::kObjectType);
+
+		// set location-id
+		key.SetString(BLOB_METADATA_LOCATION_ID_TAG, doc.GetAllocator());
+		rapidjson::Value id;
+		id.SetInt64(loc.locationId);
+		location.AddMember(key, id, doc.GetAllocator());
+
+		// set location-path
+		key.SetString(BLOB_METADATA_LOCATION_PATH_TAG, doc.GetAllocator());
+		rapidjson::Value path;
+		path.SetString(reinterpret_cast<const char*>(loc.path.begin()), loc.path.size(), doc.GetAllocator());
+		location.AddMember(key, path, doc.GetAllocator());
+
+		locations.PushBack(location, doc.GetAllocator());
+	}
+	key.SetString(BLOB_METADATA_LOCATIONS_TAG, doc.GetAllocator());
+	blobDetail.AddMember(key, locations, doc.GetAllocator());
+
+	blobDetails.PushBack(blobDetail, doc.GetAllocator());
+}
+
 void addKmsUrlsToDoc(rapidjson::Document& doc) {
 	rapidjson::Value kmsUrls(rapidjson::kArrayType);
 	// FIXME: fetch latest KMS URLs && append to the doc
@@ -258,7 +294,7 @@ VaultResponse handleFetchKeysByDomainIds(const std::string& content) {
 
 	ASSERT(!response.failed);
 	response.buff = std::string(sb.GetString(), sb.GetSize());
-	//TraceEvent("ResponeStr").detail("Str", response->buff);
+	//TraceEvent(SevDebug, "FetchByDomainIdsResponseStr").detail("Str", response->buff);
 	return response;
 }
 
@@ -316,7 +352,59 @@ VaultResponse handleFetchKeysByKeyIds(const std::string& content) {
 
 	ASSERT(!response.failed);
 	response.buff = std::string(sb.GetString(), sb.GetSize());
-	TraceEvent("ResponeStr").detail("Str", response.buff);
+	//TraceEvent(SevDebug, "FetchByKeyIdsResponseStr").detail("Str", response.buff);
+	return response;
+}
+
+VaultResponse handleFetchBlobMetada(const std::string& content) {
+	VaultResponse response;
+	rapidjson::Document doc;
+
+	doc.Parse(content.data());
+
+	int version;
+
+	if (!extractVersion(doc, &response, &version)) {
+		// Return HTTP::HTTP_STATUS_CODE_OK with appropriate 'error' details
+		ASSERT(response.failed);
+		return response;
+	}
+	ASSERT(!response.failed);
+
+	if (!checkValidationTokens(doc, version, &response)) {
+		// Return HTTP::HTTP_STATUS_CODE_OK with appropriate 'error' details
+		ASSERT(response.failed);
+		return response;
+	}
+	ASSERT(!response.failed);
+
+	rapidjson::Document result;
+	result.SetObject();
+
+	// Append 'request version'
+	addVersionToDoc(result, version);
+
+	// Append 'blob_metadata_details' as json array
+	rapidjson::Value blobDetails(rapidjson::kArrayType);
+	for (const auto& blobDetail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
+		EncryptCipherDomainId domainId = blobDetail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64();
+		addBlobMetadaToResDoc(doc, blobDetails, domainId);
+	}
+	rapidjson::Value memberKey(BLOB_METADATA_DETAILS_TAG, result.GetAllocator());
+	result.AddMember(memberKey, blobDetails, result.GetAllocator());
+
+	if (doc.HasMember(KMS_URLS_TAG) && doc[KMS_URLS_TAG].GetBool()) {
+		addKmsUrlsToDoc(result);
+	}
+
+	// Serialize json to string
+	rapidjson::StringBuffer sb;
+	rapidjson::Writer<rapidjson::StringBuffer> writer(sb);
+	result.Accept(writer);
+
+	ASSERT(!response.failed);
+	response.buff = std::string(sb.GetString(), sb.GetSize());
+	//TraceEvent(SevDebug, "FetchBlobMetadataResponeStr").detail("Str", response.buff);
 	return response;
 }
 
@@ -328,10 +416,12 @@ ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> re
 	validateHeaders(request->data.headers);
 
 	state VaultResponse vaultResponse;
-	if (request->resource.compare("/get-encryption-keys-by-key-ids") == 0) {
+	if (request->resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE) == 0) {
 		vaultResponse = handleFetchKeysByKeyIds(request->data.content);
-	} else if (request->resource.compare("/get-encryption-keys-by-domain-ids") == 0) {
+	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE) == 0) {
 		vaultResponse = handleFetchKeysByDomainIds(request->data.content);
+	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE) == 0) {
+		vaultResponse = handleFetchBlobMetada(request->data.content);
 	} else {
 		TraceEvent("UnexpectedResource").detail("Resource", request->resource);
 		throw http_bad_response();
@@ -377,7 +467,10 @@ void constructDomainIds(EncryptCipherDomainIdVec& domIds) {
 	}
 }
 
-std::string getFakeDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds, FaultType fault = FaultType::NONE) {
+std::string getFakeDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds,
+                                           const char* rootTag,
+                                           const char* elementTag,
+                                           FaultType fault = FaultType::NONE) {
 	rapidjson::Document doc;
 	doc.SetObject();
 
@@ -394,7 +487,7 @@ std::string getFakeDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds, Fau
 	}
 
 	constructDomainIds(domIds);
-	addLatestDomainDetailsToDoc(doc, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, domIds);
+	addLatestDomainDetailsToDoc(doc, rootTag, elementTag, domIds);
 
 	addRefreshKmsUrlsSectionToJsonDoc(doc, deterministicRandom()->coinflip());
 
@@ -408,8 +501,19 @@ std::string getFakeDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds, Fau
 	doc.Accept(writer);
 
 	std::string resp(sb.GetString(), sb.GetSize());
-	TraceEvent("Request").detail("Str", resp);
+	/*TraceEvent(SevDebug, "FakeDomainIdsRequest")
+	    .detail("Str", resp)
+	    .detail("RootTag", rootTag)
+	    .detail("ElementTag", elementTag);*/
 	return resp;
+}
+
+std::string getFakeEncryptDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds, FaultType fault = FaultType::NONE) {
+	return getFakeDomainIdsRequestContent(domIds, CIPHER_KEY_DETAILS_TAG, ENCRYPT_DOMAIN_ID_TAG, fault);
+}
+
+std::string getFakeBlobDomainIdsRequestContent(EncryptCipherDomainIdVec& domIds, FaultType fault = FaultType::NONE) {
+	return getFakeDomainIdsRequestContent(domIds, BLOB_METADATA_DETAILS_TAG, BLOB_METADATA_DOMAIN_ID_TAG, fault);
 }
 
 std::string getFakeBaseCipherIdsRequestContent(EncryptCipherDomainIdVec& domIds, FaultType fault = FaultType::NONE) {
@@ -449,7 +553,7 @@ std::string getFakeBaseCipherIdsRequestContent(EncryptCipherDomainIdVec& domIds,
 	doc.Accept(writer);
 
 	std::string resp(sb.GetString(), sb.GetSize());
-	TraceEvent("Request").detail("Str", resp);
+	//TraceEvent(SevDebug, "FakeKeyIdsRequest").detail("Str", resp);
 	return resp;
 }
 
@@ -459,10 +563,10 @@ Optional<ErrorDetail> getErrorDetail(const std::string& buff) {
 	return RESTKmsConnectorUtils::getError(doc);
 }
 
-void validateLookup(const VaultResponse& response, const EncryptCipherDomainIdVec& domIds) {
+void validateEncryptLookup(const VaultResponse& response, const EncryptCipherDomainIdVec& domIds) {
 	ASSERT(!response.failed);
 
-	TraceEvent("VaultResponse").detail("Str", response.buff);
+	//TraceEvent(SevDebug, "VaultEncryptResponse").detail("Str", response.buff);
 
 	rapidjson::Document doc;
 	doc.Parse(response.buff.data());
@@ -485,6 +589,44 @@ void validateLookup(const VaultResponse& response, const EncryptCipherDomainIdVe
 		ASSERT_EQ(keyCtx->key.compare(cipherKeyRef), 0);
 		const int64_t refreshAfterSec = cipherDetail[REFRESH_AFTER_SEC].GetInt64();
 		const int64_t expireAfterSec = cipherDetail[EXPIRE_AFTER_SEC].GetInt64();
+		ASSERT(refreshAfterSec <= expireAfterSec || expireAfterSec == -1);
+		count++;
+	}
+	ASSERT_EQ(count, domIds.size());
+}
+
+void validateBlobLookup(const VaultResponse& response, const EncryptCipherDomainIdVec& domIds) {
+	ASSERT(!response.failed);
+
+	//TraceEvent(SevDebug, "VaultBlobResponse").detail("Str", response.buff);
+
+	rapidjson::Document doc;
+	doc.Parse(response.buff.data());
+
+	ASSERT(doc.HasMember(BLOB_METADATA_DETAILS_TAG) && doc[BLOB_METADATA_DETAILS_TAG].IsArray());
+
+	std::unordered_set<EncryptCipherDomainId> domIdSet(domIds.begin(), domIds.end());
+	int count = 0;
+	for (const auto& blobDetail : doc[BLOB_METADATA_DETAILS_TAG].GetArray()) {
+		EncryptCipherDomainId domainId = blobDetail[BLOB_METADATA_DOMAIN_ID_TAG].GetInt64();
+		Standalone<BlobMetadataDetailsRef> details = SimKmsVault::getBlobMetadata(domainId, bgUrl);
+
+		std::unordered_map<BlobMetadataLocationId, Standalone<StringRef>> locMap;
+		for (const auto& loc : details.locations) {
+			locMap[loc.locationId] = loc.path;
+		}
+		for (const auto& location : blobDetail[BLOB_METADATA_LOCATIONS_TAG].GetArray()) {
+			BlobMetadataLocationId locationId = location[BLOB_METADATA_LOCATION_ID_TAG].GetInt64();
+			Standalone<StringRef> path = makeString(location[BLOB_METADATA_LOCATION_PATH_TAG].GetStringLength());
+			memcpy(mutateString(path),
+			       location[BLOB_METADATA_LOCATION_PATH_TAG].GetString(),
+			       location[BLOB_METADATA_LOCATION_PATH_TAG].GetStringLength());
+			auto it = locMap.find(locationId);
+			ASSERT(it != locMap.end());
+			ASSERT_EQ(it->second.compare(path), 0);
+		}
+		const int64_t refreshAfterSec = blobDetail[REFRESH_AFTER_SEC].GetInt64();
+		const int64_t expireAfterSec = blobDetail[EXPIRE_AFTER_SEC].GetInt64();
 		ASSERT(refreshAfterSec <= expireAfterSec || expireAfterSec == -1);
 		count++;
 	}
@@ -528,7 +670,7 @@ TEST_CASE("/restSimKmsVault/invalidHeader") {
 
 TEST_CASE("/restSimKmsVault/GetByDomainIds/missingVersion") {
 	EncryptCipherDomainIdVec domIds;
-	std::string requestContent = getFakeDomainIdsRequestContent(domIds, FaultType::MISSING_VERSION);
+	std::string requestContent = getFakeEncryptDomainIdsRequestContent(domIds, FaultType::MISSING_VERSION);
 	VaultResponse response = handleFetchKeysByDomainIds(requestContent);
 	ASSERT(response.failed);
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
@@ -540,7 +682,7 @@ TEST_CASE("/restSimKmsVault/GetByDomainIds/missingVersion") {
 
 TEST_CASE("/restSimKmsVault/GetByDomainIds/invalidVersion") {
 	EncryptCipherDomainIdVec domIds;
-	std::string requestContent = getFakeDomainIdsRequestContent(domIds, FaultType::INVALID_VERSION);
+	std::string requestContent = getFakeEncryptDomainIdsRequestContent(domIds, FaultType::INVALID_VERSION);
 	VaultResponse response = handleFetchKeysByDomainIds(requestContent);
 	ASSERT(response.failed);
 	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
@@ -552,7 +694,7 @@ TEST_CASE("/restSimKmsVault/GetByDomainIds/invalidVersion") {
 
 TEST_CASE("/restSimKmsVault/GetByDomainIds/missingValidationTokens") {
 	EncryptCipherDomainIdVec domIds;
-	std::string requestContent = getFakeDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
+	std::string requestContent = getFakeEncryptDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
 
 	VaultResponse response = handleFetchKeysByDomainIds(requestContent);
 	ASSERT(response.failed);
@@ -565,10 +707,10 @@ TEST_CASE("/restSimKmsVault/GetByDomainIds/missingValidationTokens") {
 
 TEST_CASE("/restSimKmsVault/GetByDomainIds") {
 	EncryptCipherDomainIdVec domIds;
-	std::string requestContent = getFakeDomainIdsRequestContent(domIds);
+	std::string requestContent = getFakeEncryptDomainIdsRequestContent(domIds);
 
 	VaultResponse response = handleFetchKeysByDomainIds(requestContent);
-	validateLookup(response, domIds);
+	validateEncryptLookup(response, domIds);
 	return Void();
 }
 
@@ -616,6 +758,54 @@ TEST_CASE("/restSimKmsVault/GetByKeyIds") {
 	std::string requestContent = getFakeBaseCipherIdsRequestContent(domIds);
 
 	VaultResponse response = handleFetchKeysByKeyIds(requestContent);
-	validateLookup(response, domIds);
+	validateEncryptLookup(response, domIds);
+	return Void();
+}
+
+TEST_CASE("/restSimKmsVault/GetBlobMetadata/missingVersion") {
+	EncryptCipherDomainIdVec domIds;
+	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VERSION);
+
+	VaultResponse response = handleFetchBlobMetada(requestContent);
+	ASSERT(response.failed);
+	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
+	ASSERT(detail.present());
+	ASSERT(detail->isEqual(ErrorDetail(missingVersionCode, missingVersionMsg)));
+
+	return Void();
+}
+
+TEST_CASE("/restSimKmsVault/GetBlobMetadata/invalidVersion") {
+	EncryptCipherDomainIdVec domIds;
+	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::INVALID_VERSION);
+
+	VaultResponse response = handleFetchBlobMetada(requestContent);
+	ASSERT(response.failed);
+	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
+	ASSERT(detail.present());
+	ASSERT(detail->isEqual(ErrorDetail(invalidVersionCode, invalidVersionMsg)));
+
+	return Void();
+}
+
+TEST_CASE("/restSimKmsVault/GetByKeyIds/missingValidationTokens") {
+	EncryptCipherDomainIdVec domIds;
+	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds, FaultType::MISSING_VALIDATION_TOKEN);
+
+	VaultResponse response = handleFetchBlobMetada(requestContent);
+	ASSERT(response.failed);
+	Optional<ErrorDetail> detail = getErrorDetail(response.buff);
+	ASSERT(detail.present());
+	ASSERT(detail->isEqual(ErrorDetail(missingTokenCode, missingTokensMsg)));
+
+	return Void();
+}
+
+TEST_CASE("/restSimKmsVault/GetBlobMetadata/foo") {
+	EncryptCipherDomainIdVec domIds;
+	std::string requestContent = getFakeBlobDomainIdsRequestContent(domIds);
+
+	VaultResponse response = handleFetchBlobMetada(requestContent);
+	validateBlobLookup(response, domIds);
 	return Void();
 }
