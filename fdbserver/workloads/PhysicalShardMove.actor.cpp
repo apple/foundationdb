@@ -126,8 +126,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::vector<KeyRange> checkpointRanges;
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
-		// &kvs));
 
 		// Move range [TestKeyD, TestKeyF) to sh0;
 		includes.insert(teamA.begin(), teamA.end());
@@ -156,8 +154,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
-		// wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::False,
-		// &kvs));
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
 		includes.insert(teamA.begin(), teamA.end());
@@ -214,6 +210,43 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			int _ = wait(setDDMode(cx, 1));
 			(void)_;
 		}
+		return Void();
+	}
+
+	ACTOR Future<Void> deleteCheckpoints(Database cx, std::vector<UID> checkpointIds) {
+		TraceEvent(SevDebug, "DataMoveDeleteCheckpoints").detail("Checkpoints", describe(checkpointIds));
+
+		state Transaction tr(cx);
+		loop {
+			try {
+				std::vector<Future<Optional<Value>>> checkpointEntries;
+				for (const UID& id : checkpointIds) {
+					checkpointEntries.push_back(tr.get(checkpointKeyFor(id)));
+				}
+				std::vector<Optional<Value>> checkpointValues = wait(getAll(checkpointEntries));
+
+				for (int i = 0; i < checkpointIds.size(); ++i) {
+					const auto& value = checkpointValues[i];
+					if (!value.present()) {
+						TraceEvent(SevWarnAlways, "CheckpointNotFound");
+						continue;
+					}
+					CheckpointMetaData checkpoint = decodeCheckpointValue(value.get());
+					const Key key = checkpointKeyFor(checkpoint.checkpointID);
+					// Setting the state as CheckpointMetaData::Deleting will trigger private mutations to instruct
+					// all storage servers to delete their local checkpoints.
+					checkpoint.setState(CheckpointMetaData::Deleting);
+					tr.set(key, checkpointValue(checkpoint));
+					tr.clear(singleKeyRange(key));
+					TraceEvent(SevDebug, "DataMoveDeleteCheckpoint").detail("Checkpoint", checkpoint.toString());
+				}
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
 		return Void();
 	}
 
@@ -304,6 +337,12 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				TraceEvent("TestFetchCheckpointError").errorUnsuppressed(e);
 			}
 		}
+
+		std::vector<UID> checkpointIds;
+		for (const auto& it : records) {
+			checkpointIds.push_back(it.second.checkpointID);
+		}
+		wait(self->deleteCheckpoints(cx, checkpointIds));
 
 		// Restore KVS.
 		state std::string rocksDBTestDir = "rocksdb-kvstore-test-restored-db";
@@ -484,9 +523,8 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		return version;
 	}
 
-	// Move keys to a random selected team consisting of a single SS, after disabling DD, so that keys won't be
-	// kept in the new team until DD is enabled.
-	// Returns the address of the single SS of the new team.
+	// Move keys to a random selected team consisting of a single SS, this requires DD is disabled to prevent shards
+	// being moved by DD automatically. Returns the address of the single SS of the new team.
 	ACTOR Future<std::vector<UID>> moveShard(PhysicalShardMoveWorkLoad* self,
 	                                         Database cx,
 	                                         UID dataMoveId,
@@ -494,9 +532,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 	                                         int teamSize,
 	                                         std::unordered_set<UID> includes,
 	                                         std::unordered_set<UID> excludes) {
-		// Disable DD to avoid DD undoing of our move.
-		int ignore = wait(setDDMode(cx, 0));
-
 		// Pick a random SS as the dest, keys will reside on a single server after the move.
 		std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
 		ASSERT(interfs.size() > teamSize - includes.size());

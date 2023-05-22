@@ -1226,11 +1226,13 @@ ACTOR Future<Void> tLogPopCore(TLogData* self, Tag inputTag, Version to, Referen
 			// start version of the second earliest generation. If `upTo` > secondEarliestGenStartVersion, the earliest
 			// generation is no longer needed for `tag`.
 			// When there is only one old generation left, GC that generation uses `recoveryComplete` mechanism.
-			std::vector<Version>* unpoppedGen = &(logData->tagUnpoppedOldGenerations[tag]);
 			bool poppedGen = false;
-			while (unpoppedGen->size() > 1 && ((*unpoppedGen)[unpoppedGen->size() - 2] < upTo)) {
-				unpoppedGen->pop_back();
-				poppedGen = true;
+			if (logData->tagUnpoppedOldGenerations.find(tag) != logData->tagUnpoppedOldGenerations.end()) {
+				std::vector<Version>* unpoppedGen = &(logData->tagUnpoppedOldGenerations[tag]);
+				while (unpoppedGen->size() > 1 && ((*unpoppedGen)[unpoppedGen->size() - 2] < upTo)) {
+					unpoppedGen->pop_back();
+					poppedGen = true;
+				}
 			}
 			if (poppedGen) {
 				logData->updateGenerationRecovery.trigger();
@@ -2598,15 +2600,21 @@ ACTOR Future<Void> respondToRecovered(TLogInterface tli, Promise<Void> recoveryC
 
 ACTOR Future<Void> trackRecoveryReq(TLogInterface tli, TrackTLogRecoveryRequest req, Reference<LogData> logData) {
 	loop {
-		Version oldestGenerationStartVersion = MAX_VERSION;
+		Version oldestGenerationRecoverAtVersion = invalidVersion;
 		for (const auto& [tag, genVersions] : logData->tagUnpoppedOldGenerations) {
-			oldestGenerationStartVersion = std::min(genVersions.back(), oldestGenerationStartVersion);
+			ASSERT(!genVersions.empty());
+			if (oldestGenerationRecoverAtVersion == invalidVersion) {
+				oldestGenerationRecoverAtVersion = genVersions.back();
+			} else {
+				oldestGenerationRecoverAtVersion = std::min(genVersions.back(), oldestGenerationRecoverAtVersion);
+			}
 		}
 
-		if (req.oldestGenStartVersion < oldestGenerationStartVersion) {
+		if (req.oldestGenRecoverAtVersion < oldestGenerationRecoverAtVersion) {
 			TraceEvent("TLogRespondRecoveredVersion", tli.id())
-			    .detail("RecoveredVersion", oldestGenerationStartVersion);
-			req.reply.send(TrackTLogRecoveryReply(oldestGenerationStartVersion));
+			    .detail("KnownOldestGenRecoverAtVersion", req.oldestGenRecoverAtVersion)
+			    .detail("RecoveredVersion", oldestGenerationRecoverAtVersion);
+			req.reply.send(TrackTLogRecoveryReply(oldestGenerationRecoverAtVersion));
 			break;
 		}
 
@@ -3581,8 +3589,10 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 
 			logData->unpoppedRecoveredTagCount = req.allTags.size();
 			logData->unpoppedRecoveredTags = std::set<Tag>(req.allTags.begin(), req.allTags.end());
-			for (const auto& tag : req.allTags) {
-				logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationStartVersions);
+			if (!req.oldGenerationRecoverAtVersions.empty()) {
+				for (const auto& tag : req.allTags) {
+					logData->tagUnpoppedOldGenerations.emplace(tag, req.oldGenerationRecoverAtVersions);
+				}
 			}
 			wait(ioTimeoutError(initPersistentState(self, logData) || logData->removed,
 			                    SERVER_KNOBS->TLOG_MAX_CREATE_DURATION,
@@ -3596,7 +3606,7 @@ ACTOR Future<Void> tLogStart(TLogData* self, InitializeTLogRequest req, Locality
 			    .detail("Tags", describe(req.recoverTags))
 			    .detail("Locality", req.locality)
 			    .detail("LogRouterTags", logData->logRouterTags)
-			    .detail("OldGenerationStartVersions", describe(req.oldGenerationStartVersions));
+			    .detail("OldGenerationRecoverAtVersions", describe(req.oldGenerationRecoverAtVersions));
 
 			if (logData->recoveryComplete.isSet()) {
 				throw worker_removed();

@@ -369,49 +369,6 @@ struct BlobManifestTailer {
 	}
 };
 
-// Defines blob restore state
-enum BlobRestorePhase {
-	INIT = 0,
-	STARTING_MIGRATOR = 1,
-	LOADING_MANIFEST = 2,
-	LOADED_MANIFEST = 3,
-	COPYING_DATA = 4,
-	APPLYING_MLOGS = 5,
-	DONE = 6,
-	ERROR = 7,
-	MAX = 8
-};
-struct BlobRestoreState {
-	constexpr static FileIdentifier file_identifier = 378657;
-	BlobRestorePhase phase;
-	int progress;
-	VectorRef<int64_t> phaseStartTs;
-	Optional<StringRef> error;
-
-	BlobRestoreState() : phase(BlobRestorePhase::INIT), progress(0){};
-	BlobRestoreState(BlobRestorePhase phase) : phase(phase), progress(0){};
-	BlobRestoreState(BlobRestorePhase phase, int progress) : phase(phase), progress(progress){};
-	BlobRestoreState(StringRef errorMessage) : phase(BlobRestorePhase::ERROR), progress(0), error(errorMessage){};
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, phase, progress, phaseStartTs, error);
-	}
-};
-
-struct BlobRestoreArg {
-	constexpr static FileIdentifier file_identifier = 947689;
-	Optional<Version> version;
-
-	BlobRestoreArg() {}
-	BlobRestoreArg(Optional<Version> v) : version(v){};
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, version);
-	}
-};
-
 // Value of blob range change log.
 struct BlobRangeChangeLogRef {
 	constexpr static FileIdentifier file_identifier = 9774587;

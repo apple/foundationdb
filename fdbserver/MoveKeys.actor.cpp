@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
 #include "flow/Util.h"
@@ -29,6 +30,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -1515,6 +1517,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
+						dataMove.src.insert(src.begin(), src.end());
+
 						if (physicalShardMoveEnabled(dataMoveId)) {
 							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
 							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
@@ -1532,7 +1536,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							    .detail("SrcServers", describe(src))
 							    .detail("ReadVersion", tr.getReadVersion().get());
 						}
-						dataMove.src.insert(src.begin(), src.end());
 					}
 
 					// Remove old dests from serverKeys.
@@ -1950,7 +1953,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+							wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						}
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", dataMoveId)
@@ -2702,7 +2707,9 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
-					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					}
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
 					TraceEvent(sevDm, "CleanUpDataMoveDeleteMetaData", dataMoveId)
@@ -2763,15 +2770,18 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
 		if (e.code() == error_code_retry_clean_up_datamove_tombstone_added) {
-			TraceEvent(sevDm, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
-			ASSERT_WE_THINK(addCleanUpDataMoveActor.present());
-			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-			                                                             dataMoveId,
-			                                                             lock,
-			                                                             cleanUpDataMoveParallelismLock,
-			                                                             keys,
-			                                                             ddEnabledState,
-			                                                             /*backgroundDelaySeconds=*/10));
+			if (addCleanUpDataMoveActor.present()) {
+				TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
+				addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
+				                                                             dataMoveId,
+				                                                             lock,
+				                                                             cleanUpDataMoveParallelismLock,
+				                                                             keys,
+				                                                             ddEnabledState,
+				                                                             /*backgroundDelaySeconds=*/10));
+			} else {
+				TraceEvent(SevWarn, "CleanUpDataMoveNotFound", dataMoveId).errorUnsuppressed(e);
+			}
 		} else {
 			TraceEvent(sevDm, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
 			throw e;
@@ -3013,6 +3023,13 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			wait(checkPersistentMoveKeysLock(&tr, lock));
+			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
+			if (currentOwnerId != bmId) {
+				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
+				dprint("Blob migrator {} is replaced by {}\n", bmId.toString(), currentOwnerId.toString());
+				TraceEvent("BlobMigratorReplaced", traceId).detail("Current", currentOwnerId).detail("BM", bmId);
+				throw blob_migrator_replaced();
+			}
 			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
 			wait(assignKeysToServer(traceId, &tr, keys, bmId));
 			wait(tr.commit());
