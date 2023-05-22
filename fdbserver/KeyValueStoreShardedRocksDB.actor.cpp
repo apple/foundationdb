@@ -477,6 +477,9 @@ rocksdb::Options getOptions() {
 	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
 		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
 	}
+
+	options.skip_stats_update_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
+	options.skip_checking_sst_file_sizes_on_db_open = SERVER_KNOBS->ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 	return options;
 }
 
