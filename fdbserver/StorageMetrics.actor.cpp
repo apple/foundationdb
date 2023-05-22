@@ -102,8 +102,11 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	result.bytesWrittenPerKSecond =
 	    bytesWriteSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+
 	result.bytesReadPerKSecond =
 	    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	result.opsReadPerKSecond =
+	    opsReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	return result;
 }
 
@@ -225,6 +228,11 @@ void StorageServerMetrics::poll() {
 		StorageMetrics m;
 		m.bytesReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		bytesReadSample.poll(waitMetricsMap, m);
+	}
+	{
+		StorageMetrics m;
+		m.opsReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		opsReadSample.poll(waitMetricsMap, m);
 	}
 	// bytesSample doesn't need polling because we never call addExpire() on it
 }
