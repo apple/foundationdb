@@ -836,7 +836,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 									if (!isExpectedTSSMismatch && !isFailed) {
 										testFailure("Data inconsistent", performQuiescentChecks, success, true);
-									} else {
+									} else if (isFailed) {
 										// If the storage servers are not live, we should retry.
 										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
 										    .detail("StorageServer0", storageServerInterfaces[firstValidServer].id())
