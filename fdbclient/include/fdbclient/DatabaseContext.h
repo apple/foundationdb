@@ -793,6 +793,8 @@ private:
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
 	double backoffDelay = 0.0;
+
+	void initializeSpecialCounters();
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.
