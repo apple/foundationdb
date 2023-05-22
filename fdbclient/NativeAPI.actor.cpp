@@ -2305,8 +2305,6 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		                              FDB_VT_VERSION,
 		                              deterministicRandom()->randomUInt64()));
 
-		initTraceEventMetrics();
-
 		std::string identifier = networkOptions.traceFileIdentifier;
 		openTraceFile(localAddress,
 		              networkOptions.traceRollSize,
@@ -2315,7 +2313,8 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		              "trace",
 		              networkOptions.traceLogGroup,
 		              identifier,
-		              networkOptions.tracePartialFileSuffix);
+		              networkOptions.tracePartialFileSuffix,
+		              InitializeTraceMetrics::True);
 
 		TraceEvent("ClientStart")
 		    .detail("SourceVersion", getSourceVersion())
