@@ -3233,6 +3233,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				break;
 			}
 
+			// subtract size BEFORE filter, to avoid huge cpu loop and processing if very selective filter applied
+			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it->expectedSize();
+
 			MutationsAndVersionRef m;
 			if (doFilterMutations) {
 				m = filterMutations(memoryReply.arena, *it, req.range, req.encrypted, commonFeedPrefixLength);
