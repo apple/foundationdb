@@ -23,6 +23,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -786,7 +787,33 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 										}
 									}
 
-									TraceEvent("ConsistencyCheck_DataInconsistent")
+									bool isTss = (storageServerInterfaces)[j].isTss() ||
+									             (storageServerInterfaces)[firstValidServer].isTss();
+									bool isExpectedTSSMismatch =
+									    g_network->isSimulated() &&
+									    g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations && isTss;
+
+									// It's possible that the storage servers are inconsistent in KillRegion
+									// workload where a forced recovery is performed. The killed storage server
+									// in the killed region returned first with a higher version, and a later
+									// response from a different region returned with a lower version (because
+									// of the rollback of the forced recovery). In this case, we should not fail
+									// the test. So we double check both process are live.
+									bool isFailed =
+									    g_network->isSimulated() &&
+									    (g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
+									         ->failed ||
+									     g_simulator
+									         ->getProcessByAddress(storageServerInterfaces[firstValidServer].address())
+									         ->failed) &&
+									    (g_simulator->getProcessByAddress((storageServerInterfaces)[j].address())
+									         ->locality.dcId() !=
+									     g_simulator
+									         ->getProcessByAddress(
+									             (storageServerInterfaces)[firstValidServer].address())
+									         ->locality.dcId());
+									TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
+									           "ConsistencyCheck_DataInconsistent")
 									    .detail(format("StorageServer%d", j).c_str(), storageServers[j].toString())
 									    .detail(format("StorageServer%d", firstValidServer).c_str(),
 									            storageServers[firstValidServer].toString())
@@ -807,11 +834,17 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									                ? "True"
 									                : "False");
 
-									if ((g_network->isSimulated() &&
-									     g_simulator->tssMode != ISimulator::TSSMode::EnabledDropMutations) ||
-									    (!storageServerInterfaces[j].isTss() &&
-									     !storageServerInterfaces[firstValidServer].isTss())) {
+									if (!isExpectedTSSMismatch && !isFailed) {
 										testFailure("Data inconsistent", performQuiescentChecks, success, true);
+									} else {
+										// If the storage servers are not live, we should retry.
+										TraceEvent("ConsistencyCheck_StorageServerUnavailable")
+										    .detail("StorageServer0", storageServerInterfaces[firstValidServer].id())
+										    .detail("StorageServer1", storageServerInterfaces[j].id())
+										    .detail("ShardBegin", printable(range.begin))
+										    .detail("ShardEnd", printable(range.end));
+										*success = false;
+										return Void();
 									}
 								}
 							}
@@ -1040,6 +1073,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				//             false);
 			}
 
+			TraceEvent("ConsistencyCheck_CheckSplits").detail("Range", range).detail("CanSplit", canSplit);
 			// Check if the storage server returns split point for the shard. There are cases where
 			// the split point returned by storage server is discarded because it's an unfair split.
 			// See splitStorageMetrics() in NativeAPI.actor.cpp.
