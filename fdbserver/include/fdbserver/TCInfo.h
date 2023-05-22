@@ -184,6 +184,7 @@ class TCTeamInfo final : public ReferenceCounted<TCTeamInfo>, public IDataDistri
 	UID id;
 
 	data_distribution::EligibilityCounter eligibilityCounter;
+	Smoother smoothCPU;
 
 public:
 	Reference<TCMachineTeamInfo> machineTeam;
@@ -255,6 +256,8 @@ public:
 	bool hasWigglePausedServer() const;
 
 	void addServers(const std::vector<UID>& servers) override;
+
+	void updateSmoothCpu();
 
 private:
 	// Calculate an "average" of the metrics replies that we received.  Penalize teams from which we did not receive all

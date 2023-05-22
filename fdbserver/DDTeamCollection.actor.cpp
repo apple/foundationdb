@@ -294,11 +294,12 @@ public:
 				if (sourceTeam.present()) {
 					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevDebug, "GetTeamReturnSourceTeam", self->distributorId)
-					    .detail("ReqSources", req.src)
-					    .detail("ReqCompleteSources", req.completeSources)
+						.detail("Request", req.getDesc())
+						.detail("Src", req.src)
+						.detail("CompleteSources", req.completeSources)
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
-					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
-					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
+					    .detail("SourceTeamSmoothCpu", sourceTeam.get()->getAverageCPU())
+					    .detail("PivotSmoothCpu", self->teamPivots.strictPivotCPU)
 					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
 					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAvailableSpaceRatio);
 					req.reply.send(std::make_pair(sourceTeam, foundSrc));
@@ -3354,6 +3355,7 @@ void DDTeamCollection::updateCpuPivots() {
 	std::vector<double> teamAverageCPU;
 	for (int i = 0; i < teams.size(); ++i) {
 		if (teams[i]->isHealthy()) {
+			teams[i]->updateSmoothCpu();
 			teamAverageCPU.emplace_back(teams[i]->getAverageCPU());
 			teamPivots.minTeamAvgCPU = std::min(teamPivots.minTeamAvgCPU, teamAverageCPU.back());
 		}
