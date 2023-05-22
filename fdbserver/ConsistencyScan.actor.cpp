@@ -28,6 +28,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
@@ -319,7 +320,22 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 					bool isExpectedTSSMismatch = g_network->isSimulated() &&
 					                             g_simulator->tssMode == ISimulator::TSSMode::EnabledDropMutations &&
 					                             isTss;
-					TraceEvent(isExpectedTSSMismatch ? SevWarn : SevError, "ConsistencyCheck_DataInconsistent")
+					// It's possible that the storage servers are inconsistent in KillRegion
+					// workload where a forced recovery is performed. The killed storage server
+					// in the killed region returned first with a higher version, and a later
+					// response from a different region returned with a lower version (because
+					// of the rollback of the forced recovery). In this case, we should not fail
+					// the test. So we double check both process are live.
+					bool isFailed =
+					    g_network->isSimulated() &&
+					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->failed ||
+					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+					         ->failed) &&
+					    (g_simulator->getProcessByAddress((*storageServerInterfaces)[j].address())->locality.dcId() !=
+					     g_simulator->getProcessByAddress((*storageServerInterfaces)[firstValidServer->get()].address())
+					         ->locality.dcId());
+					TraceEvent(isExpectedTSSMismatch || isFailed ? SevWarn : SevError,
+					           "ConsistencyCheck_DataInconsistent")
 					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
 					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
 					            (*storageServerInterfaces)[firstValidServer->get()].id())
@@ -339,6 +355,9 @@ ACTOR Future<int> consistencyCheckReadData(Database cx,
 						int issues = currentUniques + referenceUniques + valueMismatches;
 						ASSERT(issues > 0);
 						return issues;
+					}
+					if (isFailed) {
+						throw wrong_shard_server();
 					}
 				}
 			}
@@ -1645,7 +1664,12 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 						break;
 				} catch (Error& e) {
 					state Error err = e;
-					wait(onErrorTr.onError(err));
+					if (e.code() == error_code_wrong_shard_server) {
+						// consistencyCheckReadData throws this error when a storage server is dead in simulation.
+						wait(delay(1.0));
+					} else {
+						wait(onErrorTr.onError(err));
+					}
 					TraceEvent("ConsistencyCheck_RetryDataConsistency").error(err);
 				}
 			}
@@ -1719,6 +1743,8 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 				//             success,
 				//             false);
 			}
+
+			TraceEvent("ConsistencyCheck_CheckSplits").detail("Range", range).detail("CanSplit", canSplit);
 
 			// In a quiescent database, check that the (estimated) size of the shard is within permitted bounds
 			// Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard
