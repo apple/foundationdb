@@ -51,6 +51,32 @@ void clearAuditProgressMetadata(Transaction* tr, AuditType auditType, UID auditI
 	return;
 }
 
+ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
+	state bool res = false;
+	state Transaction tr(cx);
+	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedStart").detail("StorageServer", ssid);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssid)));
+			if (!serverListValue.present()) {
+				res = true; // SS is removed
+			}
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilStorageServerRemovedError")
+			    .errorUnsuppressed(e)
+			    .detail("StorageServer", ssid);
+			wait(tr.onError(e));
+		}
+	}
+
+	TraceEvent(SevDebug, "AuditUtilStorageServerRemovedEnd").detail("StorageServer", ssid).detail("Removed", res);
+	return res;
+}
+
 ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
 	state Transaction tr(cx);
 	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
@@ -458,6 +484,15 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!ddAuditState_.present()) {
+				throw audit_storage_failed();
+			}
+			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
+			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
+			if (ddAuditState.getPhase() != AuditPhase::Running) {
+				throw audit_storage_failed();
+			}
 			wait(krmSetRange(&tr,
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
@@ -523,6 +558,15 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!ddAuditState_.present()) {
+				throw audit_storage_failed();
+			}
+			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
+			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
+			if (ddAuditState.getPhase() != AuditPhase::Running) {
+				throw audit_storage_failed();
+			}
 			wait(krmSetRange(
 			    &tr,
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),

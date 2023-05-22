@@ -3082,7 +3082,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		                            remainingDurableBytes,
 		                            req.options));
 		ssReadLock.release();
-
 		data->counters.kvScanBytes += res.logicalSize();
 		++data->counters.changeFeedDiskReads;
 
@@ -5266,7 +5265,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	ASSERT(req.getType() == AuditType::ValidateStorageServerShard);
 	wait(data->serveAuditStorageParallelismLock.take(TaskPriority::DefaultYield));
 	state FlowLock::Releaser holder(data->serveAuditStorageParallelismLock);
-	TraceEvent(SevInfo, "AuditStorageShardStorageServerShardBegin", data->thisServerID)
+	TraceEvent(SevInfo, "AuditStorageSsShardBegin", data->thisServerID)
 	    .detail("AuditId", req.id)
 	    .detail("AuditRange", req.range);
 	state AuditStorageState res(req.id, data->thisServerID, req.getType());
@@ -5342,7 +5341,15 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				ownRangesSeenByServerKey = serverKeyRes.ownRanges;
 			} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
 			ASSERT(serverKeyReadAtVersion >= localShardInfoReadAtVersion);
-			wait(data->version.whenAtLeast(serverKeyReadAtVersion));
+			try {
+				wait(timeoutError(data->version.whenAtLeast(serverKeyReadAtVersion), 30));
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "AuditStorageSsShardWaitSSVersionTooLong", data->thisServerID)
+				    .detail("ServerKeyReadAtVersion", serverKeyReadAtVersion)
+				    .detail("SSVersion", data->version.get());
+				failureReason = "SS version takes long time to catch up with serverKeyReadAtVersion";
+				throw audit_storage_failed();
+			}
 			// At this point, shard assignment history guarantees to contain assignments
 			// upto serverKeyReadAtVersion
 
@@ -5353,7 +5360,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			// check any serverKey update between localShardInfoReadAtVersion and serverKeyReadAtVersion
 			std::vector<std::pair<Version, KeyRangeRef>> shardAssignments =
 			    data->getShardAssignmentHistory(localShardInfoReadAtVersion, serverKeyReadAtVersion);
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardGetHistory", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageSsShardGetHistory", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ServerKeyAtVersion", serverKeyReadAtVersion)
@@ -5379,7 +5386,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				}
 				ownRangesLocalView.push_back(overlappingRange);
 			}
-			TraceEvent(SevInfo, "AuditStorageShardStorageServerShardReadDone", data->thisServerID)
+			TraceEvent(SevInfo, "AuditStorageSsShardReadDone", data->thisServerID)
 			    .detail("AuditId", req.id)
 			    .detail("AuditRange", req.range)
 			    .detail("ClaimRange", claimRange)
@@ -5412,7 +5419,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				           data->thisServerID.toString().c_str(),
 				           mismatchedRangeByServerKey.toString().c_str(),
 				           mismatchedRangeByLocalView.toString().c_str());
-				TraceEvent(SevError, "AuditStorageShardStorageServerShardError", data->thisServerID)
+				TraceEvent(SevError, "AuditStorageSsShardError", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("ClaimRange", claimRange)
@@ -5425,7 +5432,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 
 			// Return result
 			if (!errors.empty()) {
-				TraceEvent(SevVerbose, "AuditStorageShardStorageServerShardErrorEnd", data->thisServerID)
+				TraceEvent(SevVerbose, "AuditStorageSsShardErrorEnd", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditServer", data->thisServerID);
@@ -5439,7 +5446,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
 				wait(persistAuditStateByServer(data->cx, res));
-				TraceEvent(SevInfo, "AuditStorageShardStorageServerShardDone", data->thisServerID)
+				TraceEvent(SevInfo, "AuditStorageSsShardDone", data->thisServerID)
 				    .detail("AuditId", req.id)
 				    .detail("AuditRange", req.range)
 				    .detail("AuditServer", data->thisServerID)
@@ -5457,7 +5464,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			}
 		}
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
+		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
@@ -5695,7 +5702,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		}
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditStorageShardStorageServerShardFailed", data->thisServerID)
+		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
@@ -7408,23 +7415,16 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(T
                                                                                Database cx,
                                                                                KeyRangeRef keys,
                                                                                Version fetchVersion) {
-	loop {
-		state Standalone<VectorRef<BlobGranuleChunkRef>> results;
-		try {
-			state Standalone<VectorRef<KeyRangeRef>> ranges =
-			    wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
-			for (auto& range : ranges) {
-				KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
-				    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
-				results.append(results.arena(), chunks.begin(), chunks.size());
-				results.arena().dependsOn(chunks.arena());
-			}
-			return results;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
+	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+	state Standalone<VectorRef<KeyRangeRef>> ranges = wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
+	for (auto& range : ranges) {
+		KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
+		Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+		    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
+		results.append(results.arena(), chunks.begin(), chunks.size());
+		results.arena().dependsOn(chunks.arena());
 	}
+	return results;
 }
 
 // Read keys from blob storage
@@ -8405,15 +8405,16 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
 			if (isFullRestore) {
-				state BlobRestoreRangeState rangeStatus = wait(BlobRestoreController::getRangeState(restoreController));
+				state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
-				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
-				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
+				if (phase == BlobRestorePhase::COPYING_DATA || phase == BlobRestorePhase::ERROR) {
 					wait(loadBGTenantMap(&data->tenantData, &tr));
+					// only copy the range that intersects with full restore range
+					state KeyRangeRef range(std::max(keys.begin, normalKeys.begin), std::min(keys.end, normalKeys.end));
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
-					hold = tryGetRangeFromBlob(results, &tr, data->cx, rangeStatus.first, version, &data->tenantData);
-					rangeEnd = rangeStatus.first.end;
+					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
+					rangeEnd = range.end;
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 					rangeEnd = keys.end;
@@ -8486,7 +8487,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				}
 			} catch (Error& e) {
 				if (!fetchKeyCanRetry(e)) {
-					throw;
+					throw e;
 				}
 				lastError = e;
 				if (blockBegin == keys.begin) {
@@ -8768,7 +8769,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				data->newestDirtyVersion.insert(keys, data->data().getLatestVersion());
 			}
 		}
-
 		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
 		    .error(e)
 		    .detail("Elapsed", now() - startTime)
