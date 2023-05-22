@@ -28,6 +28,7 @@
 
 #include "fdbclient/BlobConnectionProvider.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/CommitTransaction.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
@@ -168,38 +169,50 @@ struct BlobGranuleRestoreVersion {
 typedef Standalone<VectorRef<BlobGranuleRestoreVersion>> BlobGranuleRestoreVersionVector;
 
 ACTOR Future<int64_t> dumpManifest(Database db,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                    Reference<BlobConnectionProvider> blobConn,
                                    int64_t epoch,
-                                   int64_t seqNo);
-ACTOR Future<Void> loadManifest(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<Void> printRestoreSummary(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<int64_t> lastBlobEpoc(Database db, Reference<BlobConnectionProvider> blobConn);
-ACTOR Future<std::string> getMutationLogUrl();
+                                   int64_t seqNo,
+                                   bool encryptionEnabled);
+ACTOR Future<Void> loadManifest(Database db,
+                                Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<Void> printRestoreSummary(Database db,
+                                       Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                       Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<BlobGranuleRestoreVersionVector> listBlobGranules(Database db,
+                                                               Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                               Reference<BlobConnectionProvider> blobConn);
+ACTOR Future<int64_t> lastBlobEpoc(Database db,
+                                   Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                   Reference<BlobConnectionProvider> blobConn);
 
-using BlobRestoreRangeState = std::pair<KeyRange, BlobRestoreState>;
+ACTOR Future<Version> getManifestVersion(Database db);
+
 class BlobRestoreController : public ReferenceCounted<BlobRestoreController> {
 public:
 	BlobRestoreController() {}
 	BlobRestoreController(Database db, KeyRangeRef range) : db_(db), range_(range) {}
 
 	ACTOR static Future<bool> isRestoring(Reference<BlobRestoreController> self);
-	ACTOR static Future<Optional<BlobRestoreState>> getState(Reference<BlobRestoreController> self);
-	ACTOR static Future<Optional<BlobRestoreArg>> getArgument(Reference<BlobRestoreController> self);
+	ACTOR static Future<BlobRestorePhase> currentPhase(Reference<BlobRestoreController> self);
+	ACTOR static Future<Void> onPhaseChange(Reference<BlobRestoreController> self, BlobRestorePhase expectedPhase);
 	ACTOR static Future<Version> getTargetVersion(Reference<BlobRestoreController> self, Version defaultVersion);
-	ACTOR static Future<BlobRestoreRangeState> getRangeState(Reference<BlobRestoreController> self);
-	ACTOR static Future<Void> updateState(Reference<BlobRestoreController> self,
-	                                      Standalone<BlobRestoreState> newStatus,
-	                                      Optional<BlobRestorePhase> expectedPhase);
-	ACTOR static Future<Void> updateState(Reference<BlobRestoreController> self,
-	                                      BlobRestorePhase newPhase,
-	                                      Optional<BlobRestorePhase> expectedPhase);
-	ACTOR static Future<Void> updateError(Reference<BlobRestoreController> self, Standalone<StringRef> errorMessage);
+	ACTOR static Future<Void> setPhase(Reference<BlobRestoreController> self,
+	                                   BlobRestorePhase newPhase,
+	                                   Optional<UID> expectedOwner);
+	ACTOR static Future<Void> setError(Reference<BlobRestoreController> self, std::string errorMessage);
+	ACTOR static Future<Void> setProgress(Reference<BlobRestoreController> self, int progress, UID blobMigratorId);
+	ACTOR static Future<Void> setLockOwner(Reference<BlobRestoreController> self, UID migratorId);
 
 private:
 	Database db_;
 	Standalone<KeyRangeRef> range_;
 };
+
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                                                  BlobGranuleCipherKeysMeta cipherKeysMeta,
+                                                                  Arena* arena);
 #include "flow/unactorcompiler.h"
 
 #endif

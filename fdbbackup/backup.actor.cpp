@@ -193,6 +193,9 @@ enum {
 	OPT_DSTONLY,
 
 	OPT_TRACE_FORMAT,
+
+	// blob granules backup/restore
+	OPT_BLOB_MANIFEST_URL,
 };
 
 // Top level binary commands.
@@ -280,6 +283,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 	{ OPT_INCREMENTALONLY, "--incremental", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
 	{ OPT_ENCRYPT_FILES, "--encrypt-files", SO_REQ_SEP },
+	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -314,7 +318,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 	{ OPT_SNAPSHOTINTERVAL, "-s", SO_REQ_SEP },
 	{ OPT_SNAPSHOTINTERVAL, "--snapshot-interval", SO_REQ_SEP },
 	{ OPT_MOD_ACTIVE_INTERVAL, "--active-snapshot-interval", SO_REQ_SEP },
-
+	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
@@ -735,6 +739,7 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
@@ -1131,6 +1136,10 @@ static void printBackupUsage(bool devhelp) {
 	       "either enable (1) or disable (0) encryption at rest with snapshot backups. This option refers to block "
 	       "level encryption of snapshot backups while --encryption-key-file (above) refers to file level encryption. "
 	       "Generally, these two options should not be used together.\n");
+	printf("  --blob-manifest-url URL\n"
+	       "                 Perform blob manifest backup. Manifest files are stored to the destination URL.\n"
+	       "                 Blob granules should be enabled first for manifest backup.\n");
+
 	printf(TLS_HELP);
 	printf("  -w, --wait     Wait for the backup to complete (allowed with `start' and `discontinue').\n");
 	printf("  -z, --no-stop-when-done\n"
@@ -1206,6 +1215,8 @@ static void printRestoreUsage(bool devhelp) {
 	       "instead of the entire set.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
+	printf("  --blob-manifest-url URL\n"
+	       "                 Restore from blob granules. Manifest files are stored to the destination URL.\n");
 	printf(TLS_HELP);
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -1965,7 +1976,8 @@ ACTOR Future<Void> submitBackup(Database db,
                                 WaitForComplete waitForCompletion,
                                 StopWhenDone stopWhenDone,
                                 UsePartitionedLog usePartitionedLog,
-                                IncrementalBackupOnly incrementalBackupOnly) {
+                                IncrementalBackupOnly incrementalBackupOnly,
+                                Optional<std::string> blobManifestUrl) {
 	try {
 		state FileBackupAgent backupAgent;
 		ASSERT(!backupRanges.empty());
@@ -2018,7 +2030,9 @@ ACTOR Future<Void> submitBackup(Database db,
 			                              encryptionEnabled,
 			                              stopWhenDone,
 			                              usePartitionedLog,
-			                              incrementalBackupOnly));
+			                              incrementalBackupOnly,
+			                              {},
+			                              blobManifestUrl));
 
 			// Wait for the backup to complete, if requested
 			if (waitForCompletion) {
@@ -2335,7 +2349,8 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                              Optional<std::string> encryptionKeyFile) {
+                              Optional<std::string> encryptionKeyFile,
+                              Optional<std::string> blobManifestUrl) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2379,6 +2394,9 @@ ACTOR Future<Void> runRestore(Database db,
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
 			BackupDescription desc = wait(bc->describeBackup());
+			if (blobManifestUrl.present()) {
+				onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
+			}
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2411,7 +2429,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
-			                                                   encryptionKeyFile));
+			                                                   encryptionKeyFile,
+			                                                   blobManifestUrl));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3531,6 +3550,7 @@ int main(int argc, char* argv[]) {
 		bool jsonOutput = false;
 		DeleteData deleteData{ false };
 		Optional<std::string> encryptionKeyFile;
+		Optional<std::string> blobManifestUrl;
 
 		BackupModifyOptions modifyOptions;
 
@@ -3953,6 +3973,10 @@ int main(int argc, char* argv[]) {
 			case OPT_JSON:
 				jsonOutput = true;
 				break;
+			case OPT_BLOB_MANIFEST_URL: {
+				blobManifestUrl = args->OptionArg();
+				break;
+			}
 			}
 		}
 
@@ -4185,7 +4209,8 @@ int main(int argc, char* argv[]) {
 				                           waitForDone,
 				                           stopWhenDone,
 				                           usePartitionedLog,
-				                           incrementalBackupOnly));
+				                           incrementalBackupOnly,
+				                           blobManifestUrl));
 				break;
 			}
 
@@ -4370,7 +4395,9 @@ int main(int argc, char* argv[]) {
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
-				                         encryptionKeyFile));
+				                         encryptionKeyFile,
+				                         blobManifestUrl));
+
 				break;
 			case RestoreType::WAIT:
 				f = stopAfter(success(ba.waitRestore(db, KeyRef(tagName), Verbose::True)));

@@ -2,6 +2,11 @@
 maxTLogVersion = 6
 disableTss = true
 
+[[knobs]]
+# testing that restart with writing recover at version to CSTATE.
+record_recover_at_in_cstate = true
+track_tlog_recovery = true
+
 [[test]]
 testTitle = 'Clogged'
 runSetup = false

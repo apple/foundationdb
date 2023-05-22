@@ -382,6 +382,9 @@ class Summary:
             child.attributes["Path"] = str(trace_dir.absolute())
             child.attributes["Command"] = command
             self.out.append(child)
+            child = SummaryTree("Output")
+            child.attributes["StdErr"] = self.error_out
+            self.out.append(child)
             return
         self.summarize_files(trace_files[0])
         if config.joshua_dir is not None:

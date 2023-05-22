@@ -1321,7 +1321,8 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("CertificatePath", tlsConfig.getCertificatePathSync())
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
-			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"))
+			    .detail("DisablePlainTextConnection", tlsConfig.getDisablePlainTextConnection());
 			auto loadedTlsConfig = tlsConfig.loadSync();
 			ConfigureSSLContext(loadedTlsConfig, newContext);
 			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
@@ -1785,6 +1786,11 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
+	}
+
+	if (tlsConfig.getDisablePlainTextConnection()) {
+		TraceEvent(SevError, "PlainTextConnectionDisabled").detail("toAddr", toAddr);
+		throw connection_failed();
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);

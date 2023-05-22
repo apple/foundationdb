@@ -28,6 +28,7 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -57,6 +58,8 @@ struct BlobRestoreWorkload : TestWorkload {
 		performRestore_ = getOption(options, "performRestore"_sr, false);
 		restoreToVersion_ = getOption(options, "restoreToVersion"_sr, false);
 		readBatchSize_ = getOption(options, "readBatchSize"_sr, 3000);
+		blobManifestUrl_ = getOption(options, "blobManifestUrl"_sr, "file://simfdb/fdbblob/manifest"_sr);
+		mlogsUrl_ = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -77,10 +80,13 @@ struct BlobRestoreWorkload : TestWorkload {
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
 			// disable manifest backup and log truncation
-			KnobValueRef knobFalse = KnobValueRef::create(bool{ false });
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
+			wait(disableManifestBackup(cx));
 
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
+			if (self->restoreTargetVersion_ == invalidVersion) {
+				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs");
+				return Void();
+			}
 			fmt::print("Restore target version {}\n", self->restoreTargetVersion_);
 
 			// Only need to pass the version if we are trying to restore to a previous version
@@ -88,7 +94,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			if (self->restoreToVersion_) {
 				targetVersion = self->restoreTargetVersion_;
 			}
-			wait(store(result, self->extraDb_->blobRestore(normalKeys, targetVersion)));
+			wait(submitRestore(self));
 
 			state std::vector<Future<Void>> futures;
 			futures.push_back(self->runBackupAgent(self));
@@ -98,32 +104,86 @@ struct BlobRestoreWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> submitRestore(BlobRestoreWorkload* self) {
+		state std::string mlogsUrl;
+		state std::vector<std::string> containers =
+		    wait(IBackupContainer::listContainers(self->mlogsUrl_.toString(), {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		mlogsUrl = containers.back();
+
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+		ranges.push_back(ranges.arena(), normalKeys);
+		addDefaultBackupRanges(ranges);
+
+		Version version = wait(self->backupAgent_.restore(self->extraDb_,
+		                                                  {},
+		                                                  "default"_sr,
+		                                                  KeyRef(mlogsUrl),
+		                                                  {},
+		                                                  ranges,
+		                                                  WaitForComplete::False,
+		                                                  self->restoreTargetVersion_,
+		                                                  Verbose::True,
+		                                                  ""_sr,
+		                                                  ""_sr,
+		                                                  LockDB::True,
+		                                                  UnlockDB::True,
+		                                                  OnlyApplyMutationLogs::False,
+		                                                  InconsistentSnapshotOnly::False,
+		                                                  invalidVersion,
+		                                                  {},
+		                                                  self->blobManifestUrl_.toString()));
+		fmt::print("Submit blob restore to version {} \n", version);
+		return Void();
+	}
+
 	ACTOR static Future<Version> getRestoreVersion(Database cx, BlobRestoreWorkload* self) {
 		state Version targetVersion;
-		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+		state std::string baseUrl = self->mlogsUrl_.toString();
 		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
 		if (containers.size() == 0) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of missing log backups");
+			return invalidVersion;
 		}
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of invalid log backup");
+			return invalidVersion;
 		}
 		targetVersion = desc.contiguousLogEnd.get() - 1;
 		if (self->restoreToVersion_) {
 			// restore to a previous version
 			targetVersion -= deterministicRandom()->randomInt(1, 100000);
 		}
+
+		try {
+			state Standalone<VectorRef<KeyValueRef>> src_ = wait(readFromBlob(cx, targetVersion, self));
+		} catch (Error& e) {
+			fmt::print("Couldn't read blob data at version {}\n", targetVersion);
+			CODE_PROBE(true, "Skip blob restore test because of missing blob data");
+			return invalidVersion;
+		}
 		return targetVersion;
+	}
+
+	static Future<Void> disableManifestBackup(Database cx) {
+		return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			BlobGranuleBackupConfig().enabled().set(tr, false);
+			return Void();
+		});
 	}
 
 	// Start backup agent on the extra db
 	ACTOR Future<Void> runBackupAgent(BlobRestoreWorkload* self) {
-		state FileBackupAgent backupAgent;
-		state Future<Void> future = backupAgent.run(
+		state Future<Void> future = self->backupAgent_.run(
 		    self->extraDb_, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 		wait(Future<Void>(Never()));
 		throw internal_error();
@@ -133,20 +193,19 @@ struct BlobRestoreWorkload : TestWorkload {
 	ACTOR Future<Void> monitorProgress(Database cx, BlobRestoreWorkload* self) {
 		loop {
 			auto controller = makeReference<BlobRestoreController>(self->extraDb_, normalKeys);
-			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(controller));
-			if (restoreState.present()) {
-				state BlobRestoreState s = restoreState.get();
-
-				if (s.phase == BlobRestorePhase::DONE) {
-					wait(verify(cx, self));
-					return Void();
-				}
-				// TODO need to define more specific error handling
-				if (s.phase == BlobRestorePhase::ERROR) {
-					fmt::print("Unexpected restore error code = {}\n", s.error.get());
-					return Void();
-				}
+			state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(controller));
+			if (phase == BlobRestorePhase::DONE) {
+				wait(verify(cx, self));
+				return Void();
 			}
+			// TODO need to define more specific error handling
+			if (phase == BlobRestorePhase::ERROR) {
+				auto db = SystemDBWriteLockedNow(cx.getReference());
+				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
+				fmt::print("Unexpected restore error code = {}\n", error);
+				return Void();
+			}
+
 			wait(delay(5)); // delay to avoid busy loop
 		}
 	}
@@ -277,7 +336,6 @@ struct BlobRestoreWorkload : TestWorkload {
 			}
 			return Void();
 		} catch (Error& e) {
-			fmt::print("Flush error {} \n", e.what());
 			throw internal_error();
 		}
 	}
@@ -310,8 +368,11 @@ private:
 	int readBatchSize_;
 	bool restoreToVersion_;
 	Version restoreTargetVersion_;
+	Standalone<StringRef> blobManifestUrl_;
+	Standalone<StringRef> mlogsUrl_;
 	Reference<BlobConnectionProvider> blobConn_;
 	BGTenantMap tenantData_;
+	FileBackupAgent backupAgent_;
 };
 
 WorkloadFactory<BlobRestoreWorkload> BlobRestoreWorkloadFactory;

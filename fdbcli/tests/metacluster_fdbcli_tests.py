@@ -169,12 +169,15 @@ def create_tenant(
     tenant,
     tenant_group=None,
     assigned_cluster=None,
+    ignore_capacity_limit=False,
 ):
     command = "tenant create {}".format(tenant)
     if tenant_group:
         command = command + " tenant_group={}".format(tenant_group)
     if assigned_cluster:
         command = command + " assigned_cluster={}".format(assigned_cluster)
+    if ignore_capacity_limit:
+        command = command + " ignore_capacity_limit"
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
@@ -450,6 +453,86 @@ number of data clusters: {}
 
 
 @enable_logging()
+def create_tenants_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+    logger.debug("Verified")
+    num_clusters = len(cluster_files)
+    logger.debug("Setting up a metacluster")
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster=1,
+    )
+
+    # On data_cluster[0]
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group=None,
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant11",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert (
+        err
+        == "ERROR: Cluster does not have capacity to perform the specified operation (2141)"
+    )
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+        ignore_capacity_limit=True,
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant13",
+        tenant_group="group1",
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    all_tenants = get_tenant_names(cluster_files[0])
+    assert all_tenants == ["tenant1", "tenant11", "tenant12"]
+
+    clear_all_tenants(cluster_files[0])
+    cleanup_after_test(cluster_files[0], data_cluster_names)
+
+
+@enable_logging()
 def list_tenants_test(logger, cluster_files):
     tenants = [
         {"name": "tenant10"},
@@ -578,6 +661,8 @@ def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
 def test_main(logger):
     logger.debug("Tests start")
     register_and_configure_data_clusters_test(cluster_files)
+
+    create_tenants_test(cluster_files)
 
     clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
 
