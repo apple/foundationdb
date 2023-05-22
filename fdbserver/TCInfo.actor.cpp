@@ -314,7 +314,7 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant)
   : servers(servers), tenant(tenant), healthy(true), wrongConfiguration(false),
     priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()),
-	smoothCPU(SERVER_KNOBS->DD_GET_TEAM_CPU_SMOOTH_WINDOW) {
+    smoothCPU(SERVER_KNOBS->DD_GET_TEAM_CPU_SMOOTH_WINDOW) {
 	if (servers.empty()) {
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 	}
