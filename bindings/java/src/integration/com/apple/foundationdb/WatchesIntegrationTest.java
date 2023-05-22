@@ -199,12 +199,85 @@ class WatchesIntegrationTest {
     }
   }
 
-  private void ensureConnected(Database db) throws Exception {
-      // Run one transaction succesfully to ensure we established connection
+  @Test
+  @Tag("SupportsExternalClient")
+  public void testWatchCleanupInSingleTxOnCancel() throws Exception {
+    final String prefix = "ddd";
+    final int numKeys = 100;
+    final int watchesToCancel = 90;
+    final int watchLimit = 10;
+    try (Database db = fdb.open()) {
+      db.options().setMaxWatches(watchLimit);
+      ensureConnected(db);
+      setTestKeys(db, prefix, numKeys, "oldVal");
+      List<CompletableFuture<Void>> futureList = new ArrayList<CompletableFuture<Void>>();
+
       db.run(tr -> {
-        tr.getReadVersion().join();
+        for (int i = 0; i < numKeys; i++) {
+          CompletableFuture<Void> result = createTestWatch(tr, prefix, i);
+          futureList.add(result);
+          if (i < watchesToCancel) {
+            result.cancel(true);
+          }
+        }
         return null;
       });
+
+      setTestKeys(db, prefix, numKeys, "newVal");
+      int idx = 0;
+      for (CompletableFuture<Void> future : futureList) {
+        if (idx < watchesToCancel) {
+          try {
+            future.orTimeout(1, TimeUnit.SECONDS).join();
+            Assertions.fail("Expecting cancellation exception");
+          } catch (CancellationException e) {
+          }
+        } else {
+          future.orTimeout(WATCH_TIMEOUT_SEC, TimeUnit.SECONDS).join();
+        }
+        idx++;
+      }
+    }
+  }
+
+  @Test
+  @Tag("SupportsExternalClient")
+  public void testWatchCleanupOnClose() throws Exception {
+    final String prefix = "ddd";
+    final int numKeys = 100;
+    final int watchesToClose = 90;
+    final int watchLimit = 10;
+    try (Database db = fdb.open()) {
+      db.options().setMaxWatches(watchLimit);
+      ensureConnected(db);
+      setTestKeys(db, prefix, numKeys, "oldVal");
+      List<CompletableFuture<Void>> futureList = new ArrayList<CompletableFuture<Void>>();
+      for (int i = 0; i < numKeys; i++) {
+        final int idx = i;
+        db.run(tr -> {
+          CompletableFuture<Void> result = createTestWatch(tr, prefix, idx);
+          if (idx >= watchesToClose) {
+            futureList.add(result);
+          } else {
+            ((NativeFuture<Void>)result).close();
+          }
+          return null;
+        });
+      }
+      System.gc();
+      setTestKeys(db, prefix, numKeys, "newVal");
+      for (CompletableFuture<Void> future : futureList) {
+        future.orTimeout(WATCH_TIMEOUT_SEC, TimeUnit.SECONDS).join();
+      }
+    }
+  }
+
+  private void ensureConnected(Database db) throws Exception {
+    // Run one transaction succesfully to ensure we established connection
+    db.run(tr -> {
+      tr.getReadVersion().join();
+      return null;
+    });
   }
 
   private void setTestKeys(Database db, String prefix, int numberOfKeys, String value) throws Exception {
