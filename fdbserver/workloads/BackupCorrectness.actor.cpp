@@ -947,7 +947,7 @@ struct BackupAndRestoreCorrectnessWorkload : TestWorkload {
 						printf("No left over backup agent configuration keys\n");
 					}
 
-					Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+					ValueResult latestVersion = wait(tr->get(backupLatestVersionsKey));
 					if (latestVersion.present()) {
 						TraceEvent(SevError, "BackupCorrectnessLeftOverVersionKey", randomID)
 						    .detail("BackupTag", printable(self->backupTag))

@@ -459,7 +459,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		loop {
 			try {
 				self->setAuthToken(tr, self->signedToken);
-				Optional<Value> value = wait(tr.get(self->tLogConfigKey));
+				ValueResult value = wait(tr.get(self->tLogConfigKey));
 				ASSERT(value.present());
 				tLogConfigString = value;
 				break;

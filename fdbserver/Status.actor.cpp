@@ -1301,7 +1301,7 @@ ACTOR static Future<double> doReadProbe(Future<double> grvProbe, Transaction* tr
 	loop {
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			Optional<Standalone<StringRef>> _ = wait(tr->get("\xff/StatusJsonTestKey62793"_sr));
+			wait(success(tr->get("\xff/StatusJsonTestKey62793"_sr)));
 			return g_network->timer_monotonic() - start;
 		} catch (Error& e) {
 			wait(tr->onError(e));
@@ -1439,7 +1439,7 @@ ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<Value> versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				ValueResult versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
 				message["enabled"] = versionEpochVal.present();
 				if (!versionEpochVal.present()) {
 					break;
@@ -1470,7 +1470,7 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<Value> ccSuspendVal =
+				ValueResult ccSuspendVal =
 				    wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
@@ -1678,13 +1678,13 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 			}
 
 			ASSERT(result.present());
-			state std::vector<Future<Optional<Value>>> replicasFutures;
+			state std::vector<Future<ValueResult>> replicasFutures;
 			for (auto& region : result.get().regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
-			state Future<Optional<Value>> healthyZoneValue = tr.get(healthyZoneKey);
-			state Future<Optional<Value>> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
-			state Future<Optional<Value>> ddModeKey = tr.get(dataDistributionModeKey);
+			state Future<ValueResult> healthyZoneValue = tr.get(healthyZoneKey);
+			state Future<ValueResult> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			state Future<ValueResult> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
 				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) &&
@@ -2882,7 +2882,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
 			choose {
-				when(Optional<Value> lockUID = wait(tr.get(databaseLockedKey))) {
+				when(ValueResult lockUID = wait(tr.get(databaseLockedKey))) {
 					if (lockUID.present()) {
 						statusObj["locked"] = true;
 						statusObj["lock_uid"] =
@@ -2924,7 +2924,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Optional<Value>> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
+			state Future<ValueResult> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 
 			*fullyReplicatedRegions = fReplicaKeys.get().size();
@@ -2933,7 +2933,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 				messages->push_back(
 				    JsonString::makeMessage("primary_dc_missing", "Unable to determine primary datacenter."));
 			}
-			return fPrimaryDatacenterKey.get();
+			return fPrimaryDatacenterKey.get().contents();
 		} catch (Error& e) {
 			if (e.code() == error_code_timed_out) {
 				messages->push_back(

@@ -278,11 +278,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_value(FDBFuture* f,
                                                       fdb_bool_t* out_present,
                                                       uint8_t const** out_value,
                                                       int* out_value_length) {
-	CATCH_AND_RETURN(Optional<Value> v = TSAV(Optional<Value>, f)->get(); *out_present = v.present();
-	                 if (*out_present) {
-		                 *out_value = v.get().begin();
-		                 *out_value_length = v.get().size();
-	                 });
+	CATCH_AND_RETURN(ValueResult v = TSAV(ValueResult, f)->get(); *out_present = v.present(); if (*out_present) {
+		*out_value = v.get().begin();
+		*out_value_length = v.get().size();
+	});
 }
 
 fdb_error_t fdb_future_get_keyvalue_array_impl(FDBFuture* f,
@@ -347,7 +346,10 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
                                                               float* server_busyness,
                                                               float* range_busyness) {
-	CATCH_AND_RETURN(*server_busyness = 0.0f; *range_busyness = 0.0f;);
+	CATCH_AND_RETURN(ReadResultBase rr = TSAV(ReadResultBase, f)->get();
+	                 ReadMetrics const& readMetrics = rr.getReadMetrics();
+	                 *server_busyness = readMetrics.getServerBusyness();
+	                 *range_busyness = readMetrics.getRangeBusyness(););
 }
 
 namespace {

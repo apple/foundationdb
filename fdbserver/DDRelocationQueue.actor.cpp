@@ -2141,7 +2141,7 @@ Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
 }
 
 ACTOR Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool readRebalance) {
-	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
+	ValueResult val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
 	if (!val.present())
 		return false;

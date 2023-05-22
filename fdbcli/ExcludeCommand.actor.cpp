@@ -228,8 +228,8 @@ ACTOR Future<Void> checkForCoordinators(Reference<IDatabase> db, std::vector<Add
 	loop {
 		try {
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-			Optional<Value> coordinators = wait(safeThreadFutureToFuture(coordinatorsF));
+			state ThreadFuture<ValueResult> coordinatorsF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			ValueResult coordinators = wait(safeThreadFutureToFuture(coordinatorsF));
 			ASSERT(coordinators.present());
 			coordinatorList = NetworkAddress::parseList(coordinators.get().toString());
 			break;

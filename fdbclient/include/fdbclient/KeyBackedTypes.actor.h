@@ -240,16 +240,15 @@ public:
 
 	template <class Transaction>
 	Future<Optional<Versionstamp>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+		typename transaction_future_type<Transaction, ValueResult>::type getFuture = tr->get(key, snapshot);
 
-		return holdWhile(
-		    getFuture,
-		    map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<Versionstamp> {
-			    if (val.present()) {
-				    return BinaryReader::fromStringRef<Versionstamp>(*val, Unversioned());
-			    }
-			    return {};
-		    }));
+		return holdWhile(getFuture,
+		                 map(safeThreadFutureToFuture(getFuture), [](ValueResult const& val) -> Optional<Versionstamp> {
+			                 if (val.present()) {
+				                 return BinaryReader::fromStringRef<Versionstamp>(*val, Unversioned());
+			                 }
+			                 return {};
+		                 }));
 	}
 
 	template <class Transaction>
@@ -349,11 +348,11 @@ public:
 				return self.get(tr, snapshot);
 			});
 		} else {
-			typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+			typename transaction_future_type<Transaction, ValueResult>::type getFuture = tr->get(key, snapshot);
 
 			return holdWhile(
 			    getFuture,
-			    map(safeThreadFutureToFuture(getFuture), [codec = codec](Optional<Value> const& val) -> Optional<T> {
+			    map(safeThreadFutureToFuture(getFuture), [codec = codec](ValueResult const& val) -> Optional<T> {
 				    if (val.present())
 					    return codec.unpack(val.get());
 				    return {};
@@ -731,12 +730,11 @@ public:
 
 	template <class Transaction>
 	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(packKey(key), snapshot);
+		typename transaction_future_type<Transaction, ValueResult>::type getFuture = tr->get(packKey(key), snapshot);
 
 		return holdWhile(getFuture,
 		                 map(safeThreadFutureToFuture(getFuture),
-		                     [valueCodec = valueCodec](Optional<Value> const& val) -> Optional<ValueType> {
+		                     [valueCodec = valueCodec](ValueResult const& val) -> Optional<ValueType> {
 			                     if (val.present())
 				                     return valueCodec.unpack(val.get());
 			                     return {};
@@ -1042,10 +1040,9 @@ public:
 
 	template <class Transaction>
 	Future<bool> exists(Transaction tr, ValueType const& val, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
-		    tr->get(packKey(val), snapshot);
+		typename transaction_future_type<Transaction, ValueResult>::type getFuture = tr->get(packKey(val), snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> bool {
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](ValueResult const& val) -> bool {
 			                 return val.present();
 		                 }));
 	}

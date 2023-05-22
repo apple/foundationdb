@@ -122,7 +122,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> val = wait(tr.get(self->testParametersKey));
+					ValueResult val = wait(tr.get(self->testParametersKey));
 					if (val.present()) {
 						TestParameters params = TestParameters::decode(val.get());
 						self->useMetacluster = params.useMetacluster;

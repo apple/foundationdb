@@ -1019,7 +1019,7 @@ ACTOR Future<Optional<ClusterConnectionString>> getConnectionString(Database cx)
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+			ValueResult currentKey = wait(tr.get(coordinatorsKey));
 			if (!currentKey.present())
 				return Optional<ClusterConnectionString>();
 			return ClusterConnectionString(currentKey.get().toString());
@@ -1047,7 +1047,7 @@ ACTOR Future<Optional<ClusterConnectionString>> getClusterConnectionStringFromSt
 		}
 
 		Version readVersion = wait(tr->getReadVersion());
-		state Optional<Value> currentKey = wait(tr->get(coordinatorsKey));
+		state ValueResult currentKey = wait(tr->get(coordinatorsKey));
 		if (g_network->isSimulated() && currentKey.present()) {
 			// If the change coordinators request succeeded, the coordinators
 			// should have changed to the connection string of the most
@@ -1094,7 +1094,7 @@ ACTOR Future<Void> verifyConfigurationDatabaseAlive(Database cx) {
 			Tuple tuple;
 			tuple.appendNull(); // config class
 			tuple << "test"_sr;
-			Optional<Value> serializedValue = wait(configTr->get(tuple.pack()));
+			ValueResult serializedValue = wait(configTr->get(tuple.pack()));
 			TraceEvent("ChangeQuorumCheckerNewCoordinatorsOnline").log();
 			return Void();
 		} catch (Error& e) {
@@ -1389,8 +1389,8 @@ struct AutoQuorumChange final : IQuorumChange {
 	}
 
 	ACTOR static Future<int> getRedundancy(AutoQuorumChange* self, Transaction* tr) {
-		state Future<Optional<Value>> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
-		state Future<Optional<Value>> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
+		state Future<ValueResult> fStorageReplicas = tr->get("storage_replicas"_sr.withPrefix(configKeysPrefix));
+		state Future<ValueResult> fLogReplicas = tr->get("log_replicas"_sr.withPrefix(configKeysPrefix));
 		wait(success(fStorageReplicas) && success(fLogReplicas));
 		int redundancy = std::min(atoi(fStorageReplicas.get().get().toString().c_str()),
 		                          atoi(fLogReplicas.get().get().toString().c_str()));
@@ -2072,7 +2072,7 @@ ACTOR Future<Void> printHealthyZone(Database cx) {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			ValueResult val = wait(tr.get(healthyZoneKey));
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				printf("Data distribution has been disabled for all storage server failures in this cluster and thus "
 				       "maintenance mode is not active.\n");
@@ -2099,7 +2099,7 @@ ACTOR Future<bool> clearHealthyZone(Database cx, bool printWarning, bool clearSS
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			ValueResult val = wait(tr.get(healthyZoneKey));
 			if (!clearSSFailureZoneString && val.present() &&
 			    decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				if (printWarning) {
@@ -2126,7 +2126,7 @@ ACTOR Future<bool> setHealthyZone(Database cx, StringRef zoneId, double seconds,
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> val = wait(tr.get(healthyZoneKey));
+			ValueResult val = wait(tr.get(healthyZoneKey));
 			if (val.present() && decodeHealthyZoneValue(val.get()).first == ignoreSSFailuresZoneString) {
 				if (printWarning) {
 					printf("ERROR: Maintenance mode cannot be used while data distribution is disabled for storage "
@@ -2155,7 +2155,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
+			ValueResult old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;
 				if (old.present()) {
@@ -2173,7 +2173,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 			tr.set(dataDistributionModeKey, wr.toValue());
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
-				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
+				ValueResult currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
 				if (currentHealthyZoneValue.present() &&
 				    decodeHealthyZoneValue(currentHealthyZoneValue.get()).first == ignoreSSFailuresZoneString) {
 					// only clear the key if it is currently being used to disable all SS failure data movement
@@ -2223,7 +2223,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	}
 
 	if (ok) {
-		Optional<Standalone<StringRef>> value = wait(tr->get(logsKey));
+		ValueResult value = wait(tr->get(logsKey));
 		ASSERT(value.present());
 		auto logs = decodeLogsValue(value.get());
 		for (auto const& log : logs.first) {
@@ -2292,7 +2292,7 @@ ACTOR Future<Void> waitForFullReplication(Database cx) {
 			state DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);
 
-			state std::vector<Future<Optional<Value>>> replicasFutures;
+			state std::vector<Future<ValueResult>> replicasFutures;
 			for (auto& region : config.regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
@@ -2337,7 +2337,7 @@ ACTOR Future<Void> timeKeeperSetDisable(Database cx) {
 ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (val.present()) {
 		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
@@ -2358,7 +2358,7 @@ ACTOR Future<Void> lockDatabase(Transaction* tr, UID id) {
 ACTOR Future<Void> lockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (val.present()) {
 		if (BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) == id) {
@@ -2397,7 +2397,7 @@ ACTOR Future<Void> lockDatabase(Database cx, UID id) {
 ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (!val.present())
 		return Void();
@@ -2414,7 +2414,7 @@ ACTOR Future<Void> unlockDatabase(Transaction* tr, UID id) {
 ACTOR Future<Void> unlockDatabase(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (!val.present())
 		return Void();
@@ -2446,7 +2446,7 @@ ACTOR Future<Void> unlockDatabase(Database cx, UID id) {
 ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
@@ -2459,7 +2459,7 @@ ACTOR Future<Void> checkDatabaseLock(Transaction* tr, UID id) {
 ACTOR Future<Void> checkDatabaseLock(Reference<ReadYourWritesTransaction> tr, UID id) {
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-	Optional<Value> val = wait(tr->get(databaseLockedKey));
+	ValueResult val = wait(tr->get(databaseLockedKey));
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != id) {
 		//TraceEvent("DBA_CheckLocked").detail("Expecting", id).detail("Lock", BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned())).backtrace();
@@ -2473,7 +2473,7 @@ ACTOR Future<Void> updateChangeFeed(Transaction* tr, Key rangeID, ChangeFeedStat
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-	Optional<Value> val = wait(tr->get(rangeIDKey));
+	ValueResult val = wait(tr->get(rangeIDKey));
 	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
 		if (!val.present()) {
 			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
@@ -2511,7 +2511,7 @@ ACTOR Future<Void> updateChangeFeed(Reference<ReadYourWritesTransaction> tr,
 	state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-	Optional<Value> val = wait(tr->get(rangeIDKey));
+	ValueResult val = wait(tr->get(rangeIDKey));
 	if (status == ChangeFeedStatus::CHANGE_FEED_CREATE) {
 		if (!val.present()) {
 			tr->set(rangeIDKey, changeFeedValue(range, invalidVersion, status));
@@ -2619,7 +2619,7 @@ ACTOR Future<Void> waitForPrimaryDC(Database cx, StringRef dcId) {
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			Optional<Value> res = wait(tr.get(primaryDatacenterKey));
+			ValueResult res = wait(tr.get(primaryDatacenterKey));
 			if (res.present() && res.get() == dcId) {
 				return Void();
 			}

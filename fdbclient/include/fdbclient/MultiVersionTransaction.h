@@ -442,6 +442,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                            int* outCount,
 	                                            fdb_bool_t* outMore);
 	fdb_error_t (*futureGetGranuleSummaryArray)(FDBFuture* f, const FDBGranuleSummary** out_summaries, int* outCount);
+	fdb_error_t (*futureGetReadBusyness)(FDBFuture* f, float* server_busyness, float* range_busyness);
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
@@ -468,7 +469,7 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
+	ThreadFuture<ValueResult> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
@@ -707,7 +708,7 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
+	ThreadFuture<ValueResult> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,

@@ -43,7 +43,7 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	virtual Future<Void> commit() = 0;
 
 	// Gets a value associated with a given key from the database
-	virtual Future<Optional<Value>> get(KeyRef& key) = 0;
+	virtual Future<ValueResult> get(KeyRef& key) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a key range
 	virtual Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) = 0;
@@ -112,7 +112,7 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	Future<Void> commit() override { return transaction.commit(); }
 
 	// Gets a value associated with a given key from the database
-	Future<Optional<Value>> get(KeyRef& key) override { return transaction.get(key); }
+	Future<ValueResult> get(KeyRef& key) override { return transaction.get(key); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
 	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
@@ -188,7 +188,7 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	Future<Void> commit() override { return unsafeThreadFutureToFuture(transaction->commit()); }
 
 	// Gets a value associated with a given key from the database
-	Future<Optional<Value>> get(KeyRef& key) override { return unsafeThreadFutureToFuture(transaction->get(key)); }
+	Future<ValueResult> get(KeyRef& key) override { return unsafeThreadFutureToFuture(transaction->get(key)); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
 	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {

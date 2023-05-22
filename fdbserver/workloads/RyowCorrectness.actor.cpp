@@ -235,19 +235,19 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 					if (op.type == Operation::SET) {
 						transaction->set(op.beginKey, op.value);
 					} else if (op.type == Operation::GET) {
-						Optional<Value> val = wait(transaction->get(op.beginKey));
+						ValueResult val = wait(transaction->get(op.beginKey));
 						if (!dontUpdateResults)
 							self->pushKVPair(results, op.beginKey, val);
 					} else if (op.type == Operation::GET_RANGE) {
 						KeyRangeRef range(op.beginKey, op.endKey);
 						RangeResult result = wait(transaction->getRange(range, op.limit, op.reverse));
 						if (!dontUpdateResults)
-							results.push_back((RangeResultRef)result);
+							results.push_back(result);
 					} else if (op.type == Operation::GET_RANGE_SELECTOR) {
 						RangeResult result =
 						    wait(transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse));
 						if (!dontUpdateResults)
-							results.push_back((RangeResultRef)result);
+							results.push_back(result);
 					} else if (op.type == Operation::GET_KEY) {
 						Key key = wait(transaction->getKey(op.beginSelector));
 						if (!dontUpdateResults)

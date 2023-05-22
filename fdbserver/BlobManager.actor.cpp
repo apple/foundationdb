@@ -1224,7 +1224,7 @@ static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment
 }
 
 ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> bmData) {
-	Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
+	ValueResult currentLockValue = wait(tr->get(blobManagerEpochKey));
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 	if (currentEpoch != bmData->epoch) {
@@ -1350,7 +1350,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 		state VectorRef<KeyRangeRef> rangesToAdd;
 		state VectorRef<KeyRangeRef> rangesToRemove;
 		state Arena ar;
-		state Optional<Value> ckvBegin;
+		state ValueResult ckvBegin;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1558,7 +1558,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> ckvEnd = wait(tr->get(blobRangeChangeKey));
+				ValueResult ckvEnd = wait(tr->get(blobRangeChangeKey));
 
 				// clean up unreadable parts of change log (use 2* max read life versions because i'm paranoid)
 				Version changeLogCleanupVersion =
@@ -1750,7 +1750,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				return Void();
 			}
 
-			Optional<Value> prevLockValue = wait(tr->get(lockKey));
+			ValueResult prevLockValue = wait(tr->get(lockKey));
 			ASSERT(prevLockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
 			int64_t prevOwnerEpoch = std::get<0>(prevOwner);
@@ -2051,7 +2051,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			// acquire lock for old granule to make sure nobody else modifies it
 			state Key lockKey = blobGranuleLockKeyFor(granuleRange);
-			Optional<Value> lockValue = wait(tr->get(lockKey));
+			ValueResult lockValue = wait(tr->get(lockKey));
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
 			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
@@ -2422,7 +2422,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
 				KeyRange parentRange(KeyRangeRef(parentGranuleRanges[parentIdx], parentGranuleRanges[parentIdx + 1]));
 				state Key lockKey = blobGranuleLockKeyFor(parentRange);
-				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
+				state Future<ValueResult> oldLockFuture = tr->get(lockKey);
 
 				// Clear existing merge boundaries.
 				tr->clear(blobGranuleMergeBoundaryKeyFor(parentRange.begin));
@@ -2439,7 +2439,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 					           granuleIDToCFKey(parentGranuleIDs[parentIdx]).printable());
 				}
 
-				Optional<Value> oldLock = wait(oldLockFuture);
+				ValueResult oldLock = wait(oldLockFuture);
 				ASSERT(oldLock.present());
 				auto prevLock = decodeBlobGranuleLockValue(oldLock.get());
 				// Set lock to max value for this manager, so other reassignments can't race with this transaction
@@ -3621,7 +3621,7 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			ValueResult oldEpoch = wait(tr->get(blobManagerEpochKey));
 			state int64_t oldEpochValue = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) : 1;
 			if (oldEpochValue < epoch) {
 				tr->set(blobManagerEpochKey, blobManagerEpochValueFor(epoch));
@@ -4996,7 +4996,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				Optional<Value> persistedHistory = wait(tr.get(historyKey));
+				ValueResult persistedHistory = wait(tr.get(historyKey));
 				if (persistedHistory.present()) {
 					currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
 					foundHistory = true;
@@ -5748,7 +5748,7 @@ ACTOR Future<UID> fetchClusterId(Database db) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			ValueResult clusterIdVal = wait(tr->get(clusterIdKey));
 			if (clusterIdVal.present()) {
 				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
 				return clusterId;

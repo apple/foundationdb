@@ -79,7 +79,7 @@ public:
 	void setVersion(Version v) override { tr.setVersion(v); }
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override { return tr.getCachedReadVersion(); }
-	Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False) override;
+	Future<ValueResult> get(const Key& key, Snapshot = Snapshot::False) override;
 	Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) override;
 	Future<RangeResult> getRange(const KeySelector& begin,
 	                             const KeySelector& end,

@@ -119,7 +119,7 @@ struct FastTriggeredWatchesWorkload : TestWorkload {
 					state ReadYourWritesTransaction tr(cx);
 
 					try {
-						Optional<Value> val = wait(tr.get(setKey));
+						ValueResult val = wait(tr.get(setKey));
 						if (watchCommitted) {
 							getDuration = now() - watchEnd;
 						}

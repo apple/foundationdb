@@ -57,7 +57,7 @@ public:
 	struct GetValueReq {
 		explicit GetValueReq(Key key) : key(key) {}
 		Key key;
-		typedef Optional<Value> Result;
+		typedef ValueResult Result;
 	};
 
 	struct GetKeyReq {
@@ -93,7 +93,7 @@ public:
 	// make use of it.
 
 	ACTOR template <class Iter>
-	static Future<Optional<Value>> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
+	static Future<ValueResult> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
 		// This overload is required to provide postcondition: it->extractWriteMapIterator().segmentContains(read.key)
 
 		if (ryw->options.bypassUnreadable) {
@@ -104,14 +104,14 @@ public:
 		if (it->is_kv()) {
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				return ValueResult(result->value);
 			} else {
-				return Optional<Value>();
+				return ValueResult();
 			}
 		} else if (it->is_empty_range()) {
-			return Optional<Value>();
+			return ValueResult();
 		} else {
-			Optional<Value> res = wait(ryw->tr.get(read.key, Snapshot::True));
+			ValueResult res = wait(ryw->tr.get(read.key, Snapshot::True));
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
@@ -122,7 +122,7 @@ public:
 			} else {
 				ryw->cache.insert(k, Optional<ValueRef>());
 				if (!dependent)
-					return Optional<Value>();
+					return res;
 			}
 
 			// There was a dependent write at the key, so we need to lookup the iterator again
@@ -174,7 +174,7 @@ public:
 	// transaction. Responsible for clipping results to the non-system keyspace when appropriate, since NativeAPI
 	// doesn't do that.
 
-	static Future<Optional<Value>> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
+	static Future<ValueResult> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
 		return ryw->tr.get(read.key, snapshot);
 	}
 
@@ -222,7 +222,7 @@ public:
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetValueReq read,
 	                             WriteMap::iterator& it,
-	                             Optional<Value> result) {
+	                             ValueResult result) {
 		// it will already point to the right segment (see the calling code in read()), so we don't need to skip
 		// read.key will be copied into ryw->arena inside of updateConflictMap if it is being added
 		updateConflictMap<mustUnmodified>(ryw, read.key, it);
@@ -1286,7 +1286,7 @@ public:
 	}
 
 	ACTOR static Future<Void> watch(ReadYourWritesTransaction* ryw, Key key) {
-		state Future<Optional<Value>> val;
+		state Future<ValueResult> val;
 		state Future<Void> watchFuture;
 		state Reference<Watch> watch(new Watch(key));
 		state Promise<Void> done;
@@ -1602,9 +1602,9 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db) {
+ACTOR Future<ValueResult> getJSON(Database db) {
 	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
-	return getValueFromJSON(statusObj);
+	return ValueResult(getValueFromJSON(statusObj));
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
@@ -1632,7 +1632,7 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 	}
 }
 
-Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
+Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
 	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1646,7 +1646,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
-				return Optional<Value>();
+				return ValueResult();
 			}
 		}
 
@@ -1654,12 +1654,12 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
-					return output;
+					return ValueResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return Optional<Value>();
+			return ValueResult();
 		}
 
 		if (key == "\xff\xff/connection_string"_sr) {
@@ -1667,12 +1667,12 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
 					Optional<Value> output = StringRef(f->getConnectionString().toString());
-					return output;
+					return ValueResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return Optional<Value>();
+			return ValueResult();
 		}
 	}
 
@@ -1688,10 +1688,10 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 
 	// There are no keys in the database with size greater than the max key size
 	if (key.size() > getMaxReadKeySize(key)) {
-		return Optional<Value>();
+		return ValueResult();
 	}
 
-	Future<Optional<Value>> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
+	Future<ValueResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
 	reading.add(success(result));
 	return result;
 }

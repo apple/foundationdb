@@ -155,8 +155,8 @@ ACTOR Future<std::vector<WorkerInterface>> getCoordWorkers(Database cx,
                                                            Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
 	state std::vector<WorkerDetails> workers = wait(getWorkers(dbInfo));
 
-	Optional<Value> coordinators =
-	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+	ValueResult coordinators =
+	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueResult> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		    return tr->get(coordinatorsKey);
@@ -322,8 +322,8 @@ getStorageWorkers(Database cx, Reference<AsyncVar<ServerDBInfo> const> dbInfo, b
 	for (const auto& worker : workers) {
 		workersMap[worker.interf.address()] = worker.interf;
 	}
-	Optional<Value> regionsValue =
-	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+	ValueResult regionsValue =
+	    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueResult> {
 		    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		    return tr->get("usable_regions"_sr.withPrefix(configKeysPrefix));
@@ -678,7 +678,7 @@ ACTOR Future<int64_t> getVersionOffset(Database cx,
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Version rv = wait(tr.getReadVersion());
-			Optional<Standalone<StringRef>> versionEpochValue = wait(tr.get(versionEpochKey));
+			ValueResult versionEpochValue = wait(tr.get(versionEpochKey));
 			if (!versionEpochValue.present()) {
 				return 0;
 			}

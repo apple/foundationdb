@@ -290,9 +290,8 @@ public:
 	Key applyMutationsMapPrefix() { return uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid); }
 
 	ACTOR static Future<int64_t> getApplyVersionLag_impl(Reference<ReadYourWritesTransaction> tr, UID uid) {
-		state Future<Optional<Value>> beginVal =
-		    tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::True);
-		state Future<Optional<Value>> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::True);
+		state Future<ValueResult> beginVal = tr->get(uidPrefixKey(applyMutationsBeginRange.begin, uid), Snapshot::True);
+		state Future<ValueResult> endVal = tr->get(uidPrefixKey(applyMutationsEndRange.begin, uid), Snapshot::True);
 		wait(success(beginVal) && success(endVal));
 
 		if (!beginVal.get().present() || !endVal.get().present())
@@ -1446,7 +1445,7 @@ ACTOR static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 	state Subspace tagNames = backupAgent->subspace.get(BackupAgentBase::keyTagName);
-	Optional<Value> uidStr = wait(tr->get(tagNames.pack(Key(tagName))));
+	ValueResult uidStr = wait(tr->get(tagNames.pack(Key(tagName))));
 	if (!uidStr.present()) {
 		TraceEvent(SevWarn, "FileBackupAbortIncompatibleBackup_TagNotFound").detail("TagName", tagName.c_str());
 		return Void();
@@ -1457,7 +1456,7 @@ ACTOR static Future<Void> abortFiveZeroBackup(FileBackupAgent* backupAgent,
 	state Subspace globalConfig = backupAgent->subspace.get(BackupAgentBase::keyConfig).get(uid.toString());
 	state Subspace newConfigSpace = uidPrefixKey("uid->config/"_sr.withPrefix(fileBackupPrefixRange.begin), uid);
 
-	Optional<Value> statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
+	ValueResult statusStr = wait(tr->get(statusSpace.pack(FileBackupAgent::keyStateStatus)));
 	state EBackupState status =
 	    !statusStr.present() ? EBackupState::STATE_NEVERRAN : BackupAgentBase::getState(statusStr.get().toString());
 
@@ -1653,7 +1652,7 @@ ACTOR static Future<Key> addBackupTask(StringRef name,
 // Clears the backup ID from "backupStartedKey" to pause backup workers.
 ACTOR static Future<Void> clearBackupStartID(Reference<ReadYourWritesTransaction> tr, UID backupUid) {
 	// If backup worker is not enabled, exit early.
-	Optional<Value> started = wait(tr->get(backupStartedKey));
+	ValueResult started = wait(tr->get(backupStartedKey));
 	std::vector<std::pair<UID, Version>> ids;
 	if (started.present()) {
 		ids = decodeBackupStartedValue(started.get());
@@ -3466,8 +3465,8 @@ struct StartFullBackupTaskFunc : BackupTaskFuncBase {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				state Future<Void> keepRunning = taskBucket->keepRunning(tr, task);
 
-				state Future<Optional<Value>> started = tr->get(backupStartedKey);
-				state Future<Optional<Value>> taskStarted = tr->get(config.allWorkerStarted().key);
+				state Future<ValueResult> started = tr->get(backupStartedKey);
+				state Future<ValueResult> taskStarted = tr->get(config.allWorkerStarted().key);
 				partitionedLog = config.partitionedLogEnabled().get(tr);
 				wait(success(started) && success(taskStarted) && success(partitionedLog));
 
@@ -5150,7 +5149,7 @@ public:
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
+				ValueResult _restoreRequestDoneKeyValue = wait(tr.get(restoreRequestDoneKey));
 				restoreRequestDoneKeyValue = _restoreRequestDoneKeyValue;
 				// Restore may finish before restoreTool waits on the restore finish event.
 				if (restoreRequestDoneKeyValue.present()) {
@@ -5981,7 +5980,7 @@ public:
 				statusText = "";
 				tag = makeBackupTag(tagName);
 				state Optional<UidAndAbortedFlagT> uidAndAbortedFlag = wait(tag.get(tr));
-				state Future<Optional<Value>> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
+				state Future<ValueResult> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
 				if (uidAndAbortedFlag.present()) {
 					config = BackupConfig(uidAndAbortedFlag.get().first);
 					EBackupState status =
@@ -6130,7 +6129,7 @@ public:
 					}
 				}
 
-				Optional<Value> paused = wait(fPaused);
+				ValueResult paused = wait(fPaused);
 				if (paused.present()) {
 					statusText += format("\nAll backup agents have been paused.\n");
 				}
@@ -6150,7 +6149,7 @@ public:
 	                                                         Snapshot snapshot) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-		state Optional<Value> version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
+		state ValueResult version = wait(tr->get(backupAgent->lastRestorable.pack(tagName), snapshot));
 
 		return (version.present())
 		           ? Optional<Version>(BinaryReader::fromStringRef<Version>(version.get(), Unversioned()))

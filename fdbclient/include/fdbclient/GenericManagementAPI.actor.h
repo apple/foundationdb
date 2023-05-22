@@ -395,9 +395,9 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 							}
 						} else {
 							// all regions with priority >= 0 must be fully replicated
-							state std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>>
+							state std::vector<typename DB::TransactionT::template FutureT<ValueResult>>
 							    replicasFuturesF;
-							state std::vector<Future<Optional<Value>>> replicasFutures;
+							state std::vector<Future<ValueResult>> replicasFutures;
 							for (auto& it : newConfig.regions) {
 								if (it.priority >= 0) {
 									replicasFuturesF.push_back(tr->get(datacenterReplicasKeyFor(it.dcId)));
@@ -559,8 +559,8 @@ Future<ConfigurationResult> changeConfig(Reference<DB> db, std::map<std::string,
 						tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr->setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 
-						state typename DB::TransactionT::template FutureT<Optional<Value>> vF = tr->get(initIdKey);
-						Optional<Value> v = wait(safeThreadFutureToFuture(vF));
+						state typename DB::TransactionT::template FutureT<ValueResult> vF = tr->get(initIdKey);
+						ValueResult v = wait(safeThreadFutureToFuture(vF));
 						if (v != m[initIdKey.toString()])
 							return ConfigurationResult::DATABASE_ALREADY_CREATED;
 						else if (m[configKeysPrefix.toString() + "storage_engine"] ==

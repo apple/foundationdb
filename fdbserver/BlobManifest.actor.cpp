@@ -938,7 +938,7 @@ ACTOR Future<Version> getManifestVersion(Database db) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> value = wait(tr.get(blobManifestVersionKey));
+			ValueResult value = wait(tr.get(blobManifestVersionKey));
 			if (value.present()) {
 				Version version;
 				BinaryReader reader(value.get(), Unversioned());

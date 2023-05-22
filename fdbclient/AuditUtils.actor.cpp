@@ -94,7 +94,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 
 	loop {
 		try {
-			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
+			ValueResult res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
 			TraceEvent("ReadAuditState", id).detail("AuditKey", auditKey(type, id));
 			break;

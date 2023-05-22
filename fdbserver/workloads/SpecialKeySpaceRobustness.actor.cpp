@@ -95,7 +95,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			if (e.code() == error_code_actor_cancelled)
 				throw;
 			if (e.code() == error_code_special_keys_api_failure) {
-				Optional<Value> errorMsg =
+				ValueResult errorMsg =
 				    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 				ASSERT(errorMsg.present());
 				std::string errorStr;
@@ -147,11 +147,11 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin);
 					tx->set(addr, "InvalidProcessType"_sr);
 					// test ryw
-					Optional<Value> processType = wait(tx->get(addr));
+					ValueResult processType = wait(tx->get(addr));
 					ASSERT(processType.present() && processType.get() == "InvalidProcessType"_sr);
 					// test ryw disabled
 					tx->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
-					Optional<Value> originalProcessType = wait(tx->get(addr));
+					ValueResult originalProcessType = wait(tx->get(addr));
 					ASSERT(originalProcessType.present() &&
 					       originalProcessType.get() == worker.processClass.toString());
 					// test error handling (invalid value type)
@@ -165,7 +165,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				if (e.code() == error_code_actor_cancelled)
 					throw;
 				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
+					ValueResult errorMsg =
 					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 					ASSERT(errorMsg.present());
 					std::string errorStr;
@@ -224,7 +224,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 					wait(tx->commit());
 					tx->reset();
 					tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> class_source = wait(tx->get(
+					ValueResult class_source = wait(tx->get(
 					    Key("process/class_source/" + address)
 					        .withPrefix(
 					            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin)));
@@ -280,7 +280,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				// In case commit_unknown_result is thrown by buggify, we may try to lock more than once
 				// The second lock commit will throw special_keys_api_failure error
 				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
+					ValueResult errorMsg =
 					    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 					ASSERT(errorMsg.present());
 					std::string errorStr;
@@ -356,11 +356,10 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		{
 			try {
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val1 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				ValueResult val1 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
 				state bool ccSuspendSetting =
 				    val1.present() ? BinaryReader::fromStringRef<bool>(val1.get(), Unversioned()) : false;
-				Optional<Value> val2 =
-				    wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
+				ValueResult val2 = wait(tx->get(SpecialKeySpace::getManagementApiCommandPrefix("consistencycheck")));
 				// Make sure the read result from special key consistency with the system key
 				ASSERT(ccSuspendSetting ? val2.present() : !val2.present());
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -372,7 +371,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				tx->reset();
 				// Read system key to make sure it is disabled
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
+				ValueResult val3 = wait(tx->get(fdbShouldConsistencyCheckBeSuspended));
 				bool ccSuspendSetting2 =
 				    val3.present() ? BinaryReader::fromStringRef<bool>(val3.get(), Unversioned()) : false;
 				ASSERT(ccSuspendSetting2);
@@ -401,10 +400,10 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		loop {
 			try {
 				tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> res = wait(tx->get(coordinatorsKey));
+				ValueResult res = wait(tx->get(coordinatorsKey));
 				ASSERT(res.present()); // Otherwise, database is in a bad state
 				state ClusterConnectionString cs(res.get().toString());
-				Optional<Value> coordinator_processes_key = wait(
+				ValueResult coordinator_processes_key = wait(
 				    tx->get("processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 				ASSERT(coordinator_processes_key.present());
 				state std::vector<std::string> process_addresses;

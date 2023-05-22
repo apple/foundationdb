@@ -41,7 +41,7 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 	// Get the exisiting consistencyScanInfo object if present
-	state Optional<Value> consistencyScanInfo = wait(ConsistencyScanInfo::getInfo(tr));
+	state ValueResult consistencyScanInfo = wait(ConsistencyScanInfo::getInfo(tr));
 	wait(tr->commit());
 	if (consistencyScanInfo.present())
 		csInfo = ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfo.get(), IncludeVersion());

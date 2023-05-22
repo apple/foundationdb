@@ -764,8 +764,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGet : public BaseTest<TestGet, Optional<Value>> {
-		typedef BaseTest<TestGet, Optional<Value>> base_type;
+	struct TestGet : public BaseTest<TestGet, ValueResult> {
+		typedef BaseTest<TestGet, ValueResult> base_type;
 		Key key;
 
 		TestGet(unsigned int id, FuzzApiCorrectnessWorkload* workload, Reference<ITransaction> tr)

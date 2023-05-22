@@ -781,7 +781,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			tr->reset();
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True));
+			ValueResult ctrValue = wait(tr->get(KeyRef(clientLatencyAtomicCtr), Snapshot::True));
 			if (!ctrValue.present()) {
 				TraceEvent(SevInfo, "NumClntTxnEntriesNotFound").log();
 				return Void();
@@ -1372,14 +1372,14 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
-ACTOR Future<Optional<Value>> getJSON(Database db);
+ACTOR Future<ValueResult> getJSON(Database db);
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override {
 		ASSERT(kr.contains(k));
-		return map(f(ryw), [k = k](Optional<Value> v) {
+		return map(f(ryw), [k = k](ValueResult v) {
 			RangeResult result;
 			if (v.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(k, v.get()));
@@ -1389,7 +1389,7 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 	}
 
 	SingleSpecialKeyImpl(KeyRef k,
-	                     const std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)>& f,
+	                     const std::function<Future<ValueResult>(ReadYourWritesTransaction*)>& f,
 	                     bool supportsTenants = false)
 	  : SpecialKeyRangeReadImpl(singleKeyRange(k)), k(k), f(f), tenantSupport(supportsTenants) {}
 
@@ -1400,7 +1400,7 @@ struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
 
 private:
 	Key k;
-	std::function<Future<Optional<Value>>(ReadYourWritesTransaction*)> f;
+	std::function<Future<ValueResult>(ReadYourWritesTransaction*)> f;
 	bool tenantSupport;
 };
 
@@ -1604,11 +1604,13 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
 		                            SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
-			                            if (ryw->getSpecialKeySpaceErrorMsg().present())
-				                            return Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get());
-			                            else
-				                            return Optional<Value>();
+		                            [](ReadYourWritesTransaction* ryw) -> Future<ValueResult> {
+			                            if (ryw->getSpecialKeySpaceErrorMsg().present()) {
+				                            return ValueResult(
+				                                Optional<Value>(ryw->getSpecialKeySpaceErrorMsg().get()));
+			                            } else {
+				                            return ValueResult();
+			                            }
 		                            },
 		                            true));
 		registerSpecialKeysImpl(
@@ -1748,12 +1750,12 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
 		                            "\xff\xff/status/json"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+		                            [](ReadYourWritesTransaction* ryw) -> Future<ValueResult> {
 			                            if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 				                            ++ryw->getDatabase()->transactionStatusRequests;
 				                            return getJSON(ryw->getDatabase());
 			                            } else {
-				                            return Optional<Value>();
+				                            return ValueResult();
 			                            }
 		                            },
 		                            true));
@@ -1761,18 +1763,18 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
 		                            "\xff\xff/cluster_file_path"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+		                            [](ReadYourWritesTransaction* ryw) -> Future<ValueResult> {
 			                            try {
 				                            if (ryw->getDatabase().getPtr() &&
 				                                ryw->getDatabase()->getConnectionRecord()) {
 					                            Optional<Value> output =
 					                                StringRef(ryw->getDatabase()->getConnectionRecord()->getLocation());
-					                            return output;
+					                            return ValueResult(output);
 				                            }
 			                            } catch (Error& e) {
 				                            return e;
 			                            }
-			                            return Optional<Value>();
+			                            return ValueResult();
 		                            },
 		                            true));
 
@@ -1781,34 +1783,34 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::IMPLTYPE::READONLY,
 		    std::make_unique<SingleSpecialKeyImpl>(
 		        "\xff\xff/connection_string"_sr,
-		        [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+		        [](ReadYourWritesTransaction* ryw) -> Future<ValueResult> {
 			        try {
 				        if (ryw->getDatabase().getPtr() && ryw->getDatabase()->getConnectionRecord()) {
 					        Reference<IClusterConnectionRecord> f = ryw->getDatabase()->getConnectionRecord();
 					        Optional<Value> output = StringRef(f->getConnectionString().toString());
-					        return output;
+					        return ValueResult(output);
 				        }
 			        } catch (Error& e) {
 				        return e;
 			        }
-			        return Optional<Value>();
+			        return ValueResult();
 		        },
 		        true));
 		registerSpecialKeysImpl(SpecialKeySpace::MODULE::CLUSTERID,
 		                        SpecialKeySpace::IMPLTYPE::READONLY,
 		                        std::make_unique<SingleSpecialKeyImpl>(
 		                            "\xff\xff/cluster_id"_sr,
-		                            [](ReadYourWritesTransaction* ryw) -> Future<Optional<Value>> {
+		                            [](ReadYourWritesTransaction* ryw) -> Future<ValueResult> {
 			                            try {
 				                            if (ryw->getDatabase().getPtr()) {
 					                            return map(getClusterId(ryw->getDatabase()), [](UID id) {
-						                            return Optional<Value>(StringRef(id.toString()));
+						                            return ValueResult(Optional<Value>(StringRef(id.toString())));
 					                            });
 				                            }
 			                            } catch (Error& e) {
 				                            return e;
 			                            }
-			                            return Optional<Value>();
+			                            return ValueResult();
 		                            },
 		                            true));
 
@@ -2924,10 +2926,10 @@ std::string Tenant::description() const {
 	}
 }
 
-Future<Optional<Value>> getValue(Reference<TransactionState> const& trState,
-                                 Key const& key,
-                                 UseTenant const& useTenant = UseTenant::True,
-                                 TransactionRecordLogInfo const& recordLogInfo = TransactionRecordLogInfo::True);
+Future<ValueResult> getValue(Reference<TransactionState> const& trState,
+                             Key const& key,
+                             UseTenant const& useTenant = UseTenant::True,
+                             TransactionRecordLogInfo const& recordLogInfo = TransactionRecordLogInfo::True);
 
 Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              KeySelector const& begin,
@@ -2937,8 +2939,7 @@ Future<RangeResult> getRange(Reference<TransactionState> const& trState,
                              UseTenant const& useTenant);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState, UID id) {
-	Optional<Value> val =
-	    wait(getValue(trState, serverListKeyFor(id), UseTenant::False, TransactionRecordLogInfo::False));
+	ValueResult val = wait(getValue(trState, serverListKeyFor(id), UseTenant::False, TransactionRecordLogInfo::False));
 
 	if (!val.present()) {
 		// A storage server has been removed from serverList since we read keyServers
@@ -3552,10 +3553,10 @@ Future<Void> Transaction::warmRange(KeyRange keys) {
 	return warmRange_impl(trState, keys);
 }
 
-ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
-                                       Key key,
-                                       UseTenant useTenant,
-                                       TransactionRecordLogInfo recordLogInfo) {
+ACTOR Future<ValueResult> getValue(Reference<TransactionState> trState,
+                                   Key key,
+                                   UseTenant useTenant,
+                                   TransactionRecordLogInfo recordLogInfo) {
 	wait(trState->startTransaction());
 
 	CODE_PROBE(trState->hasTenant(), "NativeAPI getValue has tenant");
@@ -3662,7 +3663,8 @@ ACTOR Future<Optional<Value>> getValue(Reference<TransactionState> trState,
 
 			trState->cx->transactionBytesRead += reply.value.present() ? reply.value.get().size() : 0;
 			++trState->cx->transactionKeysRead;
-			return reply.value;
+
+			return ValueResult(std::move(reply.value), ReadMetricsNeedFilled());
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -4022,7 +4024,7 @@ ACTOR Future<Void> sameVersionDiffValue(Database cx, Reference<WatchParameters> 
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			}
 
-			state Optional<Value> valSS = wait(tr.get(parameters->key));
+			state ValueResult valSS = wait(tr.get(parameters->key));
 			Reference<WatchMetadata> metadata = cx->getWatchMetadata(parameters->tenant.tenantId, parameters->key);
 
 			// val_3 != val_1 (storage server value doesn't match value in map)
@@ -5520,14 +5522,14 @@ void Transaction::setVersion(Version v) {
 	trState->readVersionObtainedFromGrvProxy = false;
 }
 
-Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
+Future<ValueResult> Transaction::get(const Key& key, Snapshot snapshot) {
 	++trState->cx->transactionLogicalReads;
 	++trState->cx->transactionGetValueRequests;
 	// ASSERT (key < allKeys.end);
 
 	// There are no keys in the database with size greater than the max key size
 	if (key.size() > getMaxReadKeySize(key)) {
-		return Optional<Value>();
+		return ValueResult();
 	}
 
 	auto ver = getReadVersion();
@@ -5545,13 +5547,13 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 		useTenant = UseTenant::False;
 		++trState->cx->transactionMetadataVersionReads;
 		if (!ver.isReady() || trState->metadataVersion.isSet()) {
-			return trState->metadataVersion.getFuture();
+			return ValueResult(trState->metadataVersion.getFuture().get());
 		} else {
 			if (ver.isError()) {
 				return ver.getError();
 			}
 			if (ver.get() == trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
-				return trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].second;
+				return ValueResult(trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].second);
 			}
 
 			Version v = ver.get();
@@ -5563,7 +5565,7 @@ Future<Optional<Value>> Transaction::get(const Key& key, Snapshot snapshot) {
 				                 : ((hi + trState->cx->metadataVersionCache.size() + lo) / 2) %
 				                       trState->cx->metadataVersionCache.size();
 				if (v == trState->cx->metadataVersionCache[cu].first) {
-					return trState->cx->metadataVersionCache[cu].second;
+					return ValueResult(trState->cx->metadataVersionCache[cu].second);
 				}
 				if (cu == lo) {
 					break;
@@ -6277,7 +6279,7 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 						return;
 					}
 				} else {
-					Optional<Value> val = wait(tr.get(it->range().begin));
+					ValueResult val = wait(tr.get(it->range().begin));
 					if (!val.present() || val.get() != m.setValue) {
 						TraceEvent evt(SevError, "CheckWritesFailed");
 						evt.detail("Class", "Set").detail("Key", it->range().begin).detail("Expected", m.setValue);
@@ -10327,7 +10329,7 @@ ACTOR Future<KeyRange> getChangeFeedRange(Reference<DatabaseContext> db, Databas
 				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
 				tr.reset();
 			} else {
-				Optional<Value> val = wait(tr.get(rangeIDKey));
+				ValueResult val = wait(tr.get(rangeIDKey));
 				if (!val.present()) {
 					ASSERT(tr.getReadVersion().isReady());
 					TraceEvent(SevDebug, "ChangeFeedNotRegisteredGet")
@@ -10875,7 +10877,7 @@ ACTOR static Future<Void> popChangeFeedBackup(Database cx, Key rangeID, Version 
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			state Key rangeIDKey = rangeID.withPrefix(changeFeedPrefix);
-			Optional<Value> val = wait(tr.get(rangeIDKey));
+			ValueResult val = wait(tr.get(rangeIDKey));
 			if (val.present()) {
 				KeyRange range;
 				Version popVersion;
@@ -11120,7 +11122,7 @@ ACTOR Future<Void> waitPurgeGranulesCompleteActor(Reference<DatabaseContext> db,
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> purgeVal = wait(tr->get(purgeKey));
+			ValueResult purgeVal = wait(tr->get(purgeKey));
 			if (!purgeVal.present()) {
 				if (BG_REQUEST_DEBUG) {
 					fmt::print("purgeBlobGranules for {0} succeeded\n", purgeKey.printable());

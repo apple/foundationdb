@@ -150,7 +150,7 @@ struct InventoryTestWorkload : TestWorkload {
 	}
 
 	ACTOR Future<Void> inventoryTestWrite(Transaction* tr, Key key) {
-		Optional<Value> val = wait(tr->get(key));
+		ValueResult val = wait(tr->get(key));
 		int count = !val.present() ? 0 : atoi(val.get().toString().c_str());
 		ASSERT(count >= 0 && count < 1000000);
 		tr->set(key, format("%d", count + 1));
@@ -200,7 +200,7 @@ struct InventoryTestWorkload : TestWorkload {
 			} else {
 				loop {
 					try {
-						Optional<Value> val = wait(tr.get(self->chooseProduct()));
+						ValueResult val = wait(tr.get(self->chooseProduct()));
 						break;
 					} catch (Error& e) {
 						wait(tr.onError(e));
