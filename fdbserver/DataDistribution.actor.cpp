@@ -1753,6 +1753,12 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 
 	try {
 		ASSERT(audit != nullptr);
+		if (context == "ResumeAudit") {
+			ASSERT(audit->coreState.ddAuditId == self->ddId);
+			// Claim new ddId on ddAudit metadata
+			wait(updateAuditState(
+			    self->txnProcessor->context(), audit->coreState, lockInfo, self->context->isDDEnabled()));
+		}
 		loadAndDispatchAudit(self, audit, audit->coreState.range);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
 		    .detail("Context", context)
@@ -1931,6 +1937,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	ASSERT(auditState.id.isValid());
 	ASSERT(!auditState.range.empty());
 	ASSERT(auditState.getPhase() == AuditPhase::Running);
+	auditState.ddAuditId = self->ddId; // make sure any existing audit state claims the current DD
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
 	audit->retryCount = retryCount;
 	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
@@ -1997,6 +2004,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			auditState.setType(auditType);
 			auditState.range = auditRange;
 			auditState.setPhase(AuditPhase::Running);
+			auditState.ddAuditId = self->ddId; // persist ddId to new ddAudit metadata
 			TraceEvent(SevVerbose, "DDAuditStorageLaunchPersistNewAuditIDBefore", self->ddId)
 			    .detail("AuditType", auditType)
 			    .detail("Range", auditRange);
@@ -2227,6 +2235,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					// We always issue exactly one audit task (for the remaining part) when schedule
 					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
+					req.ddAuditId = self->ddId; // send this ddid to SS
 					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
 				}
 			}
@@ -2447,6 +2456,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
 						}
 						issueDoAuditCount++;
+						req.ddAuditId = self->ddId; // send this ddid to SS
 						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
 				}
