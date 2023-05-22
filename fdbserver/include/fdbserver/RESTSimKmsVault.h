@@ -25,6 +25,10 @@
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
 
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "/get-encryption-keys-by-key-ids";
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "/get-encryption-keys-by-domain-ids";
+const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "/get-blob-metadata";
+
 struct RESTSimKmsVaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<RESTSimKmsVaultRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override;
