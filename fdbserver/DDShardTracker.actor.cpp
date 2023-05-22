@@ -164,7 +164,7 @@ std::pair<ShardSizeBounds, bool> calculateShardSizeBounds(
 			ASSERT(false);
 		}
 
-		// 3. rand bandwidth bound
+		// 3. read bandwidth bound
 		if (readBandwidthStatus == ReadBandwidthStatusNormal) {
 			bounds.max.bytesReadPerKSecond =
 			    std::max((int64_t)(SERVER_KNOBS->SHARD_MAX_READ_DENSITY_RATIO * bytes *
