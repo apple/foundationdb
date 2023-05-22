@@ -3,7 +3,7 @@ FROM centos:7 as build
 ARG DEVTOOLSET_VERSION=11
 
 WORKDIR /tmp
-# skip installing elrepo-kernel on aarch64
+# skip installing elrepo-kernel on aarch64 ---
 RUN if [ ! "$(uname -m)" == "aarch64" ]; then \
         rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org && \
         yum -y install https://www.elrepo.org/elrepo-release-7.el7.elrepo.noarch.rpm && \
@@ -77,7 +77,8 @@ RUN sed -i -e 's/\*__block/\*__libc_block/g' /usr/include/unistd.h
 # install docker 20
 ENV DOCKER_BUCKET="download.docker.com" \
     DOCKER_CHANNEL="stable" \
-    DIND_COMMIT="3b5fac462d21ca164b3778647420016315289034" \ #  pragma: allowlist secret
+    # pragma: allowlist nextline secret
+    DIND_COMMIT="3b5fac462d21ca164b3778647420016315289034" \
     DOCKER_BUILDX_VERSION="v0.9.1"
 
 ENV DOCKER_VERSION="20.10.21"
@@ -86,10 +87,12 @@ VOLUME /var/lib/docker
 
 RUN set -ex \
     && if [ "$(uname -m)" == "aarch64" ]; then \
-        DOCKER_SHA256="b4ceb6151d4dd1bfc7557f5fe0317e29cfcac91f798c34fae7dee891a811f8ee"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        DOCKER_SHA256="b4ceb6151d4dd1bfc7557f5fe0317e29cfcac91f798c34fae7dee891a811f8ee"; \
         DOCKER_COMPOSE_VERSION="v2.16.0"; \
     else \
-        DOCKER_SHA256="2582bed8772b283bda9d4565c0af76ee653c93d93dc6b8d0aad795d731a1bb81"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        DOCKER_SHA256="2582bed8772b283bda9d4565c0af76ee653c93d93dc6b8d0aad795d731a1bb81"; \
         DOCKER_COMPOSE_VERSION="1.26.0"; \
     fi \
     && curl -fSLs "https://${DOCKER_BUCKET}/linux/static/${DOCKER_CHANNEL}/$(uname -m)/docker-${DOCKER_VERSION}.tgz" -o docker.tgz \
@@ -169,9 +172,11 @@ RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
 
 # install cmake
 RUN if [ "$(uname -m)" == "aarch64" ]; then \
-        CMAKE_SHA256="4a750db7becfa426a37f702fa87267e836dda6720f2b768e31828f4cb5e2e24b"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        CMAKE_SHA256="4a750db7becfa426a37f702fa87267e836dda6720f2b768e31828f4cb5e2e24b"; \
     else \
-        CMAKE_SHA256="b1dfd11d50e2dfb3d18be86ca1a369da1c1131badc14b659491dd42be1fed704"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        CMAKE_SHA256="b1dfd11d50e2dfb3d18be86ca1a369da1c1131badc14b659491dd42be1fed704"; \
     fi && \
     curl -Ls https://github.com/Kitware/CMake/releases/download/v3.26.1/cmake-3.26.1-$(uname -s)-$(uname -m).tar.gz -o cmake.tar.gz && \
     echo "${CMAKE_SHA256}  cmake.tar.gz" > cmake-sha.txt && \
@@ -247,10 +252,12 @@ RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
 # install golang 1.19
 RUN if [ "$(uname -m)" == "aarch64" ]; then \
         GOLANG_ARCH="arm64"; \
-        GOLANG_SHA256="99de2fe112a52ab748fb175edea64b313a0c8d51d6157dba683a6be163fd5eab"; \  #  pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        GOLANG_SHA256="99de2fe112a52ab748fb175edea64b313a0c8d51d6157dba683a6be163fd5eab"; \
     else \
         GOLANG_ARCH="amd64"; \
-        GOLANG_SHA256="74b9640724fd4e6bb0ed2a1bc44ae813a03f1e72a4c76253e2d5c015494430ba"; \  #  pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        GOLANG_SHA256="74b9640724fd4e6bb0ed2a1bc44ae813a03f1e72a4c76253e2d5c015494430ba"; \
     fi && \
     curl -Ls https://golang.org/dl/go1.19.3.linux-${GOLANG_ARCH}.tar.gz -o golang.tar.gz && \
     echo "${GOLANG_SHA256}  golang.tar.gz" > golang-sha.txt && \
@@ -543,10 +550,12 @@ ENV RUSTUP_VERSION=1.24.3 \
     RUST_VERSION=1.59.0
 RUN if [ "$(uname -m)" == "aarch64" ]; then \
         RUST_ARCH="aarch64-unknown-linux-gnu"; \
-        RUST_SHA256="32a1532f7cef072a667bac53f1a5542c99666c4071af0c9549795bbdb2069ec1"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        RUST_SHA256="32a1532f7cef072a667bac53f1a5542c99666c4071af0c9549795bbdb2069ec1"; \
     else \
         RUST_ARCH="x86_64-unknown-linux-gnu"; \
-        RUST_SHA256="3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        RUST_SHA256="3dc5ef50861ee18657f9db2eeb7392f9c2a6c95c90ab41e45ab4ca71476b4338"; \
     fi && \
     curl -LsO "https://static.rust-lang.org/rustup/archive/${RUSTUP_VERSION}/${RUST_ARCH}/rustup-init" && \
     echo "${RUST_SHA256}  rustup-init" > rustup-sha.txt && \
@@ -666,9 +675,11 @@ RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     sha256sum --quiet -c k9s-sha.txt && \
     tar --no-same-owner --no-same-permissions --directory /usr/local/bin -xzf k9s.tar.gz k9s && \
     if [ "$(uname -m)" == "aarch64" ]; then \
-        AWSCLI_SHA256="bcb195622f0956c8569736b95bff9cff7f5684e400e694a33661f2d498fbc799"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        AWSCLI_SHA256="bcb195622f0956c8569736b95bff9cff7f5684e400e694a33661f2d498fbc799"; \
     else \
-        AWSCLI_SHA256="daf9253f0071b5cfee9532bc5220bedd7a5d29d4e0f92b42b9e3e4c496341e88"; \  # pragma: allowlist secret
+    # pragma: allowlist nextline secret
+        AWSCLI_SHA256="daf9253f0071b5cfee9532bc5220bedd7a5d29d4e0f92b42b9e3e4c496341e88"; \
     fi && \
     curl -Ls https://awscli.amazonaws.com/awscli-exe-linux-$(uname -m)-2.7.34.zip -o "awscliv2.zip" && \
     echo "${AWSCLI_SHA256}  awscliv2.zip" > awscliv2.txt && \
@@ -845,22 +856,17 @@ RUN rm -f /root/anaconda-ks.cfg && \
     'source $HOME/.cargo/env' \
     '' \
     >> .bashrc
-
 # =========================== END OF LAYER: devel ==============================
 FROM build as distcc
-
 ARG DEVTOOLSET_VERSION=11
-
 RUN useradd distcc && \
     source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     source /opt/rh/rh-python38/enable && \
     update-distcc-symlinks
-
 EXPOSE 3632
 EXPOSE 3633
 USER distcc
 ENV ALLOW 0.0.0.0/0
-
 ENTRYPOINT distccd \
            --daemon \
            --enable-tcp-insecure \
@@ -871,11 +877,8 @@ ENTRYPOINT distccd \
            --listen 0.0.0.0 \
            --allow ${ALLOW} \
            --jobs `nproc`
-
 # =========================== END OF LAYER: distcc =============================
 FROM devel as codebuild
-
 COPY dockerd-entrypoint.sh /usr/local/bin/
 ENTRYPOINT ["dockerd-entrypoint.sh"]
-
 # =========================== END OF LAYER: codebuild ==========================
