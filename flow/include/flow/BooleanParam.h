@@ -20,8 +20,6 @@
 
 #pragma once
 
-#include "flow/Trace.h"
-
 class BooleanParam {
 	bool value;
 
@@ -29,11 +27,6 @@ public:
 	explicit constexpr BooleanParam(bool value) : value(value) {}
 	constexpr operator bool() const { return value; }
 	constexpr void set(bool value) { this->value = value; }
-};
-
-template <class BooleanParamSub>
-struct Traceable<BooleanParamSub, std::enable_if_t<std::is_base_of_v<BooleanParam, BooleanParamSub>>> : std::true_type {
-	static std::string toString(BooleanParamSub const& value) { return Traceable<bool>::toString(value); }
 };
 
 // Declares a boolean parametr with the desired name. This declaration can be nested inside of a namespace or another

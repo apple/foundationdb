@@ -2041,10 +2041,16 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			initTraceEventMetrics();
+			openTraceFile(opts.publicAddresses.address,
+			              opts.rollsize,
+			              opts.maxLogsSize,
+			              opts.logFolder,
+			              "trace",
+			              opts.logGroup,
+			              /* identifier = */ "",
+			              /* tracePartialFileSuffix = */ "",
+			              InitializeTraceMetrics::True);
 
-			openTraceFile(
-			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
 			g_network->initTLS();
 			if (!opts.authzPublicKeyFile.empty()) {
 				try {
