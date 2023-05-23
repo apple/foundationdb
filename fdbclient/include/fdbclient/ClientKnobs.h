@@ -191,6 +191,7 @@ public:
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
+	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
