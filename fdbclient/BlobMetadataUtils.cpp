@@ -65,31 +65,33 @@ Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::strin
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
 	int type = deterministicRandom()->randomInt(0, 3);
 	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
+	// guarantee unique location for each domain for now
+	BlobMetadataLocationId locIdBase = domainId * 100;
 	TraceEvent ev(SevDebug, "SimBlobMetadata");
 	ev.detail("DomainId", domainId).detail("TypeNum", type).detail("PartitionCount", partitionCount);
 	if (type == 0) {
 		// single storage location
 		std::string partition = std::to_string(domainId) + "/";
-		metadata.base = StringRef(metadata.arena(), buildPartitionPath(baseUrl, partition));
-		ev.detail("Base", metadata.base);
+		metadata.locations.emplace_back_deep(metadata.arena(), locIdBase, buildPartitionPath(baseUrl, partition));
+		ev.detail("Location", metadata.locations.back().path);
 	}
 	if (type == 1) {
 		// simulate hash prefixing in s3
-		metadata.base = StringRef(metadata.arena(), baseUrl);
-		ev.detail("Base", metadata.base);
 		for (int i = 0; i < partitionCount; i++) {
-			metadata.partitions.push_back_deep(metadata.arena(),
-			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
-			                                       std::to_string(domainId) + "/");
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+			std::string partition =
+			    deterministicRandom()->randomUniqueID().shortString() + "-" + std::to_string(domainId) + "/";
+			metadata.locations.emplace_back_deep(
+			    metadata.arena(), locIdBase + i, buildPartitionPath(baseUrl, partition));
+			ev.detail("P" + std::to_string(i), metadata.locations.back().path);
 		}
 	}
 	if (type == 2) {
 		// simulate separate storage location per partition
 		for (int i = 0; i < partitionCount; i++) {
 			std::string partition = std::to_string(domainId) + "_" + std::to_string(i) + "/";
-			metadata.partitions.push_back_deep(metadata.arena(), buildPartitionPath(baseUrl, partition));
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+			metadata.locations.emplace_back_deep(
+			    metadata.arena(), locIdBase + i, buildPartitionPath(baseUrl, partition));
+			ev.detail("P" + std::to_string(i), metadata.locations.back().path);
 		}
 	}
 
