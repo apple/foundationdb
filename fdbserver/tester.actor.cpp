@@ -1373,8 +1373,8 @@ ACTOR Future<bool> runTest(Database cx,
 				ok = false;
 			}
 
-			// Run auditStorage
-			if (quiescent) {
+			// Run auditStorage at the end of simulation
+			if (quiescent && g_network->isSimulated()) {
 				try {
 					TraceEvent("AuditStorageStart");
 					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));

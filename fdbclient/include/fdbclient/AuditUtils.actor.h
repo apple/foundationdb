@@ -64,5 +64,6 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
                                              AuditType auditType,
                                              UID maxAuditIdToClear,
                                              int numFinishAuditToKeep);
+ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
 #include "flow/unactorcompiler.h"
 #endif
