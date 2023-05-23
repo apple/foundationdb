@@ -1032,6 +1032,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+					if (excluded) {
+						ssExcludedCount++;
+					}
 
 					// Check if we are excluding a process that serves the storage role. We only have to check the free
 					// capacity if we are excluding at least one process that serves the storage role.
@@ -1074,10 +1077,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 							}
 						}
 					}
-				}
-
-				if (excluded) {
-					ssExcludedCount++;
 				}
 			}
 		}
