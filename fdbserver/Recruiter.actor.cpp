@@ -1729,61 +1729,64 @@ public:
 		}
 	}
 
-	static RecruitRemoteFromConfigurationReply findRemoteWorkersForConfiguration(
-	    Recruiter* self,
-	    ClusterControllerData const* clusterControllerData,
-	    RecruitRemoteFromConfigurationRequest const& req) {
-		RecruitRemoteFromConfigurationReply result;
+	static RemoteWorkerRecruitment findRemoteWorkersForConfiguration(Recruiter* self,
+	                                                                 ClusterControllerData const* clusterControllerData,
+	                                                                 RemoteRecruitmentInfo const& info) {
+		RemoteWorkerRecruitment recruitment;
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 
 		Recruiter::updateKnownIds(clusterControllerData, &id_used);
 
-		if (req.dbgId.present()) {
-			TraceEvent(SevDebug, "FindRemoteWorkersForConf", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("Configuration", req.configuration.toString())
-			    .detail("Policy", req.configuration.getRemoteTLogPolicy()->name());
+		if (info.dbgId.present()) {
+			TraceEvent(SevDebug, "FindRemoteWorkersForConf", info.dbgId.get())
+			    .detail("RemoteDcId", info.dcId)
+			    .detail("Configuration", info.configuration.toString())
+			    .detail("Policy", info.configuration.getRemoteTLogPolicy()->name());
 		}
 
 		std::set<Optional<Key>> remoteDC;
-		remoteDC.insert(req.dcId);
+		remoteDC.insert(info.dcId);
 
 		auto remoteLogs = self->getWorkersForTLogs(clusterControllerData,
-		                                           req.configuration,
-		                                           req.configuration.getRemoteTLogReplicationFactor(),
-		                                           req.configuration.getDesiredRemoteLogs(),
-		                                           req.configuration.getRemoteTLogPolicy(),
+		                                           info.configuration,
+		                                           info.configuration.getRemoteTLogReplicationFactor(),
+		                                           info.configuration.getDesiredRemoteLogs(),
+		                                           info.configuration.getRemoteTLogPolicy(),
 		                                           id_used,
 		                                           false,
 		                                           remoteDC,
-		                                           req.exclusionWorkerIds);
+		                                           info.exclusionWorkerIds);
 		for (int i = 0; i < remoteLogs.size(); i++) {
-			result.remoteTLogs.push_back(remoteLogs[i].interf);
+			recruitment.remoteTLogs.push_back(remoteLogs[i].interf);
 		}
 
-		auto logRouters = self->getWorkersForRoleInDatacenter(
-		    clusterControllerData, req.dcId, ProcessClass::LogRouter, req.logRouterCount, req.configuration, id_used);
+		auto logRouters = self->getWorkersForRoleInDatacenter(clusterControllerData,
+		                                                      info.dcId,
+		                                                      ProcessClass::LogRouter,
+		                                                      info.logRouterCount,
+		                                                      info.configuration,
+		                                                      id_used);
 		for (int i = 0; i < logRouters.size(); i++) {
-			result.logRouters.push_back(logRouters[i].interf);
+			recruitment.logRouters.push_back(logRouters[i].interf);
 		}
 
 		if (!clusterControllerData->goodRemoteRecruitmentTime.isReady() &&
 		    ((RoleFitness(
-		          SERVER_KNOBS->EXPECTED_TLOG_FITNESS, req.configuration.getDesiredRemoteLogs(), ProcessClass::TLog)
+		          SERVER_KNOBS->EXPECTED_TLOG_FITNESS, info.configuration.getDesiredRemoteLogs(), ProcessClass::TLog)
 		          .betterCount(RoleFitness(remoteLogs, ProcessClass::TLog, id_used))) ||
-		     (RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, req.logRouterCount, ProcessClass::LogRouter)
+		     (RoleFitness(SERVER_KNOBS->EXPECTED_LOG_ROUTER_FITNESS, info.logRouterCount, ProcessClass::LogRouter)
 		          .betterCount(RoleFitness(logRouters, ProcessClass::LogRouter, id_used))))) {
 			throw operation_failed();
 		}
 
-		if (req.dbgId.present()) {
-			TraceEvent(SevDebug, "FindRemoteWorkersForConf_ReturnResult", req.dbgId.get())
-			    .detail("RemoteDcId", req.dcId)
-			    .detail("ResultRemoteLogs", result.remoteTLogs.size());
-			result.dbgId = req.dbgId;
+		if (info.dbgId.present()) {
+			TraceEvent(SevDebug, "FindRemoteWorkersForConf_ReturnResult", info.dbgId.get())
+			    .detail("RemoteDcId", info.dcId)
+			    .detail("ResultRemoteLogs", recruitment.remoteTLogs.size());
+			recruitment.dbgId = info.dbgId;
 		}
 
-		return result;
+		return recruitment;
 	}
 
 	ACTOR static Future<Void> newSeedServers(Reference<ClusterRecoveryData> clusterRecoveryData,
@@ -1963,18 +1966,18 @@ public:
 			               std::back_inserter(exclusionWorkerIds),
 			               [](const WorkerInterface& in) { return in.id(); });
 
-			RecruitRemoteFromConfigurationRequest remoteRecruitReq(
+			RemoteRecruitmentInfo remoteRecruitmentInfo(
 			    clusterRecoveryData->configuration,
 			    remoteDcId,
 			    recr.tLogs.size() * std::max<int>(1,
 			                                      clusterRecoveryData->configuration.desiredLogRouterCount /
 			                                          std::max<int>(1, recr.tLogs.size())),
 			    exclusionWorkerIds);
-			remoteRecruitReq.dbgId = clusterRecoveryData->dbgid;
+			remoteRecruitmentInfo.dbgId = clusterRecoveryData->dbgid;
 			state Reference<RecruitRemoteWorkersInfo> recruitWorkersInfo =
-			    makeReference<RecruitRemoteWorkersInfo>(remoteRecruitReq);
+			    makeReference<RecruitRemoteWorkersInfo>(remoteRecruitmentInfo);
 			recruitWorkersInfo->dbgId = clusterRecoveryData->dbgid;
-			Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers =
+			Future<RemoteWorkerRecruitment> fRemoteWorkers =
 			    clusterRecruitRemoteFromConfiguration(self, clusterRecoveryData->controllerData, recruitWorkersInfo);
 
 			clusterRecoveryData->primaryLocality = clusterRecoveryData->dcId_locality[recr.dcId];
@@ -2008,7 +2011,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<RecruitRemoteFromConfigurationReply> clusterRecruitRemoteFromConfiguration(
+	ACTOR static Future<RemoteWorkerRecruitment> clusterRecruitRemoteFromConfiguration(
 	    Recruiter* self,
 	    ClusterControllerData* clusterControllerData,
 	    Reference<RecruitRemoteWorkersInfo> req) {

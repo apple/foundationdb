@@ -161,7 +161,6 @@ struct WorkerDetails {
 struct ClusterControllerFullInterface {
 	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
-	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
 	RequestStream<struct RecruitBlobWorkerRequest> recruitBlobWorker;
 	RequestStream<struct RegisterWorkerRequest> registerWorker;
@@ -183,18 +182,16 @@ struct ClusterControllerFullInterface {
 	NetworkAddress address() const { return clientInterface.address(); }
 
 	bool hasMessage() const {
-		return clientInterface.hasMessage() || recruitRemoteFromConfiguration.getFuture().isReady() ||
-		       recruitStorage.getFuture().isReady() || recruitBlobWorker.getFuture().isReady() ||
-		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
-		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
-		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
-		       notifyBackupWorkerDone.getFuture().isReady() || changeCoordinators.getFuture().isReady() ||
-		       getEncryptionAtRestMode.getFuture().isReady();
+		return clientInterface.hasMessage() || recruitStorage.getFuture().isReady() ||
+		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
+		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
+		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
+		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
+		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitStorage.getEndpoint(TaskPriority::ClusterController);
 		recruitBlobWorker.getEndpoint(TaskPriority::ClusterController);
 		registerWorker.getEndpoint(TaskPriority::ClusterControllerWorker);
@@ -215,7 +212,6 @@ struct ClusterControllerFullInterface {
 		}
 		serializer(ar,
 		           clientInterface,
-		           recruitRemoteFromConfiguration,
 		           recruitStorage,
 		           recruitBlobWorker,
 		           registerWorker,
@@ -290,41 +286,6 @@ struct RegisterMasterRequest {
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<RegisterMasterRequest, false>;
 extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
-
-struct RecruitRemoteFromConfigurationReply {
-	constexpr static FileIdentifier file_identifier = 9091392;
-	std::vector<WorkerInterface> remoteTLogs;
-	std::vector<WorkerInterface> logRouters;
-	Optional<UID> dbgId;
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, remoteTLogs, logRouters, dbgId);
-	}
-};
-
-struct RecruitRemoteFromConfigurationRequest {
-	constexpr static FileIdentifier file_identifier = 3235995;
-	DatabaseConfiguration configuration;
-	Optional<Key> dcId;
-	int logRouterCount;
-	std::vector<UID> exclusionWorkerIds;
-	Optional<UID> dbgId;
-	ReplyPromise<RecruitRemoteFromConfigurationReply> reply;
-
-	RecruitRemoteFromConfigurationRequest() {}
-	RecruitRemoteFromConfigurationRequest(DatabaseConfiguration const& configuration,
-	                                      Optional<Key> const& dcId,
-	                                      int logRouterCount,
-	                                      const std::vector<UID>& exclusionWorkerIds)
-	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
-	    exclusionWorkerIds(exclusionWorkerIds) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, configuration, dcId, logRouterCount, exclusionWorkerIds, dbgId, reply);
-	}
-};
 
 struct RecruitStorageReply {
 	constexpr static FileIdentifier file_identifier = 15877089;

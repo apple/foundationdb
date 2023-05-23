@@ -130,6 +130,28 @@ struct WorkerRecruitment {
 	bool operator<(WorkerRecruitment const& rhs) const { return true; }
 };
 
+struct RemoteRecruitmentInfo {
+	DatabaseConfiguration configuration;
+	Optional<Key> dcId;
+	int logRouterCount;
+	std::vector<UID> exclusionWorkerIds;
+	Optional<UID> dbgId;
+
+	RemoteRecruitmentInfo() {}
+	RemoteRecruitmentInfo(DatabaseConfiguration const& configuration,
+	                      Optional<Key> const& dcId,
+	                      int logRouterCount,
+	                      const std::vector<UID>& exclusionWorkerIds)
+	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
+	    exclusionWorkerIds(exclusionWorkerIds) {}
+};
+
+struct RemoteWorkerRecruitment {
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
+	Optional<UID> dbgId;
+};
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 	RecruitmentInfo req;
 	WorkerRecruitment rep;
@@ -140,10 +162,10 @@ struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
 };
 
 struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
-	RecruitRemoteFromConfigurationRequest req;
-	RecruitRemoteFromConfigurationReply rep;
+	RemoteRecruitmentInfo req;
+	RemoteWorkerRecruitment rep;
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
+	RecruitRemoteWorkersInfo(RemoteRecruitmentInfo const& info) : req(info) {}
 };

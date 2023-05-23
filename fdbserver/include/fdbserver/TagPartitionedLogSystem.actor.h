@@ -268,7 +268,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
 	Future<Reference<ILogSystem>> newEpoch(WorkerRecruitment const& recr,
-	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
+	                                       Future<RemoteWorkerRecruitment> const& fRemoteWorkers,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
 	                                       Version recoveryTransactionVersion,
@@ -348,7 +348,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	ACTOR static Future<Void> newRemoteEpoch(TagPartitionedLogSystem* self,
 	                                         Reference<TagPartitionedLogSystem> oldLogSystem,
-	                                         Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                         Future<RemoteWorkerRecruitment> fRemoteWorkers,
 	                                         DatabaseConfiguration configuration,
 	                                         LogEpoch recoveryCount,
 	                                         Version recoveryTransactionVersion,
@@ -357,7 +357,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
 	                                                    WorkerRecruitment recr,
-	                                                    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
+	                                                    Future<RemoteWorkerRecruitment> fRemoteWorkers,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
 	                                                    Version recoveryTransactionVersion,
