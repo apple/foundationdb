@@ -337,9 +337,13 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
 
-void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) { this->metrics.splitMetrics(req); }
+void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {
+	this->metrics.splitMetrics(req);
+}
 
-void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) { this->metrics.getReadHotRanges(req); }
+void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) {
+	this->metrics.getReadHotRanges(req);
+}
 
 Future<Void> MockStorageServer::run() {
 	ssi.initEndpoints();
