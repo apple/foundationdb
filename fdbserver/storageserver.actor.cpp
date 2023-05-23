@@ -3829,9 +3829,9 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 		tr.setVersion(version);
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<ValueResult> valueFuture = tr.get(key, Snapshot::True);
+		Future<ValueReadResult> valueFuture = tr.get(key, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
-		ValueResult valueOption = wait(valueFuture);
+		ValueReadResult valueOption = wait(valueFuture);
 		copyOptionalValue(a, getValue, valueOption);
 		double duration = g_network->timer() - getValueStart;
 		data->counters.mappedRangeRemoteSample.addMeasurement(duration);
@@ -4811,19 +4811,19 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState aud
 	    .detail("Servers", describe(candidates));
 
 	state Version version;
-	state std::vector<ValueResult> serverListValues;
+	state std::vector<ValueReadResult> serverListValues;
 	state Transaction tr(data->cx);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 	loop {
 		try {
-			std::vector<Future<ValueResult>> serverListEntries;
+			std::vector<Future<ValueReadResult>> serverListEntries;
 			for (const UID& id : candidates) {
 				serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 			}
 
-			std::vector<ValueResult> serverListValues_ = wait(getAll(serverListEntries));
+			std::vector<ValueReadResult> serverListValues_ = wait(getAll(serverListEntries));
 			serverListValues = serverListValues_;
 			Version version_ = wait(tr.getReadVersion());
 			version = version_;
@@ -4886,14 +4886,14 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 	    .detail("TargetServers", describe(targetServers));
 
 	state Version version;
-	state std::vector<ValueResult> serverListValues;
+	state std::vector<ValueReadResult> serverListValues;
 	state Transaction tr(data->cx);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 	tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 	loop {
 		try {
-			std::vector<Future<ValueResult>> serverListEntries;
+			std::vector<Future<ValueReadResult>> serverListEntries;
 			for (const UID& id : targetServers) {
 				if (id != data->thisServerID) {
 					serverListEntries.push_back(tr.get(serverListKeyFor(id)));
@@ -11942,7 +11942,7 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			ValueResult pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
+			ValueReadResult pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
 
 			if (!pairTagValue.present()) {
 				CODE_PROBE(true, "Race where tss was down, pair was removed, tss starts back up");

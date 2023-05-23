@@ -139,11 +139,11 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					std::vector<Future<ValueResult>> serverListEntries;
+					std::vector<Future<ValueReadResult>> serverListEntries;
 					for (int j = 0; j < src.size(); ++j) {
 						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}
-					std::vector<ValueResult> serverListValues = wait(getAll(serverListEntries));
+					std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
 					for (int j = 0; j < serverListValues.size(); ++j) {
 						if (!serverListValues[j].present()) {
@@ -209,7 +209,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				ValueResult val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
+				ValueReadResult val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
 				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 				if (oldReplicas == storageTeamSize) {
 					return oldReplicas;
@@ -269,7 +269,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				ValueResult val = wait(tr.get(healthyZoneKey));
+				ValueReadResult val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
@@ -282,7 +282,7 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				ValueResult mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
@@ -495,7 +495,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				ValueResult mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
@@ -528,7 +528,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			try {
-				ValueResult mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (!mode.present() && ddEnabledState->isEnabled())
 					return true;
 				if (mode.present()) {
@@ -543,7 +543,7 @@ class DDTxnProcessorImpl {
 					}
 				}
 				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-				ValueResult readVal = wait(tr.get(moveKeysLockOwnerKey));
+				ValueReadResult readVal = wait(tr.get(moveKeysLockOwnerKey));
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
@@ -582,7 +582,7 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<ValueResult> readRebalanceDDIgnoreKey(Database cx) {
+	ACTOR static Future<ValueReadResult> readRebalanceDDIgnoreKey(Database cx) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -590,7 +590,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				ValueResult res = wait(tr.get(rebalanceDDIgnoreKey));
+				ValueReadResult res = wait(tr.get(rebalanceDDIgnoreKey));
 				return res;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -688,7 +688,7 @@ Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 	return cx->getHealthMetrics(detailed);
 }
 
-Future<ValueResult> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
+Future<ValueReadResult> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }
 

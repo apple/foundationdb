@@ -838,7 +838,7 @@ struct Traceable<ReadResult<T>> : std::true_type {
 	static std::string toString(ReadResult<T> const& rr) { return Traceable<T>::toString(rr); }
 };
 
-using ValueResult = ReadResult<Optional<Value>>;
+using ValueReadResult = ReadResult<Optional<Value>>;
 
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;

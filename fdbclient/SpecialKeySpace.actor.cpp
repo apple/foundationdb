@@ -473,7 +473,9 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	return checkRYWValid(this, ryw, begin, end, limits, reverse);
 }
 
-ACTOR Future<ValueResult> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key) {
+ACTOR Future<ValueReadResult> SpecialKeySpace::getActor(SpecialKeySpace* sks,
+                                                        ReadYourWritesTransaction* ryw,
+                                                        KeyRef key) {
 	// use getRange to workaround this
 	RangeResult result = wait(sks->getRange(ryw,
 	                                        KeySelector(firstGreaterOrEqual(key)),
@@ -482,13 +484,13 @@ ACTOR Future<ValueResult> SpecialKeySpace::getActor(SpecialKeySpace* sks, ReadYo
 	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
-		return ValueResult(Optional<Value>(std::move(result[0].value)), ReadMetricsNeedFilled());
+		return ValueReadResult(Optional<Value>(std::move(result[0].value)), ReadMetricsNeedFilled());
 	} else {
-		return ValueResult({}, ReadMetricsNeedFilled());
+		return ValueReadResult({}, ReadMetricsNeedFilled());
 	}
 }
 
-Future<ValueResult> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, const Key& key) {
+Future<ValueReadResult> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, const Key& key) {
 	return getActor(this, ryw, key);
 }
 
@@ -1211,7 +1213,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 		}
 	}
 
-	ValueResult value = wait(tr.get(logsKey));
+	ValueReadResult value = wait(tr.get(logsKey));
 	ASSERT(value.present());
 	auto logs = decodeLogsValue(value.get());
 	for (auto const& log : logs.first) {
@@ -1411,7 +1413,7 @@ Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransact
 ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
 		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
@@ -1444,7 +1446,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1465,7 +1467,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 	if (val.present()) {
 		ryw->getTransaction().clear(singleKeyRange(databaseLockedKey));
 	}
@@ -1493,7 +1495,7 @@ ACTOR Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction*
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	ValueResult val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
+	ValueReadResult val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
 	bool ccSuspendSetting = val.present() ? BinaryReader::fromStringRef<bool>(val.get(), Unversioned()) : false;
 	RangeResult result;
 	if (ccSuspendSetting) {
@@ -1850,7 +1852,7 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	ValueResult currentKey = wait(tr.get(coordinatorsKey));
+	ValueReadResult currentKey = wait(tr.get(coordinatorsKey));
 
 	if (!currentKey.present()) {
 		ryw->setSpecialKeySpaceErrorMsg(
@@ -1907,7 +1909,7 @@ Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ry
 ACTOR static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
 	RangeResult result;
 	if (val.present()) {
 		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
@@ -1938,7 +1940,7 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
-	ValueResult versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+	ValueReadResult versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
 	if (versionEpochValue.present()) {
 		return ManagementAPIError::toJsonString(
 		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
@@ -1990,7 +1992,7 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(versionEpochKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(versionEpochKey));
 	RangeResult result;
 	if (val.present()) {
 		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
@@ -2451,7 +2453,7 @@ ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransact
 	// zoneId
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	ValueResult val = wait(ryw->getTransaction().get(healthyZoneKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(healthyZoneKey));
 	if (val.present()) {
 		auto healthyZone = decodeHealthyZoneValue(val.get());
 		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
@@ -2486,7 +2488,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	ValueResult val = wait(ryw->getTransaction().get(healthyZoneKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(healthyZoneKey));
 	Optional<std::pair<Key, Version>> healthyZone =
 	    val.present() ? decodeHealthyZoneValue(val.get()) : Optional<std::pair<Key, Version>>();
 
@@ -2554,7 +2556,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 	if (kr.contains(modeKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[modeKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			ValueResult f = wait(ryw->getTransaction().get(dataDistributionModeKey));
+			ValueReadResult f = wait(ryw->getTransaction().get(dataDistributionModeKey));
 			int mode = -1;
 			if (f.present()) {
 				mode = BinaryReader::fromStringRef<int>(f.get(), Unversioned());
@@ -2567,7 +2569,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 	if (kr.contains(rebalanceIgnoredKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[rebalanceIgnoredKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			ValueResult f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
+			ValueReadResult f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
 			if (f.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(rebalanceIgnoredKey, Value()));
 			}

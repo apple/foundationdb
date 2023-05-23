@@ -124,7 +124,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
 				state Version rv = wait(tr.getReadVersion());
-				ValueResult val1 = wait(tr.get(self->keyToRead));
+				ValueReadResult val1 = wait(tr.get(self->keyToRead));
 				return std::make_pair(rv, val1.contents());
 			} catch (Error& e) {
 				TRACE_ERROR(e);
@@ -196,7 +196,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			ValueResult val2 = wait(tr.get(self->keyToRead));
+			ValueReadResult val2 = wait(tr.get(self->keyToRead));
 			// We read the same key at the same read version with the same db, we must get the same value (or fail to
 			// read)
 			ASSERT(val1 == val2);
@@ -229,7 +229,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				ValueResult value = wait(tr.get(self->keyToRead));
+				ValueReadResult value = wait(tr.get(self->keyToRead));
 				int x = 0;
 				if (value.present()) {
 					BinaryReader r(value.get(), Unversioned());

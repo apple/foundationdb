@@ -142,7 +142,7 @@ struct DiskDurabilityTest : TestWorkload {
 						tr.clear(self->encodeKey(targetPages[i]));
 
 					if (!first) {
-						ValueResult v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
+						ValueReadResult v = wait(tr.get("syncs"_sr.withPrefix(self->metrics.begin)));
 						int64_t count = v.present() ? self->decodeValue(v.get()) : 0;
 						count++;
 						tr.set("syncs"_sr.withPrefix(self->metrics.begin), self->encodeValue(count));

@@ -1439,7 +1439,7 @@ ACTOR static Future<JsonBuilderObject> versionEpochStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ValueResult versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
+				ValueReadResult versionEpochVal = wait(timeoutError(BUGGIFY ? Never() : tr.get(versionEpochKey), 5.0));
 				message["enabled"] = versionEpochVal.present();
 				if (!versionEpochVal.present()) {
 					break;
@@ -1470,7 +1470,7 @@ ACTOR static Future<Void> consistencyCheckStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ValueResult ccSuspendVal =
+				ValueReadResult ccSuspendVal =
 				    wait(timeoutError(BUGGIFY ? Never() : tr.get(fdbShouldConsistencyCheckBeSuspended), 5.0));
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
@@ -1678,13 +1678,13 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 			}
 
 			ASSERT(result.present());
-			state std::vector<Future<ValueResult>> replicasFutures;
+			state std::vector<Future<ValueReadResult>> replicasFutures;
 			for (auto& region : result.get().regions) {
 				replicasFutures.push_back(tr.get(datacenterReplicasKeyFor(region.dcId)));
 			}
-			state Future<ValueResult> healthyZoneValue = tr.get(healthyZoneKey);
-			state Future<ValueResult> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
-			state Future<ValueResult> ddModeKey = tr.get(dataDistributionModeKey);
+			state Future<ValueReadResult> healthyZoneValue = tr.get(healthyZoneKey);
+			state Future<ValueReadResult> rebalanceDDIgnored = tr.get(rebalanceDDIgnoreKey);
+			state Future<ValueReadResult> ddModeKey = tr.get(dataDistributionModeKey);
 
 			choose {
 				when(wait(waitForAll(replicasFutures) && success(healthyZoneValue) && success(rebalanceDDIgnored) &&
@@ -2882,7 +2882,7 @@ ACTOR Future<JsonBuilderObject> lockedStatusFetcher(Reference<AsyncVar<ServerDBI
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
 			choose {
-				when(ValueResult lockUID = wait(tr.get(databaseLockedKey))) {
+				when(ValueReadResult lockUID = wait(tr.get(databaseLockedKey))) {
 					if (lockUID.present()) {
 						statusObj["locked"] = true;
 						statusObj["lock_uid"] =
@@ -2924,7 +2924,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<ValueResult> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
+			state Future<ValueReadResult> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 
 			*fullyReplicatedRegions = fReplicaKeys.get().size();

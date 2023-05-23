@@ -191,7 +191,7 @@ public:
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
-	Future<ValueResult> get(ReadYourWritesTransaction* ryw, const Key& key);
+	Future<ValueReadResult> get(ReadYourWritesTransaction* ryw, const Key& key);
 
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeySelector begin,
@@ -237,7 +237,7 @@ public:
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
 
 private:
-	ACTOR static Future<ValueResult> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
+	ACTOR static Future<ValueReadResult> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
 	ACTOR static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
 	                                               ReadYourWritesTransaction* ryw,

@@ -115,7 +115,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 		loop {
 			try {
 				TraceEvent("SAACheckKey").log();
-				ValueResult actualValue = wait(tr.get(self->sumKey));
+				ValueReadResult actualValue = wait(tr.get(self->sumKey));
 				uint64_t actualValueInt = 0;
 				if (actualValue.present()) {
 					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());

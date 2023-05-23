@@ -425,11 +425,11 @@ ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<ValueResult> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
 	Key k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<ValueResult> {
+	return onMainThread([tr, k, snapshot]() -> Future<ValueReadResult> {
 		tr->checkDeferredError();
 		return tr->get(k, Snapshot{ snapshot });
 	});

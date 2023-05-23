@@ -235,7 +235,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 					if (op.type == Operation::SET) {
 						transaction->set(op.beginKey, op.value);
 					} else if (op.type == Operation::GET) {
-						ValueResult val = wait(transaction->get(op.beginKey));
+						ValueReadResult val = wait(transaction->get(op.beginKey));
 						if (!dontUpdateResults)
 							self->pushKVPair(results, op.beginKey, val);
 					} else if (op.type == Operation::GET_RANGE) {

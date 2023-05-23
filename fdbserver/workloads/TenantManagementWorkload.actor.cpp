@@ -203,7 +203,7 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ValueResult val = wait(tr.get(self->testParametersKey));
+				ValueReadResult val = wait(tr.get(self->testParametersKey));
 				if (val.present()) {
 					TestParameters params = TestParameters::decode(val.get());
 					self->useMetacluster = params.useMetacluster;
@@ -653,7 +653,7 @@ struct TenantManagementWorkload : TestWorkload {
 						loop {
 							try {
 								checkTr.setOption(FDBTransactionOptions::RAW_ACCESS);
-								ValueResult val = wait(checkTr.get(self->keyName.withPrefix(tPrefix)));
+								ValueReadResult val = wait(checkTr.get(self->keyName.withPrefix(tPrefix)));
 								ASSERT(val.present());
 								ASSERT(val.get() == tenantItr->first);
 								break;
@@ -1171,7 +1171,7 @@ struct TenantManagementWorkload : TestWorkload {
 		state TenantMapEntry entry;
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			Key key = self->specialKeysTenantMapPrefix.withSuffix(tenant);
-			ValueResult value = wait(tr->get(key));
+			ValueReadResult value = wait(tr->get(key));
 			if (!value.present()) {
 				throw tenant_not_found();
 			}
@@ -1969,7 +1969,7 @@ struct TenantManagementWorkload : TestWorkload {
 					                  : FDBTransactionOptions::READ_LOCK_AWARE);
 				}
 				if (readKey) {
-					ValueResult val = wait(tr->get(self->keyName));
+					ValueReadResult val = wait(tr->get(self->keyName));
 					if (val.present()) {
 						CODE_PROBE(true, "Read tenant key has value");
 						ASSERT((keyPresent && val.get() == expectedValue) ||
@@ -2363,7 +2363,7 @@ struct TenantManagementWorkload : TestWorkload {
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-				ValueResult val = wait(tr.get(self->keyName));
+				ValueReadResult val = wait(tr.get(self->keyName));
 				ASSERT(val.present() && val.get() == self->noTenantValue);
 				break;
 			} catch (Error& e) {

@@ -58,7 +58,7 @@ class SimpleConfigTransactionImpl {
 		return reply.generation;
 	}
 
-	ACTOR static Future<ValueResult> get(SimpleConfigTransactionImpl* self, KeyRef key) {
+	ACTOR static Future<ValueReadResult> get(SimpleConfigTransactionImpl* self, KeyRef key) {
 		if (!self->getGenerationFuture.isValid()) {
 			self->getGenerationFuture = getGeneration(self);
 		}
@@ -84,9 +84,9 @@ class SimpleConfigTransactionImpl {
 			    .detail("Value", reply.value.get().toString());
 		}
 		if (reply.value.present()) {
-			return ValueResult(reply.value.get().toValue());
+			return ValueReadResult(reply.value.get().toValue());
 		} else {
-			return ValueResult{};
+			return ValueReadResult{};
 		}
 	}
 
@@ -185,7 +185,7 @@ public:
 		toCommit.mutations.push_back_deep(toCommit.arena, IKnobCollection::createClearMutation(toCommit.arena, key));
 	}
 
-	Future<ValueResult> get(KeyRef key) { return get(this, key); }
+	Future<ValueReadResult> get(KeyRef key) { return get(this, key); }
 
 	Future<RangeResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
@@ -254,7 +254,7 @@ Optional<Version> SimpleConfigTransaction::getCachedReadVersion() const {
 	return impl->getCachedReadVersion();
 }
 
-Future<ValueResult> SimpleConfigTransaction::get(Key const& key, Snapshot snapshot) {
+Future<ValueReadResult> SimpleConfigTransaction::get(Key const& key, Snapshot snapshot) {
 	return impl->get(key);
 }
 

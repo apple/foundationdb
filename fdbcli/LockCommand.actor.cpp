@@ -78,8 +78,8 @@ ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid) {
 	loop {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
-			state ThreadFuture<ValueResult> valF = tr->get(fdb_cli::lockSpecialKey);
-			ValueResult val = wait(safeThreadFutureToFuture(valF));
+			state ThreadFuture<ValueReadResult> valF = tr->get(fdb_cli::lockSpecialKey);
+			ValueReadResult val = wait(safeThreadFutureToFuture(valF));
 
 			if (!val.present())
 				return true;

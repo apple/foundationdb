@@ -137,7 +137,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 						myKeyA = format("%010d", searchInt);
 
 						if (self->testReadYourWrites) {
-							ValueResult getTest = wait(trRYOW.get(StringRef(myKeyA)));
+							ValueReadResult getTest = wait(trRYOW.get(StringRef(myKeyA)));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")
@@ -145,7 +145,7 @@ struct SelectorCorrectnessWorkload : TestWorkload {
 								    .detail("KeyA", myKeyA);
 							}
 						} else {
-							ValueResult getTest = wait(tr.get(StringRef(myKeyA)));
+							ValueReadResult getTest = wait(tr.get(StringRef(myKeyA)));
 							if ((searchInt % 2 == 0 && !getTest.present()) ||
 							    (searchInt % 2 == 1 && getTest.present())) {
 								TraceEvent(SevError, "RanSelTestFailure")

@@ -1873,8 +1873,8 @@ Java_com_apple_foundationdb_FutureMappedResults_FutureMappedResults_1getDirect(J
 	float rangeBusyness = 0.0;
 	/*err = fdb_future_get_read_busyness(f, &serverBusyness, &rangeBusyness);
 	if (err) {
-		safeThrow(jenv, getThrowable(jenv, err));
-		return;
+	    safeThrow(jenv, getThrowable(jenv, err));
+	    return;
 	}*/
 
 	int totalCapacityNeeded = 2 * sizeof(jint) + 2 * sizeof(jfloat);

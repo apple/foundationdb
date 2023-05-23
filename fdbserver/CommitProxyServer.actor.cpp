@@ -2845,7 +2845,7 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		// FIXME: potentially remove duplicate racing requests for same BW interface? Should only happen at CP startup
 		// or when BW joins cluster
 		std::unordered_set<UID> bwiLookedUp;
-		state std::vector<Future<ValueResult>> bwiLookupFutures;
+		state std::vector<Future<ValueReadResult>> bwiLookupFutures;
 		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			if (!blobGranuleMapping[i].value.size()) {
 				if (req.justGranules) {
@@ -2871,7 +2871,7 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		wait(waitForAll(bwiLookupFutures));
 
 		for (auto& f : bwiLookupFutures) {
-			ValueResult workerInterface = f.get();
+			ValueReadResult workerInterface = f.get();
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db. So throw blob_granule_request_failed to have client retry to get the new mapping

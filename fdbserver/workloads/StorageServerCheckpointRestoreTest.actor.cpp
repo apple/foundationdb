@@ -202,7 +202,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 
 		loop {
 			try {
-				state ValueResult res = wait(timeoutError(tr.get(key), 30.0));
+				state ValueReadResult res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
 					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res.contents()));

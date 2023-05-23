@@ -85,11 +85,11 @@ private:
 				int64_t inc = 1;
 				tr->atomicOp(self->counters.get(start).key(), StringRef((uint8_t*)&inc, 8), MutationRef::AddValue);
 
-				state typename TransactionT::template FutureT<ValueResult> countFuture =
+				state typename TransactionT::template FutureT<ValueReadResult> countFuture =
 				    tr->get(self->counters.get(start).key(), Snapshot::True);
 				// }
 
-				ValueResult countValue = wait(safeThreadFutureToFuture(countFuture));
+				ValueReadResult countValue = wait(safeThreadFutureToFuture(countFuture));
 
 				int64_t count = 0;
 				if (countValue.present()) {
@@ -114,7 +114,7 @@ private:
 				// if thread safety is needed, this should be locked {
 				state typename TransactionT::template FutureT<RangeResult> latestCounterFuture =
 				    tr->getRange(self->counters.range(), 1, Snapshot::True, Reverse::True);
-				state typename TransactionT::template FutureT<ValueResult> candidateValueFuture =
+				state typename TransactionT::template FutureT<ValueReadResult> candidateValueFuture =
 				    tr->get(self->recent.get(candidate).key());
 				tr->setOption(FDBTransactionOptions::NEXT_WRITE_NO_WRITE_CONFLICT_RANGE);
 				tr->set(self->recent.get(candidate).key(), ValueRef());

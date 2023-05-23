@@ -39,9 +39,9 @@ namespace metacluster::internal {
 
 ACTOR template <class Transaction>
 Future<TenantMode> getClusterConfiguredTenantMode(Transaction tr) {
-	state typename transaction_future_type<Transaction, ValueResult>::type tenantModeFuture =
+	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(tenantModeConfKey);
-	ValueResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
 	return TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 }
 

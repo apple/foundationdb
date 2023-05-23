@@ -2182,7 +2182,7 @@ public:
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					ValueResult value = wait(tr.get(perpetualStorageWiggleKey));
+					ValueReadResult value = wait(tr.get(perpetualStorageWiggleKey));
 
 					if (value.present()) {
 						speed = std::stoi(value.get().toString());
@@ -2223,7 +2223,7 @@ public:
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				ValueResult val = wait(tr.get(healthyZoneKey));
+				ValueReadResult val = wait(tr.get(healthyZoneKey));
 				state Future<Void> healthyZoneTimeout = Never();
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());

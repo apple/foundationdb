@@ -107,11 +107,11 @@ Future<ClusterType> getClusterType(Transaction tr) {
 
 ACTOR template <class Transaction>
 Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
-	state typename transaction_future_type<Transaction, ValueResult>::type tenantModeFuture =
+	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
 	state ClusterType actualClusterType = wait(getClusterType(tr));
-	ValueResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
 
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 	if (actualClusterType != expectedClusterType) {

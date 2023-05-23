@@ -219,8 +219,8 @@ ACTOR Future<bool> tenantCreateCommand(Reference<IDatabase> db, std::vector<Stri
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<ValueResult> existingTenantFuture = tr->get(tenantNameKey);
-					ValueResult existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					state ThreadFuture<ValueReadResult> existingTenantFuture = tr->get(tenantNameKey);
+					ValueReadResult existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
 					if (existingTenant.present()) {
 						throw tenant_already_exists();
 					}
@@ -271,8 +271,8 @@ ACTOR Future<bool> tenantDeleteCommand(Reference<IDatabase> db, std::vector<Stri
 			} else {
 				if (!doneExistenceCheck) {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<ValueResult> existingTenantFuture = tr->get(tenantNameKey);
-					ValueResult existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
+					state ThreadFuture<ValueReadResult> existingTenantFuture = tr->get(tenantNameKey);
+					ValueReadResult existingTenant = wait(safeThreadFutureToFuture(existingTenantFuture));
 					if (!existingTenant.present()) {
 						throw tenant_not_found();
 					}
@@ -574,8 +574,8 @@ ACTOR Future<bool> tenantGetCommand(Reference<IDatabase> db, std::vector<StringR
 				tenantJson = entry.toJson();
 			} else {
 				// Hold the reference to the standalone's memory
-				state ThreadFuture<ValueResult> tenantFuture = tr->get(tenantNameKey);
-				ValueResult tenant = wait(safeThreadFutureToFuture(tenantFuture));
+				state ThreadFuture<ValueReadResult> tenantFuture = tr->get(tenantNameKey);
+				ValueReadResult tenant = wait(safeThreadFutureToFuture(tenantFuture));
 				if (!tenant.present()) {
 					throw tenant_not_found();
 				}
@@ -770,10 +770,10 @@ ACTOR Future<bool> tenantRenameCommand(Reference<IDatabase> db, std::vector<Stri
 				wait(metacluster::renameTenant(db, tokens[2], tokens[3]));
 			} else {
 				// Hold the reference to the standalone's memory
-				state ThreadFuture<ValueResult> oldEntryFuture = tr->get(tenantOldNameKey);
-				state ThreadFuture<ValueResult> newEntryFuture = tr->get(tenantNewNameKey);
-				state ValueResult oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
-				state ValueResult newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
+				state ThreadFuture<ValueReadResult> oldEntryFuture = tr->get(tenantOldNameKey);
+				state ThreadFuture<ValueReadResult> newEntryFuture = tr->get(tenantNewNameKey);
+				state ValueReadResult oldEntry = wait(safeThreadFutureToFuture(oldEntryFuture));
+				state ValueReadResult newEntry = wait(safeThreadFutureToFuture(newEntryFuture));
 				if (firstTry) {
 					if (!oldEntry.present()) {
 						throw tenant_not_found();
@@ -892,8 +892,8 @@ ACTOR Future<bool> tenantLockCommand(Reference<IDatabase> db, std::vector<String
 				wait(metacluster::changeTenantLockState(db, name, desiredLockState, uid));
 			} else {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state ThreadFuture<ValueResult> tenantFuture = tr->get(nameKey);
-				ValueResult entry = wait(safeThreadFutureToFuture(tenantFuture));
+				state ThreadFuture<ValueReadResult> tenantFuture = tr->get(nameKey);
+				ValueReadResult entry = wait(safeThreadFutureToFuture(tenantFuture));
 				if (!entry.present()) {
 					fmt::print(stderr, "ERROR: Tenant `{}' does not exist\n", name);
 					return false;

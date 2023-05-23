@@ -369,9 +369,10 @@ struct ConfigureDatabaseWorkload : TestWorkload {
 				randomChoice = deterministicRandom()->randomInt(0, 8);
 			}
 			if (randomChoice == 0) {
-				wait(success(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueResult> {
-					return tr->get("This read is only to ensure that the database recovered"_sr);
-				})));
+				wait(success(
+				    runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
+					    return tr->get("This read is only to ensure that the database recovered"_sr);
+				    })));
 				wait(delay(20 + 10 * deterministicRandom()->random01()));
 			} else if (randomChoice < 3) {
 				double waitDuration = 3.0 * deterministicRandom()->random01();

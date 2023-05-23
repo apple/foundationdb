@@ -57,7 +57,7 @@ public:
 	struct GetValueReq {
 		explicit GetValueReq(Key key) : key(key) {}
 		Key key;
-		typedef ValueResult Result;
+		typedef ValueReadResult Result;
 	};
 
 	struct GetKeyReq {
@@ -93,7 +93,7 @@ public:
 	// make use of it.
 
 	ACTOR template <class Iter>
-	static Future<ValueResult> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
+	static Future<ValueReadResult> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
 		// This overload is required to provide postcondition: it->extractWriteMapIterator().segmentContains(read.key)
 
 		if (ryw->options.bypassUnreadable) {
@@ -104,14 +104,14 @@ public:
 		if (it->is_kv()) {
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return ValueResult(result->value);
+				return ValueReadResult(result->value);
 			} else {
-				return ValueResult();
+				return ValueReadResult();
 			}
 		} else if (it->is_empty_range()) {
-			return ValueResult();
+			return ValueReadResult();
 		} else {
-			ValueResult res = wait(ryw->tr.get(read.key, Snapshot::True));
+			ValueReadResult res = wait(ryw->tr.get(read.key, Snapshot::True));
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
@@ -174,7 +174,7 @@ public:
 	// transaction. Responsible for clipping results to the non-system keyspace when appropriate, since NativeAPI
 	// doesn't do that.
 
-	static Future<ValueResult> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
+	static Future<ValueReadResult> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
 		return ryw->tr.get(read.key, snapshot);
 	}
 
@@ -222,7 +222,7 @@ public:
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetValueReq read,
 	                             WriteMap::iterator& it,
-	                             ValueResult result) {
+	                             ValueReadResult result) {
 		// it will already point to the right segment (see the calling code in read()), so we don't need to skip
 		// read.key will be copied into ryw->arena inside of updateConflictMap if it is being added
 		updateConflictMap<mustUnmodified>(ryw, read.key, it);
@@ -1286,7 +1286,7 @@ public:
 	}
 
 	ACTOR static Future<Void> watch(ReadYourWritesTransaction* ryw, Key key) {
-		state Future<ValueResult> val;
+		state Future<ValueReadResult> val;
 		state Future<Void> watchFuture;
 		state Reference<Watch> watch(new Watch(key));
 		state Promise<Void> done;
@@ -1602,9 +1602,9 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<ValueResult> getJSON(Database db) {
+ACTOR Future<ValueReadResult> getJSON(Database db) {
 	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
-	return ValueResult(getValueFromJSON(statusObj));
+	return ValueReadResult(getValueFromJSON(statusObj));
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
@@ -1632,7 +1632,7 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 	}
 }
 
-Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
+Future<ValueReadResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
 	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1646,7 +1646,7 @@ Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snap
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
-				return ValueResult();
+				return ValueReadResult();
 			}
 		}
 
@@ -1654,12 +1654,12 @@ Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snap
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
-					return ValueResult(std::move(output));
+					return ValueReadResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return ValueResult();
+			return ValueReadResult();
 		}
 
 		if (key == "\xff\xff/connection_string"_sr) {
@@ -1667,12 +1667,12 @@ Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snap
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
 					Optional<Value> output = StringRef(f->getConnectionString().toString());
-					return ValueResult(std::move(output));
+					return ValueReadResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return ValueResult();
+			return ValueReadResult();
 		}
 	}
 
@@ -1688,10 +1688,10 @@ Future<ValueResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snap
 
 	// There are no keys in the database with size greater than the max key size
 	if (key.size() > getMaxReadKeySize(key)) {
-		return ValueResult();
+		return ValueReadResult();
 	}
 
-	Future<ValueResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
+	Future<ValueReadResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
 	reading.add(success(result));
 	return result;
 }

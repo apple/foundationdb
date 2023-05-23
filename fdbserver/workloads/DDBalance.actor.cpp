@@ -93,7 +93,7 @@ struct DDBalanceWorkload : TestWorkload {
 	Value value(int n) { return doubleToTestKey(n); }
 
 	ACTOR Future<Void> setKeyIfNotPresent(Transaction* tr, Key key, Value val) {
-		ValueResult f = wait(tr->get(key));
+		ValueReadResult f = wait(tr->get(key));
 		if (!f.present())
 			tr->set(key, val);
 		return Void();
@@ -178,7 +178,7 @@ struct DDBalanceWorkload : TestWorkload {
 						moves++;
 						i++;
 
-						ValueResult f = wait(tr.get(myKey));
+						ValueReadResult f = wait(tr.get(myKey));
 						if (f.present()) {
 							maxMovedAmount++;
 							tr.set(nextKey, f.get());

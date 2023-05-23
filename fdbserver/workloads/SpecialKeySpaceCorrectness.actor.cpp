@@ -625,7 +625,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			// Note: there's possibility we get zero workers
 			if (result.size()) {
 				state KeyValueRef entry = deterministicRandom()->randomChoice(result);
-				ValueResult singleRes = wait(tx->get(entry.key));
+				ValueReadResult singleRes = wait(tx->get(entry.key));
 				if (singleRes.present())
 					ASSERT(singleRes.get() == entry.value);
 			}
@@ -810,7 +810,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			loop {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					ValueResult ccStrValue = wait(tx->get(coordinatorsKey));
+					ValueReadResult ccStrValue = wait(tx->get(coordinatorsKey));
 					ASSERT(ccStrValue.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString ccStr(ccStrValue.get().toString());
 					// choose a new description if configuration allows transactions across differently named clusters
@@ -818,7 +818,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					                              ? deterministicRandom()->randomAlphaNumeric(8)
 					                              : ccStr.clusterKeyName().toString();
 					// get current coordinators
-					ValueResult processes_key = wait(tx->get(
+					ValueReadResult processes_key = wait(tx->get(
 					    "processes"_sr.withPrefix(SpecialKeySpace::getManagementApiCommandPrefix("coordinators"))));
 					ASSERT(processes_key.present());
 					boost::split(
@@ -874,7 +874,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						// if we repeat doing the change, we will get the error:
 						// CoordinatorsResult::SAME_NETWORK_ADDRESSES
 						if (e.code() == error_code_special_keys_api_failure) {
-							ValueResult errorMsg =
+							ValueReadResult errorMsg =
 							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 							ASSERT(errorMsg.present());
 							std::string errorStr;
@@ -910,7 +910,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				// change successful, now check it is already changed
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					ValueResult res = wait(tx->get(coordinatorsKey));
+					ValueReadResult res = wait(tx->get(coordinatorsKey));
 					ASSERT(res.present()); // Otherwise, database is in a bad state
 					ClusterConnectionString csNew(res.get().toString());
 					// verify the cluster decription
@@ -950,7 +950,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					} catch (Error& e) {
 						TraceEvent(SevDebug, "CoordinatorsManualChangeRevert").error(e);
 						if (e.code() == error_code_special_keys_api_failure) {
-							ValueResult errorMsg =
+							ValueReadResult errorMsg =
 							    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 							ASSERT(errorMsg.present());
 							std::string errorStr;
@@ -1023,7 +1023,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				} catch (Error& e) {
 					TraceEvent(SevDebug, "MaintenanceSetMoreThanOneZone").error(e);
 					if (e.code() == error_code_special_keys_api_failure) {
-						ValueResult errorMsg =
+						ValueReadResult errorMsg =
 						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 						ASSERT(errorMsg.present());
 						std::string errorStr;
@@ -1060,7 +1060,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 					// the second commit will fail since maintenance not allowed to use while DD disabled for SS
 					// failures
 					if (e.code() == error_code_special_keys_api_failure) {
-						ValueResult errorMsg =
+						ValueReadResult errorMsg =
 						    wait(tx->get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 						ASSERT(errorMsg.present());
 						std::string errorStr;
@@ -1111,17 +1111,17 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					// check DD disabled for SS failures
-					ValueResult val1 = wait(tx->get(healthyZoneKey));
+					ValueReadResult val1 = wait(tx->get(healthyZoneKey));
 					ASSERT(val1.present());
 					auto healthyZone = decodeHealthyZoneValue(val1.get());
 					ASSERT(healthyZone.first == ignoreSSFailuresZoneString);
 					// check DD mode
-					ValueResult val2 = wait(tx->get(dataDistributionModeKey));
+					ValueReadResult val2 = wait(tx->get(dataDistributionModeKey));
 					ASSERT(val2.present());
 					// mode should be set to 0
 					ASSERT(BinaryReader::fromStringRef<int>(val2.get(), Unversioned()) == 0);
 					// check DD disabled for rebalance
-					ValueResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					ValueReadResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
 					ASSERT(val3.present() &&
 					       BinaryReader::fromStringRef<uint8_t>(val3.get(), Unversioned()) == ddIgnoreValue);
 					tx->reset();
@@ -1152,13 +1152,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 				try {
 					tx->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 					// check DD SSFailures key
-					ValueResult val1 = wait(tx->get(healthyZoneKey));
+					ValueReadResult val1 = wait(tx->get(healthyZoneKey));
 					ASSERT(!val1.present());
 					// check DD mode
-					ValueResult val2 = wait(tx->get(dataDistributionModeKey));
+					ValueReadResult val2 = wait(tx->get(dataDistributionModeKey));
 					ASSERT(!val2.present());
 					// check DD rebalance key
-					ValueResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
+					ValueReadResult val3 = wait(tx->get(rebalanceDDIgnoreKey));
 					ASSERT(!val3.present());
 					tx->reset();
 					break;

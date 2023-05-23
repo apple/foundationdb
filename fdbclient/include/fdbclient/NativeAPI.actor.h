@@ -359,7 +359,7 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<ValueResult> get(const Key& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );

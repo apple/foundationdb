@@ -191,7 +191,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state ValueResult ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+				state ValueReadResult ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -1327,7 +1327,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				ValueResult currentKey = wait(tr.get(coordinatorsKey));
+				ValueReadResult currentKey = wait(tr.get(coordinatorsKey));
 
 				if (!currentKey.present()) {
 					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();

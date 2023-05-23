@@ -155,7 +155,7 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			ValueResult ss = wait(tr.get(serverListKeyFor(ssId)));
+			ValueReadResult ss = wait(tr.get(serverListKeyFor(ssId)));
 			if (!ss.present()) {
 				throw checkpoint_not_found();
 			}
@@ -948,7 +948,7 @@ ACTOR Future<Void> fetchCheckpointRange(Database cx,
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			ValueResult ss = wait(tr.get(serverListKeyFor(ssID)));
+			ValueReadResult ss = wait(tr.get(serverListKeyFor(ssID)));
 			if (!ss.present()) {
 				TraceEvent(SevWarnAlways, "FetchCheckpointRangeStorageServerNotFound", metaData->checkpointID)
 				    .detail("SSID", ssID)

@@ -423,7 +423,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			                                                   : &self->memoryDatabase,
 			                                               key);
 			*memLimit -= memRes.expectedSize();
-			ValueResult res = wait(tr->get(key, snapshot));
+			ValueReadResult res = wait(tr->get(key, snapshot));
 			*memLimit += memRes.expectedSize();
 			if (res != memRes) {
 				TraceEvent(SevError, "WDRGetWrongResult", randomID)

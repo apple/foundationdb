@@ -67,8 +67,8 @@ ACTOR Future<Void> setDDIgnoreRebalanceSwitch(Reference<IDatabase> db, uint8_t D
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		try {
-			state ThreadFuture<ValueResult> resultFuture = tr->get(rebalanceDDIgnoreKey);
-			ValueResult v = wait(safeThreadFutureToFuture(resultFuture));
+			state ThreadFuture<ValueReadResult> resultFuture = tr->get(rebalanceDDIgnoreKey);
+			ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
 			uint8_t oldValue = DDIgnore::NONE; // nothing is disabled
 			if (v.present()) {
 				if (v.get().size() > 0) {

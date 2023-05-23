@@ -1585,7 +1585,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
-		state Future<ValueResult> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1643,11 +1643,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state RangeResult tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
-		state std::vector<Future<ValueResult>> backupVersion;
+		state std::vector<Future<ValueReadResult>> backupVersion;
 		state std::vector<Future<EBackupState>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
 		state std::vector<Future<int64_t>> tagLogBytesDR;
-		state Future<ValueResult> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
 
 		state std::vector<UID> drTagUids;
 		for (int i = 0; i < tagNames.size(); i++) {

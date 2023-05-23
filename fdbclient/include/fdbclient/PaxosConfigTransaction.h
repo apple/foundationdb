@@ -39,7 +39,7 @@ public:
 	Future<Version> getReadVersion() override;
 	Optional<Version> getCachedReadVersion() const override;
 
-	Future<ValueResult> get(Key const& key, Snapshot = Snapshot::False) override;
+	Future<ValueReadResult> get(Key const& key, Snapshot = Snapshot::False) override;
 	Future<RangeResult> getRange(KeySelector const& begin,
 	                             KeySelector const& end,
 	                             int limit,

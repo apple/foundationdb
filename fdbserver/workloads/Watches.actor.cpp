@@ -132,9 +132,9 @@ struct WatchesWorkload : TestWorkload {
 			loop {
 				state std::unique_ptr<Transaction> tr = std::make_unique<Transaction>(cx);
 				try {
-					state Future<ValueResult> setValueFuture = tr->get(setKey);
-					state ValueResult watchValue = wait(tr->get(watchKey));
-					ValueResult setValue = wait(setValueFuture);
+					state Future<ValueReadResult> setValueFuture = tr->get(setKey);
+					state ValueReadResult watchValue = wait(tr->get(watchKey));
+					ValueReadResult setValue = wait(setValueFuture);
 
 					if (lastValue.present() && lastValue.get() == watchValue) {
 						TraceEvent(SevError, "WatcherTriggeredWithoutChanging")
@@ -193,7 +193,7 @@ struct WatchesWorkload : TestWorkload {
 			loop {
 				try {
 					wait(success(tr.getReadVersion()));
-					ValueResult _startValue = wait(tr.get(startKey));
+					ValueReadResult _startValue = wait(tr.get(startKey));
 					if (firstAttempt) {
 						startValue = _startValue;
 						firstAttempt = false;
@@ -224,7 +224,7 @@ struct WatchesWorkload : TestWorkload {
 				state bool finished = false;
 				loop {
 					try {
-						state ValueResult endValue = wait(tr2.get(endKey));
+						state ValueReadResult endValue = wait(tr2.get(endKey));
 						if (endValue == expectedValue) {
 							finished = true;
 							break;

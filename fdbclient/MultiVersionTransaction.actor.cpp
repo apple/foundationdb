@@ -84,10 +84,10 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<ValueResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
-	return toThreadFuture<ValueResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<ValueReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
 		const uint8_t* value;
 		int valueLength;
@@ -103,10 +103,10 @@ ThreadFuture<ValueResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
 
 		if (present) {
 			// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-			return ValueResult(Optional<Value>(Value(ValueRef(value, valueLength), Arena())),
-			                   ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+			return ValueReadResult(Optional<Value>(Value(ValueRef(value, valueLength), Arena())),
+			                       ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		} else {
-			return ValueResult(Optional<Value>(), ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
+			return ValueReadResult(Optional<Value>(), ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		}
 	});
 }
@@ -1481,7 +1481,7 @@ ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	return executeOperation(&ITransaction::getReadVersion);
 }
 
-ThreadFuture<ValueResult> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
@@ -3383,8 +3383,8 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				state ThreadFuture<ValueResult> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
-				ValueResult clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
+				state ThreadFuture<ValueReadResult> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
+				ValueReadResult clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
 				clusterId = clusterIdVal.get().toString();
 				ASSERT(UID::fromString(clusterId).isValid());

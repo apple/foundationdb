@@ -57,8 +57,8 @@ ACTOR Future<bool> configureCommandActor(Reference<IDatabase> db,
 				StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 				s = _s;
 			} else {
-				state ThreadFuture<ValueResult> statusValueF = tr->get("\xff\xff/status/json"_sr);
-				ValueResult statusValue = wait(safeThreadFutureToFuture(statusValueF));
+				state ThreadFuture<ValueReadResult> statusValueF = tr->get("\xff\xff/status/json"_sr);
+				ValueReadResult statusValue = wait(safeThreadFutureToFuture(statusValueF));
 				if (!statusValue.present()) {
 					fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 					return false;

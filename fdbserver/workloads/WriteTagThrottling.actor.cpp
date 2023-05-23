@@ -259,7 +259,7 @@ struct WriteTagThrottlingWorkload : KVWorkload {
 							ASSERT(self->keyCount >= actorId);
 							key = self->generateKey(useReadKey, startIdx, availableRange);
 							opStart = now();
-							ValueResult v = wait(tr.get(key));
+							ValueReadResult v = wait(tr.get(key));
 							double duration = now() - opStart;
 							isBadActor ? self->badActorReadLatency.addSample(duration)
 							           : self->goodActorReadLatency.addSample(duration);

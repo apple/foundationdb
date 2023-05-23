@@ -133,7 +133,7 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<ValueResult> readRebalanceDDIgnoreKey() const { return {}; }
+	virtual Future<ValueReadResult> readRebalanceDDIgnoreKey() const { return {}; }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -218,7 +218,7 @@ public:
 
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
-	Future<ValueResult> readRebalanceDDIgnoreKey() const override;
+	Future<ValueReadResult> readRebalanceDDIgnoreKey() const override;
 
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 
