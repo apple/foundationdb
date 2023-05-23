@@ -92,6 +92,7 @@ private:
 		ASSERT_LE(data.clusterAllocatedMap.size(), data.dataClusters.size());
 
 		if (data.tenantData.lastTenantId != -1) {
+			CODE_PROBE(true, "Validating last tenant ID");
 			ASSERT(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId) == data.tenantIdPrefix.get());
 		}
 
@@ -105,12 +106,14 @@ private:
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
 			if (!clusterMetadata.entry.hasCapacity() ||
 			    clusterMetadata.entry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
+				CODE_PROBE(!clusterMetadata.entry.hasCapacity(), "Checking cluster with no capacity");
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
 			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
 				ASSERT_EQ(AutoTenantAssignment::ENABLED, clusterMetadata.entry.autoTenantAssignment);
 				++numFoundInAllocatedMap;
 			} else {
+				CODE_PROBE(true, "Non-ready cluster missing from capacity index", probe::decoration::rare);
 				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
 			}
 
@@ -159,6 +162,7 @@ private:
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
+				CODE_PROBE(true, "Counting ungrouped tenant");
 				++clusterAllocated[entry.assignedCluster];
 			}
 		}
@@ -212,6 +216,7 @@ private:
 				ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
 				ASSERT_LE(data.tenantData.lastTenantId, managementData.tenantData.lastTenantId);
 			} else {
+				CODE_PROBE(true, "Data cluster has no tenants with current tenant ID prefix");
 				for (auto const& [id, tenant] : data.tenantData.tenantMap) {
 					ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix);
 				}

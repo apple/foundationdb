@@ -918,6 +918,8 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 				}
 			}
 
+			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
+
 			wait(waitForAll(deleteFutures));
 			wait(tr.commit());
 
@@ -1203,8 +1205,8 @@ ACTOR Future<Void> auditStorageCorrectness(Reference<AsyncVar<ServerDBInfo>> dbI
 				    .detail("AuditID", auditId)
 				    .detail("AuditType", auditType)
 				    .detail("RetryCount", retryCount);
-				wait(delay(30));
-				if (retryCount > 30) {
+				wait(delay(25));
+				if (retryCount > 20) {
 					TraceEvent("AuditStorageCorrectnessWaitFailed")
 					    .detail("AuditID", auditId)
 					    .detail("AuditType", auditType);
@@ -1373,17 +1375,17 @@ ACTOR Future<bool> runTest(Database cx,
 				ok = false;
 			}
 
-			// Run auditStorage
-			if (quiescent) {
+			// Run auditStorage at the end of simulation
+			if (quiescent && g_network->isSimulated()) {
 				try {
 					TraceEvent("AuditStorageStart");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateHA), 1000.0));
 					TraceEvent("AuditStorageCorrectnessHADone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateReplica), 1000.0));
 					TraceEvent("AuditStorageCorrectnessReplicaDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateLocationMetadata), 1000.0));
 					TraceEvent("AuditStorageCorrectnessLocationMetadataDone");
-					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 5000.0));
+					wait(timeoutError(auditStorageCorrectness(dbInfo, AuditType::ValidateStorageServerShard), 1000.0));
 					TraceEvent("AuditStorageCorrectnessStorageServerShardDone");
 				} catch (Error& e) {
 					ok = false;

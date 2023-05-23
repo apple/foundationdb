@@ -694,6 +694,7 @@ private:
 		if (m.param1.startsWith(prefix)) {
 			TenantMapEntry tenantEntry;
 			if (initialCommit) {
+				CODE_PROBE(true, "Recovering tenant from txn state store");
 				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
@@ -717,8 +718,10 @@ private:
 			}
 			if (lockedTenants) {
 				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
 					lockedTenants->erase(tenantEntry.id);
 				} else {
+					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
 					lockedTenants->insert(tenantEntry.id);
 				}
 			}
@@ -1174,6 +1177,7 @@ private:
 					auto endItr = endId.present()
 					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
 					                  : lockedTenants->end();
+					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
 					lockedTenants->erase(startItr, endItr);
 				}
 			}

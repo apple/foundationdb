@@ -239,16 +239,35 @@ rocksdb::DBOptions SharedRocksDBState::initialDbOptions() {
 	if (SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE > 0) {
 		options.compaction_readahead_size = SERVER_KNOBS->ROCKSDB_COMPACTION_READAHEAD_SIZE;
 	}
+	// The following two fields affect how archived logs will be deleted.
+	// 1. If both set to 0, logs will be deleted asap and will not get into
+	//    the archive.
+	// 2. If WAL_ttl_seconds is 0 and WAL_size_limit_MB is not 0,
+	//    WAL files will be checked every 10 min and if total size is greater
+	//    then WAL_size_limit_MB, they will be deleted starting with the
+	//    earliest until size_limit is met. All empty files will be deleted.
+	// 3. If WAL_ttl_seconds is not 0 and WAL_size_limit_MB is 0, then
+	//    WAL files will be checked every WAL_ttl_seconds / 2 and those that
+	//    are older than WAL_ttl_seconds will be deleted.
+	// 4. If both are not 0, WAL files will be checked every 10 min and both
+	//    checks will be performed with ttl being first.
+	options.WAL_ttl_seconds = SERVER_KNOBS->ROCKSDB_WAL_TTL_SECONDS;
+	options.WAL_size_limit_MB = SERVER_KNOBS->ROCKSDB_WAL_SIZE_LIMIT_MB;
 
 	options.statistics = rocksdb::CreateDBStatistics();
 	options.statistics->set_stats_level(rocksdb::StatsLevel(SERVER_KNOBS->ROCKSDB_STATS_LEVEL));
 
 	options.db_log_dir = g_network->isSimulated() ? "" : SERVER_KNOBS->LOG_DIRECTORY;
+	if (SERVER_KNOBS->ROCKSDB_LOG_LEVEL_DEBUG) {
+		options.info_log_level = rocksdb::InfoLogLevel::DEBUG_LEVEL;
+	}
+
+	options.max_log_file_size = SERVER_KNOBS->ROCKSDB_MAX_LOG_FILE_SIZE;
+	options.keep_log_file_num = SERVER_KNOBS->ROCKSDB_KEEP_LOG_FILE_NUM;
 
 	if (!SERVER_KNOBS->ROCKSDB_MUTE_LOGS) {
 		options.info_log = std::make_shared<RocksDBLogForwarder>(id, options.info_log_level);
 	}
-
 	return options;
 }
 
@@ -2732,6 +2751,33 @@ TEST_CASE("noSim/fdbserver/KeyValueStoreRocksDB/CheckpointRestoreKeyValues") {
 	return Void();
 }
 
+TEST_CASE("noSim/RocksDB/RangeClear") {
+	state const std::string rocksDBTestDir = "rocksdb-perf-db";
+	platform::eraseDirectoryRecursive(rocksDBTestDir);
+
+	state IKeyValueStore* kvStore = new RocksDBKeyValueStore(rocksDBTestDir, deterministicRandom()->randomUniqueID());
+	wait(kvStore->init());
+
+	state KeyRef shardPrefix = "\xffprefix/"_sr;
+
+	state int i = 0;
+	for (; i < 50000; ++i) {
+		state std::string key1 = format("\xffprefix/%d", i);
+		state std::string key2 = format("\xffprefix/%d", i + 1);
+
+		kvStore->set({ key2, std::to_string(i) });
+		RangeResult result = wait(kvStore->readRange(KeyRangeRef(shardPrefix, key1), 10000, 10000));
+		kvStore->clear({ KeyRangeRef(shardPrefix, key1) });
+		wait(kvStore->commit(false));
+	}
+
+	// TODO: flush memtable. The process is expected to OOM.
+
+	Future<Void> closed = kvStore->onClosed();
+	kvStore->dispose();
+	wait(closed);
+	return Void();
+}
 } // namespace
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL

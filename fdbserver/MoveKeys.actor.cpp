@@ -20,6 +20,7 @@
 
 #include <vector>
 
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "flow/Error.h"
 #include "flow/Util.h"
@@ -29,6 +30,7 @@
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -707,14 +709,9 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
 
 					for (int s = 0; s < serverListValues.size(); s++) {
-						// We don't think this condition should be triggered, but we're not sure if there are conditions
-						// that might cause it to trigger. Adding this assertion to find any such cases via testing.
-						ASSERT_WE_THINK(serverListValues[s].present());
+						// This can happen if a SS is removed after a shard move. See comments on PR #10110.
 						if (!serverListValues[s].present()) {
-							// Attempt to move onto a server that isn't in serverList (removed or never added to the
-							// database) This can happen (why?) and is handled by the data distribution algorithm
-							// FIXME: Answer why this can happen?
-							// CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
+							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
 					}
@@ -1517,23 +1514,25 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							physicalShardMap[ssId].emplace_back(rangeIntersectKeys, srcId);
 						}
 
-						const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
-						CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
-						                              DataMoveRocksCF,
-						                              src,
-						                              checkpointId,
-						                              dataMoveId);
-						checkpoint.setState(CheckpointMetaData::Pending);
-						tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
-						TraceEvent(sevDm, "InitiatedCheckpoint")
-						    .detail("CheckpointID", checkpointId.toString())
-						    .detail("Range", rangeIntersectKeys)
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("SrcServers", describe(src))
-						    .detail("ReadVersion", tr.getReadVersion().get());
-
 						dataMove.src.insert(src.begin(), src.end());
-						dataMove.checkpoints.insert(checkpointId);
+
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+							const UID checkpointId = UID(deterministicRandom()->randomUInt64(), srcId.first());
+							CheckpointMetaData checkpoint(std::vector<KeyRange>{ rangeIntersectKeys },
+							                              DataMoveRocksCF,
+							                              src,
+							                              checkpointId,
+							                              dataMoveId);
+							checkpoint.setState(CheckpointMetaData::Pending);
+							tr.set(checkpointKeyFor(checkpointId), checkpointValue(checkpoint));
+							TraceEvent(sevDm, "InitiatedCheckpoint")
+							    .detail("CheckpointID", checkpointId.toString())
+							    .detail("Range", rangeIntersectKeys)
+							    .detail("DataMoveID", dataMoveId)
+							    .detail("SrcServers", describe(src))
+							    .detail("ReadVersion", tr.getReadVersion().get());
+							dataMove.checkpoints.insert(checkpointId);
+						}
 					}
 
 					// Remove old dests from serverKeys.
@@ -1950,7 +1949,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+							wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+						}
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
 						TraceEvent(SevDebug, "FinishMoveShardsDeleteMetaData", dataMoveId)
@@ -2702,7 +2703,9 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
-					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
+					}
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
 					TraceEvent(SevVerbose, "CleanUpDataMoveDeleteMetaData", dataMoveId)
@@ -2762,15 +2765,18 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 		wait(cleanUpDataMoveCore(occ, dataMoveId, lock, cleanUpDataMoveParallelismLock, keys, ddEnabledState));
 	} catch (Error& e) {
 		if (e.code() == error_code_retry_clean_up_datamove_tombstone_added) {
-			TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
-			ASSERT_WE_THINK(addCleanUpDataMoveActor.present());
-			addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
-			                                                             dataMoveId,
-			                                                             lock,
-			                                                             cleanUpDataMoveParallelismLock,
-			                                                             keys,
-			                                                             ddEnabledState,
-			                                                             /*backgroundDelaySeconds=*/10));
+			if (addCleanUpDataMoveActor.present()) {
+				TraceEvent(SevDebug, "CleanUpDataMoveTriggerBackground", dataMoveId).detail("DataMoveID", dataMoveId);
+				addCleanUpDataMoveActor.get().send(cleanUpDataMoveBackground(occ,
+				                                                             dataMoveId,
+				                                                             lock,
+				                                                             cleanUpDataMoveParallelismLock,
+				                                                             keys,
+				                                                             ddEnabledState,
+				                                                             /*backgroundDelaySeconds=*/10));
+			} else {
+				TraceEvent(SevWarn, "CleanUpDataMoveNotFound", dataMoveId).errorUnsuppressed(e);
+			}
 		} else {
 			TraceEvent(SevWarn, "CleanUpDataMoveFail", dataMoveId).errorUnsuppressed(e);
 			throw e;
@@ -3012,6 +3018,13 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
 			wait(checkPersistentMoveKeysLock(&tr, lock));
+			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
+			if (currentOwnerId != bmId) {
+				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
+				dprint("Blob migrator {} is replaced by {}\n", bmId.toString(), currentOwnerId.toString());
+				TraceEvent("BlobMigratorReplaced", traceId).detail("Current", currentOwnerId).detail("BM", bmId);
+				throw blob_migrator_replaced();
+			}
 			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
 			wait(assignKeysToServer(traceId, &tr, keys, bmId));
 			wait(tr.commit());

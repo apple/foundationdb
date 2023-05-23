@@ -36,6 +36,7 @@ const StringRef STORAGESERVER_HISTOGRAM_GROUP = "StorageServer"_sr;
 const StringRef FETCH_KEYS_LATENCY_HISTOGRAM = "FetchKeysLatency"_sr;
 const StringRef FETCH_KEYS_BYTES_HISTOGRAM = "FetchKeysSize"_sr;
 const StringRef FETCH_KEYS_BYTES_PER_SECOND_HISTOGRAM = "FetchKeysBandwidth"_sr;
+const StringRef FETCH_KEYS_BYTES_PER_COMMIT_HISTOGRAM = "FetchKeysBytesPerCommit"_sr;
 const StringRef TLOG_CURSOR_READS_LATENCY_HISTOGRAM = "TLogCursorReadsLatency"_sr;
 const StringRef SS_VERSION_LOCK_LATENCY_HISTOGRAM = "SSVersionLockLatency"_sr;
 const StringRef EAGER_READS_LATENCY_HISTOGRAM = "EagerReadsLatency"_sr;
@@ -254,7 +255,9 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 				self->metrics.getReadHotRanges(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
+				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
+				    (req.tenantInfo.hasTenant() &&
+				     !self->isReadable(req.keys.withPrefix(req.tenantInfo.prefix.get())))) {
 					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {

@@ -180,6 +180,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
+	init( RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE, 10000);
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
 	init( APPLY_BLOCK_SIZE,     LOG_RANGE_BLOCK_SIZE/5 );
@@ -191,6 +192,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MIN_CLEANUP_SECONDS,                  3600.0 );
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
+	init( BLOB_GRANULE_RESTORE_CHECK_INTERVAL,              10 );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
@@ -288,6 +290,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( BG_MAX_GRANULE_PARALLELISM,                10 );
 	init( BG_TOO_MANY_GRANULES,                   20000 );
 	init( BLOB_METADATA_REFRESH_INTERVAL,          3600 ); if ( randomize && BUGGIFY ) { BLOB_METADATA_REFRESH_INTERVAL = deterministicRandom()->randomInt(5, 120); }
+	init( DETERMINISTIC_BLOB_METADATA,            false ); if( randomize && BUGGIFY_WITH_PROB(0.01) ) DETERMINISTIC_BLOB_METADATA = true;
 	init( ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE,  false ); if ( randomize && BUGGIFY ) { ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE = true; }
 
 	init( CHANGE_QUORUM_BAD_STATE_RETRY_TIMES,        3 );
@@ -314,6 +317,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION, 1 );
 
 	init( REST_KMS_ALLOW_NOT_SECURE_CONNECTION,     false ); if ( randomize && BUGGIFY ) REST_KMS_ALLOW_NOT_SECURE_CONNECTION = !REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
+	init( SIM_KMS_VAULT_MAX_KEYS,                    4096 );
 
 	// clang-format on
 }

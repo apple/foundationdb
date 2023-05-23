@@ -102,8 +102,11 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	result.bytesWrittenPerKSecond =
 	    bytesWriteSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+
 	result.bytesReadPerKSecond =
 	    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	result.opsReadPerKSecond =
+	    opsReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	return result;
 }
 
@@ -114,7 +117,8 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
-		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
+		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
+		CODE_PROBE(metrics.opsReadPerKSecond != 0, "ShardNotifyMetrics opsRead");
 	}
 
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -163,7 +167,8 @@ void StorageServerMetrics::notifyBytesReadPerKSecond(const Key& key, int64_t in)
 		notifyMetrics.opsReadPerKSecond = opsReadPerKSecond;
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
-			CODE_PROBE(true, "ShardNotifyMetrics");
+			CODE_PROBE(bytesReadPerKSecond > 0, "ShardNotifyMetrics bytesRead");
+			CODE_PROBE(opsReadPerKSecond > 0, "ShardNotifyMetrics opsRead");
 			v[i].send(notifyMetrics);
 		}
 	}
@@ -223,6 +228,11 @@ void StorageServerMetrics::poll() {
 		StorageMetrics m;
 		m.bytesReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		bytesReadSample.poll(waitMetricsMap, m);
+	}
+	{
+		StorageMetrics m;
+		m.opsReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		opsReadSample.poll(waitMetricsMap, m);
 	}
 	// bytesSample doesn't need polling because we never call addExpire() on it
 }

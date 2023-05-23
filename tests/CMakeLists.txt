@@ -170,9 +170,9 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
   add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
-  add_fdb_test(TEST_FILES fast/HTTPServerUnit.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -202,8 +202,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
-  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
@@ -234,17 +233,24 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
+    if (USE_VALGRIND)
+      add_fdb_test(TEST_FILES noSim/PerfShardedRocksDBTest.toml IGNORE)
+    else()
+      add_fdb_test(TEST_FILES noSim/PerfShardedRocksDBTest.toml UNIT)
+    endif()
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
+    add_fdb_test(TEST_FILES noSim/PerfShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
+  add_fdb_test(TEST_FILES rare/BlobGranuleRangesChangeLog.toml)
   add_fdb_test(TEST_FILES rare/BlobGranuleMergeBoundaries.toml)
   add_fdb_test(TEST_FILES rare/CheckRelocation.toml)
   add_fdb_test(TEST_FILES rare/ClogTlog.toml)
@@ -311,20 +317,8 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapCycleRestart-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-1.txt
     restarting/from_7.1.0_until_7.2.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestAttrition-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestSimpleRestart-2.txt)
-  add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_7.2.0/SnapTestRestart-1.txt
-    restarting/from_7.1.0_until_7.2.0/SnapTestRestart-2.txt)
   add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -380,17 +374,35 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.3.0/BlobGranuleRestartLarge-1.toml
     restarting/from_7.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_7.3.0/BlobGranuleRestartCorrectness-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapCycleRestart-1.txt
+    restarting/from_7.3.0/SnapCycleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestAttrition-1.txt
+    restarting/from_7.3.0/SnapTestAttrition-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestSimpleRestart-1.txt
+    restarting/from_7.3.0/SnapTestSimpleRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_7.3.0/SnapTestRestart-1.txt
+    restarting/from_7.3.0/SnapTestRestart-2.txt)
+  add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml)
+    restarting/to_7.1.0_until_7.2.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_7.2.0/CycleTestRestart-1.toml
-    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml)
+    restarting/to_7.1.0_until_7.2.0/CycleTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
+    restarting/to_7.2.0_until_7.3.0/ConfigureStorageMigrationTestRestart-2.toml IGNORE)
   add_fdb_test(
     TEST_FILES restarting/to_7.2.0_until_7.3.0/CycleTestRestart-1.toml
-    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml)
+    restarting/to_7.2.0_until_7.3.0/CycleTestRestart-2.toml IGNORE)
+  add_fdb_test(
+    TEST_FILES restarting/to_7.3.0/BlobGranuleRestartCorrectness-1.toml
+    restarting/to_7.3.0/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.3.0/ConfigureStorageMigrationTestRestart-2.toml)
@@ -420,7 +432,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/DifferentClustersSameRV.toml)
   add_fdb_test(TEST_FILES slow/DiskFailureCycle.toml)
   add_fdb_test(TEST_FILES slow/FastTriggeredWatches.toml)
-  add_fdb_test(TEST_FILES slow/GcGenerations.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/GcGenerations.toml)
   add_fdb_test(TEST_FILES slow/LongRunning.toml LONG_RUNNING)
   add_fdb_test(TEST_FILES slow/LowLatencyWithFailures.toml)
   add_fdb_test(TEST_FILES slow/MetaclusterManagement.toml)
