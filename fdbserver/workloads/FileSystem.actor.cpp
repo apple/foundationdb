@@ -120,7 +120,7 @@ struct FileSystemWorkload : TestWorkload {
 		state Transaction tr(cx);
 		while (true) {
 			try {
-				Optional<Value> f = wait(tr.get(self->keyForFileID(begin)));
+				ValueReadResult f = wait(tr.get(self->keyForFileID(begin)));
 				if (f.present())
 					break; // The transaction already completed!
 
@@ -241,9 +241,9 @@ struct FileSystemWorkload : TestWorkload {
 				try {
 					state double time = now();
 					if (isDeleting) {
-						state Optional<Value> deleted = wait(tr.get(StringRef(keyStr + "/deleted")));
+						state ValueReadResult deleted = wait(tr.get(StringRef(keyStr + "/deleted")));
 						ASSERT(deleted.present());
-						Optional<Value> serverStr = wait(tr.get(StringRef(keyStr + "/server")));
+						ValueReadResult serverStr = wait(tr.get(StringRef(keyStr + "/server")));
 						ASSERT(serverStr.present());
 						int serverID = testKeyToInt(serverStr.get());
 						if (deleted.get().toString() == "1") {

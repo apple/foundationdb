@@ -484,7 +484,7 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
                                            int64_t epoch,
                                            int64_t seqno) {
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
-	Optional<Value> lockValue = wait(tr->get(lockKey));
+	ValueReadResult lockValue = wait(tr->get(lockKey));
 
 	if (!lockValue.present()) {
 		// FIXME: could add some validation for simulation that a force purge was initiated
@@ -673,7 +673,7 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
                                                                              UID currentGranuleID) {
 	Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
 
-	Optional<Value> st = wait(tr->get(myStateKey));
+	ValueReadResult st = wait(tr->get(myStateKey));
 	if (st.present()) {
 		return decodeBlobGranuleSplitValue(st.get());
 	} else {
@@ -3171,7 +3171,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						state KeyRangeRef parentRange(curHistory.value.parentBoundaries[pIdx],
 						                              curHistory.value.parentBoundaries[pIdx + 1]);
 						state Version parentVersion = curHistory.value.parentVersions[pIdx];
-						Optional<Value> v = wait(tr.get(blobGranuleHistoryKeyFor(parentRange, parentVersion)));
+						ValueReadResult v = wait(tr.get(blobGranuleHistoryKeyFor(parentRange, parentVersion)));
 						if (v.present()) {
 							next = GranuleHistory(parentRange, parentVersion, decodeBlobGranuleHistoryValue(v.get()));
 							ASSERT(next.version != invalidVersion);
@@ -4126,7 +4126,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 ACTOR Future<GranuleFiles> loadParentGranuleForMergeSnapshot(Transaction* tr, KeyRange range, Version historyVersion) {
 	// translate key range to granule id
-	Optional<Value> historyParentValue = wait(tr->get(blobGranuleHistoryKeyFor(range, historyVersion)));
+	ValueReadResult historyParentValue = wait(tr->get(blobGranuleHistoryKeyFor(range, historyVersion)));
 	ASSERT(historyParentValue.present());
 	Standalone<BlobGranuleHistoryValue> val = decodeBlobGranuleHistoryValue(historyParentValue.get());
 	UID parentGranuleID = val.granuleID;
@@ -4161,7 +4161,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			state GranuleStartState info;
 			info.changeFeedStartVersion = invalidVersion;
 
-			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
+			state Future<ValueReadResult> fLockValue = tr.get(lockKey);
 			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Reference<BlobRestoreController> restoreController =
 			    makeReference<BlobRestoreController>(bwData->db, req.keyRange);
@@ -4187,7 +4187,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			bool isFullRestore = wait(fIsRestoring);
 			bwData->isFullRestoreMode = isFullRestore;
 
-			Optional<Value> prevLockValue = wait(fLockValue);
+			ValueReadResult prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
 
@@ -4304,7 +4304,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					state Version parentVersion = info.history.get().value.parentVersions[0];
 					state Key parentHistoryKey = blobGranuleHistoryKeyFor(parentRange, parentVersion);
 
-					Optional<Value> historyParentValue = wait(tr.get(parentHistoryKey));
+					ValueReadResult historyParentValue = wait(tr.get(parentHistoryKey));
 
 					if (historyParentValue.present()) {
 						Standalone<BlobGranuleHistoryValue> val =
@@ -4821,7 +4821,7 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
 
 			// Get manager lock from DB
-			Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
+			ValueReadResult currentLockValue = wait(tr->get(blobManagerEpochKey));
 			ASSERT(currentLockValue.present());
 			int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 			bwData->managerEpochOk(currentEpoch);
@@ -4852,7 +4852,7 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> val = wait(tr.get(blobWorkerListKey));
+				ValueReadResult val = wait(tr.get(blobWorkerListKey));
 				if (!val.present()) {
 					CODE_PROBE(true, "Blob worker found out BM killed it from reading DB");
 					return Void();

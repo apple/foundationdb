@@ -62,7 +62,7 @@
 // Since TupleCodec is a struct, partial specialization can be used, such as the std::pair
 // partial specialization below allowing any std::pair<T1,T2> where T1 and T2 are already
 // supported by TupleCodec.
-template <typename T>
+template <typename T, typename Enabled = void>
 struct TupleCodec {
 	static inline Standalone<StringRef> pack(T const& val) { return val.pack().pack(); }
 	static inline T unpack(Standalone<StringRef> const& val) { return T::unpack(Tuple::unpack(val)); }
@@ -84,6 +84,15 @@ inline Standalone<StringRef> TupleCodec<int64_t>::pack(int64_t const& val) {
 }
 template <>
 inline int64_t TupleCodec<int64_t>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getInt(0);
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<int>::pack(int const& val) {
+	return Tuple::makeTuple(val).pack();
+}
+template <>
+inline int TupleCodec<int>::unpack(Standalone<StringRef> const& val) {
 	return Tuple::unpack(val).getInt(0);
 }
 
@@ -172,6 +181,16 @@ inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
 	return KeyRangeRef(t.getString(0), t.getString(1));
 }
 
+template <class Enum>
+struct TupleCodec<Enum, std::enable_if_t<std::is_enum_v<Enum>>> {
+	static inline Standalone<StringRef> pack(Enum const& val) {
+		return Tuple::makeTuple(static_cast<int64_t>(val)).pack();
+	}
+	static inline Enum unpack(Standalone<StringRef> const& val) {
+		return static_cast<Enum>(Tuple::unpack(val).getInt(0));
+	}
+};
+
 struct NullCodec {
 	static Standalone<StringRef> pack(Standalone<StringRef> val) { return val; }
 	static Standalone<StringRef> unpack(Standalone<StringRef> val) { return val; }
@@ -221,11 +240,11 @@ public:
 
 	template <class Transaction>
 	Future<Optional<Versionstamp>> get(Transaction tr, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+		typename transaction_future_type<Transaction, ValueReadResult>::type getFuture = tr->get(key, snapshot);
 
 		return holdWhile(
 		    getFuture,
-		    map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> Optional<Versionstamp> {
+		    map(safeThreadFutureToFuture(getFuture), [](ValueReadResult const& val) -> Optional<Versionstamp> {
 			    if (val.present()) {
 				    return BinaryReader::fromStringRef<Versionstamp>(*val, Unversioned());
 			    }
@@ -330,11 +349,11 @@ public:
 				return self.get(tr, snapshot);
 			});
 		} else {
-			typename transaction_future_type<Transaction, Optional<Value>>::type getFuture = tr->get(key, snapshot);
+			typename transaction_future_type<Transaction, ValueReadResult>::type getFuture = tr->get(key, snapshot);
 
 			return holdWhile(
 			    getFuture,
-			    map(safeThreadFutureToFuture(getFuture), [codec = codec](Optional<Value> const& val) -> Optional<T> {
+			    map(safeThreadFutureToFuture(getFuture), [codec = codec](ValueReadResult const& val) -> Optional<T> {
 				    if (val.present())
 					    return codec.unpack(val.get());
 				    return {};
@@ -518,20 +537,6 @@ public:
 	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
 	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
 
-	template <class DB>
-	Future<RangeResultType> getRange(Optional<KeyType> const& begin,
-	                                 Optional<KeyType> const& end,
-	                                 int limit,
-	                                 Reference<DB> db,
-	                                 Snapshot snapshot = Snapshot::False,
-	                                 Reverse reverse = Reverse::False) const {
-		return runTransaction(db, [=, this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			return this->getRange(tr, begin, end, limit, snapshot, reverse);
-		});
-	}
-
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
@@ -540,25 +545,34 @@ public:
 	                                 int limit,
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
-		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
-		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.getRange(tr, begin, end, limit, snapshot, reverse);
+			});
+		} else {
+			Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
+			Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture),
-		        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
-			        RangeResultType rangeResult;
-			        for (int i = 0; i < kvs.size(); ++i) {
-				        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				        ValueType val = valueCodec.unpack(kvs[i].value);
-				        rangeResult.results.push_back(PairType(key, val));
-			        }
-			        rangeResult.more = kvs.more;
-			        return rangeResult;
-		        }));
+			typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+			    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+			return holdWhile(
+			    getRangeFuture,
+			    map(safeThreadFutureToFuture(getRangeFuture),
+			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+				        RangeResultType rangeResult;
+				        for (int i = 0; i < kvs.size(); ++i) {
+					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+					        ValueType val = valueCodec.unpack(kvs[i].value);
+					        rangeResult.results.push_back(PairType(key, val));
+				        }
+				        rangeResult.more = kvs.more;
+				        return rangeResult;
+			        }));
+		}
 	}
 
 	ACTOR template <class Transaction>
@@ -712,12 +726,12 @@ public:
 
 	template <class Transaction>
 	Future<Optional<ValueType>> get(Transaction tr, KeyType const& key, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
+		typename transaction_future_type<Transaction, ValueReadResult>::type getFuture =
 		    tr->get(packKey(key), snapshot);
 
 		return holdWhile(getFuture,
 		                 map(safeThreadFutureToFuture(getFuture),
-		                     [valueCodec = valueCodec](Optional<Value> const& val) -> Optional<ValueType> {
+		                     [valueCodec = valueCodec](ValueReadResult const& val) -> Optional<ValueType> {
 			                     if (val.present())
 				                     return valueCodec.unpack(val.get());
 			                     return {};
@@ -1023,10 +1037,10 @@ public:
 
 	template <class Transaction>
 	Future<bool> exists(Transaction tr, ValueType const& val, Snapshot snapshot = Snapshot::False) const {
-		typename transaction_future_type<Transaction, Optional<Value>>::type getFuture =
+		typename transaction_future_type<Transaction, ValueReadResult>::type getFuture =
 		    tr->get(packKey(val), snapshot);
 
-		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](Optional<Value> const& val) -> bool {
+		return holdWhile(getFuture, map(safeThreadFutureToFuture(getFuture), [](ValueReadResult const& val) -> bool {
 			                 return val.present();
 		                 }));
 	}

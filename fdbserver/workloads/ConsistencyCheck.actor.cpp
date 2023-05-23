@@ -191,7 +191,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+				state ValueReadResult ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -343,6 +343,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
 					if (!coordinatorsCorrect)
 						self->testFailure("Coordinators incorrect");
+
+					bool consistencyScanStopped = wait(self->checkConsistencyScan(cx));
+					if (!consistencyScanStopped)
+						self->testFailure("Consistency scan active");
 				}
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -384,7 +388,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						                          true,
 						                          self->rateLimitMax,
 						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
-						                          KeyRef(),
 						                          &self->success));
 
 						// Cache consistency check
@@ -1327,7 +1330,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+				ValueReadResult currentKey = wait(tr.get(coordinatorsKey));
 
 				if (!currentKey.present()) {
 					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
@@ -1646,6 +1649,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// TODO: Check Tlog
 
 		return true;
+	}
+
+	// returns true if stopped, false otherwise
+	ACTOR Future<bool> checkConsistencyScan(Database cx) {
+		if (!g_network->isSimulated()) {
+			return true;
+		}
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state ConsistencyScanState cs;
+		loop {
+			try {
+				SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
+				ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+				return !config.enabled;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 };
 

@@ -35,12 +35,12 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 	private final List<KeyValue> rangeResult;
 
 	// now it has 4 fields, key, value, getRange.begin, getRange.end
-	// this needs to change if FDBMappedKeyValue definition is changed.
+	// this needs to change if the FDB C FDBMappedKeyValue definition is changed.
 	private static final int TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue = 4;
 
 	FDBMappedKeyValue(byte[] key, byte[] value, byte[] rangeBegin, byte[] rangeEnd,
-					  List<KeyValue> rangeResult) {
-		super(key, value, 0.0f, 0.0f);
+						  List<KeyValue> rangeResult, float serverBusyness, float rangeBusyness) {
+		super(key, value, serverBusyness, rangeBusyness);
 		this.rangeBegin = rangeBegin;
 		this.rangeEnd = rangeEnd;
 		this.rangeResult = rangeResult;
@@ -52,11 +52,10 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 	@Override
 	public byte[] getRangeEnd() { return rangeEnd; }
 
-
 	@Override
 	public List<KeyValue> getRangeResult() { return rangeResult; }
 
-	static MappedKeyValue fromBytes(byte[] bytes, int[] lengths) {
+	static MappedKeyValue fromBytes(byte[] bytes, int[] lengths, float serverBusyness, float rangeBusyness) {
 		// Lengths include: key, value, rangeBegin, rangeEnd, count * (underlying key, underlying value)
 		if (lengths.length < TOTAL_SERIALIZED_FIELD_FDBMappedKeyValue) {
 			throw new IllegalArgumentException("There needs to be at least " +
@@ -78,9 +77,9 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 		for (int i = 0; i < count; i++) {
 			byte[] k = takeBytes(offset, bytes, lengths);
 			byte[] v = takeBytes(offset, bytes, lengths);
-			rangeResult.add(new FDBKeyValue(k, v, 0.0f, 0.0f));
+			rangeResult.add(new FDBKeyValue(k, v, serverBusyness, rangeBusyness));
 		}
-		return new FDBMappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult);
+		return new FDBMappedKeyValue(key, value, rangeBegin, rangeEnd, rangeResult, serverBusyness, rangeBusyness);
 	}
 
 	static class Offset {
@@ -107,9 +106,9 @@ class FDBMappedKeyValue extends FDBKeyValue implements MappedKeyValue {
 		if (!(obj instanceof MappedKeyValue))
 			return false;
 
-		MappedKeyValue rhs = (MappedKeyValue)obj;
+		MappedKeyValue rhs = (MappedKeyValue) obj;
 		return Arrays.equals(rangeBegin, rhs.getRangeBegin()) && Arrays.equals(rangeEnd, rhs.getRangeEnd()) &&
-			Objects.equals(rangeResult, rhs.getRangeResult());
+		    Objects.equals(rangeResult, rhs.getRangeResult());
 	}
 
 	// Hash code does not consider the the read metrics

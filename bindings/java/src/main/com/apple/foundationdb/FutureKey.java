@@ -39,7 +39,7 @@ class FutureKey extends NativeFuture<byte[]> {
 	
 	@Override
 	protected void postMarshal(byte[] value) {
-		if(value!=null && eventKeeper!=null){
+		if(value != null && eventKeeper != null){
 			eventKeeper.count(Events.BYTES_FETCHED, value.length);
 		}
 		super.postMarshal(value);

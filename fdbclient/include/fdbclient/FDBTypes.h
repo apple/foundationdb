@@ -754,6 +754,92 @@ struct GetRangeLimits {
 	}
 };
 
+class ReadMetrics {
+public:
+	using BusynessT = uint8_t;
+	constexpr static FileIdentifier file_identifier = 13999063;
+
+	ReadMetrics() {}
+	ReadMetrics(BusynessT serverBusyness, BusynessT rangeBusyness)
+	  : serverBusyness(serverBusyness), rangeBusyness(rangeBusyness) {}
+
+	float getServerBusyness() const { return (float)serverBusyness / scalingFactor; }
+	float getRangeBusyness() const { return (float)rangeBusyness / scalingFactor; }
+
+	void combine(ReadMetrics const& other) {
+		serverBusyness = std::max(serverBusyness, other.serverBusyness);
+		rangeBusyness = std::max(rangeBusyness, other.rangeBusyness);
+	}
+
+	static BusynessT busynessFloatToInt(float value) {
+		return std::clamp<BusynessT>(value * scalingFactor, 0, scalingFactor);
+	}
+
+	static ReadMetrics fromFloats(float serverBusyness, float rangeBusyness) {
+		return ReadMetrics(busynessFloatToInt(serverBusyness), busynessFloatToInt(rangeBusyness));
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serverBusyness, rangeBusyness);
+	}
+
+private:
+	static constexpr BusynessT scalingFactor = std::numeric_limits<BusynessT>::max();
+
+	BusynessT serverBusyness = 0;
+	BusynessT rangeBusyness = 0;
+};
+
+// Used to identify locations that need to have their read metrics populated from server responses. Will be removed when
+// the server responses include busyness metrics so that these locations can be found by compiler errors.
+using ReadMetricsNeedFilled = ReadMetrics;
+
+class ReadResultBase {
+public:
+	constexpr static FileIdentifier file_identifier = 6066542;
+
+	ReadResultBase() {}
+	ReadResultBase(ReadMetrics const& metrics) : metrics(metrics) {}
+
+	ReadMetrics& getReadMetrics() { return metrics; }
+	ReadMetrics const& getReadMetrics() const { return metrics; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, metrics);
+	}
+
+private:
+	ReadMetrics metrics;
+};
+
+template <class T>
+class ReadResult : public T, public ReadResultBase {
+public:
+	constexpr static FileIdentifier file_identifier = 1683564;
+
+	ReadResult() {}
+	ReadResult(T const& t) : T(t) {}
+	ReadResult(T&& t) : T(std::move(t)) {}
+	ReadResult(T&& t, ReadMetrics const& metrics) : T(std::move(t)), ReadResultBase(metrics) {}
+
+	T& contents() { return *(T*)this; }
+	T const& contents() const { return *(T const*)this; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, (ReadResultBase&)*this, (T&)*this);
+	}
+};
+
+template <class T>
+struct Traceable<ReadResult<T>> : std::true_type {
+	static std::string toString(ReadResult<T> const& rr) { return Traceable<T>::toString(rr); }
+};
+
+using ValueReadResult = ReadResult<Optional<Value>>;
+
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
 

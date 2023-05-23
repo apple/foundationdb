@@ -356,7 +356,7 @@ ACTOR static Future<Optional<Version>> getMinBackupVersion(Reference<ClusterReco
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> value = wait(tr.get(backupStartedKey));
+			ValueReadResult value = wait(tr.get(backupStartedKey));
 			Optional<Version> minVersion;
 			if (value.present()) {
 				auto uidVersions = decodeBackupStartedValue(value.get());
@@ -470,7 +470,7 @@ ACTOR Future<Void> updateLogsValue(Reference<ClusterRecoveryData> self, Database
 	state Transaction tr(cx);
 	loop {
 		try {
-			Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
+			ValueReadResult value = wait(tr.get(logsKey));
 			ASSERT(value.present());
 			auto logs = decodeLogsValue(value.get());
 

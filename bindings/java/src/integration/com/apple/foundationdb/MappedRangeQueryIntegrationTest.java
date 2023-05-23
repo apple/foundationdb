@@ -53,7 +53,7 @@ class MappedRangeQueryIntegrationTest {
 		 */
 		try (Database db = openFDB()) {
 			db.run(tr -> {
-				tr.clear(Range.startsWith(new byte[] { (byte)0x00 }));
+				tr.clear(new byte[0], new byte[] { (byte) 0xff });
 				return null;
 			});
 		}

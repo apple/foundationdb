@@ -129,7 +129,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 				// check tenant deletion
 				while (it != self->lastDeletedTenants.end()) {
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
-					Optional<Value> value = wait(tr->get(key));
+					ValueReadResult value = wait(tr->get(key));
 					// the commit proxies should have the same view of tenant map
 					ASSERT_EQ(value.present(), !lastCommitted);
 					++it;
@@ -139,7 +139,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 				it = self->lastCreatedTenants.cbegin();
 				while (it != self->lastCreatedTenants.end()) {
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
-					Optional<Value> value = wait(tr->get(key));
+					ValueReadResult value = wait(tr->get(key));
 					// the commit proxies should have the same view of tenant map
 					ASSERT_EQ(value.present(), lastCommitted || (self->idx2Tid.count(*it) > 0));
 

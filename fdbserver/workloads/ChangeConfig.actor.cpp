@@ -154,7 +154,7 @@ struct ChangeConfigWorkload : TestWorkload {
 					// Set RAW_ACCESS to explicitly avoid using tenants because
 					// access to management keys is denied for tenant transactions
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-					Optional<Value> newCoordinatorsKey = wait(tr.get("auto_coordinators"_sr.withPrefix(
+					ValueReadResult newCoordinatorsKey = wait(tr.get("auto_coordinators"_sr.withPrefix(
 					    SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)));
 					ASSERT(newCoordinatorsKey.present());
 					desiredCoordinatorsKey = newCoordinatorsKey.get().toString();
@@ -162,7 +162,7 @@ struct ChangeConfigWorkload : TestWorkload {
 					break;
 				} catch (Error& e) {
 					if (e.code() == error_code_special_keys_api_failure) {
-						Optional<Value> errorMsg =
+						ValueReadResult errorMsg =
 						    wait(tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 						ASSERT(errorMsg.present());
 						std::string errorStr;
@@ -202,7 +202,7 @@ struct ChangeConfigWorkload : TestWorkload {
 			} catch (Error& e) {
 				state Error err(e);
 				if (e.code() == error_code_special_keys_api_failure) {
-					Optional<Value> errorMsg =
+					ValueReadResult errorMsg =
 					    wait(tr.get(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::ERRORMSG).begin));
 					ASSERT(errorMsg.present());
 					std::string errorStr;

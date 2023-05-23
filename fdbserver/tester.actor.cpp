@@ -645,7 +645,7 @@ ACTOR Future<Void> pingDatabase(Database cx) {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> v =
+			ValueReadResult v =
 			    wait(tr.get(StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString())));
 			tr.makeSelfConflicting();
 			wait(tr.commit());

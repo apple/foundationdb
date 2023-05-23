@@ -417,10 +417,10 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			try {
 				Version _readVersion = wait(tr.getReadVersion());
 				readVersion = _readVersion;
-				state Optional<Value> res = wait(timeoutError(tr.get(key), 30.0));
+				state ValueReadResult res = wait(timeoutError(tr.get(key), 30.0));
 				const bool equal = !expectedValue.isError() && res == expectedValue.get();
 				if (!equal) {
-					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res));
+					self->validationFailed(expectedValue, ErrorOr<Optional<Value>>(res.contents()));
 				}
 				break;
 			} catch (Error& e) {
@@ -559,7 +559,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssId)));
+				ValueReadResult serverListValue = wait(tr.get(serverListKeyFor(ssId)));
 				ASSERT(serverListValue.present());
 				state StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 				GetShardStateRequest req(range, GetShardStateRequest::READABLE, true);

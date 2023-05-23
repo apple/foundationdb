@@ -291,7 +291,7 @@ public:
 
 		tb->setOptions(tr);
 
-		Optional<Value> keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
+		ValueReadResult keyValue = wait(tr->get(task->params[Task::reservedTaskParamValidKey]));
 
 		if (!keyValue.present()) {
 			TraceEvent("TaskBucketTaskVerifyInvalidTask")
@@ -560,7 +560,7 @@ public:
 			state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
 			try {
 				taskBucket->setOptions(tr);
-				Optional<Value> pausedVal = wait(tr->get(taskBucket->pauseKey));
+				ValueReadResult pausedVal = wait(tr->get(taskBucket->pauseKey));
 				paused->set(pausedVal.present());
 				state Future<Void> watchPausedFuture = tr->watch(taskBucket->pauseKey);
 				wait(tr->commit());
@@ -663,7 +663,7 @@ public:
 	                                       Optional<Value> startingValue) {
 		taskBucket->setOptions(tr);
 
-		Optional<Value> new_value = wait(tr->get(taskBucket->active.key()));
+		ValueReadResult new_value = wait(tr->get(taskBucket->active.key()));
 		if (new_value != startingValue) {
 			return true;
 		}
@@ -683,7 +683,7 @@ public:
 					wait(success(addIdle(tr, taskBucket)));
 				}
 
-				Optional<Value> val = wait(tr->get(taskBucket->active.key()));
+				ValueReadResult val = wait(tr->get(taskBucket->active.key()));
 				startingValue = val;
 
 				wait(tr->commit());
@@ -721,7 +721,7 @@ public:
 	                                          Reference<TaskBucket> taskBucket) {
 		taskBucket->setOptions(tr);
 
-		Optional<Value> val = wait(tr->get(taskBucket->prefix.pack("task_count"_sr)));
+		ValueReadResult val = wait(tr->get(taskBucket->prefix.pack("task_count"_sr)));
 
 		if (!val.present())
 			return 0;
@@ -934,7 +934,7 @@ ACTOR static Future<Key> actorAddTask(TaskBucket* tb,
                                       KeyRef validationKey) {
 	tb->setOptions(tr);
 
-	Optional<Value> validationValue = wait(tr->get(validationKey));
+	ValueReadResult validationValue = wait(tr->get(validationKey));
 
 	if (!validationValue.present()) {
 		TraceEvent(SevError, "TaskBucketAddTaskInvalidKey")
@@ -1225,7 +1225,7 @@ public:
 	                                       KeyRef validationKey) {
 		taskFuture->futureBucket->setOptions(tr);
 
-		Optional<Value> validationValue = wait(tr->get(validationKey));
+		ValueReadResult validationValue = wait(tr->get(validationKey));
 
 		if (!validationValue.present()) {
 			TraceEvent(SevError, "TaskBucketOnSetAddTaskInvalidKey")

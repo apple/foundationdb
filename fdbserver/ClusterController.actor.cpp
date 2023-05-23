@@ -27,6 +27,8 @@
 #include <vector>
 
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/BlobRestoreCommon.h"
+#include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/DatabaseContext.h"
@@ -85,8 +87,8 @@ ACTOR Future<Optional<Value>> getPreviousCoordinators(ClusterControllerData* sel
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> previousCoordinators = wait(tr.get(previousCoordinatorsKey));
-			return previousCoordinators;
+			ValueReadResult previousCoordinators = wait(tr.get(previousCoordinatorsKey));
+			return previousCoordinators.contents();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -1264,7 +1266,7 @@ ACTOR Future<Void> timeKeeper(ClusterControllerData* self) {
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> disableValue = wait(tr->get(timeKeeperDisableKey));
+				ValueReadResult disableValue = wait(tr->get(timeKeeperDisableKey));
 				if (disableValue.present()) {
 					break;
 				}
@@ -1396,7 +1398,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			trVer.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			trVer.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> val = wait(trVer.get(processClassVersionKey));
+			ValueReadResult val = wait(trVer.get(processClassVersionKey));
 
 			if (val.present())
 				break;
@@ -1485,7 +1487,7 @@ ACTOR Future<Void> monitorServerInfoConfig(ClusterControllerData::DBInfo* db) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
-				Optional<Value> configVal = wait(tr.get(latencyBandConfigKey));
+				ValueReadResult configVal = wait(tr.get(latencyBandConfigKey));
 				Optional<LatencyBandConfig> config;
 				if (configVal.present()) {
 					config = LatencyBandConfig::parse(configVal.get());
@@ -1525,7 +1527,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				state Optional<Value> globalConfigVersion = wait(tr.get(globalConfigVersionKey));
+				state ValueReadResult globalConfigVersion = wait(tr.get(globalConfigVersionKey));
 				state ClientDBInfo clientInfo = db->serverInfo->get().client;
 
 				if (globalConfigVersion.present()) {
@@ -2317,7 +2319,7 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			ValueReadResult oldEpoch = wait(tr->get(blobManagerEpochKey));
 			state int64_t newEpoch = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) + 1 : 1;
 			tr->set(blobManagerEpochKey, blobManagerEpochValueFor(newEpoch));
 
@@ -2331,46 +2333,35 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 }
 
 ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->cx);
 	state Reference<BlobRestoreController> restoreController =
 	    makeReference<BlobRestoreController>(self->cx, normalKeys);
-	state Key blobRestoreCommandKey = blobRestoreCommandKeyFor(normalKeys);
 	loop {
 		try {
-			tr->reset();
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			Optional<Value> blobRestoreCommand = wait(tr->get(blobRestoreCommandKey));
-			if (blobRestoreCommand.present()) {
-				state Standalone<BlobRestoreState> restoreState = decodeBlobRestoreState(blobRestoreCommand.get());
-				TraceEvent("WatchBlobRestore", self->id).detail("Phase", restoreState.phase);
-				if (restoreState.phase == BlobRestorePhase::INIT) {
-					if (self->db.blobGranulesEnabled.get()) {
-						wait(BlobRestoreController::updateState(restoreController, STARTING_MIGRATOR, {}));
-						const auto& blobManager = self->db.serverInfo->get().blobManager;
-						if (blobManager.present()) {
-							BlobManagerSingleton(blobManager)
-							    .haltBlobGranules(*self, blobManager.get().locality.processId());
-						}
-						const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
-						if (blobMigrator.present()) {
-							BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
-						}
-					} else {
-						TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
-						BlobRestoreState error("Blob granules should be enabled first."_sr);
-						Value value = blobRestoreCommandValueFor(error);
-						tr->set(blobRestoreCommandKey, value);
+			state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
+			TraceEvent("WatchBlobRestore", self->id).detail("Phase", phase);
+			if (phase == BlobRestorePhase::INIT) {
+				if (self->db.blobGranulesEnabled.get()) {
+					wait(BlobRestoreController::setPhase(restoreController, STARTING_MIGRATOR, {}));
+					const auto& blobManager = self->db.serverInfo->get().blobManager;
+					if (blobManager.present()) {
+						BlobManagerSingleton(blobManager)
+						    .haltBlobGranules(*self, blobManager.get().locality.processId());
 					}
+					const auto& blobMigrator = self->db.serverInfo->get().blobMigrator;
+					if (blobMigrator.present()) {
+						BlobMigratorSingleton(blobMigrator).halt(*self, blobMigrator.get().locality.processId());
+					}
+				} else {
+					TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
+					wait(BlobRestoreController::setError(restoreController, "Blob granules should be enabled first"));
 				}
-				self->db.blobRestoreEnabled.set(restoreState.phase < BlobRestorePhase::DONE);
 			}
+			self->db.blobRestoreEnabled.set(phase > BlobRestorePhase::UNINIT && phase < BlobRestorePhase::DONE);
 
-			state Future<Void> watch = tr->watch(blobRestoreCommandKey);
-			wait(tr->commit());
-			wait(watch);
+			wait(BlobRestoreController::onPhaseChange(restoreController, BlobRestorePhase::INIT));
 		} catch (Error& e) {
-			wait(tr->onError(e));
+			TraceEvent("WatchBlobRestoreCommand", self->id).error(e);
+			throw e;
 		}
 	}
 }
@@ -2561,7 +2552,7 @@ ACTOR Future<Void> watchBlobGranulesConfigKey(ClusterControllerData* self) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> blobConfig = wait(tr->get(blobGranuleConfigKey));
+			ValueReadResult blobConfig = wait(tr->get(blobGranuleConfigKey));
 			if (blobConfig.present()) {
 				self->db.blobGranulesEnabled.set(blobConfig.get() == "1"_sr);
 			}
@@ -2797,7 +2788,7 @@ ACTOR Future<Void> updateClusterId(ClusterControllerData* self) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			ValueReadResult clusterIdVal = wait(tr->get(clusterIdKey));
 
 			if (clusterIdVal.present()) {
 				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());

@@ -391,8 +391,8 @@ struct AtomicOpsWorkload : TestWorkload {
 						}
 
 						if (tr.get("xlogResult"_sr).get() != tr.get("xopsResult"_sr).get()) {
-							Optional<Standalone<StringRef>> logResult = tr.get("xlogResult"_sr).get();
-							Optional<Standalone<StringRef>> opsResult = tr.get("xopsResult"_sr).get();
+							ValueReadResult logResult = tr.get("xlogResult"_sr).get();
+							ValueReadResult opsResult = tr.get("xopsResult"_sr).get();
 							ASSERT(logResult.present());
 							ASSERT(opsResult.present());
 							TraceEvent(SevError, "LogMismatch")

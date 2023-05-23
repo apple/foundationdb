@@ -248,15 +248,15 @@ ACTOR Future<Void> globalConfigMigrate(GrvProxyData* grvProxyData) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 			try {
-				state Optional<Value> migrated = wait(tr->get(migratedKey));
+				state ValueReadResult migrated = wait(tr->get(migratedKey));
 				if (migrated.present()) {
 					// Already performed migration.
 					break;
 				}
 
-				state Optional<Value> sampleRate =
+				state ValueReadResult sampleRate =
 				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_sample_rate/"_sr)));
-				state Optional<Value> sizeLimit =
+				state ValueReadResult sizeLimit =
 				    wait(tr->get(Key("\xff\x02/fdbClientInfo/client_txn_size_limit/"_sr)));
 
 				tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
@@ -297,9 +297,9 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state Future<Optional<Value>> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
+			state Future<ValueReadResult> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
 			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
-			state Optional<Value> globalConfigVersion = wait(globalConfigVersionFuture);
+			state ValueReadResult globalConfigVersion = wait(globalConfigVersionFuture);
 			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
 			*cachedData = tmpCachedData;
 			if (globalConfigVersion.present()) {

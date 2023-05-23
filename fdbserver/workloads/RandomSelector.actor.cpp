@@ -198,12 +198,12 @@ struct RandomSelectorWorkload : TestWorkload {
 
 						state Optional<Value> getTest1;
 
-						Optional<Value> getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
+						ValueReadResult getTest = wait(trRYOW.get(StringRef(clientID + "b/" + myKeyA)));
 						getTest1 = getTest;
 
 						loop {
 							try {
-								Optional<Value> getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
+								ValueReadResult getTest2 = wait(tr.get(StringRef(clientID + "d/" + myKeyA)));
 
 								if ((getTest1.present() && (!getTest2.present() || getTest1.get() != getTest2.get())) ||
 								    (!getTest1.present() && getTest2.present())) {
@@ -241,7 +241,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -265,7 +265,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -289,7 +289,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -313,7 +313,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -337,7 +337,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -361,7 +361,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -385,7 +385,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -409,7 +409,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}
@@ -433,7 +433,7 @@ struct RandomSelectorWorkload : TestWorkload {
 								error = e;
 								wait(tr.onError(e));
 								if (error.code() == error_code_commit_unknown_result) {
-									Optional<Value> thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
+									ValueReadResult thing = wait(tr.get(StringRef(clientID + "z/" + myRandomIDKey)));
 									if (thing.present())
 										break;
 								}

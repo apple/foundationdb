@@ -66,7 +66,7 @@ cx->specialKeySpace->registerKeyRange(exampleRange, &exampleImpl);
 // Now any ReadYourWritesTransaction associated with `cx` is able to query the info
 state ReadYourWritesTransaction tr(cx);
 // get
-Optional<Value> res1 = wait(tr.get("\xff\xff/example/Japan"));
+ValueReadResult res1 = wait(tr.get("\xff\xff/example/Japan"));
 ASSERT(res1.present() && res.getValue() == "Tokyo"_sr);
 // getRange
 // Note: for getRange(key1, key2), both key1 and key2 should prefixed with \xff\xff

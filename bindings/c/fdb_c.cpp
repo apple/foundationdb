@@ -278,7 +278,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_value(FDBFuture* f,
                                                       fdb_bool_t* out_present,
                                                       uint8_t const** out_value,
                                                       int* out_value_length) {
-	CATCH_AND_RETURN(Optional<Value> v = TSAV(Optional<Value>, f)->get(); *out_present = v.present();
+	CATCH_AND_RETURN(ValueReadResult v = TSAV(ValueReadResult, f)->get(); *out_present = v.present();
 	                 if (*out_present) {
 		                 *out_value = v.get().begin();
 		                 *out_value_length = v.get().size();
@@ -342,6 +342,16 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_granule_summary_array(FDBFuture*
 	                     TSAV(Standalone<VectorRef<BlobGranuleSummaryRef>>, f)->get();
 	                 *out_ranges = (FDBGranuleSummary*)na.begin();
 	                 *out_count = na.size(););
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
+                                                              float* server_busyness,
+                                                              float* range_busyness) {
+	CATCH_AND_RETURN(ThreadSingleAssignmentVarBase* tsav = TSAVB(f);
+	                 ReadResultBase const& rr = tsav->getAndCast<ReadResultBase>();
+	                 ReadMetrics const& readMetrics = rr.getReadMetrics();
+	                 *server_busyness = readMetrics.getServerBusyness();
+	                 *range_busyness = readMetrics.getRangeBusyness(););
 }
 
 namespace {

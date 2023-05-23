@@ -107,18 +107,18 @@ Future<ClusterType> getClusterType(Transaction tr) {
 
 ACTOR template <class Transaction>
 Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
 
 	state ClusterType actualClusterType = wait(getClusterType(tr));
-	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
 
 	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 	if (actualClusterType != expectedClusterType) {
 		CODE_PROBE(true, "Attempting tenant operation on wrong cluster type");
 		throw invalid_metacluster_operation();
 	} else if (actualClusterType == ClusterType::STANDALONE && tenantMode == TenantMode::DISABLED) {
-		CODE_PROBE(true, "Attempting tenant operation on cluster with tenants disabled", probe::decoration::rare);
+		CODE_PROBE(true, "Attempting tenant operation on cluster with tenants disabled");
 		throw tenants_disabled();
 	}
 

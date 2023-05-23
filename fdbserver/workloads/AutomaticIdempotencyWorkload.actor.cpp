@@ -207,7 +207,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 					// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
 					// be using a tenant.
-					Optional<Value> entry = wait(runRYWTransaction(
+					ValueReadResult entry = wait(runRYWTransaction(
 					    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
 					if (!entry.present()) {
 						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
