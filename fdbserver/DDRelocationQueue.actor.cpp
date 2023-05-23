@@ -126,6 +126,7 @@ struct RelocateData {
 	int boundaryPriority;
 	int healthPriority;
 	RelocateReason reason;
+	DataMovementReason dmReason;
 
 	double startTime;
 	UID randomId; // inherit from RelocateShard.traceId
@@ -145,8 +146,8 @@ struct RelocateData {
 	    interval("QueuedRelocation") {}
 	explicit RelocateData(RelocateShard const& rs)
 	  : keys(rs.keys), priority(rs.priority), boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-	    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
+	    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
+	    startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
 	    dataMoveId(rs.dataMoveId), workFactor(0), wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) ||
 	                                                              isDataMovementForValleyFiller(rs.moveReason) ||
 	                                                              rs.moveReason == DataMovementReason::SPLIT_SHARD ||
@@ -1254,6 +1255,11 @@ struct DDQueue : public IDDRelocationQueue {
 							rrs.dataMoveId = UID();
 						} else {
 							rrs.dataMoveId = deterministicRandom()->randomUniqueID();
+							TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
+							    .detail("DataMoveID", rrs.dataMoveId.toString())
+							    .detail("Range", rrs.keys)
+							    detail("Reason", rrs.reason.toString())
+							    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 						}
 					} else {
 						rrs.dataMoveId = anonymousShardId;
@@ -1747,6 +1753,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveCreateNewPhysicalShard++;
 					}
 					rd.dataMoveId = newShardId(physicalShardIDCandidate, AssignEmptyRange::False);
+					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
+					    .detail("DataMoveID", rd.dataMoveId.toString())
+					    .detail("Reason", rd.reason.toString())
+					    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);
