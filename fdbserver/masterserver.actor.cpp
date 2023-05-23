@@ -136,6 +136,8 @@ template class GetEncryptCipherKeys<struct ServerDBInfo>;
 //	~MasterData() = default;
 //};
 
+void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
+
 Version figureVersionCxx(Version current,
                       double now,
                       Version reference,
