@@ -53,8 +53,9 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/genericactors.actor.h"
-#include "flow/actorcompiler.h" // has to be last include
 #include "fmt/core.h"
+
+#include "flow/actorcompiler.h" // has to be last include
 
 #define ENABLE_DEBUG_MG true
 
@@ -629,42 +630,15 @@ private:
 		}
 	}
 
-	// This API is used by DD to figure out split points for data movement.
-	static void processSplitMetricsRequest(Reference<BlobMigrator> self, SplitMetricsRequest req) {
-		SplitMetricsReply rep;
-		int64_t bytes = 0; // number of bytes accumulated for current split
-		for (auto& granule : self->blobGranules_) {
-			if (!req.keys.contains(granule.keyRange)) {
-				continue;
-			}
-			bytes += granule.sizeInBytes;
-			if (bytes < req.limits.bytes) {
-				continue;
-			}
-			// Add a split point if the key range exceeds expected minimal size in bytes
-			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
-			bytes = 0;
-			// Limit number of splits in single response for fast RPC processing
-			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
-				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more", probe::decoration::rare);
-				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
-				    .detail("Range", req.keys)
-				    .detail("Splits", rep.splits.size());
-				rep.more = true;
-				break;
-			}
-		}
-		req.reply.send(rep);
-	}
-
 	ACTOR static Future<Void> processWaitMetricsRequest(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
-		// FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
-		// processes
-		wait(delay(1));
 		StorageMetrics metrics;
 		metrics.bytes = sizeInBytes(self, waitMetricsRequest.keys);
-		waitMetricsRequest.reply.send(metrics);
+		if (!waitMetricsRequest.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(waitMetricsRequest.max)) {
+			waitMetricsRequest.reply.send(metrics);
+		} else {
+			wait(delay(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
+		}
 		return Void();
 	}
 
@@ -708,7 +682,6 @@ public: // Methods for IStorageMetricsService
 	}
 
 	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override {
-		// Reference<BlobMigrator>
 		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
 		return processWaitMetricsRequest(self, req);
 	}
@@ -727,14 +700,38 @@ public: // Methods for IStorageMetricsService
 		req.reply.send(resp);
 	}
 
+	// This API is used by DD to figure out split points for data movement.
 	void getSplitMetrics(const SplitMetricsRequest& req) override {
 		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
-		return processSplitMetricsRequest(self, req);
+		SplitMetricsReply rep;
+		int64_t bytes = 0; // number of bytes accumulated for current split
+		for (auto& granule : self->blobGranules_) {
+			if (!req.keys.contains(granule.keyRange)) {
+				continue;
+			}
+			bytes += granule.sizeInBytes;
+			if (bytes < req.limits.bytes) {
+				continue;
+			}
+			// Add a split point if the key range exceeds expected minimal size in bytes
+			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
+			bytes = 0;
+			// Limit number of splits in single response for fast RPC processing
+			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more", probe::decoration::rare);
+				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
+				    .detail("Range", req.keys)
+				    .detail("Splits", rep.splits.size());
+				rep.more = true;
+				break;
+			}
+		}
+		req.reply.send(rep);
 	}
 
 	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override {
-		dprint("Unsupported ReadHotSubRange\n");
-		req.reply.sendError(unsupported_operation());
+		ReadHotSubRangeReply emptyReply;
+		req.reply.send(emptyReply);
 	}
 
 	template <class Reply>
