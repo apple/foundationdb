@@ -557,14 +557,14 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		request->data.content->prependWriteBuffer(pFirst, pLast);
 
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 1)
-			printf("[%s] HTTP starting %s %s ContentLen:%d\n",
-			       conn->getDebugID().toString().c_str(),
-			       request->verb.c_str(),
-			       request->resource.c_str(),
-			       request->data.contentLen);
+			fmt::print("[{}] HTTP starting {} {} ContentLen:{}\n",
+			           conn->getDebugID().toString(),
+			           request->verb,
+			           request->resource,
+			           request->data.contentLen);
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
 			for (auto h : request->data.headers)
-				printf("Request Header: %s: %s\n", h.first.c_str(), h.second.c_str());
+				fmt::print("Request Header: {}: {}\n", h.first, h.second);
 		}
 
 		state Reference<HTTP::IncomingResponse> r(new HTTP::IncomingResponse());
@@ -656,11 +656,11 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 			           r->data.contentLen);
 		}
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 2) {
-			printf("[%s] HTTP RESPONSE:  %s %s\n%s\n",
-			       conn->getDebugID().toString().c_str(),
-			       request->verb.c_str(),
-			       request->resource.c_str(),
-			       r->toString().c_str());
+			fmt::print("[{}] HTTP RESPONSE:  {} {}\n{}\n",
+			           conn->getDebugID().toString(),
+			           request->verb,
+			           request->resource,
+			           r->toString());
 		}
 
 		if (err.present()) {
@@ -672,15 +672,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestActor(Reference<IConnec
 		double elapsed = timer() - send_start;
 		// A bad_request_id error would have already been logged in verbose mode before err is thrown above.
 		if (FLOW_KNOBS->HTTP_VERBOSE_LEVEL > 0 && e.code() != error_code_http_bad_request_id) {
-			printf("[%s] HTTP *ERROR*=%s early=%d, time=%fs %s %s contentLen=%d [%d out]\n",
-			       conn->getDebugID().toString().c_str(),
-			       e.name(),
-			       earlyResponse,
-			       elapsed,
-			       request->verb.c_str(),
-			       request->resource.c_str(),
-			       request->data.contentLen,
-			       total_sent);
+			fmt::print("[{}] HTTP *ERROR*={} early={}, time={}s {} {} contentLen={} [{} out]\n",
+			           conn->getDebugID().toString(),
+			           e.name(),
+			           earlyResponse,
+			           elapsed,
+			           request->verb,
+			           request->resource,
+			           request->data.contentLen,
+			           total_sent);
 		}
 		event.errorUnsuppressed(e);
 		throw;
