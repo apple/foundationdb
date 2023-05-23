@@ -347,8 +347,8 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (!consistencyScanStopped)
 						self->testFailure("Consistency scan active");
 
-					bool singleSingletons = self->checkSingleSingletons(self, configuration);
 					// FIXME: re-enable this check!
+					// bool singleSingletons = self->checkSingleSingletons(self, configuration);
 					// if (!singleSingletons)
 					// 	self->testFailure("Cluster has multiple instances of a singleton!");
 				}
