@@ -34,6 +34,30 @@
 
 #include <limits>
 
+struct EKPHealthStatus {
+	constexpr static FileIdentifier file_identifier = 2378149;
+	bool canConnectToKms;
+	double lastUpdatedTS;
+
+	EKPHealthStatus() : canConnectToKms(true), lastUpdatedTS(-1) {}
+	EKPHealthStatus(bool canConnectToKms, double lastUpdatedTS)
+	  : canConnectToKms(canConnectToKms), lastUpdatedTS(lastUpdatedTS) {}
+
+	bool operator==(const EKPHealthStatus& other) { return canConnectToKms == other.canConnectToKms; }
+
+	std::string toString() const {
+		std::stringstream ss;
+		ss << "CanConnectToKms(" << canConnectToKms << ")"
+		   << ", LastUpdatedTS(" << lastUpdatedTS << ")";
+		return ss.str();
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, canConnectToKms, lastUpdatedTS);
+	}
+};
+
 struct EncryptKeyProxyInterface {
 	constexpr static FileIdentifier file_identifier = 1303419;
 	struct LocalityData locality;
@@ -43,6 +67,7 @@ struct EncryptKeyProxyInterface {
 	RequestStream<struct EKPGetBaseCipherKeysByIdsRequest> getBaseCipherKeysByIds;
 	RequestStream<struct EKPGetLatestBaseCipherKeysRequest> getLatestBaseCipherKeys;
 	RequestStream<struct EKPGetLatestBlobMetadataRequest> getLatestBlobMetadata;
+	RequestStream<struct EncryptKeyProxyHealthStatusRequest> getHealthStatus;
 
 	EncryptKeyProxyInterface() {}
 	explicit EncryptKeyProxyInterface(const struct LocalityData& loc, UID id) : locality(loc), myId(id) {}
@@ -70,6 +95,8 @@ struct EncryptKeyProxyInterface {
 			    waitFailure.getEndpoint().getAdjustedEndpoint(3));
 			getLatestBlobMetadata =
 			    RequestStream<struct EKPGetLatestBlobMetadataRequest>(waitFailure.getEndpoint().getAdjustedEndpoint(4));
+			getHealthStatus = RequestStream<struct EncryptKeyProxyHealthStatusRequest>(
+			    waitFailure.getEndpoint().getAdjustedEndpoint(5));
 		}
 	}
 
@@ -80,6 +107,7 @@ struct EncryptKeyProxyInterface {
 		streams.push_back(getBaseCipherKeysByIds.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBaseCipherKeys.getReceiver(TaskPriority::Worker));
 		streams.push_back(getLatestBlobMetadata.getReceiver(TaskPriority::Worker));
+		streams.push_back(getHealthStatus.getReceiver(TaskPriority::Worker));
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
@@ -95,6 +123,18 @@ struct HaltEncryptKeyProxyRequest {
 	template <class Ar>
 	void serialize(Ar& ar) {
 		serializer(ar, requesterID, reply);
+	}
+};
+
+struct EncryptKeyProxyHealthStatusRequest {
+	constexpr static FileIdentifier file_identifier = 2378139;
+	ReplyPromise<EKPHealthStatus> reply;
+
+	EncryptKeyProxyHealthStatusRequest() {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
 	}
 };
 

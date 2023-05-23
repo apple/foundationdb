@@ -19,7 +19,9 @@
  */
 
 #pragma once
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "flow/EncryptUtils.h"
+#include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_IMPL_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_IMPL_ACTOR_G_H
@@ -214,6 +216,55 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 			return Never();
 		}
 		throw;
+	}
+}
+
+ACTOR template <class T>
+Future<EKPHealthStatus> _getEKPHealthStatusReq(Reference<AsyncVar<T> const> db,
+                                               EncryptKeyProxyHealthStatusRequest request) {
+	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
+	if (!proxy.present()) {
+		// Wait for onEncryptKeyProxyChange.
+		TraceEvent("GetEKPHealthStatusEncryptKeyProxyNotPresent");
+		return Never();
+	}
+	request.reply.reset();
+	try {
+		TraceEvent("Nim::here2");
+		EKPHealthStatus reply = wait(proxy.get().getHealthStatus.getReply(request));
+		return reply;
+	} catch (Error& e) {
+		TraceEvent("GetEKPHealthStatusCaughtError").error(e);
+		return EKPHealthStatus{ false, now() };
+	}
+}
+
+ACTOR template <class T>
+Future<EKPHealthStatus> _getEKPHealthStatusImpl(Reference<AsyncVar<T> const> db) {
+	state EncryptKeyProxyHealthStatusRequest request;
+
+	if (!db.isValid()) {
+		TraceEvent(SevError, "GetEKPHealthStatusServerDBInfoNotAvailable");
+		throw encrypt_ops_error();
+	}
+
+	loop choose {
+		when(EKPHealthStatus reply = wait(_getEKPHealthStatusReq(db, request))) {
+			return reply;
+		}
+		// In case encryptKeyProxy has changed, retry the request.
+		when(wait(_onEncryptKeyProxyChange(db))) {}
+	}
+}
+
+ACTOR template <class T>
+Future<EKPHealthStatus> _getEKPHealthStatus(Reference<AsyncVar<T> const> db) {
+	try {
+		EKPHealthStatus status = wait(timeoutError(_getEKPHealthStatusImpl(db), FLOW_KNOBS->EKP_REQUEST_TIMEOUT));
+		return status;
+	} catch (Error& e) {
+		TraceEvent("EKPHealthStatusError").error(e);
+		return EKPHealthStatus{ false, now() };
 	}
 }
 
@@ -440,6 +491,11 @@ Future<TextAndHeaderCipherKeys> GetEncryptCipherKeys<T>::getEncryptCipherKeys(Re
                                                                               BlobCipherEncryptHeaderRef header,
                                                                               BlobCipherMetrics::UsageType usageType) {
 	return _getEncryptCipherKeys(db, header, usageType);
+}
+
+template <class T>
+Future<EKPHealthStatus> GetEncryptCipherKeys<T>::getEKPHealthStatus(Reference<AsyncVar<T> const> db) {
+	return _getEKPHealthStatus(db);
 }
 
 #include "flow/unactorcompiler.h"

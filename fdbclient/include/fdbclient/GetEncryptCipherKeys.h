@@ -83,6 +83,8 @@ public:
 	static Future<TextAndHeaderCipherKeys> getEncryptCipherKeys(Reference<AsyncVar<T> const> db,
 	                                                            BlobCipherEncryptHeaderRef header,
 	                                                            BlobCipherMetrics::UsageType usageType);
+
+	static Future<EKPHealthStatus> getEKPHealthStatus(Reference<AsyncVar<T> const> db);
 };
 
 #endif

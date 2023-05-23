@@ -78,6 +78,16 @@ bool canReplyWith(Error e) {
 	}
 }
 
+bool isKmsConnectionError(Error e) {
+	switch (e.code()) {
+	case error_code_timed_out:
+	case error_code_connection_failed:
+		return true;
+	default:
+		return false;
+	}
+}
+
 int64_t computeCipherRefreshTS(Optional<int64_t> refreshInterval, int64_t currTS) {
 	int64_t refreshAtTS = -1;
 	const int64_t defaultTTL = FLOW_KNOBS->ENCRYPT_CIPHER_KEY_CACHE_TTL;
@@ -212,6 +222,7 @@ public:
 	PromiseStream<Future<Void>> addActor;
 	Future<Void> encryptionKeyRefresher;
 	Future<Void> blobMetadataRefresher;
+	Future<Void> healthChecker;
 	Future<Void> logger;
 
 	EncryptBaseDomainIdCache baseCipherDomainIdCache;
@@ -219,6 +230,8 @@ public:
 	BlobMetadataDomainIdCache blobMetadataDomainIdCache;
 
 	std::unique_ptr<KmsConnector> kmsConnector;
+
+	EKPHealthStatus kmsConnectorHealthStatus;
 
 	CounterCollection ekpCacheMetrics;
 
@@ -233,6 +246,8 @@ public:
 	Counter blobMetadataCacheMisses;
 	Counter blobMetadataRefreshed;
 	Counter numBlobMetadataRefreshErrors;
+	Counter numHealthCheckErrors;
+	Counter numHealthCheckRequests;
 
 	LatencySample kmsLookupByIdsReqLatency;
 	LatencySample kmsLookupByDomainIdsReqLatency;
@@ -251,6 +266,8 @@ public:
 	    blobMetadataCacheMisses("EKPBlobMetadataCacheMisses", ekpCacheMetrics),
 	    blobMetadataRefreshed("EKPBlobMetadataRefreshed", ekpCacheMetrics),
 	    numBlobMetadataRefreshErrors("EKPBlobMetadataRefreshErrors", ekpCacheMetrics),
+	    numHealthCheckErrors("EKPHealthCheckErrors", ekpCacheMetrics),
+	    numHealthCheckRequests("EKPHealthCheckRequests", ekpCacheMetrics),
 	    kmsLookupByIdsReqLatency("EKPKmsLookupByIdsReqLatency",
 	                             id,
 	                             SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
@@ -475,7 +492,12 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 					                      "");
 				}
 			}
+			ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ true, now() };
 		} catch (Error& e) {
+			if (isKmsConnectionError(e)) {
+				ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ false, now() };
+			}
+
 			if (!canReplyWith(e)) {
 				TraceEvent("GetCipherKeysByKeyIds", ekpProxyData->myId).error(e);
 				throw;
@@ -616,7 +638,11 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 					                      "");
 				}
 			}
+			ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ true, now() };
 		} catch (Error& e) {
+			if (isKmsConnectionError(e)) {
+				ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ false, now() };
+			}
 			if (!canReplyWith(e)) {
 				TraceEvent("GetLatestCipherKeys", ekpProxyData->myId).error(e);
 				throw;
@@ -652,6 +678,67 @@ bool isBlobMetadataEligibleForRefresh(const BlobMetadataDetailsRef& blobMetadata
 	}
 	int64_t nextRefreshCycleTS = currTS + CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
 	return nextRefreshCycleTS > blobMetadata.expireAt || nextRefreshCycleTS > blobMetadata.refreshAt;
+}
+
+ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData> ekpProxyData,
+                                                  KmsConnectorInterface kmsConnectorInf) {
+	// TODO: Implement
+	state UID debugId = deterministicRandom()->randomUniqueID();
+	TraceEvent("EKPHealthCheckStart", ekpProxyData->myId);
+
+	// Health check will try to fetch the encryption details for the system key
+	try {
+		TraceEvent("EKPHealthCheckStart2", ekpProxyData->myId);
+		KmsConnLookupEKsByDomainIdsReq req;
+		req.debugId = debugId;
+		req.encryptDomainIds.push_back(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
+		++ekpProxyData->numHealthCheckRequests;
+		TraceEvent("EKPHealthCheckStart3", ekpProxyData->myId);
+		KmsConnLookupEKsByDomainIdsRep rep =
+		    wait(timeoutError(kmsConnectorInf.ekLookupByDomainIds.getReply(req), FLOW_KNOBS->EKP_REQUEST_TIMEOUT));
+		TraceEvent("EKPHealthCheckStart4", ekpProxyData->myId);
+		if (rep.cipherKeyDetails.size() < 1) {
+			TraceEvent(SevWarn, "EKPHealthCheckResponseEmpty");
+			throw encrypt_keys_fetch_failed();
+		}
+		EncryptCipherKeyDetailsRef cipherDetails = rep.cipherKeyDetails[0];
+		if (cipherDetails.encryptDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
+			TraceEvent(SevWarn, "EKPHealthCheckNoSystemKeyFound");
+			throw key_not_found();
+		}
+		CipherKeyValidityTS validityTS =
+		    getCipherKeyValidityTS(cipherDetails.refreshAfterSec, cipherDetails.expireAfterSec);
+		ekpProxyData->insertIntoBaseDomainIdCache(cipherDetails.encryptDomainId,
+		                                          cipherDetails.encryptKeyId,
+		                                          cipherDetails.encryptKey,
+		                                          cipherDetails.encryptKCV,
+		                                          validityTS.refreshAtTS,
+		                                          validityTS.expAtTS);
+		TraceEvent("EKPHealthCheckEnd", ekpProxyData->myId);
+		return EKPHealthStatus{ true, now() };
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "EKPHealthCheckError").error(e);
+		++ekpProxyData->numHealthCheckErrors;
+		return EKPHealthStatus{ false, now() };
+	}
+}
+
+ACTOR Future<Void> updateHealthStatusImpl(Reference<EncryptKeyProxyData> ekpProxyData,
+                                          KmsConnectorInterface kmsConnectorInf) {
+	// If the health check status has been updated recently avoid doing another refresh
+	if (now() - ekpProxyData->kmsConnectorHealthStatus.lastUpdatedTS < FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL) {
+		return Void();
+	}
+
+	EKPHealthStatus status = wait(getHealthStatusImpl(ekpProxyData, kmsConnectorInf));
+	TraceEvent("EKPHealthCheckGotStatus", ekpProxyData->myId).detail("HS", status.toString());
+	if (status != ekpProxyData->kmsConnectorHealthStatus) {
+		TraceEvent("KmsConnectorHealthStatusChange")
+		    .detail("OldStatus", ekpProxyData->kmsConnectorHealthStatus.toString())
+		    .detail("NewStatus", status.toString());
+	}
+	ekpProxyData->kmsConnectorHealthStatus = status;
+	return Void();
 }
 
 ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpProxyData,
@@ -719,10 +806,13 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 		}
 
 		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
-
+		ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ true, now() };
 		t.detail("NumKeys", rep.cipherKeyDetails.size());
 		CODE_PROBE(!rep.cipherKeyDetails.empty(), "EKP refresh cipherKeys");
 	} catch (Error& e) {
+		if (isKmsConnectionError(e)) {
+			ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ false, now() };
+		}
 		if (!canReplyWith(e)) {
 			TraceEvent(SevWarn, "RefreshEKsError").error(e);
 			throw e;
@@ -736,6 +826,10 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 
 Future<Void> refreshEncryptionKeys(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
 	return refreshEncryptionKeysImpl(ekpProxyData, kmsConnectorInf);
+}
+
+Future<Void> updateHealthStatus(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
+	return updateHealthStatusImpl(ekpProxyData, kmsConnectorInf);
 }
 
 ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData,
@@ -805,7 +899,12 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 					dbgTrace.get().detail("BMI" + std::to_string(item.domainId), "");
 				}
 			}
+			ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ true, now() };
 		} catch (Error& e) {
+			if (isKmsConnectionError(e)) {
+				ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ false, now() };
+			}
+
 			if (!canReplyWith(e)) {
 				TraceEvent("GetLatestBlobMetadataUnexpectedError", ekpProxyData->myId).error(e);
 				throw;
@@ -862,9 +961,13 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 		}
 
 		ekpProxyData->blobMetadataRefreshed += rep.metadataDetails.size();
-
+		ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ true, now() };
 		t.detail("nKeys", rep.metadataDetails.size());
 	} catch (Error& e) {
+		if (isKmsConnectionError(e)) {
+			ekpProxyData->kmsConnectorHealthStatus = EKPHealthStatus{ false, now() };
+		}
+
 		if (!canReplyWith(e)) {
 			TraceEvent("RefreshBlobMetadataError").error(e);
 			throw e;
@@ -929,6 +1032,14 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
 	                                        TaskPriority::Worker);
 
+	// TODO (Nim): Make this jittered
+	self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
+	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
+	                                     true,
+	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
+	                                     TaskPriority::Worker,
+	                                     true);
+
 	CODE_PROBE(!encryptMode.isEncryptionEnabled() && SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION,
 	           "Encryption disabled and EKP Recruited");
 	try {
@@ -950,6 +1061,11 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 				TraceEvent("EKPHalted", self->myId).detail("ReqID", req.requesterID);
 				req.reply.send(Void());
 				break;
+			}
+			when(EncryptKeyProxyHealthStatusRequest req = waitNext(ekpInterface.getHealthStatus.getFuture())) {
+				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
+				TraceEvent("Nim::here1").detail("HS", self->kmsConnectorHealthStatus.toString());
+				req.reply.send(self->kmsConnectorHealthStatus);
 			}
 			when(wait(collection)) {
 				ASSERT(false);

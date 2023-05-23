@@ -200,6 +200,9 @@ ACTOR Future<Void> ekLookupByIds(Reference<SimKmsConnectorContext> ctx,
 		}
 	}
 
+	if (SERVER_KNOBS->SIM_KMS_SHOULD_HANG) {
+		wait(Never());
+	}
 	wait(delayJittered(1.0)); // simulate network delay
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
 	return Void();
@@ -257,7 +260,10 @@ ACTOR Future<Void> ekLookupByDomainIds(Reference<SimKmsConnectorContext> ctx,
 			break;
 		}
 	}
-
+	TraceEvent("Nim::SimKmsHere").detail("Hangs", SERVER_KNOBS->SIM_KMS_SHOULD_HANG);
+	if (SERVER_KNOBS->SIM_KMS_SHOULD_HANG) {
+		wait(Never());
+	}
 	wait(delayJittered(1.0)); // simulate network delay
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
 	return Void();
@@ -301,7 +307,9 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 			return Void();
 		}
 	}
-
+	if (SERVER_KNOBS->SIM_KMS_SHOULD_HANG) {
+		wait(Never());
+	}
 	req.reply.send(rep);
 
 	return Void();

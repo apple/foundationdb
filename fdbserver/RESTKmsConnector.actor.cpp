@@ -401,7 +401,7 @@ Standalone<VectorRef<EncryptCipherKeyDetailsRef>> parseEncryptCipherResponse(Ref
 	}
 
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid).detail("Response", resp->toString());
+		TraceEvent("RESTParseEncryptCipherResponseStart", ctx->uid);
 	}
 
 	rapidjson::Document doc;
@@ -827,12 +827,12 @@ Future<T> kmsRequestImpl(
 			} catch (Error& e) {
 				curUrl->nFailedResponses++;
 				if (pass > 1 && isKmsNotReachable(e.code())) {
-					TraceEvent(SevDebug, "KmsRequestFailedUnreachable", ctx->uid)
+					TraceEvent(SevWarn, "KmsRequestFailedUnreachable", ctx->uid)
 					    .error(e)
 					    .detail("RequestID", requestID);
 					throw e;
 				} else {
-					TraceEvent(SevDebug, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
+					TraceEvent(SevWarn, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
 					// attempt to do request from next KmsUrl
 				}
 			}

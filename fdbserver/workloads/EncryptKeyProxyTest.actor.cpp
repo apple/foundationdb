@@ -199,6 +199,31 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Void> simHealthyKms(EncryptKeyProxyTestWorkload* self) {
+		TraceEvent("SimHealthyKmsStart").log();
+		EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(self->dbInfo));
+		ASSERT(status.canConnectToKms);
+		ASSERT_GE(now(), status.lastUpdatedTS);
+		return Void();
+	}
+
+	ACTOR Future<Void> simUnHealthyKms(EncryptKeyProxyTestWorkload* self) {
+		TraceEvent("SimUnHealthyKmsStart").log();
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("sim_kms_should_hang",
+		                                                          KnobValueRef::create(bool{ true }));
+		loop {
+			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(self->dbInfo));
+			TraceEvent("Nim::testHere").detail("HS", status.toString());
+			if (!status.canConnectToKms) {
+				break;
+			}
+			wait(delay(60));
+		}
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("sim_kms_should_hang",
+		                                                          KnobValueRef::create(bool{ false }));
+		return Void();
+	}
+
 	// Following test cases are covered:
 	// 1. Simulate an empty domainIdCache.
 	// 2. Simulate an mixed lookup (partial cache-hit) for domainIdCache.
@@ -224,6 +249,12 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		// Simulate lookup BaseCipherIds which aren't yet cached
 		wait(self->simLookupInvalidKeyId(self));
+
+		// Simulate getting health status for healthy KMS
+		wait(self->simHealthyKms(self));
+
+		// Simulate getting health status for unhealthy KMS
+		wait(self->simUnHealthyKms(self));
 
 		return Void();
 	}
