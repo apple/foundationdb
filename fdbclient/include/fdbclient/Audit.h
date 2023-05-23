@@ -58,11 +58,11 @@ struct AuditStorageState {
 		serializer(ar, id, auditServerId, range, type, phase, error, ddAuditId);
 	}
 
-	void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
-	AuditType getType() const { return static_cast<AuditType>(this->type); }
+	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
+	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
-	void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }
-	AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
+	inline void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }
+	inline AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
 
 	// for fdbcli get_audit_status
 	std::string toStringForCLI() const {
@@ -106,8 +106,8 @@ struct AuditStorageRequest {
 	AuditStorageRequest(UID id, KeyRange range, AuditType type)
 	  : id(id), range(range), type(static_cast<uint8_t>(type)) {}
 
-	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
-	AuditType getType() const { return static_cast<AuditType>(this->type); }
+	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
+	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
