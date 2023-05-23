@@ -161,7 +161,6 @@ struct WorkerDetails {
 struct ClusterControllerFullInterface {
 	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
-	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
 	RequestStream<struct RecruitRemoteFromConfigurationRequest> recruitRemoteFromConfiguration;
 	RequestStream<struct RecruitStorageRequest> recruitStorage;
 	RequestStream<struct RecruitBlobWorkerRequest> recruitBlobWorker;
@@ -184,18 +183,17 @@ struct ClusterControllerFullInterface {
 	NetworkAddress address() const { return clientInterface.address(); }
 
 	bool hasMessage() const {
-		return clientInterface.hasMessage() || recruitFromConfiguration.getFuture().isReady() ||
-		       recruitRemoteFromConfiguration.getFuture().isReady() || recruitStorage.getFuture().isReady() ||
-		       recruitBlobWorker.getFuture().isReady() || registerWorker.getFuture().isReady() ||
-		       getWorkers.getFuture().isReady() || registerMaster.getFuture().isReady() ||
-		       getServerDBInfo.getFuture().isReady() || updateWorkerHealth.getFuture().isReady() ||
-		       tlogRejoin.getFuture().isReady() || notifyBackupWorkerDone.getFuture().isReady() ||
-		       changeCoordinators.getFuture().isReady() || getEncryptionAtRestMode.getFuture().isReady();
+		return clientInterface.hasMessage() || recruitRemoteFromConfiguration.getFuture().isReady() ||
+		       recruitStorage.getFuture().isReady() || recruitBlobWorker.getFuture().isReady() ||
+		       registerWorker.getFuture().isReady() || getWorkers.getFuture().isReady() ||
+		       registerMaster.getFuture().isReady() || getServerDBInfo.getFuture().isReady() ||
+		       updateWorkerHealth.getFuture().isReady() || tlogRejoin.getFuture().isReady() ||
+		       notifyBackupWorkerDone.getFuture().isReady() || changeCoordinators.getFuture().isReady() ||
+		       getEncryptionAtRestMode.getFuture().isReady();
 	}
 
 	void initEndpoints() {
 		clientInterface.initEndpoints();
-		recruitFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitRemoteFromConfiguration.getEndpoint(TaskPriority::ClusterControllerRecruit);
 		recruitStorage.getEndpoint(TaskPriority::ClusterController);
 		recruitBlobWorker.getEndpoint(TaskPriority::ClusterController);
@@ -217,7 +215,6 @@ struct ClusterControllerFullInterface {
 		}
 		serializer(ar,
 		           clientInterface,
-		           recruitFromConfiguration,
 		           recruitRemoteFromConfiguration,
 		           recruitStorage,
 		           recruitBlobWorker,
@@ -293,58 +290,6 @@ struct RegisterMasterRequest {
 // Instantiated in worker.actor.cpp
 extern template class RequestStream<RegisterMasterRequest, false>;
 extern template struct NetNotifiedQueue<RegisterMasterRequest, false>;
-
-struct RecruitFromConfigurationReply {
-	constexpr static FileIdentifier file_identifier = 2224085;
-	std::vector<WorkerInterface> backupWorkers;
-	std::vector<WorkerInterface> tLogs;
-	std::vector<WorkerInterface> satelliteTLogs;
-	std::vector<WorkerInterface> commitProxies;
-	std::vector<WorkerInterface> grvProxies;
-	std::vector<WorkerInterface> resolvers;
-	std::vector<WorkerInterface> storageServers;
-	std::vector<WorkerInterface> oldLogRouters; // During recovery, log routers for older generations will be recruited.
-	Optional<Key> dcId; // dcId is where master is recruited. It prefers to be in configuration.primaryDcId, but
-	                    // it can be recruited from configuration.secondaryDc: The dcId will be the secondaryDcId and
-	                    // this generation's primaryDC in memory is different from configuration.primaryDcId.
-	bool satelliteFallback;
-
-	RecruitFromConfigurationReply() : satelliteFallback(false) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar,
-		           tLogs,
-		           satelliteTLogs,
-		           commitProxies,
-		           grvProxies,
-		           resolvers,
-		           storageServers,
-		           oldLogRouters,
-		           dcId,
-		           satelliteFallback,
-		           backupWorkers);
-	}
-};
-
-struct RecruitFromConfigurationRequest {
-	constexpr static FileIdentifier file_identifier = 2023046;
-	DatabaseConfiguration configuration;
-	bool recruitSeedServers;
-	int maxOldLogRouters;
-	ReplyPromise<RecruitFromConfigurationReply> reply;
-
-	RecruitFromConfigurationRequest() {}
-	explicit RecruitFromConfigurationRequest(DatabaseConfiguration const& configuration,
-	                                         bool recruitSeedServers,
-	                                         int maxOldLogRouters)
-	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, configuration, recruitSeedServers, maxOldLogRouters, reply);
-	}
-};
 
 struct RecruitRemoteFromConfigurationReply {
 	constexpr static FileIdentifier file_identifier = 9091392;

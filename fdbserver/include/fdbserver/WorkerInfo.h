@@ -88,13 +88,55 @@ struct WorkerFitnessInfo {
 	  : worker(worker), fitness(fitness), used(used) {}
 };
 
+struct RecruitmentInfo {
+	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
+	int maxOldLogRouters;
+
+	RecruitmentInfo() {}
+	explicit RecruitmentInfo(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
+	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+};
+
+// Stores the interfaces for all the workers required for a functioning
+// transaction subsystem.
+struct WorkerRecruitment {
+	std::vector<WorkerInterface> grvProxies;
+	std::vector<WorkerInterface> commitProxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> storageServers;
+	// During recovery, log routers for older generations will be recruited.
+	std::vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> backupWorkers;
+	// dcId is where the master is recruited. It prefers to be in
+	// configuration.primaryDcId, but it can be recruited from
+	// configuration.secondaryDc: The dcId will be the secondaryDcId and this
+	// generation's primaryDC in memory is different from
+	// configuration.primaryDcId.
+	Optional<Key> dcId;
+
+	// Satellite fallback mode is automatically enabled when one of two
+	// satellite datacenters become unavailable. In satellite fallback mode,
+	// mutations will only be sent to the single remaining satellite
+	// datacenter.
+	bool satelliteFallback;
+
+	WorkerRecruitment() : satelliteFallback(false) {}
+
+	// TODO(ljoswiak): Implement when refactoring `betterMasterExists`
+	bool operator==(WorkerRecruitment const& rhs) const { return true; }
+	bool operator<(WorkerRecruitment const& rhs) const { return true; }
+};
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
-	RecruitFromConfigurationRequest req;
-	RecruitFromConfigurationReply rep;
+	RecruitmentInfo req;
+	WorkerRecruitment rep;
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
+	RecruitWorkersInfo(RecruitmentInfo const& info) : req(info) {}
 };
 
 struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {

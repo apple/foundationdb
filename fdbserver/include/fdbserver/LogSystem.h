@@ -31,6 +31,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbserver/MutationTracking.h"
+#include "fdbserver/WorkerInfo.h"
 #include "flow/Arena.h"
 #include "flow/Error.h"
 #include "flow/Histogram.h"
@@ -639,7 +640,7 @@ struct ILogSystem {
 	virtual std::map<LogEpoch, EpochTagsVersionsInfo> getOldEpochTagsVersionsInfo() const = 0;
 
 	virtual Future<Reference<ILogSystem>> newEpoch(
-	    RecruitFromConfigurationReply const& recr,
+	    WorkerRecruitment const& recr,
 	    Future<struct RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
 	    DatabaseConfiguration const& config,
 	    LogEpoch recoveryCount,

@@ -55,9 +55,9 @@ class Recruiter {
 public:
 	explicit Recruiter(UID const& id);
 
-	Future<RecruitFromConfigurationReply> findWorkers(ClusterControllerData* clusterControllerData,
-	                                                  RecruitFromConfigurationRequest const& req,
-	                                                  Optional<UID> debugId = {});
+	Future<WorkerRecruitment> findWorkers(ClusterControllerData* clusterControllerData,
+	                                      RecruitmentInfo const& info,
+	                                      Optional<UID> debugId = {});
 
 	// TODO: The return value is a little funny here - it returns a list of
 	// transactions that need to be run on the new system. I think this should
@@ -65,7 +65,7 @@ public:
 	// return the configuration change list (or just run the change itself?)
 	Future<std::vector<Standalone<CommitTransactionRef>>> recruitWorkers(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
-	    RecruitFromConfigurationReply const& recruitment,
+	    WorkerRecruitment const& recruitment,
 	    std::vector<StorageServerInterface>* seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 

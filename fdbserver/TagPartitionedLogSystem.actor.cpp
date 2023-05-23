@@ -1632,7 +1632,7 @@ Future<Void> TagPartitionedLogSystem::endEpoch() {
 }
 
 Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
-    RecruitFromConfigurationReply const& recr,
+    WorkerRecruitment const& recr,
     Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
     DatabaseConfiguration const& config,
     LogEpoch recoveryCount,
@@ -2735,7 +2735,7 @@ ACTOR Future<Void> TagPartitionedLogSystem::newRemoteEpoch(TagPartitionedLogSyst
 
 ACTOR Future<Reference<ILogSystem>> TagPartitionedLogSystem::newEpoch(
     Reference<TagPartitionedLogSystem> oldLogSystem,
-    RecruitFromConfigurationReply recr,
+    WorkerRecruitment recr,
     Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
     DatabaseConfiguration configuration,
     LogEpoch recoveryCount,

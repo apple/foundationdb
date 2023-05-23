@@ -267,7 +267,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 
 	// Call only after end_epoch() has successfully completed.  Returns a new epoch immediately following this one.
 	// The new epoch is only provisional until the caller updates the coordinated DBCoreState.
-	Future<Reference<ILogSystem>> newEpoch(RecruitFromConfigurationReply const& recr,
+	Future<Reference<ILogSystem>> newEpoch(WorkerRecruitment const& recr,
 	                                       Future<RecruitRemoteFromConfigurationReply> const& fRemoteWorkers,
 	                                       DatabaseConfiguration const& config,
 	                                       LogEpoch recoveryCount,
@@ -356,7 +356,7 @@ struct TagPartitionedLogSystem final : ILogSystem, ReferenceCounted<TagPartition
 	                                         std::vector<Tag> allTags);
 
 	ACTOR static Future<Reference<ILogSystem>> newEpoch(Reference<TagPartitionedLogSystem> oldLogSystem,
-	                                                    RecruitFromConfigurationReply recr,
+	                                                    WorkerRecruitment recr,
 	                                                    Future<RecruitRemoteFromConfigurationReply> fRemoteWorkers,
 	                                                    DatabaseConfiguration configuration,
 	                                                    LogEpoch recoveryCount,
