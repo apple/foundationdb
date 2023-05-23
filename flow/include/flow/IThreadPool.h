@@ -108,6 +108,7 @@ public:
 		                                                    : TaskPriority::DefaultOnMainThread);
 	}
 	bool isValid() const { return promise.isValid(); }
+	bool canBeSet() const { return promise.canBeSet(); }
 
 private:
 	Promise<T> promise;

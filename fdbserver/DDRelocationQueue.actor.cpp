@@ -1046,10 +1046,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						rrs.dataMoveId =
-						    newDataMoveId(deterministicRandom()->randomUInt64(),
-						                  AssignEmptyRange::False,
-						                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+						const bool enabled =
+						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                               AssignEmptyRange::False,
+						                               EnablePhysicalShardMove(enabled));
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1633,9 +1634,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
-					                              AssignEmptyRange::False,
-					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
+					const bool enabled =
+					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+					rd.dataMoveId = newDataMoveId(
+					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
@@ -1872,6 +1874,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					TraceEvent(relocateShardInterval.end(), distributorId)
 					    .detail("Duration", now() - startTime)
 					    .detail("Result", "Success");
+					TraceEvent("DataMoveStats", distributorId)
+					    .detail("Duration", now() - startTime)
+					    .detail("Bytes", metrics.bytes)
+					    .detail("Rate", static_cast<double>(metrics.bytes) / (now() - startTime))
+					    .detail("DataMoveID", rd.dataMoveId)
+					    .detail("PhysicalShardMove", physicalShardMoveEnabled(rd.dataMoveId));
 					if (now() - startTime > 600) {
 						TraceEvent(SevWarnAlways, "RelocateShardTooLong")
 						    .detail("Duration", now() - startTime)

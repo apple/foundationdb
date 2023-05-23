@@ -1696,6 +1696,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 						    .detail("EstimatedBytes", estimatedBytes[j])
 						    .detail("CorrectSampledBytes", sampledBytes)
 						    .detail("StorageServer", storageServers[j])
+						    .detail("Range", range)
 						    .detail("IsTSS", storageServerInterfaces[j].isTss() ? "True" : "False");
 
 						if (!storageServerInterfaces[j].isTss()) {

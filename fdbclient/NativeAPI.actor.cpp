@@ -9268,6 +9268,7 @@ ACTOR static Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getChe
 	}
 	return res;
 }
+
 ACTOR Future<std::vector<std::pair<KeyRange, CheckpointMetaData>>> getCheckpointMetaData(Database cx,
                                                                                          std::vector<KeyRange> ranges,
                                                                                          Version version,
