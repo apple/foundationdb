@@ -25,7 +25,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitTransaction.h"
 
-#define MUTATION_TRACKING_ENABLED 0
+#define MUTATION_TRACKING_ENABLED 1
 // The keys to track are defined in the .cpp file to limit recompilation.
 
 #define DEBUG_MUTATION(...) MUTATION_TRACKING_ENABLED&& debugMutation(__VA_ARGS__)
