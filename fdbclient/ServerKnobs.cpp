@@ -1088,7 +1088,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	// Encryption
 	init( SIM_KMS_MAX_KEYS,                                     4096 );
-	init( SIM_KMS_SHOULD_HANG,                                 false );
 	init( ENCRYPT_PROXY_MAX_DBG_TRACE_LENGTH,                 100000 );
 
 	// encrypt key proxy

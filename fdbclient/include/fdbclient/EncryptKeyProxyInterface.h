@@ -39,7 +39,7 @@ struct EKPHealthStatus {
 	bool canConnectToKms;
 	double lastUpdatedTS;
 
-	EKPHealthStatus() : canConnectToKms(true), lastUpdatedTS(-1) {}
+	EKPHealthStatus() : canConnectToKms(false), lastUpdatedTS(-1) {}
 	EKPHealthStatus(bool canConnectToKms, double lastUpdatedTS)
 	  : canConnectToKms(canConnectToKms), lastUpdatedTS(lastUpdatedTS) {}
 

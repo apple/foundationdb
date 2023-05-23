@@ -688,15 +688,12 @@ ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
 
 	// Health check will try to fetch the encryption details for the system key
 	try {
-		TraceEvent("EKPHealthCheckStart2", ekpProxyData->myId);
 		KmsConnLookupEKsByDomainIdsReq req;
 		req.debugId = debugId;
 		req.encryptDomainIds.push_back(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		++ekpProxyData->numHealthCheckRequests;
-		TraceEvent("EKPHealthCheckStart3", ekpProxyData->myId);
 		KmsConnLookupEKsByDomainIdsRep rep =
 		    wait(timeoutError(kmsConnectorInf.ekLookupByDomainIds.getReply(req), FLOW_KNOBS->EKP_REQUEST_TIMEOUT));
-		TraceEvent("EKPHealthCheckStart4", ekpProxyData->myId);
 		if (rep.cipherKeyDetails.size() < 1) {
 			TraceEvent(SevWarn, "EKPHealthCheckResponseEmpty");
 			throw encrypt_keys_fetch_failed();
@@ -714,7 +711,6 @@ ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
 		                                          cipherDetails.encryptKCV,
 		                                          validityTS.refreshAtTS,
 		                                          validityTS.expAtTS);
-		TraceEvent("EKPHealthCheckEnd", ekpProxyData->myId);
 		return EKPHealthStatus{ true, now() };
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "EKPHealthCheckError").error(e);
@@ -1064,7 +1060,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 			}
 			when(EncryptKeyProxyHealthStatusRequest req = waitNext(ekpInterface.getHealthStatus.getFuture())) {
 				ASSERT(encryptMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION);
-				TraceEvent("Nim::here1").detail("HS", self->kmsConnectorHealthStatus.toString());
 				req.reply.send(self->kmsConnectorHealthStatus);
 			}
 			when(wait(collection)) {

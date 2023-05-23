@@ -230,7 +230,6 @@ Future<EKPHealthStatus> _getEKPHealthStatusReq(Reference<AsyncVar<T> const> db,
 	}
 	request.reply.reset();
 	try {
-		TraceEvent("Nim::here2");
 		EKPHealthStatus reply = wait(proxy.get().getHealthStatus.getReply(request));
 		return reply;
 	} catch (Error& e) {
