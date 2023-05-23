@@ -321,7 +321,7 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 }
 
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-	if (SERVER_KNOBS) {
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		return updateLiveCommittedVersionSwift(self, req);
 	} else {
 		return updateLiveCommittedVersionCxx(self, req);
