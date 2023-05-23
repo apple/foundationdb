@@ -319,6 +319,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	int DD_SHARD_TRACKING_LOG_SEVERITY;
 	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
@@ -470,6 +471,8 @@ public:
 	double ROCKSDB_CF_METRICS_DELAY;
 	int ROCKSDB_MAX_LOG_FILE_SIZE;
 	int ROCKSDB_KEEP_LOG_FILE_NUM;
+	bool ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN;
+	bool ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN;
 
 	// Leader election
 	int MAX_NOTIFICATIONS;
