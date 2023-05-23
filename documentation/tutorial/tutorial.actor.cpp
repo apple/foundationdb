@@ -520,7 +520,7 @@ ACTOR Future<Void> fdbStatusStresser() {
 	loop {
 		try {
 			tx.reset();
-			Optional<Value> _ = wait(tx.get(statusJson));
+			wait(success(tx.get(statusJson)));
 		} catch (Error& e) {
 			wait(tx.onError(e));
 		}

@@ -76,7 +76,7 @@ struct UDPWorkload : TestWorkload {
 		self->serverAddress = localAddress;
 		loop {
 			try {
-				Optional<Value> v = wait(tr.get(key));
+				ValueReadResult v = wait(tr.get(key));
 				if (v.present()) {
 					return Void();
 				}

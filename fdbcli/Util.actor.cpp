@@ -48,8 +48,8 @@ void printUsage(StringRef command) {
 
 ACTOR Future<std::string> getSpecialKeysFailureErrorMessage(Reference<ITransaction> tr) {
 	// hold the returned standalone object's memory
-	state ThreadFuture<Optional<Value>> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
-	Optional<Value> errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
+	state ThreadFuture<ValueReadResult> errorMsgF = tr->get(fdb_cli::errorMsgSpecialKey);
+	ValueReadResult errorMsg = wait(safeThreadFutureToFuture(errorMsgF));
 	// Error message should be present
 	ASSERT(errorMsg.present());
 	// Read the json string

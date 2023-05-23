@@ -224,7 +224,7 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 	                                bool chained,
 	                                int subtaskCount) {
 		state Key addedInitKey("addedInitTasks"_sr);
-		Optional<Standalone<StringRef>> res = wait(tr->get(addedInitKey));
+		ValueReadResult res = wait(tr->get(addedInitKey));
 		if (res.present())
 			return Void();
 		tr->set(addedInitKey, "true"_sr);

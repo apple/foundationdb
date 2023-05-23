@@ -690,8 +690,8 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		state ThreadFuture<ValueReadResult> statusValueF = tr->get("\xff\xff/status/json"_sr);
+		ValueReadResult statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 			return Void();
@@ -1606,9 +1606,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								continue;
 							}
 						}
-						state ThreadFuture<Optional<Value>> valueF =
+						state ThreadFuture<ValueReadResult> valueF =
 						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
-						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -1919,10 +1919,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							t.append(tokens[2]);
 						}
 						t.append(tokens[1]);
-						state ThreadFuture<Optional<Value>> valueF_knob =
+						state ThreadFuture<ValueReadResult> valueF_knob =
 						    getTransaction(configDb, tenant, config_tr, options, intrans)->get(t.pack());
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
 						std::string knob_class = printable(tokens[1]);
 						if (tokens.size() == 3) {
 							std::string config_class = (" in configuration class " + printable(tokens[2]));

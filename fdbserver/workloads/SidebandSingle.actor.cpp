@@ -142,7 +142,7 @@ struct SidebandSingleWorkload : TestWorkload {
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::USE_GRV_CACHE);
-					state Optional<Value> val = wait(tr.get(messageKey));
+					state ValueReadResult val = wait(tr.get(messageKey));
 					if (!val.present()) {
 						TraceEvent(SevError, "CausalConsistencyError1")
 						    .detail("MessageKey", messageKey.toString().c_str())

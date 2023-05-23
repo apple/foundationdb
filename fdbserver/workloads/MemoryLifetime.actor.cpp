@@ -125,12 +125,12 @@ struct MemoryLifetime : KVWorkload {
 
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					state Optional<Value> get_res1 = wait(tr.get(get_startKey, snapshot));
+					state ValueReadResult get_res1 = wait(tr.get(get_startKey, snapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (get_randomStart)
 						tr.set(get_startKey, get_newValue);
-					Optional<Value> get_res2 = wait(tr.get(get_startKey, snapshot));
+					ValueReadResult get_res2 = wait(tr.get(get_startKey, snapshot));
 					ASSERT(get_res1 == get_res2);
 				} else if (op == 2) {
 					state KeySelector getKey_selector = self->getRandomKeySelector();

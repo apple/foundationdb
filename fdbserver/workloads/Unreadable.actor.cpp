@@ -441,7 +441,7 @@ struct UnreadableWorkload : TestWorkload {
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_DISABLE);
 
-					ErrorOr<Optional<Value>> value = wait(errorOr(tr.get(key, snapshot)));
+					ErrorOr<ValueReadResult> value = wait(errorOr(tr.get(key, snapshot)));
 
 					if (snapshot)
 						tr.setOption(FDBTransactionOptions::SNAPSHOT_RYW_ENABLE);

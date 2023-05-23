@@ -84,20 +84,29 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
-	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<ValueReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
 		const uint8_t* value;
 		int valueLength;
 		FdbCApi::fdb_error_t error = api->futureGetValue(f, &present, &value, &valueLength);
 		ASSERT(!error);
+
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		if (present) {
 			// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-			return Optional<Value>(Value(ValueRef(value, valueLength), Arena()));
+			return ValueReadResult(Optional<Value>(Value(ValueRef(value, valueLength), Arena())),
+			                       ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		} else {
-			return Optional<Value>();
+			return ValueReadResult(Optional<Value>(), ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		}
 	});
 }
@@ -1221,6 +1230,8 @@ void DLApi::init() {
 	                   "fdb_future_get_granule_summary_array",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
+	loadClientFunction(
+	    &api->futureGetReadBusyness, lib, fdbCPath, "fdb_future_get_read_busyness", headerVersion >= 800000);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -1470,7 +1481,7 @@ ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	return executeOperation(&ITransaction::getReadVersion);
 }
 
-ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
@@ -3372,8 +3383,8 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
-				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
+				state ThreadFuture<ValueReadResult> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
+				ValueReadResult clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
 				clusterId = clusterIdVal.get().toString();
 				ASSERT(UID::fromString(clusterId).isValid());

@@ -128,7 +128,7 @@ ACTOR Future<bool> printBlobHistory(Database db,
 
 		loop {
 			try {
-				Optional<Value> parentHistoryValue = wait(tr2.get(parentHistoryKey));
+				ValueReadResult parentHistoryValue = wait(tr2.get(parentHistoryKey));
 				foundParent = parentHistoryValue.present();
 				if (foundParent) {
 					std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(parentHistoryKey);

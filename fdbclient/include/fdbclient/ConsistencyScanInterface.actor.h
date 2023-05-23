@@ -124,15 +124,15 @@ struct ConsistencyScanInfo {
 		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Void> { return setInfo(tr, info); });
 	}
 
-	static Future<Optional<Value>> getInfo(Reference<ReadYourWritesTransaction> tr) {
+	static Future<ValueReadResult> getInfo(Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		return tr->get(consistencyScanInfoKey);
 	}
 
-	static Future<Optional<Value>> getInfo(Database cx) {
+	static Future<ValueReadResult> getInfo(Database cx) {
 		return runRYWTransaction(
-		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> { return getInfo(tr); });
+		    cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> { return getInfo(tr); });
 	}
 
 	StatusObject toJSON() const {

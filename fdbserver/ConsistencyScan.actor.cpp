@@ -564,11 +564,11 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 
 		loop {
 			try {
-				std::vector<Future<Optional<Value>>> serverListEntries;
+				std::vector<Future<ValueReadResult>> serverListEntries;
 				serverListEntries.reserve(storageServers.size());
 				for (int s = 0; s < storageServers.size(); s++)
 					serverListEntries.push_back(tr.get(serverListKeyFor(storageServers[s])));
-				state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+				state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (serverListValues[s].present())
 						storageServerInterfaces.push_back(decodeServerListValue(serverListValues[s].get()));
@@ -859,7 +859,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 									csInfoTr->setOption(FDBTransactionOptions::RAW_ACCESS);
 									csInfoTr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-									state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
+									state ValueReadResult val = wait(ConsistencyScanInfo::getInfo(csInfoTr));
 									wait(csInfoTr->commit());
 									if (val.present()) {
 										ConsistencyScanInfo consistencyScanInfo =
@@ -1189,7 +1189,7 @@ ACTOR Future<Void> watchConsistencyScanInfoKey(ConsistencyScanData* self) {
 			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			state Optional<Value> val = wait(ConsistencyScanInfo::getInfo(tr));
+			state ValueReadResult val = wait(ConsistencyScanInfo::getInfo(tr));
 			if (val.present()) {
 				ConsistencyScanInfo consistencyScanInfo =
 				    ObjectReader::fromStringRef<ConsistencyScanInfo>(val.get(), IncludeVersion());

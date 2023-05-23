@@ -359,7 +359,7 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
@@ -415,19 +415,19 @@ private:
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -439,7 +439,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,

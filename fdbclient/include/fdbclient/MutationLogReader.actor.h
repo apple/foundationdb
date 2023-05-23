@@ -48,7 +48,7 @@ struct RangeResultBlock {
 
 	// When the consumer reads, provides (partial) RangeResult, from firstVersion to min(lastVersion, firstVersion
 	// rounded up to the nearest 1M), to ensure that no versions out of this RangeResultBlock can be in between.
-	Standalone<RangeResultRef> consume();
+	RangeResult consume();
 
 	bool empty() { return indexToRead == result.size(); }
 
@@ -120,11 +120,11 @@ public:
 		return self;
 	}
 
-	Future<Standalone<RangeResultRef>> getNext();
+	Future<RangeResult> getNext();
 
 private:
 	ACTOR static Future<Void> initializePQ(MutationLogReader* self);
-	ACTOR static Future<Standalone<RangeResultRef>> getNext_impl(MutationLogReader* self);
+	ACTOR static Future<RangeResult> getNext_impl(MutationLogReader* self);
 
 	std::vector<std::unique_ptr<mutation_log_reader::PipelinedReader>> pipelinedReaders;
 	std::priority_queue<mutation_log_reader::RangeResultBlock> priorityQueue;

@@ -40,13 +40,13 @@ ACTOR Future<Void> printCoordinatorsInfo(Reference<IDatabase> db) {
 	loop {
 		try {
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
-			Optional<Value> description = wait(safeThreadFutureToFuture(descriptionF));
+			state ThreadFuture<ValueReadResult> descriptionF = tr->get(fdb_cli::clusterDescriptionSpecialKey);
+			ValueReadResult description = wait(safeThreadFutureToFuture(descriptionF));
 			ASSERT(description.present());
 			printf("Cluster description: %s\n", description.get().toString().c_str());
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<Optional<Value>> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
-			Optional<Value> processes = wait(safeThreadFutureToFuture(processesF));
+			state ThreadFuture<ValueReadResult> processesF = tr->get(fdb_cli::coordinatorsProcessSpecialKey);
+			ValueReadResult processes = wait(safeThreadFutureToFuture(processesF));
 			ASSERT(processes.present());
 			std::vector<std::string> process_addresses;
 			boost::split(process_addresses, processes.get().toString(), [](char c) { return c == ','; });
@@ -101,9 +101,9 @@ ACTOR Future<bool> changeCoordinators(Reference<IDatabase> db, std::vector<Strin
 				// if previous read failed, retry, otherwise, use the same recommened config
 				if (!auto_coordinators_str.size()) {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<Optional<Value>> auto_coordinatorsF =
+					state ThreadFuture<ValueReadResult> auto_coordinatorsF =
 					    tr->get(fdb_cli::coordinatorsAutoSpecialKey);
-					Optional<Value> auto_coordinators = wait(safeThreadFutureToFuture(auto_coordinatorsF));
+					ValueReadResult auto_coordinators = wait(safeThreadFutureToFuture(auto_coordinatorsF));
 					ASSERT(auto_coordinators.present());
 					auto_coordinators_str = auto_coordinators.get().toString();
 				}

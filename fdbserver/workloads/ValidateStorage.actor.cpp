@@ -189,7 +189,7 @@ struct ValidateStorage : TestWorkload {
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
 					const int idx = deterministicRandom()->randomInt(0, src.size());
-					Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
+					ValueReadResult serverListValue = wait(tr.get(serverListKeyFor(src[idx])));
 					ASSERT(serverListValue.present());
 					const StorageServerInterface ssi = decodeServerListValue(serverListValue.get());
 					TraceEvent("TestValidateStorageSendingRequest")

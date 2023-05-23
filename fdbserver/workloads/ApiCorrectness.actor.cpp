@@ -371,7 +371,7 @@ public:
 			loop {
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(data[currentIndex].key));
+					ValueReadResult value = wait(transaction->get(data[currentIndex].key));
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, data.size());
 					     i++) {
@@ -425,7 +425,7 @@ public:
 			// Get the values from the database
 			loop {
 				try {
-					state std::vector<Future<Optional<Value>>> dbValueFutures;
+					state std::vector<Future<ValueReadResult>> dbValueFutures;
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++)
 						dbValueFutures.push_back(transaction->get(keys[i]));
@@ -712,7 +712,7 @@ public:
 			loop {
 				try {
 					// For now, make this transaction self-conflicting to avoid commit errors
-					Optional<Value> value = wait(transaction->get(keys[0]));
+					ValueReadResult value = wait(transaction->get(keys[0]));
 
 					for (int i = currentIndex; i < std::min(currentIndex + self->maxKeysPerTransaction, keys.size());
 					     i++) {
@@ -767,7 +767,7 @@ public:
 		loop {
 			try {
 				// For now, make this transaction self-conflicting to avoid commit errors
-				Optional<Value> value = wait(transaction->get(start));
+				ValueReadResult value = wait(transaction->get(start));
 
 				state KeyRangeRef range(start, end);
 				if (!range.empty()) {

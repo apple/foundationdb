@@ -573,7 +573,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 	                                              bool strictMetadataCheck,
 	                                              bool possiblyInFlight) {
 		// change feed
-		Optional<Value> changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
+		ValueReadResult changeFeed = wait(tr->get(granuleIDToCFKey(granuleId).withPrefix(changeFeedPrefix)));
 		if (possiblyInFlight && changeFeed.present()) {
 			fmt::print("WARN: Change Feed for [{0} - {1}): {2} not purged, retrying\n",
 			           granuleRange.begin.printable(),
@@ -596,14 +596,14 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 
 		if (strictMetadataCheck) {
 			// lock
-			Optional<Value> lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
+			ValueReadResult lock = wait(tr->get(blobGranuleLockKeyFor(granuleRange)));
 			if (possiblyInFlight && lock.present()) {
 				return false;
 			}
 			ASSERT(!lock.present());
 
 			// history entry
-			Optional<Value> history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
+			ValueReadResult history = wait(tr->get(blobGranuleHistoryKeyFor(granuleRange, historyVersion)));
 			if (possiblyInFlight && history.present()) {
 				return false;
 			}
@@ -617,7 +617,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			ASSERT(splitData.empty());
 
 			// merge state
-			Optional<Value> merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
+			ValueReadResult merge = wait(tr->get(blobGranuleMergeKeyFor(granuleId)));
 			if (possiblyInFlight && merge.present()) {
 				return false;
 			}
@@ -955,11 +955,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				Version ver = wait(tr.getReadVersion());
 				readVersion = ver;
 
-				state PromiseStream<Standalone<RangeResultRef>> results;
+				state PromiseStream<RangeResult> results;
 				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
 
 				loop {
-					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					RangeResult res = waitNext(results.getFuture());
 					output.arena().dependsOn(res.arena());
 					output.append(output.arena(), res.begin(), res.size());
 					bufferedBytes += res.expectedSize();
