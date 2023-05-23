@@ -76,7 +76,6 @@ public:
 
 	// Start migration
 	ACTOR static Future<Void> start(Reference<BlobMigrator> self) {
-		self->setReferencedSelf(self);
 		wait(initialize(self));
 		wait(serverLoop(self));
 		return Void();
@@ -526,10 +525,10 @@ private:
 
 	// Main server loop
 	ACTOR static Future<Void> serverLoop(Reference<BlobMigrator> self) {
-		ASSERT(self->referencedSelf_.isValid());
 		self->addActor(waitFailureServer(self->interf_.waitFailure.getFuture()));
 		self->addActor(handleRequest(self));
 		self->addActor(handleUnsupportedRequest(self));
+		self->addActor(serveStorageMetricsRequests(self.getPtr(), self->interf_.ssi));
 		loop {
 			try {
 				choose {
@@ -563,17 +562,6 @@ private:
 						GetShardStateReply rep(version, version);
 						req.reply.send(rep); // return empty shards
 					}
-					when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-						// dprint("Handle WaitMetricsRequest\n");
-						self->addActor(self->waitMetricsTenantAware(req));
-					}
-					when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-						// dprint("Handle SplitMetrics {} limit {} bytes\n", req.keys.toString(), req.limits.bytes);
-						processSplitMetricsRequest(self, req);
-					}
-					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						self->getStorageMetrics(req);
-					}
 					when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
 						dprint("Handle KeyValueStoreType\n");
 						reply.send(KeyValueStoreType::MEMORY);
@@ -592,16 +580,8 @@ private:
 		loop {
 			try {
 				choose {
-					when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-						dprint("Unsupported SplitRangeRequest\n");
-						self->getSplitPoints(req);
-					}
 					when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
 						self->addActor(processStorageQueuingMetricsRequest(req));
-					}
-					when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-						dprint("Unsupported ReadHotSubRange\n");
-						req.reply.sendError(unsupported_operation());
 					}
 					when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) {
 						dprint("Unsupported GetKeyValuesStreamRequest\n");
@@ -719,26 +699,27 @@ private:
 		return max;
 	}
 
-private: // Methods for IStorageMetricsService
-	void setReferencedSelf(Reference<BlobMigrator> self) {
-		this->referencedSelf_ = self;
-	}
-
+public: // Methods for IStorageMetricsService
+	
 	void addActor(Future<Void> future) override {
 		actors_.add(future);
 	}
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
+		dprint("Unsupported SplitRangeRequest\n");
 		req.reply.sendError(broken_promise());
 	}
 
 	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest &req) override {
-		return processWaitMetricsRequest(this->referencedSelf_, req);
+		//Reference<BlobMigrator> 
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		return processWaitMetricsRequest(self, req);
 	}
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
 		StorageMetrics metrics;
-		metrics.bytes = sizeInBytes(this->referencedSelf_);
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		metrics.bytes = sizeInBytes(self);
 		GetStorageMetricsReply resp;
 		resp.load = metrics;
 		resp.available = StorageMetrics();
@@ -747,6 +728,21 @@ private: // Methods for IStorageMetricsService
 		resp.versionLag = 0;
 		resp.lastUpdate = now();
 		req.reply.send(resp);
+	}
+
+	void getSplitMetrics(const SplitMetricsRequest& req) override {
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		return processSplitMetricsRequest(self, req);
+	}
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override {
+		dprint("Unsupported ReadHotSubRange\n");
+		req.reply.sendError(unsupported_operation());
+	}
+
+	template <class Reply>
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+		promise.sendError(err);
 	}
 
 private:
@@ -761,7 +757,6 @@ private:
 	Standalone<VectorRef<KeyRangeRef>> mlogRestoreRanges_;
 	Standalone<VectorRef<Version>> mlogRestoreBeginVersions_;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo_;
-	Reference<BlobMigrator> referencedSelf_ = Reference<BlobMigrator>();
 };
 
 // Main entry point

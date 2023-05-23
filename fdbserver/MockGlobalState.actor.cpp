@@ -337,6 +337,10 @@ Future<Void> MockStorageServer::waitMetricsTenantAware(const WaitMetricsRequest&
 
 void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {}
 
+void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {}
+
+void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) {}
+
 Future<Void> MockStorageServer::run() {
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();
