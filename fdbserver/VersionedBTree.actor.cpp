@@ -10094,9 +10094,9 @@ RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 
 double getExternalTimeoutThreshold(const UnitTestParameters& params) {
 #if defined(USE_SANITIZER)
-	double ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(3600);
+	double ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(800);
 #else
-	double ret = params.getDouble("maxRunTimeWallTime").orDefault(1800);
+	double ret = params.getDouble("maxRunTimeWallTime").orDefault(250);
 #endif
 
 #if VALGRIND
