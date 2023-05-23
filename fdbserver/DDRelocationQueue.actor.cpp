@@ -1258,7 +1258,7 @@ struct DDQueue : public IDDRelocationQueue {
 							TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 							    .detail("DataMoveID", rrs.dataMoveId.toString())
 							    .detail("Range", rrs.keys)
-							    detail("Reason", rrs.reason.toString())
+							    .detail("Reason", rrs.reason.toString())
 							    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 						}
 					} else {
