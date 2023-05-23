@@ -140,12 +140,12 @@ struct MemoryLifetime : KVWorkload {
 
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					state Key getKey_res1 = wait(tr.getKey(getKey_selector, snapshot));
+					state KeyReadResult getKey_res1 = wait(tr.getKey(getKey_selector, snapshot));
 					tr = ReadYourWritesTransaction(cx);
 					wait(delay(0.01));
 					if (getKey_randomStart)
 						tr.set(getKey_selector.getKey(), getKey_newValue);
-					Key getKey_res2 = wait(tr.getKey(getKey_selector, snapshot));
+					KeyReadResult getKey_res2 = wait(tr.getKey(getKey_selector, snapshot));
 					ASSERT(getKey_res1 == getKey_res2);
 				} else if (op == 3) {
 					state Key getAddress_startKey = self->getRandomKey();

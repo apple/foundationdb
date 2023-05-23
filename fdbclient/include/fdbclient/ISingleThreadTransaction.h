@@ -59,7 +59,7 @@ public:
 	virtual Future<Version> getReadVersion() = 0;
 	virtual Optional<Version> getCachedReadVersion() const = 0;
 	virtual Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False) = 0;
-	virtual Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
+	virtual Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
 	virtual Future<RangeResult> getRange(const KeySelector& begin,
 	                                     const KeySelector& end,
 	                                     int limit,
