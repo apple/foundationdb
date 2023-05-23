@@ -130,9 +130,9 @@ RelocateData::RelocateData()
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
     boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId),
-    workFactor(0),
+    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
+    startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
+    dataMoveId(rs.dataMoveId), workFactor(0),
     wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
                     rs.moveReason == DataMovementReason::SPLIT_SHARD ||
                     rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
@@ -1050,10 +1050,11 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						    newDataMoveId(deterministicRandom()->randomUInt64(),
 						                  AssignEmptyRange::False,
 						                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
-						TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
-						    .detail("Reason", rrs.reason.toString());
+						    .detail("Reason", rrs.reason.toString())
+						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 					}
 				} else {
 					rrs.dataMoveId = anonymousShardId;
@@ -1635,9 +1636,10 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
 					                              AssignEmptyRange::False,
 					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
-					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
-					    .detail("Reason", rd.reason.toString());
+					    .detail("Reason", rd.reason.toString())
+					    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);

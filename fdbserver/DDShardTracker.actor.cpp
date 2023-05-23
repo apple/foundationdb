@@ -925,6 +925,8 @@ static bool shardBackwardMergeFeasible(DataDistributionTracker* self, KeyRange c
 Future<Void> shardMerger(DataDistributionTracker* self,
                          KeyRange const& keys,
                          Reference<AsyncVar<Optional<ShardMetrics>>> shardSize) {
+	const UID actionId = deterministicRandom()->randomUniqueID();
+	const Severity stSev = static_cast<Severity>(SERVER_KNOBS->DD_SHARD_TRACKING_LOG_SEVERITY);
 	int64_t maxShardSize = self->maxShardSize->get().get();
 
 	auto prevIter = self->shards->rangeContaining(keys.begin);
@@ -970,8 +972,19 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 
 			// If going forward, give up when the next shard's stats are not yet present, or if the
 			// the shard is already over the merge bounds.
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
-			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
+			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			const int64_t newSize =
+			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
+			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
+				if (shardsMerged == 1) {
+					TraceEvent(stSev, "ShardMergeStopForward", self->distributorId)
+					    .detail("ActionID", actionId)
+					    .detail("Keys", keys)
+					    .detail("MetricsPresent", newMetrics.present())
+					    .detail("ShardCount", newCount)
+					    .detail("ShardSize", newSize)
+					    .detail("MaxShardSize", maxShardSize);
+				}
 				--nextIter;
 				forwardComplete = true;
 				continue;
@@ -988,9 +1001,18 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			// If going backward, stop when the stats are not present or if the shard is already over the merge
 			//  bounds. If this check triggers right away (if we have not merged anything) then return a trigger
 			//  on the previous shard changing "size".
-			if (!newMetrics.present() || shardCount + newMetrics.get().shardCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT ||
-			    (endingStats.bytes + newMetrics.get().metrics.bytes > maxShardSize)) {
+			const int newCount = newMetrics.present() ? (shardCount + newMetrics.get().shardCount) : shardCount;
+			const int64_t newSize =
+			    newMetrics.present() ? (endingStats.bytes + newMetrics.get().metrics.bytes) : endingStats.bytes;
+			if (!newMetrics.present() || newCount >= CLIENT_KNOBS->SHARD_COUNT_LIMIT || newSize > maxShardSize) {
 				if (shardsMerged == 1) {
+					TraceEvent(stSev, "ShardMergeStopBackward", self->distributorId)
+					    .detail("ActionID", actionId)
+					    .detail("Keys", keys)
+					    .detail("MetricsPresent", newMetrics.present())
+					    .detail("ShardCount", newCount)
+					    .detail("ShardSize", newSize)
+					    .detail("MaxShardSize", maxShardSize);
 					CODE_PROBE(true, "shardMerger cannot merge anything");
 					return brokenPromiseToReady(prevIter->value().stats->onChange());
 				}
@@ -1025,13 +1047,21 @@ Future<Void> shardMerger(DataDistributionTracker* self,
 			if (forwardComplete)
 				break;
 
+			shardsMerged--;
+			if (shardsMerged == 1) {
+				TraceEvent(stSev, "ShardMergeUndoForward", self->distributorId)
+				    .detail("ActionID", actionId)
+				    .detail("Keys", keys)
+				    .detail("ShardCount", shardCount)
+				    .detail("EndingMetrics", endingStats.toString())
+				    .detail("MaxShardSize", maxShardSize);
+			}
 			// If going forward, remove most recently added range
 			endingStats -= newMetrics.get().metrics;
 			shardCount -= newMetrics.get().shardCount;
 			if (nextIter->range().begin >= systemKeys.begin) {
 				systemBytes -= newMetrics.get().metrics.bytes;
 			}
-			shardsMerged--;
 			--nextIter;
 			merged = KeyRangeRef(prevIter->range().begin, nextIter->range().end);
 			forwardComplete = true;
