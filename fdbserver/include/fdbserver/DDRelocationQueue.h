@@ -313,6 +313,9 @@ public:
 	std::vector<int> retryFindDstReasonCount;
 
 	MovingWindow<int64_t> moveBytesRate;
+	Smoother queueRetentionTime;
+	MovingWindow<int64_t> relocationCompleteWindow;
+	MovingWindow<int64_t> relocationCancelWindow;
 
 	DDQueue() = default;
 
