@@ -700,18 +700,15 @@ private:
 	}
 
 public: // Methods for IStorageMetricsService
-	
-	void addActor(Future<Void> future) override {
-		actors_.add(future);
-	}
+	void addActor(Future<Void> future) override { actors_.add(future); }
 
 	void getSplitPoints(SplitRangeRequest const& req) override {
 		dprint("Unsupported SplitRangeRequest\n");
 		req.reply.sendError(broken_promise());
 	}
 
-	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest &req) override {
-		//Reference<BlobMigrator> 
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override {
+		// Reference<BlobMigrator>
 		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
 		return processWaitMetricsRequest(self, req);
 	}
