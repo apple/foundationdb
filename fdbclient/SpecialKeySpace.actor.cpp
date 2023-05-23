@@ -1030,6 +1030,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+					if (excluded) {
+						ssExcludedCount++;
+					}
 
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
@@ -1066,10 +1069,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 							}
 						}
 					}
-				}
-
-				if (excluded) {
-					ssExcludedCount++;
 				}
 			}
 		}
