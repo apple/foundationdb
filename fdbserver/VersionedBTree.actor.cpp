@@ -10287,14 +10287,16 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int64_t totalPageOps = 0;
 
 	state double testStartWallTime = timer();
+	state int64_t commitOps = 0;
 
-	// Check test op limits and wall time
+	// Check test op limits and wall time and commitOps
 	state std::function<bool()> testFinished = [=]() {
 		if (timer() - testStartWallTime >= maxRunTimeWallTime) {
 			noUnseed = true;
 		}
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
-		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts && !noUnseed);
+		         totalRecordsRead < maxRecordsRead && coldStarts < maxColdStarts && !noUnseed) &&
+		       commitOps > 0;
 	};
 
 	while (!testFinished()) {
@@ -10459,6 +10461,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				committedVersions.send(v);
 				return Void();
 			});
+			++commitOps;
 
 			if (serialTest) {
 				// Wait for commit, wait for verification, then start new verification
