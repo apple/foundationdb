@@ -40,17 +40,17 @@ public:
 	Optional<Version> getCachedReadVersion() const override;
 
 	Future<ValueReadResult> get(Key const& key, Snapshot = Snapshot::False) override;
-	Future<RangeResult> getRange(KeySelector const& begin,
+	Future<RangeReadResult> getRange(KeySelector const& begin,
 	                             KeySelector const& end,
 	                             int limit,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False) override;
-	Future<RangeResult> getRange(KeySelector begin,
+	Future<RangeReadResult> getRange(KeySelector begin,
 	                             KeySelector end,
 	                             GetRangeLimits limits,
 	                             Snapshot = Snapshot::False,
 	                             Reverse = Reverse::False) override;
-	Future<MappedRangeResult> getMappedRange(KeySelector begin,
+	Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
 	                                         KeySelector end,
 	                                         Key mapper,
 	                                         GetRangeLimits limits,

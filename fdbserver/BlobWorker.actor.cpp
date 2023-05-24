@@ -561,12 +561,12 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
                                            BlobGranuleSplitState newState) {
 	state KeyRange currentRange = blobGranuleSplitKeyRangeFor(parentGranuleID);
 
-	state RangeResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
+	state RangeReadResult totalState = wait(tr->getRange(currentRange, SERVER_KNOBS->BG_MAX_SPLIT_FANOUT + 1));
 	// FIXME: remove above conflict range?
 	tr->addWriteConflictRange(currentRange);
 	// maybe someone decreased the knob, we should gracefully handle it
 	if (totalState.more || totalState.size() > SERVER_KNOBS->BG_MAX_SPLIT_FANOUT) {
-		RangeResult tryAgain = wait(tr->getRange(currentRange, 10000));
+		RangeReadResult tryAgain = wait(tr->getRange(currentRange, 10000));
 		ASSERT(!tryAgain.more);
 		totalState = tryAgain;
 	}
@@ -964,7 +964,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
                                           int64_t epoch,
                                           int64_t seqno,
                                           Version version,
-                                          PromiseStream<RangeResult> rows,
+                                          PromiseStream<RangeReadResult> rows,
                                           bool initialSnapshot) {
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
@@ -982,7 +982,7 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
 			}
-			RangeResult res = waitNext(rows.getFuture());
+			RangeReadResult res = waitNext(rows.getFuture());
 			snapshot.arena().dependsOn(res.arena());
 			snapshot.append(snapshot.arena(), res.begin(), res.size());
 			bytesRead += res.expectedSize();
@@ -1198,7 +1198,7 @@ ACTOR Future<BlobFileIndex> dumpInitialSnapshotFromFDB(Reference<BlobWorkerData>
 
 			readVersion = rv;
 			ASSERT(lastReadVersion <= readVersion);
-			state PromiseStream<RangeResult> rowsStream;
+			state PromiseStream<RangeReadResult> rowsStream;
 			state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData,
 			                                                           bstore,
 			                                                           metadata->keyRange,
@@ -1378,7 +1378,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 	}
 
 	try {
-		state PromiseStream<RangeResult> rowsStream;
+		state PromiseStream<RangeReadResult> rowsStream;
 		state Future<BlobFileIndex> snapshotWriter = writeSnapshot(bwData,
 		                                                           bstore,
 		                                                           metadata->keyRange,
@@ -1391,7 +1391,8 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 		state int resultIdx;
 		for (resultIdx = 0; resultIdx < chunksToRead.size(); resultIdx++) {
 			RangeResult newGranuleChunk = wait(chunksToRead[resultIdx]);
-			rowsStream.send(std::move(newGranuleChunk));
+			// FIXME
+			rowsStream.send(RangeReadResult(std::move(newGranuleChunk)));
 		}
 
 		bwData->stats.bytesReadFromS3ForCompaction += compactBytesRead;

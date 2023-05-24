@@ -191,7 +191,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					wait(store(taskCount, backupAgent->getTaskCount(tr)));
 				}
 
-				RangeResult agentValues =
+				RangeReadResult agentValues =
 				    wait(tr->getRange(KeyRange(KeyRangeRef(backupAgentKey, strinc(backupAgentKey))), 100));
 
 				// Error if the system keyspace for the backup tag is not empty
@@ -226,10 +226,10 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					printf("No left over backup version key\n");
 				}
 
-				RangeResult versions = wait(
+				RangeReadResult versions = wait(
 				    tr->getRange(KeyRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath))), 1));
 				if (!versions.size()) {
-					RangeResult logValues =
+					RangeReadResult logValues =
 					    wait(tr->getRange(KeyRange(KeyRangeRef(backupLogValuesKey, strinc(backupLogValuesKey))), 100));
 
 					// Error if the log/mutation keyspace for the backup tag is not empty
@@ -332,8 +332,8 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 						tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 						tr2.setOption(FDBTransactionOptions::LOCK_AWARE);
 						tr2.setOption(FDBTransactionOptions::RAW_ACCESS);
-						state Future<RangeResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
-						state Future<RangeResult> bkpFuture =
+						state Future<RangeReadResult> srcFuture = tr.getRange(KeyRangeRef(begin, range.end), 1000);
+						state Future<RangeReadResult> bkpFuture =
 						    tr2.getRange(KeyRangeRef(begin, range.end).withPrefix(backupPrefix), 1000);
 						wait(success(srcFuture) && success(bkpFuture));
 

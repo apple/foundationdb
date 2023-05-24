@@ -300,15 +300,13 @@ fdb_error_t fdb_future_get_keyvalue_array_impl(FDBFuture* f,
                                                FDBKeyValue const** out_kv,
                                                int* out_count,
                                                fdb_bool_t* out_more) {
-	CATCH_AND_RETURN(Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
-	                 *out_kv = (FDBKeyValue*)rrr.begin();
+	CATCH_AND_RETURN(RangeReadResult rrr = TSAV(RangeReadResult, f)->get(); *out_kv = (FDBKeyValue*)rrr.begin();
 	                 *out_count = rrr.size();
 	                 *out_more = rrr.more;);
 }
 
 fdb_error_t fdb_future_get_keyvalue_array_v13(FDBFuture* f, FDBKeyValue const** out_kv, int* out_count) {
-	CATCH_AND_RETURN(Standalone<RangeResultRef> rrr = TSAV(Standalone<RangeResultRef>, f)->get();
-	                 *out_kv = (FDBKeyValue*)rrr.begin();
+	CATCH_AND_RETURN(RangeReadResult rrr = TSAV(RangeReadResult, f)->get(); *out_kv = (FDBKeyValue*)rrr.begin();
 	                 *out_count = rrr.size(););
 }
 
@@ -316,7 +314,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_mappedkeyvalue_array(FDBFuture* 
                                                                      FDBMappedKeyValue const** out_kvm,
                                                                      int* out_count,
                                                                      fdb_bool_t* out_more) {
-	CATCH_AND_RETURN(Standalone<MappedRangeResultRef> rrr = TSAV(Standalone<MappedRangeResultRef>, f)->get();
+	CATCH_AND_RETURN(MappedRangeReadResult rrr = TSAV(MappedRangeReadResult, f)->get();
 	                 *out_kvm = (FDBMappedKeyValue*)rrr.begin();
 	                 *out_count = rrr.size();
 	                 *out_more = rrr.more;);

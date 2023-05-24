@@ -49,9 +49,9 @@ public:
 	// TODO: implement the range reading in a loop so that the underlying implementation
 	// can more naively fetch items up to the limit. If the merging deletes any entries,
 	// then the next set of entries can be read.
-	virtual Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                                     KeyRangeRef kr,
-	                                     GetRangeLimits limitsHint) const = 0;
+	virtual Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                         KeyRangeRef kr,
+	                                         GetRangeLimits limitsHint) const = 0;
 
 	explicit SpecialKeyRangeReadImpl(KeyRangeRef kr) : range(kr) {}
 	KeyRangeRef getKeyRange() const { return range; }
@@ -119,25 +119,25 @@ class SpecialKeyRangeAsyncImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit SpecialKeyRangeAsyncImpl(KeyRangeRef kr) : SpecialKeyRangeReadImpl(kr) {}
 
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override = 0;
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint) const override = 0;
 
 	// calling with a cache object to have consistent results if we need to call rpc
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint,
-	                             KeyRangeMap<Optional<RangeResult>>* cache) const {
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint,
+	                                 KeyRangeMap<Optional<RangeReadResult>>* cache) const {
 		return getRangeAsyncActor(this, ryw, kr, limitsHint, cache);
 	}
 
 	bool isAsync() const override { return true; }
 
-	ACTOR static Future<RangeResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
-	                                                    ReadYourWritesTransaction* ryw,
-	                                                    KeyRangeRef kr,
-	                                                    GetRangeLimits limits,
-	                                                    KeyRangeMap<Optional<RangeResult>>* cache) {
+	ACTOR static Future<RangeReadResult> getRangeAsyncActor(const SpecialKeyRangeReadImpl* skrAyncImpl,
+	                                                        ReadYourWritesTransaction* ryw,
+	                                                        KeyRangeRef kr,
+	                                                        GetRangeLimits limits,
+	                                                        KeyRangeMap<Optional<RangeReadResult>>* cache) {
 		ASSERT(skrAyncImpl->getKeyRange().contains(kr));
 		ASSERT(cache != nullptr);
 		ASSERT(cache->rangeContaining(kr.begin) == cache->rangeContainingKeyBefore(kr.end));
@@ -145,7 +145,7 @@ public:
 			// For simplicity, every time we need to cache, we read the whole range
 			// Although sometimes the range can be narrowed,
 			// there is not a general way to do it in complicated scenarios
-			RangeResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits));
+			RangeReadResult result_ = wait(skrAyncImpl->getRange(ryw, skrAyncImpl->getKeyRange(), limits));
 			cache->insert(skrAyncImpl->getKeyRange(), result_);
 		}
 		const auto& allResults = (*cache)[kr.begin].get();
@@ -155,11 +155,11 @@ public:
 		while (end > 0 && allResults[end - 1].key >= kr.end)
 			--end;
 		if (start < end) {
-			RangeResult result = RangeResultRef(allResults.slice(start, end), false);
-			result.arena().dependsOn(allResults.arena());
+			RangeReadResult result(RangeResult(RangeResultRef(allResults.slice(start, end), false), allResults.arena()),
+			                       allResults.getReadMetrics());
 			return result;
 		} else
-			return RangeResult();
+			return RangeReadResult({}, allResults.getReadMetrics());
 	}
 };
 
@@ -193,7 +193,7 @@ public:
 
 	Future<ValueReadResult> get(ReadYourWritesTransaction* ryw, const Key& key);
 
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeySelector begin,
 	                             KeySelector end,
 	                             GetRangeLimits limits,
@@ -239,13 +239,13 @@ public:
 private:
 	ACTOR static Future<ValueReadResult> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
-	ACTOR static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
+	ACTOR static Future<RangeReadResult> checkRYWValid(SpecialKeySpace* sks,
 	                                               ReadYourWritesTransaction* ryw,
 	                                               KeySelector begin,
 	                                               KeySelector end,
 	                                               GetRangeLimits limits,
 	                                               Reverse reverse);
-	ACTOR static Future<RangeResult> getRangeAggregationActor(SpecialKeySpace* sks,
+	ACTOR static Future<RangeReadResult> getRangeAggregationActor(SpecialKeySpace* sks,
 	                                                          ReadYourWritesTransaction* ryw,
 	                                                          KeySelector begin,
 	                                                          KeySelector end,
@@ -277,7 +277,7 @@ private:
 class SKSCTestRWImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit SKSCTestRWImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -286,7 +286,7 @@ public:
 class SKSCTestAsyncReadImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit SKSCTestAsyncReadImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -300,7 +300,7 @@ public:
 class ConflictingKeysImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ConflictingKeysImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	bool supportsTenants() const override {
@@ -312,7 +312,7 @@ public:
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ReadConflictRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	bool supportsTenants() const override {
@@ -324,7 +324,7 @@ public:
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit WriteConflictRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	bool supportsTenants() const override {
@@ -336,7 +336,7 @@ public:
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit DDStatsRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -344,7 +344,7 @@ public:
 class ManagementCommandsOptionsImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ManagementCommandsOptionsImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -357,7 +357,7 @@ public:
 class ExcludedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludedLocalitiesRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -370,7 +370,7 @@ public:
 class FailedLocalitiesRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit FailedLocalitiesRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -382,7 +382,7 @@ public:
 class ExcludeServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ExcludeServersRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -394,7 +394,7 @@ public:
 class FailedServersRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit FailedServersRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -406,7 +406,7 @@ public:
 class ExclusionInProgressRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit ExclusionInProgressRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -414,7 +414,7 @@ public:
 class ProcessClassRangeImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ProcessClassRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -425,7 +425,7 @@ public:
 class ProcessClassSourceRangeImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ProcessClassSourceRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -433,7 +433,7 @@ public:
 class LockDatabaseImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit LockDatabaseImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -442,7 +442,7 @@ public:
 class ConsistencyCheckImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ConsistencyCheckImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -451,7 +451,7 @@ public:
 class GlobalConfigImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit GlobalConfigImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -463,7 +463,7 @@ public:
 class TracingOptionsImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit TracingOptionsImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -475,7 +475,7 @@ public:
 class CoordinatorsImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit CoordinatorsImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -486,7 +486,7 @@ public:
 class CoordinatorsAutoImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit CoordinatorsAutoImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -494,7 +494,7 @@ public:
 class AdvanceVersionImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit AdvanceVersionImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -503,7 +503,7 @@ public:
 class VersionEpochImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit VersionEpochImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -513,7 +513,7 @@ public:
 class ClientProfilingImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit ClientProfilingImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -524,7 +524,7 @@ public:
 class ActorLineageImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit ActorLineageImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -535,7 +535,7 @@ class ActorProfilerConf : public SpecialKeyRangeRWImpl {
 
 public:
 	explicit ActorProfilerConf(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	void set(ReadYourWritesTransaction* ryw, const KeyRef& key, const ValueRef& value) override;
@@ -547,7 +547,7 @@ public:
 class MaintenanceImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit MaintenanceImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -556,7 +556,7 @@ public:
 class DataDistributionImpl : public SpecialKeyRangeRWImpl {
 public:
 	explicit DataDistributionImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 	Future<Optional<std::string>> commit(ReadYourWritesTransaction* ryw) override;
@@ -566,7 +566,7 @@ class WorkerInterfacesSpecialKeyImpl : public SpecialKeyRangeReadImpl {
 public:
 	explicit WorkerInterfacesSpecialKeyImpl(KeyRangeRef kr);
 
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
 };
@@ -579,7 +579,7 @@ ACTOR Future<Void> validateSpecialSubrangeRead(ReadYourWritesTransaction* ryw,
                                                KeySelector end,
                                                GetRangeLimits limits,
                                                Reverse reverse,
-                                               RangeResult result);
+                                               RangeReadResult result);
 
 #include "flow/unactorcompiler.h"
 #endif

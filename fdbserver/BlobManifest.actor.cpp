@@ -487,10 +487,10 @@ private:
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (auto range : ranges) {
 				try {
-					state PromiseStream<RangeResult> rows;
+					state PromiseStream<RangeReadResult> rows;
 					state Future<Void> stream = tr.getRangeStream(rows, range, GetRangeLimits(), Snapshot::True);
 					loop {
-						RangeResult result = waitNext(rows.getFuture());
+						RangeReadResult result = waitNext(rows.getFuture());
 						splitter->append(result);
 					}
 				} catch (Error& e) {
@@ -674,7 +674,7 @@ public:
 				state KeySelectorRef begin = firstGreaterOrEqual(blobGranuleMappingKeys.begin);
 				state KeySelectorRef end = firstGreaterOrEqual(blobGranuleMappingKeys.end);
 				loop {
-					RangeResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					RangeReadResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : rows) {
 						blobRanges.push_back_deep(blobRanges.arena(), row.key);
 						blobRangesAssigned.push_back(blobRangesAssigned.arena(), !row.value.empty());
@@ -900,7 +900,7 @@ private:
 		loop {
 			try {
 				// reverse lookup so that the first row is the newest version
-				state RangeResult results = wait(
+				state RangeReadResult results = wait(
 				    tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
 				for (KeyValueRef row : results) {
 					state KeyRange keyRange;
@@ -956,7 +956,7 @@ private:
 		state KeySelectorRef begin = firstGreaterOrEqual(fileKeyRange.begin);
 		state KeySelectorRef end = firstGreaterOrEqual(fileKeyRange.end);
 		loop {
-			RangeResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			RangeReadResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			for (auto& row : results) {
 				UID gid;
 				Version version;

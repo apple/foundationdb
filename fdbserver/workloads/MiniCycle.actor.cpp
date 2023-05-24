@@ -326,7 +326,7 @@ struct MiniCycleWorkload : TestWorkload {
 		loop {
 			try {
 				state Version v = wait(tr.getReadVersion());
-				RangeResult data = wait(
+				RangeReadResult data = wait(
 				    tr.getRange(firstGreaterOrEqual(doubleToTestKey(self->beginKey(self->clientId), self->keyPrefix)),
 				                firstGreaterOrEqual(doubleToTestKey(self->endKey(self->clientId), self->keyPrefix)),
 				                self->cycleSize(self->clientId) + 1));

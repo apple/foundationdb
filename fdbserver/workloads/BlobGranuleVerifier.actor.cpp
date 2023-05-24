@@ -224,7 +224,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state bool first = true;
 		loop {
 			try {
-				RangeResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
 
 				state std::vector<UID> haltIds;
 				state std::vector<Future<ErrorOr<Void>>> haltRequests;
@@ -266,7 +266,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				RangeResult history = wait(tr.getRange(cur, 100));
+				RangeReadResult history = wait(tr.getRange(cur, 100));
 				for (auto& it : history) {
 					KeyRange keyRange;
 					Version version;
@@ -584,7 +584,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		ASSERT(!changeFeed.present());
 
 		// file metadata
-		RangeResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
+		RangeReadResult fileMetadata = wait(tr->getRange(blobGranuleFileKeyRangeFor(granuleId), 1));
 		if (possiblyInFlight && !fileMetadata.empty()) {
 			fmt::print("WARN: File metadata for [{0} - {1}): {2} not purged, retrying\n",
 			           granuleRange.begin.printable(),
@@ -610,7 +610,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 			ASSERT(!history.present());
 
 			// split state
-			RangeResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
+			RangeReadResult splitData = wait(tr->getRange(blobGranuleSplitKeyRangeFor(granuleId), 1));
 			if (possiblyInFlight && !splitData.empty()) {
 				return false;
 			}
@@ -645,7 +645,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult history = wait(tr.getRange(cur, 1000));
+				RangeReadResult history = wait(tr.getRange(cur, 1000));
 				for (auto& it : history) {
 					KeyRange keyRange;
 					Version version;
@@ -713,7 +713,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		loop {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult feeds = wait(tr.getRange(cur, 1000));
+				RangeReadResult feeds = wait(tr.getRange(cur, 1000));
 				for (auto& it : feeds) {
 					KeyRange keyRange;
 					Version version;
@@ -955,11 +955,11 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 				Version ver = wait(tr.getReadVersion());
 				readVersion = ver;
 
-				state PromiseStream<RangeResult> results;
+				state PromiseStream<RangeReadResult> results;
 				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
 
 				loop {
-					RangeResult res = waitNext(results.getFuture());
+					RangeReadResult res = waitNext(results.getFuture());
 					output.arena().dependsOn(res.arena());
 					output.append(output.arena(), res.begin(), res.size());
 					bufferedBytes += res.expectedSize();

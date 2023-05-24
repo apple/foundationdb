@@ -1703,7 +1703,7 @@ ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<Re
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	state Standalone<VectorRef<KeyRef>> results;
-	RangeResult values = wait(tr->getRange(
+	RangeReadResult values = wait(tr->getRange(
 	    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 	for (auto& s : values) {
@@ -5441,7 +5441,7 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1 || isDefaultBackup(normalizedRanges)) {
-			RangeResult existingDestUidValues = wait(
+			RangeReadResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			KeyRangeRef targetRange =
@@ -5558,7 +5558,7 @@ public:
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
 				                                .removePrefix(removePrefix)
 				                                .withPrefix(addPrefix);
-				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				RangeReadResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
 				if (existingRows.size() > 0) {
 					throw restore_destination_not_empty();
 				}
@@ -6835,7 +6835,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)
 			    .detail("End", end);
-			RangeResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
@@ -6867,7 +6867,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (i = 0; i < restoreRanges.size(); ++i) {
-				RangeResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				for (auto kv : kvs) {
 					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
@@ -6934,7 +6934,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			for (int i = 0; i < emptyData.size(); ++i) {
 				TraceEvent(SevError, "ExpectEmptyData")
 				    .detail("Index", i)
@@ -6972,7 +6972,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 			for (int i = 0; i < allData.size(); ++i) {
 				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);

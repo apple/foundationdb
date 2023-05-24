@@ -466,7 +466,7 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
                                                           const KeySelectorRef& end,
                                                           int limit,
                                                           bool snapshot,
@@ -475,13 +475,13 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeResult> {
+	return onMainThread([tr, b, e, limit, snapshot, reverse]() -> Future<RangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limit, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
-ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
+ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
                                                           const KeySelectorRef& end,
                                                           GetRangeLimits limits,
                                                           bool snapshot,
@@ -490,13 +490,13 @@ ThreadFuture<RangeResult> ThreadSafeTransaction::getRange(const KeySelectorRef& 
 	KeySelector e = end;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeResult> {
+	return onMainThread([tr, b, e, limits, snapshot, reverse]() -> Future<RangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getRange(b, e, limits, Snapshot{ snapshot }, Reverse{ reverse });
 	});
 }
 
-ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
+ThreadFuture<MappedRangeReadResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
                                                                       const KeySelectorRef& end,
                                                                       const StringRef& mapper,
                                                                       GetRangeLimits limits,
@@ -508,7 +508,7 @@ ThreadFuture<MappedRangeResult> ThreadSafeTransaction::getMappedRange(const KeyS
 	Key h = mapper;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeResult> {
+	return onMainThread([tr, b, e, h, limits, matchIndex, snapshot, reverse]() -> Future<MappedRangeReadResult> {
 		tr->checkDeferredError();
 		return tr->getMappedRange(b, e, h, limits, matchIndex, Snapshot{ snapshot }, Reverse{ reverse });
 	});

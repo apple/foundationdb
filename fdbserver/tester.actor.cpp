@@ -944,7 +944,7 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		try {
 			tr.debugTransaction(debugRandom()->randomUniqueID());
 			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
-			state RangeResult rangeResult = wait(tr.getRange(normalKeys, 1));
+			state RangeReadResult rangeResult = wait(tr.getRange(normalKeys, 1));
 			state Optional<Key> tenantPrefix;
 
 			// If the result is non-empty, it is possible that there is some bad interaction between the test

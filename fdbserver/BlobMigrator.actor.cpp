@@ -237,7 +237,7 @@ private:
 				// incompleted migrations
 				state KeyRange currentKeys = normalKeys;
 				state Key begin = normalKeys.begin;
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				state std::vector<UID> src;
 				state std::vector<UID> dest;
 				state UID srcId;

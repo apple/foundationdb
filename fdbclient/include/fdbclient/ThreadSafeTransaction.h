@@ -139,29 +139,29 @@ public:
 
 	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
+	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
 	                                   int limit,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
+	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
 	                                   GetRangeLimits limits,
 	                                   bool snapshot = false,
 	                                   bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
-	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
+	ThreadFuture<MappedRangeReadResult> getMappedRange(const KeySelectorRef& begin,
 	                                               const KeySelectorRef& end,
 	                                               const StringRef& mapper,
 	                                               GetRangeLimits limits,

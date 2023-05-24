@@ -143,7 +143,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				RangeResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult result = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
 				//			showResult(result);
 				break;
 			} catch (Error& e) {
@@ -210,7 +210,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		return false;
 	}
 
-	ACTOR Future<MappedRangeResult> scanMappedRangeWithLimits(Database cx,
+	ACTOR Future<MappedRangeReadResult> scanMappedRangeWithLimits(Database cx,
 	                                                          KeySelector beginSelector,
 	                                                          KeySelector endSelector,
 	                                                          Key mapper,
@@ -229,7 +229,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(tr->getMappedRange(beginSelector,
+				MappedRangeReadResult result = wait(tr->getMappedRange(beginSelector,
 				                                                   endSelector,
 				                                                   mapper,
 				                                                   GetRangeLimits(limit, byteLimit),
@@ -266,7 +266,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 				    (!SERVER_KNOBS->QUICK_GET_KEY_VALUES_FALLBACK &&
 				     e.code() == error_code_quick_get_key_values_miss)) {
 					TraceEvent("GetMappedRangeWorkloadExpectedErrorDetected").error(e);
-					return MappedRangeResult();
+					return MappedRangeReadResult();
 				} else {
 					std::cout << "error " << e.what() << std::endl;
 					wait(tr->onError(e));
@@ -294,7 +294,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " FRACTION_INDEX_BYTELIMIT_PREFETCH: " << SERVER_KNOBS->FRACTION_INDEX_BYTELIMIT_PREFETCH
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
-			MappedRangeResult result = wait(self->scanMappedRangeWithLimits(cx,
+			MappedRangeReadResult result = wait(self->scanMappedRangeWithLimits(cx,
 			                                                                beginSelector,
 			                                                                endSelector,
 			                                                                mapper,
@@ -365,7 +365,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		std::cout << "conflict write to " << printable(writeKey) << std::endl;
 	}
 
-	static Future<MappedRangeResult> runGetMappedRange(int beginId,
+	static Future<MappedRangeReadResult> runGetMappedRange(int beginId,
 	                                                   int endId,
 	                                                   Reference<TransactionWrapper>& tr,
 	                                                   GetMappedRangeWorkload* self) {
@@ -391,7 +391,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		loop {
 			state Reference<TransactionWrapper> tr1 = self->createTransaction();
 			try {
-				MappedRangeResult result = wait(runGetMappedRange(5, 10, tr1, self));
+				MappedRangeReadResult result = wait(runGetMappedRange(5, 10, tr1, self));
 
 				// Commit another transaction that has conflict writes.
 				loop {
@@ -432,7 +432,7 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			try {
 				// Write something that will be read in getMappedRange.
 				conflictWriteOnRecord(7, tr1, self);
-				MappedRangeResult result = wait(runGetMappedRange(5, 10, tr1, self));
+				MappedRangeReadResult result = wait(runGetMappedRange(5, 10, tr1, self));
 				UNREACHABLE();
 			} catch (Error& e) {
 				if (e.code() == error_code_get_mapped_range_reads_your_writes) {

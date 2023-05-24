@@ -166,7 +166,7 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state Standalone<VectorRef<KeyRef>> results;
-		RangeResult values = wait(tr->getRange(
+		RangeReadResult values = wait(tr->getRange(
 		    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 		for (auto& s : values) {
@@ -330,12 +330,12 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 					            Snapshot::True);
 					state Future<ValueReadResult> rangeCountValue = tr->get(rangeCountKey, Snapshot::True);
-					state Future<RangeResult> prevRange = tr->getRange(firstGreaterOrEqual(prefix),
+					state Future<RangeReadResult> prevRange = tr->getRange(firstGreaterOrEqual(prefix),
 					                                                   lastLessOrEqual(rangeBegin.withPrefix(prefix)),
 					                                                   1,
 					                                                   Snapshot::True,
 					                                                   Reverse::True);
-					state Future<RangeResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
+					state Future<RangeReadResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
 					                                                   firstGreaterOrEqual(strinc(prefix)),
 					                                                   1,
 					                                                   Snapshot::True,
@@ -1838,7 +1838,7 @@ struct CopyDiffLogsUpgradeTaskFunc : TaskFuncBase {
 				}
 
 				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
-					RangeResult existingDestUidValues = wait(srcTr->getRange(
+					RangeReadResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					bool found = false;
 					KeyRangeRef targetRange =
@@ -2086,7 +2086,7 @@ struct StartFullBackupTaskFunc : TaskFuncBase {
 
 				// Initialize destUid
 				if (backupRanges.size() == 1 || isDefaultBackup(backupRanges)) {
-					RangeResult existingDestUidValues = wait(srcTr->getRange(
+					RangeReadResult existingDestUidValues = wait(srcTr->getRange(
 					    KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 					KeyRangeRef targetRange =
 					    (backupRanges.size() == 1) ? backupRanges[0] : getDefaultBackupSharedRange();
@@ -2590,7 +2590,7 @@ public:
 
 		if (backupAction == DatabaseBackupAgent::PreBackupAction::VERIFY) {
 			// Make sure all of the ranges are empty before we backup into them.
-			state std::vector<Future<RangeResult>> backupIntoResults;
+			state std::vector<Future<RangeReadResult>> backupIntoResults;
 			for (auto& backupRange : backupRanges) {
 				backupIntoResults.push_back(
 				    tr->getRange(backupRange.removePrefix(removePrefix).withPrefix(addPrefix), 1));
@@ -3089,13 +3089,13 @@ public:
 				state UID logUid = wait(backupAgent->getLogUid(tr, tagName));
 
 				state Future<ValueReadResult> fPaused = tr->get(backupAgent->taskBucket->getPauseKey());
-				state Future<RangeResult> fErrorValues =
+				state Future<RangeReadResult> fErrorValues =
 				    errorLimit > 0
 				        ? tr->getRange(backupAgent->errors.get(BinaryWriter::toValue(logUid, Unversioned())).range(),
 				                       errorLimit,
 				                       Snapshot::False,
 				                       Reverse::True)
-				        : Future<RangeResult>();
+				        : Future<RangeReadResult>();
 				state Future<ValueReadResult> fBackupUid =
 				    tr->get(backupAgent->states.get(BinaryWriter::toValue(logUid, Unversioned()))
 				                .pack(DatabaseBackupAgent::keyFolderId));
@@ -3178,7 +3178,7 @@ public:
 
 				// Append the errors, if requested
 				if (errorLimit > 0) {
-					RangeResult values = wait(fErrorValues);
+					RangeReadResult values = wait(fErrorValues);
 
 					// Display the errors, if any
 					if (values.size() > 0) {

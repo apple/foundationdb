@@ -120,7 +120,7 @@ struct IndexScanWorkload : KVWorkload {
 
 			try {
 				loop {
-					RangeResult r = wait(tr.getRange(begin, end, limits));
+					RangeReadResult r = wait(tr.getRange(begin, end, limits));
 					chunks++;
 					rowsRead += r.size();
 					if (!r.size() || !r.more || (now() - startTime) > self->transactionDuration) {
