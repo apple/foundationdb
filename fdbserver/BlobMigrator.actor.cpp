@@ -632,7 +632,7 @@ private:
 
 	ACTOR static Future<Void> waitMetricsTenantAwareImpl(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
-		StorageMetrics metrics;
+		state StorageMetrics metrics;
 		metrics.bytes = sizeInBytes(self, waitMetricsRequest.keys);
 		if (waitMetricsRequest.min.allLessOrEqual(metrics) && metrics.allLessOrEqual(waitMetricsRequest.max)) {
 			wait(delay(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
