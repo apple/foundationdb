@@ -922,7 +922,7 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError"_audit, UID());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
