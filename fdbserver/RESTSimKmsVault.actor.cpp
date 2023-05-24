@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/BlobMetadataUtils.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/RESTSimKmsVault.h"
 #include "fdbclient/SimKmsVault.h"
 #include "fdbrpc/HTTP.h"
@@ -27,16 +28,21 @@
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
 
+#include "flow/FastRef.h"
+#include "flow/IRandom.h"
+#include "flow/Knobs.h"
+#include "flow/Platform.h"
+#include "flow/Trace.h"
+
+#include <boost/filesystem/operations.hpp>
 #include <cstring>
+#include <fstream>
+#include <memory>
 #include <rapidjson/document.h>
 #include <rapidjson/rapidjson.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
-
-#include "flow/FastRef.h"
-#include "flow/IRandom.h"
-#include "flow/Knobs.h"
-#include "flow/Trace.h"
+#include <string>
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using DomIdVec = std::vector<EncryptCipherDomainId>;
@@ -60,6 +66,8 @@ struct VaultResponse {
 
 	VaultResponse() : failed(false), buff("") {}
 };
+
+Future<Void> discoverUrlFileReaper = Future<Void>();
 
 } // namespace
 
@@ -410,6 +418,8 @@ VaultResponse handleFetchBlobMetada(const std::string& content) {
 	return response;
 }
 
+namespace RestSimKms {
+
 ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> request,
                                              Reference<HTTP::OutgoingResponse> response) {
 	wait(delay(0));
@@ -438,10 +448,93 @@ ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> re
 	return Void();
 }
 
-Future<Void> RESTSimKmsVaultRequestHandler::handleRequest(Reference<HTTP::IncomingRequest> request,
-                                                          Reference<HTTP::OutgoingResponse> response) {
+Future<Void> VaultRequestHandler::handleRequest(Reference<HTTP::IncomingRequest> request,
+                                                Reference<HTTP::OutgoingResponse> response) {
 	return simKmsVaultRequestHandler(request, response);
 }
+
+void initConfig() {
+	std::ofstream urlFile(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	// Files gets written
+	fmt::print("RESTSimKms config file {} created\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+
+	std::ofstream tokenFile(REST_SIM_KMS_VAULT_TOKEN_FILE);
+	tokenFile << "dummy_value";
+	tokenFile.close();
+	fmt::print("RESTSimKms config file {} created\n", REST_SIM_KMS_VAULT_TOKEN_FILE);
+
+	std::string detailsStr = REST_SIM_KMS_VAULT_TOKEN_NAME;
+	detailsStr.append(RESTKmsConnectorUtils::TOKEN_NAME_FILE_SEP).append(REST_SIM_KMS_VAULT_TOKEN_FILE);
+
+	// Update configurations RESTKmsConnector depends upon
+	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
+	g_knobs.setKnob("kms_connector_type", KnobValueRef::create(std::string("RESTKmsConnector")));
+	g_knobs.setKnob("rest_kms_connector_validation_token_details", KnobValueRef::create(std::string(detailsStr)));
+	g_knobs.setKnob("rest_kms_connector_discover_kms_url_file",
+	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_DISCOVERY_FILE)));
+	g_knobs.setKnob("rest_kms_connector_get_encryption_keys_endpoint",
+	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE)));
+	g_knobs.setKnob("rest_kms_connector_get_latest_encryption_keys_endpoint",
+	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE)));
+	g_knobs.setKnob("rest_kms_connector_get_blob_metadata_endpoint",
+	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE)));
+}
+
+void cleanupConfig() {
+	// Cancel the reaper task before cleaning up discoverUrl file to avoid race:
+	if (discoverUrlFileReaper.isValid()) {
+		discoverUrlFileReaper.cancel();
+	}
+
+	if (fileExists(REST_SIM_KMS_VAULT_DISCOVERY_FILE)) {
+		boost::filesystem::remove(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+		fmt::print("RESTSimKms config file {} removed\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	}
+	if (fileExists(REST_SIM_KMS_VAULT_TOKEN_FILE)) {
+		boost::filesystem::remove(REST_SIM_KMS_VAULT_TOKEN_FILE);
+		fmt::print("RESTSimKms config file {} removed\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	}
+}
+
+ACTOR Future<Void> updateDiscoverUrlFile() {
+	state std::vector<NetworkAddress> resolvedNetworkAddresses =
+	    wait(INetworkConnections::net()->resolveTCPEndpoint(REST_SIM_KMS_HOSTNAME, REST_SIM_KMS_SERVICE_PORT));
+
+	std::ofstream urlFile(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	if (!urlFile.is_open()) {
+		TraceEvent(SevError, "RESTSimKmsUpdateFileFailed").detail("Path", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+		throw operation_failed();
+	}
+	for (const auto& address : resolvedNetworkAddresses) {
+		const std::string url = "https://" + address.ip.toString() + ":" + REST_SIM_KMS_SERVICE_PORT;
+		urlFile << url << std::endl;
+	}
+	urlFile.close();
+
+	TraceEvent(SevDebug, "RESTSimKmsDiscoverUrlFileUpdated").detail("NumServers", resolvedNetworkAddresses.size());
+	return Void();
+}
+
+ACTOR [[flow_allow_discard]] void initDiscoverUrlFileImpl() {
+	ASSERT(!SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE.empty());
+	ASSERT(fileExists(REST_SIM_KMS_VAULT_DISCOVERY_FILE));
+
+	wait(updateDiscoverUrlFile());
+
+	// Trigger a reaper task to simulate discover URL file getting updated periodically
+	const int interval = deterministicRandom()->randomInt(120, 180);
+	discoverUrlFileReaper = recurringAsync([&]() { return updateDiscoverUrlFile(); },
+	                                       interval, /* interval */
+	                                       true, /* absoluteIntervalDelay */
+	                                       interval, /* initialDelay */
+	                                       TaskPriority::Worker);
+}
+
+void initDiscoverUrlFile() {
+	initDiscoverUrlFileImpl();
+}
+
+} // namespace RestSimKms
 
 // Only used to link unit tests
 void forceLinkRESTSimKmsVaultTest() {}
@@ -645,7 +738,7 @@ TEST_CASE("/restSimKmsVault/invalidResource") {
 	request->resource = "/whatever";
 	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
 	try {
-		wait(simKmsVaultRequestHandler(request, response));
+		wait(RestSimKms::simKmsVaultRequestHandler(request, response));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_http_bad_response);
@@ -662,7 +755,7 @@ TEST_CASE("/restSimKmsVault/invalidHeader") {
 	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
 	request->data.headers["Foo"] = "Bar";
 	try {
-		wait(simKmsVaultRequestHandler(request, response));
+		wait(RestSimKms::simKmsVaultRequestHandler(request, response));
 		ASSERT(false);
 	} catch (Error& e) {
 		ASSERT_EQ(e.code(), error_code_rest_malformed_response);

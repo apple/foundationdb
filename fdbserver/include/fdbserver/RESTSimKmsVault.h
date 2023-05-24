@@ -25,17 +25,32 @@
 #include "fdbrpc/HTTP.h"
 #include "fdbrpc/simulator.h"
 
+namespace RestSimKms {
+
+const std::string REST_SIM_KMS_HOSTNAME = "restsimkms";
+const std::string REST_SIM_KMS_SERVICE_PORT = "7860";
+
+const std::string REST_SIM_KMS_VAULT_DISCOVERY_FILE = "simfdb/restSimKmsDiscovery_urls";
+const std::string REST_SIM_KMS_VAULT_TOKEN_NAME = "simKmsValidationToken";
+const std::string REST_SIM_KMS_VAULT_TOKEN_FILE = "simfdb/restSimKmsValidation_tokens";
+
 const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "/get-encryption-keys-by-key-ids";
 const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "/get-encryption-keys-by-domain-ids";
 const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "/get-blob-metadata";
 
-struct RESTSimKmsVaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<RESTSimKmsVaultRequestHandler> {
+struct VaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<VaultRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override;
-	Reference<HTTP::IRequestHandler> clone() override { return makeReference<RESTSimKmsVaultRequestHandler>(); }
+	Reference<HTTP::IRequestHandler> clone() override { return makeReference<VaultRequestHandler>(); }
 
-	void addref() override { ReferenceCounted<RESTSimKmsVaultRequestHandler>::addref(); }
-	void delref() override { ReferenceCounted<RESTSimKmsVaultRequestHandler>::delref(); }
+	void addref() override { ReferenceCounted<VaultRequestHandler>::addref(); }
+	void delref() override { ReferenceCounted<VaultRequestHandler>::delref(); }
 };
+
+void cleanupConfig();
+void initConfig();
+void initDiscoverUrlFile();
+
+} // namespace RestSimKms
 
 #endif

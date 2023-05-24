@@ -64,6 +64,7 @@
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
 #include "fdbserver/RestoreWorkerInterface.actor.h"
+#include "fdbserver/RESTSimKmsVault.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "fdbserver/Status.actor.h"
