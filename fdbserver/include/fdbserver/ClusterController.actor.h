@@ -1246,7 +1246,6 @@ public:
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
-	Future<Void> outstandingRemoteRequestChecker;
 	AsyncTrigger updateDBInfo;
 	std::set<Endpoint> updateDBInfoEndpoints;
 	std::set<Endpoint> removedDBInfoEndpoints;
@@ -1321,12 +1320,11 @@ public:
 	                      Reference<AsyncVar<Optional<UID>>> clusterId)
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
-	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
-	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
-	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
-	    recruiter(id), recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false),
-	    recruitBlobMigrator(false), recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
-	    clusterControllerMetrics("ClusterController", id.toString()),
+	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), goodRecruitmentTime(Never()),
+	    goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0), versionDifferenceUpdated(false),
+	    remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false), recruiter(id), recruitDistributor(false),
+	    recruitRatekeeper(false), recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
+	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),

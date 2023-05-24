@@ -151,21 +151,3 @@ struct RemoteWorkerRecruitment {
 	std::vector<WorkerInterface> logRouters;
 	Optional<UID> dbgId;
 };
-
-struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
-	RecruitmentInfo req;
-	WorkerRecruitment rep;
-	AsyncTrigger waitForCompletion;
-	Optional<UID> dbgId;
-
-	RecruitWorkersInfo(RecruitmentInfo const& info) : req(info) {}
-};
-
-struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
-	RemoteRecruitmentInfo req;
-	RemoteWorkerRecruitment rep;
-	AsyncTrigger waitForCompletion;
-	Optional<UID> dbgId;
-
-	RecruitRemoteWorkersInfo(RemoteRecruitmentInfo const& info) : req(info) {}
-};
