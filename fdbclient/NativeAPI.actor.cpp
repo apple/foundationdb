@@ -3665,7 +3665,7 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 			trState->cx->transactionBytesRead += reply.value.present() ? reply.value.get().size() : 0;
 			++trState->cx->transactionKeysRead;
 
-			return ValueReadResult(std::move(reply.value), ReadMetricsNeedFilled());
+			return ValueReadResult(std::move(reply.value), reply.readMetrics);
 		} catch (Error& e) {
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
@@ -3785,7 +3785,7 @@ ACTOR Future<KeyReadResult> getKey(Reference<TransactionState> trState,
 				                                                 // reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
-				return KeyReadResult(k.getKey(), ReadMetricsNeedFilled());
+				return KeyReadResult(std::move(k.getKey()), reply.readMetrics);
 			}
 		} catch (Error& e) {
 			if (getKeyID.present())
