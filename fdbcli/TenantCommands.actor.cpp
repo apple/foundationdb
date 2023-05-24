@@ -343,23 +343,27 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 }
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
-ACTOR Future<bool> tenantMoveUpdateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
 ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
 
 ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 3) {
-		fmt::print("Usage: tenant move <start/update/finish> <TENANT_GROUP>\n\n");
+		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
 		return false;
 	}
 	step = tokens[2];
-	if (step == "start"_sr) {
-		tenantMoveStartCommand(db, tokens);
-	} else if (step == "update"_sr) {
-		tenantMoveUpdateCommand(db, tokens);
-	} else if (step == "finish"_sr) {
-		tenantMoveFinishCommand(db, tokens);
-	} else {
-		fmt::print("Usage: tenant move <start/update/finish> <TENANT_GROUP>\n\n");
+	switch (step) {
+	case "start"_sr:
+		return tenantMoveStartCommand(db, tokens);
+	case "switch"_sr:
+		return tenantMoveSwitchCommand(db, tokens);
+	case "finish"_sr:
+		return tenantMoveFinishCommand(db, tokens);
+	case "abort"_sr:
+		return tenantMoveAbortCommand(db, tokens);
+	default:
+		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
 		return false;
 	}
 }
