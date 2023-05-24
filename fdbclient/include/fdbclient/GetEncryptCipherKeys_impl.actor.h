@@ -19,9 +19,7 @@
  */
 
 #pragma once
-#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "flow/EncryptUtils.h"
-#include "flow/Knobs.h"
 #include "flow/genericactors.actor.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_GETCIPHERKEYS_IMPL_ACTOR_G_H)
 #define FDBCLIENT_GETCIPHERKEYS_IMPL_ACTOR_G_H

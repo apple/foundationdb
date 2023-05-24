@@ -20,7 +20,6 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
@@ -2442,17 +2441,6 @@ ACTOR static Future<JsonBuilderObject> clusterSummaryStatisticsFetcher(
 	return statusObj;
 }
 
-ACTOR static Future<JsonBuilderObject> encryptionStatusFetcher(Reference<AsyncVar<ServerDBInfo>> db) {
-	EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(db));
-	JsonBuilderObject statusObj;
-	if (status.canConnectToKms) {
-		statusObj["kms_health_status"] = "healthy";
-	} else {
-		statusObj["kms_health_status"] = "unhealthy";
-	}
-	return statusObj;
-}
-
 ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
     Database cx,
     Optional<BlobManagerInterface> managerIntf,
@@ -3065,6 +3053,24 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
+
+		state JsonBuilderObject statusObj;
+
+		// Get EKP Health
+		if (db->get().client.encryptKeyProxy.present()) {
+			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(db));
+			JsonBuilderObject _statusObj;
+			if (status.canConnectToKms) {
+				_statusObj["kms_health_status"] = "healthy";
+			} else {
+				_statusObj["kms_health_status"] = "unhealthy";
+			}
+			statusObj["encryption_at_rest"] = _statusObj;
+			if (!status.canConnectToKms) {
+				return StatusReply(statusObj.getJson());
+			}
+		}
+
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -3193,7 +3199,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state WorkerEvents programStarts =
 		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
-		state JsonBuilderObject statusObj;
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
@@ -3523,11 +3528,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		                              &status_incomplete_reasons));
 		statusObj["processes"] = processStatus;
 		statusObj["clients"] = clientStatusFetcher(clientStatus);
-
-		if (configuration.present() && configuration.get().encryptionAtRestMode.isEncryptionEnabled()) {
-			JsonBuilderObject encryptionStatus = wait(encryptionStatusFetcher(db));
-			statusObj["encryption_at_rest"] = encryptionStatus;
-		}
 
 		if (configuration.present() && configuration.get().blobGranulesEnabled) {
 			JsonBuilderObject blobGranuelsStatus = wait(

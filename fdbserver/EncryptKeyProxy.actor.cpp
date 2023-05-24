@@ -1028,7 +1028,6 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 	                                        CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL,
 	                                        TaskPriority::Worker);
 
-	// TODO (Nim): Make this jittered
 	self->healthChecker = recurringAsync([&]() { return updateHealthStatus(self, kmsConnectorInf); },
 	                                     FLOW_KNOBS->ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,
 	                                     true,
