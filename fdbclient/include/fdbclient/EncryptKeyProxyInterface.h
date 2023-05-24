@@ -37,24 +37,28 @@
 struct EKPHealthStatus {
 	constexpr static FileIdentifier file_identifier = 2378149;
 	bool canConnectToKms;
+	bool canConnectToEKP;
 	double lastUpdatedTS;
 
-	EKPHealthStatus() : canConnectToKms(false), lastUpdatedTS(-1) {}
-	EKPHealthStatus(bool canConnectToKms, double lastUpdatedTS)
-	  : canConnectToKms(canConnectToKms), lastUpdatedTS(lastUpdatedTS) {}
+	EKPHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
+	EKPHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
+	  : canConnectToKms(canConnectToKms), canConnectToEKP(canConnectToEKP), lastUpdatedTS(lastUpdatedTS) {}
 
-	bool operator==(const EKPHealthStatus& other) { return canConnectToKms == other.canConnectToKms; }
+	bool operator==(const EKPHealthStatus& other) {
+		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
+	}
 
 	std::string toString() const {
 		std::stringstream ss;
 		ss << "CanConnectToKms(" << canConnectToKms << ")"
+		   << ", CanConnectToEKP(" << canConnectToEKP << ")"
 		   << ", LastUpdatedTS(" << lastUpdatedTS << ")";
 		return ss.str();
 	}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, canConnectToKms, lastUpdatedTS);
+		serializer(ar, canConnectToKms, canConnectToEKP, lastUpdatedTS);
 	}
 };
 

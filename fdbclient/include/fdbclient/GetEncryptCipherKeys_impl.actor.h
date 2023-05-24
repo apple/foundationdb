@@ -232,7 +232,7 @@ Future<EKPHealthStatus> _getEKPHealthStatusReq(Reference<AsyncVar<T> const> db,
 		return reply;
 	} catch (Error& e) {
 		TraceEvent("GetEKPHealthStatusCaughtError").error(e);
-		return EKPHealthStatus{ false, now() };
+		return EKPHealthStatus{ false, false, now() };
 	}
 }
 
@@ -261,7 +261,7 @@ Future<EKPHealthStatus> _getEKPHealthStatus(Reference<AsyncVar<T> const> db) {
 		return status;
 	} catch (Error& e) {
 		TraceEvent("EKPHealthStatusError").error(e);
-		return EKPHealthStatus{ false, now() };
+		return EKPHealthStatus{ false, false, now() };
 	}
 }
 

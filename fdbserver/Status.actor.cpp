@@ -3060,13 +3060,11 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		if (db->get().client.encryptKeyProxy.present()) {
 			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(db));
 			JsonBuilderObject _statusObj;
-			if (status.canConnectToKms) {
-				_statusObj["kms_health_status"] = "healthy";
-			} else {
-				_statusObj["kms_health_status"] = "unhealthy";
-			}
+			_statusObj["kms_is_healthy"] = status.canConnectToKms;
+			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
 			statusObj["encryption_at_rest"] = _statusObj;
-			if (!status.canConnectToKms) {
+			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
+			if (!status.canConnectToKms || !status.canConnectToEKP) {
 				return StatusReply(statusObj.getJson());
 			}
 		}

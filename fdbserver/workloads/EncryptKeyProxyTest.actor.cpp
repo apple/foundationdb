@@ -203,7 +203,7 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		TraceEvent("SimHealthyKmsStart").log();
 		loop {
 			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(self->dbInfo));
-			if (status.canConnectToKms) {
+			if (status.canConnectToKms && status.canConnectToEKP) {
 				ASSERT_GE(status.lastUpdatedTS, 0);
 				ASSERT_GE(now(), status.lastUpdatedTS);
 				break;
