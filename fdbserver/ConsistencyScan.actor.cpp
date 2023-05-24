@@ -128,7 +128,7 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 	// if shard move in progress, use destination
 	std::vector<UID> storageServers = (!destStorageServers.empty()) ? destStorageServers : sourceStorageServers;
 
-	state std::vector<Future<Optional<Value>>> serverListEntries;
+	state std::vector<Future<ValueReadResult>> serverListEntries;
 	serverListEntries.reserve(storageServers.size());
 	state std::vector<StorageServerInterface> storageServerInterfaces;
 	storageServerInterfaces.reserve(storageServers.size());
@@ -137,7 +137,7 @@ ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 
-	state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+	state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 	for (auto& it : serverListValues) {
 		ASSERT(it.present());
 		storageServerInterfaces.push_back(decodeServerListValue(it.get()));
