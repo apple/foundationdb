@@ -630,15 +630,14 @@ private:
 		}
 	}
 
-	ACTOR static Future<Void> processWaitMetricsRequest(Reference<BlobMigrator> self, WaitMetricsRequest req) {
+	ACTOR static Future<Void> waitMetricsTenantAwareImpl(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
 		StorageMetrics metrics;
 		metrics.bytes = sizeInBytes(self, waitMetricsRequest.keys);
-		if (!waitMetricsRequest.min.allLessOrEqual(metrics) || !metrics.allLessOrEqual(waitMetricsRequest.max)) {
-			waitMetricsRequest.reply.send(metrics);
-		} else {
+		if (waitMetricsRequest.min.allLessOrEqual(metrics) && metrics.allLessOrEqual(waitMetricsRequest.max)) {
 			wait(delay(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
 		}
+		waitMetricsRequest.reply.send(metrics);
 		return Void();
 	}
 
@@ -683,7 +682,7 @@ public: // Methods for IStorageMetricsService
 
 	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override {
 		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
-		return processWaitMetricsRequest(self, req);
+		return waitMetricsTenantAwareImpl(self, req);
 	}
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
