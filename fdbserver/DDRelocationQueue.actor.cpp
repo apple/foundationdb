@@ -547,11 +547,7 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     rawProcessingUnhealthy(new AsyncVar<bool>(false)), rawProcessingWiggle(new AsyncVar<bool>(false)),
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
-    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL),
-    queueRetentionTime(SERVER_KNOBS->RELOCATION_METRICS_SMOOTHING),
-    relocationCancelWindow(SERVER_KNOBS->RELOCATION_METRICS_WINDOW),
-    relocationCompleteWindow(SERVER_KNOBS->RELOCATION_METRICS_WINDOW) {}
+    retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0) {}
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
 	// Although PRIORITY_TEAM_REDUNDANT has lower priority than split and merge shard movement,

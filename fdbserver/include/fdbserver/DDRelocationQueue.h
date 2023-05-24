@@ -313,10 +313,10 @@ public:
 	};
 	std::vector<int> retryFindDstReasonCount;
 
-	MovingWindow<int64_t> moveBytesRate;
+	MovingWindow<int64_t> moveBytesRate{ SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL };
 	Smoother queueRetentionTime{ SERVER_KNOBS->RELOCATION_METRICS_SMOOTHING };
-	MovingWindow<int64_t> relocationCompleteWindow;
-	MovingWindow<int64_t> relocationCancelWindow;
+	MovingWindow<int64_t> relocationCompleteWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
+	MovingWindow<int64_t> relocationCancelWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
 
 	DDQueue() = default;
 
