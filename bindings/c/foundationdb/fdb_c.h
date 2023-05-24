@@ -307,6 +307,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uin
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_bytes(FDBFuture* f,
+                                                              uint8_t const** out_bytes,
+                                                              int* out_bytes_length);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_value(FDBFuture* f,

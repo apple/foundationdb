@@ -435,11 +435,11 @@ ThreadFuture<ValueReadResult> ThreadSafeTransaction::get(const KeyRef& key, bool
 	});
 }
 
-ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	KeySelector k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<Key> {
+	return onMainThread([tr, k, snapshot]() -> Future<KeyReadResult> {
 		tr->checkDeferredError();
 		return tr->getKey(k, Snapshot{ snapshot });
 	});

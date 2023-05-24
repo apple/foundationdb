@@ -63,7 +63,7 @@ public:
 	struct GetKeyReq {
 		explicit GetKeyReq(KeySelector key) : key(key) {}
 		KeySelector key;
-		typedef Key Result;
+		typedef KeyReadResult Result;
 	};
 
 	template <bool reverse>
@@ -131,32 +131,32 @@ public:
 			ASSERT(it->is_kv());
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				return ValueReadResult(result->value, res.getReadMetrics());
 			} else {
-				return Optional<Value>();
+				return ValueReadResult({}, res.getReadMetrics());
 			}
 		}
 	}
 
 	ACTOR template <class Iter>
-	static Future<Key> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
+	static Future<KeyReadResult> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
 		if (read.key.offset > 0) {
 			RangeResult result =
 			    wait(getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it));
 			if (result.readToBegin)
-				return allKeys.begin;
+				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
 			if (result.readThroughEnd || !result.size())
-				return ryw->getMaxReadKey();
-			return result[0].key;
+				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
+			return KeyReadResult(std::move(result[0].key), ReadMetricsNeedFilled());
 		} else {
 			read.key.offset++;
 			RangeResult result =
 			    wait(getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it));
 			if (result.readThroughEnd)
-				return ryw->getMaxReadKey();
+				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
 			if (result.readToBegin || !result.size())
-				return allKeys.begin;
-			return result[0].key;
+				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
+			return KeyReadResult(result[0].key, ReadMetricsNeedFilled());
 		}
 	};
 
@@ -178,10 +178,12 @@ public:
 		return ryw->tr.get(read.key, snapshot);
 	}
 
-	ACTOR static Future<Key> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
-		Key key = wait(ryw->tr.getKey(read.key, snapshot));
-		if (ryw->getMaxReadKey() < key)
-			return ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
+	ACTOR static Future<KeyReadResult> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
+		KeyReadResult key = wait(ryw->tr.getKey(read.key, snapshot));
+		// Filter out results in the system keys if they are not accessible
+		if (ryw->getMaxReadKey() < key) {
+			return KeyReadResult(ryw->getMaxReadKey(), key.getReadMetrics());
+		}
 		return key;
 	}
 
@@ -192,7 +194,7 @@ public:
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
@@ -228,7 +230,10 @@ public:
 		updateConflictMap<mustUnmodified>(ryw, read.key, it);
 	}
 
-	static void addConflictRange(ReadYourWritesTransaction* ryw, GetKeyReq read, WriteMap::iterator& it, Key result) {
+	static void addConflictRange(ReadYourWritesTransaction* ryw,
+	                             GetKeyReq read,
+	                             WriteMap::iterator& it,
+	                             KeyReadResult result) {
 		KeyRangeRef readRange;
 		if (read.key.offset <= 0)
 			readRange = KeyRangeRef(KeyRef(ryw->arena, result),
@@ -620,7 +625,7 @@ public:
 		}
 
 		if (!end.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedEnd = wait(read(ryw, GetKeyReq(end), pit));
+			KeyReadResult resolvedEnd = wait(read(ryw, GetKeyReq(end), pit));
 			if (resolvedEnd == allKeys.begin)
 				readToBegin = true;
 			if (resolvedEnd == ryw->getMaxReadKey())
@@ -665,7 +670,7 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedEnd =
+				KeyReadResult resolvedEnd =
 				    wait(read(ryw,
 				              GetKeyReq(end),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
@@ -924,7 +929,7 @@ public:
 		}
 
 		if (!begin.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedBegin = wait(read(ryw, GetKeyReq(begin), pit));
+			KeyReadResult resolvedBegin = wait(read(ryw, GetKeyReq(begin), pit));
 			if (resolvedBegin == allKeys.begin)
 				readToBegin = true;
 			if (resolvedBegin == ryw->getMaxReadKey())
@@ -969,7 +974,7 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedBegin =
+				KeyReadResult resolvedBegin =
 				    wait(read(ryw,
 				              GetKeyReq(begin),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
@@ -1150,7 +1155,7 @@ public:
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
@@ -1696,7 +1701,7 @@ Future<ValueReadResult> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 	return result;
 }
 
-Future<Key> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot snapshot) {
+Future<KeyReadResult> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1707,7 +1712,7 @@ Future<Key> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot s
 	if (key.getKey() > getMaxReadKey())
 		return key_outside_legal_range();
 
-	Future<Key> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetKeyReq(key), snapshot);
+	Future<KeyReadResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetKeyReq(key), snapshot);
 	reading.add(success(result));
 	return result;
 }

@@ -270,7 +270,8 @@ protected:
 	Reference<AsyncVar<bool>> processingUnhealthy;
 	Future<Void> readyToStart;
 	Future<Void> checkTeamDelay;
-	Optional<double> firstLargeTeamFailure;
+	// A map of teamSize to first failure time
+	std::map<int, Optional<double>> firstLargeTeamFailure;
 	Promise<Void> addSubsetComplete;
 	Future<Void> badTeamRemover;
 	Future<Void> checkInvalidLocalities;

@@ -249,7 +249,7 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 						if (!dontUpdateResults)
 							results.push_back(result);
 					} else if (op.type == Operation::GET_KEY) {
-						Key key = wait(transaction->getKey(op.beginSelector));
+						KeyReadResult key = wait(transaction->getKey(op.beginSelector));
 						if (!dontUpdateResults)
 							self->pushKVPair(results, key, Value());
 					} else if (op.type == Operation::CLEAR) {

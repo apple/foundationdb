@@ -574,12 +574,17 @@ class TestRunner:
             result = result and run.success
             test_picker.add_time(test_files[0], run.run_time, run.summary.out)
             decorate_summary(run.summary.out, file, seed + count, run.buggify_enabled)
-            if unseed_check and run.summary.unseed:
+            if unseed_check and run.summary.unseed >= 0:
                 run.summary.out.append(run.summary.list_simfdb())
             run.summary.out.dump(sys.stdout)
             if not result:
                 return False
-            if count == 0 and unseed_check and run.summary.unseed is not None:
+            if (
+                count == 0
+                and unseed_check
+                and run.summary.unseed is not None
+                and run.summary.unseed >= 0
+            ):
                 run2 = TestRun(
                     binary,
                     file.absolute(),

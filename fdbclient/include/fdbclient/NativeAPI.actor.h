@@ -361,7 +361,7 @@ public:
 
 	[[nodiscard]] Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,

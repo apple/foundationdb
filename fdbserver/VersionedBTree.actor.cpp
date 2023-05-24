@@ -10094,6 +10094,19 @@ RandomKeyGenerator getDefaultKeyGenerator(int maxKeySize) {
 	return keyGen;
 }
 
+double getExternalTimeoutThreshold(const UnitTestParameters& params) {
+#if defined(USE_SANITIZER)
+	double ret = params.getDouble("maxRunTimeSanitizerModeWallTime").orDefault(800);
+#else
+	double ret = params.getDouble("maxRunTimeWallTime").orDefault(250);
+#endif
+
+#if VALGRIND
+	ret *= 20;
+#endif
+	return ret;
+}
+
 } // namespace
 
 TEST_CASE("Lredwood/correctness/btree") {
@@ -10155,6 +10168,9 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state int maxColdStarts = params.getInt("maxColdStarts").orDefault(300);
 	// Max number of records in the BTree or the versioned written map to visit
 	state int64_t maxRecordsRead = params.getInt("maxRecordsRead").orDefault(300e6);
+	// Max test runtime (in seconds). After the test runs for this amount of time, the next iteration of the test
+	// loop will terminate.
+	state double maxRunTimeWallTime = getExternalTimeoutThreshold(params);
 
 	state Optional<std::string> keyGenerator = params.get("keyGenerator");
 	state RandomKeyGenerator keyGen;
@@ -10272,10 +10288,17 @@ TEST_CASE("Lredwood/correctness/btree") {
 	state Future<Void> commit = Void();
 	state int64_t totalPageOps = 0;
 
-	// Check test op limits
+	state double testStartWallTime = timer();
+	state int64_t commitOps = 0;
+
+	// Check test op limits and wall time and commitOps
 	state std::function<bool()> testFinished = [=]() {
+		if (timer() - testStartWallTime >= maxRunTimeWallTime) {
+			noUnseed = true;
+		}
 		return !(totalPageOps < maxPageOps && written.size() < maxVerificationMapEntries &&
-		         totalRecordsRead < maxRecordsRead);
+		         totalRecordsRead < maxRecordsRead && !noUnseed) &&
+		       commitOps > 0;
 	};
 
 	while (!testFinished()) {
@@ -10440,6 +10463,7 @@ TEST_CASE("Lredwood/correctness/btree") {
 				committedVersions.send(v);
 				return Void();
 			});
+			++commitOps;
 
 			if (serialTest) {
 				// Wait for commit, wait for verification, then start new verification

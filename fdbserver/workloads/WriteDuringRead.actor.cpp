@@ -181,7 +181,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			                                          : &self->memoryDatabase,
 			                                      key);
 			*memLimit -= memRes.expectedSize();
-			Key _res = wait(tr->getKey(key, snapshot));
+			KeyReadResult _res = wait(tr->getKey(key, snapshot));
 			Key res = _res;
 			*memLimit += memRes.expectedSize();
 			if (self->useSystemKeys && res > self->getKeyForIndex(self->nodes))

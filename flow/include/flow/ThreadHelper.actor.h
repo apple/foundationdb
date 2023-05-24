@@ -35,6 +35,8 @@
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+FDB_BOOLEAN_PARAM(AddValueReference);
+
 // Helper actor. Do not use directly!
 namespace internal_thread_helper {
 
@@ -335,12 +337,16 @@ public:
 	}
 
 	template <class T>
-	T getAndCast() {
+	T getAndCast(AddValueReference addValueReference) {
 		ThreadSpinLockHolder holder(mutex);
 		if (!isReadyUnsafe())
 			throw future_not_set();
 		if (isErrorUnsafe())
 			throw error;
+
+		if (addValueReference) {
+			addValueReferenceUnsafe();
+		}
 
 		return *static_cast<const T*>(getValuePtrUnsafe());
 	}

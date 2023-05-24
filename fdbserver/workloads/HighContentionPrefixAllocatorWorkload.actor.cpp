@@ -132,8 +132,8 @@ struct HighContentionPrefixAllocatorWorkload : TestWorkload {
 		state Reference<ReadYourWritesTransaction> tr = cx->createTransaction();
 		loop {
 			try {
-				state Key k1 = wait(tr->getKey(firstGreaterOrEqual(""_sr)));
-				Key k2 = wait(tr->getKey(lastLessThan("\xff"_sr)));
+				state KeyReadResult k1 = wait(tr->getKey(firstGreaterOrEqual(""_sr)));
+				KeyReadResult k2 = wait(tr->getKey(lastLessThan("\xff"_sr)));
 				if (!k1.startsWith(self->allocatorSubspace.key()) || !k2.startsWith(self->allocatorSubspace.key())) {
 					TraceEvent(SevError, "HighContentionAllocationWorkloadFailure")
 					    .detail("Reason", "Keys written outside allocator subspace")
