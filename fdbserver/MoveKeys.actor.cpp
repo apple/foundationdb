@@ -1706,6 +1706,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state int retries = 0;
 	state DataMoveMetaData dataMove;
 	state bool complete = false;
+	state bool cancelDataMove = false;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
 	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
@@ -1743,6 +1744,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					TraceEvent(sevDm, "FinishMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
+					if (cancelDataMove) {
+						dataMove.setPhase(DataMoveMetaData::Deleting);
+						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+						wait(tr.commit());
+						throw movekeys_conflict();
+					}
 					destServers.insert(destServers.end(), dataMove.dest.begin(), dataMove.dest.end());
 					std::sort(destServers.begin(), destServers.end());
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
@@ -1792,7 +1799,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						TraceEvent(SevWarnAlways, "FinishMoveShardsInconsistentIDs", relocationIntervalId)
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("ExistingShardID", destId);
-						throw movekeys_conflict();
+						cancelDataMove = true;
+						throw retry();
 					}
 
 					std::sort(dest.begin(), dest.end());
@@ -1978,34 +1986,24 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					tr.reset();
 				}
 			} catch (Error& error) {
-				state Error err = error;
 				TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
-				    .errorUnsuppressed(err)
+				    .errorUnsuppressed(error)
 				    .detail("DataMoveID", dataMoveId);
-				if (err.code() == error_code_retry) {
+				if (error.code() == error_code_retry) {
+					++retries;
 					wait(delay(1));
+				} else if (error.code() == error_code_actor_cancelled) {
+					throw;
 				} else {
-					if (err.code() == error_code_actor_cancelled) {
-						throw;
-					} else if (err.code() == error_code_movekeys_conflict || retries > 100) {
-						// wait(cleanUpDataMove(occ, dataMoveId, lock, startMoveKeysLock, keys, ddEnabledState));
-						Transaction txn(occ);
-						txn.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-						txn.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-						dataMove.setPhase(DataMoveMetaData::Deleting);
-						txn.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
-						wait(txn.commit());
-						throw data_move_cancelled();
-					} else {
-						wait(tr.onError(err));
-						++retries;
-						if (retries % 10 == 0) {
-							TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
-							           "RelocateShard_FinishMoveKeysRetrying",
-							           relocationIntervalId)
-							    .error(err)
-							    .detail("DataMoveID", dataMoveId);
-						}
+					state Error err = error;
+					wait(tr.onError(err));
+					retries++;
+					if (retries % 10 == 0) {
+						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+						           "RelocateShard_FinishMoveKeysRetrying",
+						           relocationIntervalId)
+						    .error(err)
+						    .detail("DataMoveID", dataMoveId);
 					}
 				}
 			}
