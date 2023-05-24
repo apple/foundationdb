@@ -342,6 +342,28 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 
+ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveUpdateCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+
+ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() < 3) {
+		fmt::print("Usage: tenant move <start/update/finish> <TENANT_GROUP>\n\n");
+		return false;
+	}
+	step = tokens[2];
+	if (step == "start"_sr) {
+		tenantMoveStartCommand(db, tokens);
+	} else if (step == "update"_sr) {
+		tenantMoveUpdateCommand(db, tokens);
+	} else if (step == "finish"_sr) {
+		tenantMoveFinishCommand(db, tokens);
+	} else {
+		fmt::print("Usage: tenant move <start/update/finish> <TENANT_GROUP>\n\n");
+		return false;
+	}
+}
+
 void tenantListOutputJson(std::map<TenantName, int64_t> tenants) {
 	json_spirit::mArray tenantsArr;
 	for (auto const& [tenantName, tenantId] : tenants) {
