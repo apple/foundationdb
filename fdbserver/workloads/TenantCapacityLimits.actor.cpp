@@ -76,36 +76,20 @@ struct TenantCapacityLimits : TestWorkload {
 	}
 	ACTOR static Future<Void> _setup(Database cx, TenantCapacityLimits* self) {
 		if (self->useMetacluster) {
-			Reference<IDatabase> threadSafeHandle =
-			    wait(unsafeThreadFutureToFuture(ThreadSafeDatabase::createFromExistingDatabase(cx)));
-
-			MultiVersionApi::api->selectApiVersion(cx->apiVersion.version());
-			self->managementDb = MultiVersionDatabase::debugCreateFromExistingDatabase(threadSafeHandle);
-
-			wait(success(metacluster::createMetacluster(
-			    cx.getReference(), "management_cluster"_sr, self->tenantIdPrefix, false)));
-
 			metacluster::DataClusterEntry entry;
 			entry.capacity.numTenantGroups = 1e9;
-			wait(metacluster::registerCluster(
-			    self->managementDb, "test_data_cluster"_sr, g_simulator->extraDatabases[0], entry));
 
-			ASSERT(g_simulator->extraDatabases.size() == 1);
-			self->dataDb = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0], cx->defaultTenant);
-			// wait for tenant mode change on dataDB
-			wait(success(self->waitDataDbTenantModeChange()));
+			metacluster::util::SimulatedMetacluster simMetacluster =
+			    wait(metacluster::util::createSimulatedMetacluster(cx, self->tenantIdPrefix, entry));
+
+			self->managementDb = simMetacluster.managementDb;
+			ASSERT_EQ(simMetacluster.dataDbs.size(), 1);
+			self->dataDb = simMetacluster.dataDbs.begin()->second;
 		} else {
 			self->dataDb = cx;
 		}
 
 		return Void();
-	}
-
-	Future<Optional<Key>> waitDataDbTenantModeChange() const {
-		return runRYWTransaction(dataDb, [](Reference<ReadYourWritesTransaction> tr) {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			return tr->get("\xff"_sr); // just a meaningless read
-		});
 	}
 
 	Future<Void> start(Database const& cx) override {
@@ -151,8 +135,10 @@ struct TenantCapacityLimits : TestWorkload {
 			try {
 				metacluster::MetaclusterTenantMapEntry entry;
 				entry.tenantName = "test_tenant_metacluster"_sr;
-				wait(metacluster::createTenant(
-				    self->managementDb, entry, metacluster::AssignClusterAutomatically::True));
+				wait(metacluster::createTenant(self->managementDb,
+				                               entry,
+				                               metacluster::AssignClusterAutomatically::True,
+				                               metacluster::IgnoreCapacityLimit::False));
 				ASSERT(false);
 			} catch (Error& e) {
 				ASSERT(e.code() == error_code_cluster_no_capacity);

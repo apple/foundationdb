@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/KeyBackedTypes.h" // for key backed map codecs for tss mapping
+#include "fdbclient/KeyBackedTypes.actor.h" // for key backed map codecs for tss mapping
 #include "fdbclient/MetaclusterRegistration.h"
 #include "fdbclient/MutationList.h"
 #include "fdbclient/Notified.h"
@@ -154,7 +154,7 @@ private:
 	std::unordered_map<UID, StorageServerInterface>* tssMapping = nullptr;
 
 	std::map<int64_t, TenantName>* tenantMap = nullptr;
-	std::unordered_map<TenantName, int64_t>* tenantNameIndex = nullptr;
+	std::unordered_map<TenantName, TenantLookupInfo>* tenantNameIndex = nullptr;
 	std::set<int64_t>* lockedTenants = nullptr;
 	EncryptionAtRestMode encryptMode;
 
@@ -686,7 +686,7 @@ private:
 		TraceEvent("WriteRecoveryKeySet", dbgid).log();
 		if (!initialCommit)
 			txnStateStore->set(KeyValueRef(m.param1, m.param2));
-		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore", probe::decoration::rare);
+		CODE_PROBE(true, "Snapshot created, setting writeRecoveryKey in txnStateStore");
 	}
 
 	void checkSetTenantMapPrefix(MutationRef m) {
@@ -694,10 +694,12 @@ private:
 		if (m.param1.startsWith(prefix)) {
 			TenantMapEntry tenantEntry;
 			if (initialCommit) {
+				CODE_PROBE(true, "Recovering tenant from txn state store");
 				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
 				tenantEntry.tenantLockState = txnStateStoreEntry.tenantLockState;
+				tenantEntry.tenantGroup = txnStateStoreEntry.group;
 			} else {
 				tenantEntry = TenantMapEntry::decode(m.param2);
 			}
@@ -707,18 +709,22 @@ private:
 
 				TraceEvent("CommitProxyInsertTenant", dbgid)
 				    .detail("Tenant", tenantEntry.tenantName)
+				    .detail("Group", tenantEntry.tenantGroup)
 				    .detail("Id", tenantEntry.id)
 				    .detail("Version", version);
 
 				(*tenantMap)[tenantEntry.id] = tenantEntry.tenantName;
 				if (tenantNameIndex) {
-					(*tenantNameIndex)[tenantEntry.tenantName] = tenantEntry.id;
+					(*tenantNameIndex)[tenantEntry.tenantName] =
+					    TenantLookupInfo(tenantEntry.id, tenantEntry.tenantGroup);
 				}
 			}
 			if (lockedTenants) {
 				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
 					lockedTenants->erase(tenantEntry.id);
 				} else {
+					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
 					lockedTenants->insert(tenantEntry.id);
 				}
 			}
@@ -747,19 +753,30 @@ private:
 		}
 	}
 
+	template <bool Versioned>
+	void reportMetaclusterRegistration(ValueRef value) {
+		MetaclusterRegistrationEntryImpl<Versioned> entry = MetaclusterRegistrationEntryImpl<Versioned>::decode(value);
+
+		TraceEvent("SetMetaclusterRegistration", dbgid)
+		    .detail("ClusterType", entry.clusterType)
+		    .detail("MetaclusterID", entry.metaclusterId)
+		    .detail("MetaclusterName", entry.metaclusterName)
+		    .detail("ClusterID", entry.id)
+		    .detail("ClusterName", entry.name)
+		    .detail("MetaclusterVersion", entry.version);
+	}
+
 	void checkSetMetaclusterRegistration(MutationRef m) {
 		if (m.param1 == metacluster::metadata::metaclusterRegistration().key) {
-			MetaclusterRegistrationEntry entry = MetaclusterRegistrationEntry::decode(m.param2);
-
-			TraceEvent("SetMetaclusterRegistration", dbgid)
-			    .detail("ClusterType", entry.clusterType)
-			    .detail("MetaclusterID", entry.metaclusterId)
-			    .detail("MetaclusterName", entry.metaclusterName)
-			    .detail("ClusterID", entry.id)
-			    .detail("ClusterName", entry.name);
+			if (MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites) {
+				reportMetaclusterRegistration<false>(m.param2);
+			} else {
+				CODE_PROBE(true, "Writing metacluster registration with version validation");
+				reportMetaclusterRegistration<true>(m.param2);
+			}
 
 			Optional<Value> value =
-			    txnStateStore->readValue(metacluster::metadata::metaclusterRegistration().key).get();
+			    txnStateStore->readValue(metacluster::metadata::unversionedMetaclusterRegistration().key).get();
 			if (!initialCommit) {
 				txnStateStore->set(KeyValueRef(m.param1, m.param2));
 			}
@@ -1163,6 +1180,7 @@ private:
 					auto endItr = endId.present()
 					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
 					                  : lockedTenants->end();
+					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
 					lockedTenants->erase(startItr, endItr);
 				}
 			}

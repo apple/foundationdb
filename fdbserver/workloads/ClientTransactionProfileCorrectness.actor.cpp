@@ -310,8 +310,8 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 		state Key clientLatencyAtomicCtr = CLIENT_LATENCY_INFO_CTR_PREFIX.withPrefix(fdbClientInfoPrefixRange.begin);
 		state int64_t counter;
 		state RangeResult txInfoEntries;
-		Optional<Value> ctrValue =
-		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<Optional<Value>> {
+		ValueReadResult ctrValue =
+		    wait(runRYWTransaction(cx, [=](Reference<ReadYourWritesTransaction> tr) -> Future<ValueReadResult> {
 			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			    tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			    return tr->get(clientLatencyAtomicCtr);

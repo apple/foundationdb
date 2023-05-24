@@ -54,9 +54,18 @@ ACTOR Future<MetaclusterMetrics> getMetaclusterMetricsImpl(Database db) {
 			    .detail("TenantGroupCapacity", metrics.tenantGroupCapacity)
 			    .detail("TenantGroupsAllocated", metrics.tenantGroupsAllocated);
 
+			CODE_PROBE(true, "Got metacluster metrics");
+
 			return metrics;
 		} catch (Error& e) {
 			TraceEvent("MetaclusterUpdaterError").error(e);
+			if (e.code() == error_code_unsupported_metacluster_version) {
+				TraceEvent(SevWarnAlways, "MetaclusterMetricsFailure").error(e);
+				MetaclusterMetrics metrics;
+				metrics.error = e.what();
+				return metrics;
+			}
+
 			wait(tr->onError(e));
 		}
 	}

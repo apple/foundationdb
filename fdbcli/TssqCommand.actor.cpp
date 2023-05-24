@@ -22,7 +22,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 
 #include "flow/Arena.h"
@@ -65,8 +65,8 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 
 			// Do some validation first to make sure the command is valid
 			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> serverListValueF = tr->get(serverListKeyFor(tssId));
-			Optional<Value> serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
+			state ThreadFuture<ValueReadResult> serverListValueF = tr->get(serverListKeyFor(tssId));
+			ValueReadResult serverListValue = wait(safeThreadFutureToFuture(serverListValueF));
 			if (!serverListValue.present()) {
 				printf("No TSS %s found in cluster!\n", tssId.toString().c_str());
 				return false;
@@ -78,8 +78,8 @@ ACTOR Future<bool> tssQuarantine(Reference<IDatabase> db, bool enable, UID tssId
 			}
 
 			// hold the returned standalone object's memory
-			state ThreadFuture<Optional<Value>> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
-			Optional<Value> currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
+			state ThreadFuture<ValueReadResult> currentQuarantineValueF = tr->get(tssQuarantineKeyFor(tssId));
+			ValueReadResult currentQuarantineValue = wait(safeThreadFutureToFuture(currentQuarantineValueF));
 			if (enable && currentQuarantineValue.present()) {
 				printf("TSS %s already in quarantine, doing nothing.\n", tssId.toString().c_str());
 				return false;

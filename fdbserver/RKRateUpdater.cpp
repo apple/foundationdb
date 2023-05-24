@@ -7,7 +7,7 @@
 #include "flow/UnitTest.h"
 
 RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
-  : limits(limits), lastWarning(0), ratekeeperId(ratekeeperId) {}
+  : limits(limits), lastWarning(0), blobWorkerTime(now()), ratekeeperId(ratekeeperId) {}
 
 RKRateUpdater::~RKRateUpdater() = default;
 
@@ -17,10 +17,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKConfigurationMonitor const& configurationMonitor,
                            IRKRecoveryTracker const& recoveryTracker,
                            Deque<double> const& actualTpsHistory,
-                           bool anyBlobRanges,
-                           Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-                           double& blobWorkerTime,
-                           double& unblockedAssignmentTime) {
+                           IRKBlobMonitor& blobMonitor) {
 	// double controlFactor = ;  // dt / eFoldingTime
 	double actualTps = getActualTps(rateServer, metricsTracker);
 
@@ -213,7 +210,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 
 		limitingDurabilityLag = -1 * ss->first;
 		if (limitingDurabilityLag > limits.durabilityLagTargetVersions &&
-		    actualTpsHistory.size() > SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
+		    actualTpsHistory.size() >= SERVER_KNOBS->NEEDED_TPS_HISTORY_SAMPLES) {
 			if (limits.durabilityLagLimit == std::numeric_limits<double>::infinity()) {
 				double maxTps = 0;
 				for (int i = 0; i < actualTpsHistory.size(); i++) {
@@ -263,6 +260,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		loop {
 			auto secondEntry = version_transactions.begin();
 			++secondEntry;
+			auto const& blobWorkerVersionHistory = blobMonitor.getVersionHistory();
 			if (secondEntry != version_transactions.end() &&
 			    secondEntry->second.created < now() - (2 * SERVER_KNOBS->TARGET_BW_LAG) &&
 			    (blobWorkerVersionHistory.empty() || secondEntry->first < blobWorkerVersionHistory.front().second)) {
@@ -273,9 +271,11 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		}
 	}
 
-	if (configurationMonitor.areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED && anyBlobRanges) {
+	if (configurationMonitor.areBlobGranulesEnabled() && SERVER_KNOBS->BW_THROTTLING_ENABLED &&
+	    blobMonitor.hasAnyRanges()) {
 		Version lastBWVer = 0;
 		auto lastIter = version_transactions.end();
+		auto const& blobWorkerVersionHistory = blobMonitor.getVersionHistory();
 		if (!blobWorkerVersionHistory.empty()) {
 			lastBWVer = blobWorkerVersionHistory.back().second;
 			lastIter = version_transactions.lower_bound(lastBWVer);
@@ -288,6 +288,9 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 			}
 		}
 		double blobWorkerLag = (now() - blobWorkerTime) - recoveryTracker.getRecoveryDuration(lastBWVer);
+		if (requireSmallBlobVersionLag() && limits.bwLagTarget == SERVER_KNOBS->TARGET_BW_LAG) {
+			ASSERT_LE(blobWorkerLag, 3 * limits.bwLagTarget);
+		}
 		if (blobWorkerLag > limits.bwLagTarget / 2 && !blobWorkerVersionHistory.empty()) {
 			double elapsed = blobWorkerVersionHistory.back().first - blobWorkerVersionHistory.front().first;
 			Version firstBWVer = blobWorkerVersionHistory.front().second;
@@ -299,8 +302,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					double targetRateRatio;
 					if (blobWorkerLag > 3 * limits.bwLagTarget) {
 						targetRateRatio = 0;
-						ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 					} else if (blobWorkerLag > limits.bwLagTarget) {
 						targetRateRatio = SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT;
 					} else {
@@ -312,7 +313,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					    lastIter->second.batchTransactions - firstIter->second.batchTransactions;
 					int64_t normalTransactions = totalTransactions - batchTransactions;
 					double bwTPS;
-					if (limits.bwLagTarget == SERVER_KNOBS->TARGET_BW_LAG) {
+					if (limits.priority == TransactionPriority::DEFAULT) {
 						bwTPS = targetRateRatio * (totalTransactions) / elapsed;
 					} else {
 						bwTPS = std::max(0.0, ((targetRateRatio * (totalTransactions)) - normalTransactions) / elapsed);
@@ -357,8 +358,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 							    .detail("RecoveryDuration", recoveryTracker.getRecoveryDuration(lastBWVer));
 						}
 						limitReason = limitReason_t::blob_worker_missing;
-						ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-						       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 					} else if (bwTPS < limits.tpsLimit) {
 						if (verbose) {
 							TraceEvent("RatekeeperLimitReasonDetails")
@@ -386,8 +385,6 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 					;
 				}
 				limitReason = limitReason_t::blob_worker_missing;
-				ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-				       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 			}
 		} else if (blobWorkerLag > 3 * limits.bwLagTarget) {
 			limits.tpsLimit = 0.0;
@@ -399,12 +396,10 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 				    .detail("HistorySize", blobWorkerVersionHistory.size());
 			}
 			limitReason = limitReason_t::blob_worker_missing;
-			ASSERT(!g_network->isSimulated() || limits.bwLagTarget != SERVER_KNOBS->TARGET_BW_LAG ||
-			       now() < FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY);
 		}
 	} else {
 		blobWorkerTime = now();
-		unblockedAssignmentTime = now();
+		blobMonitor.setUnblockedAssignmentTimeNow();
 	}
 
 	healthMetrics.worstStorageQueue = worstStorageQueueStorageServer;
@@ -691,6 +686,11 @@ void RKRateUpdater::updateHealthMetricsStorageStats(IRKMetricsTracker const& met
 		ssMetrics.cpuUsage = ss.lastReply.cpuUsage;
 		ssMetrics.diskUsage = ss.lastReply.diskUsage;
 	}
+}
+
+bool IRKRateUpdater::requireSmallBlobVersionLag() {
+	return g_network->isSimulated() &&
+	       now() > FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS + SERVER_KNOBS->BW_RK_SIM_QUIESCE_DELAY;
 }
 
 RatekeeperLimits::RatekeeperLimits(TransactionPriority priority,

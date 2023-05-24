@@ -26,7 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/Status.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/StatusClient.h"
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/DatabaseContext.h"
@@ -404,6 +404,28 @@ static std::vector<std::vector<StringRef>> parseLine(std::string& line, bool& er
 			case ';':
 				line.erase(i, 1);
 				break;
+			// Handle \uNNNN utf-8 characters from JSON strings but only as a single byte
+			// Return an error for a sequence out of range for a single byte
+			case 'u': {
+				if (i + 6 > line.length()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				char* pEnd;
+				save = line[i + 6];
+				line[i + 6] = 0;
+				unsigned long val = strtoul(line.data() + i + 2, &pEnd, 16);
+				ent = char(val);
+				if (*pEnd || val > std::numeric_limits<unsigned char>::max()) {
+					err = true;
+					ret.push_back(std::move(buf));
+					return ret;
+				}
+				line[i + 6] = save;
+				line.replace(i, 6, 1, ent);
+				break;
+			}
 			case 'x':
 				if (i + 4 > line.length()) {
 					err = true;
@@ -666,8 +688,8 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		state ThreadFuture<ValueReadResult> statusValueF = tr->get("\xff\xff/status/json"_sr);
+		ValueReadResult statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 			return Void();
@@ -898,6 +920,7 @@ struct CLIOptions {
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
+	bool tlsDisablePlainTextConnection = false;
 	uint64_t memLimit = 8uLL << 30;
 
 	std::vector<std::pair<std::string, std::string>> knobs;
@@ -1016,6 +1039,9 @@ struct CLIOptions {
 			break;
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
+			break;
+		case TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION:
+			tlsDisablePlainTextConnection = true;
 			break;
 
 		case OPT_HELP:
@@ -1272,9 +1298,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							       "To include a literal quotation mark in a token, precede it with a backslash\n"
 							       "(\\\"hello\\ world\\\").\n"
 							       "\n"
-							       "To express a binary value, encode each byte as a two-digit hex byte, preceded\n"
-							       "by \\x (e.g. \\x20 for a space character, or \\x0a\\x00\\x00\\x00 for a\n"
-							       "32-bit, little-endian representation of the integer 10).\n"
+							       "To express a binary value, encode each byte as either\n"
+							       "   a) a two-digit hex byte preceded by \\x\n"
+							       "   b) a four-digit hex byte in the range of 0x0000-0x00FF preceded by \\u\n"
+							       "(e.g. \\x20 or \\u0020 for a space character, or \\x0a\\x00\\x00\\x00 or\n"
+							       "\\u000a\\u0000\\u0000\\u0000 for a 32-bit, little-endian representation of\n"
+							       "the integer 10.  Any byte can use either syntax, so \\u000a\\x00\\x00\\x00\n"
+							       "is also a valid representation of a little-endian value of 10).\n"
 							       "\n"
 							       "All keys and values are displayed by the fdbcli with non-printable characters\n"
 							       "and spaces encoded as two-digit hex bytes.\n\n");
@@ -1415,13 +1445,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 
 				if (tokencmp(tokens[0], "blobkey")) {
 					bool _result = wait(makeInterruptable(blobKeyCommandActor(localDb, tenantEntry, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "blobrestore")) {
-					bool _result = wait(makeInterruptable(blobRestoreCommandActor(localDb, tokens)));
 					if (!_result)
 						is_error = true;
 					continue;
@@ -1581,9 +1604,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								continue;
 							}
 						}
-						state ThreadFuture<Optional<Value>> valueF =
+						state ThreadFuture<ValueReadResult> valueF =
 						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
-						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -1894,10 +1917,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							t.append(tokens[2]);
 						}
 						t.append(tokens[1]);
-						state ThreadFuture<Optional<Value>> valueF_knob =
+						state ThreadFuture<ValueReadResult> valueF_knob =
 						    getTransaction(configDb, tenant, config_tr, options, intrans)->get(t.pack());
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
 						std::string knob_class = printable(tokens[1]);
 						if (tokens.size() == 3) {
 							std::string config_class = (" in configuration class " + printable(tokens[2]));
@@ -2154,6 +2176,13 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
+				if (tokencmp(tokens[0], "rangeconfig")) {
+					bool _result = wait(makeInterruptable(rangeConfigCommandActor(localDb, tokens)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
 				fprintf(stderr, "ERROR: Unknown command `%s'. Try `help'?\n", formatStringRef(tokens[0]).c_str());
 				is_error = true;
 			}
@@ -2372,6 +2401,15 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	if (opt.tlsDisablePlainTextConnection) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_DISABLE_PLAINTEXT_CONNECTION);
+		} catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
+			return 1;
+		}
+	}
+
 	try {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	} catch (Error& e) {
@@ -2386,6 +2424,7 @@ int main(int argc, char** argv) {
 		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
 		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
 		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
+		printf("\tPlaintext Connection Disable: %s\n", tlsConfig.getDisablePlainTextConnection() ? "true" : "false");
 		try {
 			LoadedTLSConfig loaded = tlsConfig.loadSync();
 			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");

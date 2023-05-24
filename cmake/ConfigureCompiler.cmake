@@ -339,6 +339,8 @@ if (CLANG OR ICX)
     -Wno-unused-command-line-argument
     # Disable C++ 20 warning for ambiguous operator.
     -Wno-ambiguous-reversed-operator
+    # Required to compile googlebenchmark:
+    -Wno-error=shift-sign-overflow
     )
   if (USE_CCACHE)
     add_compile_options(

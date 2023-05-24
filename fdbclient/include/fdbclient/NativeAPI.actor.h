@@ -48,6 +48,7 @@
 #define CLIENT_BUGGIFY CLIENT_BUGGIFY_WITH_PROB(P_BUGGIFIED_SECTION_FIRES[int(BuggifyType::Client)])
 
 FDB_BOOLEAN_PARAM(UseProvisionalProxies);
+FDB_BOOLEAN_PARAM(UseRawAccess);
 
 // Incomplete types that are reference counted
 class DatabaseContext;
@@ -244,13 +245,14 @@ class Tenant : public ReferenceCounted<Tenant>, public FastAllocated<Tenant>, No
 public:
 	Tenant(Database cx, TenantName name);
 	explicit Tenant(int64_t id);
-	Tenant(Future<int64_t> id, Optional<TenantName> name);
+	Tenant(Future<TenantLookupInfo> tenantLookupFuture, Optional<TenantName> name);
 
 	static Tenant* allocateOnForeignThread() { return (Tenant*)Tenant::operator new(sizeof(Tenant)); }
 
-	Future<Void> ready() const { return success(idFuture); }
+	Future<Void> ready() const { return success(lookupFuture); }
 	int64_t id() const;
-	Future<int64_t> getIdFuture() const;
+	Optional<TenantGroupName> tenantGroup() const;
+	Future<TenantLookupInfo> getLookupFuture() const;
 	KeyRef prefix() const;
 	std::string description() const;
 
@@ -258,7 +260,7 @@ public:
 
 private:
 	mutable int64_t bigEndianId = -1;
-	Future<int64_t> idFuture;
+	Future<TenantLookupInfo> lookupFuture;
 };
 
 template <>
@@ -357,9 +359,9 @@ public:
 	Future<Version> getRawReadVersion();
 	Optional<Version> getCachedReadVersion() const;
 
-	[[nodiscard]] Future<Optional<Value>> get(const Key& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False);
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
-	[[nodiscard]] Future<Key> getKey(const KeySelector& key, Snapshot = Snapshot::False);
+	[[nodiscard]] Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
 	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
 	                                           const KeySelector& end,
@@ -413,19 +415,19 @@ private:
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -437,7 +439,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<Standalone<RangeResultRef>>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,

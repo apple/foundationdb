@@ -4,8 +4,9 @@ from argparse import ArgumentParser, RawDescriptionHelpFormatter
 
 
 def CreateTmpFdbClusterArgParser(description):
-    parser = ArgumentParser(formatter_class=RawDescriptionHelpFormatter,
-                            description=description)
+    parser = ArgumentParser(
+        formatter_class=RawDescriptionHelpFormatter, description=description
+    )
     parser.add_argument(
         "--build-dir",
         "-b",
@@ -26,13 +27,16 @@ def CreateTmpFdbClusterArgParser(description):
         "--disable-tenants",
         help="Do not enable tenant mode",
         action="store_true",
-        default=False
+        default=False,
     )
     parser.add_argument(
         "--blob-granules-enabled", help="Enable blob granules", action="store_true"
     )
     parser.add_argument(
-        "--tls-enabled", help="Enable TLS (with test-only certificates)", action="store_true")
+        "--tls-enabled",
+        help="Enable TLS (with test-only certificates)",
+        action="store_true",
+    )
     parser.add_argument(
         "--server-cert-chain-len",
         help="Length of server TLS certificate chain including root CA. Negative value deliberately generates expired leaf certificate for TLS testing. Only takes effect with --tls-enabled.",

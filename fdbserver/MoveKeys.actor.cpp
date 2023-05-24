@@ -20,17 +20,26 @@
 
 #include <vector>
 
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "flow/Error.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+template <typename... T>
+static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
+	if (g_network->isSimulated())
+		fmt::print(fmt, std::forward<T>(args)...);
+}
 
 namespace {
 struct Shard {
@@ -155,11 +164,11 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 
 ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointIds, UID logId) {
 	TraceEvent(SevDebug, "DataMoveDeleteCheckpoints", logId).detail("Checkpoints", describe(checkpointIds));
-	std::vector<Future<Optional<Value>>> checkpointEntries;
+	std::vector<Future<ValueReadResult>> checkpointEntries;
 	for (const UID& id : checkpointIds) {
 		checkpointEntries.push_back(tr->get(checkpointKeyFor(id)));
 	}
-	std::vector<Optional<Value>> checkpointValues = wait(getAll(checkpointEntries));
+	std::vector<ValueReadResult> checkpointValues = wait(getAll(checkpointEntries));
 
 	for (int i = 0; i < checkpointIds.size(); ++i) {
 		const auto& value = checkpointValues[i];
@@ -180,41 +189,64 @@ ACTOR Future<Void> deleteCheckpoints(Transaction* tr, std::set<UID> checkpointId
 }
 } // namespace
 
-bool DDEnabledState::isDDEnabled() const {
-	return ddEnabled;
+bool DDEnabledState::sameId(const UID& id) const {
+	return ddEnabledStatusUID == id;
+}
+bool DDEnabledState::isEnabled() const {
+	return stateValue == ENABLED;
 }
 
-bool DDEnabledState::setDDEnabled(bool status, UID snapUID) {
-	TraceEvent("SetDDEnabled").detail("Status", status).detail("SnapUID", snapUID);
-	ASSERT(snapUID != UID());
-	if (!status) {
-		// disabling DD
-		if (ddEnabledStatusUID != UID()) {
-			// disable DD when a disable is already in progress not allowed
-			return false;
-		}
-		ddEnabled = status;
-		ddEnabledStatusUID = snapUID;
-		return true;
+bool DDEnabledState::isBlobRestorePreparing() const {
+	return stateValue == BLOB_RESTORE_PREPARING;
+}
+
+bool DDEnabledState::trySetSnapshot(UID requesterId) {
+	ASSERT(requesterId != UID());
+	// disabling DD
+	if (!isEnabled()) {
+		// only allow state modification to snapshot when DD is enabled.
+		return false;
 	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = SNAPSHOT;
+	TraceEvent("SetDDSnapshot").detail("RequesterUID", requesterId);
+
+	return true;
+}
+
+bool DDEnabledState::trySetEnabled(UID requesterId) {
+	ASSERT(requesterId != UID());
 	// enabling DD
-	if (snapUID != ddEnabledStatusUID) {
-		// enabling DD not allowed if UID does not match with the disable request
+	if (!sameId(requesterId)) {
+		// enabling DD not allowed if UID does not match with the previous request
 		return false;
 	}
 	// reset to default status
-	ddEnabled = status;
 	ddEnabledStatusUID = UID();
+	stateValue = ENABLED;
+	TraceEvent("SetDDEnabled").detail("RequesterUID", requesterId);
+	return true;
+}
+
+bool DDEnabledState::trySetBlobRestorePreparing(UID requesterId) {
+	ASSERT(requesterId != UID());
+	if (!isEnabled()) {
+		// only allow state modification to RestorePreparing when DD is enabled.
+		return false;
+	}
+	ddEnabledStatusUID = requesterId;
+	stateValue = BLOB_RESTORE_PREPARING;
+	TraceEvent("SetDDBlobRestorePreparing").detail("RequesterUID", requesterId);
 	return true;
 }
 
 ACTOR Future<Void> readMoveKeysLock(Transaction* tr, MoveKeysLock* lock) {
 	{
-		Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+		ValueReadResult readVal = wait(tr->get(moveKeysLockOwnerKey));
 		lock->prevOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 	}
 	{
-		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		ValueReadResult readVal = wait(tr->get(moveKeysLockWriteKey));
 		lock->prevWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 	}
 	return Void();
@@ -266,21 +298,15 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
-                                            MoveKeysLock lock,
-                                            const DDEnabledState* ddEnabledState,
-                                            bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	if (!ddEnabledState->isDDEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
-		throw movekeys_conflict();
-	}
-	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
+
+	ValueReadResult readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
 	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
-		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
+		ValueReadResult readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
@@ -319,6 +345,17 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		throw movekeys_conflict();
 	}
+}
+
+Future<Void> checkMoveKeysLock(Transaction* tr,
+                               MoveKeysLock const& lock,
+                               const DDEnabledState* ddEnabledState,
+                               bool isWrite = true) {
+	if (!ddEnabledState->isEnabled()) {
+		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
+		throw movekeys_conflict();
+	}
+	return checkPersistentMoveKeysLock(tr, lock, isWrite);
 }
 
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
@@ -491,13 +528,13 @@ ACTOR Future<std::vector<UID>> addReadWriteDestinations(KeyRangeRef shard,
 
 // Returns storage servers selected from 'candidates', who is serving a read-write copy of 'range'.
 ACTOR Future<std::vector<UID>> pickReadWriteServers(Transaction* tr, std::vector<UID> candidates, KeyRangeRef range) {
-	std::vector<Future<Optional<Value>>> serverListEntries;
+	std::vector<Future<ValueReadResult>> serverListEntries;
 
 	for (const UID id : candidates) {
 		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
 	}
 
-	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+	std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 
 	std::vector<StorageServerInterface> ssis;
 	for (auto& v : serverListValues) {
@@ -534,7 +571,7 @@ ACTOR Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards
                                                               int maxServers) {
 	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-	std::vector<Future<Optional<Value>>> serverListEntries;
+	std::vector<Future<ValueReadResult>> serverListEntries;
 	std::set<UID> fetching;
 	for (int i = 0; i < shards.size() - 1; ++i) {
 		std::vector<UID> src;
@@ -557,7 +594,7 @@ ACTOR Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards
 		}
 	}
 
-	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+	std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 
 	std::map<UID, StorageServerInterface> ssiMap;
 	for (int s = 0; s < serverListValues.size(); s++) {
@@ -665,17 +702,15 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 						loadedTssMapping = true;
 					}
 
-					std::vector<Future<Optional<Value>>> serverListEntries;
+					std::vector<Future<ValueReadResult>> serverListEntries;
 					serverListEntries.reserve(servers.size());
 					for (int s = 0; s < servers.size(); s++)
 						serverListEntries.push_back(tr->get(serverListKeyFor(servers[s])));
-					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 
 					for (int s = 0; s < serverListValues.size(); s++) {
+						// This can happen if a SS is removed after a shard move. See comments on PR #10110.
 						if (!serverListValues[s].present()) {
-							// Attempt to move onto a server that isn't in serverList (removed or never added to the
-							// database) This can happen (why?) and is handled by the data distribution algorithm
-							// FIXME: Answer why this can happen?
 							CODE_PROBE(true, "start move keys moving to a removed server", probe::decoration::rare);
 							throw move_to_removed_server();
 						}
@@ -865,17 +900,20 @@ ACTOR Future<Void> checkFetchingState(Database cx,
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
-			std::vector<Future<Optional<Value>>> serverListEntries;
+			std::vector<Future<ValueReadResult>> serverListEntries;
 			serverListEntries.reserve(dest.size());
 			for (int s = 0; s < dest.size(); s++)
 				serverListEntries.push_back(tr.get(serverListKeyFor(dest[s])));
-			state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+			state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 			std::vector<Future<Void>> requests;
 			state std::vector<Future<Void>> tssRequests;
 			for (int s = 0; s < serverListValues.size(); s++) {
+				// We don't think this condition should be triggered, but we're not sure if there are conditions
+				// that might cause it to trigger. Adding this assertion to find any such cases via testing.
+				ASSERT_WE_THINK(serverListValues[s].present());
 				if (!serverListValues[s].present()) {
 					// FIXME: Is this the right behavior?  dataMovementComplete will never be sent!
-					CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
+					// CODE_PROBE(true, "check fetching state moved to removed server", probe::decoration::rare);
 					throw move_to_removed_server();
 				}
 				auto si = decodeServerListValue(serverListValues[s].get());
@@ -1113,11 +1151,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					// for smartQuorum
 					state std::vector<StorageServerInterface> storageServerInterfaces;
-					std::vector<Future<Optional<Value>>> serverListEntries;
+					std::vector<Future<ValueReadResult>> serverListEntries;
 					serverListEntries.reserve(newDestinations.size());
 					for (int s = 0; s < newDestinations.size(); s++)
 						serverListEntries.push_back(tr.get(serverListKeyFor(newDestinations[s])));
-					state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 
 					releaser.release();
 
@@ -1313,7 +1351,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+				ValueReadResult val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					DataMoveMetaData dmv = decodeDataMoveValue(val.get()); // dmv: Data move value.
 					dataMove = dmv;
@@ -1350,13 +1388,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId);
 				}
 
-				std::vector<Future<Optional<Value>>> serverListEntries;
+				std::vector<Future<ValueReadResult>> serverListEntries;
 				serverListEntries.reserve(servers.size());
 				for (int s = 0; s < servers.size(); s++) {
 					serverListEntries.push_back(tr.get(serverListKeyFor(servers[s])));
 				}
 
-				std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+				std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 				for (int s = 0; s < serverListValues.size(); s++) {
 					if (!serverListValues[s].present()) {
 						// Attempt to move onto a server that isn't in serverList (removed or never added to the
@@ -1430,7 +1468,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 									wait(cleanUpDataMove(occ, destId, lock, startMoveKeysLock, keys, ddEnabledState));
 									throw retry();
 								} else {
-									Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
+									ValueReadResult val = wait(tr.get(dataMoveKeyFor(destId)));
 									ASSERT(val.present());
 									DataMoveMetaData dmv = decodeDataMoveValue(val.get());
 									TraceEvent(
@@ -1678,7 +1716,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+				ValueReadResult val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
 					TraceEvent(SevDebug, "FinishMoveShardsFoundDataMove", relocationIntervalId)
@@ -1768,12 +1806,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				}
 
 				state std::vector<StorageServerInterface> storageServerInterfaces;
-				std::vector<Future<Optional<Value>>> serverListEntries;
+				std::vector<Future<ValueReadResult>> serverListEntries;
 				serverListEntries.reserve(newDestinations.size());
 				for (const UID& id : newDestinations) {
 					serverListEntries.push_back(tr.get(serverListKeyFor(id)));
 				}
-				state std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+				state std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 
 				releaser.release();
 
@@ -1907,40 +1945,41 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// FIXME: don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
 			state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-			state Future<Optional<Value>> fv = tr->get(serverListKeyFor(server.id()));
+			state Future<ValueReadResult> fv = tr->get(serverListKeyFor(server.id()));
 
-			state Future<Optional<Value>> fExclProc = tr->get(
+			state Future<ValueReadResult> fExclProc = tr->get(
 			    StringRef(encodeExcludedServersKey(AddressExclusion(server.address().ip, server.address().port))));
-			state Future<Optional<Value>> fExclIP =
+			state Future<ValueReadResult> fExclIP =
 			    tr->get(StringRef(encodeExcludedServersKey(AddressExclusion(server.address().ip))));
-			state Future<Optional<Value>> fFailProc = tr->get(
+			state Future<ValueReadResult> fFailProc = tr->get(
 			    StringRef(encodeFailedServersKey(AddressExclusion(server.address().ip, server.address().port))));
-			state Future<Optional<Value>> fFailIP =
+			state Future<ValueReadResult> fFailIP =
 			    tr->get(StringRef(encodeFailedServersKey(AddressExclusion(server.address().ip))));
 
-			state Future<Optional<Value>> fExclProc2 =
+			state Future<ValueReadResult> fExclProc2 =
 			    server.secondaryAddress().present()
 			        ? tr->get(StringRef(encodeExcludedServersKey(
 			              AddressExclusion(server.secondaryAddress().get().ip, server.secondaryAddress().get().port))))
-			        : Future<Optional<Value>>(Optional<Value>());
-			state Future<Optional<Value>> fExclIP2 =
+			        : Future<ValueReadResult>(ValueReadResult());
+			state Future<ValueReadResult> fExclIP2 =
 			    server.secondaryAddress().present()
 			        ? tr->get(StringRef(encodeExcludedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
-			        : Future<Optional<Value>>(Optional<Value>());
-			state Future<Optional<Value>> fFailProc2 =
+			        : Future<ValueReadResult>(ValueReadResult());
+			state Future<ValueReadResult> fFailProc2 =
 			    server.secondaryAddress().present()
 			        ? tr->get(StringRef(encodeFailedServersKey(
 			              AddressExclusion(server.secondaryAddress().get().ip, server.secondaryAddress().get().port))))
-			        : Future<Optional<Value>>(Optional<Value>());
-			state Future<Optional<Value>> fFailIP2 =
+			        : Future<ValueReadResult>(ValueReadResult());
+			state Future<ValueReadResult> fFailIP2 =
 			    server.secondaryAddress().present()
 			        ? tr->get(StringRef(encodeFailedServersKey(AddressExclusion(server.secondaryAddress().get().ip))))
-			        : Future<Optional<Value>>(Optional<Value>());
+			        : Future<ValueReadResult>(ValueReadResult());
 
-			state std::vector<Future<Optional<Value>>> localityExclusions;
+			state std::vector<Future<ValueReadResult>> localityExclusions;
 			std::map<std::string, std::string> localityData = server.locality.getAllData();
 			for (const auto& l : localityData) {
 				localityExclusions.push_back(tr->get(StringRef(encodeExcludedLocalityKey(
@@ -2049,15 +2088,15 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				tr->addReadConflictRange(conflictRange);
 				tr->addWriteConflictRange(conflictRange);
 
-				StorageMetadataType metadata(StorageMetadataType::currentTime());
-				metadataMap.set(tr, server.id(), metadata);
-
 				if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 					// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
 					TraceEvent(SevError, "TSSIdentityMappingEnabled").log();
 					tssMapDB.set(tr, server.id(), server.id());
 				}
 			}
+
+			StorageMetadataType metadata(StorageMetadataType::currentTime());
+			metadataMap.set(tr, server.id(), metadata);
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
@@ -2123,7 +2162,8 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(checkMoveKeysLock(&(tr->getTransaction()), lock, ddEnabledState));
-			TraceEvent("RemoveStorageServerLocked")
+			TraceEvent("RemoveStorageServer")
+			    .detail("State", "Locked")
 			    .detail("ServerID", serverID)
 			    .detail("Version", tr->getReadVersion().get());
 
@@ -2132,12 +2172,14 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 				CODE_PROBE(true,
 				           "The caller had a transaction in flight that assigned keys to the server.  Wait for it to "
 				           "reverse its mistake.");
-				TraceEvent(SevWarn, "NoCanRemove").detail("Count", noCanRemoveCount++).detail("ServerID", serverID);
+				TraceEvent(SevWarn, "RemoveStorageServer")
+				    .detail("State", "CanRemoveFailed")
+				    .detail("ServerID", serverID)
+				    .detail("Count", noCanRemoveCount++);
 				wait(delayJittered(SERVER_KNOBS->REMOVE_RETRY_DELAY, TaskPriority::DataDistributionLaunch));
 				tr->reset();
-				TraceEvent("RemoveStorageServerRetrying").detail("CanRemove", canRemove);
 			} else {
-				state Future<Optional<Value>> fListKey = tr->get(serverListKeyFor(serverID));
+				state Future<ValueReadResult> fListKey = tr->get(serverListKeyFor(serverID));
 				state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY);
 				state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
@@ -2202,7 +2244,7 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 					tssMapDB.erase(tr, tssPairID.get());
 					// remove the TSS from quarantine, if it was in quarantine
 					Key tssQuarantineKey = tssQuarantineKeyFor(serverID);
-					Optional<Value> tssInQuarantine = wait(tr->get(tssQuarantineKey));
+					ValueReadResult tssInQuarantine = wait(tr->get(tssQuarantineKey));
 					if (tssInQuarantine.present()) {
 						tr->clear(tssQuarantineKeyFor(serverID));
 					}
@@ -2212,12 +2254,13 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				wait(tr->commit());
+				TraceEvent("RemoveStorageServer").detail("State", "Success").detail("ServerID", serverID);
 				return Void();
 			}
 		} catch (Error& e) {
 			state Error err = e;
 			wait(tr->onError(e));
-			TraceEvent("RemoveStorageServerRetrying").error(err);
+			TraceEvent("RemoveStorageServer").error(err).detail("State", "Retry").detail("ServerID", serverID);
 		}
 	}
 }
@@ -2306,7 +2349,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 						}
 
 						if (destId.isValid() && destId != anonymousShardId) {
-							Optional<Value> val = wait(tr.get(dataMoveKeyFor(destId)));
+							ValueReadResult val = wait(tr.get(dataMoveKeyFor(destId)));
 							if (val.present()) {
 								state DataMoveMetaData dataMove = decodeDataMoveValue(val.get());
 								ASSERT(!dataMove.ranges.empty());
@@ -2429,7 +2472,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
-				Optional<Value> val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
+				ValueReadResult val = wait(tr.get(dataMoveKeyFor(dataMoveId)));
 				if (val.present()) {
 					dataMove = decodeDataMoveValue(val.get());
 					ASSERT(!dataMove.ranges.empty());
@@ -2681,7 +2724,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 	for (auto& s : servers) {
 		tr.set(arena, serverTagKeyFor(s.id()), serverTagValue(server_tag[s.id()]));
 		tr.set(arena, serverListKeyFor(s.id()), serverListValue(s));
-		tr.set(arena, metadataMap.serializeKey(s.id()), metadataMap.serializeValue(metadata));
+		tr.set(arena, metadataMap.packKey(s.id()), metadataMap.packValue(metadata));
 
 		if (SERVER_KNOBS->TSS_HACK_IDENTITY_MAPPING) {
 			// THIS SHOULD NEVER BE ENABLED IN ANY NON-TESTING ENVIRONMENT
@@ -2720,6 +2763,94 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 		for (auto& s : servers) {
 			krmSetPreviouslyEmptyRange(
 			    tr, arena, serverKeysPrefixFor(s.id()), allKeys, serverKeysTrue, serverKeysFalse);
+		}
+	}
+}
+
+// Unassign given key range from its current storage servers
+ACTOR template <typename TrType = Transaction*>
+Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::set<UID> ignoreServers) {
+	state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
+	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+	for (auto& server : serverList) {
+		state UID id = decodeServerListValue(server.value).id();
+		ValueReadResult tag = wait(tr->get(serverTagKeyFor(id)));
+		if (!tag.present()) {
+			dprint("Server {} no tag\n", id.shortString());
+			continue;
+		}
+
+		if (ignoreServers.count(id)) {
+			dprint("Ignore un-assignment from {} .\n", id.toString());
+			continue;
+		}
+		RangeResult ranges = wait(krmGetRanges(tr, serverKeysPrefixFor(id), keys));
+
+		bool owning = false;
+		for (auto& r : ranges) {
+			if (r.value != serverKeysFalse) {
+				owning = true;
+				break;
+			}
+		}
+		if (owning) {
+			wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(id), keys, allKeys, serverKeysFalse));
+			dprint("Unassign {} from storage server {}\n", keys.toString(), id.toString());
+			TraceEvent("UnassignKeys", traceId).detail("Keys", keys).detail("SS", id);
+		}
+	}
+	return Void();
+}
+
+// Assign given key range to specified storage server.
+ACTOR template <typename TrType = Transaction*>
+Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID serverUID) {
+	state Value value = keyServersValue(std::vector<UID>({ serverUID }), std::vector<UID>(), UID(), UID());
+	wait(krmSetRangeCoalescing(tr, keyServersPrefix, keys, allKeys, value));
+	wait(krmSetRangeCoalescing(tr, serverKeysPrefixFor(serverUID), keys, allKeys, serverKeysTrue));
+	dprint("Assign {} to server {}\n", normalKeys.toString(), serverUID.toString());
+	TraceEvent("AssignKeys", traceId).detail("Keys", keys).detail("SS", serverUID);
+	return Void();
+}
+
+ACTOR Future<Void> prepareBlobRestore(Database occ,
+                                      MoveKeysLock lock,
+                                      const DDEnabledState* ddEnabledState,
+                                      UID traceId,
+                                      KeyRangeRef keys,
+                                      UID bmId,
+                                      UID reqId) {
+	state int retries = 0;
+	state Transaction tr = Transaction(occ);
+	ASSERT(ddEnabledState->isBlobRestorePreparing());
+	loop {
+		tr.debugTransaction(reqId);
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		try {
+			wait(checkPersistentMoveKeysLock(&tr, lock));
+			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
+			if (currentOwnerId != bmId) {
+				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
+				dprint("Blob migrator {} is replaced by {}\n", bmId.toString(), currentOwnerId.toString());
+				TraceEvent("BlobMigratorReplaced", traceId).detail("Current", currentOwnerId).detail("BM", bmId);
+				throw blob_migrator_replaced();
+			}
+			wait(unassignServerKeys(traceId, &tr, keys, { bmId }));
+			wait(assignKeysToServer(traceId, &tr, keys, bmId));
+			wait(tr.commit());
+			TraceEvent("BlobRestorePrepare", traceId)
+			    .detail("State", "PrepareTxnCommitted")
+			    .detail("ReqId", reqId)
+			    .detail("BM", bmId);
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+
+			if (++retries > SERVER_KNOBS->BLOB_MIGRATOR_ERROR_RETRIES) {
+				throw restore_error();
+			}
 		}
 	}
 }

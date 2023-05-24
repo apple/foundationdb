@@ -524,7 +524,7 @@ ACTOR Future<Void> resolveBatch(Reference<Resolver> self,
 		if (batchItr != proxyInfoItr->second.outstandingBatches.end()) {
 			req.reply.send(batchItr->second);
 		} else {
-			CODE_PROBE(true, "No outstanding batches for version on proxy", probe::decoration::rare);
+			CODE_PROBE(true, "No outstanding batches for version on proxy");
 			req.reply.send(Never());
 		}
 	} else {

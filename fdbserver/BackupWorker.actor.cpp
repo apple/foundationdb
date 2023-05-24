@@ -510,7 +510,7 @@ ACTOR Future<bool> monitorBackupStartedKeyChanges(BackupData* self, bool present
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> value = wait(tr.get(backupStartedKey));
+				ValueReadResult value = wait(tr.get(backupStartedKey));
 				std::vector<std::pair<UID, Version>> uidVersions;
 				bool shouldExit = self->endVersion.present();
 				if (value.present()) {
@@ -1089,7 +1089,7 @@ ACTOR static Future<Void> monitorWorkerPause(BackupData* self) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-			Optional<Value> value = wait(tr->get(backupPausedKey));
+			ValueReadResult value = wait(tr->get(backupPausedKey));
 			bool paused = value.present() && value.get() == "1"_sr;
 			if (self->paused.get() != paused) {
 				TraceEvent(paused ? "BackupWorkerPaused" : "BackupWorkerResumed", self->myId).log();

@@ -319,7 +319,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
-	int DD_MAXIMUM_LARGE_TEAMS; // the maximum number of large teams data distribution will maintain
+	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
 	double DD_LARGE_TEAM_DELAY; // the amount of time data distribution will wait before returning less replicas than
@@ -735,6 +735,10 @@ public:
 	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 	// Interval at which ratekeeper logs statistics for each tag:
 	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
+	// If this knob is set to true, the global tag throttler will still
+	// compute rates, but these rates won't be sent to GRV proxies for
+	// enforcement.
+	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -1059,6 +1063,8 @@ public:
 	// Whether to use knobs or EKP for blob metadata and credentials
 	std::string BG_METADATA_SOURCE;
 
+	bool BG_USE_BLOB_RANGE_CHANGE_LOG;
+
 	int BG_SNAPSHOT_FILE_TARGET_BYTES;
 	int BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES;
 	int BG_DELTA_FILE_TARGET_BYTES;
@@ -1073,6 +1079,7 @@ public:
 	int BG_MERGE_CANDIDATE_THRESHOLD_SECONDS;
 	int BG_MERGE_CANDIDATE_DELAY_SECONDS;
 	int BG_KEY_TUPLE_TRUNCATE_OFFSET;
+	bool BG_ENABLE_SPLIT_TRUNCATED;
 	bool BG_ENABLE_READ_DRIVEN_COMPACTION;
 	int BG_RDC_BYTES_FACTOR;
 	int BG_RDC_READ_FACTOR;
@@ -1112,12 +1119,10 @@ public:
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
-	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
-	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
-	std::string BLOB_RESTORE_MANIFEST_URL;
+	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;

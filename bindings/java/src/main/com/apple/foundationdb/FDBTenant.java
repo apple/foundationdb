@@ -127,6 +127,10 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 		Transaction tr = null;
 		try {
 			tr = new FDBTransaction(Tenant_createTransaction(getPtr()), database, e, eventKeeper);
+			// In newer versions, this option is set as a default option on the database
+			if (FDB.instance().getAPIVersion() < 710300) {
+				tr.options().setUsedDuringCommitProtectionDisable();
+			}
 			return tr;
 		} catch (RuntimeException err) {
 			if (tr != null) {
@@ -143,7 +147,7 @@ class FDBTenant extends NativeObjectWrapper implements Tenant {
 	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Tenant_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
+			return new FutureBytes(Tenant_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

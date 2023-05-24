@@ -80,6 +80,9 @@ private:
 		ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT(data.metaclusterRegistration.get().id == data.metaclusterRegistration.get().metaclusterId &&
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
+		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
 		ASSERT(data.clusterTenantCounts.results.size() <= data.dataClusters.size() && !data.clusterTenantCounts.more);
@@ -89,6 +92,7 @@ private:
 		ASSERT_LE(data.clusterAllocatedMap.size(), data.dataClusters.size());
 
 		if (data.tenantData.lastTenantId != -1) {
+			CODE_PROBE(true, "Validating last tenant ID");
 			ASSERT(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId) == data.tenantIdPrefix.get());
 		}
 
@@ -97,14 +101,19 @@ private:
 		int numFoundInTenantGroupMap = 0;
 		for (auto const& [clusterName, clusterMetadata] : data.dataClusters) {
 			// If the cluster has capacity, it should be in the capacity index and have the correct count of
-			// allocated tenants stored there
+			// allocated tenants stored there.
+			// If the cluster has disabled auto tenant assignment, then it mustn't exist in the capacity index.
 			auto allocatedItr = data.clusterAllocatedMap.find(clusterName);
-			if (!clusterMetadata.entry.hasCapacity()) {
+			if (!clusterMetadata.entry.hasCapacity() ||
+			    clusterMetadata.entry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
+				CODE_PROBE(!clusterMetadata.entry.hasCapacity(), "Checking cluster with no capacity");
 				ASSERT(allocatedItr == data.clusterAllocatedMap.end());
 			} else if (allocatedItr != data.clusterAllocatedMap.end()) {
 				ASSERT_EQ(allocatedItr->second, clusterMetadata.entry.allocated.numTenantGroups);
+				ASSERT_EQ(AutoTenantAssignment::ENABLED, clusterMetadata.entry.autoTenantAssignment);
 				++numFoundInAllocatedMap;
 			} else {
+				CODE_PROBE(true, "Non-ready cluster missing from capacity index", probe::decoration::rare);
 				ASSERT_NE(clusterMetadata.entry.clusterState, DataClusterState::READY);
 			}
 
@@ -153,6 +162,7 @@ private:
 			} else {
 				// Track the actual tenant group allocation per cluster (a tenant with no group counts against the
 				// allocation)
+				CODE_PROBE(true, "Counting ungrouped tenant");
 				++clusterAllocated[entry.assignedCluster];
 			}
 		}
@@ -182,106 +192,117 @@ private:
 	ACTOR static Future<Void> validateDataCluster(MetaclusterConsistencyCheck* self,
 	                                              ClusterName clusterName,
 	                                              DataClusterMetadata clusterMetadata) {
-		state Reference<IDatabase> dataDb = wait(openDatabase(clusterMetadata.connectionString));
-		state TenantConsistencyCheck<IDatabase, StandardTenantTypes> tenantConsistencyCheck(
-		    dataDb, &TenantMetadata::instance());
-		wait(tenantConsistencyCheck.run());
+		try {
+			state Reference<IDatabase> dataDb = wait(openDatabase(clusterMetadata.connectionString));
+			state TenantConsistencyCheck<IDatabase, StandardTenantTypes> tenantConsistencyCheck(
+			    dataDb, &TenantMetadata::instance());
+			wait(tenantConsistencyCheck.run());
 
-		auto dataClusterItr = self->metaclusterData.dataClusterMetadata.find(clusterName);
-		ASSERT(dataClusterItr != self->metaclusterData.dataClusterMetadata.end());
-		auto const& data = dataClusterItr->second;
-		auto const& managementData = self->metaclusterData.managementMetadata;
+			auto dataClusterItr = self->metaclusterData.dataClusterMetadata.find(clusterName);
+			ASSERT(dataClusterItr != self->metaclusterData.dataClusterMetadata.end());
+			auto const& data = dataClusterItr->second;
+			auto const& managementData = self->metaclusterData.managementMetadata;
 
-		ASSERT(data.metaclusterRegistration.present());
-		ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_DATA);
-		ASSERT(data.metaclusterRegistration.get().matches(managementData.metaclusterRegistration.get()));
-		ASSERT(data.metaclusterRegistration.get().name == clusterName);
-		ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
+			ASSERT(data.metaclusterRegistration.present());
+			ASSERT_EQ(data.metaclusterRegistration.get().clusterType, ClusterType::METACLUSTER_DATA);
+			ASSERT(data.metaclusterRegistration.get().matches(managementData.metaclusterRegistration.get()));
+			ASSERT(data.metaclusterRegistration.get().name == clusterName);
+			ASSERT(data.metaclusterRegistration.get().id == clusterMetadata.entry.id);
+			ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
+			ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+			ASSERT_EQ(data.metaclusterRegistration.get().version, managementData.metaclusterRegistration.get().version);
 
-		if (data.tenantData.lastTenantId >= 0) {
-			ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
-			ASSERT_LE(data.tenantData.lastTenantId, managementData.tenantData.lastTenantId);
-		} else {
-			for (auto const& [id, tenant] : data.tenantData.tenantMap) {
-				ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix);
+			if (data.tenantData.lastTenantId >= 0) {
+				ASSERT_EQ(TenantAPI::getTenantIdPrefix(data.tenantData.lastTenantId), managementData.tenantIdPrefix);
+				ASSERT_LE(data.tenantData.lastTenantId, managementData.tenantData.lastTenantId);
+			} else {
+				CODE_PROBE(true, "Data cluster has no tenants with current tenant ID prefix");
+				for (auto const& [id, tenant] : data.tenantData.tenantMap) {
+					ASSERT_NE(TenantAPI::getTenantIdPrefix(id), managementData.tenantIdPrefix);
+				}
 			}
-		}
 
-		std::set<int64_t> expectedTenants;
-		auto clusterTenantMapItr = managementData.clusterTenantMap.find(clusterName);
-		if (clusterTenantMapItr != managementData.clusterTenantMap.end()) {
-			expectedTenants = clusterTenantMapItr->second;
-		}
+			std::set<int64_t> expectedTenants;
+			auto clusterTenantMapItr = managementData.clusterTenantMap.find(clusterName);
+			if (clusterTenantMapItr != managementData.clusterTenantMap.end()) {
+				expectedTenants = clusterTenantMapItr->second;
+			}
 
-		std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
-		if (!self->allowPartialMetaclusterOperations) {
-			ASSERT_EQ(data.tenantData.tenantMap.size(), expectedTenants.size());
-		} else {
-			ASSERT_LE(data.tenantData.tenantMap.size(), expectedTenants.size());
-			for (auto const& tenantId : expectedTenants) {
+			std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
+			if (!self->allowPartialMetaclusterOperations) {
+				ASSERT_EQ(data.tenantData.tenantMap.size(), expectedTenants.size());
+			} else {
+				ASSERT_LE(data.tenantData.tenantMap.size(), expectedTenants.size());
+				for (auto const& tenantId : expectedTenants) {
+					auto tenantMapItr = managementData.tenantData.tenantMap.find(tenantId);
+					ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
+					MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
+					if (!data.tenantData.tenantMap.count(tenantId)) {
+						ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
+						       metaclusterEntry.tenantState == TenantState::REMOVING ||
+						       metaclusterEntry.tenantState == TenantState::ERROR);
+					} else if (metaclusterEntry.tenantGroup.present()) {
+						tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
+					}
+				}
+			}
+
+			for (auto const& [tenantId, entry] : data.tenantData.tenantMap) {
+				ASSERT(expectedTenants.count(tenantId));
 				auto tenantMapItr = managementData.tenantData.tenantMap.find(tenantId);
 				ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
 				MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
-				if (!data.tenantData.tenantMap.count(tenantId)) {
-					ASSERT(metaclusterEntry.tenantState == TenantState::REGISTERING ||
-					       metaclusterEntry.tenantState == TenantState::REMOVING ||
-					       metaclusterEntry.tenantState == TenantState::ERROR);
-				} else if (metaclusterEntry.tenantGroup.present()) {
-					tenantGroupsWithCompletedTenants.insert(metaclusterEntry.tenantGroup.get());
+				ASSERT_EQ(entry.id, metaclusterEntry.id);
+
+				if (!self->allowPartialMetaclusterOperations) {
+					ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
+					ASSERT(entry.tenantName == metaclusterEntry.tenantName);
+				} else if (entry.tenantName != metaclusterEntry.tenantName) {
+					ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
+				}
+				if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
+				    metaclusterEntry.tenantState != TenantState::REMOVING) {
+					ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
+				} else {
+					ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
+				}
+
+				if (entry.configurationSequenceNum == metaclusterEntry.configurationSequenceNum) {
+					ASSERT(entry.tenantGroup == metaclusterEntry.tenantGroup);
+					ASSERT_EQ(entry.tenantLockState, metaclusterEntry.tenantLockState);
+					ASSERT(entry.tenantLockId == metaclusterEntry.tenantLockId);
 				}
 			}
-		}
 
-		for (auto const& [tenantId, entry] : data.tenantData.tenantMap) {
-			ASSERT(expectedTenants.count(tenantId));
-			auto tenantMapItr = managementData.tenantData.tenantMap.find(tenantId);
-			ASSERT(tenantMapItr != managementData.tenantData.tenantMap.end());
-			MetaclusterTenantMapEntry const& metaclusterEntry = tenantMapItr->second;
-			ASSERT_EQ(entry.id, metaclusterEntry.id);
-
+			std::set<TenantGroupName> expectedTenantGroups;
+			auto clusterTenantGroupItr = managementData.clusterTenantGroupMap.find(clusterName);
+			if (clusterTenantGroupItr != managementData.clusterTenantGroupMap.end()) {
+				expectedTenantGroups = clusterTenantGroupItr->second;
+			}
 			if (!self->allowPartialMetaclusterOperations) {
-				ASSERT_EQ(metaclusterEntry.tenantState, TenantState::READY);
-				ASSERT(entry.tenantName == metaclusterEntry.tenantName);
-			} else if (entry.tenantName != metaclusterEntry.tenantName) {
-				ASSERT(entry.tenantName == metaclusterEntry.renameDestination);
-			}
-			if (metaclusterEntry.tenantState != TenantState::UPDATING_CONFIGURATION &&
-			    metaclusterEntry.tenantState != TenantState::REMOVING) {
-				ASSERT_EQ(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
+				ASSERT_EQ(data.tenantData.tenantGroupMap.size(), expectedTenantGroups.size());
 			} else {
-				ASSERT_LE(entry.configurationSequenceNum, metaclusterEntry.configurationSequenceNum);
-			}
-
-			if (entry.configurationSequenceNum == metaclusterEntry.configurationSequenceNum) {
-				ASSERT(entry.tenantGroup == metaclusterEntry.tenantGroup);
-				ASSERT_EQ(entry.tenantLockState, metaclusterEntry.tenantLockState);
-				ASSERT(entry.tenantLockId == metaclusterEntry.tenantLockId);
-			}
-		}
-
-		std::set<TenantGroupName> expectedTenantGroups;
-		auto clusterTenantGroupItr = managementData.clusterTenantGroupMap.find(clusterName);
-		if (clusterTenantGroupItr != managementData.clusterTenantGroupMap.end()) {
-			expectedTenantGroups = clusterTenantGroupItr->second;
-		}
-		if (!self->allowPartialMetaclusterOperations) {
-			ASSERT_EQ(data.tenantData.tenantGroupMap.size(), expectedTenantGroups.size());
-		} else {
-			ASSERT_LE(data.tenantData.tenantGroupMap.size(), expectedTenantGroups.size());
-			for (auto const& name : expectedTenantGroups) {
-				if (!data.tenantData.tenantGroupMap.count(name)) {
-					auto itr = tenantGroupsWithCompletedTenants.find(name);
-					ASSERT(itr == tenantGroupsWithCompletedTenants.end());
+				ASSERT_LE(data.tenantData.tenantGroupMap.size(), expectedTenantGroups.size());
+				for (auto const& name : expectedTenantGroups) {
+					if (!data.tenantData.tenantGroupMap.count(name)) {
+						auto itr = tenantGroupsWithCompletedTenants.find(name);
+						ASSERT(itr == tenantGroupsWithCompletedTenants.end());
+					}
 				}
 			}
-		}
-		for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
-			ASSERT(expectedTenantGroups.count(name));
-			expectedTenantGroups.erase(name);
-		}
+			for (auto const& [name, entry] : data.tenantData.tenantGroupMap) {
+				ASSERT(expectedTenantGroups.count(name));
+				expectedTenantGroups.erase(name);
+			}
 
-		for (auto const& name : expectedTenantGroups) {
-			ASSERT(tenantGroupsWithCompletedTenants.count(name) == 0);
+			for (auto const& name : expectedTenantGroups) {
+				ASSERT(tenantGroupsWithCompletedTenants.count(name) == 0);
+			}
+		} catch (Error& e) {
+			TraceEvent(SevError, "MetaclusterConsistencyDataClusterValidationFailed")
+			    .error(e)
+			    .detail("ClusterName", clusterName);
+			ASSERT(false);
 		}
 
 		return Void();
@@ -291,7 +312,13 @@ private:
 		state TenantConsistencyCheck<DB, MetaclusterTenantTypes> managementTenantConsistencyCheck(
 		    self->managementDb, &metadata::management::tenantMetadata());
 
-		wait(managementTenantConsistencyCheck.run() && self->metaclusterData.load() && checkManagementSystemKeys(self));
+		try {
+			wait(managementTenantConsistencyCheck.run() && self->metaclusterData.load() &&
+			     checkManagementSystemKeys(self));
+		} catch (Error& e) {
+			TraceEvent(SevError, "MetaclusterConsistencyManagementClusterValidationFailed").error(e);
+			ASSERT(false);
+		}
 
 		self->validateManagementCluster();
 

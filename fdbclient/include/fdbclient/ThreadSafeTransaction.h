@@ -137,8 +137,8 @@ public:
 	void setVersion(Version v) override;
 	ThreadFuture<Version> getReadVersion() override;
 
-	ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
+	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
+	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
 	                                   int limit,

@@ -342,7 +342,7 @@ class TransactionEnvironment {
 		state Reference<IConfigTransaction> tr =
 		    IConfigTransaction::createTestSimple(self->writeTo.getTransactionInterface());
 		state Key configKey = encodeConfigKey(configClass, knobName);
-		state Optional<Value> value = wait(tr->get(configKey));
+		state ValueReadResult value = wait(tr->get(configKey));
 		if (expected.present()) {
 			ASSERT_EQ(Tuple::unpack(value.get()).getInt(0), expected.get());
 		} else {

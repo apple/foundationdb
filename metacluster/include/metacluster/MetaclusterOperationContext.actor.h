@@ -28,7 +28,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/VersionedMap.h"
@@ -71,10 +71,13 @@ struct MetaclusterOperationContext {
 		    dataClusterMetadata.present() ? dataClusterMetadata.get().entry.clusterState : DataClusterState::READY;
 		if (clusterState != DataClusterState::READY && extraSupportedDataClusterStates.count(clusterState) == 0) {
 			if (clusterState == DataClusterState::REGISTERING) {
+				CODE_PROBE(true, "Run metacluster transaction on registering cluster");
 				throw cluster_not_found();
 			} else if (clusterState == DataClusterState::REMOVING) {
+				CODE_PROBE(true, "Run metacluster transaction on removing cluster");
 				throw cluster_removed();
 			} else if (clusterState == DataClusterState::RESTORING) {
+				CODE_PROBE(true, "Run metacluster transaction on restoring cluster");
 				throw cluster_restoring();
 			}
 
@@ -96,6 +99,7 @@ struct MetaclusterOperationContext {
 				// If this transaction is retrying and didn't have the cluster name set at the beginning, clear it
 				// out to be set again in the next iteration.
 				if (!clusterPresentAtStart) {
+					CODE_PROBE(true, "Retry management transaction with unconfigured cluster");
 					self->clearCluster();
 				}
 
@@ -119,9 +123,11 @@ struct MetaclusterOperationContext {
 				// transactions have run on.
 				if (!currentMetaclusterRegistration.present() ||
 				    currentMetaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+					CODE_PROBE(true, "Run management transaction on non-management cluster");
 					throw invalid_metacluster_operation();
 				} else if (self->metaclusterRegistration.present() &&
 				           !self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
+					CODE_PROBE(true, "Run management transaction on wrong management cluster", probe::decoration::rare);
 					throw metacluster_mismatch();
 				}
 
@@ -130,6 +136,7 @@ struct MetaclusterOperationContext {
 				// registration entry.
 				if (self->clusterName.present()) {
 					if (!currentDataClusterMetadata.present()) {
+						CODE_PROBE(true, "Run management transaction using deleted data cluster");
 						throw cluster_removed();
 					} else {
 						currentMetaclusterRegistration = currentMetaclusterRegistration.get().toDataClusterRegistration(
@@ -146,6 +153,7 @@ struct MetaclusterOperationContext {
 				// updated cluster metadata in the context and open a connection to the data DB.
 				if (self->dataClusterMetadata.present() &&
 				    self->dataClusterMetadata.get().entry.id != currentDataClusterMetadata.get().entry.id) {
+					CODE_PROBE(true, "Run management transaction using wrong data cluster");
 					throw cluster_removed();
 				} else if (self->clusterName.present()) {
 					self->dataClusterMetadata = currentDataClusterMetadata;
@@ -208,12 +216,15 @@ struct MetaclusterOperationContext {
 				// Check that this is the expected data cluster and is part of the right metacluster
 				if (!currentMetaclusterRegistration.present()) {
 					if (!runOnDisconnectedCluster) {
+						CODE_PROBE(true, "Run data cluster transaction on non-data cluster");
 						throw cluster_removed();
 					}
 				} else if (currentMetaclusterRegistration.get().clusterType != ClusterType::METACLUSTER_DATA) {
+					CODE_PROBE(true, "Run data cluster transaction on non-data cluster", probe::decoration::rare);
 					throw cluster_removed();
 				} else if (!self->metaclusterRegistration.get().matches(currentMetaclusterRegistration.get())) {
 					if (!runOnMismatchedCluster) {
+						CODE_PROBE(true, "Run data cluster transaction on wrong data cluster");
 						throw cluster_removed();
 					}
 				}
@@ -221,6 +232,7 @@ struct MetaclusterOperationContext {
 				if (checkRestoring) {
 					KeyBackedRangeResult<std::pair<ClusterName, UID>> activeRestoreId = wait(activeRestoreIdFuture);
 					if (!activeRestoreId.results.empty()) {
+						CODE_PROBE(true, "Run data cluster transaction on restoring data cluster");
 						throw cluster_restoring();
 					}
 				}

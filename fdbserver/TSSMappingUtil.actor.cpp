@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/TSSMappingUtil.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -34,7 +34,7 @@ ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
 	state std::vector<std::pair<UID, UID>>::iterator mapItr;
 	for (mapItr = uidMapping.results.begin(); mapItr != uidMapping.results.end(); ++mapItr) {
 		state UID ssId = mapItr->first;
-		Optional<Value> v = wait(tr->get(serverListKeyFor(mapItr->second)));
+		ValueReadResult v = wait(tr->get(serverListKeyFor(mapItr->second)));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
 	return Void();
@@ -47,7 +47,7 @@ ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerIn
 	for (auto& it : mappingList) {
 		state UID ssId = TupleCodec<UID>::unpack(it.key.removePrefix(tssMappingKeys.begin));
 		UID tssId = TupleCodec<UID>::unpack(it.value);
-		Optional<Value> v = wait(tr->get(serverListKeyFor(tssId)));
+		ValueReadResult v = wait(tr->get(serverListKeyFor(tssId)));
 		(*tssMapping)[ssId] = decodeServerListValue(v.get());
 	}
 	return Void();

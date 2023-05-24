@@ -45,7 +45,9 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		// Automatically set the UsedDuringCommitProtectionDisable option
 		// This is because the Java bindings disallow use of Transaction objects after
 		// Transaction#onError is called.
-		this.options.setTransactionUsedDuringCommitProtectionDisable();
+		if (FDB.instance().getAPIVersion() >= 710300) {
+			this.options.setTransactionUsedDuringCommitProtectionDisable();
+		}
 		this.eventKeeper = eventKeeper;
 	}
 
@@ -170,6 +172,10 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 		Transaction tr = null;
 		try {
 			tr = new FDBTransaction(Database_createTransaction(getPtr()), this, e, eventKeeper);
+			// In newer versions, this option is set as a default option on the database
+			if (FDB.instance().getAPIVersion() < 710300) {
+				tr.options().setUsedDuringCommitProtectionDisable();
+			}
 			return tr;
 		} catch (RuntimeException err) {
 			if (tr != null) {
@@ -206,7 +212,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	public CompletableFuture<byte[]> purgeBlobGranules(byte[] beginKey, byte[] endKey, long purgeVersion, boolean force, Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
+			return new FutureBytes(Database_purgeBlobGranules(getPtr(), beginKey, endKey, purgeVersion, force), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}
@@ -296,7 +302,7 @@ class FDBDatabase extends NativeObjectWrapper implements Database, OptionConsume
 	public CompletableFuture<byte[]> getClientStatus(Executor e) {
 		pointerReadLock.lock();
 		try {
-			return new FutureKey(Database_getClientStatus(getPtr()), e, eventKeeper);
+			return new FutureBytes(Database_getClientStatus(getPtr()), e, eventKeeper);
 		} finally {
 			pointerReadLock.unlock();
 		}

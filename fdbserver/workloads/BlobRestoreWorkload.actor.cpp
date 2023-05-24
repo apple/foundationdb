@@ -25,8 +25,10 @@
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BackupContainerFileSystem.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/Knobs.h"
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
+#include "fdbclient/BlobRestoreCommon.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -49,16 +51,15 @@
 //
 struct BlobRestoreWorkload : TestWorkload {
 	static constexpr auto NAME = "BlobRestoreWorkload";
-	BlobRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	BlobRestoreWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), tenantData_(wcx.dbInfo) {
 		ASSERT(g_simulator->extraDatabases.size() == 1); // extra db must be enabled
 		extraDb_ = Database::createSimulatedExtraDatabase(g_simulator->extraDatabases[0]);
 		setupBlob_ = getOption(options, "setupBlob"_sr, false);
 		performRestore_ = getOption(options, "performRestore"_sr, false);
 		restoreToVersion_ = getOption(options, "restoreToVersion"_sr, false);
 		readBatchSize_ = getOption(options, "readBatchSize"_sr, 3000);
-		if (!blobConn_.isValid() && SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
-			blobConn_ = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BG_URL);
-		}
+		blobManifestUrl_ = getOption(options, "blobManifestUrl"_sr, "file://simfdb/fdbblob/manifest"_sr);
+		mlogsUrl_ = getOption(options, "backupDir"_sr, "file://simfdb/backups/"_sr);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -79,10 +80,14 @@ struct BlobRestoreWorkload : TestWorkload {
 		if (self->performRestore_) {
 			fmt::print("Perform blob restore\n");
 			// disable manifest backup and log truncation
-			KnobValueRef knobFalse = KnobValueRef::create(bool{ false });
-			IKnobCollection::getMutableGlobalKnobCollection().setKnob("blob_manifest_backup", knobFalse);
+			wait(disableManifestBackup(cx));
 
 			wait(store(self->restoreTargetVersion_, getRestoreVersion(cx, self)));
+			if (self->restoreTargetVersion_ == invalidVersion) {
+				CODE_PROBE(true, "Skip blob restore test because of missing mutation logs", probe::decoration::rare);
+				return Void();
+			}
+			CODE_PROBE(true, "Perform blob restore");
 			fmt::print("Restore target version {}\n", self->restoreTargetVersion_);
 
 			// Only need to pass the version if we are trying to restore to a previous version
@@ -90,7 +95,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			if (self->restoreToVersion_) {
 				targetVersion = self->restoreTargetVersion_;
 			}
-			wait(store(result, self->extraDb_->blobRestore(normalKeys, targetVersion)));
+			wait(submitRestore(self));
 
 			state std::vector<Future<Void>> futures;
 			futures.push_back(self->runBackupAgent(self));
@@ -100,32 +105,86 @@ struct BlobRestoreWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> submitRestore(BlobRestoreWorkload* self) {
+		state std::string mlogsUrl;
+		state std::vector<std::string> containers =
+		    wait(IBackupContainer::listContainers(self->mlogsUrl_.toString(), {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		mlogsUrl = containers.back();
+
+		Standalone<VectorRef<KeyRangeRef>> ranges;
+		ranges.push_back(ranges.arena(), normalKeys);
+		addDefaultBackupRanges(ranges);
+
+		Version version = wait(self->backupAgent_.restore(self->extraDb_,
+		                                                  {},
+		                                                  "default"_sr,
+		                                                  KeyRef(mlogsUrl),
+		                                                  {},
+		                                                  ranges,
+		                                                  WaitForComplete::False,
+		                                                  self->restoreTargetVersion_,
+		                                                  Verbose::True,
+		                                                  ""_sr,
+		                                                  ""_sr,
+		                                                  LockDB::True,
+		                                                  UnlockDB::True,
+		                                                  OnlyApplyMutationLogs::False,
+		                                                  InconsistentSnapshotOnly::False,
+		                                                  invalidVersion,
+		                                                  {},
+		                                                  self->blobManifestUrl_.toString()));
+		fmt::print("Submit blob restore to version {} \n", version);
+		return Void();
+	}
+
 	ACTOR static Future<Version> getRestoreVersion(Database cx, BlobRestoreWorkload* self) {
 		state Version targetVersion;
-		state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
+		state std::string baseUrl = self->mlogsUrl_.toString();
 		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
 		if (containers.size() == 0) {
 			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			CODE_PROBE(true, "Skip blob restore test because of missing log backups", probe::decoration::rare);
+			return invalidVersion;
 		}
 		state Reference<IBackupContainer> bc = IBackupContainer::openContainer(containers.front(), {}, {});
 		BackupDescription desc = wait(bc->describeBackup(true));
 		if (!desc.contiguousLogEnd.present()) {
-			fmt::print("missing mutation logs {}\n", baseUrl);
-			throw restore_missing_data();
+			fmt::print("invalid mutation log backup {}\n", baseUrl);
+			CODE_PROBE(true, "Skip blob restore test because of invalid log backup", probe::decoration::rare);
+			return invalidVersion;
 		}
 		targetVersion = desc.contiguousLogEnd.get() - 1;
 		if (self->restoreToVersion_) {
 			// restore to a previous version
 			targetVersion -= deterministicRandom()->randomInt(1, 100000);
 		}
+
+		try {
+			state Standalone<VectorRef<KeyValueRef>> src_ = wait(readFromBlob(cx, targetVersion, self));
+		} catch (Error& e) {
+			fmt::print("Couldn't read blob data at version {}\n", targetVersion);
+			CODE_PROBE(true, "Skip blob restore test because of missing blob data");
+			return invalidVersion;
+		}
 		return targetVersion;
+	}
+
+	static Future<Void> disableManifestBackup(Database cx) {
+		return runRYWTransaction(cx, [](Reference<ReadYourWritesTransaction> tr) -> Future<Void> {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			BlobGranuleBackupConfig().enabled().set(tr, false);
+			return Void();
+		});
 	}
 
 	// Start backup agent on the extra db
 	ACTOR Future<Void> runBackupAgent(BlobRestoreWorkload* self) {
-		state FileBackupAgent backupAgent;
-		state Future<Void> future = backupAgent.run(
+		state Future<Void> future = self->backupAgent_.run(
 		    self->extraDb_, 1.0 / CLIENT_KNOBS->BACKUP_AGGREGATE_POLL_RATE, CLIENT_KNOBS->SIM_BACKUP_TASKS_PER_AGENT);
 		wait(Future<Void>(Never()));
 		throw internal_error();
@@ -135,90 +194,92 @@ struct BlobRestoreWorkload : TestWorkload {
 	ACTOR Future<Void> monitorProgress(Database cx, BlobRestoreWorkload* self) {
 		loop {
 			auto controller = makeReference<BlobRestoreController>(self->extraDb_, normalKeys);
-			Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(controller));
-			if (restoreState.present()) {
-				state BlobRestoreState s = restoreState.get();
-				if (s.phase == BlobRestorePhase::DONE) {
-					wait(verify(cx, self));
-					return Void();
-				}
-				// TODO need to define more specific error handling
-				if (s.phase == BlobRestorePhase::ERROR) {
-					fmt::print("Unexpected restore error code = {}\n", s.error.get());
-					return Void();
-				}
+			state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(controller));
+			if (phase == BlobRestorePhase::DONE) {
+				wait(verify(cx, self));
+				return Void();
 			}
+			// TODO need to define more specific error handling
+			if (phase == BlobRestorePhase::ERROR) {
+				auto db = SystemDBWriteLockedNow(cx.getReference());
+				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
+				fmt::print("Unexpected restore error code = {}\n", error);
+				return Void();
+			}
+
 			wait(delay(5)); // delay to avoid busy loop
 		}
 	}
 
 	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> readFromStorageServer(Database cx,
-	                                                                              KeySelectorRef begin,
 	                                                                              BlobRestoreWorkload* self) {
+		state Standalone<VectorRef<KeyRangeRef>> ranges =
+		    wait(cx->listBlobbifiedRanges(normalKeys, CLIENT_KNOBS->TOO_MANY));
 		state Standalone<VectorRef<KeyValueRef>> data;
 		state Transaction tr(cx);
-		state KeySelectorRef end = firstGreaterOrEqual(normalKeys.end);
 		state Arena arena;
 
-		loop {
-			try {
-				GetRangeLimits limits(self->readBatchSize_ - data.size());
-				limits.minRows = 0;
-				RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
-				for (auto& row : result) {
-					data.push_back_deep(data.arena(), KeyValueRef(row.key, row.value));
+		for (auto& range : ranges) {
+			state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
+			state KeySelectorRef end = firstGreaterOrEqual(range.end);
+			state Standalone<VectorRef<KeyValueRef>> rows;
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					GetRangeLimits limits(self->readBatchSize_);
+					limits.minRows = 0;
+					state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& row : result) {
+						rows.push_back_deep(rows.arena(), KeyValueRef(row.key, row.value));
+					}
+					if (!result.more) {
+						break;
+					}
+					begin = result.nextBeginKeySelector();
+				} catch (Error& e) {
+					wait(tr.onError(e));
 				}
-				if (!result.more) {
-					break;
-				}
-				if (data.size() == self->readBatchSize_) {
-					break;
-				}
-				if (result.readThrough.present()) {
-					begin = firstGreaterOrEqual(KeyRef(arena, result.readThrough.get()));
-				} else {
-					begin = firstGreaterThan(KeyRef(arena, result.back().key));
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
 			}
+			data.append_deep(data.arena(), rows.begin(), rows.size());
 		}
 		return data;
 	}
 
 	ACTOR static Future<Standalone<VectorRef<KeyValueRef>>> readFromBlob(Database cx,
-	                                                                     KeySelectorRef begin,
 	                                                                     Version readVersion,
 	                                                                     BlobRestoreWorkload* self) {
-		state Transaction tr(cx);
+		state Standalone<VectorRef<KeyRangeRef>> ranges =
+		    wait(cx->listBlobbifiedRanges(normalKeys, CLIENT_KNOBS->TOO_MANY));
 		state Standalone<VectorRef<KeyValueRef>> data;
-		state KeyRangeRef keys(begin.getKey(), normalKeys.end);
-		state int count = 0;
+		state Transaction tr(cx);
 
-		loop {
-			try {
-				state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
-				    wait(tr.readBlobGranules(keys, 0, readVersion));
-				state int i;
-				for (i = 0; i < chunks.size(); ++i) {
-					state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, readVersion, self->blobConn_));
-					for (auto& r : rows) {
-						if (begin.isDefinitelyGreater(r.key)) {
-							continue;
-						}
-						data.push_back_deep(data.arena(), r);
-						count++;
-						if (count >= self->readBatchSize_) {
-							return data;
+		if (SERVER_KNOBS->BG_METADATA_SOURCE == "tenant") {
+			wait(loadBGTenantMap(&self->tenantData_, &tr));
+		}
+
+		for (auto& range_ : ranges) {
+			state KeyRangeRef range = range_;
+			loop {
+				try {
+					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+					state Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+					    wait(tr.readBlobGranules(range, 0, readVersion));
+					state int i;
+					for (i = 0; i < chunks.size(); ++i) {
+						state Reference<BlobConnectionProvider> blobConn =
+						    wait(loadBStoreForTenant(&self->tenantData_, range));
+						state RangeResult rows = wait(readBlobGranule(chunks[i], range, 0, readVersion, blobConn));
+						for (auto& r : rows) {
+							data.push_back_deep(data.arena(), r);
 						}
 					}
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
 				}
-				return data;
-			} catch (Error& e) {
-				fmt::print("read blob error {} \n", e.what());
-				wait(tr.onError(e));
 			}
 		}
+		return data;
 	}
 
 	static bool compare(VectorRef<KeyValueRef> src, VectorRef<KeyValueRef> dest) {
@@ -266,32 +327,35 @@ struct BlobRestoreWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Void> verify(Database cx, BlobRestoreWorkload* self) {
-		state Arena arena;
-		state KeySelectorRef srcBegin = firstGreaterOrEqual(normalKeys.begin);
-		state KeySelectorRef destBegin = firstGreaterOrEqual(normalKeys.begin);
-		// flush src db
-		bool flush = wait(cx->flushBlobRange(normalKeys, false, self->restoreTargetVersion_));
-		if (!flush) {
-			fmt::print("Cannot flush to version {} \n", self->restoreTargetVersion_);
+	ACTOR static Future<Void> flushSrcDbToBlob(Database cx, BlobRestoreWorkload* self) {
+		state Standalone<VectorRef<KeyRangeRef>> ranges =
+		    wait(cx->listBlobbifiedRanges(normalKeys, CLIENT_KNOBS->TOO_MANY));
+		try {
+			for (auto& r : ranges) {
+				bool flush = wait(cx->flushBlobRange(r, false, self->restoreTargetVersion_));
+				if (!flush) {
+					fmt::print("Cannot flush to version {} \n", self->restoreTargetVersion_);
+					throw internal_error();
+				}
+			}
+			return Void();
+		} catch (Error& e) {
 			throw internal_error();
 		}
+	}
 
-		loop {
-			// restore src. data before restore
-			state Standalone<VectorRef<KeyValueRef>> src =
-			    wait(readFromBlob(cx, srcBegin, self->restoreTargetVersion_, self));
-			//  restore dest. data after restore
-			state Standalone<VectorRef<KeyValueRef>> dest =
-			    wait(readFromStorageServer(self->extraDb_, destBegin, self));
-			if (src.size() == 0 && dest.size() == 0) {
-				break;
-			}
-			if (!compare(src, dest)) {
-				break;
-			}
-			srcBegin = firstGreaterThan(KeyRef(arena, src.back().key));
-			destBegin = firstGreaterThan(KeyRef(arena, dest.back().key));
+	ACTOR static Future<Void> verify(Database cx, BlobRestoreWorkload* self) {
+		// flush src db
+		wait(flushSrcDbToBlob(cx, self));
+
+		// restore src. data before restore
+		state Standalone<VectorRef<KeyValueRef>> src = wait(readFromBlob(cx, self->restoreTargetVersion_, self));
+		fmt::print("read src {} \n", src.size());
+		//  restore dest. data after restore
+		state Standalone<VectorRef<KeyValueRef>> dest = wait(readFromStorageServer(self->extraDb_, self));
+		fmt::print("read dest {} \n", dest.size());
+		if (!compare(src, dest)) {
+			fmt::print("Verification fails\n");
 		}
 		return Void();
 	}
@@ -308,7 +372,11 @@ private:
 	int readBatchSize_;
 	bool restoreToVersion_;
 	Version restoreTargetVersion_;
+	Standalone<StringRef> blobManifestUrl_;
+	Standalone<StringRef> mlogsUrl_;
 	Reference<BlobConnectionProvider> blobConn_;
+	BGTenantMap tenantData_;
+	FileBackupAgent backupAgent_;
 };
 
 WorkloadFactory<BlobRestoreWorkload> BlobRestoreWorkloadFactory;

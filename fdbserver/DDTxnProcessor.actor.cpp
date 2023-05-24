@@ -139,11 +139,11 @@ class DDTxnProcessorImpl {
 					UID srcId, destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 
-					std::vector<Future<Optional<Value>>> serverListEntries;
+					std::vector<Future<ValueReadResult>> serverListEntries;
 					for (int j = 0; j < src.size(); ++j) {
 						serverListEntries.push_back(tr.get(serverListKeyFor(src[j])));
 					}
-					std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+					std::vector<ValueReadResult> serverListValues = wait(getAll(serverListEntries));
 					IDDTxnProcessor::DDRangeLocations current(KeyRangeRef(shards[i].key, shards[i + 1].key));
 					for (int j = 0; j < serverListValues.size(); ++j) {
 						if (!serverListValues[j].present()) {
@@ -209,7 +209,7 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				Optional<Value> val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
+				ValueReadResult val = wait(tr.get(datacenterReplicasKeyFor(dcId)));
 				state int oldReplicas = val.present() ? decodeDatacenterReplicasValue(val.get()) : 0;
 				if (oldReplicas == storageTeamSize) {
 					return oldReplicas;
@@ -242,6 +242,11 @@ class DDTxnProcessorImpl {
 
 		state Transaction tr(cx);
 
+		if (ddLargeTeamEnabled()) {
+			wait(store(result->userRangeConfig,
+			           DDConfiguration().userRangeConfig().getSnapshot(
+			               SystemDBWriteLockedNow(cx.getReference()), allKeys.begin, allKeys.end)));
+		}
 		state std::map<UID, Optional<Key>> server_dc;
 		state std::map<std::vector<UID>, std::pair<std::vector<UID>, std::vector<UID>>> team_cache;
 		state std::vector<std::pair<StorageServerInterface, ProcessClass>> tss_servers;
@@ -259,18 +264,12 @@ class DDTxnProcessorImpl {
 			tss_servers.clear();
 			team_cache.clear();
 			succeeded = false;
-			result->customReplication->insert(allKeys, -1);
-			if (g_network->isSimulated() && ddLargeTeamEnabled()) {
-				for (auto& it : g_simulator->customReplicas) {
-					result->customReplication->insert(KeyRangeRef(std::get<0>(it), std::get<1>(it)), std::get<2>(it));
-				}
-			}
 			try {
 				// Read healthyZone value which is later used to determine on/off of failure triggered DD
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				Optional<Value> val = wait(tr.get(healthyZoneKey));
+				ValueReadResult val = wait(tr.get(healthyZoneKey));
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
 					if (p.second > tr.getReadVersion().get() || p.first == ignoreSSFailuresZoneString) {
@@ -283,13 +282,13 @@ class DDTxnProcessorImpl {
 				}
 
 				result->mode = 1;
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					rd >> result->mode;
 				}
-				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isDDEnabled()) {
-					// DD can be disabled persistently (result->mode = 0) or transiently (isDDEnabled() = 0)
+				if ((!skipDDModeCheck && !result->mode) || !ddEnabledState->isEnabled()) {
+					// DD can be disabled persistently (result->mode = 0) or transiently (isEnabled() = 0)
 					TraceEvent(SevDebug, "GetInitialDataDistribution_DisabledDD").log();
 					return result;
 				}
@@ -496,8 +495,8 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled()) {
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
+				if (!mode.present() && ddEnabledState->isEnabled()) {
 					TraceEvent("WaitForDDEnabledSucceeded").log();
 					return Void();
 				}
@@ -507,8 +506,8 @@ class DDTxnProcessorImpl {
 					rd >> m;
 					TraceEvent(SevDebug, "WaitForDDEnabled")
 					    .detail("Mode", m)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
-					if (m && ddEnabledState->isDDEnabled()) {
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						return Void();
 					}
@@ -529,35 +528,35 @@ class DDTxnProcessorImpl {
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 			try {
-				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
-				if (!mode.present() && ddEnabledState->isDDEnabled())
+				ValueReadResult mode = wait(tr.get(dataDistributionModeKey));
+				if (!mode.present() && ddEnabledState->isEnabled())
 					return true;
 				if (mode.present()) {
 					BinaryReader rd(mode.get(), Unversioned());
 					int m;
 					rd >> m;
-					if (m && ddEnabledState->isDDEnabled()) {
+					if (m && ddEnabledState->isEnabled()) {
 						TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 						    .detail("Mode", m)
-						    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+						    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 						return true;
 					}
 				}
 				// SOMEDAY: Write a wrapper in MoveKeys.actor.h
-				Optional<Value> readVal = wait(tr.get(moveKeysLockOwnerKey));
+				ValueReadResult readVal = wait(tr.get(moveKeysLockOwnerKey));
 				UID currentOwner =
 				    readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-				if (ddEnabledState->isDDEnabled() && (currentOwner != dataDistributionModeLock)) {
+				if (ddEnabledState->isEnabled() && (currentOwner != dataDistributionModeLock)) {
 					TraceEvent(SevDebug, "IsDDEnabledSucceeded")
 					    .detail("CurrentOwner", currentOwner)
 					    .detail("DDModeLock", dataDistributionModeLock)
-					    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 					return true;
 				}
 				TraceEvent(SevDebug, "IsDDEnabledFailed")
 				    .detail("CurrentOwner", currentOwner)
 				    .detail("DDModeLock", dataDistributionModeLock)
-				    .detail("IsDDEnabled", ddEnabledState->isDDEnabled());
+				    .detail("IsDDEnabled", ddEnabledState->isEnabled());
 				return false;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -583,7 +582,7 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<Optional<Value>> readRebalanceDDIgnoreKey(Database cx) {
+	ACTOR static Future<ValueReadResult> readRebalanceDDIgnoreKey(Database cx) {
 		state Transaction tr(cx);
 		loop {
 			try {
@@ -591,7 +590,7 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-				Optional<Value> res = wait(tr.get(rebalanceDDIgnoreKey));
+				ValueReadResult res = wait(tr.get(rebalanceDDIgnoreKey));
 				return res;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -689,7 +688,7 @@ Future<HealthMetrics> DDTxnProcessor::getHealthMetrics(bool detailed) const {
 	return cx->getHealthMetrics(detailed);
 }
 
-Future<Optional<Value>> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
+Future<ValueReadResult> DDTxnProcessor::readRebalanceDDIgnoreKey() const {
 	return DDTxnProcessorImpl::readRebalanceDDIgnoreKey(cx);
 }
 
@@ -724,7 +723,7 @@ struct DDMockTxnProcessorImpl {
 			KeyRangeRef cloneRef = range;
 			if (std::all_of(ids.begin(), ids.end(), [selfP, cloneRef](const UID& id) {
 				    auto& server = selfP->mgs->allServers.at(id);
-				    return server.allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
+				    return server->allShardStatusIn(cloneRef, { MockShardStatus::FETCHED, MockShardStatus::COMPLETED });
 			    })) {
 				break;
 			}
@@ -767,7 +766,7 @@ struct DDMockTxnProcessorImpl {
 Future<ServerWorkerInfos> DDMockTxnProcessor::getServerListAndProcessClasses() {
 	ServerWorkerInfos res;
 	for (auto& [_, mss] : mgs->allServers) {
-		res.servers.emplace_back(mss.ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
+		res.servers.emplace_back(mss->ssi, ProcessClass(ProcessClass::StorageClass, ProcessClass::DBSource));
 	}
 	// FIXME(xwang): possible generate version from time?
 	res.readVersion = 0;
@@ -891,10 +890,10 @@ void DDMockTxnProcessor::setupMockGlobalState(Reference<InitialDataDistribution>
 		}
 		// insert to serverKeys
 		for (auto& id : shardInfo.primarySrc) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::COMPLETED, shardBytes });
 		}
 		for (auto& id : shardInfo.primaryDest) {
-			mgs->allServers[id].serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
+			mgs->allServers.at(id)->serverKeys.insert(keys, { MockShardStatus::INFLIGHT, shardBytes });
 		}
 	}
 
@@ -978,8 +977,8 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	    deterministicRandom()->randomInt64(SERVER_KNOBS->MIN_SHARD_BYTES, SERVER_KNOBS->MAX_SHARD_BYTES);
 	for (auto& id : params.destinationTeam) {
 		auto& server = mgs->allServers.at(id);
-		server.setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
-		server.signalFetchKeys(keys, randomRangeSize);
+		server->setShardStatus(keys, MockShardStatus::INFLIGHT, mgs->restrictSize);
+		server->signalFetchKeys(keys, randomRangeSize);
 	}
 	return Void();
 }
@@ -1022,7 +1021,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 
 	for (auto& id : params.destinationTeam) {
-		mgs->allServers.at(id).setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
+		mgs->allServers.at(id)->setShardStatus(keys, MockShardStatus::COMPLETED, mgs->restrictSize);
 	}
 
 	// remove destination servers from source servers
@@ -1030,7 +1029,7 @@ ACTOR Future<Void> rawFinishMovement(std::shared_ptr<MockGlobalState> mgs,
 	for (auto& id : srcTeams.front().servers) {
 		// the only caller moveKeys will always make sure the UID are sorted
 		if (!std::binary_search(params.destinationTeam.begin(), params.destinationTeam.end(), id)) {
-			mgs->allServers.at(id).removeShard(keys);
+			mgs->allServers.at(id)->removeShard(keys);
 		}
 	}
 	mgs->shardMapping->finishMove(keys);
@@ -1050,5 +1049,9 @@ Future<Optional<HealthMetrics::StorageStats>> DDTxnProcessor::getStorageStats(co
 
 Future<Optional<HealthMetrics::StorageStats>> DDMockTxnProcessor::getStorageStats(const UID& id,
                                                                                   double maxStaleness) const {
-	return {};
+	auto it = mgs->allServers.find(id);
+	if (it == mgs->allServers.end()) {
+		return Optional<HealthMetrics::StorageStats>();
+	}
+	return Optional<HealthMetrics::StorageStats>(it->second->getStorageStats());
 }

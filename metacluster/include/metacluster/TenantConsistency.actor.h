@@ -29,7 +29,7 @@
 #define METACLUSTER_TENANTCONSISTENCY_ACTOR_H
 
 #include "fdbclient/FDBOptions.g.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "flow/BooleanParam.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantData.actor.h"
@@ -48,6 +48,15 @@ private:
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads
 	static inline const int metaclusterMaxTenants = 10e6;
+
+	void validateQuotas() const {
+		for (auto const& [tenantGroup, quota] : tenantData.throughputQuotas) {
+			ASSERT(tenantData.tenantGroupIndex.count(tenantGroup));
+		}
+		for (auto const& [tenantGroup, quota] : tenantData.storageQuotas) {
+			ASSERT(tenantData.tenantGroupIndex.count(tenantGroup));
+		}
+	}
 
 	void validateTenantMetadataImpl() {
 		ASSERT_EQ(tenantData.tenantMap.size(), tenantData.tenantCount);
@@ -77,6 +86,8 @@ private:
 			ASSERT_NE(tenantMapEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED,
 			          tenantMapEntry.tenantLockId.present());
 		}
+
+		validateQuotas();
 	}
 
 	// Specialization for TenantMapEntry, used on data and standalone clusters
@@ -91,7 +102,7 @@ private:
 
 	// Specialization for MetaclusterTenantMapEntry, used on management clusters
 	void validateTenantMetadata(TenantData<DB, MetaclusterTenantTypes> tenantData) {
-		ASSERT(tenantData.clusterType == ClusterType::METACLUSTER_MANAGEMENT);
+		ASSERT_EQ(tenantData.clusterType, ClusterType::METACLUSTER_MANAGEMENT);
 		ASSERT_LE(tenantData.tenantMap.size(), metaclusterMaxTenants);
 
 		// Check metacluster specific properties

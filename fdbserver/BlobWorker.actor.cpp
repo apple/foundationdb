@@ -397,14 +397,14 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getLatestGranuleCipherKeys(Reference<Blob
 	return cipherKeysCtx;
 }
 
-ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwData,
+ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                    BlobCipherDetails cipherDetails,
                                                    Arena* arena) {
 	std::unordered_set<BlobCipherDetails> cipherDetailsSet;
 	cipherDetailsSet.emplace(cipherDetails);
 	state std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>> cipherKeyMap =
 	    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(
-	        bwData->dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
+	        dbInfo, cipherDetailsSet, BlobCipherMetrics::BLOB_GRANULE));
 
 	ASSERT(cipherKeyMap.size() == 1);
 
@@ -420,7 +420,7 @@ ACTOR Future<BlobGranuleCipherKey> lookupCipherKey(Reference<BlobWorkerData> bwD
 	return BlobGranuleCipherKey::fromBlobCipherKey(cipherKeyMapItr->second, *arena);
 }
 
-ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<BlobWorkerData> bwData,
+ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                                 BlobCipherDetails textCipherDetails,
                                                                 BlobCipherDetails headerCipherDetails,
                                                                 StringRef ivRef,
@@ -428,11 +428,11 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<BlobWo
 	state BlobGranuleCipherKeysCtx cipherKeysCtx;
 
 	// Fetch 'textCipher' key
-	BlobGranuleCipherKey textCipherKey = wait(lookupCipherKey(bwData, textCipherDetails, arena));
+	BlobGranuleCipherKey textCipherKey = wait(lookupCipherKey(dbInfo, textCipherDetails, arena));
 	cipherKeysCtx.textCipherKey = textCipherKey;
 
 	// Fetch 'headerCipher' key
-	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(bwData, headerCipherDetails, arena));
+	BlobGranuleCipherKey headerCipherKey = wait(lookupCipherKey(dbInfo, headerCipherDetails, arena));
 	cipherKeysCtx.headerCipherKey = headerCipherKey;
 
 	// Populate 'Intialization Vector'
@@ -453,7 +453,7 @@ ACTOR Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysImpl(Reference<BlobWo
 	return cipherKeysCtx;
 }
 
-Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<BlobWorkerData> bwData,
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                                   BlobGranuleCipherKeysMeta cipherKeysMeta,
                                                                   Arena* arena) {
 	BlobCipherDetails textCipherDetails(
@@ -464,10 +464,10 @@ Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMeta(Reference<Blob
 
 	StringRef ivRef = StringRef(*arena, cipherKeysMeta.ivStr);
 
-	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, ivRef, arena);
+	return getGranuleCipherKeysImpl(dbInfo, textCipherDetails, headerCipherDetails, ivRef, arena);
 }
 
-Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMetaRef(Reference<BlobWorkerData> bwData,
+Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMetaRef(Reference<AsyncVar<ServerDBInfo> const> dbInfo,
                                                                      BlobGranuleCipherKeysMetaRef cipherKeysMetaRef,
                                                                      Arena* arena) {
 	BlobCipherDetails textCipherDetails(
@@ -476,7 +476,7 @@ Future<BlobGranuleCipherKeysCtx> getGranuleCipherKeysFromKeysMetaRef(Reference<B
 	BlobCipherDetails headerCipherDetails(
 	    cipherKeysMetaRef.headerDomainId, cipherKeysMetaRef.headerBaseCipherId, cipherKeysMetaRef.headerSalt);
 
-	return getGranuleCipherKeysImpl(bwData, textCipherDetails, headerCipherDetails, cipherKeysMetaRef.ivRef, arena);
+	return getGranuleCipherKeysImpl(dbInfo, textCipherDetails, headerCipherDetails, cipherKeysMetaRef.ivRef, arena);
 }
 
 ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> tr,
@@ -484,7 +484,7 @@ ACTOR Future<Void> readAndCheckGranuleLock(Reference<ReadYourWritesTransaction> 
                                            int64_t epoch,
                                            int64_t seqno) {
 	state Key lockKey = blobGranuleLockKeyFor(granuleRange);
-	Optional<Value> lockValue = wait(tr->get(lockKey));
+	ValueReadResult lockValue = wait(tr->get(lockKey));
 
 	if (!lockValue.present()) {
 		// FIXME: could add some validation for simulation that a force purge was initiated
@@ -673,7 +673,7 @@ ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Tra
                                                                              UID currentGranuleID) {
 	Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
 
-	Optional<Value> st = wait(tr->get(myStateKey));
+	ValueReadResult st = wait(tr->get(myStateKey));
 	if (st.present()) {
 		return decodeBlobGranuleSplitValue(st.get());
 	} else {
@@ -969,13 +969,15 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 	state std::string fileName = randomBGFilename(bwData->id, granuleID, version, ".snapshot");
 	state Standalone<GranuleSnapshot> snapshot;
 	state int64_t bytesRead = 0;
+	state bool canStopEarly =
+	    (SERVER_KNOBS->BG_KEY_TUPLE_TRUNCATE_OFFSET == 0 || SERVER_KNOBS->BG_ENABLE_SPLIT_TRUNCATED);
 	state bool injectTooBig = initialSnapshot && g_network->isSimulated() && BUGGIFY_WITH_PROB(0.1);
 
 	wait(delay(0, TaskPriority::BlobWorkerUpdateStorage));
 
 	loop {
 		try {
-			if (initialSnapshot && snapshot.size() > 1 &&
+			if (initialSnapshot && snapshot.size() > 1 && canStopEarly &&
 			    (injectTooBig || bytesRead >= 3 * SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES)) {
 				// throw transaction too old either on injection for simulation, or if snapshot would be too large now
 				throw transaction_too_old();
@@ -1316,7 +1318,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 			ASSERT(bwData->encryptMode.isEncryptionEnabled());
 			CODE_PROBE(true, "fetching cipher keys for blob snapshot file");
 			BlobGranuleCipherKeysCtx keysCtx =
-			    wait(getGranuleCipherKeysFromKeysMeta(bwData, snapshotF.cipherKeysMeta.get(), &filenameArena));
+			    wait(getGranuleCipherKeysFromKeysMeta(bwData->dbInfo, snapshotF.cipherKeysMeta.get(), &filenameArena));
 			snapCipherKeysCtx = std::move(keysCtx);
 		}
 
@@ -1347,7 +1349,7 @@ ACTOR Future<BlobFileIndex> compactFromBlob(Reference<BlobWorkerData> bwData,
 				ASSERT(bwData->encryptMode.isEncryptionEnabled());
 				CODE_PROBE(true, "fetching cipher keys for delta file");
 				BlobGranuleCipherKeysCtx keysCtx =
-				    wait(getGranuleCipherKeysFromKeysMeta(bwData, deltaF.cipherKeysMeta.get(), &filenameArena));
+				    wait(getGranuleCipherKeysFromKeysMeta(bwData->dbInfo, deltaF.cipherKeysMeta.get(), &filenameArena));
 				deltaCipherKeysCtx = std::move(keysCtx);
 			}
 
@@ -3169,7 +3171,7 @@ ACTOR Future<Void> blobGranuleLoadHistory(Reference<BlobWorkerData> bwData,
 						state KeyRangeRef parentRange(curHistory.value.parentBoundaries[pIdx],
 						                              curHistory.value.parentBoundaries[pIdx + 1]);
 						state Version parentVersion = curHistory.value.parentVersions[pIdx];
-						Optional<Value> v = wait(tr.get(blobGranuleHistoryKeyFor(parentRange, parentVersion)));
+						ValueReadResult v = wait(tr.get(blobGranuleHistoryKeyFor(parentRange, parentVersion)));
 						if (v.present()) {
 							next = GranuleHistory(parentRange, parentVersion, decodeBlobGranuleHistoryValue(v.get()));
 							ASSERT(next.version != invalidVersion);
@@ -3951,7 +3953,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							ASSERT(!chunk.snapshotFile.get().cipherKeysCtx.present());
 							CODE_PROBE(true, "fetching cipher keys from meta ref for snapshot file");
 							snapCipherKeysCtx = getGranuleCipherKeysFromKeysMetaRef(
-							    bwData, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
+							    bwData->dbInfo, chunk.snapshotFile.get().cipherKeysMetaRef.get(), &rep.arena);
 						}
 					}
 					state std::unordered_map<int, Future<BlobGranuleCipherKeysCtx>> deltaCipherKeysCtxs;
@@ -3972,7 +3974,7 @@ ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, Bl
 							deltaCipherKeysCtxs.emplace(
 							    deltaIdx,
 							    getGranuleCipherKeysFromKeysMetaRef(
-							        bwData, chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.get(), &rep.arena));
+							        bwData->dbInfo, chunk.deltaFiles[deltaIdx].cipherKeysMetaRef.get(), &rep.arena));
 						}
 					}
 
@@ -4124,7 +4126,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 ACTOR Future<GranuleFiles> loadParentGranuleForMergeSnapshot(Transaction* tr, KeyRange range, Version historyVersion) {
 	// translate key range to granule id
-	Optional<Value> historyParentValue = wait(tr->get(blobGranuleHistoryKeyFor(range, historyVersion)));
+	ValueReadResult historyParentValue = wait(tr->get(blobGranuleHistoryKeyFor(range, historyVersion)));
 	ASSERT(historyParentValue.present());
 	Standalone<BlobGranuleHistoryValue> val = decodeBlobGranuleHistoryValue(historyParentValue.get());
 	UID parentGranuleID = val.granuleID;
@@ -4159,7 +4161,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			state GranuleStartState info;
 			info.changeFeedStartVersion = invalidVersion;
 
-			state Future<Optional<Value>> fLockValue = tr.get(lockKey);
+			state Future<ValueReadResult> fLockValue = tr.get(lockKey);
 			state Future<ForcedPurgeState> fForcedPurgeState = getForcePurgedState(&tr, req.keyRange);
 			Reference<BlobRestoreController> restoreController =
 			    makeReference<BlobRestoreController>(bwData->db, req.keyRange);
@@ -4185,7 +4187,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 			bool isFullRestore = wait(fIsRestoring);
 			bwData->isFullRestoreMode = isFullRestore;
 
-			Optional<Value> prevLockValue = wait(fLockValue);
+			ValueReadResult prevLockValue = wait(fLockValue);
 			state bool hasPrevOwner = prevLockValue.present();
 			state bool createChangeFeed = false;
 
@@ -4198,7 +4200,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 				// if it's the first snapshot of a new granule, history won't be present
 				if (info.history.present()) {
 					if (info.granuleID != info.history.get().value.granuleID) {
-						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit", probe::decoration::rare);
+						CODE_PROBE(true, "Blob Worker re-opening granule after merge+resplit");
 						// The only case this can happen is when a granule was merged into a larger granule,
 						// then split back out to the same one. Validate that this is a new granule that was
 						// split previously. Just check lock based on epoch, since seqno is intentionally
@@ -4302,7 +4304,7 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 					state Version parentVersion = info.history.get().value.parentVersions[0];
 					state Key parentHistoryKey = blobGranuleHistoryKeyFor(parentRange, parentVersion);
 
-					Optional<Value> historyParentValue = wait(tr.get(parentHistoryKey));
+					ValueReadResult historyParentValue = wait(tr.get(parentHistoryKey));
 
 					if (historyParentValue.present()) {
 						Standalone<BlobGranuleHistoryValue> val =
@@ -4819,7 +4821,7 @@ ACTOR Future<Void> registerBlobWorker(Reference<BlobWorkerData> bwData,
 			tr->set(blobWorkerListKey, blobWorkerListValue(interf));
 
 			// Get manager lock from DB
-			Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
+			ValueReadResult currentLockValue = wait(tr->get(blobManagerEpochKey));
 			ASSERT(currentLockValue.present());
 			int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 			bwData->managerEpochOk(currentEpoch);
@@ -4850,7 +4852,7 @@ ACTOR Future<Void> monitorRemoval(Reference<BlobWorkerData> bwData) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> val = wait(tr.get(blobWorkerListKey));
+				ValueReadResult val = wait(tr.get(blobWorkerListKey));
 				if (!val.present()) {
 					CODE_PROBE(true, "Blob worker found out BM killed it from reading DB");
 					return Void();

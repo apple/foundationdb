@@ -72,6 +72,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 		RawTenantAccessWorkload* workload = self;
 		// create N tenant through special key space
 		wait(runRYWTransaction(cx, [workload](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 			for (int i = 0; i < workload->tenantCount; i += 2) {
 				tr->set(workload->specialKeysTenantMapPrefix.withSuffix(workload->indexToTenantName(i)), ""_sr);
@@ -121,14 +122,14 @@ struct RawTenantAccessWorkload : TestWorkload {
 		// check tenant existence, and load tenantId
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
 		loop {
-			tr->reset();
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			newTenantIds.clear();
 			try {
 				state std::set<int>::const_iterator it = self->lastDeletedTenants.cbegin();
 				// check tenant deletion
 				while (it != self->lastDeletedTenants.end()) {
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
-					Optional<Value> value = wait(tr->get(key));
+					ValueReadResult value = wait(tr->get(key));
 					// the commit proxies should have the same view of tenant map
 					ASSERT_EQ(value.present(), !lastCommitted);
 					++it;
@@ -138,7 +139,7 @@ struct RawTenantAccessWorkload : TestWorkload {
 				it = self->lastCreatedTenants.cbegin();
 				while (it != self->lastCreatedTenants.end()) {
 					Key key = self->specialKeysTenantMapPrefix.withSuffix(self->indexToTenantName(*it));
-					Optional<Value> value = wait(tr->get(key));
+					ValueReadResult value = wait(tr->get(key));
 					// the commit proxies should have the same view of tenant map
 					ASSERT_EQ(value.present(), lastCommitted || (self->idx2Tid.count(*it) > 0));
 

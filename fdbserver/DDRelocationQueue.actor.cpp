@@ -943,7 +943,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
-	std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
+	auto it = combined.begin();
 	for (; it != combined.end(); it++) {
 		RelocateData rd(*it);
 
@@ -1206,6 +1206,18 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
 	}
 }
+
+static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
+	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
+	int count = 0;
+	for (int i = 0; i < destIds.size(); i++) {
+		if (srcSet.count(destIds[i]) == 0) {
+			count++;
+		}
+	}
+	return count;
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1824,8 +1836,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						dataTransferComplete.send(rd);
 					}
 
+					// In the case of merge, rd.completeSources would be the intersection set of two source server
+					// lists, while rd.src would be the union set.
+					// FIXME. It is a bit over-estimated here with rd.completeSources.
+					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
 					self->bytesWritten += metrics.bytes;
-					self->moveBytesRate.addSample(metrics.bytes);
+					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2125,7 +2141,7 @@ Future<bool> DDQueue::rebalanceTeams(DataMovementReason moveReason,
 }
 
 ACTOR Future<bool> getSkipRebalanceValue(Reference<IDDTxnProcessor> txnProcessor, bool readRebalance) {
-	Optional<Value> val = wait(txnProcessor->readRebalanceDDIgnoreKey());
+	ValueReadResult val = wait(txnProcessor->readRebalanceDDIgnoreKey());
 
 	if (!val.present())
 		return false;
@@ -2229,8 +2245,7 @@ struct DDQueueImpl {
 	ACTOR static Future<Void> run(Reference<DDQueue> self,
 	                              Reference<AsyncVar<bool>> processingUnhealthy,
 	                              Reference<AsyncVar<bool>> processingWiggle,
-	                              FutureStream<Promise<int>> getUnhealthyRelocationCount,
-	                              const DDEnabledState* ddEnabledState) {
+	                              FutureStream<Promise<int>> getUnhealthyRelocationCount) {
 
 		state std::set<UID> serversToLaunchFrom;
 		state KeyRange keysToLaunchFrom;
@@ -2266,10 +2281,10 @@ struct DDQueueImpl {
 				// launched.
 				if (launchData.startTime != -1) {
 					// Launch dataDistributionRelocator actor to relocate the launchData
-					self->launchQueuedWork(launchData, ddEnabledState);
+					self->launchQueuedWork(launchData, self->ddEnabledState);
 					launchData = RelocateData();
 				} else if (!keysToLaunchFrom.empty()) {
-					self->launchQueuedWork(keysToLaunchFrom, ddEnabledState);
+					self->launchQueuedWork(keysToLaunchFrom, self->ddEnabledState);
 					keysToLaunchFrom = KeyRangeRef();
 				}
 
@@ -2280,9 +2295,9 @@ struct DDQueueImpl {
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
-							self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
 						} else if (rs.cancelled) {
-							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
+							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
 						} else {
 							bool wasEmpty = serversToLaunchFrom.empty();
 							self->queueRelocation(rs, serversToLaunchFrom);
@@ -2291,7 +2306,7 @@ struct DDQueueImpl {
 						}
 					}
 					when(wait(launchQueuedWorkTimeout)) {
-						self->launchQueuedWork(serversToLaunchFrom, ddEnabledState);
+						self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
 						serversToLaunchFrom = std::set<UID>();
 						launchQueuedWorkTimeout = Never();
 					}
@@ -2434,9 +2449,9 @@ Future<Void> DDQueue::run(Reference<DDQueue> self,
                           Reference<AsyncVar<bool>> processingWiggle,
                           FutureStream<Promise<int>> getUnhealthyRelocationCount,
                           const DDEnabledState* ddEnabledState) {
-	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount, ddEnabledState);
+	self->ddEnabledState = ddEnabledState;
+	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
 }
-
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	state DDQueue self;

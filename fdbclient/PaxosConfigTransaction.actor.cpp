@@ -285,7 +285,7 @@ class PaxosConfigTransactionImpl {
 	Database cx;
 	Future<Void> watchClusterFileFuture;
 
-	ACTOR static Future<Optional<Value>> get(PaxosConfigTransactionImpl* self, Key key) {
+	ACTOR static Future<ValueReadResult> get(PaxosConfigTransactionImpl* self, Key key) {
 		state ConfigKey configKey = ConfigKey::decodeKey(key);
 		loop {
 			try {
@@ -307,9 +307,9 @@ class PaxosConfigTransactionImpl {
 				                     ConfigTransactionGetRequest{ self->coordinatorsHash, generation, configKey }),
 				    CLIENT_KNOBS->GET_KNOB_TIMEOUT));
 				if (reply.value.present()) {
-					return reply.value.get().toValue();
+					return ValueReadResult(reply.value.get().toValue());
 				} else {
-					return Optional<Value>{};
+					return ValueReadResult{};
 				}
 			} catch (Error& e) {
 				if (e.code() != error_code_timed_out && e.code() != error_code_broken_promise &&
@@ -457,7 +457,7 @@ public:
 
 	void clear(KeyRef key) { commitQuorum.clear(key); }
 
-	Future<Optional<Value>> get(Key const& key) { return get(this, key); }
+	Future<ValueReadResult> get(Key const& key) { return get(this, key); }
 
 	Future<RangeResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
@@ -530,7 +530,7 @@ Optional<Version> PaxosConfigTransaction::getCachedReadVersion() const {
 	return impl->getCachedReadVersion();
 }
 
-Future<Optional<Value>> PaxosConfigTransaction::get(Key const& key, Snapshot) {
+Future<ValueReadResult> PaxosConfigTransaction::get(Key const& key, Snapshot) {
 	return impl->get(key);
 }
 

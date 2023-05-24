@@ -420,7 +420,8 @@ public:
 	                                                                Optional<Reference<Tenant>> tenant = {});
 	Future<Version> verifyBlobRange(const KeyRange& range,
 	                                Optional<Version> version,
-	                                Optional<Reference<Tenant>> tenant = {});
+	                                Optional<Reference<Tenant>> tenant = {},
+	                                UseRawAccess = UseRawAccess::False);
 	Future<bool> flushBlobRange(const KeyRange& range,
 	                            bool compact,
 	                            Optional<Version> version,
@@ -473,7 +474,7 @@ public:
 		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = Optional<UID>())
+		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
@@ -482,7 +483,9 @@ public:
 		PromiseStream<VersionRequest> stream;
 		Future<Void> actor;
 	};
-	std::map<uint32_t, VersionBatcher> versionBatcher;
+
+	using VersionBatcherIndex = std::pair<uint32_t, Optional<TenantGroupName>>;
+	std::map<VersionBatcherIndex, VersionBatcher> versionBatcher;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
@@ -720,7 +723,18 @@ public:
 	                            Version readVersion,
 	                            VersionVector& latestCommitVersion);
 
-	TenantMode getTenantMode() const { return clientInfo->get().tenantMode; }
+	// Gets the tenant mode stored in the DatabaseContext's ClientDBInfo
+	// If the ClientDBInfo is provisional, it is possible we don't actually know the tenant mode, in which case we
+	// return an empty optional
+	Optional<TenantMode> getTenantMode() const {
+		if (clientInfo->get().tenantMode == TenantMode::DISABLED &&
+		    (clientInfo->get().grvProxies.empty() || clientInfo->get().grvProxies[0].provisional)) {
+			CODE_PROBE(true, "Accessing tenant mode in provisional ClientDBInfo", probe::decoration::rare);
+			return {};
+		}
+
+		return clientInfo->get().tenantMode;
+	}
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
@@ -729,7 +743,7 @@ public:
 	std::unique_ptr<GlobalConfig> globalConfig;
 	EventCacheHolder connectToDatabaseEventCacheHolder;
 
-	Future<int64_t> lookupTenant(TenantName tenant);
+	Future<TenantLookupInfo> lookupTenant(TenantName tenant);
 
 	// Get client-side status information as a JSON string with the following schema:
 	// { "Healthy" : <overall health status: true or false>,
@@ -784,6 +798,8 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	void initializeSpecialCounters();
 };
 
 // Similar to tr.onError(), but doesn't require a DatabaseContext.

@@ -94,12 +94,10 @@ public:
 	virtual Future<Void> waitForDataDistributionEnabled(const DDEnabledState* ddEnabledState) const { return Void(); };
 
 	virtual Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const {
-		return ddEnabledState->isDDEnabled();
+		return ddEnabledState->isEnabled();
 	};
 
-	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
-		return Never();
-	};
+	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const = 0;
 
 	// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
 	// Changes to keyServer and serverKey must happen symmetrically in this function.
@@ -135,7 +133,7 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+	virtual Future<ValueReadResult> readRebalanceDDIgnoreKey() const { return {}; }
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -220,7 +218,7 @@ public:
 
 	Future<HealthMetrics> getHealthMetrics(bool detailed) const override;
 
-	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override;
+	Future<ValueReadResult> readRebalanceDDIgnoreKey() const override;
 
 	Future<Void> waitDDTeamInfoPrintSignal() const override;
 
@@ -296,6 +294,10 @@ public:
 	Future<HealthMetrics> getHealthMetrics(bool detailed = false) const override;
 
 	Future<std::vector<ProcessData>> getWorkers() const override;
+
+	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const override {
+		return Never();
+	}
 
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 

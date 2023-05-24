@@ -16,7 +16,7 @@
 #include "flow/IndexedSet.h"
 #include "flow/IRandom.h"
 
-// Storages statistics for an individual storage server that are relevant for ratekeeper throttling
+// Stores statistics for an individual storage server that are relevant for ratekeeper throttling
 class StorageQueueInfo {
 	uint64_t totalWriteCosts{ 0 };
 	int totalWriteOps{ 0 };
@@ -36,7 +36,7 @@ public:
 	StorageQueuingMetricsReply lastReply;
 	bool acceptingRequests;
 	limitReason_t limitReason;
-	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
+	std::vector<BusyTagInfo> busiestReadTags, busiestWriteTags;
 
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);

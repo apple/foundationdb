@@ -191,7 +191,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state Optional<Value> ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
+				state ValueReadResult ccSuspendVal = wait(tr.get(fdbShouldConsistencyCheckBeSuspended));
 				bool ccSuspend = ccSuspendVal.present()
 				                     ? BinaryReader::fromStringRef<bool>(ccSuspendVal.get(), Unversioned())
 				                     : false;
@@ -239,6 +239,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state std::map<UID, StorageServerInterface> tssMapping;
 
 				state Transaction tr(cx);
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				loop {
 					try {
@@ -321,6 +322,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 
 					wait(::success(self->checkForStorage(cx, configuration, tssMapping, self)));
 					wait(::success(self->checkForExtraDataStores(cx, self)));
+					wait(::success(self->checkStorageMetadata(cx, self)));
 
 					// Check blob workers are operating as expected
 					if (configuration.blobGranulesEnabled) {
@@ -341,6 +343,10 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
 					if (!coordinatorsCorrect)
 						self->testFailure("Coordinators incorrect");
+
+					bool consistencyScanStopped = wait(self->checkConsistencyScan(cx));
+					if (!consistencyScanStopped)
+						self->testFailure("Consistency scan active");
 				}
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -382,7 +388,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						                          true,
 						                          self->rateLimitMax,
 						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
-						                          KeyRef(),
 						                          &self->success));
 
 						// Cache consistency check
@@ -971,6 +976,42 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		return false;
 	}
 
+	// Every storage server should have it metadata populated and no metadata leak when the database reach the quiescent
+	// state
+	ACTOR Future<bool> checkStorageMetadata(Database cx, ConsistencyCheckWorkload* self) {
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
+		state std::vector<StorageServerInterface> servers;
+		state std::unordered_map<UID, StorageMetadataType> id_ssi;
+		state Transaction tr(cx);
+		loop {
+			servers.clear();
+			id_ssi.clear();
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
+				    wait(metadataMap.getRange(&tr, {}, {}, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!metadata.more && metadata.results.size() < CLIENT_KNOBS->TOO_MANY);
+				RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
+				ASSERT_EQ(metadata.results.size(), serverList.size());
+				id_ssi = std::unordered_map<UID, StorageMetadataType>(metadata.results.begin(), metadata.results.end());
+				servers.reserve(serverList.size());
+				for (int i = 0; i < serverList.size(); i++)
+					servers.push_back(decodeServerListValue(serverList[i].value));
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		for (auto& ssi : servers) {
+			ASSERT(id_ssi.count(ssi.id()));
+		}
+		return true;
+	}
+
 	// Returns false if any worker that should have a storage server does not have one
 	ACTOR Future<bool> checkForStorage(Database cx,
 	                                   DatabaseConfiguration configuration,
@@ -1252,6 +1293,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
+			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
 				if (!workerAddresses.count(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
@@ -1286,8 +1328,9 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
+				tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+				ValueReadResult currentKey = wait(tr.get(coordinatorsKey));
 
 				if (!currentKey.present()) {
 					TraceEvent("ConsistencyCheck_NoCoordinatorKey").log();
@@ -1606,6 +1649,24 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		// TODO: Check Tlog
 
 		return true;
+	}
+
+	// returns true if stopped, false otherwise
+	ACTOR Future<bool> checkConsistencyScan(Database cx) {
+		if (!g_network->isSimulated()) {
+			return true;
+		}
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state ConsistencyScanState cs;
+		loop {
+			try {
+				SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
+				ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+				return !config.enabled;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
 	}
 };
 

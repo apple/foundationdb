@@ -32,9 +32,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/DirectBufferPool.java
   src/main/com/apple/foundationdb/FDB.java
   src/main/com/apple/foundationdb/FDBDatabase.java
+  src/main/com/apple/foundationdb/FDBKeyValue.java
+  src/main/com/apple/foundationdb/FDBMappedKeyValue.java
+  src/main/com/apple/foundationdb/FDBResultBytes.java
   src/main/com/apple/foundationdb/FDBTenant.java
   src/main/com/apple/foundationdb/FDBTransaction.java
   src/main/com/apple/foundationdb/FutureBool.java
+  src/main/com/apple/foundationdb/FutureBytes.java
   src/main/com/apple/foundationdb/FutureInt64.java
   src/main/com/apple/foundationdb/FutureKey.java
   src/main/com/apple/foundationdb/FutureKeyArray.java
@@ -45,8 +49,13 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/FutureStrings.java
   src/main/com/apple/foundationdb/FutureVoid.java
   src/main/com/apple/foundationdb/JNIUtil.java
+  src/main/com/apple/foundationdb/KeyArrayResult.java
+  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/KeySelector.java
   src/main/com/apple/foundationdb/KeyValue.java
+  src/main/com/apple/foundationdb/MappedRangeQuery.java
+  src/main/com/apple/foundationdb/MappedRangeResult.java
+  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/MappedKeyValue.java
   src/main/com/apple/foundationdb/LocalityUtil.java
   src/main/com/apple/foundationdb/NativeFuture.java
@@ -56,14 +65,11 @@ set(JAVA_BINDING_SRCS
   src/main/com/apple/foundationdb/package-info.java
   src/main/com/apple/foundationdb/Range.java
   src/main/com/apple/foundationdb/RangeQuery.java
-  src/main/com/apple/foundationdb/MappedRangeQuery.java
-  src/main/com/apple/foundationdb/KeyArrayResult.java
-  src/main/com/apple/foundationdb/KeyRangeArrayResult.java
   src/main/com/apple/foundationdb/RangeResult.java
-  src/main/com/apple/foundationdb/MappedRangeResult.java
   src/main/com/apple/foundationdb/RangeResultInfo.java
-  src/main/com/apple/foundationdb/MappedRangeResultInfo.java
   src/main/com/apple/foundationdb/RangeResultSummary.java
+  src/main/com/apple/foundationdb/ReadMetrics.java
+  src/main/com/apple/foundationdb/ResultBytes.java
   src/main/com/apple/foundationdb/ReadTransaction.java
   src/main/com/apple/foundationdb/ReadTransactionContext.java
   src/main/com/apple/foundationdb/subspace/package-info.java
@@ -423,6 +429,15 @@ if(NOT OPEN_FOR_IDE)
       -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
       -Djava.library.path=${CMAKE_BINARY_DIR}/lib
       org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
+      )
+
+    add_fdbclient_test(NAME java-integration-external-client
+      API_TEST_BLOB_GRANULES_ENABLED
+      COMMAND ${Java_JAVA_EXECUTABLE}
+      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" 
+          "--disable-banner" "-t SupportsExternalClient" "--config=external_client_library=${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so"
       )
 
   endif()

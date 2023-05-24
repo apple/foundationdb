@@ -97,7 +97,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		if (clientId != 0) {
 			return Void();
 		}
-		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1);
+		auto switchConnFileDb = Database::createDatabase(cx->getConnectionRecord(), -1, IsInternal::False);
 		switchConnFileDb->defaultTenant = cx->defaultTenant;
 		originalDB = cx;
 		std::vector<Future<Void>> clients = { readerClientSeparateDBs(cx, this),
@@ -124,8 +124,8 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
 				state Version rv = wait(tr.getReadVersion());
-				Optional<Value> val1 = wait(tr.get(self->keyToRead));
-				return std::make_pair(rv, val1);
+				ValueReadResult val1 = wait(tr.get(self->keyToRead));
+				return std::make_pair(rv, val1.contents());
 			} catch (Error& e) {
 				TRACE_ERROR(e);
 				wait(tr.onError(e));
@@ -196,7 +196,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		tr.setVersion(rv);
 		tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 		try {
-			Optional<Value> val2 = wait(tr.get(self->keyToRead));
+			ValueReadResult val2 = wait(tr.get(self->keyToRead));
 			// We read the same key at the same read version with the same db, we must get the same value (or fail to
 			// read)
 			ASSERT(val1 == val2);
@@ -229,7 +229,7 @@ struct DifferentClustersSameRVWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				Optional<Value> value = wait(tr.get(self->keyToRead));
+				ValueReadResult value = wait(tr.get(self->keyToRead));
 				int x = 0;
 				if (value.present()) {
 					BinaryReader r(value.get(), Unversioned());

@@ -57,13 +57,13 @@ public:
 	struct GetValueReq {
 		explicit GetValueReq(Key key) : key(key) {}
 		Key key;
-		typedef Optional<Value> Result;
+		typedef ValueReadResult Result;
 	};
 
 	struct GetKeyReq {
 		explicit GetKeyReq(KeySelector key) : key(key) {}
 		KeySelector key;
-		typedef Key Result;
+		typedef KeyReadResult Result;
 	};
 
 	template <bool reverse>
@@ -93,7 +93,7 @@ public:
 	// make use of it.
 
 	ACTOR template <class Iter>
-	static Future<Optional<Value>> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
+	static Future<ValueReadResult> read(ReadYourWritesTransaction* ryw, GetValueReq read, Iter* it) {
 		// This overload is required to provide postcondition: it->extractWriteMapIterator().segmentContains(read.key)
 
 		if (ryw->options.bypassUnreadable) {
@@ -104,14 +104,14 @@ public:
 		if (it->is_kv()) {
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				return ValueReadResult(result->value);
 			} else {
-				return Optional<Value>();
+				return ValueReadResult();
 			}
 		} else if (it->is_empty_range()) {
-			return Optional<Value>();
+			return ValueReadResult();
 		} else {
-			Optional<Value> res = wait(ryw->tr.get(read.key, Snapshot::True));
+			ValueReadResult res = wait(ryw->tr.get(read.key, Snapshot::True));
 			KeyRef k(ryw->arena, read.key);
 
 			if (res.present()) {
@@ -122,7 +122,7 @@ public:
 			} else {
 				ryw->cache.insert(k, Optional<ValueRef>());
 				if (!dependent)
-					return Optional<Value>();
+					return res;
 			}
 
 			// There was a dependent write at the key, so we need to lookup the iterator again
@@ -131,32 +131,32 @@ public:
 			ASSERT(it->is_kv());
 			const KeyValueRef* result = it->kv(ryw->arena);
 			if (result != nullptr) {
-				return result->value;
+				return ValueReadResult(result->value, res.getReadMetrics());
 			} else {
-				return Optional<Value>();
+				return ValueReadResult({}, res.getReadMetrics());
 			}
 		}
 	}
 
 	ACTOR template <class Iter>
-	static Future<Key> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
+	static Future<KeyReadResult> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
 		if (read.key.offset > 0) {
 			RangeResult result =
 			    wait(getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it));
 			if (result.readToBegin)
-				return allKeys.begin;
+				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
 			if (result.readThroughEnd || !result.size())
-				return ryw->getMaxReadKey();
-			return result[0].key;
+				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
+			return KeyReadResult(std::move(result[0].key), ReadMetricsNeedFilled());
 		} else {
 			read.key.offset++;
 			RangeResult result =
 			    wait(getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it));
 			if (result.readThroughEnd)
-				return ryw->getMaxReadKey();
+				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
 			if (result.readToBegin || !result.size())
-				return allKeys.begin;
-			return result[0].key;
+				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
+			return KeyReadResult(result[0].key, ReadMetricsNeedFilled());
 		}
 	};
 
@@ -174,14 +174,16 @@ public:
 	// transaction. Responsible for clipping results to the non-system keyspace when appropriate, since NativeAPI
 	// doesn't do that.
 
-	static Future<Optional<Value>> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
+	static Future<ValueReadResult> readThrough(ReadYourWritesTransaction* ryw, GetValueReq read, Snapshot snapshot) {
 		return ryw->tr.get(read.key, snapshot);
 	}
 
-	ACTOR static Future<Key> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
-		Key key = wait(ryw->tr.getKey(read.key, snapshot));
-		if (ryw->getMaxReadKey() < key)
-			return ryw->getMaxReadKey(); // Filter out results in the system keys if they are not accessible
+	ACTOR static Future<KeyReadResult> readThrough(ReadYourWritesTransaction* ryw, GetKeyReq read, Snapshot snapshot) {
+		KeyReadResult key = wait(ryw->tr.getKey(read.key, snapshot));
+		// Filter out results in the system keys if they are not accessible
+		if (ryw->getMaxReadKey() < key) {
+			return KeyReadResult(ryw->getMaxReadKey(), key.getReadMetrics());
+		}
 		return key;
 	}
 
@@ -192,7 +194,7 @@ public:
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
@@ -222,13 +224,16 @@ public:
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetValueReq read,
 	                             WriteMap::iterator& it,
-	                             Optional<Value> result) {
+	                             ValueReadResult result) {
 		// it will already point to the right segment (see the calling code in read()), so we don't need to skip
 		// read.key will be copied into ryw->arena inside of updateConflictMap if it is being added
 		updateConflictMap<mustUnmodified>(ryw, read.key, it);
 	}
 
-	static void addConflictRange(ReadYourWritesTransaction* ryw, GetKeyReq read, WriteMap::iterator& it, Key result) {
+	static void addConflictRange(ReadYourWritesTransaction* ryw,
+	                             GetKeyReq read,
+	                             WriteMap::iterator& it,
+	                             KeyReadResult result) {
 		KeyRangeRef readRange;
 		if (read.key.offset <= 0)
 			readRange = KeyRangeRef(KeyRef(ryw->arena, result),
@@ -620,7 +625,7 @@ public:
 		}
 
 		if (!end.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedEnd = wait(read(ryw, GetKeyReq(end), pit));
+			KeyReadResult resolvedEnd = wait(read(ryw, GetKeyReq(end), pit));
 			if (resolvedEnd == allKeys.begin)
 				readToBegin = true;
 			if (resolvedEnd == ryw->getMaxReadKey())
@@ -665,7 +670,7 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedEnd =
+				KeyReadResult resolvedEnd =
 				    wait(read(ryw,
 				              GetKeyReq(end),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
@@ -924,7 +929,7 @@ public:
 		}
 
 		if (!begin.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
-			Key resolvedBegin = wait(read(ryw, GetKeyReq(begin), pit));
+			KeyReadResult resolvedBegin = wait(read(ryw, GetKeyReq(begin), pit));
 			if (resolvedBegin == allKeys.begin)
 				readToBegin = true;
 			if (resolvedBegin == ryw->getMaxReadKey())
@@ -969,7 +974,7 @@ public:
 					break;
 				if (!result.size())
 					break;
-				Key resolvedBegin =
+				KeyReadResult resolvedBegin =
 				    wait(read(ryw,
 				              GetKeyReq(begin),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
@@ -1150,7 +1155,7 @@ public:
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
-			Key key = wait(ryw->tr.getKey(read.end, snapshot));
+			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
@@ -1286,7 +1291,7 @@ public:
 	}
 
 	ACTOR static Future<Void> watch(ReadYourWritesTransaction* ryw, Key key) {
-		state Future<Optional<Value>> val;
+		state Future<ValueReadResult> val;
 		state Future<Void> watchFuture;
 		state Reference<Watch> watch(new Watch(key));
 		state Promise<Void> done;
@@ -1602,9 +1607,9 @@ Optional<Value> getValueFromJSON(StatusObject statusObj) {
 	}
 }
 
-ACTOR Future<Optional<Value>> getJSON(Database db) {
+ACTOR Future<ValueReadResult> getJSON(Database db) {
 	StatusObject statusObj = wait(StatusClient::statusFetcher(db));
-	return getValueFromJSON(statusObj);
+	return ValueReadResult(getValueFromJSON(statusObj));
 }
 
 ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
@@ -1632,7 +1637,7 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 	}
 }
 
-Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
+Future<ValueReadResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
 	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
 	if (getDatabase()->apiVersionAtLeast(630)) {
@@ -1646,7 +1651,7 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 				++tr.getDatabase()->transactionStatusRequests;
 				return getJSON(tr.getDatabase());
 			} else {
-				return Optional<Value>();
+				return ValueReadResult();
 			}
 		}
 
@@ -1654,12 +1659,12 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 			try {
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Optional<Value> output = StringRef(tr.getDatabase()->getConnectionRecord()->getLocation());
-					return output;
+					return ValueReadResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return Optional<Value>();
+			return ValueReadResult();
 		}
 
 		if (key == "\xff\xff/connection_string"_sr) {
@@ -1667,12 +1672,12 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 				if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 					Reference<IClusterConnectionRecord> f = tr.getDatabase()->getConnectionRecord();
 					Optional<Value> output = StringRef(f->getConnectionString().toString());
-					return output;
+					return ValueReadResult(std::move(output));
 				}
 			} catch (Error& e) {
 				return e;
 			}
-			return Optional<Value>();
+			return ValueReadResult();
 		}
 	}
 
@@ -1688,15 +1693,15 @@ Future<Optional<Value>> ReadYourWritesTransaction::get(const Key& key, Snapshot 
 
 	// There are no keys in the database with size greater than the max key size
 	if (key.size() > getMaxReadKeySize(key)) {
-		return Optional<Value>();
+		return ValueReadResult();
 	}
 
-	Future<Optional<Value>> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
+	Future<ValueReadResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetValueReq(key), snapshot);
 	reading.add(success(result));
 	return result;
 }
 
-Future<Key> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot snapshot) {
+Future<KeyReadResult> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	if (checkUsedDuringCommit()) {
 		return used_during_commit();
 	}
@@ -1707,7 +1712,7 @@ Future<Key> ReadYourWritesTransaction::getKey(const KeySelector& key, Snapshot s
 	if (key.getKey() > getMaxReadKey())
 		return key_outside_legal_range();
 
-	Future<Key> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetKeyReq(key), snapshot);
+	Future<KeyReadResult> result = RYWImpl::readWithConflictRange(this, RYWImpl::GetKeyReq(key), snapshot);
 	reading.add(success(result));
 	return result;
 }

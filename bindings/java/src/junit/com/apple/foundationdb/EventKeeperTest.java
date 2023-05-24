@@ -78,7 +78,8 @@ class EventKeeperTest {
 	@Test
 	void testGetRangeRecordsFetches() throws Exception {
 		EventKeeper timer = new MapEventKeeper();
-		List<KeyValue> testKvs = Arrays.asList(new KeyValue("hello".getBytes(), "goodbye".getBytes()));
+		List<KeyValue> testKvs = Arrays.asList(
+				new FDBKeyValue("hello".getBytes(), "goodbye".getBytes(), 0.0f, 0.0f));
 
 		FDBTransaction txn = new FakeFDBTransaction(testKvs, 1L, null, null);
 

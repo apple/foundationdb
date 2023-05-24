@@ -1241,8 +1241,9 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 			if (e.code() == error_code_transaction_too_old)
 				*isTooOld = true;
 			output.more = true;
-			if (begin.isFirstGreaterOrEqual())
-				output.readThrough = begin.getKey();
+			if (begin.isFirstGreaterOrEqual()) {
+				output.setReadThrough(begin.getKey());
+			}
 			return output;
 		}
 		throw;
@@ -2194,7 +2195,7 @@ ACTOR Future<Void> watchInterface(StorageCacheData* self, StorageServerInterface
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				Optional<Value> val = wait(tr.get(storageKey));
+				ValueReadResult val = wait(tr.get(storageKey));
 				// This could race with the data distributor trying to remove
 				// the interface - but this is ok, as we don't need to kill
 				// ourselves if FailureMonitor marks us as down (this might save

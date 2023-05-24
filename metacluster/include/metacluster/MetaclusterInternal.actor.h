@@ -27,7 +27,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantName.h"
@@ -52,11 +52,13 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 
 	KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants = wait(tenantsFuture);
 	if (!tenants.results.empty()) {
+		CODE_PROBE(true, "Metacluster emptiness check has tenants", probe::decoration::rare);
 		throw cluster_not_empty();
 	}
 
 	RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
 	if (!dbContents.empty()) {
+		CODE_PROBE(true, "Metacluster emptiness check has data");
 		throw cluster_not_empty();
 	}
 
@@ -68,12 +70,17 @@ void updateClusterCapacityIndex(Transaction tr,
                                 ClusterName name,
                                 DataClusterEntry const& previousEntry,
                                 DataClusterEntry const& updatedEntry) {
+	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED,
+	           "Update tenant capacity with auto-assignment disabled");
+	CODE_PROBE(updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED,
+	           "Update tenant capacity with auto-assignment enabled");
+
 	// Entries are put in the cluster capacity index ordered by how many items are already allocated to them
-	if (previousEntry.hasCapacity()) {
+	if (previousEntry.hasCapacity() || updatedEntry.autoTenantAssignment == AutoTenantAssignment::DISABLED) {
 		metadata::management::clusterCapacityIndex().erase(
 		    tr, Tuple::makeTuple(previousEntry.allocated.numTenantGroups, name));
 	}
-	if (updatedEntry.hasCapacity()) {
+	if (updatedEntry.hasCapacity() && updatedEntry.autoTenantAssignment == AutoTenantAssignment::ENABLED) {
 		metadata::management::clusterCapacityIndex().insert(
 		    tr, Tuple::makeTuple(updatedEntry.allocated.numTenantGroups, name));
 	}

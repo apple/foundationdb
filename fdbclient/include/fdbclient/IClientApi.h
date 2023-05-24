@@ -44,8 +44,8 @@ public:
 	// These functions that read data return Standalone<...> objects, but these objects are not required to manage their
 	// own memory. It is guaranteed, however, that the ThreadFuture will hold a reference to the memory. It will persist
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
-	virtual ThreadFuture<Optional<Value>> get(const KeyRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) = 0;
+	virtual ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
 	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                           const KeySelectorRef& end,
 	                                           int limit,

@@ -164,15 +164,15 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 					try {
 						self->setAuthToken(tr);
 						// Reverse next and next^2 node
-						Optional<Value> v = wait(tr.get(self->key(r)));
+						ValueReadResult v = wait(tr.get(self->key(r)));
 						if (!v.present())
 							self->badRead("KeyR", r, tr);
 						state int r2 = self->fromValue(v.get());
-						Optional<Value> v2 = wait(tr.get(self->key(r2)));
+						ValueReadResult v2 = wait(tr.get(self->key(r2)));
 						if (!v2.present())
 							self->badRead("KeyR2", r2, tr);
 						state int r3 = self->fromValue(v2.get());
-						Optional<Value> v3 = wait(tr.get(self->key(r3)));
+						ValueReadResult v3 = wait(tr.get(self->key(r3)));
 						if (!v3.present())
 							self->badRead("KeyR3", r3, tr);
 						int r4 = self->fromValue(v3.get());
@@ -328,8 +328,8 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 
 ACTOR Future<Void> prepareToken(Database cx, CycleWorkload<true>* self) {
 	cx->defaultTenant = self->tenant;
-	int64_t tenantId = wait(cx->lookupTenant(self->tenant));
-	self->tenantId = tenantId;
+	TenantLookupInfo tenantLookupInfo = wait(cx->lookupTenant(self->tenant));
+	self->tenantId = tenantLookupInfo.id;
 	ASSERT_NE(self->tenantId, TenantInfo::INVALID_TENANT);
 	// make the lifetime comfortably longer than the timeout of the workload
 	self->signedToken = g_simulator->makeToken(self->tenantId,

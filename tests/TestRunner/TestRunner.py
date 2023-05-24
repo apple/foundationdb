@@ -277,7 +277,6 @@ def process_traces(
     cmake_seed,
 ):
     res = True
-    backtraces = []
     parser = None
     if log_format == "json":
         parser = JSONParser(
@@ -384,7 +383,7 @@ def run_simulation_test(basedir, options):
         seed = int(options.seed, 0)
         if options.test_number:
             idx = int(options.test_number)
-            seed = ((seed + idx) % (2 ** 32 - 2)) + 1
+            seed = ((seed + idx) % (2**32 - 2)) + 1
         pargs.append("{}".format(seed))
     if options.testtype == "test":
         pargs.append("-C")
@@ -404,7 +403,7 @@ def run_simulation_test(basedir, options):
         seed = int(options.seed, 0)
         if options.test_number:
             idx = int(options.test_number)
-            seed = ((seed + idx) % (2 ** 32 - 2)) + 1
+            seed = ((seed + idx) % (2**32 - 2)) + 1
     wd = os.path.join(test_dir, "test_{}".format(options.name.replace("/", "_")))
     os.mkdir(wd)
     return_codes = {}  # {command: return_code}
@@ -428,7 +427,7 @@ def run_simulation_test(basedir, options):
         if not first:
             tmp.append("-R")
             if seed is not None:
-                seed = (seed + 1) % (2 ** 32 - 2)
+                seed = (seed + 1) % (2**32 - 2)
         first = False
         if seed is not None:
             tmp.append("-s")

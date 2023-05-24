@@ -3,11 +3,17 @@ repos:
     rev: 2018e667a6a36ee3fbfa8041cd36512f92f60d49  # frozen: 22.8.0
     hooks:
     - id: black
+      exclude: |
+          (?x)^(
+              bindings/python/fdb/six.py|
+              contrib/Implib.so/implib-gen.py|
+              documentation/sphinx/extensions/rubydomain.py
+          )$
 -   repo: https://github.com/pycqa/flake8
     rev: f8e1b317742036ff11ff86356fd2b68147e169f7  # frozen: 5.0.4
     hooks:
     - id: flake8
 -   repo: git@github.com:snowflakedb/casec_precommit.git
-    rev: 9861e31ff3ba599242336dd8bbefc53a6e9f069e # pragma: allowlist secret
+    rev: 30374abd7e4cfcd07a03794bb706812ac9fa8da2
     hooks:
-    - id: snowflake-secret-scanner
+    - id: fdb-secret-scanner

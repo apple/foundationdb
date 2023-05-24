@@ -137,6 +137,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	// Throw error if module doesn't support tenants and we have a tenant
 	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		CODE_PROBE(true, "Illegal tenant access to special keys module");
 		throw illegal_tenant_access();
 	}
 
@@ -372,6 +373,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				continue;
 			}
 			if (!iter->value()->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant access to special keys module");
 				throw illegal_tenant_access();
 			}
 		}
@@ -471,7 +473,7 @@ Future<RangeResult> SpecialKeySpace::getRange(ReadYourWritesTransaction* ryw,
 	return checkRYWValid(this, ryw, begin, end, limits, reverse);
 }
 
-ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
+ACTOR Future<ValueReadResult> SpecialKeySpace::getActor(SpecialKeySpace* sks,
                                                         ReadYourWritesTransaction* ryw,
                                                         KeyRef key) {
 	// use getRange to workaround this
@@ -482,13 +484,13 @@ ACTOR Future<Optional<Value>> SpecialKeySpace::getActor(SpecialKeySpace* sks,
 	                                        Reverse::False));
 	ASSERT(result.size() <= 1);
 	if (result.size()) {
-		return Optional<Value>(result[0].value);
+		return ValueReadResult(Optional<Value>(std::move(result[0].value)), ReadMetricsNeedFilled());
 	} else {
-		return Optional<Value>();
+		return ValueReadResult({}, ReadMetricsNeedFilled());
 	}
 }
 
-Future<Optional<Value>> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, const Key& key) {
+Future<ValueReadResult> SpecialKeySpace::get(ReadYourWritesTransaction* ryw, const Key& key) {
 	return getActor(this, ryw, key);
 }
 
@@ -503,6 +505,7 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		throw special_keys_no_write_module_found();
 	}
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant write to special keys module");
 		throw illegal_tenant_access();
 	}
 	return impl->set(ryw, key, value);
@@ -523,6 +526,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		throw special_keys_no_write_module_found();
 	}
 	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear range to special keys module");
 		throw illegal_tenant_access();
 	}
 	return begin->clear(ryw, range);
@@ -535,6 +539,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear to special keys module", probe::decoration::rare);
 		throw illegal_tenant_access();
 	}
 	return impl->clear(ryw, key);
@@ -629,6 +634,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	if (ryw->getTenant().present()) {
 		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 			if (!(*it)->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant commit to special keys module", probe::decoration::rare);
 				throw illegal_tenant_access();
 			}
 		}
@@ -999,7 +1005,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreFreeBytes = 0;
 	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
-	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
+	state int64_t totalKvStoreUsedBytesNotExcluded = 0;
 	state int64_t totalKvStoreAvailableBytes = 0;
 
 	try {
@@ -1024,6 +1030,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+					if (excluded) {
+						ssExcludedCount++;
+					}
 
 					int64_t used_bytes;
 					if (!role.get("kvstore_used_bytes", used_bytes)) {
@@ -1051,7 +1060,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 					totalKvStoreAvailableBytes += available_bytes;
 
 					if (!excluded) {
-						totalKvStoreUsedBytesNonExcluded += used_bytes;
+						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
 							totalKvStoreFreeBytesNotExcluded += free_bytes;
@@ -1060,10 +1069,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 							}
 						}
 					}
-				}
-
-				if (excluded) {
-					ssExcludedCount++;
 				}
 			}
 		}
@@ -1075,10 +1080,20 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	// The numerator is the total space in use by FDB that is not immediately reusable.
 	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
-	// The denominator is the total capacity usable by FDB (either used or unused currently).
+	// The denominator is the total capacity usable by FDB (either used or unused currently) on non-excluded servers.
 	double finalUnavailableRatio =
-	    (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
-	    std::max((totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded), (int64_t)1);
+	    (double)(totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((double)(totalKvStoreUsedBytesNotExcluded + totalKvStoreFreeBytesNotExcluded), (double)1);
+
+	TraceEvent(SevInfo, "CheckExclusionDetails")
+	    .detail("SsTotalCount", ssTotalCount)
+	    .detail("SsExcludedCount", ssExcludedCount)
+	    .detail("FinalUnavailableRatio", finalUnavailableRatio)
+	    .detail("TotalKvStoreUsedBytes", totalKvStoreUsedBytes)
+	    .detail("TotalKvStoreFreeBytes", totalKvStoreFreeBytes)
+	    .detail("TotalKvStoreAvailableBytes", totalKvStoreAvailableBytes)
+	    .detail("TotalKvStoreUsedBytesNotExcluded", totalKvStoreUsedBytesNotExcluded)
+	    .detail("TotalKvStoreFreeBytesNotExcluded", totalKvStoreFreeBytesNotExcluded);
 
 	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
 		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"
@@ -1207,7 +1222,7 @@ ACTOR Future<RangeResult> ExclusionInProgressActor(ReadYourWritesTransaction* ry
 		}
 	}
 
-	Optional<Standalone<StringRef>> value = wait(tr.get(logsKey));
+	ValueReadResult value = wait(tr.get(logsKey));
 	ASSERT(value.present());
 	auto logs = decodeLogsValue(value.get());
 	for (auto const& log : logs.first) {
@@ -1407,7 +1422,7 @@ Future<RangeResult> ProcessClassSourceRangeImpl::getRange(ReadYourWritesTransact
 ACTOR Future<RangeResult> getLockedKeyActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 	RangeResult result;
 	if (val.present()) {
 		UID uid = UID::fromString(BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()).toString());
@@ -1440,7 +1455,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 	state Optional<std::string> msg;
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 
 	if (val.present() && BinaryReader::fromStringRef<UID>(val.get().substr(10), Unversioned()) != uid) {
 		// check database not locked
@@ -1461,7 +1476,7 @@ ACTOR Future<Optional<std::string>> lockDatabaseCommitActor(ReadYourWritesTransa
 ACTOR Future<Optional<std::string>> unlockDatabaseCommitActor(ReadYourWritesTransaction* ryw) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(databaseLockedKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(databaseLockedKey));
 	if (val.present()) {
 		ryw->getTransaction().clear(singleKeyRange(databaseLockedKey));
 	}
@@ -1489,7 +1504,7 @@ ACTOR Future<RangeResult> getConsistencyCheckKeyActor(ReadYourWritesTransaction*
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
+	ValueReadResult val = wait(ryw->getTransaction().get(fdbShouldConsistencyCheckBeSuspended));
 	bool ccSuspendSetting = val.present() ? BinaryReader::fromStringRef<bool>(val.get(), Unversioned()) : false;
 	RangeResult result;
 	if (ccSuspendSetting) {
@@ -1846,7 +1861,7 @@ ACTOR static Future<RangeResult> CoordinatorsAutoImplActor(ReadYourWritesTransac
 	tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 	tr.setOption(FDBTransactionOptions::USE_PROVISIONAL_PROXIES);
 	tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> currentKey = wait(tr.get(coordinatorsKey));
+	ValueReadResult currentKey = wait(tr.get(coordinatorsKey));
 
 	if (!currentKey.present()) {
 		ryw->setSpecialKeySpaceErrorMsg(
@@ -1903,7 +1918,7 @@ Future<RangeResult> CoordinatorsAutoImpl::getRange(ReadYourWritesTransaction* ry
 ACTOR static Future<RangeResult> getMinCommitVersionActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(minRequiredCommitVersionKey));
 	RangeResult result;
 	if (val.present()) {
 		Version minRequiredCommitVersion = BinaryReader::fromStringRef<Version>(val.get(), Unversioned());
@@ -1934,7 +1949,7 @@ Future<RangeResult> AdvanceVersionImpl::getRange(ReadYourWritesTransaction* ryw,
 }
 
 ACTOR static Future<Optional<std::string>> advanceVersionCommitActor(ReadYourWritesTransaction* ryw, Version v) {
-	Optional<Standalone<StringRef>> versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
+	ValueReadResult versionEpochValue = wait(ryw->getTransaction().get(versionEpochKey));
 	if (versionEpochValue.present()) {
 		return ManagementAPIError::toJsonString(
 		    false, "advanceversion", "Illegal to modify the version while the version epoch is enabled");
@@ -1986,7 +2001,7 @@ Future<Optional<std::string>> AdvanceVersionImpl::commit(ReadYourWritesTransacti
 ACTOR static Future<RangeResult> getVersionEpochActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(versionEpochKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(versionEpochKey));
 	RangeResult result;
 	if (val.present()) {
 		int64_t versionEpoch = BinaryReader::fromStringRef<int64_t>(val.get(), Unversioned());
@@ -2433,7 +2448,7 @@ ACTOR static Future<RangeResult> MaintenanceGetRangeActor(ReadYourWritesTransact
 	// zoneId
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
-	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(healthyZoneKey));
 	if (val.present()) {
 		auto healthyZone = decodeHealthyZoneValue(val.get());
 		if ((healthyZone.first == ignoreSSFailuresZoneString) ||
@@ -2468,7 +2483,7 @@ ACTOR static Future<Optional<std::string>> maintenanceCommitActor(ReadYourWrites
 	ryw->getTransaction().setOption(FDBTransactionOptions::LOCK_AWARE);
 	ryw->getTransaction().setOption(FDBTransactionOptions::RAW_ACCESS);
 	ryw->getTransaction().setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-	Optional<Value> val = wait(ryw->getTransaction().get(healthyZoneKey));
+	ValueReadResult val = wait(ryw->getTransaction().get(healthyZoneKey));
 	Optional<std::pair<Key, Version>> healthyZone =
 	    val.present() ? decodeHealthyZoneValue(val.get()) : Optional<std::pair<Key, Version>>();
 
@@ -2536,7 +2551,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 	if (kr.contains(modeKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[modeKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			Optional<Value> f = wait(ryw->getTransaction().get(dataDistributionModeKey));
+			ValueReadResult f = wait(ryw->getTransaction().get(dataDistributionModeKey));
 			int mode = -1;
 			if (f.present()) {
 				mode = BinaryReader::fromStringRef<int>(f.get(), Unversioned());
@@ -2549,7 +2564,7 @@ ACTOR static Future<RangeResult> DataDistributionGetRangeActor(ReadYourWritesTra
 	if (kr.contains(rebalanceIgnoredKey)) {
 		auto entry = ryw->getSpecialKeySpaceWriteMap()[rebalanceIgnoredKey];
 		if (ryw->readYourWritesDisabled() || !entry.first) {
-			Optional<Value> f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
+			ValueReadResult f = wait(ryw->getTransaction().get(rebalanceDDIgnoreKey));
 			if (f.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(rebalanceIgnoredKey, Value()));
 			}

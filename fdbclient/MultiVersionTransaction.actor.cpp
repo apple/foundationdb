@@ -80,36 +80,53 @@ ThreadFuture<Version> DLTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> DLTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> DLTransaction::get(const KeyRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f = api->transactionGet(tr, key.begin(), key.size(), snapshot);
 
-	return toThreadFuture<Optional<Value>>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<ValueReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FdbCApi::fdb_bool_t present;
 		const uint8_t* value;
 		int valueLength;
 		FdbCApi::fdb_error_t error = api->futureGetValue(f, &present, &value, &valueLength);
 		ASSERT(!error);
+
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		if (present) {
 			// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-			return Optional<Value>(Value(ValueRef(value, valueLength), Arena()));
+			return ValueReadResult(Optional<Value>(Value(ValueRef(value, valueLength), Arena())),
+			                       ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		} else {
-			return Optional<Value>();
+			return ValueReadResult(Optional<Value>(), ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 		}
 	});
 }
 
-ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f =
 	    api->transactionGetKey(tr, key.getKey().begin(), key.getKey().size(), key.orEqual, key.offset, snapshot);
 
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<KeyReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
+		return KeyReadResult(Key(KeyRef(key, keyLength), Arena()),
+		                     ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 	});
 }
 
@@ -1217,6 +1234,8 @@ void DLApi::init() {
 	                   "fdb_future_get_granule_summary_array",
 	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->futureGetSharedState, lib, fdbCPath, "fdb_future_get_shared_state", headerVersion >= 710);
+	loadClientFunction(
+	    &api->futureGetReadBusyness, lib, fdbCPath, "fdb_future_get_read_busyness", headerVersion >= 800000);
 	loadClientFunction(&api->futureSetCallback, lib, fdbCPath, "fdb_future_set_callback", headerVersion >= 0);
 	loadClientFunction(&api->futureCancel, lib, fdbCPath, "fdb_future_cancel", headerVersion >= 0);
 	loadClientFunction(&api->futureDestroy, lib, fdbCPath, "fdb_future_destroy", headerVersion >= 0);
@@ -1466,11 +1485,11 @@ ThreadFuture<Version> MultiVersionTransaction::getReadVersion() {
 	return executeOperation(&ITransaction::getReadVersion);
 }
 
-ThreadFuture<Optional<Value>> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> MultiVersionTransaction::get(const KeyRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::getKey, key, std::forward<bool>(snapshot));
 }
 
@@ -2161,10 +2180,10 @@ ThreadFuture<int64_t> MultiVersionDatabase::rebootWorker(const StringRef& addres
 
 template <class T, class... Args>
 ThreadFuture<T> MultiVersionDatabase::executeOperation(ThreadFuture<T> (IDatabase::*func)(Args...), Args&&... args) {
-	auto db = dbState->db;
-	if (db) {
-		auto f = (db.getPtr()->*func)(std::forward<Args>(args)...);
-		return abortableFuture(f, dbState->dbVar->get().onChange);
+	auto db = dbState->dbVar->get();
+	if (db.value) {
+		auto f = (db.value.getPtr()->*func)(std::forward<Args>(args)...);
+		return abortableFuture(f, db.onChange);
 	}
 
 	// If database initialization failed, return the initialization error
@@ -2174,7 +2193,7 @@ ThreadFuture<T> MultiVersionDatabase::executeOperation(ThreadFuture<T> (IDatabas
 	}
 
 	// Wait for the database to be initialized
-	return abortableFuture(ThreadFuture<T>(Never()), dbState->dbVar->get().onChange);
+	return abortableFuture(ThreadFuture<T>(Never()), db.onChange);
 }
 
 ThreadFuture<Void> MultiVersionDatabase::forceRecoveryWithDataLoss(const StringRef& dcid) {
@@ -2257,16 +2276,16 @@ ThreadFuture<ProtocolVersion> MultiVersionDatabase::getServerProtocol(Optional<P
 
 ThreadFuture<Standalone<StringRef>> MultiVersionDatabase::getClientStatus() {
 	auto stateRef = dbState;
-	auto db = stateRef->db;
-	if (!db.isValid()) {
-		db = stateRef->versionMonitorDb;
+	auto db = stateRef->dbVar->get();
+	if (!db.value.isValid()) {
+		db.value = stateRef->versionMonitorDb;
 	}
-	if (!db.isValid()) {
+	if (!db.value.isValid()) {
 		return onMainThread([stateRef] { return Future<Standalone<StringRef>>(stateRef->getClientStatus(""_sr)); });
 	} else {
 		// If a database is created first retrieve its status
-		auto f = db->getClientStatus();
-		auto statusFuture = abortableFuture(f, dbState->dbVar->get().onChange);
+		auto f = db.value->getClientStatus();
+		auto statusFuture = abortableFuture(f, db.onChange);
 		return flatMapThreadFuture<Standalone<StringRef>, Standalone<StringRef>>(
 		    statusFuture, [stateRef](ErrorOr<Standalone<StringRef>> dbContextStatus) {
 			    return onMainThread([stateRef, dbContextStatus] {
@@ -3351,8 +3370,8 @@ ACTOR Future<std::string> updateClusterSharedStateMapImpl(MultiVersionApi* self,
 		state Reference<ITransaction> tr = db->createTransaction();
 		loop {
 			try {
-				state ThreadFuture<Optional<Value>> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
-				Optional<Value> clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
+				state ThreadFuture<ValueReadResult> clusterIdFuture = tr->get("\xff\xff/cluster_id"_sr);
+				ValueReadResult clusterIdVal = wait(safeThreadFutureToFuture(clusterIdFuture));
 				ASSERT(clusterIdVal.present());
 				clusterId = clusterIdVal.get().toString();
 				ASSERT(UID::fromString(clusterId).isValid());

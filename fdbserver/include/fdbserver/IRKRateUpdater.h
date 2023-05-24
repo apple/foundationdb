@@ -32,10 +32,12 @@ public:
 	                    class IRKConfigurationMonitor const&,
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
-	                    bool anyBlobRanges,
-	                    Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	                    double& blobWorkerTime,
-	                    double& unblockedAssignmentTime) = 0;
+	                    class IRKBlobMonitor&) = 0;
+
+	// In simulation, after a certain period of time has passed,
+	// we expect blob worker lag to be low, and fail an assertion
+	// if this is not the case.
+	static bool requireSmallBlobVersionLag();
 };
 
 class RKRateUpdater : public IRKRateUpdater {
@@ -43,6 +45,7 @@ class RKRateUpdater : public IRKRateUpdater {
 	HealthMetrics healthMetrics;
 	std::map<Version, RKVersionInfo> version_transactions;
 	double lastWarning;
+	double blobWorkerTime;
 	UID ratekeeperId;
 
 	// Returns the actual rate at which transactions being released,
@@ -74,10 +77,7 @@ public:
 	            class IRKConfigurationMonitor const&,
 	            class IRKRecoveryTracker const&,
 	            Deque<double> const& actualTpsHistory,
-	            bool anyBlobRanges,
-	            Deque<std::pair<double, Version>> const& blobWorkerVersionHistory,
-	            double& blobWorkerTime,
-	            double& unblockedAssignmentTime) override;
+	            class IRKBlobMonitor&) override;
 
 	HealthMetrics const& getHealthMetrics() const& override;
 };

@@ -27,10 +27,9 @@ import sys
 
 functions = {}
 
-func_re = re.compile(
-    "^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
+func_re = re.compile("^\s*FDB_API_(?:CHANGED|REMOVED)\s*\(\s*([^,]*),\s*([^)]*)\).*")
 
-with open(source, 'r') as srcfile:
+with open(source, "r") as srcfile:
     for line in srcfile:
         m = func_re.match(line)
         if m:
@@ -46,20 +45,19 @@ def write_unix_asm(asmfile, functions, prefix):
     if cpu != "aarch64":
         asmfile.write(".intel_syntax noprefix\n")
 
-    i = 0
-    if os == 'linux':
+    if os == "linux":
         asmfile.write("\n.data\n")
         for f in functions:
             asmfile.write("\t.extern fdb_api_ptr_%s\n" % f)
 
-        if os == 'linux':
+        if os == "linux":
             asmfile.write("\n.text\n")
             for f in functions:
                 asmfile.write("\t.global %s\n\t.type %s, @function\n" % (f, f))
-    i = 0
+
     for f in functions:
         asmfile.write("\n.globl %s%s\n" % (prefix, f))
-        if cpu == 'aarch64' and os == 'osx':
+        if cpu == "aarch64" and os == "osx":
             asmfile.write(".p2align\t2\n")
         asmfile.write("%s%s:\n" % (prefix, f))
 
@@ -93,34 +91,37 @@ def write_unix_asm(asmfile, functions, prefix):
         # 	.ident	"GCC: (GNU) 8.3.1 20190311 (Red Hat 8.3.1-3)"
 
         if cpu == "aarch64":
-            if os == 'osx':
+            if os == "osx":
                 asmfile.write("\tadrp x8, _fdb_api_ptr_%s@GOTPAGE\n" % (f))
                 asmfile.write("\tldr x8, [x8, _fdb_api_ptr_%s@GOTPAGEOFF]\n" % (f))
-            elif os == 'linux':
+            elif os == "linux":
                 asmfile.write("\tadrp x8, :got:fdb_api_ptr_%s\n" % (f))
                 asmfile.write("\tldr x8, [x8, #:got_lo12:fdb_api_ptr_%s]\n" % (f))
             else:
-                assert False, '{} not supported for Arm yet'.format(os)
+                assert False, "{} not supported for Arm yet".format(os)
             asmfile.write("\tldr x8, [x8]\n")
             asmfile.write("\tbr x8\n")
         else:
             asmfile.write(
-                "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f))
+                "\tmov r11, qword ptr [%sfdb_api_ptr_%s@GOTPCREL+rip]\n" % (prefix, f)
+            )
             asmfile.write("\tmov r11, qword ptr [r11]\n")
             asmfile.write("\tjmp r11\n")
 
 
-with open(asm, 'w') as asmfile:
-    with open(h, 'w') as hfile:
+with open(asm, "w") as asmfile:
+    with open(h, "w") as hfile:
         hfile.write(
-            "void fdb_api_ptr_unimpl() { fprintf(stderr, \"UNIMPLEMENTED FDB API FUNCTION\\n\"); abort(); }\n\n")
+            'void fdb_api_ptr_unimpl() { fprintf(stderr, "UNIMPLEMENTED FDB API FUNCTION\\n"); abort(); }\n\n'
+        )
         hfile.write(
-            "void fdb_api_ptr_removed() { fprintf(stderr, \"REMOVED FDB API FUNCTION\\n\"); abort(); }\n\n")
+            'void fdb_api_ptr_removed() { fprintf(stderr, "REMOVED FDB API FUNCTION\\n"); abort(); }\n\n'
+        )
 
-        if os == 'linux':
-            write_unix_asm(asmfile, functions, '')
+        if os == "linux":
+            write_unix_asm(asmfile, functions, "")
         elif os == "osx":
-            write_unix_asm(asmfile, functions, '_')
+            write_unix_asm(asmfile, functions, "_")
 
         for f in functions:
             hfile.write("void* fdb_api_ptr_%s = (void*)&fdb_api_ptr_unimpl;\n" % f)

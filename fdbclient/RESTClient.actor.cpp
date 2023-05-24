@@ -87,31 +87,35 @@ std::unordered_map<std::string, int> RESTClient::getKnobs() const {
 	return knobs.get();
 }
 
-ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> client,
-                                                       std::string verb,
-                                                       HTTP::Headers headers,
-                                                       RESTUrl url,
-                                                       std::set<unsigned int> successCodes) {
+ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> client,
+                                                               std::string verb,
+                                                               HTTP::Headers headers,
+                                                               RESTUrl url,
+                                                               std::set<unsigned int> successCodes) {
+
+	state Reference<HTTP::OutgoingRequest> req = makeReference<HTTP::OutgoingRequest>();
 	state UnsentPacketQueue content;
-	state int contentLen = url.body.size();
+	req->data.content = &content;
+	req->data.contentLen = url.body.size();
+	req->data.headers = headers;
+	req->data.headers["Host"] = url.host;
+	req->verb = verb;
+	req->resource = url.resource;
 
 	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
 		TraceEvent("RESTDoRequestImpl").detail("Url", url.toString());
 	}
 
 	if (url.body.size() > 0) {
-		PacketWriter pw(content.getWriteBuffer(url.body.size()), nullptr, Unversioned());
+		PacketWriter pw(req->data.content->getWriteBuffer(url.body.size()), nullptr, Unversioned());
 		pw.serializeBytes(url.body);
 	}
 
-	std::string statsKey = RESTClient::getStatsKey(url.service, url.service);
+	std::string statsKey = RESTClient::getStatsKey(url.host, url.service);
 	auto sItr = client->statsMap.find(statsKey);
 	if (sItr == client->statsMap.end()) {
 		client->statsMap.emplace(statsKey, std::make_unique<RESTClient::Stats>(statsKey));
 	}
-
-	headers["Content-Length"] = format("%d", contentLen);
-	headers["Host"] = url.host;
 
 	state int maxTries = std::min(client->knobs.request_tries, client->knobs.connect_tries);
 	state int thisTry = 1;
@@ -125,7 +129,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 		state Optional<Error> err;
 		state Optional<NetworkAddress> remoteAddress;
 		state bool connectionEstablished = false;
-		state Reference<HTTP::Response> r;
+
+		state Reference<HTTP::IncomingResponse> r;
 
 		try {
 			// Start connecting
@@ -138,21 +143,13 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
-			Reference<HTTP::Response> _r = wait(timeoutError(HTTP::doRequest(rconn.conn,
-			                                                                 verb,
-			                                                                 url.resource,
-			                                                                 headers,
-			                                                                 contentLen > 0 ? &content : nullptr,
-			                                                                 contentLen,
-			                                                                 sendReceiveRate,
-			                                                                 &statsPtr->bytes_sent,
-			                                                                 sendReceiveRate),
-			                                                 reqTimeout));
+			Reference<HTTP::IncomingResponse> _r = wait(timeoutError(
+			    HTTP::doRequest(rconn.conn, req, sendReceiveRate, &statsPtr->bytes_sent, sendReceiveRate), reqTimeout));
 			r = _r;
 
 			// Since the response was parsed successfully (which is why we are here) reuse the connection unless we
 			// received the "Connection: close" header.
-			if (r->headers["Connection"] != "close") {
+			if (r->data.headers["Connection"] != "close") {
 				client->conectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
 			}
 			rconn.conn.clear();
@@ -217,8 +214,8 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 		if (retryable) {
 			// If r is valid then obey the Retry-After response header if present.
 			if (r) {
-				auto iRetryAfter = r->headers.find("Retry-After");
-				if (iRetryAfter != r->headers.end()) {
+				auto iRetryAfter = r->data.headers.find("Retry-After");
+				if (iRetryAfter != r->data.headers.end()) {
 					event.detail("RetryAfterHeader", iRetryAfter->second);
 					char* pEnd;
 					double retryAfter = strtod(iRetryAfter->second.c_str(), &pEnd);
@@ -270,10 +267,10 @@ ACTOR Future<Reference<HTTP::Response>> doRequest_impl(Reference<RESTClient> cli
 	}
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doPutOrPost(const std::string& verb,
-                                                          Optional<HTTP::Headers> optHeaders,
-                                                          RESTUrl& url,
-                                                          std::set<unsigned int> successCodes) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doPutOrPost(const std::string& verb,
+                                                                  Optional<HTTP::Headers> optHeaders,
+                                                                  RESTUrl& url,
+                                                                  std::set<unsigned int> successCodes) {
 	HTTP::Headers headers;
 	if (optHeaders.present()) {
 		headers = optHeaders.get();
@@ -282,17 +279,17 @@ Future<Reference<HTTP::Response>> RESTClient::doPutOrPost(const std::string& ver
 	return doRequest_impl(Reference<RESTClient>::addRef(this), verb, headers, url, successCodes);
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doPost(const std::string& fullUrl,
-                                                     const std::string& requestBody,
-                                                     Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doPost(const std::string& fullUrl,
+                                                             const std::string& requestBody,
+                                                             Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, requestBody);
 	TRACE_REST_OP("DoPost", url);
 	return doPutOrPost(HTTP::HTTP_VERB_POST, optHeaders, url, { HTTP::HTTP_STATUS_CODE_OK });
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doPut(const std::string& fullUrl,
-                                                    const std::string& requestBody,
-                                                    Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doPut(const std::string& fullUrl,
+                                                            const std::string& requestBody,
+                                                            Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl, requestBody);
 	TRACE_REST_OP("DoPut", url);
 	return doPutOrPost(
@@ -304,10 +301,10 @@ Future<Reference<HTTP::Response>> RESTClient::doPut(const std::string& fullUrl,
 	    { HTTP::HTTP_STATUS_CODE_OK, HTTP::HTTP_STATUS_CODE_CREATED, HTTP::HTTP_STATUS_CODE_NO_CONTENT });
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doGetHeadDeleteOrTrace(const std::string& verb,
-                                                                     Optional<HTTP::Headers> optHeaders,
-                                                                     RESTUrl& url,
-                                                                     std::set<unsigned int> successCodes) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doGetHeadDeleteOrTrace(const std::string& verb,
+                                                                             Optional<HTTP::Headers> optHeaders,
+                                                                             RESTUrl& url,
+                                                                             std::set<unsigned int> successCodes) {
 	HTTP::Headers headers;
 	if (optHeaders.present()) {
 		headers = optHeaders.get();
@@ -316,19 +313,22 @@ Future<Reference<HTTP::Response>> RESTClient::doGetHeadDeleteOrTrace(const std::
 	return doRequest_impl(Reference<RESTClient>::addRef(this), HTTP::HTTP_VERB_GET, headers, url, successCodes);
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doGet(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doGet(const std::string& fullUrl,
+                                                            Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl);
 	TRACE_REST_OP("DoGet", url);
 	return doGetHeadDeleteOrTrace(HTTP::HTTP_VERB_GET, optHeaders, url, { HTTP::HTTP_STATUS_CODE_OK });
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doHead(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doHead(const std::string& fullUrl,
+                                                             Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl);
 	TRACE_REST_OP("DoHead", url);
 	return doGetHeadDeleteOrTrace(HTTP::HTTP_VERB_HEAD, optHeaders, url, { HTTP::HTTP_STATUS_CODE_OK });
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doDelete(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doDelete(const std::string& fullUrl,
+                                                               Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl);
 	TRACE_REST_OP("DoDelete", url);
 	return doGetHeadDeleteOrTrace(
@@ -341,7 +341,8 @@ Future<Reference<HTTP::Response>> RESTClient::doDelete(const std::string& fullUr
 	    { HTTP::HTTP_STATUS_CODE_OK, HTTP::HTTP_STATUS_CODE_NO_CONTENT, HTTP::HTTP_STATUS_CODE_ACCEPTED });
 }
 
-Future<Reference<HTTP::Response>> RESTClient::doTrace(const std::string& fullUrl, Optional<HTTP::Headers> optHeaders) {
+Future<Reference<HTTP::IncomingResponse>> RESTClient::doTrace(const std::string& fullUrl,
+                                                              Optional<HTTP::Headers> optHeaders) {
 	RESTUrl url(fullUrl);
 	TRACE_REST_OP("DoTrace", url);
 	return doGetHeadDeleteOrTrace(HTTP::HTTP_VERB_TRACE, optHeaders, url, { HTTP::HTTP_STATUS_CODE_OK });

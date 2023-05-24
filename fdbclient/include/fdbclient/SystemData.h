@@ -25,7 +25,6 @@
 // Functions and constants documenting the organization of the reserved keyspace in the database beginning with "\xFF"
 
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/BlobGranuleCommon.h"
 #include "fdbclient/BlobWorkerInterface.h" // TODO move the functions that depend on this out of here and into BlobWorkerInterface.h to remove this depdendency
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbclient/Tenant.h"
@@ -37,6 +36,12 @@
 FDB_BOOLEAN_PARAM(AssignEmptyRange);
 FDB_BOOLEAN_PARAM(UnassignShard);
 FDB_BOOLEAN_PARAM(EnablePhysicalShardMove);
+
+// SystemKey is just a Key but with a special type so that instances of it can be found easily throughput the code base
+// and in simulation constructions will verify that no SystemKey is a direct prefix of any other.
+struct SystemKey : Key {
+	SystemKey(Key const& k);
+};
 
 struct RestoreLoaderInterface;
 struct RestoreApplierInterface;
@@ -180,9 +185,6 @@ extern const KeyRangeRef cacheChangeKeys;
 extern const KeyRef cacheChangePrefix;
 const Key cacheChangeKeyFor(uint16_t idx);
 uint16_t cacheChangeKeyDecodeIndex(const KeyRef& key);
-
-// For persisting the consistency scan configuration and metrics
-extern const KeyRef consistencyScanInfoKey;
 
 // "\xff/tss/[[serverId]]" := "[[tssId]]"
 extern const KeyRangeRef tssMappingKeys;
@@ -629,6 +631,7 @@ extern const KeyRangeRef configClassKeys;
 // blob range special keys
 extern const KeyRef blobRangeChangeKey;
 extern const KeyRangeRef blobRangeKeys;
+extern const KeyRangeRef blobRangeChangeLogKeys;
 extern const KeyRef blobManagerEpochKey;
 
 const Value blobManagerEpochValueFor(int64_t epoch);
@@ -639,6 +642,10 @@ extern const StringRef blobRangeActive;
 extern const StringRef blobRangeInactive;
 
 bool isBlobRangeActive(const ValueRef& blobRangeValue);
+
+const Key blobRangeChangeLogReadKeyFor(Version version);
+const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value);
+Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value);
 
 extern const uint8_t BG_FILE_TYPE_DELTA;
 extern const uint8_t BG_FILE_TYPE_SNAPSHOT;
@@ -742,17 +749,6 @@ UID decodeBlobWorkerAffinityKey(KeyRef const& key);
 const Value blobWorkerAffinityValue(UID const& id);
 UID decodeBlobWorkerAffinityValue(ValueRef const& value);
 
-// Blob restore command
-extern const KeyRangeRef blobRestoreCommandKeys;
-const Value blobRestoreCommandKeyFor(const KeyRangeRef range);
-const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key);
-const Value blobRestoreCommandValueFor(BlobRestoreState restoreState);
-Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value);
-extern const KeyRangeRef blobRestoreArgKeys;
-const Value blobRestoreArgKeyFor(const KeyRangeRef range);
-const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key);
-const Value blobRestoreArgValueFor(BlobRestoreArg args);
-Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value);
 extern const Key blobManifestVersionKey;
 extern const Key blobGranulesLastFlushKey;
 

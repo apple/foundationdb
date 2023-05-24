@@ -174,6 +174,7 @@ private:
 			}
 			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
 			if (renaming) {
+				CODE_PROBE(true, "Loading metacluster data with renaming tenant");
 				ASSERT(entry.tenantState == TenantState::RENAMING || entry.tenantState == TenantState::REMOVING);
 				ASSERT(entry.renameDestination == tenantName);
 			} else {
@@ -195,27 +196,32 @@ private:
 	ACTOR static Future<Void> loadDataClusterMetadata(MetaclusterData* self,
 	                                                  ClusterName clusterName,
 	                                                  ClusterConnectionString connectionString) {
-		state std::pair<typename std::map<ClusterName, DataClusterData>::iterator, bool> clusterItr =
-		    self->dataClusterMetadata.try_emplace(clusterName);
+		try {
+			state std::pair<typename std::map<ClusterName, DataClusterData>::iterator, bool> clusterItr =
+			    self->dataClusterMetadata.try_emplace(clusterName);
 
-		if (clusterItr.second) {
-			state Reference<IDatabase> dataDb = wait(openDatabase(connectionString));
-			state Reference<ITransaction> tr = dataDb->createTransaction();
+			if (clusterItr.second) {
+				state Reference<IDatabase> dataDb = wait(openDatabase(connectionString));
+				state Reference<ITransaction> tr = dataDb->createTransaction();
 
-			clusterItr.first->second.tenantData =
-			    TenantData<IDatabase, StandardTenantTypes>(dataDb, &TenantMetadata::instance());
-			loop {
-				try {
-					tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-					wait(store(clusterItr.first->second.metaclusterRegistration,
-					           metadata::metaclusterRegistration().get(tr)) &&
-					     clusterItr.first->second.tenantData.load(tr));
+				clusterItr.first->second.tenantData =
+				    TenantData<IDatabase, StandardTenantTypes>(dataDb, &TenantMetadata::instance());
+				loop {
+					try {
+						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+						wait(store(clusterItr.first->second.metaclusterRegistration,
+						           metadata::metaclusterRegistration().get(tr)) &&
+						     clusterItr.first->second.tenantData.load(tr));
 
-					break;
-				} catch (Error& e) {
-					wait(safeThreadFutureToFuture(tr->onError(e)));
+						break;
+					} catch (Error& e) {
+						wait(safeThreadFutureToFuture(tr->onError(e)));
+					}
 				}
 			}
+		} catch (Error& e) {
+			TraceEvent(SevError, "LoadDataClusterError").error(e).detail("ClusterName", clusterName);
+			ASSERT(false);
 		}
 
 		return Void();

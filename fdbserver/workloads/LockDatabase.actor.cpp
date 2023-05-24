@@ -73,7 +73,7 @@ struct LockDatabaseWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				Optional<Value> val = wait(tr.get(databaseLockedKey));
+				ValueReadResult val = wait(tr.get(databaseLockedKey));
 				if (!val.present())
 					return Void();
 

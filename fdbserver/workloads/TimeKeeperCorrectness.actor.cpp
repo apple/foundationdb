@@ -20,7 +20,7 @@
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/KeyBackedTypes.h"
+#include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbserver/Knobs.h"
 #include "flow/actorcompiler.h" // has to be last include
 

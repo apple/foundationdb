@@ -50,4 +50,6 @@ class Smoother:
         elapsed = time - self.time
         if elapsed > 0:
             self.time = time
-            self.estimate += (self.total - self.estimate) * (1 - math.exp(-elapsed / self.folding_time))
+            self.estimate += (self.total - self.estimate) * (
+                1 - math.exp(-elapsed / self.folding_time)
+            )

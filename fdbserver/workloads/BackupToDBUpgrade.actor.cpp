@@ -216,7 +216,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					printf("No left over backup agent configuration keys\n");
 				}
 
-				Optional<Value> latestVersion = wait(tr->get(backupLatestVersionsKey));
+				ValueReadResult latestVersion = wait(tr->get(backupLatestVersionsKey));
 				if (latestVersion.present()) {
 					TraceEvent(SevError, "BackupCorrectnessLeftoverVersionKey")
 					    .detail("BackupTag", printable(tag))
@@ -425,7 +425,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 					UID _logUid = wait(backupAgent.getLogUid(tr, self->backupTag));
 					logUid = _logUid;
 
-					Optional<Key> backupKeysPacked =
+					ValueReadResult backupKeysPacked =
 					    wait(tr->get(backupAgent.config.get(BinaryWriter::toValue(logUid, Unversioned()))
 					                     .pack(BackupAgentBase::keyConfigBackupRanges)));
 					ASSERT(backupKeysPacked.present());
@@ -451,7 +451,7 @@ struct BackupToDBUpgradeWorkload : TestWorkload {
 				try {
 					versionCheckTr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					versionCheckTr.setOption(FDBTransactionOptions::LOCK_AWARE);
-					Optional<Value> v = wait(versionCheckTr.get(
+					ValueReadResult v = wait(versionCheckTr.get(
 					    BinaryWriter::toValue(logUid, Unversioned()).withPrefix(applyMutationsBeginRange.begin)));
 					TraceEvent("DRU_Applied")
 					    .detail("AppliedVersion",

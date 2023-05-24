@@ -55,7 +55,8 @@ struct CommandHelp {
 	std::string short_desc;
 	std::string long_desc;
 	CommandHelp() {}
-	CommandHelp(const char* u, const char* s, const char* l) : usage(u), short_desc(s), long_desc(l) {}
+	CommandHelp(const char* usage, const char* short_desc, const char* long_desc)
+	  : usage(usage), short_desc(short_desc), long_desc(long_desc) {}
 };
 
 void arrayGenerator(const char* text, const char* line, const char** options, std::vector<std::string>& lc);
@@ -285,6 +286,9 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // idempotencyids command
 ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef> tokens);
+
+// rangeconfig command
+ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
 
 } // namespace fdb_cli
 

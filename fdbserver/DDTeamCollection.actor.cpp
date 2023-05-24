@@ -21,6 +21,7 @@
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
@@ -239,23 +240,24 @@ public:
 
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
-				for (auto& it : self->customReplication->intersectingRanges(req.keys.get())) {
-					customReplicas = std::max(customReplicas, it.value());
+				for (auto it : self->userRangeConfig->intersectingRanges(req.keys->begin, req.keys->end)) {
+					customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
+					auto& firstFailureTime = self->firstLargeTeamFailure[customReplicas];
 					if (newTeam) {
 						if (newTeam->size() < customReplicas) {
-							if (!self->firstLargeTeamFailure.present()) {
-								self->firstLargeTeamFailure = now();
+							if (!firstFailureTime.present()) {
+								firstFailureTime = now();
 							}
-							if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+							if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 								req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 								return Void();
 							}
 							self->underReplication.insert(req.keys.get(), true);
 						} else {
-							self->firstLargeTeamFailure = Optional<double>();
+							firstFailureTime = Optional<double>();
 						}
 						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
 						    .detail("Team", newTeam->getDesc())
@@ -265,10 +267,10 @@ public:
 						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
-						if (!self->firstLargeTeamFailure.present()) {
-							self->firstLargeTeamFailure = now();
+						if (!firstFailureTime.present()) {
+							firstFailureTime = now();
 						}
-						if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+						if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 							req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 							return Void();
 						}
@@ -276,7 +278,7 @@ public:
 						    .suppressFor(1.0)
 						    .detail("Replicas", customReplicas)
 						    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-						    .detail("LargeTeamDiff", now() - self->firstLargeTeamFailure.get());
+						    .detail("LargeTeamDiff", now() - firstFailureTime.get());
 						self->underReplication.insert(req.keys.get(), true);
 					}
 				}
@@ -511,7 +513,7 @@ public:
 	                               Reference<InitialDataDistribution> initTeams,
 	                               const DDEnabledState* ddEnabledState) {
 
-		self->customReplication = initTeams->customReplication;
+		self->userRangeConfig = initTeams->userRangeConfig;
 		self->healthyZone.set(initTeams->initHealthyZoneValue);
 		// SOMEDAY: If some servers have teams and not others (or some servers have more data than others) and there is
 		// an address/locality collision, should we preferentially mark the least used server as undesirable?
@@ -708,7 +710,7 @@ public:
 		state bool lastHealthy;
 		state bool lastOptimal;
 		state bool lastWrongConfiguration = team->isWrongConfiguration();
-
+		state bool trackHealthyTeam = team->size() == self->configuration.storageTeamSize;
 		state bool lastZeroHealthy = self->zeroHealthyTeams->get();
 		state bool firstCheck = true;
 
@@ -797,7 +799,7 @@ public:
 				lastReady = self->initialFailureReactionDelay.isReady();
 				lastZeroHealthy = self->zeroHealthyTeams->get();
 
-				if (firstCheck) {
+				if (firstCheck && trackHealthyTeam) {
 					firstCheck = false;
 					if (healthy) {
 						self->healthyTeamCount++;
@@ -828,35 +830,37 @@ public:
 
 					team->setWrongConfiguration(anyWrongConfiguration);
 
-					if (optimal != lastOptimal) {
-						lastOptimal = optimal;
-						self->optimalTeamCount += optimal ? 1 : -1;
+					if (trackHealthyTeam) {
+						if (optimal != lastOptimal) {
+							lastOptimal = optimal;
+							self->optimalTeamCount += optimal ? 1 : -1;
 
-						ASSERT_GE(self->optimalTeamCount, 0);
-						self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
-					}
-
-					if (lastHealthy != healthy) {
-						lastHealthy = healthy;
-						// Update healthy team count when the team healthy changes
-						self->healthyTeamCount += healthy ? 1 : -1;
-
-						ASSERT_GE(self->healthyTeamCount, 0);
-						self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
-
-						if (self->healthyTeamCount == 0) {
-							TraceEvent(SevWarn, "ZeroServerTeamsHealthySignalling", self->distributorId)
-							    .detail("SignallingTeam", team->getDesc())
-							    .detail("Primary", self->primary);
+							ASSERT_GE(self->optimalTeamCount, 0);
+							self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
 						}
 
-						if (logTeamEvents) {
-							TraceEvent("ServerTeamHealthDifference", self->distributorId)
-							    .detail("ServerTeam", team->getDesc())
-							    .detail("LastOptimal", lastOptimal)
-							    .detail("LastHealthy", lastHealthy)
-							    .detail("Optimal", optimal)
-							    .detail("OptimalTeamCount", self->optimalTeamCount);
+						if (lastHealthy != healthy) {
+							lastHealthy = healthy;
+							// Update healthy team count when the team healthy changes
+							self->healthyTeamCount += healthy ? 1 : -1;
+
+							ASSERT_GE(self->healthyTeamCount, 0);
+							self->zeroHealthyTeams->set(self->healthyTeamCount == 0);
+
+							if (self->healthyTeamCount == 0) {
+								TraceEvent(SevWarn, "ZeroServerTeamsHealthySignalling", self->distributorId)
+								    .detail("SignallingTeam", team->getDesc())
+								    .detail("Primary", self->primary);
+							}
+
+							if (logTeamEvents) {
+								TraceEvent("ServerTeamHealthDifference", self->distributorId)
+								    .detail("ServerTeam", team->getDesc())
+								    .detail("LastOptimal", lastOptimal)
+								    .detail("LastHealthy", lastHealthy)
+								    .detail("Optimal", optimal)
+								    .detail("OptimalTeamCount", self->optimalTeamCount);
+							}
 						}
 					}
 
@@ -1031,21 +1035,23 @@ public:
 				    .detail("Priority", team->getPriority());
 			}
 			self->priority_teams[team->getPriority()]--;
-			if (team->isHealthy()) {
-				self->healthyTeamCount--;
-				ASSERT_GE(self->healthyTeamCount, 0);
+			if (trackHealthyTeam) {
+				if (team->isHealthy()) {
+					self->healthyTeamCount--;
+					ASSERT_GE(self->healthyTeamCount, 0);
 
-				if (self->healthyTeamCount == 0) {
-					TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
-					    .detail("ServerPrimary", self->primary)
-					    .detail("SignallingServerTeam", team->getDesc());
-					self->zeroHealthyTeams->set(true);
+					if (self->healthyTeamCount == 0) {
+						TraceEvent(SevWarn, "ZeroTeamsHealthySignalling", self->distributorId)
+						    .detail("ServerPrimary", self->primary)
+						    .detail("SignallingServerTeam", team->getDesc());
+						self->zeroHealthyTeams->set(true);
+					}
 				}
-			}
-			if (lastOptimal) {
-				self->optimalTeamCount--;
-				ASSERT_GE(self->optimalTeamCount, 0);
-				self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+				if (lastOptimal) {
+					self->optimalTeamCount--;
+					ASSERT_GE(self->optimalTeamCount, 0);
+					self->zeroOptimalTeams.set(self->optimalTeamCount == 0);
+				}
 			}
 			throw;
 		}
@@ -1069,11 +1075,14 @@ public:
 		    !self->isValidLocality(self->configuration.storagePolicy, server->getLastKnownInterface().locality);
 		state int targetTeamNumPerServer =
 		    (SERVER_KNOBS->DESIRED_TEAMS_PER_SERVER * (self->configuration.storageTeamSize + 1)) / 2;
-		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
-				status.isWrongConfiguration = false;
+				state bool isBm = BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
+				status.isUndesired =
+				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
+
+				status.isWrongConfiguration = isBm;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
@@ -1225,7 +1234,7 @@ public:
 						    .detail("Server", server->getId())
 						    .detail("Excluded", worstAddr.toString());
 						wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
-						while (!ddEnabledState->isDDEnabled()) {
+						while (!ddEnabledState->isEnabled()) {
 							wait(delay(1.0));
 						}
 						if (self->removeFailedServer.canBeSet()) {
@@ -1362,6 +1371,8 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
+								// TODO: Improve simulation testing to test locality changes. Until then, we
+								// realistically don't expect this code probe to be hit.
 								CODE_PROBE(true, "Server locality change created bad teams", probe::decoration::rare);
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
@@ -1387,8 +1398,7 @@ public:
 						recordTeamCollectionInfo = true;
 						// Restart the storeTracker for the new interface. This will cancel the previous
 						// keyValueStoreTypeTracker
-						// storeTypeTracker = (isTss) ? Never() : keyValueStoreTypeTracker(self, server);
-						storageMetadataTracker = self->updateStorageMetadata(server, isTss);
+						storageMetadataTracker = self->updateStorageMetadata(server);
 						hasWrongDC = !self->isCorrectDC(*server);
 						hasInvalidLocality = !self->isValidLocality(self->configuration.storagePolicy,
 						                                            server->getLastKnownInterface().locality);
@@ -2173,7 +2183,7 @@ public:
 			loop {
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-					Optional<Standalone<StringRef>> value = wait(tr.get(perpetualStorageWiggleKey));
+					ValueReadResult value = wait(tr.get(perpetualStorageWiggleKey));
 
 					if (value.present()) {
 						speed = std::stoi(value.get().toString());
@@ -2214,7 +2224,7 @@ public:
 			try {
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> val = wait(tr.get(healthyZoneKey));
+				ValueReadResult val = wait(tr.get(healthyZoneKey));
 				state Future<Void> healthyZoneTimeout = Never();
 				if (val.present()) {
 					auto p = decodeHealthyZoneValue(val.get());
@@ -2563,7 +2573,6 @@ public:
 						// trigger restartRecruiting again, or the host will become healthy again, in which case we
 						// won't need to recruit on it and it would be counted with Excl1.
 						exclusions.insert(it.first);
-						CODE_PROBE(true, "DD excluding host with many failed storages", probe::decoration::rare);
 						TraceEvent(SevDebug, "DDRecruitExcl3")
 						    .detail("Primary", self->primary)
 						    .detail("Excluding", it.first.toString())
@@ -2889,18 +2898,20 @@ public:
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
 
+		state bool isTss = server->getLastKnownInterface().isTss();
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
-		state StorageMetadataType data(StorageMetadataType::currentTime(),
-		                               server->getStoreType(),
-		                               !server->isCorrectStoreType(self->configuration.storageServerStoreType));
+		state StorageMetadataType data(
+		    StorageMetadataType::currentTime(),
+		    server->getStoreType(),
+		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
+		                                      : self->configuration.storageServerStoreType));
 
 		// read storage metadata
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				auto property = metadataMap.getProperty(server->getId());
-				Optional<StorageMetadataType> metadata = wait(property.get(tr));
+				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
@@ -2913,18 +2924,23 @@ public:
 			}
 		}
 		// printf("------ updated metadata %s\n", server->getId().toString().c_str());
+		TraceEvent("UpdateStorageMetadata", self->getDistributorId())
+		    .detail("Server", server->getId())
+		    .detail("IsTss", isTss);
 
 		// wrong store type handler
-		if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
-		    self->wrongStoreTypeRemover.isReady()) {
-			self->wrongStoreTypeRemover = removeWrongStoreType(self);
-			self->addActor.send(self->wrongStoreTypeRemover);
-		}
-		// add server to wiggler
-		if (self->storageWiggler->contains(server->getId())) {
-			self->storageWiggler->updateMetadata(server->getId(), data);
-		} else {
-			self->storageWiggler->addServer(server->getId(), data);
+		if (!isTss) {
+			if (!server->isCorrectStoreType(self->configuration.storageServerStoreType) &&
+			    self->wrongStoreTypeRemover.isReady()) {
+				self->wrongStoreTypeRemover = removeWrongStoreType(self);
+				self->addActor.send(self->wrongStoreTypeRemover);
+			}
+			// add server to wiggler
+			if (self->storageWiggler->contains(server->getId())) {
+				self->storageWiggler->updateMetadata(server->getId(), data);
+			} else {
+				self->storageWiggler->addServer(server->getId(), data);
+			}
 		}
 
 		return Never();
@@ -3328,24 +3344,43 @@ void DDTeamCollection::updateCpuPivots() {
 }
 
 void DDTeamCollection::updateTeamEligibility() {
+	int healthyCount = 0, lowDiskUtilTotal = 0, lowCpuTotal = 0, allMetricsLow = 0;
 	for (auto& team : teams) {
 		if (team->isHealthy()) {
-			if (team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio)) {
+			bool lowDiskUtil = team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
+			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
+			healthyCount++;
+
+			if (lowDiskUtil) {
+				lowDiskUtilTotal++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			}
 
-			if (team->hasLowerCpu(teamPivots.pivotCPU)) {
+			if (lowCPU) {
+				lowCpuTotal++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 			} else {
 				team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
+			}
+
+			if (lowDiskUtil && lowCPU) {
+				allMetricsLow++;
 			}
 		} else {
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
 			team->resetEligibilityCount(data_distribution::EligibilityCounter::LOW_CPU);
 		}
 	}
+	TraceEvent("TeamEligibilityCount", distributorId)
+	    .detail("TotalTeam", teams.size())
+	    .detail("HealthyTeam", healthyCount)
+	    .detail("AllMetricsLowTeam", allMetricsLow)
+	    .detail("LowDiskUtilTeam", lowDiskUtilTotal)
+	    .detail("LowCPUTeam", lowCpuTotal)
+	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
+	    .detail("PivotCpuRatio", teamPivots.pivotCPU);
 }
 
 void DDTeamCollection::updateTeamPivotValues() {
@@ -3646,8 +3681,8 @@ void DDTeamCollection::fixUnderReplication() {
 			}
 
 			int customReplicas = configuration.storageTeamSize;
-			for (auto& c : customReplication->intersectingRanges(r.range())) {
-				customReplicas = std::max(customReplicas, c.value());
+			for (auto it : userRangeConfig->intersectingRanges(r.range().begin, r.range().end)) {
+				customReplicas = std::max(customReplicas, it->value().replicationFactor.orDefault(0));
 			}
 
 			int currentSize = 0;
@@ -3772,8 +3807,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server, bool isTss) {
-	return isTss ? Never() : DDTeamCollectionImpl::updateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
+	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
 void DDTeamCollection::resetLocalitySet() {
@@ -4135,12 +4170,6 @@ struct ServerPriority {
 
 Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 	cleanupLargeTeams();
-	if (largeTeams.size() >= SERVER_KNOBS->DD_MAXIMUM_LARGE_TEAMS) {
-		TraceEvent(SevWarnAlways, "TooManyLargeTeams", distributorId)
-		    .suppressFor(1.0)
-		    .detail("TeamCount", largeTeams.size());
-		return Reference<TCTeamInfo>();
-	}
 
 	std::map<UID, ServerPriority> server_priority;
 	for (auto& [serverID, server] : server_info) {
@@ -4154,10 +4183,12 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 	}
 
+	int totalShardCount = 0;
 	for (auto& team : largeTeams) {
 		const auto servers = team->getServerIDs();
 		const int shardCount =
 		    shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(servers, primary));
+		totalShardCount += shardCount;
 		if (team->isHealthy()) {
 			for (auto& it : servers) {
 				auto f = server_priority.find(it);
@@ -4173,6 +4204,14 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 				}
 			}
 		}
+	}
+
+	if (totalShardCount >= SERVER_KNOBS->DD_MAX_SHARDS_ON_LARGE_TEAMS) {
+		TraceEvent(SevWarnAlways, "TooManyShardsOnLargeTeams", distributorId)
+		    .suppressFor(1.0)
+		    .detail("TeamCount", largeTeams.size())
+		    .detail("ShardCount", totalShardCount);
+		return Reference<TCTeamInfo>();
 	}
 
 	// The set of all healthy servers sorted so the most desirable option is first in the list
@@ -4192,7 +4231,7 @@ Reference<TCTeamInfo> DDTeamCollection::buildLargeTeam(int teamSize) {
 		}
 		candidateTeam.push_back(sortedServers[i].info);
 	}
-	if (!satisfiesPolicy(candidateTeam)) {
+	if (candidateTeam.size() <= configuration.storageTeamSize || !satisfiesPolicy(candidateTeam)) {
 		TraceEvent(SevWarnAlways, "TooFewServersForLargeTeam", distributorId)
 		    .suppressFor(1.0)
 		    .detail("TeamSize", candidateTeam.size())

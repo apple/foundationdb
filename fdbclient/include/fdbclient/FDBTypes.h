@@ -43,6 +43,11 @@ typedef int64_t Generation;
 typedef UID SpanID;
 typedef uint64_t CoordinatorsHash;
 
+// invalidKey is intentionally far beyond the system space.  It is meant to be used as a safe initial value for a key
+// before it is set to something meaningful to avoid mistakes where a default constructed key is written to instead of
+// the intended target.
+static const KeyRef invalidKey = "\xff\xff\xff\xff\xff\xff\xff\xff"_sr;
+
 enum {
 	tagLocalitySpecial = -1, // tag with this locality means it is invalidTag (id=0), txsTag (id=1), or cacheTag (id=2)
 	tagLocalityLogRouter = -2,
@@ -403,7 +408,7 @@ struct KeyRangeRef {
 		}
 	};
 
-	std::string toString() const { return "Begin:" + begin.printable() + "End:" + end.printable(); }
+	std::string toString() const { return "{ begin=" + begin.printable() + "  end=" + end.printable() + " }"; }
 };
 
 template <>
@@ -749,13 +754,151 @@ struct GetRangeLimits {
 	}
 };
 
+class ReadMetrics {
+public:
+	using BusynessT = uint8_t;
+	constexpr static FileIdentifier file_identifier = 13999063;
+
+	ReadMetrics() {}
+	ReadMetrics(BusynessT serverBusyness, BusynessT rangeBusyness)
+	  : serverBusyness(serverBusyness), rangeBusyness(rangeBusyness) {}
+
+	float getServerBusyness() const { return (float)serverBusyness / scalingFactor; }
+	float getRangeBusyness() const { return (float)rangeBusyness / scalingFactor; }
+
+	void combine(ReadMetrics const& other) {
+		serverBusyness = std::max(serverBusyness, other.serverBusyness);
+		rangeBusyness = std::max(rangeBusyness, other.rangeBusyness);
+	}
+
+	static BusynessT busynessFloatToInt(float value) {
+		return std::clamp<BusynessT>(value * scalingFactor, 0, scalingFactor);
+	}
+
+	static ReadMetrics fromFloats(float serverBusyness, float rangeBusyness) {
+		return ReadMetrics(busynessFloatToInt(serverBusyness), busynessFloatToInt(rangeBusyness));
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, serverBusyness, rangeBusyness);
+	}
+
+private:
+	static constexpr BusynessT scalingFactor = std::numeric_limits<BusynessT>::max();
+
+	BusynessT serverBusyness = 0;
+	BusynessT rangeBusyness = 0;
+};
+
+// Used to identify locations that need to have their read metrics populated from server responses. Will be removed when
+// the server responses include busyness metrics so that these locations can be found by compiler errors.
+using ReadMetricsNeedFilled = ReadMetrics;
+
+class ReadResultBase {
+public:
+	constexpr static FileIdentifier file_identifier = 6066542;
+
+	ReadResultBase() {}
+	ReadResultBase(ReadMetrics const& metrics) : metrics(metrics) {}
+
+	ReadMetrics& getReadMetrics() { return metrics; }
+	ReadMetrics const& getReadMetrics() const { return metrics; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, metrics);
+	}
+
+private:
+	ReadMetrics metrics;
+};
+
+template <class T>
+class ReadResult : public T, public ReadResultBase {
+public:
+	constexpr static FileIdentifier file_identifier = 1683564;
+
+	ReadResult() {}
+	ReadResult(T const& t) : T(t) {}
+	ReadResult(T&& t) : T(std::move(t)) {}
+	ReadResult(T&& t, ReadMetrics const& metrics) : T(std::move(t)), ReadResultBase(metrics) {}
+
+	T& contents() { return *(T*)this; }
+	T const& contents() const { return *(T const*)this; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, (ReadResultBase&)*this, (T&)*this);
+	}
+};
+
+template <class T>
+struct Traceable<ReadResult<T>> : std::true_type {
+	static std::string toString(ReadResult<T> const& rr) { return Traceable<T>::toString(rr); }
+};
+
+using ValueReadResult = ReadResult<Optional<Value>>;
+using KeyReadResult = ReadResult<Key>;
+
 struct RangeResultRef : VectorRef<KeyValueRef> {
 	constexpr static FileIdentifier file_identifier = 3985192;
-	bool more; // True if (but not necessarily only if) values remain in the *key* range requested (possibly beyond the
-	           // limits requested) False implies that no such values remain
-	Optional<KeyRef> readThrough; // Only present when 'more' is true. When present, this value represent the end (or
-	                              // beginning if reverse) of the range which was read to produce these results. This is
-	                              // guaranteed to be less than the requested range.
+
+	// True if the range may have more keys in it (possibly beyond the specified limits).
+	// 'more' can be true even if there are no keys left in the range, e.g. if a shard boundary is hit, it may or may
+	// not have more keys left, but 'more' will be set to true in that case.
+	// Additionally, 'getRangeStream()' always sets 'more' to true and uses the 'end_of_stream' error to indicate that a
+	// range is exhausted.
+	// If 'more' is false, the range is guaranteed to have been exhausted.
+	bool more;
+
+	// Only present when 'more' is true, for example, when the read reaches the shard boundary, 'readThrough' is set to
+	// the shard boundary and the client's next range read should start with the 'readThrough'.
+	// But 'more' is true does not necessarily guarantee 'readThrough' is present, for example, when the read reaches
+	// size limit, 'readThrough' might not be set, the next read should just start from the keyAfter of the current
+	// query result's last key.
+	// In both cases, please use the getter function 'getReadThrough()' instead, which represents the end (or beginning
+	// if reverse) of the range which was read.
+	Optional<KeyRef> readThrough;
+
+	// return the value represents the end of the range which was read. If 'reverse' is true, returns the last key, as
+	// it should be used as the new "end" of the next query and the end key should be non-inclusive.
+	Key getReadThrough(bool reverse = false) const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return readThrough.get();
+		}
+		ASSERT(size() > 0);
+		return reverse ? back().key : keyAfter(back().key);
+	}
+
+	// Helper function to get the next range scan's BeginKeySelector, use it when the range read is non-reverse,
+	// otherwise, please use nextEndKeySelector().
+	KeySelectorRef nextBeginKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterThan(back().key);
+	}
+
+	// Helper function to get the next range scan's EndKeySelector, use it when the range read is reverse.
+	KeySelectorRef nextEndKeySelector() const {
+		ASSERT(more);
+		if (readThrough.present()) {
+			return firstGreaterOrEqual(readThrough.get());
+		}
+		ASSERT(size() > 0);
+		return firstGreaterOrEqual(back().key);
+	}
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
+
 	bool readToBegin;
 	bool readThroughEnd;
 
@@ -875,6 +1018,12 @@ struct MappedRangeResultRef : VectorRef<MappedKeyValueRef> {
 	Optional<KeyRef> readThrough;
 	bool readToBegin;
 	bool readThroughEnd;
+
+	void setReadThrough(KeyRef key) {
+		ASSERT(more);
+		ASSERT(!readThrough.present());
+		readThrough = key;
+	}
 
 	MappedRangeResultRef() : more(false), readToBegin(false), readThroughEnd(false) {}
 	MappedRangeResultRef(Arena& p, const MappedRangeResultRef& toCopy)
@@ -1679,6 +1828,9 @@ struct transaction_creator_traits : std::false_type {};
 
 template <typename T>
 struct transaction_creator_traits<T, std::void_t<typename T::TransactionT>> : std::true_type {};
+
+template <typename T>
+struct transaction_creator_traits<Reference<T>> : transaction_creator_traits<T> {};
 
 template <typename T>
 constexpr bool is_transaction_creator = transaction_creator_traits<T>::value;

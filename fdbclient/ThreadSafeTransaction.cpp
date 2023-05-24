@@ -265,7 +265,9 @@ Reference<ITransaction> ThreadSafeTenant::createTransaction() {
 
 ThreadFuture<int64_t> ThreadSafeTenant::getId() {
 	Tenant* tenant = this->tenant;
-	return onMainThread([tenant]() -> Future<int64_t> { return tenant->getIdFuture(); });
+	return onMainThread([tenant]() -> Future<int64_t> {
+		return map(tenant->getLookupFuture(), [](auto const& info) { return info.id; });
+	});
 }
 
 ThreadFuture<Key> ThreadSafeTenant::purgeBlobGranules(const KeyRangeRef& keyRange, Version purgeVersion, bool force) {
@@ -423,21 +425,21 @@ ThreadFuture<Version> ThreadSafeTransaction::getReadVersion() {
 	});
 }
 
-ThreadFuture<Optional<Value>> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
+ThreadFuture<ValueReadResult> ThreadSafeTransaction::get(const KeyRef& key, bool snapshot) {
 	Key k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<Optional<Value>> {
+	return onMainThread([tr, k, snapshot]() -> Future<ValueReadResult> {
 		tr->checkDeferredError();
 		return tr->get(k, Snapshot{ snapshot });
 	});
 }
 
-ThreadFuture<Key> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> ThreadSafeTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	KeySelector k = key;
 
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, k, snapshot]() -> Future<Key> {
+	return onMainThread([tr, k, snapshot]() -> Future<KeyReadResult> {
 		tr->checkDeferredError();
 		return tr->getKey(k, Snapshot{ snapshot });
 	});

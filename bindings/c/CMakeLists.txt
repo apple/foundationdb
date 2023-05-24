@@ -345,42 +345,70 @@ else()
       --process-number 3
       )
 
-    add_python_venv_test(NAME fdb_c_upgrade_from_prev2_direct
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
-      --process-number 3
-      )
+      # TODO: re-enable the downgrade step to "${FDB_PREV_RELEASE_VERSION}" in all the following
+      # fdb_c_upgrade_from_* tests once 71.3 binaries are available.
 
-    add_python_venv_test(NAME fdb_c_upgrade_from_prev
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
-      --process-number 3
-      )
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev3_gradual
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
 
-    add_python_venv_test(NAME fdb_c_wiggle_only
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
-      --disable-log-dump
-      --process-number 3
-      --redundancy double
-      )
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev3_direct
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
 
-    add_python_venv_test(NAME fdb_c_wiggle_and_upgrade
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
-      --disable-log-dump
-      --process-number 3
-      --redundancy double
-      )
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_gradual
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
 
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev2_direct
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_upgrade_from_prev
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}"
+        --process-number 3
+        )
+
+      add_python_venv_test(NAME fdb_c_wiggle_only
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_CURRENT_VERSION}" "wiggle"
+        --disable-log-dump
+        --process-number 3
+        --redundancy double
+        )
+
+      add_python_venv_test(NAME fdb_c_wiggle_and_upgrade
+        COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
+        --build-dir ${CMAKE_BINARY_DIR}
+        --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
+        --upgrade-path "${FDB_PREV_RELEASE_VERSION}" "wiggle" "${FDB_CURRENT_VERSION}"
+        --disable-log-dump
+        --process-number 3
+        --redundancy double
+        )
+
+    endif()
   endif()
 endif()
 

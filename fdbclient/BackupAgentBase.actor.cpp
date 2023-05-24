@@ -994,7 +994,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	if (checkBackupUid) {
 		Subspace sourceStates =
 		    Subspace(databaseBackupPrefixRange.begin).get(BackupAgentBase::keySourceStates).get(logUidValue);
-		Optional<Value> v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
+		ValueReadResult v = wait(tr->get(sourceStates.pack(DatabaseBackupAgent::keyFolderId)));
 		if (v.present() && BinaryReader::fromStringRef<Version>(v.get(), Unversioned()) > backupUid)
 			return Void();
 	}
@@ -1143,11 +1143,11 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 				}
 
 				if (!loggedLogUids.count(currLogUid)) {
-					state Future<Optional<Value>> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
+					state Future<ValueReadResult> foundDRKey = tr->get(Subspace(databaseBackupPrefixRange.begin)
 					                                                       .get(BackupAgentBase::keySourceStates)
 					                                                       .get(currLogUid)
 					                                                       .pack(DatabaseBackupAgent::keyStateStatus));
-					state Future<Optional<Value>> foundBackupKey = tr->get(
+					state Future<ValueReadResult> foundBackupKey = tr->get(
 					    Subspace(currLogUid.withPrefix("uid->config/"_sr).withPrefix(fileBackupPrefixRange.begin))
 					        .pack("stateEnum"_sr));
 					wait(success(foundDRKey) && success(foundBackupKey));
@@ -1359,6 +1359,7 @@ VectorRef<KeyRangeRef> const& getSystemBackupRanges() {
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(),
 		                                  singleKeyRange(metacluster::metadata::metaclusterRegistration().key));
 		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), tagQuotaKeys);
+		systemBackupRanges.push_back_deep(systemBackupRanges.arena(), blobRangeKeys);
 	}
 
 	return systemBackupRanges;
