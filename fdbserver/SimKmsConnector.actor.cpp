@@ -174,6 +174,7 @@ ACTOR Future<Void> ekLookupByDomainIds(KmsConnectorInterface interf, KmsConnLook
 			break;
 		}
 	}
+
 	wait(delayJittered(1.0)); // simulate network delay
 	success ? req.reply.send(rep) : req.reply.sendError(encrypt_key_not_found());
 	return Void();
@@ -224,6 +225,7 @@ ACTOR Future<Void> blobMetadataLookup(KmsConnectorInterface interf, KmsConnBlobM
 			ASSERT(false);
 		}
 	}
+
 	req.reply.send(rep);
 
 	return Void();
