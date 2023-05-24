@@ -363,6 +363,9 @@ ACTOR Future<Void> newSeedServers(Reference<ClusterRecoveryData> self,
 		isr.interfaceId = deterministicRandom()->randomUniqueID();
 		isr.initialClusterVersion = self->recoveryTransactionVersion;
 		isr.encryptMode = self->configuration.encryptionAtRestMode;
+		if (StorageEngineParamsFactory::isSupported(self->configuration.storageServerStoreType.storeType())) {
+			isr.storageEngineParams = self->configuration.storageEngineParams;
+		}
 
 		ErrorOr<InitializeStorageReply> newServer = wait(recruits.storageServers[idx].storage.tryGetReply(isr));
 

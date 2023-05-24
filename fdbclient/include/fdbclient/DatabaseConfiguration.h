@@ -230,10 +230,12 @@ struct DatabaseConfiguration {
 	Reference<IReplicationPolicy> storagePolicy;
 	int32_t storageTeamSize;
 	KeyValueStoreType storageServerStoreType;
+	StorageEngineParamSet storageEngineParams;
 
 	// Testing StorageServers
 	int32_t desiredTSSCount;
 	KeyValueStoreType testingStorageServerStoreType;
+	StorageEngineParamSet tssStorageEngineParams;
 
 	// Remote TLogs
 	int32_t desiredLogRouterCount;

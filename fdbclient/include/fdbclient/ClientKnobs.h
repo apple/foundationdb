@@ -319,6 +319,8 @@ public:
 	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
 	int SIM_KMS_VAULT_MAX_KEYS;
 
+	bool ENABLE_STORAGE_ENGINE_PARAM_INTERFACE;
+
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);
 };

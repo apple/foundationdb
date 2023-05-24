@@ -1599,11 +1599,11 @@ ACTOR Future<Void> redwoodHistogramsLogger(double interval) {
 	}
 }
 
-ACTOR Future<Void> redwoodMetricsLogger() {
+ACTOR Future<Void> redwoodMetricsLogger(double metricsInterval, double histogramInterval) {
 	g_redwoodMetrics.clear();
-	state Future<Void> loggingFuture = redwoodHistogramsLogger(SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL);
+	state Future<Void> loggingFuture = redwoodHistogramsLogger(histogramInterval);
 	loop {
-		wait(delay(SERVER_KNOBS->REDWOOD_METRICS_INTERVAL));
+		wait(delay(metricsInterval));
 
 		TraceEvent e("RedwoodMetrics");
 		double elapsed = now() - g_redwoodMetrics.startTime;
@@ -2016,7 +2016,9 @@ public:
 	          int64_t pageCacheSizeBytes,
 	          int64_t remapCleanupWindowBytes,
 	          int concurrentExtentReads,
-	          bool memoryOnly)
+	          bool memoryOnly,
+	          double metricsInterval = SERVER_KNOBS->REDWOOD_METRICS_INTERVAL,
+	          double histogramInterval = SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL)
 	  : ioLock(makeReference<PriorityMultiLock>(FLOW_KNOBS->MAX_OUTSTANDING, SERVER_KNOBS->REDWOOD_IO_PRIORITIES)),
 	    pageCacheBytes(pageCacheSizeBytes), desiredPageSize(desiredPageSize), desiredExtentSize(desiredExtentSize),
 	    filename(filename), memoryOnly(memoryOnly), remapCleanupWindowBytes(remapCleanupWindowBytes),
@@ -2026,9 +2028,7 @@ public:
 		pageCache.evictor().sizeLimit = pageCacheBytes;
 
 		g_redwoodMetrics.ioLock = ioLock.getPtr();
-		if (!g_redwoodMetricsActor.isValid()) {
-			g_redwoodMetricsActor = redwoodMetricsLogger();
-		}
+		g_redwoodMetricsActor = redwoodMetricsLogger(metricsInterval, histogramInterval);
 
 		commitFuture = Void();
 		recoverFuture = forwardError(recover(this), errorPromise);
@@ -4981,6 +4981,8 @@ public:
 	void close() { return close_impl(false); }
 
 	StorageBytes getStorageBytes() const { return m_pager->getStorageBytes(); }
+
+	int getPageSize() const { return m_pager->getLogicalPageSize(); }
 
 	// Set key to value as of the next commit
 	// The new value is not readable until after the next commit is completed.
@@ -7997,20 +7999,26 @@ public:
 	                     UID logID,
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
+	                     StorageEngineParamSet params = {},
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
-	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
+	  : m_filename(filename),
+	    prefetch(params.get("kvstore_range_prefetch", SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH)),
+	    metrics_interval(params.get("metrics_interval", SERVER_KNOBS->REDWOOD_METRICS_INTERVAL)),
+	    histogram_interval(params.get("histogram_interval", SERVER_KNOBS->REDWOOD_HISTOGRAM_INTERVAL)) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
 		}
 
-		int pageSize =
-		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
+		int pageSize = BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4)
+		                       : params.get("page_size", SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE); // needReplacement
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
 		int64_t pageCacheBytes =
 		    g_network->isSimulated()
-		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+		        ? (BUGGIFY
+		               ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
+		               : FLOW_KNOBS
+		                     ->SIM_PAGE_CACHE_4K) // force cache size to be tiny in simulation, cannot remove the knob
 		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
@@ -8027,7 +8035,10 @@ public:
 		                               pageCacheBytes,
 		                               remapCleanupWindowBytes,
 		                               SERVER_KNOBS->REDWOOD_EXTENT_CONCURRENT_READS,
-		                               false);
+		                               false,
+		                               metrics_interval,
+		                               histogram_interval);
+
 		m_tree = new VersionedBTree(pager, filename, logID, db, encryptionMode, encodingType, keyProvider);
 		m_init = catchError(init_impl(this));
 	}
@@ -8302,6 +8313,54 @@ public:
 
 	~KeyValueStoreRedwood() override{};
 
+	Future<StorageEngineParamSet> getParameters() const override {
+		StorageEngineParamSet result;
+		result.set("kvstore_range_prefetch", prefetch ? "true" : "false");
+		result.set("page_size", std::to_string(m_tree->getPageSize()));
+		result.set("metrics_interval", std::to_string(metrics_interval));
+		result.set("histogram_interval", std::to_string(histogram_interval));
+		return result;
+	}
+
+	Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) override {
+		// setParameters is stateless, it will reset all unmentioned parameters to their default values
+		// so if you set with an empty set, it will reset everything to defaul if they are not now
+		StorageEngineParamSet newParams(StorageEngineParamsFactory::getParamsValue(getType().storeType()));
+		for (const auto& [k, v] : params.getParams())
+			newParams.set(k, v); // override the default
+		StorageEngineParamResult result = checkCompatibility(newParams).get();
+		for (const auto& k : result.applied) {
+			if (k == "kvstore_range_prefetch")
+				prefetch = !prefetch;
+			TraceEvent(SevDebug, "RedwoodStorageEngineParamsApplied").detail("Param", k);
+		}
+		return result;
+	}
+
+	Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) override {
+		StorageEngineParamResult result;
+		for (auto const& [k, v] : params.getParams()) {
+			TraceEvent(SevDebug, "CheckCompatibilityParam").detail("Param", k).detail("New", v);
+			if (k == "kvstore_range_prefetch") {
+				params.getBool(k) == prefetch ? result.unchanged.push_back(k) : result.applied.push_back(k);
+			} else if (k == "metrics_interval") {
+				params.getDouble(k) == metrics_interval ? result.unchanged.push_back(k)
+				                                        : result.needReboot.push_back(k);
+			} else if (k == "histogram_interval") {
+				params.getDouble(k) == histogram_interval ? result.unchanged.push_back(k)
+				                                          : result.needReboot.push_back(k);
+			} else if (k == "page_size") {
+				params.getInt(k) == m_tree->getPageSize() ? result.unchanged.push_back(k)
+				                                          : result.needReplacement.push_back(k);
+			} else if (k == StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY) {
+				continue;
+			} else {
+				result.unknown.push_back(k);
+			}
+		}
+		return result;
+	}
+
 private:
 	std::string m_filename;
 	VersionedBTree* m_tree;
@@ -8309,6 +8368,8 @@ private:
 	Promise<Void> m_closed;
 	Promise<Void> m_errorPromise;
 	bool prefetch;
+	double metrics_interval;
+	double histogram_interval;
 	Version m_nextCommitVersion;
 	Reference<IPageEncryptionKeyProvider> m_keyProvider;
 	Future<Void> m_lastCommit = Void();
@@ -8322,8 +8383,10 @@ private:
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
-                                       Optional<EncryptionAtRestMode> encryptionMode) {
-	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode);
+                                       Optional<EncryptionAtRestMode> encryptionMode,
+                                       Optional<StorageEngineParamSet> params) {
+	return new KeyValueStoreRedwood(
+	    filename, logID, db, encryptionMode, params.present() ? params.get() : StorageEngineParamSet());
 }
 
 int randomSize(int max) {
@@ -11563,6 +11626,7 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               isEncodingTypeAESEncrypted(initialEncodingType)
 		                                   ? EncryptionAtRestMode::CLUSTER_AWARE
 		                                   : EncryptionAtRestMode::DISABLED,
+		                               {},
 		                               initialEncodingType,
 		                               encryptionKeyProviders.at(initialEncodingType));
 		wait(kvs->init());
@@ -11576,6 +11640,7 @@ TEST_CASE("/redwood/correctness/EnforceEncodingType") {
 		                               UID(),
 		                               {}, // db
 		                               {}, // encryptionMode
+		                               {},
 		                               reopenEncodingType,
 		                               encryptionKeyProviders.at(reopenEncodingType));
 		try {

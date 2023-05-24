@@ -365,7 +365,8 @@ private:
 			if ((!m.param1.startsWith(excludedServersPrefix) && m.param1 != excludedServersVersionKey) &&
 			    (!m.param1.startsWith(failedServersPrefix) && m.param1 != failedServersVersionKey) &&
 			    (!m.param1.startsWith(excludedLocalityPrefix) && m.param1 != excludedLocalityVersionKey) &&
-			    (!m.param1.startsWith(failedLocalityPrefix) && m.param1 != failedLocalityVersionKey)) {
+			    (!m.param1.startsWith(failedLocalityPrefix) && m.param1 != failedLocalityVersionKey) &&
+			    !m.param1.startsWith(storageEngineParamsPrefix) && !m.param1.startsWith(tssStorageEngineParamsPrefix)) {
 				auto t = txnStateStore->readValue(m.param1).get();
 				TraceEvent("MutationRequiresRestart", dbgid)
 				    .detail("M", m)
@@ -817,7 +818,8 @@ private:
 		if (!initialCommit)
 			txnStateStore->clear(range & configKeys);
 		if (!excludedServersKeys.contains(range) && !failedServersKeys.contains(range) &&
-		    !excludedLocalityKeys.contains(range) && !failedLocalityKeys.contains(range)) {
+		    !excludedLocalityKeys.contains(range) && !failedLocalityKeys.contains(range) &&
+		    !storageEngineParamsKeys.contains(range) && !tssStorageEngineParamsKeys.contains(range)) {
 			TraceEvent("MutationRequiresRestart", dbgid).detail("M", m);
 			confChange = true;
 		}

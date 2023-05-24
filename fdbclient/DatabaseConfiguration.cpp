@@ -27,6 +27,14 @@
 #include "flow/genericactors.actor.h"
 #include "flow/UnitTest.h"
 
+StorageEngineParamsFactory redwoodFactory(
+    KeyValueStoreType::SSD_REDWOOD_V1,
+    { { "page_size", { StorageEngineParamSet::CHANGETYPE::NEEDREPLACEMENT, "8192" } },
+      { "kvstore_range_prefetch", { StorageEngineParamSet::CHANGETYPE::RUNTIME, "true" } },
+      { "metrics_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "5.0" } },
+      { "histogram_interval", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "30.0" } },
+      { "remote_kv_store", { StorageEngineParamSet::CHANGETYPE::NEEDREBOOT, "false" } } });
+
 DatabaseConfiguration::DatabaseConfiguration() {
 	resetInternal();
 }
@@ -56,6 +64,8 @@ void DatabaseConfiguration::resetInternal() {
 	blobGranulesEnabled = false;
 	tenantMode = TenantMode::DISABLED;
 	encryptionAtRestMode = EncryptionAtRestMode::DISABLED;
+	storageEngineParams = StorageEngineParamSet();
+	tssStorageEngineParams = StorageEngineParamSet();
 }
 
 int toInt(ValueRef const& v) {
@@ -388,6 +398,24 @@ StatusObject DatabaseConfiguration::toJSON(bool noPolicies) const {
 	result["blob_granules_enabled"] = (int32_t)blobGranulesEnabled;
 	result["tenant_mode"] = tenantMode.toString();
 	result["encryption_at_rest_mode"] = encryptionAtRestMode.toString();
+
+	// Add non-empty storage engine params into the json string
+	if (storageEngineParams.getParams().size()) {
+		ASSERT(StorageEngineParamsFactory::isSupported(storageServerStoreType));
+		StatusObject params;
+		for (auto const& [k, v] : storageEngineParams.getParams()) {
+			params[k] = v;
+		}
+		result["storage_engine_params"] = params;
+	}
+	if (tssStorageEngineParams.getParams().size()) {
+		ASSERT(StorageEngineParamsFactory::isSupported(testingStorageServerStoreType));
+		StatusObject params;
+		for (auto const& [k, v] : tssStorageEngineParams.getParams()) {
+			params[k] = v;
+		}
+		result["tss_storage_engine_params"] = params;
+	}
 	return result;
 }
 
@@ -429,6 +457,9 @@ std::string DatabaseConfiguration::configureStringFromJSON(const StatusObject& j
 			          json_spirit::write_string(json_spirit::mValue(kv.second.get_array()),
 			                                    json_spirit::Output_options::none);
 		} else {
+			static std::set<std::string> directSet = { "storage_engine_params", "tss_storage_engine_params" };
+			if (directSet.contains(kv.first))
+				continue;
 			throw invalid_config_db_key();
 		}
 	}
@@ -677,6 +708,13 @@ bool DatabaseConfiguration::setInternal(KeyRef key, ValueRef value) {
 		blobGranulesEnabled = (type != 0);
 	} else if (ck == "encryption_at_rest_mode"_sr) {
 		encryptionAtRestMode = EncryptionAtRestMode::fromValueRef(Optional<ValueRef>(value));
+	} else if (ck.startsWith(storageEngineParamsPrefix.removePrefix(configKeysPrefix))) {
+		// TODO : should we hardcode the above condition like others?
+		auto paramName = ck.removePrefix(storageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
+		storageEngineParams.set(paramName, value.toString());
+	} else if (ck.startsWith(tssStorageEngineParamsPrefix.removePrefix(configKeysPrefix))) {
+		auto paramName = ck.removePrefix(tssStorageEngineParamsPrefix.removePrefix(configKeysPrefix)).toString();
+		tssStorageEngineParams.set(paramName, value.toString());
 	} else if (ck.startsWith("excluded/"_sr)) {
 		// excluded servers: don't keep the state internally
 	} else {
@@ -870,6 +908,10 @@ bool DatabaseConfiguration::isOverridden(std::string key) const {
 	}
 
 	return false;
+}
+
+bool StorageEngineParamsFactory::isSupported(KeyValueStoreType::StoreType storeType) {
+	return CLIENT_KNOBS->ENABLE_STORAGE_ENGINE_PARAM_INTERFACE && !factories()[storeType].empty();
 }
 
 TEST_CASE("/fdbclient/databaseConfiguration/overwriteCommitProxy") {

@@ -1480,13 +1480,14 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
                                                  bool isTss,
                                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                                  std::string folder,
-                                                 ActorCollection* filesClosed,
+                                                 SignalableActorCollection* filesClosed,
                                                  int64_t memoryLimit,
                                                  IKeyValueStore* store,
                                                  bool validateDataFiles,
-                                                 Promise<Void>* rebootKVStore) {
+                                                 Reference<StorageEngineParamSet> storageEngineParams) {
 	state TrackRunningStorage _(id, storeType, locality, filename, runningStorages, storageCleaners);
 	loop {
+		state Future<Void> kvClosed = store->onClosed();
 		ErrorOr<Void> e = wait(errorOr(prevStorageServer));
 		if (!e.isError())
 			return Void();
@@ -1496,12 +1497,12 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 
 		TraceEvent("StorageServerRequestedReboot", id)
 		    .detail("RebootStorageEngine", e.getError().code() == error_code_please_reboot_kv_store)
-		    .log();
+		    .detail("Params", storageEngineParams ? describe(storageEngineParams->getParams()) : "");
 
 		if (e.getError().code() == error_code_please_reboot_kv_store) {
-			// Add the to actorcollection to make sure filesClosed not return
-			filesClosed->add(rebootKVStore->getFuture());
-			wait(delay(SERVER_KNOBS->REBOOT_KV_STORE_DELAY));
+			// Wait the kv store shutdown complete before opening a new one
+			wait(kvClosed);
+			// use the up-to-date storage engine paras
 			// reopen KV store
 			store = openKVStore(
 			    storeType,
@@ -1515,14 +1516,10 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 			             ? (/* Disable for RocksDB */ storeType != KeyValueStoreType::SSD_ROCKSDB_V1 &&
 			                deterministicRandom()->coinflip())
 			             : true),
-			    db);
-			Promise<Void> nextRebootKVStorePromise;
-			filesClosed->add(store->onClosed() ||
-			                 nextRebootKVStorePromise
-			                     .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */);
-			// remove the original onClosed signal from the actorCollection
-			rebootKVStore->send(Void());
-			rebootKVStore->swap(nextRebootKVStorePromise);
+			    db,
+			    {},
+			    storageEngineParams ? *storageEngineParams : Optional<StorageEngineParamSet>());
+			filesClosed->add(store->onClosed());
 		}
 
 		StorageServerInterface recruited;
@@ -1552,8 +1549,13 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
-		prevStorageServer =
-		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
+		prevStorageServer = storageServer(store,
+		                                  recruited,
+		                                  db,
+		                                  folder,
+		                                  Promise<Void>(),
+		                                  Reference<IClusterConnectionRecord>(nullptr),
+		                                  storageEngineParams);
 		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
 	}
 }
@@ -1962,10 +1964,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state ActorCollection errorForwarders(false);
 	state Future<Void> loggingTrigger = Void();
 	state double loggingDelay = SERVER_KNOBS->WORKER_LOGGING_INTERVAL;
-	// These two promises are destroyed after the "filesClosed" below to avoid broken_promise
-	state Promise<Void> rebootKVSPromise;
-	state Promise<Void> rebootKVSPromise2;
-	state ActorCollection filesClosed(true);
+	state SignalableActorCollection filesClosed;
 	state Promise<Void> stopping;
 	state WorkerCache<InitializeStorageReply> storageCache;
 	state Future<Void> metricsLogger;
@@ -2102,10 +2101,10 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                s.storeType != KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
 				                deterministicRandom()->coinflip())
 				             : true),
-				    dbInfo);
-				Future<Void> kvClosed =
-				    kv->onClosed() ||
-				    rebootKVSPromise.getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
+				    dbInfo,
+				    {},
+				    Optional<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType)));
+				Future<Void> kvClosed = kv->onClosed();
 				filesClosed.add(kvClosed);
 
 				// std::string doesn't have startsWith
@@ -2148,9 +2147,15 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedStream);
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
+				// TODO : add for the new interface
 
+				// When an exsiting storage rejoins, use the default parameter values to open the KVS
+				Reference<StorageEngineParamSet> paramsPtr =
+				    StorageEngineParamsFactory::isSupported(s.storeType)
+				        ? makeReference<StorageEngineParamSet>(StorageEngineParamsFactory::getParamsValue(s.storeType))
+				        : Reference<StorageEngineParamSet>();
 				Promise<Void> recovery;
-				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
+				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord, paramsPtr);
 				recoveries.push_back(recovery.getFuture());
 				f = handleIOErrors(f, kv, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
@@ -2167,7 +2172,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                                  memoryLimit,
 				                                  kv,
 				                                  validateDataFiles,
-				                                  &rebootKVSPromise);
+				                                  paramsPtr);
 				errorForwarders.add(forwardError(errors, ssRole, recruited.id(), f));
 			} else if (s.storedComponent == DiskStore::TLogData) {
 				LocalLineage _;
@@ -2825,6 +2830,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					std::map<std::string, std::string> details;
 					details["StorageEngine"] = req.storeType.toString();
 					details["IsTSS"] = std::to_string(isTss);
+					// TODO : add storage engine params into the details?
 					Role ssRole = isTss ? Role::TESTING_STORAGE_SERVER : Role::STORAGE_SERVER;
 					startRole(ssRole, recruited.id(), interf.id(), details);
 
@@ -2866,15 +2872,17 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                deterministicRandom()->coinflip())
 					             : true),
 					    dbInfo,
-					    req.encryptMode);
+					    req.encryptMode,
+					    req.storageEngineParams);
 
-					Future<Void> kvClosed =
-					    data->onClosed() ||
-					    rebootKVSPromise2
-					        .getFuture() /* clear the onClosed() Future in actorCollection when rebooting */;
+					Future<Void> kvClosed = data->onClosed();
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					Reference<StorageEngineParamSet> paramsPtr =
+					    req.storageEngineParams.present()
+					        ? makeReference<StorageEngineParamSet>(req.storageEngineParams.get())
+					        : Reference<StorageEngineParamSet>();
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2882,7 +2890,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               isTss ? req.tssPairIDAndVersion.get().second : 0,
 					                               storageReady,
 					                               dbInfo,
-					                               folder);
+					                               folder,
+					                               paramsPtr);
 					s = handleIOErrors(s, data, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
@@ -2899,7 +2908,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                  memoryLimit,
 					                                  data,
 					                                  false,
-					                                  &rebootKVSPromise2);
+					                                  paramsPtr);
 					errorForwarders.add(forwardError(errors, ssRole, recruited.id(), s));
 				} else if (storageCache.exists(req.reqId)) {
 					forwardPromise(req.reply, storageCache.get(req.reqId));
@@ -3210,7 +3219,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 			// We get cancelled e.g. when an entire simulation times out, but in that case
 			// we won't be restarted and don't need to wait for shutdown
 			stopping.send(Void());
-			wait(filesClosed.getResult()); // Wait for complete shutdown of KV stores
+			wait(filesClosed.signal()); // Wait for complete shutdown of KV stores
 			wait(delay(0.0)); // Unwind the callstack to make sure that IAsyncFile references are all gone
 			TraceEvent(SevInfo, "WorkerShutdownComplete", interf.id());
 		}

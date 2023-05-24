@@ -115,8 +115,10 @@ typedef std::map<std::string, TraceEventFields> EventMap;
 struct StorageServerStatusInfo : public StorageServerInterface {
 	Optional<StorageMetadataType> metadata;
 	EventMap eventMap;
+	Optional<StorageEngineParamSet> storageEngineParams;
 	StorageServerStatusInfo(const StorageServerInterface& interface,
-	                        Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>())
+	                        Optional<StorageMetadataType> metadata = Optional<StorageMetadataType>(),
+	                        Optional<std::pair<StorageEngineParamSet, StorageEngineParamSet>> = {})
 	  : StorageServerInterface(interface), metadata(metadata) {}
 };
 
@@ -512,8 +514,11 @@ struct RolesInfo {
 		obj["role"] = role;
 		obj["tss"] = iface.isTss();
 		if (iface.metadata.present()) {
-			obj["storage_metadata"] = iface.metadata.get().toJSON();
-			// printf("%s\n", metadataObj.getJson().c_str());
+			StatusObject metadataObj = iface.metadata.get().toJSON();
+			if (iface.storageEngineParams.present()) {
+				metadataObj["storage_parameters"] = iface.storageEngineParams.get().toJSON();
+			}
+			obj["storage_metadata"] = metadataObj;
 		}
 
 		try {
@@ -625,6 +630,7 @@ struct RolesInfo {
 
 		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
+
 	JsonBuilderObject& addRole(std::string const& role,
 	                           TLogInterface& iface,
 	                           EventMap const& metrics,
@@ -656,6 +662,7 @@ struct RolesInfo {
 			*pMetricVersion = metricVersion;
 		return roles.insert(std::make_pair(iface.address(), obj))->second;
 	}
+
 	JsonBuilderObject& addRole(std::string const& role, CommitProxyInterface& iface, EventMap const& metrics) {
 		JsonBuilderObject obj;
 		obj["id"] = iface.id().shortString();
@@ -2039,6 +2046,19 @@ ACTOR static Future<std::vector<StorageServerStatusInfo>> getStorageServerStatus
 	wait(store(results, getServerMetrics(servers, address_workers, STORAGE_SERVER_METRICS_LIST)));
 	for (int i = 0; i < results.size(); ++i) {
 		servers[i].eventMap = std::move(results[i].second);
+	}
+	if (CLIENT_KNOBS->ENABLE_STORAGE_ENGINE_PARAM_INTERFACE) {
+		state std::vector<Future<ErrorOr<GetStorageEngineParamsReply>>> paramSetsFutures;
+		for (const StorageServerInterface& ssi : servers)
+			paramSetsFutures.push_back(ssi.getStorageEngineParams.tryGetReply(GetStorageEngineParamsRequest()));
+		wait(waitForAll(paramSetsFutures) || delay(5.0));
+		for (int i = 0; i < paramSetsFutures.size(); ++i) {
+			Future<ErrorOr<GetStorageEngineParamsReply>>& f = paramSetsFutures[i];
+			// Only add fetched results
+			if (f.isReady() && !f.get().isError()) {
+				servers[i].storageEngineParams = f.get().get().params;
+			}
+		}
 	}
 	return servers;
 }

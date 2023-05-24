@@ -1646,24 +1646,44 @@ struct StorageMetadataType {
 	// when the SS is initialized, in epoch seconds, comes from currentTime()
 	double createdTime;
 	KeyValueStoreType storeType;
+	// unused for now, if true will wiggle the storage
+	// fit in the scenario where you just want the storage to be replaced without an underlying parameter change
+	bool needReplacement = false;
+	// storage engine parameters that need to be updated which let the storages to be wiggled
+	std::set<std::string> paramsNeedTobeReplaced;
 
 	// no need to serialize part (should be assigned after initialization)
 	bool wrongConfigured = false;
 
 	StorageMetadataType() : createdTime(0) {}
-	StorageMetadataType(double t, KeyValueStoreType storeType = KeyValueStoreType::END, bool wrongConfigured = false)
-	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured) {}
+	StorageMetadataType(double t,
+	                    KeyValueStoreType storeType = KeyValueStoreType::END,
+	                    bool wrongConfigured = false,
+	                    bool needReplacement = false,
+	                    const std::set<std::string>& params = {})
+	  : createdTime(t), storeType(storeType), wrongConfigured(wrongConfigured), needReplacement(needReplacement),
+	    paramsNeedTobeReplaced(params) {}
 
 	static double currentTime() { return g_network->timer(); }
 
 	bool operator==(const StorageMetadataType& b) const {
-		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured;
+		// now treat all storage engine parameters same and we'll wiggle the one with more parameters to be replaced
+		return createdTime == b.createdTime && storeType == b.storeType && wrongConfigured == b.wrongConfigured &&
+		       needReplacement == b.needReplacement && paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size();
 	}
 
 	bool operator<(const StorageMetadataType& b) const {
 		if (wrongConfigured == b.wrongConfigured) {
-			// the older SS has smaller createdTime
-			return createdTime < b.createdTime;
+			if (needReplacement == b.needReplacement) {
+				if (paramsNeedTobeReplaced.size() == b.paramsNeedTobeReplaced.size()) {
+					// the older SS has smaller createdTime
+					return createdTime < b.createdTime;
+				} else {
+					return paramsNeedTobeReplaced.size() > b.paramsNeedTobeReplaced.size();
+				}
+			} else {
+				return needReplacement > b.needReplacement;
+			}
 		}
 		return wrongConfigured > b.wrongConfigured;
 	}
@@ -1674,7 +1694,7 @@ struct StorageMetadataType {
 	// to be considered
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, createdTime, storeType);
+		serializer(ar, createdTime, storeType, needReplacement, paramsNeedTobeReplaced);
 	}
 
 	StatusObject toJSON() const {
@@ -1682,6 +1702,13 @@ struct StorageMetadataType {
 		result["created_time_timestamp"] = createdTime;
 		result["created_time_datetime"] = epochsToGMTString(createdTime);
 		result["storage_engine"] = storeType.toString();
+		result["need_replacement"] = needReplacement;
+		if (paramsNeedTobeReplaced.size()) {
+			StatusArray parmsObj;
+			for (const auto& k : paramsNeedTobeReplaced)
+				parmsObj.push_back(k);
+			result["params_need_to_be_replaced"] = parmsObj;
+		}
 		return result;
 	}
 };
@@ -1787,5 +1814,114 @@ template <class Ar>
 inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
+
+struct StorageEngineParamSet : public ReferenceCounted<StorageEngineParamSet> {
+
+	constexpr static FileIdentifier file_identifier = 2389372;
+
+	enum CHANGETYPE { RUNTIME, NEEDREBOOT, NEEDREPLACEMENT };
+
+	StorageEngineParamSet() {}
+	StorageEngineParamSet(const std::map<std::string, std::string>& params) : params(params) {}
+	StorageEngineParamSet(const StorageEngineParamSet& s) : params(s.params) {}
+
+	StorageEngineParamSet& operator=(const StorageEngineParamSet& rhs) {
+		params = rhs.params;
+		return *this;
+	}
+
+	void set(const std::string& name, const std::string& value) { params[name] = value; }
+
+	void clear(const std::string& name) { params.erase(name); }
+
+	int get(const std::string& name, int defaultValue) const {
+		return params.contains(name) ? std::stoi(params.at(name)) : defaultValue;
+	}
+
+	int getInt(const std::string& name) const { return std::stoi(params.at(name)); }
+
+	double get(const std::string& name, double defaultValue) const {
+		return params.contains(name) ? std::stod(params.at(name)) : defaultValue;
+	}
+
+	double getDouble(const std::string& name) const { return std::stod(params.at(name)); }
+
+	bool get(const std::string& name, bool defaultValue) const {
+		return params.contains(name) ? params.at(name) == "true" : defaultValue;
+	}
+
+	bool getBool(const std::string& name) const { return params.at(name) == "true"; }
+
+	std::string get(const std::string& name, const std::string& defaultValue) const {
+		return params.contains(name) ? params.at(name) : defaultValue;
+	}
+
+	const std::map<std::string, std::string>& getParams() const { return params; }
+
+	std::map<std::string, std::string>& getMutableParams() { return params; }
+
+	bool operator==(const StorageEngineParamSet& b) const { return params == b.params; }
+
+	bool operator!=(const StorageEngineParamSet& b) const { return !(*this == b); }
+
+	StatusObject toJSON() const {
+		StatusObject result;
+		for (const auto& [name, value] : params) {
+			result[name] = value;
+		}
+		return result;
+	}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, params);
+	}
+
+private:
+	std::map<std::string, std::string> params;
+};
+
+// used to initialize default parameters' values for different storage engines
+struct StorageEngineParamsFactory {
+
+	static constexpr auto REMOTE_KV_STORE_PARAM_KEY = "remote_kv_store";
+
+	static std::map<KeyValueStoreType::StoreType,
+	                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>&
+	factories() {
+		static std::map<KeyValueStoreType::StoreType,
+		                std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>>
+		    theFactories;
+		return theFactories;
+	}
+
+	StorageEngineParamsFactory(
+	    KeyValueStoreType::StoreType storeType,
+	    std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>> const& vals) {
+		factories()[storeType] = vals;
+	}
+
+	static std::map<std::string, std::pair<StorageEngineParamSet::CHANGETYPE, std::string>>& getParams(
+	    KeyValueStoreType::StoreType storeType) {
+		return factories()[storeType];
+	}
+
+	static std::map<std::string, std::string> getParamsValue(KeyValueStoreType::StoreType storeType) {
+		std::map<std::string, std::string> result;
+		if (factories().contains(storeType)) {
+			auto m = factories().at(storeType);
+			for (const auto& [k, pair] : m)
+				result[k] = pair.second;
+		}
+		return result;
+	}
+
+	static StorageEngineParamSet::CHANGETYPE getChangeType(KeyValueStoreType::StoreType storeType,
+	                                                       const std::string& name) {
+		return factories()[storeType][name].first;
+	}
+
+	static bool isSupported(KeyValueStoreType::StoreType storeType);
+};
 
 #endif

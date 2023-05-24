@@ -118,6 +118,15 @@ public:
 	// Delete a checkpoint.
 	virtual Future<Void> deleteCheckpoint(const CheckpointMetaData& checkpoint) { throw not_implemented(); }
 
+	// storage engine parameters interface
+	virtual Future<StorageEngineParamSet> getParameters() const { throw not_implemented(); }
+	virtual Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) {
+		throw not_implemented();
+	}
+	virtual Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) {
+		throw not_implemented();
+	}
+
 	/*
 	Concurrency contract
 	    Causal consistency:
@@ -153,7 +162,8 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
                                               Reference<AsyncVar<ServerDBInfo> const> db = {},
-                                              Optional<EncryptionAtRestMode> encryptionMode = {});
+                                              Optional<EncryptionAtRestMode> encryptionMode = {},
+                                              Optional<StorageEngineParamSet> params = {});
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -183,7 +193,9 @@ extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
                                          UID logID,
                                          int64_t memoryLimit,
                                          bool checkChecksums = false,
-                                         bool checkIntegrity = false);
+                                         bool checkIntegrity = false,
+                                         Optional<EncryptionAtRestMode> mode = {},
+                                         Optional<StorageEngineParamSet> params = {});
 
 inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    std::string const& filename,
@@ -193,7 +205,9 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                                    bool checkIntegrity = false,
                                    bool openRemotely = false,
                                    Reference<AsyncVar<ServerDBInfo> const> db = {},
-                                   Optional<EncryptionAtRestMode> encryptionMode = {}) {
+                                   Optional<EncryptionAtRestMode> encryptionMode = {},
+                                   Optional<StorageEngineParamSet> params = {}) {
+
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
 	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
@@ -202,8 +216,19 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 		    .detail("EncryptionMode", encryptionMode);
 		throw encrypt_mode_mismatch();
 	}
+	openRemotely = openRemotely || params.present() ? params.get().get("remote_kv_store", false) : false;
 	if (openRemotely) {
-		return openRemoteKVStore(storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity);
+		if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled()) {
+			TraceEvent(SevWarn, "KVStoreNotSupportedConfig")
+			    .detail("Encryption", encryptionMode)
+			    .detail("Message", "Encryption is not suppored on remote kv store yet");
+			throw encrypt_unsupported();
+		}
+		// erase the parameter to avoid cyclic calls of openRemoteKVStore
+		StorageEngineParamSet _params = params.present() ? params.get() : StorageEngineParamSet();
+		_params.getMutableParams().erase("remote_kv_store");
+		return openRemoteKVStore(
+		    storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, encryptionMode, _params);
 	}
 	switch (storeType) {
 	case KeyValueStoreType::SSD_BTREE_V1:
@@ -213,7 +238,7 @@ inline IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode);
+		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode, params);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

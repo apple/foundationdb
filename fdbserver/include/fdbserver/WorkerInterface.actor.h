@@ -869,11 +869,20 @@ struct InitializeStorageRequest {
 	Version initialClusterVersion;
 	ReplyPromise<InitializeStorageReply> reply;
 	EncryptionAtRestMode encryptMode;
+	Optional<StorageEngineParamSet> storageEngineParams; // Parameters to initialize the storage engine
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(
-		    ar, seedTag, reqId, interfaceId, storeType, reply, tssPairIDAndVersion, initialClusterVersion, encryptMode);
+		serializer(ar,
+		           seedTag,
+		           reqId,
+		           interfaceId,
+		           storeType,
+		           reply,
+		           tssPairIDAndVersion,
+		           initialClusterVersion,
+		           encryptMode,
+		           storageEngineParams);
 	}
 };
 
@@ -1207,15 +1216,16 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder);
+                                 std::string folder,
+                                 Reference<StorageEngineParamSet> storageEngineParams);
 ACTOR Future<Void> storageServer(
     IKeyValueStore* persistentData,
     StorageServerInterface ssi,
     Reference<AsyncVar<ServerDBInfo> const> db,
     std::string folder,
     Promise<Void> recovered,
-    Reference<IClusterConnectionRecord>
-        connRecord); // changes pssi->id() to be the recovered ID); // changes pssi->id() to be the recovered ID
+    Reference<IClusterConnectionRecord> connRecord, // changes pssi->id() to be the recovered ID
+    Reference<StorageEngineParamSet> storageEngineParams);
 ACTOR Future<Void> masterServer(MasterInterface mi,
                                 Reference<AsyncVar<ServerDBInfo> const> db,
                                 Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,

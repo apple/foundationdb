@@ -571,10 +571,11 @@ struct GetStorageServerRejoinInfoReply {
 	bool newLocality;
 	std::vector<std::pair<Version, Tag>> history;
 	EncryptionAtRestMode encryptMode;
+	Optional<StorageEngineParamSet> storageEngineParams;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, version, tag, newTag, newLocality, history, encryptMode);
+		serializer(ar, version, tag, newTag, newLocality, history, encryptMode, storageEngineParams);
 	}
 };
 
@@ -583,13 +584,17 @@ struct GetStorageServerRejoinInfoRequest {
 	UID id;
 	Optional<Value> dcId;
 	ReplyPromise<GetStorageServerRejoinInfoReply> reply;
+	bool checkStorageEngineParams;
 
 	GetStorageServerRejoinInfoRequest() {}
-	explicit GetStorageServerRejoinInfoRequest(UID const& id, Optional<Value> const& dcId) : id(id), dcId(dcId) {}
+	explicit GetStorageServerRejoinInfoRequest(UID const& id,
+	                                           Optional<Value> const& dcId,
+	                                           bool checkStorageEngineParams = false)
+	  : id(id), dcId(dcId), checkStorageEngineParams(checkStorageEngineParams) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, dcId, reply);
+		serializer(ar, id, dcId, reply, checkStorageEngineParams);
 	}
 };
 

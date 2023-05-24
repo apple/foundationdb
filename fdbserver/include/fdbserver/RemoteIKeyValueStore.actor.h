@@ -84,6 +84,9 @@ struct IKVSInterface {
 	RequestStream<struct IKVSOnClosedRequest> onClosed;
 	RequestStream<struct IKVSDisposeRequest> dispose;
 	RequestStream<struct IKVSCloseRequest> close;
+	RequestStream<struct IKVSGetParametersRequest> getParameters;
+	RequestStream<struct IKVSSetParametersRequest> setParameters;
+	RequestStream<struct IKVSSetParametersRequest> checkCompatibility;
 
 	UID uniqueID;
 
@@ -111,6 +114,9 @@ struct IKVSInterface {
 		           onClosed,
 		           dispose,
 		           close,
+		           getParameters,
+		           setParameters,
+		           checkCompatibility,
 		           uniqueID);
 	}
 };
@@ -134,6 +140,8 @@ struct OpenKVStoreRequest {
 	bool checkChecksums;
 	bool checkIntegrity;
 	ReplyPromise<struct IKVSInterface> reply;
+	EncryptionAtRestMode encryptionMode;
+	Optional<StorageEngineParamSet> params;
 
 	OpenKVStoreRequest(){};
 
@@ -142,13 +150,16 @@ struct OpenKVStoreRequest {
 	                   UID logID,
 	                   int64_t memoryLimit,
 	                   bool checkChecksums = false,
-	                   bool checkIntegrity = false)
+	                   bool checkIntegrity = false,
+	                   EncryptionAtRestMode mode = EncryptionAtRestMode::DISABLED,
+	                   Optional<StorageEngineParamSet> params = {})
 	  : storeType(storeType), filename(filename), logID(logID), memoryLimit(memoryLimit),
-	    checkChecksums(checkChecksums), checkIntegrity(checkIntegrity) {}
+	    checkChecksums(checkChecksums), checkIntegrity(checkIntegrity), encryptionMode(mode), params(params) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, reply);
+		serializer(
+		    ar, storeType, filename, logID, memoryLimit, checkChecksums, checkIntegrity, reply, encryptionMode, params);
 	}
 };
 
@@ -301,6 +312,27 @@ struct IKVSCloseRequest {
 	}
 };
 
+struct IKVSGetParametersRequest {
+	constexpr static FileIdentifier file_identifier = 13859173;
+	ReplyPromise<GetStorageEngineParamsReply> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, reply);
+	}
+};
+
+struct IKVSSetParametersRequest {
+	constexpr static FileIdentifier file_identifier = 13859174;
+	StorageEngineParamSet params;
+	ReplyPromise<StorageEngineParamResult> reply;
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, params, reply);
+	}
+};
+
 ACTOR Future<Void> runIKVS(OpenKVStoreRequest openReq, IKVSInterface ikvsInterface);
 
 struct KeyValueStoreProcess : FlowProcess {
@@ -418,6 +450,21 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 		IKVSReadRangeRequest req{ keys, rowLimit, byteLimit, options, ReplyPromise<IKVSReadRangeReply>() };
 		return fmap([](const IKVSReadRangeReply& reply) { return reply.toRangeResult(); },
 		            interf.readRange.getReply(req));
+	}
+
+	Future<StorageEngineParamSet> getParameters() const override {
+		return fmap([](const GetStorageEngineParamsReply& reply) { return reply.params; },
+		            interf.getParameters.getReply(IKVSGetParametersRequest{}));
+	}
+
+	Future<StorageEngineParamResult> setParameters(StorageEngineParamSet const& params) override {
+		return interf.setParameters.getReply(
+		    IKVSSetParametersRequest{ params, ReplyPromise<StorageEngineParamResult>() });
+	}
+
+	Future<StorageEngineParamResult> checkCompatibility(StorageEngineParamSet const& params) override {
+		return interf.checkCompatibility.getReply(
+		    IKVSSetParametersRequest{ params, ReplyPromise<StorageEngineParamResult>() });
 	}
 
 	StorageBytes getStorageBytes() const override { return storageBytes; }

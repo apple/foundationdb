@@ -18,13 +18,14 @@
  * limitations under the License.
  */
 
+#include <climits>
+
 #include "fdbserver/DDTeamCollection.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
-#include <climits>
 
 namespace {
 
@@ -2171,7 +2172,7 @@ public:
 	// This coroutine sets a watch to monitor the value change of `perpetualStorageWiggleKey` which is controlled by
 	// command `configure perpetual_storage_wiggle=$value` if the value is 1, this actor start 2 actors,
 	// `perpetualStorageWiggleIterator` and `perpetualStorageWiggler`. Otherwise, it sends stop signal to them.
-	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self) {
+	ACTOR static Future<Void> monitorPerpetualStorageWiggle(DDTeamCollection* self, Promise<Void> initializedSignal) {
 		state int speed = 0;
 		state PromiseStream<Void> finishStorageWiggleSignal;
 		state SignalableActorCollection collection;
@@ -2209,6 +2210,8 @@ public:
 						wait(self->storageWiggler->resetStats());
 						TraceEvent("PerpetualStorageWiggleClose", self->distributorId).detail("Primary", self->primary);
 					}
+					if (initializedSignal.canBeSet())
+						initializedSignal.send(Void());
 					wait(watchFuture);
 					break;
 				} catch (Error& e) {
@@ -2216,6 +2219,172 @@ public:
 				}
 			}
 		}
+	}
+
+	ACTOR static Future<Void> storageParamsUpdater(DDTeamCollection* self,
+	                                               StorageEngineParamSet newParams,
+	                                               Future<Void> wigglerInitialized) {
+		// always set the params from database configuration when DD starts
+		// the API has no change if the storage servers already have the expected config
+		TraceEvent(SevDebug, "DDTCStorageEngineParamsUpdaterStart")
+		    .detail("StoreType", self->configuration.storageServerStoreType.toString())
+		    .detail("NewParams", describe(newParams.getParams()));
+		// send update requests to all storages interfaces
+		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
+		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
+		// Read the metadata, which tells params being wiggled, for all storge servers
+		// If a param being wiggled is changed back to old value, we will update the metadata to not wiggle it
+		// Note: there's no race even the storage finishes the wiggle after it replies to the request and before we stop
+		// the wiggle In particular, the wiggle finished means the process rejoins as a storage server with the given
+		// configuration from txnStateStore
+		state Future<std::map<UID, std::set<std::string>>> paramsUnderWiggleF = getStorageParamsUnderWiggle(self);
+		for (const auto& [serverId, ss] : self->server_info) {
+			StorageServerInterface si = ss->getLastKnownInterface();
+			Future<ErrorOr<SetStorageEngineParamsReply>> f =
+			    si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams));
+			fs.push_back(f);
+			fmap[serverId] = f;
+		}
+		wait(waitForAll(fs) && wigglerInitialized && success(paramsUnderWiggleF));
+		state std::vector<Future<Void>> collection;
+		for (const auto& [serverId, f] : fmap) {
+			if (!f.isReady() || f.get().isError()) {
+				TraceEvent(SevWarn, "DDTCSetStorageEngineParamsFailed")
+				    .detail("ServerId", serverId)
+				    .detail("Error", f.get().getError().code());
+				continue;
+			}
+			if (!self->server_info.contains(serverId)) {
+				TraceEvent(SevWarn, "DDTCSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				continue;
+			}
+			SetStorageEngineParamsReply reply = f.get().get();
+			for (const auto& k : reply.result.applied) {
+				newParams.getParams().contains(k)
+				    ? self->configuration.storageEngineParams.set(k, newParams.getParams().at(k))
+				    : self->configuration.storageEngineParams.clear(k);
+				TraceEvent(SevDebug, "StorageEngineParamApplied")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			for (const auto& k : reply.result.needReplacement) {
+				TraceEvent(SevDebug, "StorageEngineParamUpdaterNeedReplacement")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			for (const auto& k : reply.result.unknown) {
+				TraceEvent(SevWarn, "UnknownStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			std::vector<std::string> noNeedReplacement;
+			auto paramsUnderWiggle = paramsUnderWiggleF.getValue()[serverId];
+			for (const auto& k : reply.result.unchanged) {
+				if (paramsUnderWiggle.contains(k)) {
+					// rollback to old value, no need to wiggle now, update the wiggle data
+					noNeedReplacement.push_back(k);
+					TraceEvent(SevDebug, "StorageEngineParamRollbackReplacement")
+					    .detail("ServerId", serverId)
+					    .detail("Param", k)
+					    .detail("Value", newParams.get(k, ""));
+				}
+			}
+
+			if (reply.result.needReplacement.size() || noNeedReplacement.size()) {
+				if (self->storageWiggler && !self->storageWiggler->isStopped()) {
+					// wiggle the storage
+					TraceEvent("WiggleStorageServerForKVSParamUpdate").detail("ServerId", serverId);
+					collection.push_back(
+					    holdWhile(self->server_info[serverId],
+					              self->updateStorageMetadata(
+					                  self->server_info[serverId].getPtr(),
+					                  false, // not used for now
+					                  reply.result.needReplacement, // it will use the number of needReplacement params
+					                                                // to determine whether to wiggle
+					                  noNeedReplacement)));
+				} else {
+					// TODO : now only warnings, should we consider rollback or disallow change if perpetual wiggle is
+					// not enabled
+					TraceEvent(SevWarn, "NeedReplacementInvalidAsWiggleNotEnabled")
+					    .detail("ServerId", serverId)
+					    .detail("HelpMessage", "Please enable the perpetual wiggle and reboot the cluster");
+				}
+			}
+		}
+
+		wait(waitForAll(collection));
+
+		TraceEvent(SevDebug, "DDTCStorageParamsUpdaterFinished").detail("NewParams", describe(newParams.getParams()));
+		return Void();
+	}
+
+	ACTOR static Future<Void> tssStorageParamsUpdater(DDTeamCollection* self, StorageEngineParamSet newParams) {
+		// always set the params from database configuration when DD starts
+		// the API has no change if the storage servers already have the expected config
+		TraceEvent(SevDebug, "DDTCTSSStorageEngineParamsUpdaterStart")
+		    .detail("StoreType", self->configuration.testingStorageServerStoreType.toString())
+		    .detail("NewParams", describe(newParams.getParams()));
+		// send update requests to all storages interfaces
+		std::vector<Future<ErrorOr<SetStorageEngineParamsReply>>> fs;
+		state std::map<UID, Future<ErrorOr<SetStorageEngineParamsReply>>> fmap;
+		for (const auto& [serverId, ss] : self->tss_info_by_pair) {
+			StorageServerInterface si = ss->getLastKnownInterface();
+			Future<ErrorOr<SetStorageEngineParamsReply>> f =
+			    si.setStorageEngineParams.tryGetReply(SetStorageEngineParamsRequest(newParams));
+			fs.push_back(f);
+			fmap[serverId] = f;
+		}
+		wait(waitForAll(fs));
+		state std::vector<Future<Void>> collection;
+		for (const auto& [serverId, f] : fmap) {
+			if (!f.isReady() || f.get().isError()) {
+				TraceEvent(SevWarn, "DDTCTSSSetStorageEngineParamsFailed")
+				    .detail("ServerId", serverId)
+				    .detail("Error", f.get().getError().code());
+				continue;
+			}
+			if (!self->tss_info_by_pair.contains(serverId)) {
+				TraceEvent(SevWarn, "DDTCTSSSetStorageEngineParamsServerRemoved").detail("ServerId", serverId);
+				continue;
+			}
+			SetStorageEngineParamsReply reply = f.get().get();
+			for (const auto& k : reply.result.applied) {
+				newParams.getParams().contains(k)
+				    ? self->configuration.tssStorageEngineParams.set(k, newParams.getParams().at(k))
+				    : self->configuration.tssStorageEngineParams.clear(k);
+				TraceEvent(SevDebug, "TSSStorageEngineParamApplied")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			for (const auto& k : reply.result.needReplacement) {
+				TraceEvent(SevDebug, "TSSStorageEngineParamUpdaterNeedReplacement")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			for (const auto& k : reply.result.unknown) {
+				TraceEvent(SevDebug, "TSSUnknownStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+			for (const auto& k : reply.result.unchanged) {
+				TraceEvent(SevDebug, "TSSUnchangedStorageEngineParam")
+				    .detail("ServerId", serverId)
+				    .detail("Param", k)
+				    .detail("Value", newParams.get(k, ""));
+			}
+		}
+
+		wait(waitForAll(collection));
+
+		TraceEvent(SevDebug, "DDTCTSSStorageParamsUpdaterFinished")
+		    .detail("NewParams", describe(newParams.getParams()));
+		return Void();
 	}
 
 	ACTOR static Future<Void> waitHealthyZoneChange(DDTeamCollection* self) {
@@ -2342,6 +2511,11 @@ public:
 			isr.reqId = deterministicRandom()->randomUniqueID();
 			isr.interfaceId = interfaceId;
 			isr.encryptMode = self->configuration.encryptionAtRestMode;
+			if (StorageEngineParamsFactory::isSupported(
+			        recruitTss ? self->configuration.testingStorageServerStoreType.storeType()
+			                   : self->configuration.storageServerStoreType.storeType()))
+				isr.storageEngineParams =
+				    recruitTss ? self->configuration.tssStorageEngineParams : self->configuration.storageEngineParams;
 
 			// if tss, wait for pair ss to finish and add its id to isr. If pair fails, don't recruit tss
 			state bool doRecruit = true;
@@ -2893,7 +3067,45 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self, TCServerInfo* server) {
+	ACTOR static Future<std::map<UID, std::set<std::string>>> getStorageParamsUnderWiggle(DDTeamCollection* self) {
+		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
+		    serverMetadataKeys.begin, IncludeVersion());
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
+		// read each storage server's metadata
+		state std::vector<Future<Optional<StorageMetadataType>>> fs;
+		state std::map<UID, std::set<std::string>> result;
+		state std::map<UID, Reference<TCServerInfo>>::iterator iter;
+		loop {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			result.clear();
+			try {
+				for (iter = self->server_info.begin(); iter != self->server_info.end(); ++iter) {
+					auto property = metadataMap.getProperty(iter->first);
+					fs.push_back((property.get(tr)));
+					Optional<StorageMetadataType> metadataOptinal = wait(property.get(tr));
+				}
+				wait(waitForAll(fs));
+				// std::map is ordered, so futures are matched with the server
+				iter = self->server_info.begin();
+				for (int i = 0; i < fs.size(); i++, iter++) {
+					ASSERT(fs[i].canGet());
+					auto metadataOptional = fs[i].get();
+					if (metadataOptional.present() && metadataOptional.get().paramsNeedTobeReplaced.size()) {
+						result[iter->first] = metadataOptional.get().paramsNeedTobeReplaced;
+					}
+				}
+				return result;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> updateStorageMetadata(DDTeamCollection* self,
+	                                                TCServerInfo* server,
+	                                                bool needReplacement,
+	                                                std::vector<std::string> needReplacementParams,
+	                                                std::vector<std::string> noNeedReplacementParams) {
 		state KeyBackedObjectMap<UID, StorageMetadataType, decltype(IncludeVersion())> metadataMap(
 		    serverMetadataKeys.begin, IncludeVersion());
 		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
@@ -2905,16 +3117,28 @@ public:
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
 		    !server->isCorrectStoreType(isTss ? self->configuration.testingStorageServerStoreType
-		                                      : self->configuration.storageServerStoreType));
+		                                      : self->configuration.storageServerStoreType),
+		    needReplacement,
+		    std::set(needReplacementParams.begin(), needReplacementParams.end()));
 
 		// read storage metadata
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
+				Optional<StorageMetadataType> metadataOptional = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
-				if (metadata.present()) {
-					data.createdTime = metadata.get().createdTime;
+				if (metadataOptional.present()) {
+					auto metadata = metadataOptional.get();
+					data.createdTime = metadata.createdTime;
+					data.needReplacement = needReplacement || metadata.needReplacement;
+					data.paramsNeedTobeReplaced.insert(metadata.paramsNeedTobeReplaced.begin(),
+					                                   metadata.paramsNeedTobeReplaced.end());
+				}
+				for (const auto& k : noNeedReplacementParams) {
+					TraceEvent("UpdateStorageMetadataRollbackParam")
+					    .detail("Param", k)
+					    .detail("CurrentWiggleParams", describe(data.paramsNeedTobeReplaced));
+					data.paramsNeedTobeReplaced.erase(k);
 				}
 				metadataMap.set(tr, server->getId(), data);
 				wait(tr->commit());
@@ -2954,6 +3178,7 @@ public:
 		state DDTeamCollection* self = teamCollection.getPtr();
 		state Future<Void> loggingTrigger = Void();
 		state PromiseStream<Void> serverRemoved;
+		state Promise<Void> storageWigglerInitialized;
 		state Future<Void> error = actorCollection(self->addActor.getFuture());
 
 		try {
@@ -3000,7 +3225,9 @@ public:
 			if (!self->db->isMocked()) {
 				self->addActor.send(self->trackExcludedServers());
 				self->addActor.send(self->waitHealthyZoneChange());
-				self->addActor.send(self->monitorPerpetualStorageWiggle());
+				self->addActor.send(self->monitorPerpetualStorageWiggle(storageWigglerInitialized));
+				self->addActor.send(self->storageParamsUpdater(storageWigglerInitialized.getFuture()));
+				self->addActor.send(self->tssStorageParamsUpdater());
 			}
 			// SOMEDAY: Monitor FF/serverList for (new) servers that aren't in allServers and add or remove them
 
@@ -3739,9 +3966,27 @@ Future<Void> DDTeamCollection::perpetualStorageWiggler(AsyncVar<bool>& stopSigna
 	return DDTeamCollectionImpl::perpetualStorageWiggler(this, &stopSignal, finishStorageWiggleSignal);
 }
 
-Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle() {
+Future<Void> DDTeamCollection::monitorPerpetualStorageWiggle(Promise<Void> initializedSignal) {
 	ASSERT(!db->isMocked());
-	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this);
+	return DDTeamCollectionImpl::monitorPerpetualStorageWiggle(this, initializedSignal);
+}
+
+Future<Void> DDTeamCollection::storageParamsUpdater(Future<Void> wigglerInitialized) {
+	ASSERT(!db->isMocked());
+	// Storage type change is through storage migration and will reboot DD
+	// Thus, DD will start again with the new type and reevaluate here
+	return StorageEngineParamsFactory::isSupported(configuration.storageServerStoreType)
+	           ? DDTeamCollectionImpl::storageParamsUpdater(this, configuration.storageEngineParams, wigglerInitialized)
+	           : Never();
+}
+
+Future<Void> DDTeamCollection::tssStorageParamsUpdater() {
+	ASSERT(!db->isMocked());
+	// Storage type change is through storage migration and will reboot DD
+	// Thus, DD will start again with the new type and reevaluate here
+	return StorageEngineParamsFactory::isSupported(configuration.testingStorageServerStoreType)
+	           ? DDTeamCollectionImpl::tssStorageParamsUpdater(this, configuration.tssStorageEngineParams)
+	           : Never();
 }
 
 Future<Void> DDTeamCollection::waitServerListChange(FutureStream<Void> serverRemoved,
@@ -3807,8 +4052,12 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 	return DDTeamCollectionImpl::readStorageWiggleMap(this);
 }
 
-Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
-	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
+Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server,
+                                                     bool needReplacement,
+                                                     std::vector<std::string> needReplacementParams,
+                                                     std::vector<std::string> noNeedReplacementParams) {
+	return DDTeamCollectionImpl::updateStorageMetadata(
+	    this, server, needReplacement, needReplacementParams, noNeedReplacementParams);
 }
 
 void DDTeamCollection::resetLocalitySet() {

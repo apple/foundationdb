@@ -610,6 +610,10 @@ struct StorageServerDisk {
 	KeyValueStoreType getKeyValueStoreType() const { return storage->getType(); }
 	StorageBytes getStorageBytes() const { return storage->getStorageBytes(); }
 	std::tuple<size_t, size_t, size_t> getSize() const { return storage->getSize(); }
+	// Get the underlying storage engine parameters
+	Future<StorageEngineParamSet> getStorageEngineParams() const;
+	// Update the underlying storage engine's parameters
+	Future<StorageEngineParamResult> setStorageEngineParams(const StorageEngineParamSet& params);
 
 	Future<EncryptionAtRestMode> encryptionMode() { return storage->encryptionMode(); }
 
@@ -1222,6 +1226,47 @@ public:
 		tssInQuarantine = true;
 	}
 
+	Future<Void> checkStorageEngineParams(StorageEngineParamSet& params, bool isTss) {
+		return fmap(
+		    [this, &params, &isTss](StorageEngineParamResult res) {
+			    // all changed params are those not written into the storage files
+			    for (const auto& k : res.applied) {
+				    // TODO : need to remove this logging
+				    std::string currV =
+				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
+				    TraceEvent("ApplyRuntimeStorageEngineParamChangeAfterRejoin")
+				        .detail("IsTss", isTss)
+				        .detail("Param", k)
+				        .detail("Expected", params.getParams().at(k))
+				        .detail("Used", currV);
+			    }
+			    for (const auto& k : res.needReboot) {
+				    std::string currV =
+				        storageEngineParams->getParams().contains(k) ? storageEngineParams->getParams().at(k) : "NULL";
+				    TraceEvent("MismatchedStorageEngineParamNeedReboot")
+				        .detail("IsTss", isTss)
+				        .detail("Param", k)
+				        .detail("Expected", params.getParams().at(k))
+				        .detail("Used", currV);
+				    params.getParams().contains(k) ? storageEngineParams->set(k, params.getParams().at(k))
+				                                   : storageEngineParams->clear(k);
+			    }
+			    if (isTss && res.needReplacement.size()) {
+				    TraceEvent("ReplacementParamsTssRemoved").detail("Params", describe(res.needReplacement));
+				    throw worker_removed();
+			    }
+			    if (res.needReboot.size()) {
+				    TraceEvent("RebootKVSAfterStorageRejoin")
+				        .detail("Params", describe(res.needReboot))
+				        .detail("IsTss", isTss);
+				    throw please_reboot_kv_store();
+			    }
+			    return Void();
+		    },
+		    // it is safe to call when params is the same as the one storage's using
+		    storage.setStorageEngineParams(params));
+	}
+
 	StorageServerDisk storage;
 
 	KeyRangeMap<Reference<ShardInfo>> shards;
@@ -1585,15 +1630,19 @@ public:
 
 	Reference<EventCacheHolder> storageServerSourceTLogIDEventHolder;
 
+	// Storage engine parameters
+	Reference<StorageEngineParamSet> storageEngineParams;
 	// Tenant metadata to manage connection to blob store for fetchKeys()
 	BGTenantMap tenantData;
 
 	StorageServer(IKeyValueStore* storage,
 	              Reference<AsyncVar<ServerDBInfo> const> const& db,
-	              StorageServerInterface const& ssi)
-	  : shardAware(false), tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                                               TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
-	                                                                               Histogram::Unit::milliseconds)),
+	              StorageServerInterface const& ssi,
+	              Reference<StorageEngineParamSet> storageEngineParams = {})
+	  : storageEngineParams(storageEngineParams), shardAware(false),
+	    tlogCursorReadsLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                            TLOG_CURSOR_READS_LATENCY_HISTOGRAM,
+	                                                            Histogram::Unit::milliseconds)),
 	    ssVersionLockLatencyHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                          SS_VERSION_LOCK_LATENCY_HISTOGRAM,
 	                                                          Histogram::Unit::milliseconds)),
@@ -1915,6 +1964,7 @@ public:
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 
+	bool isUsingStorageEngineParams() const { return storageEngineParams.isValid(); }
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
 	Version trackShardAssignmentMinVersion; // == invalidVersion means tracking stopped
@@ -5995,6 +6045,51 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		}
 	}
 
+	return Void();
+}
+
+ACTOR Future<Void> getStorageEngineParamsActor(StorageServer* self, GetStorageEngineParamsRequest req) {
+	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		StorageEngineParamSet params = wait(self->storage.getStorageEngineParams());
+		GetStorageEngineParamsReply _reply(params);
+		req.reply.send(_reply);
+	} else {
+		TraceEvent(SevWarn, "StorageEngineParamInterfaceNotSupprted")
+		    .detail("RequestType", "Get")
+		    .detail("StoreType", self->storage.getKeyValueStoreType().toString());
+		req.reply.sendError(storage_engine_migration_in_progress());
+	}
+	return Void();
+}
+
+ACTOR Future<Void> setStorageEngineParamsActor(StorageServer* self, SetStorageEngineParamsRequest req) {
+	if (StorageEngineParamsFactory::isSupported(self->storage.getKeyValueStoreType())) {
+		StorageEngineParamResult res = wait(self->storage.setStorageEngineParams(req.params));
+		SetStorageEngineParamsReply _reply(res);
+		req.reply.send(_reply);
+		if (self->isTss() && _reply.result.needReplacement.size()) {
+			// needReplacement changes will destroy the TSS and a new one will be recruited
+			TraceEvent(SevInfo, "TSSNeedReplacementParamChange")
+			    .detail("Params", describe(_reply.result.needReplacement));
+			throw worker_removed();
+		}
+		// runtime already finished, reboot are thrown here, replacement will be handled by DD wiggler
+		if (_reply.result.needReboot.size()) {
+			TraceEvent("RebootKVStoreForParamChange")
+			    .detail("Params", describe(_reply.result.needReboot))
+			    .detail("IsTss", self->isTss());
+			for (const auto& k : _reply.result.needReboot)
+				req.params.getParams().contains(k) ? self->storageEngineParams->set(k, req.params.getParams().at(k))
+				                                   : self->storageEngineParams->clear(k);
+			throw please_reboot_kv_store();
+		}
+	} else {
+		TraceEvent(SevWarn, "StorageEngineParamInterfaceNotSupprted")
+		    .detail("RequestType", "Set")
+		    .detail("Params", describe(req.params.getParams()))
+		    .detail("StoreType", self->storage.getKeyValueStoreType().toString());
+		req.reply.sendError(storage_engine_migration_in_progress());
+	}
 	return Void();
 }
 
@@ -12299,6 +12394,47 @@ void StorageServerDisk::changeLogProtocol(Version version, ProtocolVersion proto
 	    MutationRef(MutationRef::SetValue, persistLogProtocol, BinaryWriter::toValue(protocol, Unversioned())));
 }
 
+Future<StorageEngineParamSet> StorageServerDisk::getStorageEngineParams() const {
+	return fmap(
+	    [this](StorageEngineParamSet result) {
+		    // handle storage server level but storage engine related parameters
+		    const std::string remoteKVStoreParam("remote_kv_store");
+		    // Add the default value
+		    result.set(remoteKVStoreParam, "false");
+		    // overwrite the default value if needed
+		    if (data->storageEngineParams->getParams().contains(remoteKVStoreParam) &&
+		        data->storageEngineParams->getBool(remoteKVStoreParam))
+			    result.set(remoteKVStoreParam, "true");
+		    return result;
+	    },
+	    storage->getParameters());
+}
+
+Future<StorageEngineParamResult> StorageServerDisk::setStorageEngineParams(const StorageEngineParamSet& params) {
+	return fmap(
+	    [this, &params](StorageEngineParamResult result) {
+		    // Handle storage server level but storage engine specific parameters
+		    // At present, only the remote_kv_store is in this scenario
+		    if (params.getParams().contains(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY)) {
+			    auto expected = params.get(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY, false);
+			    auto current =
+			        data->storageEngineParams->get(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY, false);
+			    TraceEvent(SevDebug, "StorageServerSetStorageEngineParamsCheckRemoteKVStore")
+			        .detail("Expect", expected)
+			        .detail("Curr", current);
+			    if (expected != current) {
+				    result.needReboot.push_back(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY);
+				    data->storageEngineParams->set(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY,
+				                                   expected ? "true" : "false");
+			    } else {
+				    result.unchanged.push_back(StorageEngineParamsFactory::REMOTE_KV_STORE_PARAM_KEY);
+			    }
+		    }
+		    return result;
+	    },
+	    storage->setParameters(params));
+}
+
 ACTOR Future<Void> applyByteSampleResult(StorageServer* data,
                                          IKeyValueStore* storage,
                                          Key begin,
@@ -13522,6 +13658,12 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					self->actors.add(auditStorageQ(self, req));
 				}
 			}
+			when(GetStorageEngineParamsRequest req = waitNext(ssi.getStorageEngineParams.getFuture())) {
+				self->actors.add(getStorageEngineParamsActor(self, req));
+			}
+			when(SetStorageEngineParamsRequest req = waitNext(ssi.setStorageEngineParams.getFuture())) {
+				self->actors.add(setStorageEngineParamsActor(self, req));
+			}
 			when(wait(updateProcessStatsTimer)) {
 				updateProcessStats(self);
 				updateProcessStatsTimer = delay(SERVER_KNOBS->FASTRESTORE_UPDATE_PROCESS_STATS_INTERVAL);
@@ -13640,7 +13782,8 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 			         wait(commitProxies->size()
 			                  ? basicLoadBalance(commitProxies,
 			                                     &CommitProxyInterface::getStorageServerRejoinInfo,
-			                                     GetStorageServerRejoinInfoRequest(ssi.id(), ssi.locality.dcId()))
+			                                     GetStorageServerRejoinInfoRequest(
+			                                         ssi.id(), ssi.locality.dcId(), self->isUsingStorageEngineParams()))
 			                  : Never())) {
 				state GetStorageServerRejoinInfoReply rep = _rep;
 				if (rep.encryptMode != encryptionMode) {
@@ -13648,6 +13791,15 @@ ACTOR Future<Void> replaceInterface(StorageServer* self, StorageServerInterface 
 					    .detail("StorageEncryptionMode", encryptionMode)
 					    .detail("ClusterEncryptionMode", rep.encryptMode);
 					throw encrypt_mode_mismatch();
+				}
+				// When a new storage starts, rep.params is the same as existing params
+				// When an existing storage rejoins, exsiting params are intialized as defaults
+				// It will set the storage engine parameters as the current DB config
+				// If a "needReboot" parameter mismatches, it will reboot the kv store
+				if (self->isUsingStorageEngineParams()) {
+					TraceEvent(SevInfo, "ReplaceInterfaceCheckStorageEngineParams")
+					    .detail("Params", describe(rep.storageEngineParams.get().getParams()));
+					wait(self->checkStorageEngineParams(rep.storageEngineParams.get(), false));
 				}
 
 				try {
@@ -13741,6 +13893,19 @@ ACTOR Future<Void> replaceTSSInterface(StorageServer* self, StorageServerInterfa
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
+			// storage engine params
+			if (self->isUsingStorageEngineParams()) {
+				RangeResult paramKVs = wait(tr->getRange(tssStorageEngineParamsKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!paramKVs.more && paramKVs.size() < CLIENT_KNOBS->TOO_MANY);
+				StorageEngineParamSet params;
+				for (const auto& [k, v] : paramKVs) {
+					params.set(k.removePrefix(tssStorageEngineParamsPrefix).toString(), v.toString());
+				}
+				TraceEvent(SevInfo, "ReplaceTSSInterfaceCheckTSSStorageEngineParams")
+				    .detail("Params", describe(params.getParams()));
+				wait(self->checkStorageEngineParams(params, true));
+			}
+
 			Optional<Value> pairTagValue = wait(tr->get(serverTagKeyFor(self->tssPairID.get())));
 
 			if (!pairTagValue.present()) {
@@ -13803,9 +13968,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Version tssSeedVersion,
                                  ReplyPromise<InitializeStorageReply> recruitReply,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
-                                 std::string folder) {
-	state StorageServer self(persistentData, db, ssi);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
+                                 std::string folder,
+                                 Reference<StorageEngineParamSet> storageEngineParams) {
+	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {
@@ -13902,8 +14067,9 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder,
                                  Promise<Void> recovered,
-                                 Reference<IClusterConnectionRecord> connRecord) {
-	state StorageServer self(persistentData, db, ssi);
+                                 Reference<IClusterConnectionRecord> connRecord,
+                                 Reference<StorageEngineParamSet> storageEngineParams) {
+	state StorageServer self(persistentData, db, ssi, storageEngineParams);
 	state Future<Void> ssCore;
 	self.folder = folder;
 	self.checkpointFolder = joinPath(self.folder, serverCheckpointFolder);

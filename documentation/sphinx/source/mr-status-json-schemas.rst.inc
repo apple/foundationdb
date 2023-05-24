@@ -161,6 +161,10 @@
                   "storage_metadata":{
                      "created_time_datetime":"1970-01-01 00:00:00.000 +0000",
                      "created_time_timestamp": 0,
+                     "need_replacement":false,
+                     "params_need_to_be_replaced":[
+                        "page_size"
+                     ],
                      "storage_engine":{
                      "$enum":[
                      "ssd",
@@ -174,7 +178,14 @@
                      "memory-2",
                      "memory-radixtree-beta",
                      "unknown"
-                     ]}
+                     ]},
+                     "storage_parameters" : {
+                        "histogram_interval" : "30.000000",
+                        "kvstore_range_prefetch" : "true",
+                        "metrics_interval" : "5.000000",
+                        "page_size" : "8192",
+                        "remote_kv_store" : "false"
+                     }
                   },
                   "data_version":12341234,
                   "durable_version":12341234,
@@ -826,6 +837,13 @@
              "memory-2",
              "memory-radixtree-beta"
          ]},
+         "storage_engine_params":{
+            "histogram_interval" : "30.000000",
+            "kvstore_range_prefetch" : "true",
+            "metrics_interval" : "5.000000",
+            "page_size" : "8192",
+            "remote_kv_store" : "false"
+         },
          "tss_count":1,
          "tss_storage_engine":{
          "$enum":[
@@ -840,6 +858,13 @@
              "memory-2",
              "memory-radixtree-beta"
          ]},
+         "tss_storage_engine_params":{
+            "histogram_interval" : "30.000000",
+            "kvstore_range_prefetch" : "true",
+            "metrics_interval" : "5.000000",
+            "page_size" : "8192",
+            "remote_kv_store" : "false"
+         },
          "coordinators_count":1,
          "excluded_servers":[
             {
