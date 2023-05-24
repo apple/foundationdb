@@ -1002,6 +1002,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 
 		if (!rd.isRestore()) {
 			queuedRelocations--;
+			queueRetentionTime.setTotal(now() - rd.startTime);
 			TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 			    .detail("DataMoveID", rd.dataMoveId)
 			    .detail("RandomID", rd.randomId)
@@ -1846,7 +1847,6 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
 					self->bytesWritten += metrics.bytes;
 					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
-					self->queueRetentionTime.setTotal(now() - rd.startTime, now());
 					self->relocationCompleteWindow.addSample(1);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
