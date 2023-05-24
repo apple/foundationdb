@@ -60,7 +60,7 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	                                                 Reverse reverse) = 0;
 
 	// Gets the key from the database specified by a given key selector
-	virtual Future<Key> getKey(KeySelectorRef& key) = 0;
+	virtual Future<KeyReadResult> getKey(KeySelectorRef& key) = 0;
 
 	// Clears a key from the database
 	virtual void clear(KeyRef& key) = 0;
@@ -135,7 +135,7 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	}
 
 	// Gets the key from the database specified by a given key selector
-	Future<Key> getKey(KeySelectorRef& key) override { return transaction.getKey(key); }
+	Future<KeyReadResult> getKey(KeySelectorRef& key) override { return transaction.getKey(key); }
 
 	// Clears a key from the database
 	void clear(KeyRef& key) override { transaction.clear(key); }
@@ -212,7 +212,9 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	}
 
 	// Gets the key from the database specified by a given key selector
-	Future<Key> getKey(KeySelectorRef& key) override { return unsafeThreadFutureToFuture(transaction->getKey(key)); }
+	Future<KeyReadResult> getKey(KeySelectorRef& key) override {
+		return unsafeThreadFutureToFuture(transaction->getKey(key));
+	}
 
 	// Clears a key from the database
 	void clear(KeyRef& key) override { transaction->clear(key); }

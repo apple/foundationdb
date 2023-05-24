@@ -470,7 +470,7 @@ public:
 	ThreadFuture<Version> getReadVersion() override;
 
 	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
+	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
 	                                   int limit,
@@ -709,7 +709,7 @@ public:
 	ThreadFuture<Version> getReadVersion() override;
 
 	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
-	ThreadFuture<Key> getKey(const KeySelectorRef& key, bool snapshot = false) override;
+	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
 	                                   const KeySelectorRef& end,
 	                                   int limit,

@@ -245,18 +245,19 @@ public:
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
+					auto& firstFailureTime = self->firstLargeTeamFailure[customReplicas];
 					if (newTeam) {
 						if (newTeam->size() < customReplicas) {
-							if (!self->firstLargeTeamFailure.present()) {
-								self->firstLargeTeamFailure = now();
+							if (!firstFailureTime.present()) {
+								firstFailureTime = now();
 							}
-							if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+							if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 								req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 								return Void();
 							}
 							self->underReplication.insert(req.keys.get(), true);
 						} else {
-							self->firstLargeTeamFailure = Optional<double>();
+							firstFailureTime = Optional<double>();
 						}
 						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
 						    .detail("Team", newTeam->getDesc())
@@ -266,10 +267,10 @@ public:
 						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
-						if (!self->firstLargeTeamFailure.present()) {
-							self->firstLargeTeamFailure = now();
+						if (!firstFailureTime.present()) {
+							firstFailureTime = now();
 						}
-						if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+						if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 							req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 							return Void();
 						}
@@ -277,7 +278,7 @@ public:
 						    .suppressFor(1.0)
 						    .detail("Replicas", customReplicas)
 						    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-						    .detail("LargeTeamDiff", now() - self->firstLargeTeamFailure.get());
+						    .detail("LargeTeamDiff", now() - firstFailureTime.get());
 						self->underReplication.insert(req.keys.get(), true);
 					}
 				}

@@ -3696,7 +3696,9 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 	}
 }
 
-ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, UseTenant useTenant = UseTenant::True) {
+ACTOR Future<KeyReadResult> getKey(Reference<TransactionState> trState,
+                                   KeySelector k,
+                                   UseTenant useTenant = UseTenant::True) {
 	CODE_PROBE(!useTenant, "Get key ignoring tenant");
 	wait(trState->startTransaction());
 
@@ -3783,7 +3785,7 @@ ACTOR Future<Key> getKey(Reference<TransactionState> trState, KeySelector k, Use
 				                                                 // reply.sel.offset).detail("OrEqual", k.orEqual);
 			k = reply.sel;
 			if (!k.offset && k.orEqual) {
-				return k.getKey();
+				return KeyReadResult(k.getKey(), ReadMetricsNeedFilled());
 			}
 		} catch (Error& e) {
 			if (getKeyID.present())
@@ -4409,12 +4411,12 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 	}
 }
 
-Future<Key> resolveKey(Reference<TransactionState> trState, KeySelector const& key, UseTenant useTenant) {
+Future<KeyReadResult> resolveKey(Reference<TransactionState> trState, KeySelector const& key, UseTenant useTenant) {
 	if (key.isFirstGreaterOrEqual())
-		return Future<Key>(key.getKey());
+		return Future<KeyReadResult>(KeyReadResult(key.getKey()));
 
 	if (key.isFirstGreaterThan())
-		return Future<Key>(keyAfter(key.getKey()));
+		return Future<KeyReadResult>(KeyReadResult(keyAfter(key.getKey())));
 
 	return getKey(trState, key, useTenant);
 }
@@ -4431,11 +4433,12 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	CODE_PROBE(trState->hasTenant() && useTenant, "NativeAPI getRangeFallback has tenant");
 	CODE_PROBE(!useTenant, "NativeAPI getRangeFallback ignoring tenant");
 
-	Future<Key> fb = resolveKey(trState, begin, useTenant);
-	state Future<Key> fe = resolveKey(trState, end, useTenant);
+	Future<KeyReadResult> fb = resolveKey(trState, begin, useTenant);
+	state Future<KeyReadResult> fe = resolveKey(trState, end, useTenant);
 
-	state Key b = wait(fb);
-	state Key e = wait(fe);
+	state KeyReadResult b = wait(fb);
+	state KeyReadResult e = wait(fe);
+
 	if (b >= e) {
 		return RangeResultFamily();
 	}
@@ -5360,11 +5363,14 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	CODE_PROBE(trState->hasTenant(), "NativeAPI getRangeStream has tenant");
 	trState->cx->validateVersion(trState->readVersion());
 
-	Future<Key> fb = resolveKey(trState, begin, UseTenant::True);
-	state Future<Key> fe = resolveKey(trState, end, UseTenant::True);
+	Future<KeyReadResult> fb = resolveKey(trState, begin, UseTenant::True);
+	state Future<KeyReadResult> fe = resolveKey(trState, end, UseTenant::True);
 
-	state Key b = wait(fb);
-	state Key e = wait(fe);
+	// Read metrics from the beginning and ending key selectors are not included in the response
+	KeyReadResult resolvedBegin = wait(fb);
+	state Key b = resolvedBegin;
+	KeyReadResult resolvedEnd = wait(fe);
+	state Key e = resolvedEnd;
 
 	if (!snapshot) {
 		// FIXME: this conflict range is too large, and should be updated continously as results are returned
@@ -5759,11 +5765,11 @@ Future<Standalone<VectorRef<const char*>>> Transaction::getAddressesForKey(const
 	return getAddressesForKeyActor(trState, key);
 }
 
-ACTOR Future<Key> getKeyAndConflictRange(Reference<TransactionState> trState,
-                                         KeySelector k,
-                                         Promise<std::pair<Key, Key>> conflictRange) {
+ACTOR Future<KeyReadResult> getKeyAndConflictRange(Reference<TransactionState> trState,
+                                                   KeySelector k,
+                                                   Promise<std::pair<Key, Key>> conflictRange) {
 	try {
-		Key rep = wait(getKey(trState, k));
+		KeyReadResult rep = wait(getKey(trState, k));
 		if (k.offset <= 0)
 			conflictRange.send(std::make_pair(rep, k.orEqual ? keyAfter(k.getKey()) : Key(k.getKey(), k.arena())));
 		else
@@ -5776,7 +5782,7 @@ ACTOR Future<Key> getKeyAndConflictRange(Reference<TransactionState> trState,
 	}
 }
 
-Future<Key> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
+Future<KeyReadResult> Transaction::getKey(const KeySelector& key, Snapshot snapshot) {
 	++trState->cx->transactionLogicalReads;
 	++trState->cx->transactionGetKeyRequests;
 	if (snapshot)

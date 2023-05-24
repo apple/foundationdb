@@ -1748,6 +1748,10 @@ public:
 		StorageBytes sb = storage.getStorageBytes();
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
+
+	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = ""_sr;

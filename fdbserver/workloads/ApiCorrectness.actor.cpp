@@ -622,7 +622,7 @@ public:
 
 			loop {
 				try {
-					state std::vector<Future<Standalone<KeyRef>>> dbKeyFutures;
+					state std::vector<Future<KeyReadResult>> dbKeyFutures;
 					for (int i = currentIndex;
 					     i < std::min(currentIndex + self->maxKeysPerTransaction, selectors.size());
 					     i++)
@@ -672,7 +672,7 @@ public:
 					state Key dbKey;
 					loop {
 						try {
-							Key key = wait(tr->getKey(sel));
+							KeyReadResult key = wait(tr->getKey(sel));
 							dbKey = key;
 							break;
 						} catch (Error& e) {
