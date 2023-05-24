@@ -637,7 +637,11 @@ class Summary:
                 return
             self.test_end_found = True
             self.unseed = int(attrs["RandomUnseed"])
-            if self.expected_unseed is not None and self.unseed != self.expected_unseed:
+            if (
+                self.expected_unseed is not None
+                and self.unseed != self.expected_unseed
+                and self.unseed != -1
+            ):
                 severity = (
                     40
                     if ("UnseedMismatch", 40) not in self.severity_map
