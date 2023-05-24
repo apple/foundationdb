@@ -1035,7 +1035,7 @@ public:
 	ACTOR static Future<bool> isEmpty(Reference<ReadYourWritesTransaction> tr, Reference<FutureBucket> futureBucket) {
 		futureBucket->setOptions(tr);
 
-		Key lastKey = wait(tr->getKey(lastLessOrEqual(futureBucket->prefix.pack(maxUIDKey))));
+		KeyReadResult lastKey = wait(tr->getKey(lastLessOrEqual(futureBucket->prefix.pack(maxUIDKey))));
 		return !futureBucket->prefix.contains(lastKey);
 	}
 };

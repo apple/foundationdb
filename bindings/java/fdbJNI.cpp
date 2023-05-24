@@ -760,7 +760,9 @@ JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureResult_FutureResult_
 	return result;
 }
 
-JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
+JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureBytes_FutureBytes_1get(JNIEnv* jenv,
+                                                                                      jobject,
+                                                                                      jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;
@@ -769,7 +771,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 
 	const uint8_t* value;
 	int length;
-	fdb_error_t err = fdb_future_get_key(f, &value, &length);
+	fdb_error_t err = fdb_future_get_bytes(f, &value, &length);
 	if (err) {
 		safeThrow(jenv, getThrowable(jenv, err));
 		return JNI_NULL;
@@ -786,9 +788,7 @@ JNIEXPORT jbyteArray JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1ge
 	return result;
 }
 
-JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKeyResult_FutureKeyResult_1get(JNIEnv* jenv,
-                                                                                           jobject,
-                                                                                           jlong future) {
+JNIEXPORT jobject JNICALL Java_com_apple_foundationdb_FutureKey_FutureKey_1get(JNIEnv* jenv, jobject, jlong future) {
 	if (!future) {
 		throwParamNotNull(jenv);
 		return JNI_NULL;

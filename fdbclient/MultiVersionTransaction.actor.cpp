@@ -111,18 +111,26 @@ ThreadFuture<ValueReadResult> DLTransaction::get(const KeyRef& key, bool snapsho
 	});
 }
 
-ThreadFuture<Key> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> DLTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	FdbCApi::FDBFuture* f =
 	    api->transactionGetKey(tr, key.getKey().begin(), key.getKey().size(), key.orEqual, key.offset, snapshot);
 
-	return toThreadFuture<Key>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<KeyReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const uint8_t* key;
 		int keyLength;
 		FdbCApi::fdb_error_t error = api->futureGetKey(f, &key, &keyLength);
 		ASSERT(!error);
 
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return Key(KeyRef(key, keyLength), Arena());
+		return KeyReadResult(Key(KeyRef(key, keyLength), Arena()),
+		                     ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 	});
 }
 
@@ -1485,7 +1493,7 @@ ThreadFuture<ValueReadResult> MultiVersionTransaction::get(const KeyRef& key, bo
 	return executeOperation(&ITransaction::get, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<Key> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
+ThreadFuture<KeyReadResult> MultiVersionTransaction::getKey(const KeySelectorRef& key, bool snapshot) {
 	return executeOperation(&ITransaction::getKey, key, std::forward<bool>(snapshot));
 }
 
