@@ -1036,6 +1036,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FILE_LATENCY_SKETCH_ACCURACY,                         0.01 );
 	init( LATENCY_METRICS_LOGGING_INTERVAL,                     60.0 );
 
+	// Relocation request queue measurement
+	init( RELOCATION_METRICS_SMOOTHING, 						300.0);
+	init( RELOCATION_METRICS_WINDOW, 							 10.0);
+
 	// Cluster recovery
 	init ( CLUSTER_RECOVERY_EVENT_NAME_PREFIX,              "Master" );
 
