@@ -1788,15 +1788,15 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					    .detail("Dest", describe(dest));
 					allServers.insert(src.begin(), src.end());
 					allServers.insert(dest.begin(), dest.end());
-					if (!destId.isValid()) {
-						TraceEvent(SevError, "FinishMoveShardsInvalidDestID", relocationIntervalId)
-						    .detail("DataMoveID", dataMoveId);
-						continue;
-					} else {
-						ASSERT(destId == dataMoveId);
-						std::sort(dest.begin(), dest.end());
-						ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
+					if (destId != dataMoveId) {
+						TraceEvent(SevWarnAlways, "FinishMoveShardsInconsistentIDs", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("ExistingShardID", destId);
+						throw movekeys_conflict();
 					}
+
+					std::sort(dest.begin(), dest.end());
+					ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
 
 					std::set<UID> srcSet;
 					for (int s = 0; s < src.size(); s++) {
@@ -1978,23 +1978,34 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					tr.reset();
 				}
 			} catch (Error& error) {
+				state Error err = error;
 				TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
-				    .errorUnsuppressed(error)
+				    .errorUnsuppressed(err)
 				    .detail("DataMoveID", dataMoveId);
-				if (error.code() == error_code_retry) {
+				if (err.code() == error_code_retry) {
 					wait(delay(1));
 				} else {
-					if (error.code() == error_code_actor_cancelled)
+					if (err.code() == error_code_actor_cancelled) {
 						throw;
-					state Error err = error;
-					wait(tr.onError(error));
-					retries++;
-					if (retries % 10 == 0) {
-						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
-						           "RelocateShard_FinishMoveKeysRetrying",
-						           relocationIntervalId)
-						    .error(err)
-						    .detail("DataMoveID", dataMoveId);
+					} else if (err.code() == error_code_movekeys_conflict || retries > 100) {
+						// wait(cleanUpDataMove(occ, dataMoveId, lock, startMoveKeysLock, keys, ddEnabledState));
+						Transaction txn(occ);
+						txn.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+						txn.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+						dataMove.setPhase(DataMoveMetaData::Deleting);
+						txn.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+						wait(txn.commit());
+						throw data_move_cancelled();
+					} else {
+						wait(tr.onError(err));
+						++retries;
+						if (retries % 10 == 0) {
+							TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
+							           "RelocateShard_FinishMoveKeysRetrying",
+							           relocationIntervalId)
+							    .error(err)
+							    .detail("DataMoveID", dataMoveId);
+						}
 					}
 				}
 			}
