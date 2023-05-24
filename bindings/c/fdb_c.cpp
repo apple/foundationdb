@@ -300,13 +300,17 @@ fdb_error_t fdb_future_get_keyvalue_array_impl(FDBFuture* f,
                                                FDBKeyValue const** out_kv,
                                                int* out_count,
                                                fdb_bool_t* out_more) {
-	CATCH_AND_RETURN(RangeReadResult rrr = TSAV(RangeReadResult, f)->get(); *out_kv = (FDBKeyValue*)rrr.begin();
+	CATCH_AND_RETURN(ThreadSingleAssignmentVarBase* tsav = TSAVB(f);
+	                 RangeResultRef rrr = tsav->getAndCast<RangeResult>(AddValueReference::True);
+	                 *out_kv = (FDBKeyValue*)rrr.begin();
 	                 *out_count = rrr.size();
 	                 *out_more = rrr.more;);
 }
 
 fdb_error_t fdb_future_get_keyvalue_array_v13(FDBFuture* f, FDBKeyValue const** out_kv, int* out_count) {
-	CATCH_AND_RETURN(RangeReadResult rrr = TSAV(RangeReadResult, f)->get(); *out_kv = (FDBKeyValue*)rrr.begin();
+	CATCH_AND_RETURN(ThreadSingleAssignmentVarBase* tsav = TSAVB(f);
+	                 RangeResultRef rrr = tsav->getAndCast<RangeResult>(AddValueReference::True);
+	                 *out_kv = (FDBKeyValue*)rrr.begin();
 	                 *out_count = rrr.size(););
 }
 
