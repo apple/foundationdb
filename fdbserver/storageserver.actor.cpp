@@ -997,7 +997,7 @@ public:
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	Future<Void> auditSSShardInfoActor;
+	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> ssAuditManager;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -13535,20 +13535,44 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				// A SS can run one ValidateStorageServerShard at a time
-				// We do not have this limitation on other audit types
-				if (req.getType() == AuditType::ValidateStorageServerShard) {
-					if (self->auditSSShardInfoActor.isValid() && !self->auditSSShardInfoActor.isReady()) {
-						TraceEvent(SevWarn, "ExistRunningAuditStorageForServerShard")
-						    .detail("NewAuditId", req.id)
-						    .detail("NewAuditType", req.getType());
-						self->auditSSShardInfoActor.cancel();
-					} // New audit immediately starts and existing one gets cancelled
-					self->auditSSShardInfoActor = auditStorageStorageServerShardQ(self, req);
+				// Check existing audit task state
+				if (self->ssAuditManager.contains(req.getType())) {
+					if (req.id != self->ssAuditManager[req.getType()].first) {
+						// Any task of past audit must be ready
+						if (!self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+							req.reply.sendError(audit_storage_exceeded_request_limit());
+							TraceEvent(SevWarnAlways, "ExistSSAuditWithDifferentId") // unexpected
+							    .detail("NewAuditId", req.id)
+							    .detail("NewAuditType", req.getType());
+							continue;
+						}
+					} else if (req.getType() == AuditType::ValidateStorageServerShard &&
+					           !self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+						// Only one ValidateStorageServerShard is allowed to run at a time
+						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
+						    .detail("AuditId", req.id)
+						    .detail("AuditType", req.getType());
+						self->ssAuditManager[req.getType()].second.clear(true);
+					}
+				}
+				// Prepare for audit task
+				if (!self->ssAuditManager.contains(req.getType()) ||
+				    self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+					ASSERT(req.id.isValid());
+					self->ssAuditManager[req.getType()] = std::make_pair(req.id, ActorCollection(true));
+				}
+				// Start audit task
+				if (req.getType() == AuditType::ValidateHA) {
+					self->ssAuditManager[req.getType()].second.add(auditStorageQ(self, req));
+				} else if (req.getType() == AuditType::ValidateReplica) {
+					self->ssAuditManager[req.getType()].second.add(auditStorageQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->actors.add(auditStorageLocationMetadataQ(self, req));
+					self->ssAuditManager[req.getType()].second.add(auditStorageLocationMetadataQ(self, req));
+				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+					self->ssAuditManager[req.getType()].second.add(auditStorageStorageServerShardQ(self, req));
 				} else {
-					self->actors.add(auditStorageQ(self, req));
+					req.reply.sendError(not_implemented());
+					continue;
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {

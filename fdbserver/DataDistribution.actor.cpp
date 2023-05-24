@@ -2532,11 +2532,12 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
-		if (e.code() == error_code_actor_cancelled) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_not_implemented) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
-		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
+		} else if (audit->retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX ||
+		           e.code() == error_code_audit_storage_exceeded_request_limit) {
 			throw audit_storage_failed();
 		} else {
 			if (req.getType() == AuditType::ValidateStorageServerShard) {
