@@ -1959,7 +1959,7 @@ public:
 	}
 
 	ACTOR static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
-		if (g_network->isSimulated() && g_simulator->speedUpSimulation) {
+		if (g_network->isSimulated() && g_simulator->isConsistencyChecked) {
 			// Wiggle can cause consistency check to repeatedly restart. So we want to
 			// slow it down to avoid consistency check timeout.
 			wait(delay(300));
