@@ -40,7 +40,6 @@ class SmootherImpl {
 	}
 
 protected:
-	SmootherImpl() = default;
 	explicit SmootherImpl(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
 
 public:
@@ -71,8 +70,6 @@ public:
 class Smoother : public SmootherImpl<Smoother> {
 public:
 	static double now() { return ::now(); }
-
-	Smoother() = default;
 	explicit Smoother(double eFoldingTime) : SmootherImpl<Smoother>(eFoldingTime) {}
 };
 class TimerSmoother : public SmootherImpl<TimerSmoother> {
