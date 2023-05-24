@@ -1927,8 +1927,9 @@ bool validateSimulationDataFiles(std::string const& dataFolder, bool isRestartin
 			if (file != "restartInfo.ini" && file != getTestEncryptionFileName()) {
 				TraceEvent(SevError, "IncompatibleFileFound").detail("DataFolder", dataFolder).detail("FileName", file);
 				fprintf(stderr,
-				        "ERROR: Data folder `%s' is non-empty; please use clean, fdb-only folder\n",
-				        dataFolder.c_str());
+				        "ERROR: Data folder `%s' is non-empty, file `%s`; please use clean, fdb-only folder\n",
+				        dataFolder.c_str(),
+				        file.c_str());
 				return false;
 			}
 		}

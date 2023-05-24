@@ -50,6 +50,7 @@ struct VaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<VaultReques
 void cleanupConfig();
 void initConfig();
 void initDiscoverUrlFile();
+bool isVaultConfigFile(const std::string&);
 
 } // namespace RestSimKms
 

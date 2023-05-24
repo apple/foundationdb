@@ -469,6 +469,7 @@ void initConfig() {
 	// Update configurations RESTKmsConnector depends upon
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	g_knobs.setKnob("kms_connector_type", KnobValueRef::create(std::string("RESTKmsConnector")));
+	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
 	g_knobs.setKnob("rest_kms_connector_validation_token_details", KnobValueRef::create(std::string(detailsStr)));
 	g_knobs.setKnob("rest_kms_connector_discover_kms_url_file",
 	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_DISCOVERY_FILE)));
@@ -506,7 +507,7 @@ ACTOR Future<Void> updateDiscoverUrlFile() {
 		throw operation_failed();
 	}
 	for (const auto& address : resolvedNetworkAddresses) {
-		const std::string url = "https://" + address.ip.toString() + ":" + REST_SIM_KMS_SERVICE_PORT;
+		const std::string url = "http://" + address.ip.toString() + ":" + std::to_string(address.port);
 		urlFile << url << std::endl;
 	}
 	urlFile.close();
@@ -532,6 +533,10 @@ ACTOR [[flow_allow_discard]] void initDiscoverUrlFileImpl() {
 
 void initDiscoverUrlFile() {
 	initDiscoverUrlFileImpl();
+}
+
+bool isVaultConfigFile(const std::string& file) {
+	return file.compare(REST_SIM_KMS_VAULT_DISCOVERY_FILE) == 0 || file.compare(REST_SIM_KMS_VAULT_TOKEN_FILE) == 0;
 }
 
 } // namespace RestSimKms
