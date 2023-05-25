@@ -316,6 +316,40 @@ ACTOR Future<Void> clusterRecruitStorage(ClusterControllerData* clusterControlle
 	}
 }
 
+ACTOR Future<Void> clusterRecruitBlobWorker(ClusterControllerData* clusterControllerData,
+                                            RecruitBlobWorkerRequest req) {
+	state double timeoutTime = now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT;
+	loop {
+		try {
+			if (timeoutTime < now()) {
+				req.reply.sendError(timed_out());
+				return Void();
+			} else if (!clusterControllerData->gotProcessClasses) {
+				throw no_more_servers();
+			}
+
+			auto worker = clusterControllerData->recruiter.findBlobWorker(
+			    req, clusterControllerData->id_worker, clusterControllerData->clusterControllerDcId);
+
+			RecruitBlobWorkerReply rep;
+			rep.worker = worker.interf;
+			rep.processClass = worker.processClass;
+			req.reply.send(rep);
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_no_more_servers) {
+				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", clusterControllerData->id)
+				    .errorUnsuppressed(e)
+				    .suppressFor(1.0);
+			} else {
+				TraceEvent(SevError, "RecruitBlobWorkerError", clusterControllerData->id).error(e);
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
+}
+
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
@@ -611,10 +645,6 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			}
 		}
 
-		if (self->db.blobGranulesEnabled.get()) {
-			self->recruiter.checkOutstandingBlobWorkerRequests(
-			    self->gotProcessClasses, self->id_worker, self->clusterControllerDcId);
-		}
 		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
@@ -2818,8 +2848,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterRecruitStorage(&self, req));
 		}
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
-			self.recruiter.clusterRecruitBlobWorker(
-			    req, self.gotProcessClasses, self.id_worker, self.clusterControllerDcId);
+			self.addActor.send(clusterRecruitBlobWorker(&self, req));
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;
