@@ -1136,9 +1136,7 @@ void usage() {
 	printf("%-24s %s\n", "    --version", "Print FDB version");
 	printf("%-24s %s\n", "-v, --verbose", "Specify verbosity");
 	printf("%-24s %s\n", "-a, --api_version=API_VERSION", "Specify API_VERSION to use");
-	printf("%-24s %s\n",
-	       "    --key_prefix=PREFIX",
-	       "Specify mako key space prefix (Default: \"mako\"");
+	printf("%-24s %s\n", "    --key_prefix=PREFIX", "Specify mako key space prefix (Default: \"mako\"");
 	printf("%-24s %s\n", "-c, --cluster=FILE", "Specify FDB cluster file");
 	printf("%-24s %s\n", "-d, --num_databases=NUM_DATABASES", "Specify number of databases");
 	printf("%-24s %s\n", "-p, --procs=PROCS", "Specify number of worker processes");
