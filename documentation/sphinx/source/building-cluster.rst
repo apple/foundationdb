@@ -55,7 +55,7 @@ By default, the script will pick a local network interface that can access the i
 
 If a cluster has no record of a configured database, you can execute the following command with the desired storage engine and redundancy mode to create a new one::
 
-    user@host1$ fdbcli -C /etc/foundationdb/fdb.cluster --exec "configure new single memory"
+    user@host1$ fdbcli --exec "configure new single memory"
     Database created
 
 .. _test-the-database:
