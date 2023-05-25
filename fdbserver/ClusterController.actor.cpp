@@ -283,6 +283,39 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	return Void();
 }
 
+ACTOR Future<Void> clusterRecruitStorage(ClusterControllerData* clusterControllerData, RecruitStorageRequest req) {
+	state double timeoutTime = now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT;
+	loop {
+		try {
+			if (timeoutTime < now()) {
+				req.reply.sendError(timed_out());
+				return Void();
+			} else if (!clusterControllerData->gotProcessClasses && !req.criticalRecruitment) {
+				throw no_more_servers();
+			}
+
+			auto worker = clusterControllerData->recruiter.findStorage(req, clusterControllerData->id_worker);
+
+			RecruitStorageReply rep;
+			rep.worker = worker.interf;
+			rep.processClass = worker.processClass;
+			req.reply.send(rep);
+			return Void();
+		} catch (Error& e) {
+			if (e.code() == error_code_no_more_servers) {
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", clusterControllerData->id)
+				    .errorUnsuppressed(e)
+				    .suppressFor(1.0)
+				    .detail("IsCriticalRecruitment", req.criticalRecruitment);
+			} else {
+				TraceEvent(SevError, "RecruitStorageError", clusterControllerData->id).error(e);
+				throw; // Any other error will bring down the cluster controller
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_STORAGE_RECRUITMENT_DELAY));
+	}
+}
+
 // Finds and returns a new process for role
 WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          const ProcessClass::ClusterRole role,
@@ -577,8 +610,6 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 				wait(self->goodRecruitmentTime);
 			}
 		}
-
-		self->recruiter.checkOutstandingStorageRequests(self->gotProcessClasses, self->id_worker);
 
 		if (self->db.blobGranulesEnabled.get()) {
 			self->recruiter.checkOutstandingBlobWorkerRequests(
@@ -2784,7 +2815,7 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterOpenDatabase(&self.db, req));
 		}
 		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
-			self.recruiter.clusterRecruitStorage(req, self.gotProcessClasses, self.id_worker);
+			self.addActor.send(clusterRecruitStorage(&self, req));
 		}
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
 			self.recruiter.clusterRecruitBlobWorker(
