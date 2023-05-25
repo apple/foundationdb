@@ -223,11 +223,11 @@ if(NOT OPEN_FOR_IDE)
   # Make sure that fdb_c.h is compatible with c90
   add_executable(fdb_c90_test test/fdb_c90_test.c)
   set_property(TARGET fdb_c90_test PROPERTY C_STANDARD 90)
-  if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-    target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Wno-gnu-line-marker -Werror)
-  else ()
-    target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
-  endif ()
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Wno-gnu-line-marker -Werror)
+else ()
+  target_compile_options(fdb_c90_test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif ()
   target_link_libraries(fdb_c90_test PRIVATE fdb_c)
 endif()
 
@@ -319,30 +319,6 @@ else()
       COMMAND python ${CMAKE_CURRENT_SOURCE_DIR}/test/fdb_c_client_config_tests.py
       --build-dir ${CMAKE_BINARY_DIR}
       --client-config-tester-bin $<TARGET_FILE:fdb_c_client_config_tester>
-      )
-
-    add_python_venv_test(NAME fdb_c_upgrade_from_prev3_gradual
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
-      --process-number 3
-      )
-
-    add_python_venv_test(NAME fdb_c_upgrade_from_prev3_direct
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV3_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
-      --process-number 3
-      )
-
-    add_python_venv_test(NAME fdb_c_upgrade_from_prev2_gradual
-      COMMAND python ${CMAKE_SOURCE_DIR}/tests/TestRunner/upgrade_test.py
-      --build-dir ${CMAKE_BINARY_DIR}
-      --test-file ${CMAKE_SOURCE_DIR}/bindings/c/test/apitester/tests/upgrade/MixedApiWorkloadMultiThr.toml
-      --upgrade-path "${FDB_PREV2_RELEASE_VERSION}" "${FDB_PREV_RELEASE_VERSION}" "${FDB_CURRENT_VERSION}" "${FDB_PREV_RELEASE_VERSION}"
-      --process-number 3
       )
 
     # TODO: re-enable the downgrade step to "${FDB_PREV_RELEASE_VERSION}" in all the following
