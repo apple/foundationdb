@@ -55,6 +55,14 @@ struct GranuleDeltas : VectorRef<MutationsAndVersionRef> {
 	}
 };
 
+void readGranuleDeltas(GranuleDeltas& srcDeltas,
+                       GranuleDeltas& destDeltas,
+                       Arena& arena,
+                       Version beginVersion,
+                       Version readVersion,
+                       Version& includedVersion,
+                       int64_t byteLimit);
+
 #pragma pack(push, 4)
 struct GranuleMutationRef {
 	MutationRef::Type type;
