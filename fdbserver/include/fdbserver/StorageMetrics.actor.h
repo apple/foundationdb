@@ -221,6 +221,10 @@ public:
 
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
 
+	virtual void getSplitMetrics(const SplitMetricsRequest& req) = 0;
+
+	virtual void getHotRangeMetrics(const ReadHotSubRangeRequest& req) = 0;
+
 	// NOTE: also need to have this function but template can't be a virtual so...
 	// template <class Reply>
 	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
@@ -244,14 +248,14 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->metrics.splitMetrics(req);
+					self->getSplitMetrics(req);
 				}
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				self->metrics.getReadHotRanges(req);
+				self->getHotRangeMetrics(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 				if (!self->isReadable(req.keys)) {
