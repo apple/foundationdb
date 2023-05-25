@@ -67,6 +67,38 @@ KeyBackedSet<Tuple>& clusterTenantIndex();
 
 // A set of (cluster, tenant group name) tuples ordered by cluster
 KeyBackedSet<Tuple>& clusterTenantGroupIndex();
+
+struct MovementMetadataSpecification {
+	Key subspace;
+
+	// emergency_movement/move(tenantGroup) = RunID
+	KeyBackedMap<TenantGroupName, UID> emergencyMovements;
+
+	// emergency_movement/version(tenantGroup, RunID) = Version
+	KeyBackedMap<std::pair<TenantGroupName, UID>, Version> movementVersions;
+
+	// emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
+	KeyBackedMap<std::pair<TenantGroupName, UID>, std::pair<TenantName, Key>> movementQueue;
+
+	// emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
+	KeyBackedMap<Tuple, Key> splitPointsMap;
+
+	MovementMetadataSpecification(KeyRef prefix)
+	  : subspace(prefix.withSuffix("emergency_movement/"_sr)), splitPointsMap(subspace.withSuffix("split_points"_sr)),
+	    emergencyMovements(subspace.withSuffix("move"_sr)), movementVersions(subspace.withSuffix("version"_sr)),
+	    movementQueue(subspace.withSuffix("queue"_sr)) {}
+};
+
+struct MovementMetadata {
+	static MovementMetadataSpecification& instance();
+
+	static inline auto& subspace() { return instance().subspace; }
+	static inline auto& splitPointsMap() { return instance().splitPointsMap; }
+	static inline auto& emergencyMovements() { return instance().emergencyMovements; }
+	static inline auto& movementVersions() { return instance().movementVersions; }
+	static inline auto& movementQueue() { return instance().movementQueue; }
+};
+
 } // namespace management
 
 } // namespace metacluster::metadata

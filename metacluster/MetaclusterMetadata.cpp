@@ -75,5 +75,10 @@ TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata() {
 	return instance;
 }
 
+MovementMetadataSpecification& MovementMetadata::instance() {
+	static MovementMetadataSpecification _instance = MovementMetadataSpecification(""_sr);
+	return _instance;
+}
+
 } // namespace management
 } // namespace metacluster::metadata

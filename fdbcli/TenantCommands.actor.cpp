@@ -342,7 +342,17 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 
-ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() > 4) {
+		fmt::print("Usage: tenant move start <TENANT_GROUP>\n\n");
+		return false;
+	}
+	TenantGroupName tenantGroup = tokens[3];
+	state UID runID = deterministicRandom()->randomUniqueID();
+	wait(metacluster::startTenantMovement(db, tenantGroup, runID));
+
+	return true;
+}
 ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
 ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
@@ -352,20 +362,44 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
 		return false;
 	}
-	step = tokens[2];
-	switch (step) {
-	case "start"_sr:
+	state Reference<ITransaction> tr = db->createTransaction();
+
+	try {
+		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+		state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+			fmt::print("Tenant movement should only be run on a management cluster.");
+			return false;
+		}
+	} catch (Error& e) {
+		wait(safeThreadFutureToFuture(tr->onError(e)));
+	}
+	StringRef step = tokens[2];
+	if (step == "start"_sr) {
 		return tenantMoveStartCommand(db, tokens);
-	case "switch"_sr:
+	} else if (step == "switch"_sr) {
 		return tenantMoveSwitchCommand(db, tokens);
-	case "finish"_sr:
+	} else if (step == "finish"_sr) {
 		return tenantMoveFinishCommand(db, tokens);
-	case "abort"_sr:
+	} else if (step == "abort"_sr) {
 		return tenantMoveAbortCommand(db, tokens);
-	default:
+	} else {
 		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
 		return false;
 	}
+	// switch (step) {
+	// case "start"_sr:
+	// 	return tenantMoveStartCommand(db, tokens);
+	// case "switch"_sr:
+	// 	return tenantMoveSwitchCommand(db, tokens);
+	// case "finish"_sr:
+	// 	return tenantMoveFinishCommand(db, tokens);
+	// case "abort"_sr:
+	// 	return tenantMoveAbortCommand(db, tokens);
+	// default:
+	// 	fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
+	// 	return false;
+	// }
 }
 
 void tenantListOutputJson(std::map<TenantName, int64_t> tenants) {
