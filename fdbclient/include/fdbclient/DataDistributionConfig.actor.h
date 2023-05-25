@@ -105,7 +105,7 @@ struct DDConfiguration : public KeyBackedClass {
 	typedef RangeConfigMap::LocalSnapshot RangeConfigMapSnapshot;
 
 	// Range configuration options set by Users
-	RangeConfigMap userRangeConfig() const { return { IncludeVersion(), subspace.pack(__FUNCTION__sr), trigger }; }
+	RangeConfigMap userRangeConfig() const { return { subspace.pack(__FUNCTION__sr), trigger, IncludeVersion() }; }
 
 	static json_spirit::mValue toJSON(RangeConfigMapSnapshot const& snapshot, bool includeDefaultRanges = false);
 };
