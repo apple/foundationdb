@@ -1728,6 +1728,55 @@ public:
 		StorageBytes sb = storage.getStorageBytes();
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
+
+	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
+
+	// Used for recording shard assignment history for auditStorage
+	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
+	Version trackShardAssignmentMinVersion; // == invalidVersion means tracking stopped
+
+	std::string printShardAssignmentHistory() {
+		std::string toPrint = "";
+		for (const auto& [version, range] : shardAssignmentHistory) {
+			toPrint = toPrint + std::to_string(version) + " ";
+		}
+		return toPrint;
+	}
+
+	void startTrackShardAssignment(Version startVersion) {
+		ASSERT(startVersion != invalidVersion);
+		ASSERT(trackShardAssignmentMinVersion == invalidVersion);
+		trackShardAssignmentMinVersion = startVersion;
+		return;
+	}
+
+	void stopTrackShardAssignment() { trackShardAssignmentMinVersion = invalidVersion; }
+
+	std::vector<std::pair<Version, KeyRangeRef>> getShardAssignmentHistory(Version early, Version later) {
+		std::vector<std::pair<Version, KeyRangeRef>> res;
+		for (const auto& shardAssignment : shardAssignmentHistory) {
+			if (shardAssignment.first >= early && shardAssignment.first <= later) {
+				TraceEvent(SevVerbose, "ShardAssignmentHistoryGetOne", thisServerID)
+				    .detail("Keys", shardAssignment.second)
+				    .detail("Version", shardAssignment.first);
+				res.push_back(shardAssignment);
+			} else {
+				TraceEvent(SevVerbose, "ShardAssignmentHistoryGetSkip", thisServerID)
+				    .detail("Keys", shardAssignment.second)
+				    .detail("Version", shardAssignment.first)
+				    .detail("EarlyVersion", early)
+				    .detail("LaterVersion", later);
+			}
+		}
+		TraceEvent(SevVerbose, "ShardAssignmentHistoryGetDone", thisServerID)
+		    .detail("EarlyVersion", early)
+		    .detail("LaterVersion", later)
+		    .detail("HistoryTotalSize", shardAssignmentHistory.size())
+		    .detail("HistoryTotal", printShardAssignmentHistory());
+		return res;
+	}
 };
 
 const StringRef StorageServer::CurrentRunningFetchKeys::emptyString = ""_sr;

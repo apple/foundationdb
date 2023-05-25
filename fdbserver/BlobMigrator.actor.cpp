@@ -19,10 +19,13 @@
  */
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <string>
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbserver/RestoreUtil.h"
+#include "fdbserver/StorageMetrics.actor.h"
 #include "flow/CodeProbe.h"
+#include "flow/Error.h"
 #include "flow/network.h"
 #include "flow/flow.h"
 #include "flow/ActorCollection.h"
@@ -46,6 +49,8 @@
 #include "fdbserver/BlobMigratorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "flow/genericactors.actor.h"
+#include "fmt/core.h"
+
 #include "flow/actorcompiler.h" // has to be last include
 
 #define ENABLE_DEBUG_MG true
@@ -58,7 +63,7 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 
 // BlobMigrator manages data migration from blob storage to storage server. It implements a minimal set of
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
-class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator> {
+class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
 public:
 	BlobMigrator(Database db, BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : interf_(interf), actors_(false), db_(db), dbInfo_(dbInfo) {
@@ -431,10 +436,11 @@ private:
 
 	// Main server loop
 	ACTOR static Future<Void> serverLoop(Reference<BlobMigrator> self) {
-		self->actors_.add(waitFailureServer(self->interf_.waitFailure.getFuture()));
-		self->actors_.add(logProgress(self));
-		self->actors_.add(handleRequest(self));
-		self->actors_.add(handleUnsupportedRequest(self));
+		self->addActor(waitFailureServer(self->interf_.waitFailure.getFuture()));
+		self->addActor(logProgress(self));
+		self->addActor(handleRequest(self));
+		self->addActor(handleUnsupportedRequest(self));
+		self->addActor(serveStorageMetricsRequests(self.getPtr(), self->interf_.ssi));
 		loop {
 			try {
 				choose {
@@ -468,26 +474,6 @@ private:
 						GetShardStateReply rep(version, version);
 						req.reply.send(rep); // return empty shards
 					}
-					when(WaitMetricsRequest req = waitNext(ssi.waitMetrics.getFuture())) {
-						// dprint("Handle WaitMetricsRequest\n");
-						self->actors_.add(processWaitMetricsRequest(self, req));
-					}
-					when(SplitMetricsRequest req = waitNext(ssi.splitMetrics.getFuture())) {
-						dprint("Handle SplitMetrics {} limit {} bytes\n", req.keys.toString(), req.limits.bytes);
-						processSplitMetricsRequest(self, req);
-					}
-					when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
-						StorageMetrics metrics;
-						metrics.bytes = sizeInBytes(self);
-						GetStorageMetricsReply resp;
-						resp.load = metrics;
-						resp.available = StorageMetrics();
-						resp.capacity = StorageMetrics();
-						resp.bytesInputRate = 0;
-						resp.versionLag = 0;
-						resp.lastUpdate = now();
-						req.reply.send(resp);
-					}
 					when(ReplyPromise<KeyValueStoreType> reply = waitNext(ssi.getKeyValueStoreType.getFuture())) {
 						dprint("Handle KeyValueStoreType\n");
 						reply.send(KeyValueStoreType::MEMORY);
@@ -506,16 +492,8 @@ private:
 		loop {
 			try {
 				choose {
-					when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-						dprint("Unsupported SplitRangeRequest\n");
-						req.reply.sendError(broken_promise());
-					}
 					when(StorageQueuingMetricsRequest req = waitNext(ssi.getQueuingMetrics.getFuture())) {
-						self->actors_.add(processStorageQueuingMetricsRequest(req));
-					}
-					when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-						dprint("Unsupported ReadHotSubRange\n");
-						req.reply.sendError(unsupported_operation());
+						self->addActor(processStorageQueuingMetricsRequest(req));
 					}
 					when(GetKeyValuesStreamRequest req = waitNext(ssi.getKeyValuesStream.getFuture())) {
 						dprint("Unsupported GetKeyValuesStreamRequest\n");
@@ -563,41 +541,13 @@ private:
 		}
 	}
 
-	// This API is used by DD to figure out split points for data movement.
-	static void processSplitMetricsRequest(Reference<BlobMigrator> self, SplitMetricsRequest req) {
-		SplitMetricsReply rep;
-		int64_t bytes = 0; // number of bytes accumulated for current split
-		for (auto& granule : self->blobGranules_) {
-			if (!req.keys.contains(granule.keyRange)) {
-				continue;
-			}
-			bytes += granule.sizeInBytes;
-			if (bytes < req.limits.bytes) {
-				continue;
-			}
-			// Add a split point if the key range exceeds expected minimal size in bytes
-			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
-			bytes = 0;
-			// Limit number of splits in single response for fast RPC processing
-			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
-				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more");
-				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
-				    .detail("Range", req.keys)
-				    .detail("Splits", rep.splits.size());
-				rep.more = true;
-				break;
-			}
-		}
-		req.reply.send(rep);
-	}
-
-	ACTOR static Future<Void> processWaitMetricsRequest(Reference<BlobMigrator> self, WaitMetricsRequest req) {
+	ACTOR static Future<Void> waitMetricsTenantAwareImpl(Reference<BlobMigrator> self, WaitMetricsRequest req) {
 		state WaitMetricsRequest waitMetricsRequest = req;
-		// FIXME get rid of this delay. it's a temp solution to avoid starvaion scheduling of DD
-		// processes
-		wait(delay(1));
-		StorageMetrics metrics;
+		state StorageMetrics metrics;
 		metrics.bytes = sizeInBytes(self, waitMetricsRequest.keys);
+		if (waitMetricsRequest.min.allLessOrEqual(metrics) && metrics.allLessOrEqual(waitMetricsRequest.max)) {
+			wait(delay(SERVER_KNOBS->STORAGE_METRIC_TIMEOUT));
+		}
 		waitMetricsRequest.reply.send(metrics);
 		return Void();
 	}
@@ -631,6 +581,72 @@ private:
 			max = std::max(granule.version, max);
 		}
 		return max;
+	}
+
+public: // Methods for IStorageMetricsService
+	void addActor(Future<Void> future) override { actors_.add(future); }
+
+	void getSplitPoints(SplitRangeRequest const& req) override {
+		dprint("Unsupported SplitRangeRequest\n");
+		req.reply.sendError(broken_promise());
+	}
+
+	Future<Void> waitMetricsTenantAware(const WaitMetricsRequest& req) override {
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		return waitMetricsTenantAwareImpl(self, req);
+	}
+
+	void getStorageMetrics(const GetStorageMetricsRequest& req) override {
+		StorageMetrics metrics;
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		metrics.bytes = sizeInBytes(self);
+		GetStorageMetricsReply resp;
+		resp.load = metrics;
+		resp.available = StorageMetrics();
+		resp.capacity = StorageMetrics();
+		resp.bytesInputRate = 0;
+		resp.versionLag = 0;
+		resp.lastUpdate = now();
+		req.reply.send(resp);
+	}
+
+	// This API is used by DD to figure out split points for data movement.
+	void getSplitMetrics(const SplitMetricsRequest& req) override {
+		Reference<BlobMigrator> self = Reference<BlobMigrator>::addRef(this);
+		SplitMetricsReply rep;
+		int64_t bytes = 0; // number of bytes accumulated for current split
+		for (auto& granule : self->blobGranules_) {
+			if (!req.keys.contains(granule.keyRange)) {
+				continue;
+			}
+			bytes += granule.sizeInBytes;
+			if (bytes < req.limits.bytes) {
+				continue;
+			}
+			// Add a split point if the key range exceeds expected minimal size in bytes
+			rep.splits.push_back_deep(rep.splits.arena(), granule.keyRange.end);
+			bytes = 0;
+			// Limit number of splits in single response for fast RPC processing
+			if (rep.splits.size() > SERVER_KNOBS->SPLIT_METRICS_MAX_ROWS) {
+				CODE_PROBE(true, "Blob Migrator SplitMetrics API has more");
+				TraceEvent("BlobMigratorSplitMetricsContinued", self->interf_.id())
+				    .detail("Range", req.keys)
+				    .detail("Splits", rep.splits.size());
+				rep.more = true;
+				break;
+			}
+		}
+		req.reply.send(rep);
+	}
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override {
+		ReadHotSubRangeReply emptyReply;
+		req.reply.send(emptyReply);
+	}
+
+	template <class Reply>
+	void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double) {
+		promise.sendError(err);
 	}
 
 private:
