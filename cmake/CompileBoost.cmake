@@ -108,9 +108,6 @@ function(compile_boost)
 endfunction(compile_boost)
 
 if(USE_SANITIZER)
-  if(WIN32)
-    message(FATAL_ERROR "Sanitizers are not supported on Windows")
-  endif()
   message(STATUS "A sanitizer is enabled, need to build boost from source")
   if (USE_VALGRIND)
     compile_boost(TARGET boost_target BUILD_ARGS valgrind=on
@@ -140,17 +137,6 @@ if(BOOST_ROOT)
   list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
 endif()
 
-if(WIN32)
-  # this should be done with the line below -- but apparently the CI is not set up
-  # properly for config mode. So we use the old way on Windows
-  #  find_package(Boost 1.72.0 EXACT QUIET REQUIRED CONFIG PATHS ${BOOST_HINT_PATHS})
-  # I think depending on the cmake version this will cause weird warnings
-  find_package(Boost 1.78 COMPONENTS filesystem iostreams serialization system)
-  add_library(boost_target INTERFACE)
-  target_link_libraries(boost_target INTERFACE Boost::boost Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
-  return()
-endif()
-
 find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
@@ -170,8 +156,6 @@ set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores an
 if(Boost_FOUND AND NOT FORCE_BOOST_BUILD)
   add_library(boost_target INTERFACE)
   target_link_libraries(boost_target INTERFACE Boost::boost Boost::context Boost::filesystem Boost::iostreams Boost::serialization Boost::system)
-elseif(WIN32)
-  message(FATAL_ERROR "Could not find Boost")
 else()
   if(FORCE_BOOST_BUILD)
     message(STATUS "Compile boost because FORCE_BOOST_BUILD is set")

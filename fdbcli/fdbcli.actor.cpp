@@ -65,10 +65,8 @@
 #include <type_traits>
 #include <signal.h>
 
-#ifdef __unixish__
 #include <stdio.h>
 #include "linenoise/linenoise.h"
-#endif
 
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
@@ -2335,7 +2333,6 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-#ifdef __unixish__
 	struct sigaction act;
 
 	// We don't want ctrl-c to quit
@@ -2343,7 +2340,6 @@ int main(int argc, char** argv) {
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
 	sigaction(SIGINT, &act, nullptr);
-#endif
 
 	CLIOptions opt(argc, argv);
 	if (opt.exit_code != -1)

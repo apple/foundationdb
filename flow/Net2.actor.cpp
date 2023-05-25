@@ -69,9 +69,6 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
-#ifdef WIN32
-#include <mmsystem.h>
-#endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Defined to track the stack limit
@@ -80,7 +77,7 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #include <execinfo.h>
 
 std::atomic<int64_t> net2RunLoopIterations(0);
@@ -1441,11 +1438,6 @@ void Net2::run() {
 
 	unsigned int tasksSinceReact = 0;
 
-#ifdef WIN32
-	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "TimeBeginPeriodError").log();
-#endif
-
 	timeOffsetLogger = logTimeOffset();
 	const char* flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
 	if (flow_profiler_enabled != nullptr && *flow_profiler_enabled != '\0') {
@@ -1629,11 +1621,6 @@ void Net2::run() {
 	for (auto& fn : stopCallbacks) {
 		fn();
 	}
-
-#ifdef WIN32
-	timeEndPeriod(1);
-#endif
-
 	runLoopActive = false;
 } // Net2::run
 

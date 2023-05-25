@@ -18,9 +18,7 @@
  * limitations under the License.
  */
 
-#ifdef __unixish__
 #include <fcntl.h>
-#endif
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/json_spirit/json_spirit_reader_template.h"
@@ -48,9 +46,7 @@
 #include "flow/UnitTest.h"
 #include "flow/Trace.h"
 
-#ifdef __unixish__
 #include <fcntl.h>
-#endif // __unixish__
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -2887,7 +2883,6 @@ void MultiVersionApi::addExternalLibraryDirectory(std::string path) {
 		}
 	}
 }
-#if defined(__unixish__)
 std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
 	ASSERT_GE(threadCount, 1);
 	// Copy library for each thread configured per version
@@ -2955,17 +2950,6 @@ std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPe
 
 	return paths;
 }
-#else // if defined (__unixish__)
-std::vector<std::pair<std::string, bool>> MultiVersionApi::copyExternalLibraryPerThread(std::string path) {
-	if (threadCount > 1) {
-		TraceEvent(SevError, "MultipleClientThreadsUnsupportedOnWindows").log();
-		throw unsupported_operation();
-	}
-	std::vector<std::pair<std::string, bool>> paths;
-	paths.push_back({ path, false });
-	return paths;
-}
-#endif // if defined (__unixish__)
 
 void MultiVersionApi::disableLocalClient() {
 	MutexHolder holder(lock);
@@ -3050,12 +3034,7 @@ void MultiVersionApi::setNetworkOptionInternal(FDBNetworkOptions::Option option,
 		if (networkStartSetup) {
 			throw invalid_option();
 		}
-#if defined(__unixish__)
 		threadCount = extractIntOption(value, 1, 1024);
-#else
-		// multiple client threads are not supported on windows.
-		threadCount = extractIntOption(value, 1, 1);
-#endif
 	} else if (option == FDBNetworkOptions::CLIENT_TMP_DIR) {
 		validateOption(value, true, false, false);
 		tmpDir = abspath(value.get().toString());
