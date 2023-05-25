@@ -997,7 +997,7 @@ public:
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> ssAuditManager;
+	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> auditTasks;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -4956,7 +4956,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			}
 
 			const GetKeyValuesReply &remote = reps[0].get(), local = reps[1].get();
-			remoteReadBytes = reps[0].get().data.expectedSize();
+			remoteReadBytes = remote.data.expectedSize();
 			Key lastKey = range.begin;
 			auditState.range = range;
 
@@ -13538,11 +13538,11 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				// Check existing audit task state
-				if (self->ssAuditManager.contains(req.getType())) {
-					if (req.id != self->ssAuditManager[req.getType()].first) {
+				// Check existing audit task states
+				if (self->auditTasks.contains(req.getType())) {
+					if (req.id != self->auditTasks[req.getType()].first) {
 						// Any task of past audit must be ready
-						if (!self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+						if (!self->auditTasks[req.getType()].second.getResult().isReady()) {
 							req.reply.sendError(audit_storage_exceeded_request_limit());
 							TraceEvent(SevWarnAlways, "ExistSSAuditWithDifferentId") // unexpected
 							    .detail("NewAuditId", req.id)
@@ -13550,32 +13550,31 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 							continue;
 						}
 					} else if (req.getType() == AuditType::ValidateStorageServerShard &&
-					           !self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+					           !self->auditTasks[req.getType()].second.getResult().isReady()) {
 						// Only one ValidateStorageServerShard is allowed to run at a time
 						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
 						    .detail("AuditId", req.id)
 						    .detail("AuditType", req.getType());
-						self->ssAuditManager[req.getType()].second.clear(true);
+						self->auditTasks[req.getType()].second.clear(true);
 					}
 				}
-				// Prepare for audit task
-				if (!self->ssAuditManager.contains(req.getType()) ||
-				    self->ssAuditManager[req.getType()].second.getResult().isReady()) {
+				// Prepare for the new audit task
+				if (!self->auditTasks.contains(req.getType()) ||
+				    self->auditTasks[req.getType()].second.getResult().isReady()) {
 					ASSERT(req.id.isValid());
-					self->ssAuditManager[req.getType()] = std::make_pair(req.id, ActorCollection(true));
+					self->auditTasks[req.getType()] = std::make_pair(req.id, ActorCollection(true));
 				}
-				// Start audit task
+				// Start the new audit task
 				if (req.getType() == AuditType::ValidateHA) {
-					self->ssAuditManager[req.getType()].second.add(auditStorageQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageQ(self, req));
 				} else if (req.getType() == AuditType::ValidateReplica) {
-					self->ssAuditManager[req.getType()].second.add(auditStorageQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->ssAuditManager[req.getType()].second.add(auditStorageLocationMetadataQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageLocationMetadataQ(self, req));
 				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
-					self->ssAuditManager[req.getType()].second.add(auditStorageStorageServerShardQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageStorageServerShardQ(self, req));
 				} else {
 					req.reply.sendError(not_implemented());
-					continue;
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {
