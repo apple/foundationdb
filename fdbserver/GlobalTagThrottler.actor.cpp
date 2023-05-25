@@ -409,7 +409,8 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
-			if (!stats.canLog()) {
+			bool const traceEnabled = stats.canLog();
+			if (traceEnabled) {
 				te.disable();
 			}
 			bool isBusy{ false };
@@ -421,7 +422,9 @@ public:
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
 				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
-				stats.updateLastLogged();
+				if (traceEnabled) {
+					stats.updateLastLogged();
+				}
 			} else {
 				te.disable();
 			}
