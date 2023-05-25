@@ -23,6 +23,7 @@
 package fdb_test
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"testing"
@@ -367,4 +368,110 @@ func ExampleOpenWithConnectionString() {
 	// Do work here
 
 	// Output:
+}
+
+func TestCreateTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName = fdb.Key("test-tenant")
+
+	err = db.CreateTenant(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to create tenant: %v\n", err)
+	}
+
+	_, err = db.OpenTenant(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to open tenant: %v\n", err)
+	}
+}
+
+func TestCreateExistTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName = fdb.Key("test-tenant")
+
+	err = db.CreateTenant(testTenantName)
+	if err != nil {
+		t.Fatalf("Unable to create tenant: %v\n", err)
+	}
+
+	// This should fail
+	err = db.CreateTenant(testTenantName)
+	if err == nil {
+		t.Fatalf("Tenant was created when already exists")
+	}
+}
+
+func inSlice(sl []fdb.Key, t fdb.Key) bool {
+	for _, s := range sl {
+		if bytes.Compare(s, t) == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func TestListTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName1 = fdb.Key("1-test-1-tenant-1")
+	var testTenantName2 = fdb.Key("2-test-2-tenant-2")
+
+	err = db.CreateTenant(testTenantName1)
+	if err != nil {
+		t.Fatalf("Unable to create tenant 1: %v\n", err)
+	}
+
+	err = db.CreateTenant(testTenantName2)
+	if err != nil {
+		t.Fatalf("Unable to create tenant 2: %v\n", err)
+	}
+
+	ls, err := db.ListTenants()
+	if err != nil {
+		t.Fatalf("Unable to list tenants: %v\n", err)
+	}
+
+	if len(ls) > 2 {
+		t.Fatalf("More than 2 tenants")
+	}
+
+	if !inSlice(ls, testTenantName1) {
+		t.Fatalf("tenant 1 not in slice")
+	}
+
+	if !inSlice(ls, testTenantName2) {
+		t.Fatalf("tenant 2 not in slice")
+	}
 }
