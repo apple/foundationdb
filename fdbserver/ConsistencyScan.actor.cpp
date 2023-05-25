@@ -745,8 +745,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 
 						if (DEBUG_SCAN_PROGRESS) {
 							TraceEvent(SevDebug, "ConsistencyScanProgressRoundComplete", memState->csId)
-							    .detail("BytesRead", logicalBytesRead)
-							    .detail("ProgressKey", statsCurrentRound.lastEndKey);
+							    .detail("BytesRead", statsCurrentRound.logicalBytesScanned);
 						}
 
 						// Return to main loop after this commit, but delay first for the difference between the time
