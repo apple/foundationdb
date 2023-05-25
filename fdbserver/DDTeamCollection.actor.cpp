@@ -19,10 +19,12 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 #include <climits>
 
 namespace {
@@ -1957,7 +1959,12 @@ public:
 	}
 
 	ACTOR static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
-		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
+		if (g_network->isSimulated() && g_simulator->isConsistencyChecked) {
+			// Wiggle can cause consistency check to repeatedly restart. So we want to
+			// slow it down to avoid consistency check timeout.
+			wait(delay(300));
+			return Void();
+		} else if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
 			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 			return Void();
 		}
