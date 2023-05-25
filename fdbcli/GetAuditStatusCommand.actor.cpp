@@ -71,7 +71,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count));
 		for (const auto& it : res) {
-			printf("Audit result is:\n%s\n", it.toString().c_str());
+			printf("Audit result is:\n%s\n", it.toStringForCLI().c_str());
 		}
 	} else {
 		printUsage(tokens[0]);
