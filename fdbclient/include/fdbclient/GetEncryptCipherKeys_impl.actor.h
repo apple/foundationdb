@@ -257,10 +257,14 @@ Future<EKPHealthStatus> _getEKPHealthStatusImpl(Reference<AsyncVar<T> const> db)
 ACTOR template <class T>
 Future<EKPHealthStatus> _getEKPHealthStatus(Reference<AsyncVar<T> const> db) {
 	try {
-		EKPHealthStatus status = wait(timeoutError(_getEKPHealthStatusImpl(db), FLOW_KNOBS->EKP_REQUEST_TIMEOUT));
+		EKPHealthStatus status =
+		    wait(timeoutError(_getEKPHealthStatusImpl(db), FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
 		return status;
 	} catch (Error& e) {
 		TraceEvent("EKPHealthStatusError").error(e);
+		if (e.code() != error_code_timed_out) {
+			throw;
+		}
 		return EKPHealthStatus{ false, false, now() };
 	}
 }

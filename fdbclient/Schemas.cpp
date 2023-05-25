@@ -1018,8 +1018,8 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "data_cluster_id" : 12346,
          "num_data_clusters":10
       },
+      "kms_is_healthy": true,
       "encryption_at_rest": {
-         "kms_is_healthy": true,
          "ekp_is_healthy": true
       },
       "tenants":{

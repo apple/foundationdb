@@ -683,7 +683,9 @@ bool isBlobMetadataEligibleForRefresh(const BlobMetadataDetailsRef& blobMetadata
 ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData> ekpProxyData,
                                                   KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
-	TraceEvent("EKPHealthCheckStart", ekpProxyData->myId);
+	if (DEBUG_ENCRYPT_KEY_PROXY) {
+		TraceEvent("EKPHealthCheckStart", ekpProxyData->myId);
+	}
 
 	// Health check will try to fetch the encryption details for the system key
 	try {
@@ -691,8 +693,8 @@ ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
 		req.debugId = debugId;
 		req.encryptDomainIds.push_back(SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID);
 		++ekpProxyData->numHealthCheckRequests;
-		KmsConnLookupEKsByDomainIdsRep rep =
-		    wait(timeoutError(kmsConnectorInf.ekLookupByDomainIds.getReply(req), FLOW_KNOBS->EKP_REQUEST_TIMEOUT));
+		KmsConnLookupEKsByDomainIdsRep rep = wait(timeoutError(kmsConnectorInf.ekLookupByDomainIds.getReply(req),
+		                                                       FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
 		if (rep.cipherKeyDetails.size() < 1) {
 			TraceEvent(SevWarn, "EKPHealthCheckResponseEmpty");
 			throw encrypt_keys_fetch_failed();
@@ -713,6 +715,9 @@ ACTOR Future<EKPHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
 		return EKPHealthStatus{ true, true, now() };
 	} catch (Error& e) {
 		TraceEvent(SevWarn, "EKPHealthCheckError").error(e);
+		if (!canReplyWith(e)) {
+			throw;
+		}
 		++ekpProxyData->numHealthCheckErrors;
 		return EKPHealthStatus{ false, true, now() };
 	}

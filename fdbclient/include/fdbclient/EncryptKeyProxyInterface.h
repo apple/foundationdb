@@ -34,6 +34,8 @@
 
 #include <limits>
 
+#define DEBUG_ENCRYPT_KEY_PROXY false
+
 struct EKPHealthStatus {
 	constexpr static FileIdentifier file_identifier = 2378149;
 	bool canConnectToKms;
