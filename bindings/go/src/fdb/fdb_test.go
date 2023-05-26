@@ -423,6 +423,29 @@ func TestCreateExistTenant(t *testing.T) {
 	}
 }
 
+func TestOpenNotExistTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName = fdb.Key("test-not-exist-tenant")
+
+	// this should fail
+	_, err = db.OpenTenant(testTenantName)
+	if err == nil {
+		t.Fatalf("Able to open tenant that doesn't exist: %v\n", err)
+	}
+
+}
+
 func inSlice(sl []fdb.Key, t fdb.Key) bool {
 	for _, s := range sl {
 		if bytes.Compare(s, t) == 0 {
@@ -464,10 +487,10 @@ func TestListTenant(t *testing.T) {
 	}
 
 	if !inSlice(ls, testTenantName1) {
-		t.Fatalf("tenant 1 not in slice")
+		t.Fatalf("tenant 1 not in slice %#v", ls)
 	}
 
 	if !inSlice(ls, testTenantName2) {
-		t.Fatalf("tenant 2 not in slice")
+		t.Fatalf("tenant 2 not in slice, %#v", ls)
 	}
 }

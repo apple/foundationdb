@@ -111,7 +111,7 @@ func (t Transaction) ListTenants() ([]Key, error) {
 	// trim tenant prefix
 	tenants := make([]Key, len(rawTenants))
 	for i, rt := range rawTenants {
-		tenants[i] = rt.Key[24:] // len of tenant prefix
+		tenants[i] = rt.Key[25:] // len of tenant prefix
 	}
 
 	return tenants, nil
@@ -151,16 +151,15 @@ type tenant struct {
 // OpenTenant returns a tenant handle identified by the given name. All transactions
 // created by this tenant will operate on the tenant’s key-space.
 func (d Database) OpenTenant(name KeyConvertible) (Tenant, error) {
-
 	var outt *C.FDBTenant
 	if err := C.fdb_database_open_tenant(d.database.ptr, byteSliceToPtr(name.FDBKey()), C.int(len(name.FDBKey())), &outt); err != 0 {
 		return Tenant{}, Error{int(err)}
 	}
 
-	tenant := &tenant{outt}
-	runtime.SetFinalizer(outt, (*tenant).destroy)
+	tnt := &tenant{outt}
+	runtime.SetFinalizer(tnt, (*tenant).destroy)
 
-	return Tenant{tenant, d}, nil
+	return Tenant{tnt, d}, nil
 }
 
 func (t *tenant) destroy() {
@@ -183,7 +182,7 @@ func (t Tenant) CreateTransaction() (Transaction, error) {
 	}
 
 	trx := &transaction{outt, t.db}
-	runtime.SetFinalizer(t, (*transaction).destroy)
+	runtime.SetFinalizer(trx, (*transaction).destroy)
 
 	return Transaction{trx}, nil
 }
