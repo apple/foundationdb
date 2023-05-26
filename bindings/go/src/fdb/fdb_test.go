@@ -351,14 +351,14 @@ func ExampleOpenWithConnectionString() {
 
 	clusterFileContent, err := os.ReadFile(os.Getenv("FDB_CLUSTER_FILE"))
 	if err != nil {
-		fmt.Errorf("Unable to read cluster file: %v\n", err)
+		fmt.Printf("Unable to read cluster file: %v\n", err)
 		return
 	}
 
 	// OpenWithConnectionString opens the database described by the connection string
 	db, err := fdb.OpenWithConnectionString(string(clusterFileContent))
 	if err != nil {
-		fmt.Errorf("Unable to open database: %v\n", err)
+		fmt.Printf("Unable to open database: %v\n", err)
 		return
 	}
 
@@ -383,7 +383,7 @@ func TestCreateTenant(t *testing.T) {
 		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
-	var testTenantName = fdb.Key("test-tenant")
+	var testTenantName = fdb.Key("test-create-tenant")
 
 	err = db.CreateTenant(testTenantName)
 	if err != nil {
@@ -409,7 +409,7 @@ func TestCreateExistTenant(t *testing.T) {
 		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
-	var testTenantName = fdb.Key("test-tenant")
+	var testTenantName = fdb.Key("test-exist-tenant")
 
 	err = db.CreateTenant(testTenantName)
 	if err != nil {
@@ -445,8 +445,8 @@ func TestListTenant(t *testing.T) {
 		t.Fatalf("Unable to set API version: %v\n", err)
 	}
 
-	var testTenantName1 = fdb.Key("1-test-1-tenant-1")
-	var testTenantName2 = fdb.Key("2-test-2-tenant-2")
+	var testTenantName1 = fdb.Key("1-test-list-1-tenant-1")
+	var testTenantName2 = fdb.Key("2-test-list-2-tenant-2")
 
 	err = db.CreateTenant(testTenantName1)
 	if err != nil {
@@ -461,10 +461,6 @@ func TestListTenant(t *testing.T) {
 	ls, err := db.ListTenants()
 	if err != nil {
 		t.Fatalf("Unable to list tenants: %v\n", err)
-	}
-
-	if len(ls) > 2 {
-		t.Fatalf("More than 2 tenants")
 	}
 
 	if !inSlice(ls, testTenantName1) {
