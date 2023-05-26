@@ -34,14 +34,14 @@
 #include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 #ifndef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
 // Forward declare C++ MasterData type.
 struct MasterData;
 
 #include "SwiftModules/FDBServer"
 #endif
-#endif // USE_SWIFT
+#endif // WITH_SWIFT
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
@@ -76,7 +76,7 @@ private:
 // A concrete Optional<Version> type that can be referenced in Swift.
 using OptionalVersion = Optional<Version>;
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 #ifdef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
 // Forward declare the Swift actor.
 namespace fdbserver_swift {
@@ -138,7 +138,7 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
     Future<Void> logger;
     Future<Void> balancer;
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
     std::unique_ptr<fdbserver_swift::MasterDataActor> swiftImpl;
 
 #ifndef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS

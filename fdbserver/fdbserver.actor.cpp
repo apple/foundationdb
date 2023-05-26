@@ -389,7 +389,7 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 		failAfter(trigger, g_simulator->getProcess(e));
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR void swiftTestRunner() {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
@@ -2072,7 +2072,7 @@ int main(int argc, char* argv[]) {
 				       __FUNCTION__);
 			}
 
-#if USE_SWIFT
+#if WITH_SWIFT
 			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
 				swiftTestRunner(); // spawns actor that will call Swift functions

@@ -219,7 +219,7 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 	return Void();
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(getVersionSwift(self, req));
@@ -288,14 +288,14 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 	balancer = resolutionBalancer.resolutionBalancing();
     locality = tagLocalityInvalid;
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 	using namespace fdbserver_swift;
 	// FIXME(swift): can we make a cleaner init?
 	swiftImpl.reset(new MasterDataActor((const MasterDataActor&)MasterDataActor::init()));
 #endif
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 void MasterData::setSwiftImpl(fdbserver_swift::MasterDataActor* impl) {
 	swiftImpl.reset(impl);
 }
@@ -314,7 +314,7 @@ ACTOR Future<Void> provideVersionsCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->provideVersions(self.getPtr());
 	wait(future);
@@ -322,7 +322,7 @@ SWIFT_ACTOR Future<Void> provideVersionsSwift(Reference<MasterData> self) {
 }
 #endif
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(provideVersionsSwift(self));
@@ -340,7 +340,7 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 #endif
 
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 void updateLiveCommittedVersionSwift(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	fdbserver_swift::updateLiveCommittedVersion(self.getPtr(), req);
 }
@@ -370,7 +370,7 @@ void updateLiveCommittedVersionCxx(Reference<MasterData> self, ReportRawCommitte
 	++self->reportLiveCommittedVersionRequests;
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		return updateLiveCommittedVersionSwift(self, req);
@@ -384,7 +384,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 }
 #endif
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 SWIFT_ACTOR Future<Void> serveLiveCommittedVersionSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveLiveCommittedVersion(self.getPtr());
 	wait(future);
@@ -432,7 +432,7 @@ ACTOR Future<Void> serveLiveCommittedVersionCxx(Reference<MasterData> self) {
 	}
 }
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(serveLiveCommittedVersionSwift(self));
@@ -448,7 +448,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 }
 #endif
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 SWIFT_ACTOR Future<Void> updateRecoveryDataSwift(Reference<MasterData> self) {
 	auto future = self->swiftImpl->serveUpdateRecoveryData(self.getPtr());
 	wait(future);
@@ -499,7 +499,7 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 }
 
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(updateRecoveryDataSwift(self));
@@ -623,7 +623,7 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 }
 
 
-#ifdef USE_SWIFT
+#ifdef WITH_SWIFT
 ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     Reference<AsyncVar<ServerDBInfo> const> db,
                                     Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
