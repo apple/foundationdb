@@ -739,8 +739,8 @@ ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID audi
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
-                                    int currentRetryCount,
-                                    std::string context);
+                                    std::string context,
+                                    int currentRetryCount);
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
@@ -1774,8 +1774,8 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
-                                    int currentRetryCount,
-                                    std::string context) {
+                                    std::string context,
+                                    int currentRetryCount) {
 	// At this point, audit must be launched
 	ASSERT(auditID.isValid());
 	state std::shared_ptr<DDAudit> audit = getAuditFromAuditMap(self, auditType, auditID);
@@ -1976,7 +1976,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	    .detail("Context", context);
 	addAuditToAuditMap(self, audit);
 	audit->setAuditRunActor(
-	    auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), audit->retryCount, context));
+	    auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), context, audit->retryCount));
 	return;
 }
 
