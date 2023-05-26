@@ -2462,11 +2462,15 @@ public:
 		} else {
 			this->currentProcess = t.machine;
 			try {
+#ifdef WITH_SWIFT
 				if (t.swiftJob) {
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
 					t.promise.send(Void());
 				}
+#else
+        t.promise.send(Void());
+#endif
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);

@@ -34,12 +34,14 @@
 #include "flow/swift_support.h"
 #include "fdbclient/VersionVector.h"
 
+#ifdef USE_SWIFT
 #ifndef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
 // Forward declare C++ MasterData type.
 struct MasterData;
 
 #include "SwiftModules/FDBServer"
 #endif
+#endif // USE_SWIFT
 
 // When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
 // version.
@@ -74,11 +76,13 @@ private:
 // A concrete Optional<Version> type that can be referenced in Swift.
 using OptionalVersion = Optional<Version>;
 
+#ifdef USE_SWIFT
 #ifdef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
 // Forward declare the Swift actor.
 namespace fdbserver_swift {
 class MasterDataActor;
 }
+#endif
 #endif
 
 // FIXME (after the one below): Use SWIFT_CXX_REF once https://github.com/apple/swift/issues/61620 is fixed.
@@ -133,8 +137,10 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
 
     Future<Void> logger;
     Future<Void> balancer;
-    
+
+#ifdef USE_SWIFT
     std::unique_ptr<fdbserver_swift::MasterDataActor> swiftImpl;
+
 #ifndef FDBSERVER_FORWARD_DECLARE_SWIFT_APIS
     // This function is not available to Swift as the FDBServer header is
     // being generated, as we do not yet have `MasterDataActor` type definition
@@ -143,7 +149,9 @@ struct SWIFT_CXX_REF_MASTERDATA MasterData : NonCopyable, ReferenceCounted<Maste
 		return *swiftImpl;
 	}
 #endif
+
 	void setSwiftImpl(fdbserver_swift::MasterDataActor* impl);
+#endif
 
     MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
                MasterInterface const& myInterface,

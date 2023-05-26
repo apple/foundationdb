@@ -389,6 +389,7 @@ void failAfter(Future<Void> trigger, Endpoint e) {
 		failAfter(trigger, g_simulator->getProcess(e));
 }
 
+#ifdef USE_SWIFT
 ACTOR void swiftTestRunner() {
 	auto p = PromiseVoid();
 	fdbserver_swift::swiftyTestRunner(p);
@@ -396,6 +397,7 @@ ACTOR void swiftTestRunner() {
 
 	flushAndExit(0);
 }
+#endif
 
 ACTOR Future<Void> histogramReport() {
 	loop {
@@ -2070,13 +2072,12 @@ int main(int argc, char* argv[]) {
 				       __FUNCTION__);
 			}
 
+#if USE_SWIFT
 			// Set FDBSWIFTTEST env variable to execute some simple Swift/Flow interop tests.
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT && getenv("FDBSWIFTTEST")) {
 				swiftTestRunner(); // spawns actor that will call Swift functions
-
-				g_network->run();
-				while (true);
 			}
+#endif
 
 			g_network->addStopCallback(Net2FileSystem::stop);
 			FlowTransport::createInstance(false, 1, WLTOKEN_RESERVED_COUNT, &opts.allowList);

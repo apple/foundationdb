@@ -267,11 +267,15 @@ public:
 		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
 		void operator()() {
+#ifdef WITH_SWIFT
 			if (auto job = swiftJob) {
 				swift_job_run(job, ExecutorRef::generic());
 			} else {
 				promise.send(Void());
 			}
+#else
+      promise.send(Void());
+#endif
 			delete this;
 		}
 	};
