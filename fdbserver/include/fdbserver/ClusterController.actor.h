@@ -240,71 +240,6 @@ public:
 		}
 	};
 
-	bool workerAvailable(WorkerInfo const& worker, bool checkStable) const {
-		return (now() - startTime < 2 * FLOW_KNOBS->SERVER_REQUEST_INTERVAL) ||
-		       (IFailureMonitor::failureMonitor().getState(worker.details.interf.storage.getEndpoint()).isAvailable() &&
-		        (!checkStable || worker.reboots < 2));
-	}
-
-	WorkerDetails getStorageWorker(RecruitStorageRequest const& req) {
-		std::set<Optional<Standalone<StringRef>>> excludedMachines(req.excludeMachines.begin(),
-		                                                           req.excludeMachines.end());
-		std::set<Optional<Standalone<StringRef>>> includeDCs(req.includeDCs.begin(), req.includeDCs.end());
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-
-		for (auto& it : id_worker)
-			if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-			    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-			    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::Storage) <= ProcessClass::UnsetFit) {
-				return it.second.details;
-			}
-
-		if (req.criticalRecruitment) {
-			ProcessClass::Fitness bestFit = ProcessClass::NeverAssign;
-			Optional<WorkerDetails> bestInfo;
-			for (auto& it : id_worker) {
-				ProcessClass::Fitness fit = it.second.details.processClass.machineClassFitness(ProcessClass::Storage);
-				if (workerAvailable(it.second, false) && it.second.details.recoveredDiskFiles &&
-				    !excludedMachines.count(it.second.details.interf.locality.zoneId()) &&
-				    (includeDCs.size() == 0 || includeDCs.count(it.second.details.interf.locality.dcId())) &&
-				    !addressExcluded(excludedAddresses, it.second.details.interf.address()) && fit < bestFit) {
-					bestFit = fit;
-					bestInfo = it.second.details;
-				}
-			}
-
-			if (bestInfo.present()) {
-				return bestInfo.get();
-			}
-		}
-
-		throw no_more_servers();
-	}
-
-	// Returns a worker that can be used by a blob worker
-	// Note: we restrict the set of possible workers to those in the same DC as the BM/CC
-	WorkerDetails getBlobWorker(RecruitBlobWorkerRequest const& req) {
-		std::set<AddressExclusion> excludedAddresses(req.excludeAddresses.begin(), req.excludeAddresses.end());
-		for (auto& it : id_worker) {
-			// the worker must be available, have the same dcID as CC,
-			// not be one of the excluded addrs from req and have the approriate fitness
-			if (workerAvailable(it.second, false) &&
-			    clusterControllerDcId == it.second.details.interf.locality.dcId() &&
-			    !addressExcluded(excludedAddresses, it.second.details.interf.address()) &&
-			    (!it.second.details.interf.secondaryAddress().present() ||
-			     !addressExcluded(excludedAddresses, it.second.details.interf.secondaryAddress().get())) &&
-			    it.second.details.processClass.machineClassFitness(ProcessClass::BlobWorker) == ProcessClass::BestFit) {
-				return it.second.details;
-			}
-		}
-
-		throw no_more_servers();
-	}
-
 	void checkRecoveryStalled() {
 		if ((db.serverInfo->get().recoveryState == RecoveryState::RECRUITING ||
 		     db.serverInfo->get().recoveryState == RecoveryState::ACCEPTING_COMMITS ||
@@ -505,7 +440,7 @@ public:
 		std::map<Optional<Standalone<StringRef>>, int> old_id_used;
 		id_used[clusterControllerProcessId]++;
 		old_id_used[clusterControllerProcessId]++;
-		WorkerFitnessInfo mworker = Recruiter::getWorkerForRoleInDatacenter(
+		WorkerFitnessInfo mworker = recruiter.getWorkerForRoleInDatacenter(
 		    this, clusterControllerDcId, ProcessClass::Master, ProcessClass::NeverAssign, db.config, id_used, {}, true);
 		auto newMasterFit = mworker.worker.processClass.machineClassFitness(ProcessClass::Master);
 		if (db.config.isExcludedServer(mworker.worker.interf.addresses())) {
@@ -554,14 +489,14 @@ public:
 		// Check tLog fitness
 		updateIdUsed(tlogs, old_id_used);
 		RoleFitness oldTLogFit(tlogs, ProcessClass::TLog, old_id_used);
-		auto newTLogs = Recruiter::getWorkersForTlogs(this,
-		                                              db.config,
-		                                              db.config.tLogReplicationFactor,
-		                                              db.config.getDesiredLogs(),
-		                                              db.config.tLogPolicy,
-		                                              id_used,
-		                                              true,
-		                                              primaryDC);
+		auto newTLogs = recruiter.getWorkersForTLogs(this,
+		                                             db.config,
+		                                             db.config.tLogReplicationFactor,
+		                                             db.config.getDesiredLogs(),
+		                                             db.config.tLogPolicy,
+		                                             id_used,
+		                                             true,
+		                                             primaryDC);
 		RoleFitness newTLogFit(newTLogs, ProcessClass::TLog, id_used);
 
 		bool oldSatelliteFallback = false;
@@ -584,7 +519,7 @@ public:
 		auto newSatelliteTLogs = satellite_tlogs;
 		RoleFitness newSatelliteTLogFit = oldSatelliteTLogFit;
 		if (region.satelliteTLogReplicationFactor > 0 && db.config.usableRegions > 1) {
-			newSatelliteTLogs = Recruiter::getWorkersForSatelliteLogs(
+			newSatelliteTLogs = recruiter.getWorkersForSatelliteLogs(
 			    this, db.config, region, remoteRegion, id_used, newSatelliteFallback, true);
 			newSatelliteTLogFit = RoleFitness(newSatelliteTLogs, ProcessClass::TLog, id_used);
 		}
@@ -647,15 +582,15 @@ public:
 		RoleFitness newRemoteTLogFit = oldRemoteTLogFit;
 		if (db.config.usableRegions > 1 && (dbi.recoveryState == RecoveryState::ALL_LOGS_RECRUITED ||
 		                                    dbi.recoveryState == RecoveryState::FULLY_RECOVERED)) {
-			newRemoteTLogFit = RoleFitness(Recruiter::getWorkersForTlogs(this,
-			                                                             db.config,
-			                                                             db.config.getRemoteTLogReplicationFactor(),
-			                                                             db.config.getDesiredRemoteLogs(),
-			                                                             db.config.getRemoteTLogPolicy(),
-			                                                             id_used,
-			                                                             true,
-			                                                             remoteDC,
-			                                                             exclusionWorkerIds),
+			newRemoteTLogFit = RoleFitness(recruiter.getWorkersForTLogs(this,
+			                                                            db.config,
+			                                                            db.config.getRemoteTLogReplicationFactor(),
+			                                                            db.config.getDesiredRemoteLogs(),
+			                                                            db.config.getRemoteTLogPolicy(),
+			                                                            id_used,
+			                                                            true,
+			                                                            remoteDC,
+			                                                            exclusionWorkerIds),
 			                               ProcessClass::TLog,
 			                               id_used);
 		}
@@ -667,15 +602,15 @@ public:
 		RoleFitness oldLogRoutersFit(log_routers, ProcessClass::LogRouter, old_id_used);
 		RoleFitness newLogRoutersFit = oldLogRoutersFit;
 		if (db.config.usableRegions > 1 && dbi.recoveryState == RecoveryState::FULLY_RECOVERED) {
-			newLogRoutersFit = RoleFitness(Recruiter::getWorkersForRoleInDatacenter(this,
-			                                                                        *remoteDC.begin(),
-			                                                                        ProcessClass::LogRouter,
-			                                                                        newRouterCount,
-			                                                                        db.config,
-			                                                                        id_used,
-			                                                                        {},
-			                                                                        Optional<WorkerFitnessInfo>(),
-			                                                                        true),
+			newLogRoutersFit = RoleFitness(recruiter.getWorkersForRoleInDatacenter(this,
+			                                                                       *remoteDC.begin(),
+			                                                                       ProcessClass::LogRouter,
+			                                                                       newRouterCount,
+			                                                                       db.config,
+			                                                                       id_used,
+			                                                                       {},
+			                                                                       Optional<WorkerFitnessInfo>(),
+			                                                                       true),
 			                               ProcessClass::LogRouter,
 			                               id_used);
 		}
@@ -696,64 +631,64 @@ public:
 		RoleFitness oldResolverFit(resolverClasses, ProcessClass::Resolver, old_id_used);
 
 		std::map<Optional<Standalone<StringRef>>, int> preferredSharing;
-		auto first_commit_proxy = Recruiter::getWorkerForRoleInDatacenter(this,
-		                                                                  clusterControllerDcId,
-		                                                                  ProcessClass::CommitProxy,
-		                                                                  ProcessClass::ExcludeFit,
-		                                                                  db.config,
-		                                                                  id_used,
-		                                                                  preferredSharing,
-		                                                                  true);
+		auto first_commit_proxy = recruiter.getWorkerForRoleInDatacenter(this,
+		                                                                 clusterControllerDcId,
+		                                                                 ProcessClass::CommitProxy,
+		                                                                 ProcessClass::ExcludeFit,
+		                                                                 db.config,
+		                                                                 id_used,
+		                                                                 preferredSharing,
+		                                                                 true);
 		preferredSharing[first_commit_proxy.worker.interf.locality.processId()] = 0;
-		auto first_grv_proxy = Recruiter::getWorkerForRoleInDatacenter(this,
-		                                                               clusterControllerDcId,
-		                                                               ProcessClass::GrvProxy,
-		                                                               ProcessClass::ExcludeFit,
-		                                                               db.config,
-		                                                               id_used,
-		                                                               preferredSharing,
-		                                                               true);
-		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
-		auto first_resolver = Recruiter::getWorkerForRoleInDatacenter(this,
+		auto first_grv_proxy = recruiter.getWorkerForRoleInDatacenter(this,
 		                                                              clusterControllerDcId,
-		                                                              ProcessClass::Resolver,
+		                                                              ProcessClass::GrvProxy,
 		                                                              ProcessClass::ExcludeFit,
 		                                                              db.config,
 		                                                              id_used,
 		                                                              preferredSharing,
 		                                                              true);
+		preferredSharing[first_grv_proxy.worker.interf.locality.processId()] = 1;
+		auto first_resolver = recruiter.getWorkerForRoleInDatacenter(this,
+		                                                             clusterControllerDcId,
+		                                                             ProcessClass::Resolver,
+		                                                             ProcessClass::ExcludeFit,
+		                                                             db.config,
+		                                                             id_used,
+		                                                             preferredSharing,
+		                                                             true);
 		preferredSharing[first_resolver.worker.interf.locality.processId()] = 2;
 		auto maxUsed = std::max({ first_commit_proxy.used, first_grv_proxy.used, first_resolver.used });
 		first_commit_proxy.used = maxUsed;
 		first_grv_proxy.used = maxUsed;
 		first_resolver.used = maxUsed;
-		auto commit_proxies = Recruiter::getWorkersForRoleInDatacenter(this,
-		                                                               clusterControllerDcId,
-		                                                               ProcessClass::CommitProxy,
-		                                                               db.config.getDesiredCommitProxies(),
-		                                                               db.config,
-		                                                               id_used,
-		                                                               preferredSharing,
-		                                                               first_commit_proxy,
-		                                                               true);
-		auto grv_proxies = Recruiter::getWorkersForRoleInDatacenter(this,
-		                                                            clusterControllerDcId,
-		                                                            ProcessClass::GrvProxy,
-		                                                            db.config.getDesiredGrvProxies(),
-		                                                            db.config,
-		                                                            id_used,
-		                                                            preferredSharing,
-		                                                            first_grv_proxy,
-		                                                            true);
-		auto resolvers = Recruiter::getWorkersForRoleInDatacenter(this,
-		                                                          clusterControllerDcId,
-		                                                          ProcessClass::Resolver,
-		                                                          db.config.getDesiredResolvers(),
-		                                                          db.config,
-		                                                          id_used,
-		                                                          preferredSharing,
-		                                                          first_resolver,
-		                                                          true);
+		auto commit_proxies = recruiter.getWorkersForRoleInDatacenter(this,
+		                                                              clusterControllerDcId,
+		                                                              ProcessClass::CommitProxy,
+		                                                              db.config.getDesiredCommitProxies(),
+		                                                              db.config,
+		                                                              id_used,
+		                                                              preferredSharing,
+		                                                              first_commit_proxy,
+		                                                              true);
+		auto grv_proxies = recruiter.getWorkersForRoleInDatacenter(this,
+		                                                           clusterControllerDcId,
+		                                                           ProcessClass::GrvProxy,
+		                                                           db.config.getDesiredGrvProxies(),
+		                                                           db.config,
+		                                                           id_used,
+		                                                           preferredSharing,
+		                                                           first_grv_proxy,
+		                                                           true);
+		auto resolvers = recruiter.getWorkersForRoleInDatacenter(this,
+		                                                         clusterControllerDcId,
+		                                                         ProcessClass::Resolver,
+		                                                         db.config.getDesiredResolvers(),
+		                                                         db.config,
+		                                                         id_used,
+		                                                         preferredSharing,
+		                                                         first_resolver,
+		                                                         true);
 
 		RoleFitness newCommitProxyFit(commit_proxies, ProcessClass::CommitProxy, id_used);
 		RoleFitness newGrvProxyFit(grv_proxies, ProcessClass::GrvProxy, id_used);
@@ -763,15 +698,15 @@ public:
 		updateIdUsed(backup_workers, old_id_used);
 		RoleFitness oldBackupWorkersFit(backup_workers, ProcessClass::Backup, old_id_used);
 		const int nBackup = backup_addresses.size();
-		RoleFitness newBackupWorkersFit(Recruiter::getWorkersForRoleInDatacenter(this,
-		                                                                         clusterControllerDcId,
-		                                                                         ProcessClass::Backup,
-		                                                                         nBackup,
-		                                                                         db.config,
-		                                                                         id_used,
-		                                                                         {},
-		                                                                         Optional<WorkerFitnessInfo>(),
-		                                                                         true),
+		RoleFitness newBackupWorkersFit(recruiter.getWorkersForRoleInDatacenter(this,
+		                                                                        clusterControllerDcId,
+		                                                                        ProcessClass::Backup,
+		                                                                        nBackup,
+		                                                                        db.config,
+		                                                                        id_used,
+		                                                                        {},
+		                                                                        Optional<WorkerFitnessInfo>(),
+		                                                                        true),
 		                                ProcessClass::Backup,
 		                                id_used);
 
@@ -1308,8 +1243,6 @@ public:
 	    changedDcIds; // current DC priorities to change second, and whether the cluster controller has been changed
 	const UID id;
 	Reference<AsyncVar<Optional<UID>>> clusterId;
-	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
-	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 	ActorCollection ac;
 	UpdateWorkerList updateWorkerList;
 	Future<Void> outstandingRequestChecker;
@@ -1320,7 +1253,6 @@ public:
 
 	DBInfo db;
 	Database cx;
-	double startTime;
 	Future<Void> goodRecruitmentTime;
 	Future<Void> goodRemoteRecruitmentTime;
 	Version datacenterVersionDifference;
@@ -1390,11 +1322,11 @@ public:
 	  : gotProcessClasses(false), gotFullyRecoveredConfig(false), shouldCommitSuicide(false),
 	    clusterControllerProcessId(locality.processId()), clusterControllerDcId(locality.dcId()), id(ccInterface.id()),
 	    clusterId(clusterId), ac(false), outstandingRequestChecker(Void()), outstandingRemoteRequestChecker(Void()),
-	    startTime(now()), goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()),
-	    datacenterVersionDifference(0), versionDifferenceUpdated(false), remoteDCMonitorStarted(false),
-	    remoteTransactionSystemDegraded(false), recruiter(id), recruitDistributor(false), recruitRatekeeper(false),
-	    recruitBlobManager(false), recruitBlobMigrator(false), recruitEncryptKeyProxy(false),
-	    recruitConsistencyScan(false), clusterControllerMetrics("ClusterController", id.toString()),
+	    goodRecruitmentTime(Never()), goodRemoteRecruitmentTime(Never()), datacenterVersionDifference(0),
+	    versionDifferenceUpdated(false), remoteDCMonitorStarted(false), remoteTransactionSystemDegraded(false),
+	    recruiter(id), recruitDistributor(false), recruitRatekeeper(false), recruitBlobManager(false),
+	    recruitBlobMigrator(false), recruitEncryptKeyProxy(false), recruitConsistencyScan(false),
+	    clusterControllerMetrics("ClusterController", id.toString()),
 	    openDatabaseRequests("OpenDatabaseRequests", clusterControllerMetrics),
 	    registerWorkerRequests("RegisterWorkerRequests", clusterControllerMetrics),
 	    getWorkersRequests("GetWorkersRequests", clusterControllerMetrics),

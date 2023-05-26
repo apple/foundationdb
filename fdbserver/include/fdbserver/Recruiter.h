@@ -32,8 +32,7 @@ class ClusterControllerData;
 struct ClusterRecoveryData;
 
 //
-// Handles recruitment for stateless roles plus the transaction logs.
-// Recruitment consists of two main phases:
+// Handles recruitment for all roles. Recruitment consists of two main phases:
 //
 //   1. Find an optimal assignment of roles to workers
 //   2. Send recruitment messages to the assigned workers
@@ -41,10 +40,17 @@ struct ClusterRecoveryData;
 class Recruiter {
 	friend class RecruiterImpl;
 
+	// Stores a copy of the cluster controllers' interface ID.
 	const UID id;
+	// Stores the time recruitment begins. Used to check whether worker
+	// processes are still available for recruitment or if they have
+	// potentially failed.
+	const double startTime;
 
 	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
 	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
+	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
+	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 
 public:
 	explicit Recruiter(UID const& id);
@@ -53,15 +59,31 @@ public:
 	// proxies, resolvers, and transaction logs.
 	Future<std::vector<Standalone<CommitTransactionRef>>> recruitEverything(
 	    Reference<ClusterRecoveryData> clusterRecoveryData,
-	    std::vector<StorageServerInterface>* seedServers,
+	    std::vector<StorageServerInterface>& seedServers,
 	    Reference<ILogSystem> oldLogSystem);
 
-	// Check if txn system is recruited successfully in each region.
-	void checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions);
+	void clusterRecruitStorage(RecruitStorageRequest req,
+	                           bool gotProcessClasses,
+	                           std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker);
+
+	// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
+	// Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
+	void clusterRecruitBlobWorker(RecruitBlobWorkerRequest req,
+	                              bool gotProcessClasses,
+	                              std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                              Optional<Standalone<StringRef>> clusterControllerDcId);
 
 	// TODO: Make private eventually
 	void checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData);
 	void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData);
+	void checkOutstandingStorageRequests(bool gotProcessClasses,
+	                                     std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker);
+	void checkOutstandingBlobWorkerRequests(bool gotProcessClasses,
+	                                        std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
+	                                        Optional<Standalone<StringRef>> clusterControllerDcId);
+
+	// Check if txn system is recruited successfully in each region.
+	void checkRegions(ClusterControllerData* clusterControllerData, const std::vector<RegionInfo>& regions);
 
 	// TODO: Move functions in ClusterController.actor.cpp that recruit special
 	// roles like EKP into this class. Then, this function can be made private.
@@ -69,47 +91,45 @@ public:
 	                           std::map<Optional<Standalone<StringRef>>, int>* id_used);
 
 	// TODO: Make these functions private after rewriting betterMasterExists
-	static WorkerFitnessInfo getWorkerForRoleInDatacenter(
+	WorkerFitnessInfo getWorkerForRoleInDatacenter(
 	    ClusterControllerData const* clusterControllerData,
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    ProcessClass::Fitness unacceptableFitness,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
+	    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing = {},
 	    bool checkStable = false);
 
-	static std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
+	std::vector<WorkerDetails> getWorkersForRoleInDatacenter(
 	    ClusterControllerData const* clusterControllerData,
 	    Optional<Standalone<StringRef>> const& dcId,
 	    ProcessClass::ClusterRole role,
 	    int amount,
 	    DatabaseConfiguration const& conf,
 	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    std::map<Optional<Standalone<StringRef>>, int> preferredSharing = {},
-	    Optional<WorkerFitnessInfo> minWorker = Optional<WorkerFitnessInfo>(),
+	    std::map<Optional<Standalone<StringRef>>, int> const& preferredSharing = {},
+	    Optional<WorkerFitnessInfo> const& minWorker = Optional<WorkerFitnessInfo>(),
 	    bool checkStable = false);
 
 	// Selects the best method for TLog recruitment based on the specified policy
-	static std::vector<WorkerDetails> getWorkersForTlogs(
-	    ClusterControllerData const* clusterControllerData,
-	    DatabaseConfiguration const& conf,
-	    int32_t required,
-	    int32_t desired,
-	    Reference<IReplicationPolicy> const& policy,
-	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    bool checkStable = false,
-	    const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
-	    const std::vector<UID>& exclusionWorkerIds = {});
+	std::vector<WorkerDetails> getWorkersForTLogs(ClusterControllerData const* clusterControllerData,
+	                                              DatabaseConfiguration const& conf,
+	                                              int32_t required,
+	                                              int32_t desired,
+	                                              Reference<IReplicationPolicy> const& policy,
+	                                              std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                              bool checkStable = false,
+	                                              const std::set<Optional<Key>>& dcIds = std::set<Optional<Key>>(),
+	                                              const std::vector<UID>& exclusionWorkerIds = {});
 
-	static std::vector<WorkerDetails> getWorkersForSatelliteLogs(
-	    ClusterControllerData const* clusterControllerData,
-	    const DatabaseConfiguration& conf,
-	    const RegionInfo& region,
-	    const RegionInfo& remoteRegion,
-	    std::map<Optional<Standalone<StringRef>>, int>& id_used,
-	    bool& satelliteFallback,
-	    bool checkStable = false);
+	std::vector<WorkerDetails> getWorkersForSatelliteLogs(ClusterControllerData const* clusterControllerData,
+	                                                      const DatabaseConfiguration& conf,
+	                                                      const RegionInfo& region,
+	                                                      const RegionInfo& remoteRegion,
+	                                                      std::map<Optional<Standalone<StringRef>>, int>& id_used,
+	                                                      bool& satelliteFallback,
+	                                                      bool checkStable = false);
 
 	// TODO: Move this function to a superclass
 	// Get the encryption at rest mode from the database configuration.

@@ -86,12 +86,12 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = Recruiter::getWorkerForRoleInDatacenter(cluster,
-		                                                       cluster->clusterControllerDcId,
-		                                                       ProcessClass::Master,
-		                                                       ProcessClass::NeverAssign,
-		                                                       db->config,
-		                                                       id_used);
+		masterWorker = cluster->recruiter.getWorkerForRoleInDatacenter(cluster,
+		                                                               cluster->clusterControllerDcId,
+		                                                               ProcessClass::Master,
+		                                                               ProcessClass::NeverAssign,
+		                                                               db->config,
+		                                                               id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
@@ -1030,7 +1030,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
-	    self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
+	    self->controllerData->recruiter.recruitEverything(self, *seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
@@ -1071,7 +1071,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 				if (self->configuration != oldConf) { // confChange does not trigger when including servers
 					self->dcId_locality = originalLocalityMap;
-					recruitments = self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
+					recruitments = self->controllerData->recruiter.recruitEverything(self, *seedServers, oldLogSystem);
 				}
 			}
 		}
