@@ -4,6 +4,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 
+#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantName.h"
 #include "flow/FastRef.h"
@@ -72,9 +73,9 @@ struct StartTenantMovementImpl {
 	                                                 Reference<typename DB::TransactionT> tr,
 	                                                 Tenant tenant,
 	                                                 TenantName tenantName) {
-		// check if self->dataClusterDb works correctly
+		// check if self->ctx->dataClusterDb works correctly
 		state Reference<ReadYourWritesTransaction> ryw =
-		    makeReference<ReadYourWritesTransaction>(self->dataClusterDb, tenant);
+		    makeReference<ReadYourWritesTransaction>(self->ctx.dataClusterDb, tenant);
 		// What should chunkSize be?
 		state Standalone<VectorRef<KeyRef>> splitPoints =
 		    wait(ryw->getRangeSplitPoints(KeyRangeRef(""_sr, "\xff"_sr), 1000));
@@ -98,10 +99,23 @@ struct StartTenantMovementImpl {
 			Tenant t(tenantPair.second);
 			storeTenantSplitPoints(self, tr, t, tenantPair.first);
 		}
+		ASSERT(self->tenantsInGroup.size());
+		TenantName firstTenant = self->tenantsInGroup[0].first;
+
+		// Set the queue head to the first tenant and an empty key
+		metadata::management::MovementMetadata::movementQueue().set(std::make_pair(self->tenantGroup, self->runID),
+		                                                            std::make_pair(firstTenant, Key()));
 		return Void();
 	}
 
-	ACTOR Future<Void> createLockedDestinationTenants(Database db, TenantGroupName tenantGroup) { return Void(); }
+	ACTOR static Future<Void> createLockedDestinationTenants(StartTenantMovementImpl* self) {
+		for (auto& tenantPair : self->tenantsInGroup) {
+			TenantMapEntry entry(tenantPair.second, tenantPair.first, self->tenantGroup);
+			entry.tenantLockState = TenantAPI::TenantLockState::LOCKED;
+			entry.tenantLockId = self->runID;
+			TenantAPI::createTenant(self->ctx.dataClusterDb, tenantPair.first, entry);
+		}
+	}
 
 	ACTOR static Future<Void> run(StartTenantMovementImpl* self) {
 		bool success = wait(self->ctx.runManagementTransaction(
@@ -118,16 +132,68 @@ struct StartTenantMovementImpl {
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return lockSourceTenants(self, tr); }));
 
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return storeAllTenantsSplitPoints(self, tr); }));
+
+		wait(createLockedDestinationTenants(self));
+
 		return Void();
 	}
 
 	Future<Void> run() { return run(this); }
 };
+
+template <class DB>
+struct SwitchTenantMovementImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	TenantGroupName tenantGroup;
+	UID runID;
+};
+
+template <class DB>
+struct FinishTenantMovementImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	TenantGroupName tenantGroup;
+	UID runID;
+};
+
+template <class DB>
+struct AbortTenantMovementImpl {
+	MetaclusterOperationContext<DB> ctx;
+
+	// Initialization parameters
+	TenantGroupName tenantGroup;
+	UID runID;
+};
+
 } // namespace internal
 
 ACTOR template <class DB>
 Future<Void> startTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
 	state internal::StartTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+	wait(impl.run());
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> switchTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
+	state internal::SwitchTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+	wait(impl.run());
+	return Void();
+}
+ACTOR template <class DB>
+Future<Void> finishTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
+	state internal::FinishTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+	wait(impl.run());
+	return Void();
+}
+ACTOR template <class DB>
+Future<Void> abortTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
+	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, runID);
 	wait(impl.run());
 	return Void();
 }
