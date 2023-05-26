@@ -63,7 +63,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		const UID id = UID::fromString(tokens[3].toString());
 		AuditStorageState res = wait(getAuditState(cx, type, id));
-		printf("Audit result is:\n%s", res.toStringForCLI().c_str());
+		printf("Audit result is:\n%s", res.toString().c_str());
 	} else if (tokencmp(tokens[2], "recent")) {
 		int count = CLIENT_KNOBS->TOO_MANY;
 		if (tokens.size() == 4) {
@@ -71,7 +71,7 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		}
 		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count));
 		for (const auto& it : res) {
-			printf("Audit result is:\n%s\n", it.toStringForCLI().c_str());
+			printf("Audit result is:\n%s\n", it.toString().c_str());
 		}
 	} else {
 		printUsage(tokens[0]);
