@@ -23,6 +23,7 @@
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
+#include "fdbserver/QuietDatabase.h"
 #include "fdbrpc/simulator.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/Error.h"
@@ -114,7 +115,7 @@ struct ValidateStorage : TestWorkload {
 					wait(delay(30));
 					continue;
 				} else if (auditState.getPhase() == AuditPhase::Error) {
-					break;
+					throw audit_storage_error();
 				} else if (auditState.getPhase() == AuditPhase::Failed) {
 					break;
 				} else {
@@ -130,6 +131,7 @@ struct ValidateStorage : TestWorkload {
 				wait(delay(1));
 			}
 		}
+
 		// Check internal persist state
 		// Check no audit is in Running or Error phase
 		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
@@ -237,6 +239,7 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateReplica));
 		TraceEvent("TestValidateReplicaDone");
 
+		wait(self->injectInconsistency(self, cx));
 		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateLocationMetadata));
 		TraceEvent("TestValidateShardKeyServersDone");
 
@@ -280,6 +283,29 @@ struct ValidateStorage : TestWorkload {
 		    .detail("DebugID", debugID);
 
 		return version;
+	}
+
+	ACTOR Future<Void> injectInconsistency(ValidateStorage* self, Database cx) {
+		TraceEvent("TestInjectInconsistencyBegin");
+		state Transaction tr(cx);
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				std::vector<StorageServerInterface> interfs = wait(getStorageServers(cx));
+				const UID& dest = interfs[deterministicRandom()->randomInt(0, interfs.size())].uniqueID;
+				tr.set(keyServersKey("TestKeyF"_sr),
+				       keyServersValue({ dest }, {}, deterministicRandom()->randomUniqueID(), UID()));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("TestInjectInconsistencyDone");
+
+		return Void();
 	}
 
 	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {

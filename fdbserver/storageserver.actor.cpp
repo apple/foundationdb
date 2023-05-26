@@ -5806,7 +5806,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			// Compare: check if mapFromKeyServers === mapFromServerKeys
 			// 1. check mapFromKeyServers => mapFromServerKeys
 			for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
-				if (!mapFromServerKeys.contains(ssid)) {
+				if (!.contains(ssid)) {
 					std::string error = format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
 					                           "on Server(%s) in KeyServers but not ServerKeys",
 					                           claimRange.toString().c_str(),
@@ -5814,8 +5814,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					                           ssid.toString().c_str());
 					errors.push_back(error);
 					TraceEvent(SevError, "AuditStorageShardLocationMetadataError", data->thisServerID)
+					    .detail("ErrorType", "MissingRangeOnServerKeys")
 					    .detail("AuditId", req.id)
-					    .detail("AuditRange", req.range)
+					    .detail("Ranges", describe(keyServerRanges))
 					    .detail("ClaimRange", claimRange)
 					    .detail("ErrorMessage", error)
 					    .detail("AuditServerID", data->thisServerID);
