@@ -1915,6 +1915,10 @@ public:
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
 
+	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
+
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
 	Version trackShardAssignmentMinVersion; // == invalidVersion means tracking stopped
@@ -13493,7 +13497,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
 				TraceEvent("BusiestWriteTag", self->thisServerID)
 				    .detail("Elapsed", req.elapsed)
-				    .detail("Tag", printable(req.busiestTag))
+				    .detail("Tag", req.busiestTag)
 				    .detail("TagOps", req.opsSum)
 				    .detail("TagCost", req.costSum)
 				    .detail("TotalCost", req.totalWriteCosts)
