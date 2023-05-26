@@ -192,6 +192,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( FASTRESTORE_ATOMICOP_WEIGHT,               1 ); if( randomize && BUGGIFY ) { FASTRESTORE_ATOMICOP_WEIGHT = deterministicRandom()->random01() * 200 + 1; }
 	init( RESTORE_RANGES_READ_BATCH,             10000 );
 	init( BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH, false );
+	init( BLOB_GRANULE_RESTORE_CHECK_INTERVAL,      10 );
 
 	// Configuration
 	init( DEFAULT_AUTO_COMMIT_PROXIES,               3 );
