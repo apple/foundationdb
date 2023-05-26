@@ -81,11 +81,6 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 		                                                      .opsReadPerKSecond = StorageMetrics::infinity } };
 }
 
-enum class DDAuditContext : uint8_t {
-	LaunchNewAudit = 0,
-	ResumeAudit = 1,
-};
-
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
@@ -100,10 +95,6 @@ struct DDAudit {
 	bool cancelled; // use to cancel any actor beyond auditActor
 	int64_t overallIssuedDoAuditCount;
 	int64_t overallCompleteDoAuditCount;
-
-	uint8_t context; // record why does this DDAudit run? resume from an existing one? or a brand new one?
-	inline void setContext(DDAuditContext context) { this->context = static_cast<uint8_t>(context); }
-	inline DDAuditContext getContext() const { return static_cast<DDAuditContext>(this->context); }
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -743,12 +734,13 @@ inline std::unordered_map<UID, std::shared_ptr<DDAudit>> getAuditsForType(Refere
 void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditStates,
                      int retryCount,
-                     DDAuditContext context);
+                     std::string context);
 ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType);
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
-                                    int currentRetryCount);
+                                    int currentRetryCount,
+                                    std::string context);
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
@@ -800,7 +792,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 				// Only running audit will be resumed
 				if (auditState.getPhase() == AuditPhase::Running) {
 					AuditStorageState toUpdate = auditState;
-					toUpdate.ddAuditId = self->ddId;
+					toUpdate.ddId = self->ddId;
 					fs.push_back(updateAuditState(
 					    self->txnProcessor->context(), toUpdate, lockInfo, self->context->isDDEnabled()));
 				}
@@ -879,7 +871,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 			    .detail("AuditType", auditState.getType())
 			    .detail("NumFinishAuditsCleared", numFinishAuditsCleared)
 			    .detail("IsReady", self->auditInitialized.getFuture().isReady());
-			runAuditStorage(self, auditState, 0, DDAuditContext::ResumeAudit);
+			runAuditStorage(self, auditState, 0, "ResumeAudit");
 		}
 	}
 
@@ -1782,7 +1774,8 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
-                                    int currentRetryCount) {
+                                    int currentRetryCount,
+                                    std::string context) {
 	// At this point, audit must be launched
 	ASSERT(auditID.isValid());
 	state std::shared_ptr<DDAudit> audit = getAuditFromAuditMap(self, auditType, auditID);
@@ -1794,10 +1787,10 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 
 	try {
 		ASSERT(audit != nullptr);
-		ASSERT(audit->coreState.ddAuditId == self->ddId);
+		ASSERT(audit->coreState.ddId == self->ddId);
 		loadAndDispatchAudit(self, audit, audit->coreState.range);
 		TraceEvent(SevInfo, "DDAuditStorageCoreScheduled", self->ddId)
-		    .detail("Context", audit->getContext())
+		    .detail("Context", context)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", audit->coreState.range)
 		    .detail("AuditType", audit->coreState.getType())
@@ -1824,7 +1817,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			audit->coreState.setPhase(AuditPhase::Complete);
 		}
 		TraceEvent(SevVerbose, "DDAuditStorageCoreGotResult", self->ddId)
-		    .detail("Context", audit->getContext())
+		    .detail("Context", context)
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
@@ -1834,7 +1827,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		                       lockInfo,
 		                       self->context->isDDEnabled()));
 		TraceEvent(SevVerbose, "DDAuditStorageCoreSetResult", self->ddId)
-		    .detail("Context", audit->getContext())
+		    .detail("Context", context)
 		    .detail("AuditState", audit->coreState.toString())
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
@@ -1842,7 +1835,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		                        audit->coreState.id); // remove audit
 
 		TraceEvent(SevInfo, "DDAuditStorageCoreEnd", self->ddId)
-		    .detail("Context", audit->getContext())
+		    .detail("Context", context)
 		    .detail("AuditID", auditID)
 		    .detail("AuditType", auditType)
 		    .detail("Range", audit->coreState.range)
@@ -1851,7 +1844,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
-		    .detail("Context", audit->getContext())
+		    .detail("Context", context)
 		    .detail("AuditID", auditID)
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("AuditType", auditType)
@@ -1876,7 +1869,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			// Erase the old audit from map and spawn a new audit inherit from the old audit
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
-			runAuditStorage(self, audit->coreState, audit->retryCount, audit->getContext());
+			runAuditStorage(self, audit->coreState, audit->retryCount, "auditStorageCoreRetry");
 		} else {
 			try {
 				audit->coreState.setPhase(AuditPhase::Failed);
@@ -1886,7 +1879,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 				                       lockInfo,
 				                       self->context->isDDEnabled()));
 				TraceEvent(SevInfo, "DDAuditStorageCoreSetFailed", self->ddId)
-				    .detail("Context", audit->getContext())
+				    .detail("Context", context)
 				    .detail("AuditID", auditID)
 				    .detail("AuditType", auditType)
 				    .detail("RetryCount", currentRetryCount)
@@ -1895,7 +1888,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			} catch (Error& e) {
 				TraceEvent(SevWarn, "DDAuditStorageCoreErrorWhenSetAuditFailed", self->ddId)
 				    .errorUnsuppressed(e)
-				    .detail("Context", audit->getContext())
+				    .detail("Context", context)
 				    .detail("AuditID", auditID)
 				    .detail("AuditType", auditType)
 				    .detail("RetryCount", currentRetryCount)
@@ -1963,7 +1956,7 @@ ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID audi
 void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditState,
                      int retryCount,
-                     DDAuditContext context) {
+                     std::string context) {
 	// Validate input auditState
 	if (auditState.getType() != AuditType::ValidateHA && auditState.getType() != AuditType::ValidateReplica &&
 	    auditState.getType() != AuditType::ValidateLocationMetadata &&
@@ -1973,17 +1966,17 @@ void runAuditStorage(Reference<DataDistributor> self,
 	ASSERT(auditState.id.isValid());
 	ASSERT(!auditState.range.empty());
 	ASSERT(auditState.getPhase() == AuditPhase::Running);
-	auditState.ddAuditId = self->ddId; // make sure any existing audit state claims the current DD
+	auditState.ddId = self->ddId; // make sure any existing audit state claims the current DD
 	std::shared_ptr<DDAudit> audit = std::make_shared<DDAudit>(auditState);
 	audit->retryCount = retryCount;
-	audit->setContext(context);
 	TraceEvent(SevDebug, "DDRunAuditStorage", self->ddId)
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", audit->coreState.range)
 	    .detail("AuditType", audit->coreState.getType())
-	    .detail("Context", audit->getContext());
+	    .detail("Context", context);
 	addAuditToAuditMap(self, audit);
-	audit->setAuditRunActor(auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), audit->retryCount));
+	audit->setAuditRunActor(
+	    auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), audit->retryCount, context));
 	return;
 }
 
@@ -2040,7 +2033,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			auditState.setType(auditType);
 			auditState.range = auditRange;
 			auditState.setPhase(AuditPhase::Running);
-			auditState.ddAuditId = self->ddId; // persist ddId to new ddAudit metadata
+			auditState.ddId = self->ddId; // persist ddId to new ddAudit metadata
 			TraceEvent(SevVerbose, "DDAuditStorageLaunchPersistNewAuditIDBefore", self->ddId)
 			    .detail("AuditType", auditType)
 			    .detail("Range", auditRange);
@@ -2068,7 +2061,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			    .detail("Range", auditRange);
 			auditState.id = auditID_;
 			auditID = auditID_;
-			runAuditStorage(self, auditState, 0, DDAuditContext::LaunchNewAudit);
+			runAuditStorage(self, auditState, 0, "LaunchAudit");
 		}
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "DDAuditStorageLaunchError", self->ddId)
@@ -2271,7 +2264,7 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 					// We always issue exactly one audit task (for the remaining part) when schedule
 					ASSERT(issueDoAuditCount == 0);
 					issueDoAuditCount++;
-					req.ddAuditId = self->ddId; // send this ddid to SS
+					req.ddId = self->ddId; // send this ddid to SS
 					audit->actors.add(doAuditOnStorageServer(self, audit, ssi, req));
 				}
 			}
@@ -2492,7 +2485,7 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
 						}
 						issueDoAuditCount++;
-						req.ddAuditId = self->ddId; // send this ddid to SS
+						req.ddId = self->ddId; // send this ddid to SS
 						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
 					}
 				}

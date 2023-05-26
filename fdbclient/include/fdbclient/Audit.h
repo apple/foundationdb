@@ -45,17 +45,17 @@ enum class AuditType : uint8_t {
 struct AuditStorageState {
 	constexpr static FileIdentifier file_identifier = 13804340;
 
-	AuditStorageState() : type(0), auditServerId(UID()), phase(0), ddAuditId(UID()) {}
+	AuditStorageState() : type(0), auditServerId(UID()), phase(0), ddId(UID()) {}
 	AuditStorageState(UID id, UID auditServerId, AuditType type)
-	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
+	  : id(id), auditServerId(auditServerId), type(static_cast<uint8_t>(type)), phase(0), ddId(UID()) {}
 	AuditStorageState(UID id, KeyRange range, AuditType type)
-	  : id(id), auditServerId(UID()), range(range), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
+	  : id(id), auditServerId(UID()), range(range), type(static_cast<uint8_t>(type)), phase(0), ddId(UID()) {}
 	AuditStorageState(UID id, AuditType type)
-	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0), ddAuditId(UID()) {}
+	  : id(id), auditServerId(UID()), type(static_cast<uint8_t>(type)), phase(0), ddId(UID()) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, auditServerId, range, type, phase, error, ddAuditId);
+		serializer(ar, id, auditServerId, range, type, phase, error, ddId);
 	}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(type); }
@@ -90,7 +90,13 @@ struct AuditStorageState {
 	}
 
 	UID id;
-	UID ddAuditId; // UID of DD who claims the audit
+	UID ddId; // ddId indicates this audit is managed by which dd
+	// ddId is used to check if dd has changed
+	// When a new dd starts in the middle of an onging audit,
+	// The ongoing audit's ddId gets updated
+	// When SS updates the progress, it checks ddId
+	// If the ddId is updated, SS Audit actors of the old dd will stop themselves
+	// New dd will issue new requests to SSes to continue the remaining work
 	UID auditServerId; // UID of SS who is working on this audit task
 	KeyRange range;
 	uint8_t type;
@@ -111,11 +117,11 @@ struct AuditStorageRequest {
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, range, type, targetServers, reply, ddAuditId);
+		serializer(ar, id, range, type, targetServers, reply, ddId);
 	}
 
 	UID id;
-	UID ddAuditId; // UID of DD who claims the audit
+	UID ddId; // UID of DD who claims the audit
 	KeyRange range;
 	uint8_t type;
 	std::vector<UID> targetServers;

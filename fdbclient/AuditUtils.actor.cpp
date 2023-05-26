@@ -518,8 +518,8 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			if (ddAuditState.getPhase() != AuditPhase::Running) {
 				throw audit_storage_failed();
 			}
-			ASSERT(ddAuditState.ddAuditId.isValid());
-			if (ddAuditState.ddAuditId != auditState.ddAuditId) {
+			ASSERT(ddAuditState.ddId.isValid());
+			if (ddAuditState.ddId != auditState.ddId) {
 				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
 			}
 			wait(krmSetRange(&tr,
@@ -594,8 +594,8 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			if (ddAuditState.getPhase() != AuditPhase::Running) {
 				throw audit_storage_failed();
 			}
-			ASSERT(ddAuditState.ddAuditId.isValid());
-			if (ddAuditState.ddAuditId != auditState.ddAuditId) {
+			ASSERT(ddAuditState.ddId.isValid());
+			if (ddAuditState.ddId != auditState.ddId) {
 				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
 			}
 			wait(krmSetRange(
