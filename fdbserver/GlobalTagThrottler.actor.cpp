@@ -289,7 +289,7 @@ class GlobalTagThrottlerImpl {
 		}
 		auto const& [_, ssInfo] = *it;
 		return ssInfo.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
-		                                    SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		                                    SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
 	}
 
 	// Returns the desired cost for a storage server, based on its current
