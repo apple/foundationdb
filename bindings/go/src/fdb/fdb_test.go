@@ -448,6 +448,26 @@ func TestOpenNotExistTenant(t *testing.T) {
 	assertErrorCodeEqual(t, err, errTenantNotFound)
 }
 
+func TestDeleteNotExistTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName = fdb.Key("test-not-exist-tenant")
+
+	// this should fail
+	err = db.DeleteTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantNotFound)
+}
+
 func inSlice(sl []fdb.Key, t fdb.Key) bool {
 	for _, s := range sl {
 		if bytes.Equal(s, t) {
