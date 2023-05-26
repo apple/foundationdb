@@ -214,7 +214,7 @@ class GlobalTagThrottlerImpl {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
 		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
-		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
+		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", tag).detail("Cost", result);
 
 		return result;
 	}
@@ -421,7 +421,7 @@ class GlobalTagThrottlerImpl {
 
 		isBusy = limitingTps.present() && limitingTps.get() < desiredTps;
 
-		te.detail("Tag", printable(tag))
+		te.detail("Tag", tag)
 		    .detail("TargetTps", targetTps)
 		    .detail("AverageTransactionCost", averageTransactionCost)
 		    .detail("LimitingTps", limitingTps)
@@ -447,7 +447,7 @@ public:
 				           "been reached");
 				TraceEvent("GlobalTagThrottler_IgnoringRequests")
 				    .suppressFor(60.0)
-				    .detail("Tag", printable(tag))
+				    .detail("Tag", tag)
 				    .detail("Count", count);
 			} else {
 				tagStatistics[tag].addTransactions(static_cast<double>(count));
