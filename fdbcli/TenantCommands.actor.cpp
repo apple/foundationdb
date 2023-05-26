@@ -341,15 +341,19 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
 	return true;
 }
+std::string usageMessage = "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>"
+                           "<SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 4) {
-		fmt::print("Usage: tenant move start <TENANT_GROUP>\n\n");
+	if (tokens.size() > 6) {
+		fmt::print(usageMessage);
 		return false;
 	}
 	TenantGroupName tenantGroup = tokens[3];
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
 	state UID runID = deterministicRandom()->randomUniqueID();
-	wait(metacluster::startTenantMovement(db, tenantGroup, runID));
+	wait(metacluster::startTenantMovement(db, tenantGroup, runID, srcCluster, dstCluster));
 
 	return true;
 }
@@ -358,8 +362,8 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
 
 ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() < 3) {
-		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
+	if (tokens.size() < 6) {
+		fmt::print(usageMessage);
 		return false;
 	}
 	state Reference<ITransaction> tr = db->createTransaction();
@@ -384,7 +388,7 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	} else if (step == "abort"_sr) {
 		return tenantMoveAbortCommand(db, tokens);
 	} else {
-		fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
+		fmt::print(usageMessage);
 		return false;
 	}
 	// switch (step) {

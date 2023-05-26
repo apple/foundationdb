@@ -1,4 +1,8 @@
 #pragma once
+#include "fdbclient/IClientApi.h"
+#ifndef FDB_METACLUSTER_METACLUSTERMOVE_H
+#define FDB_METACLUSTER_METACLUSTERMOVE_H
+
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
@@ -24,12 +28,18 @@ struct StartTenantMovementImpl {
 	// Initialization parameters
 	TenantGroupName tenantGroup;
 	UID runID;
+	ClusterName src;
+	ClusterName dst;
 
 	// Parameters filled in during the run
 	std::vector<std::pair<TenantName, int64_t>> tenantsInGroup;
 
-	StartTenantMovementImpl(Reference<DB> managementDb, TenantGroupName tenantGroup, UID runID)
-	  : ctx(managementDb), tenantGroup(tenantGroup), runID(runID) {}
+	StartTenantMovementImpl(Reference<DB> managementDb,
+	                        TenantGroupName tenantGroup,
+	                        UID runID,
+	                        ClusterName src,
+	                        ClusterName dst)
+	  : ctx(managementDb), tenantGroup(tenantGroup), runID(runID), src(src), dst(dst) {}
 
 	ACTOR static Future<bool> storeRunId(StartTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
 		UID existingRunID = metadata::management::MovementMetadata::emergencyMovements().get(tr, self->tenantGroup);
@@ -74,6 +84,7 @@ struct StartTenantMovementImpl {
 	                                                 Tenant tenant,
 	                                                 TenantName tenantName) {
 		// check if self->ctx->dataClusterDb works correctly
+		wait(self->ctx.setCluster(tr, self->src));
 		state Reference<ReadYourWritesTransaction> ryw =
 		    makeReference<ReadYourWritesTransaction>(self->ctx.dataClusterDb, tenant);
 		// What should chunkSize be?
@@ -113,8 +124,12 @@ struct StartTenantMovementImpl {
 			TenantMapEntry entry(tenantPair.second, tenantPair.first, self->tenantGroup);
 			entry.tenantLockState = TenantAPI::TenantLockState::LOCKED;
 			entry.tenantLockId = self->runID;
-			TenantAPI::createTenant(self->ctx.dataClusterDb, tenantPair.first, entry);
+			wait(success(TenantAPI::createTenant(self->ctx.dataClusterDb, tenantPair.first, entry)));
 		}
+	}
+
+	ACTOR static Future<Void> setDestinationQuota(StartTenantMovementImpl* self, Reference<ITransaction> tr) {
+		// ThrottleApi::setTagQuota(tr, tag, quota.reservedQuota, quota.totalQuota);
 	}
 
 	ACTOR static Future<Void> run(StartTenantMovementImpl* self) {
@@ -137,6 +152,9 @@ struct StartTenantMovementImpl {
 
 		wait(createLockedDestinationTenants(self));
 
+		wait(self->ctx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return setDestinationQuota(self, tr); }));
+
 		return Void();
 	}
 
@@ -150,6 +168,15 @@ struct SwitchTenantMovementImpl {
 	// Initialization parameters
 	TenantGroupName tenantGroup;
 	UID runID;
+	ClusterName src;
+	ClusterName dst;
+
+	SwitchTenantMovementImpl(Reference<DB> managementDb,
+	                         TenantGroupName tenantGroup,
+	                         UID runID,
+	                         ClusterName src,
+	                         ClusterName dst)
+	  : ctx(managementDb), tenantGroup(tenantGroup), runID(runID), src(src), dst(dst) {}
 };
 
 template <class DB>
@@ -159,6 +186,15 @@ struct FinishTenantMovementImpl {
 	// Initialization parameters
 	TenantGroupName tenantGroup;
 	UID runID;
+	ClusterName src;
+	ClusterName dst;
+
+	FinishTenantMovementImpl(Reference<DB> managementDb,
+	                         TenantGroupName tenantGroup,
+	                         UID runID,
+	                         ClusterName src,
+	                         ClusterName dst)
+	  : ctx(managementDb), tenantGroup(tenantGroup), runID(runID), src(src), dst(dst) {}
 };
 
 template <class DB>
@@ -168,34 +204,61 @@ struct AbortTenantMovementImpl {
 	// Initialization parameters
 	TenantGroupName tenantGroup;
 	UID runID;
+	ClusterName src;
+	ClusterName dst;
+
+	AbortTenantMovementImpl(Reference<DB> managementDb,
+	                        TenantGroupName tenantGroup,
+	                        UID runID,
+	                        ClusterName src,
+	                        ClusterName dst)
+	  : ctx(managementDb), tenantGroup(tenantGroup), runID(runID), src(src), dst(dst) {}
 };
 
 } // namespace internal
 
 ACTOR template <class DB>
-Future<Void> startTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
-	state internal::StartTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+Future<Void> startTenantMovement(Reference<DB> db,
+                                 TenantGroupName tenantGroup,
+                                 UID runID,
+                                 ClusterName src,
+                                 ClusterName dst) {
+	state internal::StartTenantMovementImpl<DB> impl(db, tenantGroup, runID, src, dst);
 	wait(impl.run());
 	return Void();
 }
 
 ACTOR template <class DB>
-Future<Void> switchTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
-	state internal::SwitchTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+Future<Void> switchTenantMovement(Reference<DB> db,
+                                  TenantGroupName tenantGroup,
+                                  UID runID,
+                                  ClusterName src,
+                                  ClusterName dst) {
+	state internal::SwitchTenantMovementImpl<DB> impl(db, tenantGroup, runID, src, dst);
 	wait(impl.run());
 	return Void();
 }
 ACTOR template <class DB>
-Future<Void> finishTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
-	state internal::FinishTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+Future<Void> finishTenantMovement(Reference<DB> db,
+                                  TenantGroupName tenantGroup,
+                                  UID runID,
+                                  ClusterName src,
+                                  ClusterName dst) {
+	state internal::FinishTenantMovementImpl<DB> impl(db, tenantGroup, runID, src, dst);
 	wait(impl.run());
 	return Void();
 }
 ACTOR template <class DB>
-Future<Void> abortTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, UID runID) {
-	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, runID);
+Future<Void> abortTenantMovement(Reference<DB> db,
+                                 TenantGroupName tenantGroup,
+                                 UID runID,
+                                 ClusterName src,
+                                 ClusterName dst) {
+	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, runID, src, dst);
 	wait(impl.run());
 	return Void();
 }
 
 } // namespace metacluster
+
+#endif
