@@ -130,11 +130,6 @@ SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVe
   wait(future);
   return Void();
 }
-#else
-SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-  ASSERT(false && "Cannot call into Swift without building it");
-  return Void();
-}
 #endif
 
 ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionRequest req) {
@@ -224,6 +219,7 @@ ACTOR Future<Void> getVersionCxx(Reference<MasterData> self, GetCommitVersionReq
 	return Void();
 }
 
+#ifdef USE_SWIFT
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		wait(getVersionSwift(self, req));
@@ -233,6 +229,12 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 		return Void();
 	}
 }
+#else
+ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
+  wait(getVersionCxx(self, req));
+  return Void();
+}
+#endif
 
 CounterValue::CounterValue(std::string const& name, CounterCollection& collection) :
     value(std::make_shared<Counter>(name, collection)) {}
@@ -684,41 +686,41 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	state Reference<MasterData> self(
 	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
 
-  masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery);
+  wait(masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
 	return Void();
 }
 
 
-//TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
-//	ASSERT_EQ(
-//      figureVersion(0, 1.0, 0, 1e6, SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
-//	    1e6);
-//	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 100, 0.1, 1e6), 1000110);
-//	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 550000, 0.1, 1e6), 1500000);
-//	return Void();
-//}
-//
-//TEST_CASE("/fdbserver/MasterServer/FigureVersion/Small") {
-//	// Should always advance by at least 1 version.
-//	ASSERT_EQ(figureVersion(1e6, 2.0, 0, 1, 0.0001, 1e6), 1000001);
-//	ASSERT_EQ(figureVersion(1e6, 0.0, 0, 1, 0.1, 1e6), 1000001);
-//	return Void();
-//}
-//
-//TEST_CASE("/fdbserver/MasterServer/FigureVersion/MaxOffset") {
-//	ASSERT_EQ(figureVersion(1e6, 10.0, 0, 5e6, 0.1, 1e6), 6500000);
-//	ASSERT_EQ(figureVersion(1e6, 20.0, 0, 15e6, 0.1, 1e6), 17e6);
-//	return Void();
-//}
-//
-//TEST_CASE("/fdbserver/MasterServer/FigureVersion/PositiveReferenceVersion") {
-//	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 1e6, 0.1, 1e6), 2e6);
-//	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 100, 0.1, 1e6), 1000110);
-//	return Void();
-//}
-//
-//TEST_CASE("/fdbserver/MasterServer/FigureVersion/NegativeReferenceVersion") {
-//	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 3e6, 0.1, 1e6), 3e6);
-//	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 5e5, 0.1, 1e6), 550000);
-//	return Void();
-//}
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
+	ASSERT_EQ(
+      figureVersion(0, 1.0, 0, 1e6, SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
+	    1e6);
+	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 100, 0.1, 1e6), 1000110);
+	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 550000, 0.1, 1e6), 1500000);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/Small") {
+	// Should always advance by at least 1 version.
+	ASSERT_EQ(figureVersion(1e6, 2.0, 0, 1, 0.0001, 1e6), 1000001);
+	ASSERT_EQ(figureVersion(1e6, 0.0, 0, 1, 0.1, 1e6), 1000001);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/MaxOffset") {
+	ASSERT_EQ(figureVersion(1e6, 10.0, 0, 5e6, 0.1, 1e6), 6500000);
+	ASSERT_EQ(figureVersion(1e6, 20.0, 0, 15e6, 0.1, 1e6), 17e6);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/PositiveReferenceVersion") {
+	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 1e6, 0.1, 1e6), 2e6);
+	ASSERT_EQ(figureVersion(1e6, 3.0, 1e6, 100, 0.1, 1e6), 1000110);
+	return Void();
+}
+
+TEST_CASE("/fdbserver/MasterServer/FigureVersion/NegativeReferenceVersion") {
+	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 3e6, 0.1, 1e6), 3e6);
+	ASSERT_EQ(figureVersion(0, 2.0, -1e6, 5e5, 0.1, 1e6), 550000);
+	return Void();
+}
