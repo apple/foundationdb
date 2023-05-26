@@ -145,8 +145,10 @@ TagSet getTagSet(TransactionTagRef tag) {
 } // namespace
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
-	state TransactionTagCounter counter(
-	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	state TransactionTagCounter counter(UID(),
+	                                    /*maxTagsTracked=*/2,
+	                                    /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
+	                                        CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);
 	{
@@ -166,8 +168,10 @@ TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
 }
 
 TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
-	state TransactionTagCounter counter(
-	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	state TransactionTagCounter counter(UID(),
+	                                    /*maxTagsTracked=*/2,
+	                                    /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE /
+	                                        CLIENT_KNOBS->READ_TAG_SAMPLE_RATE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);
 	{
