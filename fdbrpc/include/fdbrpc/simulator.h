@@ -351,6 +351,7 @@ public:
 	BackupAgentType drAgents;
 	bool willRestart = false;
 	bool restarted = false;
+	bool isConsistencyChecked = false;
 	ValidationData validationData;
 
 	bool hasDiffProtocolProcess; // true if simulator is testing a process with a different version

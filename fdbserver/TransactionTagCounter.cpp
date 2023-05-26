@@ -118,7 +118,7 @@ public:
 
 			// For status, report the busiest tag:
 			if (previousBusiestTags.empty()) {
-				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0);
+				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
 			} else {
 				auto busiestTagInfo = previousBusiestTags[0];
 				for (int i = 1; i < previousBusiestTags.size(); ++i) {
