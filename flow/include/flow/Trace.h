@@ -477,15 +477,15 @@ struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
 
-  // Exposed for Swift which cannot use std::enable_if
-  template<class T>
-  void addDetail(std::string key, const T &value) {
-    if (enabled && init()) {
-      auto s = Traceable<T>::toString(value);
-      addMetric(key.c_str(), value, s);
-      detailImpl(std::move(key), std::move(s), false);
-    }
-  }
+	// Exposed for Swift which cannot use std::enable_if
+	template <class T>
+	void addDetail(std::string key, const T& value) {
+		if (enabled && init()) {
+			auto s = Traceable<T>::toString(value);
+			addMetric(key.c_str(), value, s);
+			detailImpl(std::move(key), std::move(s), false);
+		}
+	}
 };
 
 class StringRef;

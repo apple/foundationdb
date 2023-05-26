@@ -114,7 +114,6 @@ class MasterData;
 #define SWIFT_REVERSE_INTEROP_SUPPORTED
 #endif
 
-
 #if __has_include("SwiftModules/Flow")
 #include "SwiftModules/Flow"
 #endif
@@ -122,7 +121,7 @@ class MasterData;
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // FIXME(swift): remove those
-extern "C" void swiftCallMeFuture(void * _Nonnull opaqueResultPromisePtr) noexcept;
+extern "C" void swiftCallMeFuture(void* _Nonnull opaqueResultPromisePtr) noexcept;
 
 using namespace std::literals;
 

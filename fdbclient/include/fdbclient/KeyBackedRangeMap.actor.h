@@ -128,8 +128,11 @@ public:
 	typedef KeyRangeMapSnapshot<KeyType, ValueType> LocalSnapshot;
 	typedef typename LocalSnapshot::RangeValue RangeValue;
 
-	// KeyBackedRangeMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec = {}) // FIXME(swift): does not build
-	KeyBackedRangeMap(ValueCodec valueCodec, KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}) // FIXME(swift): does not build
+	// KeyBackedRangeMap(KeyRef prefix = invalidKey, Optional<WatchableTrigger> trigger = {}, ValueCodec valueCodec =
+	// {}) // FIXME(swift): does not build
+	KeyBackedRangeMap(ValueCodec valueCodec,
+	                  KeyRef prefix = invalidKey,
+	                  Optional<WatchableTrigger> trigger = {}) // FIXME(swift): does not build
 	  : kvMap(prefix, trigger, valueCodec) {}
 
 	// Get the RangeValue for the range that contains key, if there is a begin and end in the map which contain key

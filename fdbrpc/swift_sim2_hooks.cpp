@@ -30,10 +30,9 @@
 //// ==== Sim2 hooks
 
 SWIFT_CC(swift)
-void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
-  ISimulator* sim = g_simulator;
-  ASSERT(sim);
+void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
+	ISimulator* sim = g_simulator;
+	ASSERT(sim);
 
-  sim->_swiftEnqueue(job);
+	sim->_swiftEnqueue(job);
 }

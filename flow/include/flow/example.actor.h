@@ -36,12 +36,12 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 ACTOR Future<int> flowNum() {
-  return 42;
+	return 42;
 }
 
 ACTOR Future<int> flowSimpleIncrement() {
-//    return 42 + wait(flowNum());
-  return 42;
+	//    return 42 + wait(flowNum());
+	return 42;
 }
 
 #include "flow/unactorcompiler.h"

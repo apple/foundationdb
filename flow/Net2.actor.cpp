@@ -274,7 +274,7 @@ public:
 				promise.send(Void());
 			}
 #else
-      promise.send(Void());
+			promise.send(Void());
 #endif
 			delete this;
 		}
@@ -1430,9 +1430,11 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
-	printf("[c++][%s:%d](%s) Running NET2! %s\n", __FILE_NAME__, __LINE__, __FUNCTION__,
+	printf("[c++][%s:%d](%s) Running NET2! %s\n",
+	       __FILE_NAME__,
+	       __LINE__,
+	       __FUNCTION__,
 	       getLocalAddress().toString().c_str());
-
 
 	thread_network = this;
 
@@ -2318,4 +2320,3 @@ void net2_test(){
 	printf("  Used: %lld\n", FastAllocator<4096>::getTotalMemory());
 	*/
 };
-

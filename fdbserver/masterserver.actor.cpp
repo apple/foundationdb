@@ -50,11 +50,11 @@ template class GetEncryptCipherKeys<struct ServerDBInfo>;
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req);
 
 Version figureVersionCxx(Version current,
-                      double now,
-                      Version reference,
-                      int64_t toAdd,
-                      double maxVersionRateModifier,
-                      int64_t maxVersionRateOffset) {
+                         double now,
+                         Version reference,
+                         int64_t toAdd,
+                         double maxVersionRateModifier,
+                         int64_t maxVersionRateOffset) {
 	// Versions should roughly follow wall-clock time, based on the
 	// system clock of the current machine and an FDB-specific epoch.
 	// Calculate the expected version and determine whether we need to
@@ -88,7 +88,7 @@ Version figureVersion(Version current,
                       int64_t toAdd,
                       double maxVersionRateModifier,
                       int64_t maxVersionRateOffset) {
-  return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
+	return figureVersionCxx(current, now, reference, toAdd, maxVersionRateModifier, maxVersionRateOffset);
 }
 #endif
 
@@ -111,24 +111,23 @@ SWIFT_ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommit
 }
 #else
 ACTOR Future<Void> waitForPrev(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-  state double startTime = now();
-  wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
-  double latency = now() - startTime;
-  self->waitForPrevLatencies.addMeasurement(latency);
-  ++self->waitForPrevCommitRequests;
-  updateLiveCommittedVersion(self, req);
-  req.reply.send(Void());
+	state double startTime = now();
+	wait(self->liveCommittedVersion.whenAtLeast(req.prevVersion.get()));
+	double latency = now() - startTime;
+	self->waitForPrevLatencies.addMeasurement(latency);
+	++self->waitForPrevCommitRequests;
+	updateLiveCommittedVersion(self, req);
+	req.reply.send(Void());
 
 	return Void();
 }
 #endif
 
-
 #ifdef WITH_SWIFT
 SWIFT_ACTOR Future<Void> getVersionSwift(Reference<MasterData> self, GetCommitVersionRequest req) {
-  auto future = self->swiftImpl->getVersion(self.getPtr(), req);
-  wait(future);
-  return Void();
+	auto future = self->swiftImpl->getVersion(self.getPtr(), req);
+	wait(future);
+	return Void();
 }
 #endif
 
@@ -231,34 +230,33 @@ ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionReques
 }
 #else
 ACTOR Future<Void> getVersion(Reference<MasterData> self, GetCommitVersionRequest req) {
-  wait(getVersionCxx(self, req));
-  return Void();
+	wait(getVersionCxx(self, req));
+	return Void();
 }
 #endif
 
-CounterValue::CounterValue(std::string const& name, CounterCollection& collection) :
-    value(std::make_shared<Counter>(name, collection)) {}
+CounterValue::CounterValue(std::string const& name, CounterCollection& collection)
+  : value(std::make_shared<Counter>(name, collection)) {}
 
 void CounterValue::operator+=(Value delta) {
-    value->operator +=(delta);
+	value->operator+=(delta);
 }
 
 void CounterValue::operator++() {
-    value->operator ++();
+	value->operator++();
 }
 void CounterValue::clear() {
-    value->clear();
+	value->clear();
 }
 
 MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
-           MasterInterface const& myInterface,
-           ServerCoordinators const& coordinators,
-           ClusterControllerFullInterface const& clusterController,
-           Standalone<StringRef> const& dbId,
-           PromiseStream<Future<Void>> addActor,
-           bool forceRecovery)
-  : dbgid(myInterface.id()),
-  lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
+                       MasterInterface const& myInterface,
+                       ServerCoordinators const& coordinators,
+                       ClusterControllerFullInterface const& clusterController,
+                       Standalone<StringRef> const& dbId,
+                       PromiseStream<Future<Void>> addActor,
+                       bool forceRecovery)
+  : dbgid(myInterface.id()), lastEpochEnd(invalidVersion), recoveryTransactionVersion(invalidVersion),
     liveCommittedVersion(invalidVersion), databaseLocked(false), minKnownCommittedVersion(invalidVersion),
     coordinators(coordinators), version(invalidVersion), lastVersionTime(0), myInterface(myInterface),
     resolutionBalancer(&version), forceRecovery(forceRecovery), cc("Master", dbgid.toString()),
@@ -286,7 +284,7 @@ MasterData::MasterData(Reference<AsyncVar<ServerDBInfo> const> const& dbInfo,
 		forceRecovery = false;
 	}
 	balancer = resolutionBalancer.resolutionBalancing();
-    locality = tagLocalityInvalid;
+	locality = tagLocalityInvalid;
 
 #ifdef WITH_SWIFT
 	using namespace fdbserver_swift;
@@ -334,11 +332,10 @@ ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
 }
 #else
 ACTOR Future<Void> provideVersions(Reference<MasterData> self) {
-  wait(provideVersionsCxx(self));
-  return Void();
+	wait(provideVersionsCxx(self));
+	return Void();
 }
 #endif
-
 
 #ifdef WITH_SWIFT
 void updateLiveCommittedVersionSwift(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
@@ -380,7 +377,7 @@ void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVe
 }
 #else
 void updateLiveCommittedVersion(Reference<MasterData> self, ReportRawCommittedVersionRequest req) {
-  return updateLiveCommittedVersionCxx(self, req);
+	return updateLiveCommittedVersionCxx(self, req);
 }
 #endif
 
@@ -443,7 +440,7 @@ ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
 }
 #else
 ACTOR Future<Void> serveLiveCommittedVersion(Reference<MasterData> self) {
-  wait(serveLiveCommittedVersionCxx(self));
+	wait(serveLiveCommittedVersionCxx(self));
 	return Void();
 }
 #endif
@@ -498,7 +495,6 @@ ACTOR Future<Void> updateRecoveryDataCxx(Reference<MasterData> self) {
 	}
 }
 
-
 #ifdef WITH_SWIFT
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
@@ -510,7 +506,7 @@ ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
 }
 #else
 ACTOR Future<Void> updateRecoveryData(Reference<MasterData> self) {
-  wait(updateRecoveryDataCxx(self));
+	wait(updateRecoveryDataCxx(self));
 	return Void();
 }
 #endif
@@ -622,7 +618,6 @@ ACTOR Future<Void> masterServerCxx(MasterInterface mi,
 	}
 }
 
-
 #ifdef WITH_SWIFT
 ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     Reference<AsyncVar<ServerDBInfo> const> db,
@@ -630,24 +625,24 @@ ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     ServerCoordinators coordinators,
                                     LifetimeToken lifetime,
                                     bool forceRecovery) {
-  if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-    auto promise = Promise<Void>();
-    fdbserver_swift::masterServerSwift(
-        mi,
-        const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
-        const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
-        coordinators,
-        lifetime,
-        forceRecovery,
-        self.getPtr(),
-        /*result=*/promise);
-    Future<Void> f = promise.getFuture();
-    wait(f);
-    return Void();
-  } else {
-    wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-    return Void();
-  }
+	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
+		auto promise = Promise<Void>();
+		fdbserver_swift::masterServerSwift(
+		    mi,
+		    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
+		    const_cast<AsyncVar<Optional<ClusterControllerFullInterface>>*>(ccInterface.getPtr()),
+		    coordinators,
+		    lifetime,
+		    forceRecovery,
+		    self.getPtr(),
+		    /*result=*/promise);
+		Future<Void> f = promise.getFuture();
+		wait(f);
+		return Void();
+	} else {
+		wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
+		return Void();
+	}
 }
 #else
 ACTOR Future<Void> masterServerImpl(MasterInterface mi,
@@ -656,17 +651,17 @@ ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     ServerCoordinators coordinators,
                                     LifetimeToken lifetime,
                                     bool forceRecovery) {
-  wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
-  return Void();
+	wait(masterServerCxx(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
+	return Void();
 }
 #endif
 
 ACTOR Future<Void> masterServer(MasterInterface mi,
-                                      Reference<AsyncVar<ServerDBInfo> const> db,
-                                      Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
-                                      ServerCoordinators coordinators,
-                                      LifetimeToken lifetime,
-                                      bool forceRecovery) {
+                                Reference<AsyncVar<ServerDBInfo> const> db,
+                                Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
+                                ServerCoordinators coordinators,
+                                LifetimeToken lifetime,
+                                bool forceRecovery) {
 
 	state Future<Void> ccTimeout = delay(SERVER_KNOBS->CC_INTERFACE_TIMEOUT);
 	while (!ccInterface->get().present() || db->get().clusterInterface != ccInterface->get().get()) {
@@ -686,14 +681,13 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 	state Reference<MasterData> self(
 	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
 
-  wait(masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
+	wait(masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
 	return Void();
 }
 
-
 TEST_CASE("/fdbserver/MasterServer/FigureVersion/Simple") {
 	ASSERT_EQ(
-      figureVersion(0, 1.0, 0, 1e6, SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
+	    figureVersion(0, 1.0, 0, 1e6, SERVER_KNOBS->MAX_VERSION_RATE_MODIFIER, SERVER_KNOBS->MAX_VERSION_RATE_OFFSET),
 	    1e6);
 	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 100, 0.1, 1e6), 1000110);
 	ASSERT_EQ(figureVersion(1e6, 1.5, 0, 550000, 0.1, 1e6), 1500000);

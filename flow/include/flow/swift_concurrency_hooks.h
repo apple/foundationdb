@@ -238,15 +238,16 @@
 /// A hook to take over global enqueuing.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobal_original)(swift::Job* job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
-SWIFT_CC(swift) void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* job,
-                                                                swift_task_enqueueGlobal_original _Nonnull original);
+SWIFT_CC(swift)
+void (*_Nullable swift_task_enqueueGlobal_hook)(swift::Job* job, swift_task_enqueueGlobal_original _Nonnull original);
 
 /// A hook to take over global enqueuing with delay.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_original)(unsigned long long delay, swift::Job* job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
-SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
-                                                               swift::Job* _Nonnull job,
-                                                               swift_task_enqueueGlobalWithDelay_original original);
+SWIFT_CC(swift)
+void (*swift_task_enqueueGlobalWithDelay_hook)(unsigned long long delay,
+                                               swift::Job* _Nonnull job,
+                                               swift_task_enqueueGlobalWithDelay_original original);
 
 typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(long long sec,
                                                                               long long nsec,
@@ -255,20 +256,20 @@ typedef SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_original)(lo
                                                                               int clock,
                                                                               swift::Job* _Nonnull job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
-SWIFT_CC(swift) void (*swift_task_enqueueGlobalWithDeadline_hook)(
-    long long sec,
-    long long nsec,
-    long long tsec,
-    long long tnsec,
-    int clock,
-    swift::Job* job,
-    swift_task_enqueueGlobalWithDeadline_original original);
+SWIFT_CC(swift)
+void (*swift_task_enqueueGlobalWithDeadline_hook)(long long sec,
+                                                  long long nsec,
+                                                  long long tsec,
+                                                  long long tnsec,
+                                                  int clock,
+                                                  swift::Job* job,
+                                                  swift_task_enqueueGlobalWithDeadline_original original);
 
 /// A hook to take over main executor enqueueing.
 typedef SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_original)(swift::Job* job);
 SWIFT_EXPORT_FROM(swift_Concurrency)
-SWIFT_CC(swift) void (*swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job,
-                                                            swift_task_enqueueMainExecutor_original original);
+SWIFT_CC(swift)
+void (*swift_task_enqueueMainExecutor_hook)(swift::Job* _Nonnull job, swift_task_enqueueMainExecutor_original original);
 
 SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::Job* job, ExecutorRef executor);
 
@@ -281,16 +282,14 @@ SWIFT_EXPORT_FROM(swift_Concurrency) SWIFT_CC(swift) void swift_job_run(swift::J
 void swift_job_run_generic(swift::Job* job);
 
 SWIFT_CC(swift)
-void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
+void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
 SWIFT_CC(swift)
-void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
+void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall)));
 
 inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* _Nonnull net) {
 #ifdef WITH_SWIFT
-  printf("[c++] net        = %p\n", net);
+	printf("[c++] net        = %p\n", net);
 	printf("[c++] g_network  = %p\n", g_network);
 	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
 
@@ -302,17 +301,17 @@ inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* _Nonnull ne
 		printf("[c++][net2] configured: swift_task_enqueueGlobal_hook\n");
 	}
 #else
-  ASSERT(false && "Cannot install Swift Concurrency hooks when building without Swift.");
+	ASSERT(false && "Cannot install Swift Concurrency hooks when building without Swift.");
 #endif
 }
 
 inline void newNet2ThenInstallSwiftConcurrencyHooks() {
 #ifdef WITH_SWIFT
-  auto tls = new TLSConfig();
-  g_network = _swift_newNet2(tls, false, false);
-  installSwiftConcurrencyHooks(/*isSimulator=*/false, g_network);
+	auto tls = new TLSConfig();
+	g_network = _swift_newNet2(tls, false, false);
+	installSwiftConcurrencyHooks(/*isSimulator=*/false, g_network);
 #else
-  ASSERT(false && "Cannot install Swift Concurrency hooks when building without Swift.");
+	ASSERT(false && "Cannot install Swift Concurrency hooks when building without Swift.");
 #endif
 }
 
