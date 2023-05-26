@@ -34,11 +34,16 @@ import (
 // CreateTenant creates a new tenant in the cluster. The tenant name cannot
 // start with the \xff byte.
 func (t Transaction) CreateTenant(name KeyConvertible) error {
+	tenantName := name.FDBKey()
+	if len(tenantName) > 0 && tenantName[0] == '\xFF' {
+		return errTenantNameInvalid
+	}
+
 	if err := t.Options().SetSpecialKeySpaceEnableWrites(); err != nil {
 		return err
 	}
 
-	key := append(Key("\xFF\xFF/management/tenant/map/"), name.FDBKey()...)
+	key := append(Key("\xFF\xFF/management/tenant/map/"), tenantName...)
 
 	exist, err := t.checkTenantExist(key)
 	if err != nil {

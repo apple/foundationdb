@@ -370,6 +370,13 @@ func ExampleOpenWithConnectionString() {
 	// Output:
 }
 
+// Copied from errors.go so that these types aren't public
+var (
+	errTenantNotFound    = fdb.Error{2131}
+	errTenantExists      = fdb.Error{2132}
+	errTenantNameInvalid = fdb.Error{2134}
+)
+
 func TestCreateTenant(t *testing.T) {
 	err := fdb.APIVersion(API_VERSION)
 	if err != nil {
@@ -418,9 +425,7 @@ func TestCreateExistTenant(t *testing.T) {
 
 	// This should fail
 	err = db.CreateTenant(testTenantName)
-	if err == nil {
-		t.Fatal("Tenant was created when already exists")
-	}
+	assertErrorCodeEqual(t, err, errTenantExists)
 }
 
 func TestOpenNotExistTenant(t *testing.T) {
@@ -440,10 +445,7 @@ func TestOpenNotExistTenant(t *testing.T) {
 
 	// this should fail
 	_, err = db.OpenTenant(testTenantName)
-	if err == nil {
-		t.Fatal("Able to open tenant that doesn't exist")
-	}
-
+	assertErrorCodeEqual(t, err, errTenantNotFound)
 }
 
 func inSlice(sl []fdb.Key, t fdb.Key) bool {
@@ -453,6 +455,21 @@ func inSlice(sl []fdb.Key, t fdb.Key) bool {
 		}
 	}
 	return false
+}
+
+func assertErrorCodeEqual(t *testing.T, actual error, expected fdb.Error) {
+	if actual == nil {
+		t.Fatalf("Error is nil when it should be: %v\n", expected.Code)
+	}
+
+	castErr, ok := actual.(fdb.Error)
+	if !ok {
+		t.Fatalf("Error is wrong type %v, expected %v\n", actual, expected)
+	}
+
+	if castErr.Code != expected.Code {
+		t.Fatalf("Error is wrong code, expected %v, actual %v\n", expected.Code, castErr.Code)
+	}
 }
 
 func TestListTenant(t *testing.T) {
@@ -493,4 +510,24 @@ func TestListTenant(t *testing.T) {
 	if !inSlice(ls, testTenantName2) {
 		t.Fatalf("tenant 2 not in slice, %#v", ls)
 	}
+}
+
+func TestInvalidPrefixTenant(t *testing.T) {
+	err := fdb.APIVersion(API_VERSION)
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	// OpenDefault opens the database described by the platform-specific default
+	// cluster file
+	db, err := fdb.OpenDefault()
+	if err != nil {
+		t.Fatalf("Unable to set API version: %v\n", err)
+	}
+
+	var testTenantName = fdb.Key("\xFFtest-invalid-prefix-tenant")
+
+	// this should fail
+	err = db.CreateTenant(testTenantName)
+	assertErrorCodeEqual(t, err, errTenantNameInvalid)
 }
