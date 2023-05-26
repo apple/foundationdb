@@ -419,7 +419,7 @@ func TestCreateExistTenant(t *testing.T) {
 	// This should fail
 	err = db.CreateTenant(testTenantName)
 	if err == nil {
-		t.Fatalf("Tenant was created when already exists")
+		t.Fatal("Tenant was created when already exists")
 	}
 }
 
@@ -441,14 +441,14 @@ func TestOpenNotExistTenant(t *testing.T) {
 	// this should fail
 	_, err = db.OpenTenant(testTenantName)
 	if err == nil {
-		t.Fatalf("Able to open tenant that doesn't exist: %v\n", err)
+		t.Fatal("Able to open tenant that doesn't exist")
 	}
 
 }
 
 func inSlice(sl []fdb.Key, t fdb.Key) bool {
 	for _, s := range sl {
-		if bytes.Compare(s, t) == 0 {
+		if bytes.Equal(s, t) {
 			return true
 		}
 	}
