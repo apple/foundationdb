@@ -900,11 +900,43 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 	return Void();
 }
 
-ACTOR Future<Void> disableConsistencyScanInSim(Database db, Reference<ConsistencyScanMemoryState> memState) {
+ACTOR Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<ConsistencyScanMemoryState> memState) {
+	ASSERT(g_network->isSimulated());
+
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	state ConsistencyScanState cs;
+
+	if (BUGGIFY_WITH_PROB(0.1) && !g_simulator->speedUpSimulation) {
+		TraceEvent("ConsistencyScan_RandomStatClearWaiting", memState->csId).log();
+		wait(delay(deterministicRandom()->randomInt(1, 60)));
+
+		TraceEvent("ConsistencyScan_RandomStatClearing", memState->csId).log();
+		loop {
+			try {
+				SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
+				wait(cs.clearStats(tr));
+				wait(tr->commit());
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		TraceEvent("ConsistencyScan_RandomStatCleared", memState->csId).log();
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> disableConsistencyScanInSim(Database db,
+                                               Reference<ConsistencyScanMemoryState> memState,
+                                               Future<Void> waitBeforeDisable) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state ConsistencyScanState cs;
 	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
+	wait(waitBeforeDisable);
 	// FIXME: also wait until we've done the canary failure
+	// FIXME: sometimes maybe don't wait for scan to stop, just disable it anyway?
 	ASSERT(g_network->isSimulated());
 	loop {
 		if (g_simulator->speedUpSimulation &&
@@ -969,11 +1001,13 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	state Future<Void> core = consistencyScanCore(db, memState, ConsistencyScanState());
 
 	// Enable consistencyScan in simulation
-	// TODO:  Move this to a BehaviorInjection workload once that concept exists.
+	// TODO: Move this to a BehaviorInjection workload once that concept exists.
 	if (g_network->isSimulated()) {
 		wait(enableConsistencyScanInSim(db, csInterf.id()));
 		// even if we don't enable it, if a previous incarnation did, we still need to disable it
-		actors.add(disableConsistencyScanInSim(db, memState));
+		Future<Void> chaosStatsClear = sometimesRandomlyClearStatsInSim(db, memState);
+		actors.add(chaosStatsClear);
+		actors.add(disableConsistencyScanInSim(db, memState, chaosStatsClear));
 	}
 
 	loop {
@@ -1000,6 +1034,20 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 		}
 	}
 }
+
+/*ACTOR Future<Void> consistencyScanStateClearStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
+    // read the keyspaces so the transaction conflicts on write (key-backed properties don't expose conflict ranges, and
+the extra work here is negligible because this is a rare manual command so performance is not a huge concern)
+    wait(success(cs->currentRoundStats().getD(tr)) && success(cs->lifetimeStats().getD(tr)) &&
+success(cs->roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
+
+    // update each of the stats keyspaces to empty
+    cs->currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
+    cs->lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
+    cs->roundStatsHistory().erase(tr, 0, MAX_VERSION);
+
+    return Void();
+}*/
 
 ///////////////////////////////////////////////////////
 // Everything below this line is not relevant to the ConsistencyScan Role anymore.
