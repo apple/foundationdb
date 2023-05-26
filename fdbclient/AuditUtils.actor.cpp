@@ -119,26 +119,28 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 	state std::vector<AuditStorageState> auditStates;
 	state Key readBegin;
 	state Key readEnd;
-	state RangeResult res;
 	state Reverse reverse = newFirst ? Reverse::True : Reverse::False;
-
+	if (num.present() && num.get() == 0) {
+		return auditStates;
+	}
 	loop {
 		try {
 			readBegin = auditKeyRange(auditType).begin;
 			readEnd = auditKeyRange(auditType).end;
 			auditStates.clear();
 			while (true) {
-				res.clear();
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				KeyRangeRef rangeToRead(readBegin, readEnd);
-				if (num.present()) {
-					wait(store(res, tr.getRange(rangeToRead, num.get(), Snapshot::False, reverse)));
-				} else {
-					wait(store(res, tr.getRange(rangeToRead, GetRangeLimits(), Snapshot::False, reverse)));
-				}
+				state RangeResult res = wait(tr.getRange(rangeToRead,
+				                                         num.present() ? GetRangeLimits(num.get()) : GetRangeLimits(),
+				                                         Snapshot::False,
+				                                         reverse));
 				for (int i = 0; i < res.size(); ++i) {
 					auditStates.push_back(decodeAuditStorageState(res[i].value));
+					if (num.present() && auditStates.size() == num.get()) {
+						return auditStates; // since res.more is not reliable when GetRangeLimits is set to 1
+					}
 				}
 				if (!res.more) {
 					break;
