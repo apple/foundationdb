@@ -36,17 +36,17 @@
 
 #define DEBUG_ENCRYPT_KEY_PROXY false
 
-struct EKPHealthStatus {
+struct KMSHealthStatus {
 	constexpr static FileIdentifier file_identifier = 2378149;
 	bool canConnectToKms;
 	bool canConnectToEKP;
 	double lastUpdatedTS;
 
-	EKPHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
-	EKPHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
+	KMSHealthStatus() : canConnectToEKP(false), canConnectToKms(false), lastUpdatedTS(-1) {}
+	KMSHealthStatus(bool canConnectToKms, bool canConnectToEKP, double lastUpdatedTS)
 	  : canConnectToKms(canConnectToKms), canConnectToEKP(canConnectToEKP), lastUpdatedTS(lastUpdatedTS) {}
 
-	bool operator==(const EKPHealthStatus& other) {
+	bool operator==(const KMSHealthStatus& other) {
 		return canConnectToKms == other.canConnectToKms && canConnectToEKP == other.canConnectToEKP;
 	}
 
@@ -134,7 +134,7 @@ struct HaltEncryptKeyProxyRequest {
 
 struct EncryptKeyProxyHealthStatusRequest {
 	constexpr static FileIdentifier file_identifier = 2378139;
-	ReplyPromise<EKPHealthStatus> reply;
+	ReplyPromise<KMSHealthStatus> reply;
 
 	EncryptKeyProxyHealthStatusRequest() {}
 

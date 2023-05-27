@@ -20,9 +20,11 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -2978,6 +2980,24 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 		}
 	}
 }
+
+ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
+	try {
+		if (!db->get().client.encryptKeyProxy.present()) {
+			return KMSHealthStatus{ false, false, now() };
+		}
+		KMSHealthStatus reply = wait(timeoutError(
+		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
+		    FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
+		return reply;
+	} catch (Error& e) {
+		if (e.code() != error_code_timed_out) {
+			throw;
+		}
+		return KMSHealthStatus{ false, false, now() };
+	}
+}
+
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
 ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
                                                            DatabaseConfiguration conf,
@@ -3058,7 +3078,7 @@ ACTOR Future<StatusReply> clusterGetStatus(
 
 		// Get EKP Health
 		if (db->get().client.encryptKeyProxy.present()) {
-			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(db));
+			KMSHealthStatus status = wait(getKMSHealthStatus(db));
 			JsonBuilderObject _statusObj;
 			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
 			statusObj["encryption_at_rest"] = _statusObj;

@@ -26,6 +26,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
@@ -202,12 +203,14 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 	ACTOR Future<Void> simHealthyKms(EncryptKeyProxyTestWorkload* self) {
 		TraceEvent("SimHealthyKmsStart").log();
 		loop {
-			EKPHealthStatus status = wait(GetEncryptCipherKeys<ServerDBInfo>::getEKPHealthStatus(self->dbInfo));
+			KMSHealthStatus status = wait(getKMSHealthStatus(self->dbInfo));
+			TraceEvent("Nim::hereo").detail("Status", status.toString());
 			if (status.canConnectToKms && status.canConnectToEKP) {
 				ASSERT_GE(status.lastUpdatedTS, 0);
 				ASSERT_GE(now(), status.lastUpdatedTS);
 				break;
 			}
+			wait(delay(20.0));
 		}
 		return Void();
 	}
