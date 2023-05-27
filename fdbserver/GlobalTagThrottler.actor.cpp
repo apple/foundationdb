@@ -466,7 +466,7 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
 			bool const traceEnabled = stats.canLog();
-			if (traceEnabled) {
+			if (!traceEnabled) {
 				te.disable();
 			}
 			bool isBusy{ false };
