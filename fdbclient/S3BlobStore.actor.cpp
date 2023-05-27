@@ -21,6 +21,7 @@
 #include "fdbclient/S3BlobStore.h"
 
 #include "flow/IConnection.h"
+#include "flow/NetworkAddress.h"
 #include "md5/md5.h"
 #include "libb64/encode.h"
 #include "fdbclient/sha1/SHA1.h"
@@ -753,6 +754,10 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	}
 	bool isTLS = b->knobs.isTLS();
 	state Reference<IConnection> conn;
+	uint16_t flags = NetworkAddress::FLAG_PUBLIC;
+	if (isTLS) {
+		flags |= NetworkAddress::FLAG_TLS;
+	}
 	if (b->useProxy) {
 		if (isTLS) {
 			Reference<IConnection> _conn =
@@ -761,11 +766,11 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		} else {
 			host = b->proxyHost.get();
 			service = b->proxyPort.get();
-			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, false));
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, flags));
 			conn = _conn;
 		}
 	} else {
-		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
+		wait(store(conn, INetworkConnections::net()->connect(host, service, flags)));
 	}
 	wait(conn->connectHandshake());
 

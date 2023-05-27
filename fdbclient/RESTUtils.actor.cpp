@@ -21,12 +21,16 @@
 #include "fdbclient/RESTUtils.h"
 #include "fdbclient/Knobs.h"
 
+#include "flow/Arena.h"
+#include "flow/NetworkAddress.h"
 #include "flow/flat_buffers.h"
 #include "flow/UnitTest.h"
 #include "flow/IConnection.h"
 
+#include <algorithm>
 #include <boost/algorithm/string.hpp>
 #include <queue>
+#include <regex>
 
 #include "flow/actorcompiler.h" // always the last include
 
@@ -143,8 +147,12 @@ ACTOR Future<RESTConnectionPool::ReusableConnection> connect_impl(Reference<REST
 	ASSERT(poolItr == connectionPool->connectionPoolMap.end() || poolItr->second.empty());
 
 	// No valid connection exists, create a new one
+	uint16_t flags = NetworkAddress::FLAG_PUBLIC;
+	if (isSecure) {
+		flags |= NetworkAddress::FLAG_TLS;
+	}
 	state Reference<IConnection> conn =
-	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, isSecure));
+	    wait(INetworkConnections::net()->connect(connectKey.first, connectKey.second, flags));
 	wait(conn->connectHandshake());
 
 	TraceEvent("RESTTUilCreateNewConn")
@@ -238,15 +246,30 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 			this->reqParameters = t.eat().toString();
 		}
 
-		// hostPort is at least a host or IP address, optionally followed by :portNumber or :serviceName
-		StringRef hRef(hostPort);
-		StringRef h = hRef.eat(":");
-		if (h.size() == 0) {
+		// hostPort is at least a host or IP (IPv6 or IPv4) address, optionally followed by :portNumber or :serviceName
+		std::string hostPortStr = boost::trim_copy(hostPort.toString());
+		size_t hostPortDelimiter = hostPortStr.rfind(":");
+		if (hostPortDelimiter == std::string::npos) {
+			this->host = hostPortStr;
+		} else {
+			this->host = hostPortStr.substr(0, hostPortDelimiter);
+			if (hostPortDelimiter < hostPortStr.size()) {
+				this->service = hostPortStr.substr(hostPortDelimiter + 1);
+			} else {
+				// service is empty
+			}
+		}
+		// URI is allowed to use canonical IPv6 address format representation
+		if (this->host[0] == '[' || this->host[this->host.size() - 1] == ']') {
+			if (this->host[0] != '[' || this->host[this->host.size() - 1] != ']' || this->host.size() <= 2) {
+				throw std::string("malformed IPv6 address");
+			}
+			this->host = this->host.substr(1, this->host.size() - 2);
+		}
+		if (this->host.empty()) {
 			CODE_PROBE(true, "REST URI empty host");
 			throw std::string("host cannot be empty");
 		}
-		this->host = h.toString();
-		this->service = hRef.eat().toString();
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			TraceEvent("RESTUtilParseURI")
@@ -292,12 +315,75 @@ TEST_CASE("/RESTUtils/MissingHost") {
 	return Void();
 }
 
+TEST_CASE("/RESTUtils/InvalidIPv6") {
+	try {
+		std::string uri("https://[]:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+
+	try {
+		std::string uri("https://[abcd::1:2:3:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+
+	try {
+		std::string uri("https://abcd::1:2:3]:/bar");
+		RESTUrl r(uri);
+		ASSERT(false);
+	} catch (Error& e) {
+		if (e.code() != error_code_rest_invalid_uri) {
+			throw e;
+		}
+	}
+	return Void();
+}
+
 TEST_CASE("/RESTUtils/ValidURIWithService") {
 	std::string uri("https://host:80/foo/bar");
 	RESTUrl r(uri);
 	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
 	ASSERT_EQ(r.host.compare("host"), 0);
 	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithCanonicalIPv6AndService") {
+	std::string uri("https://[abcd::1:2:3:4]:80/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("abcd::1:2:3:4"), 0);
+	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithIPv6AndService") {
+	std::string uri("https://abcd::1:2:3:4:80/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("abcd::1:2:3:4"), 0);
+	ASSERT_EQ(r.service.compare("80"), 0);
+	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
+	return Void();
+}
+
+TEST_CASE("/RESTUtils/ValidURIWithEmptyService") {
+	std::string uri("https://host:/foo/bar");
+	RESTUrl r(uri);
+	ASSERT_EQ(r.connType.secure, RESTConnectionType::SECURE_CONNECTION);
+	ASSERT_EQ(r.host.compare("host"), 0);
+	ASSERT(r.service.empty());
 	ASSERT_EQ(r.resource.compare("/foo/bar"), 0);
 	return Void();
 }

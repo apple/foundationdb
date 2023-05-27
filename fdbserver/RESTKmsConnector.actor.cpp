@@ -637,8 +637,11 @@ Future<T> kmsRequestImpl(
 					    .detail("FullUrl", kmsEncryptionFullUrl);
 				}
 
-				Reference<HTTP::IncomingResponse> resp = wait(ctx->restClient.doPost(
-				    kmsEncryptionFullUrl, requestBodyRef.toString(), RESTKmsConnectorUtils::getHTTPHeaders()));
+				HTTP::Headers headers;
+				headers["Content-type"] = RESTKmsConnectorUtils::HTTP_CONTENT_TYPE;
+				headers["Accept"] = RESTKmsConnectorUtils::HTTP_ACCEPT;
+				Reference<HTTP::IncomingResponse> resp =
+				    wait(ctx->restClient.doPost(kmsEncryptionFullUrl, requestBodyRef.toString(), headers));
 				curUrl->nRequests++;
 
 				try {

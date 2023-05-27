@@ -30,13 +30,14 @@ namespace RestSimKms {
 const std::string REST_SIM_KMS_HOSTNAME = "restsimkms";
 const std::string REST_SIM_KMS_SERVICE_PORT = "7860";
 
-const std::string REST_SIM_KMS_VAULT_DISCOVERY_FILE = "simfdb/restSimKmsDiscovery_urls";
+const std::string REST_SIM_KMS_VAULT_DIR = "simkmsvault";
+const std::string REST_SIM_KMS_VAULT_DISCOVERY_FILE = "restSimKmsDiscovery_urls";
 const std::string REST_SIM_KMS_VAULT_TOKEN_NAME = "simKmsValidationToken";
-const std::string REST_SIM_KMS_VAULT_TOKEN_FILE = "simfdb/restSimKmsValidation_tokens";
+const std::string REST_SIM_KMS_VAULT_TOKEN_FILE = "restSimKmsValidation_tokens";
 
-const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "/get-encryption-keys-by-key-ids";
-const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "/get-encryption-keys-by-domain-ids";
-const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "/get-blob-metadata";
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "get-encryption-keys-by-key-ids";
+const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "get-encryption-keys-by-domain-ids";
+const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "get-blob-metadata";
 
 struct VaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<VaultRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
@@ -48,7 +49,7 @@ struct VaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<VaultReques
 };
 
 void cleanupConfig();
-void initConfig();
+void initConfig(const std::string& baseFolder);
 void initDiscoverUrlFile();
 bool isVaultConfigFile(const std::string&);
 

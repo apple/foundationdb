@@ -358,14 +358,14 @@ TEST_CASE("/flow/DNSCacheParsing") {
 
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
-                                                            bool isTLS) {
+                                                            Optional<uint16_t> flags) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = INetworkConnections::pickOneAddress(addresses);
 		    addr.fromHostname = true;
-		    if (isTLS) {
-			    addr.flags = NetworkAddress::FLAG_TLS;
+		    if (flags.present()) {
+			    addr.flags = flags.get();
 		    }
 		    return addr;
 	    });

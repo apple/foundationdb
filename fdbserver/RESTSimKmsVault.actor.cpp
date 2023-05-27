@@ -19,15 +19,19 @@
  */
 
 #include "fdbclient/BlobMetadataUtils.h"
-#include "fdbrpc/simulator.h"
-#include "fdbserver/RESTSimKmsVault.h"
+#include "fdbclient/RESTUtils.h"
 #include "fdbclient/SimKmsVault.h"
+
+#include "fdbclient/SystemData.h"
+#include "fdbrpc/simulator.h"
 #include "fdbrpc/HTTP.h"
+
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RESTKmsConnectorUtils.h"
+#include "fdbserver/RESTSimKmsVault.h"
+
 #include "flow/Arena.h"
 #include "flow/EncryptUtils.h"
-
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
@@ -35,7 +39,9 @@
 #include "flow/Trace.h"
 
 #include <boost/filesystem/operations.hpp>
+#include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <rapidjson/document.h>
@@ -86,8 +92,21 @@ int64_t getExpireInterval(const int64_t refTS, const int64_t defaultTtl) {
 	return (refTS + defaultTtl);
 }
 
-void validateHeaders(const HTTP::Headers& toCompare) {
-	if (toCompare != RESTKmsConnectorUtils::getHTTPHeaders()) {
+void validateRequest(Reference<HTTP::IncomingRequest> request) {
+	if (request->resource.empty()) {
+		TraceEvent(SevError, "RESTSimKmsEmptyResource");
+		throw rest_malformed_response();
+	}
+
+	auto itr = request->data.headers.find("Content-type");
+	if (itr == request->data.headers.end() || itr->second != RESTKmsConnectorUtils::HTTP_CONTENT_TYPE) {
+		TraceEvent(SevError, "RESTSimKmsVaultMalformedHeder").detail("Malformed", "Content-type");
+		throw rest_malformed_response();
+	}
+
+	itr = request->data.headers.find("Accept");
+	if (itr == request->data.headers.end() || itr->second != RESTKmsConnectorUtils::HTTP_ACCEPT) {
+		TraceEvent(SevError, "RESTSimKmsVaultMalformedHeder").detail("Malformed", "Accept");
 		throw rest_malformed_response();
 	}
 }
@@ -422,28 +441,42 @@ namespace RestSimKms {
 
 ACTOR Future<Void> simKmsVaultRequestHandler(Reference<HTTP::IncomingRequest> request,
                                              Reference<HTTP::OutgoingResponse> response) {
-	wait(delay(0));
+	wait(delay(0.0));
+
 	ASSERT_EQ(request->verb, HTTP::HTTP_VERB_POST);
 
-	validateHeaders(request->data.headers);
+	validateRequest(request);
+
+	std::string resource = request->resource[0] == '/' ? request->resource.substr(1) : request->resource;
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTSimKmsVaultReq").detail("Resource", resource).detail("Content", request->data.content);
+	}
 
 	state VaultResponse vaultResponse;
-	if (request->resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE) == 0) {
+	if (resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE) == 0) {
 		vaultResponse = handleFetchKeysByKeyIds(request->data.content);
-	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE) == 0) {
+	} else if (resource.compare(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE) == 0) {
 		vaultResponse = handleFetchKeysByDomainIds(request->data.content);
-	} else if (request->resource.compare(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE) == 0) {
+	} else if (resource.compare(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE) == 0) {
 		vaultResponse = handleFetchBlobMetada(request->data.content);
 	} else {
-		TraceEvent("UnexpectedResource").detail("Resource", request->resource);
+		TraceEvent("RESTSimKmsVaultUnexpectedResource").detail("Resource", resource);
 		throw http_bad_response();
 	}
 
 	response->code = HTTP::HTTP_STATUS_CODE_OK;
-	response->data.headers = request->data.headers;
+	response->data.headers["Content-type"] = RESTKmsConnectorUtils::HTTP_CONTENT_TYPE;
+	response->data.headers["Accept"] = RESTKmsConnectorUtils::HTTP_ACCEPT;
+
 	PacketWriter pw(response->data.content->getWriteBuffer(vaultResponse.buff.size()), nullptr, Unversioned());
 	pw.serializeBytes(vaultResponse.buff.data(), vaultResponse.buff.size());
 	response->data.contentLen = vaultResponse.buff.size();
+
+	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
+		TraceEvent("RESTSimKmsVaultResp")
+		    .detail("ResponseLen", response->data.contentLen)
+		    .detail("Code", response->code);
+	}
 
 	return Void();
 }
@@ -453,26 +486,47 @@ Future<Void> VaultRequestHandler::handleRequest(Reference<HTTP::IncomingRequest>
 	return simKmsVaultRequestHandler(request, response);
 }
 
-void initConfig() {
-	std::ofstream urlFile(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
-	// Files gets written
-	fmt::print("RESTSimKms config file {} created\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+void initConfig(const std::string& baseFolder) {
+	ASSERT(!baseFolder.empty());
 
-	std::ofstream tokenFile(REST_SIM_KMS_VAULT_TOKEN_FILE);
+	std::string vaultDirPath = baseFolder + "/" + REST_SIM_KMS_VAULT_DIR;
+
+	if (!std::filesystem::exists(vaultDirPath)) {
+		if (!std::filesystem::create_directory(vaultDirPath)) {
+			TraceEvent(SevError, "UnableToCreateVaultDir").detail("Path", vaultDirPath);
+			throw operation_failed();
+		}
+		TraceEvent("RESTSimKmsCreateVaultDirCreated").detail("Dir", vaultDirPath);
+	} else {
+		// cleanup vault-dir contents from previous runs
+		for (const auto& entry : std::filesystem::directory_iterator(vaultDirPath)) {
+			std::filesystem::remove(entry.path());
+			TraceEvent("RESTSimKmsVaultRemoveEntry").detail("Dir", vaultDirPath).detail("Entry", entry.path().string());
+		}
+	}
+
+	std::string discoverFilePath = vaultDirPath + "/" + REST_SIM_KMS_VAULT_DISCOVERY_FILE;
+	fmt::print("DiscoveryFilePath {}\n", discoverFilePath);
+	std::ofstream urlFile(discoverFilePath);
+	// Files gets written
+	fmt::print("RESTSimKms config file {} created\n", discoverFilePath);
+
+	std::string tokenFilePath = vaultDirPath + "/" + REST_SIM_KMS_VAULT_TOKEN_FILE;
+	std::ofstream tokenFile(tokenFilePath);
 	tokenFile << "dummy_value";
 	tokenFile.close();
-	fmt::print("RESTSimKms config file {} created\n", REST_SIM_KMS_VAULT_TOKEN_FILE);
+	fmt::print("RESTSimKms config file {} created\n", tokenFilePath);
 
 	std::string detailsStr = REST_SIM_KMS_VAULT_TOKEN_NAME;
-	detailsStr.append(RESTKmsConnectorUtils::TOKEN_NAME_FILE_SEP).append(REST_SIM_KMS_VAULT_TOKEN_FILE);
+	detailsStr.append(RESTKmsConnectorUtils::TOKEN_NAME_FILE_SEP).append(tokenFilePath);
 
 	// Update configurations RESTKmsConnector depends upon
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	g_knobs.setKnob("kms_connector_type", KnobValueRef::create(std::string("RESTKmsConnector")));
 	g_knobs.setKnob("rest_kms_allow_not_secure_connection", KnobValueRef::create(bool{ true }));
 	g_knobs.setKnob("rest_kms_connector_validation_token_details", KnobValueRef::create(std::string(detailsStr)));
-	g_knobs.setKnob("rest_kms_connector_discover_kms_url_file",
-	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_DISCOVERY_FILE)));
+	g_knobs.setKnob("rest_sim_kms_vault_dir", KnobValueRef::create(std::string(vaultDirPath)));
+	g_knobs.setKnob("rest_kms_connector_discover_kms_url_file", KnobValueRef::create(std::string(discoverFilePath)));
 	g_knobs.setKnob("rest_kms_connector_get_encryption_keys_endpoint",
 	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE)));
 	g_knobs.setKnob("rest_kms_connector_get_latest_encryption_keys_endpoint",
@@ -487,13 +541,8 @@ void cleanupConfig() {
 		discoverUrlFileReaper.cancel();
 	}
 
-	if (fileExists(REST_SIM_KMS_VAULT_DISCOVERY_FILE)) {
-		boost::filesystem::remove(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
-		fmt::print("RESTSimKms config file {} removed\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
-	}
-	if (fileExists(REST_SIM_KMS_VAULT_TOKEN_FILE)) {
-		boost::filesystem::remove(REST_SIM_KMS_VAULT_TOKEN_FILE);
-		fmt::print("RESTSimKms config file {} removed\n", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	if (!SERVER_KNOBS->REST_SIM_KMS_VAULT_DIR.empty()) {
+		std::filesystem::remove_all(SERVER_KNOBS->REST_SIM_KMS_VAULT_DIR);
 	}
 }
 
@@ -501,13 +550,14 @@ ACTOR Future<Void> updateDiscoverUrlFile() {
 	state std::vector<NetworkAddress> resolvedNetworkAddresses =
 	    wait(INetworkConnections::net()->resolveTCPEndpoint(REST_SIM_KMS_HOSTNAME, REST_SIM_KMS_SERVICE_PORT));
 
-	std::ofstream urlFile(REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+	std::ofstream urlFile(SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE);
 	if (!urlFile.is_open()) {
-		TraceEvent(SevError, "RESTSimKmsUpdateFileFailed").detail("Path", REST_SIM_KMS_VAULT_DISCOVERY_FILE);
+		TraceEvent(SevError, "RESTSimKmsUpdateFileFailed")
+		    .detail("Path", SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE);
 		throw operation_failed();
 	}
 	for (const auto& address : resolvedNetworkAddresses) {
-		const std::string url = "http://" + address.ip.toString() + ":" + std::to_string(address.port);
+		const std::string url = "http://" + address.toString();
 		urlFile << url << std::endl;
 	}
 	urlFile.close();
@@ -518,7 +568,7 @@ ACTOR Future<Void> updateDiscoverUrlFile() {
 
 ACTOR [[flow_allow_discard]] void initDiscoverUrlFileImpl() {
 	ASSERT(!SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE.empty());
-	ASSERT(fileExists(REST_SIM_KMS_VAULT_DISCOVERY_FILE));
+	ASSERT(fileExists(SERVER_KNOBS->REST_KMS_CONNECTOR_DISCOVER_KMS_URL_FILE));
 
 	wait(updateDiscoverUrlFile());
 
@@ -741,7 +791,8 @@ TEST_CASE("/restSimKmsVault/invalidResource") {
 
 	request->verb = HTTP::HTTP_VERB_POST;
 	request->resource = "/whatever";
-	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
+	request->data.headers["Content-type"] = RESTKmsConnectorUtils::HTTP_CONTENT_TYPE;
+	request->data.headers["Accept"] = RESTKmsConnectorUtils::HTTP_ACCEPT;
 	try {
 		wait(RestSimKms::simKmsVaultRequestHandler(request, response));
 		ASSERT(false);
@@ -757,8 +808,8 @@ TEST_CASE("/restSimKmsVault/invalidHeader") {
 
 	request->verb = HTTP::HTTP_VERB_POST;
 	request->resource = "/whatever";
-	request->data.headers = RESTKmsConnectorUtils::getHTTPHeaders();
-	request->data.headers["Foo"] = "Bar";
+	request->data.headers["Content-type"] = "foo";
+	request->data.headers["Accept"] = RESTKmsConnectorUtils::HTTP_ACCEPT;
 	try {
 		wait(RestSimKms::simKmsVaultRequestHandler(request, response));
 		ASSERT(false);

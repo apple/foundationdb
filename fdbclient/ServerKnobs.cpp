@@ -1199,6 +1199,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
 	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
+	init( REST_SIM_KMS_VAULT_DIR,                                  "");
 
 	init( CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO,                0.5 ); if( randomize && BUGGIFY ) CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO = deterministicRandom()->random01();
 

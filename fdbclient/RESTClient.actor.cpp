@@ -131,6 +131,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		state bool connectionEstablished = false;
 
 		state Reference<HTTP::IncomingResponse> r;
+		state RESTConnectionPool::ReusableConnection rconn;
 
 		try {
 			// Start connecting
@@ -138,8 +139,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			state RESTConnectionPool::ReusableConnection rconn =
-			    wait(timeoutError(frconn, client->knobs.connect_timeout));
+			RESTConnectionPool::ReusableConnection rconn = wait(timeoutError(frconn, client->knobs.connect_timeout));
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
@@ -193,10 +193,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 
 		event.detail("ConnectionEstablished", connectionEstablished);
 
-		if (remoteAddress.present())
-			event.detail("RemoteEndpoint", remoteAddress.get());
-		else
-			event.detail("RemoteHost", url.host);
+		if (remoteAddress.present()) {
+			event.detail("RemoteAddress", remoteAddress.get());
+		} else {
+			std::string remoteAddress = url.host + ":" + url.service;
+			event.detail("RemoteAddress", remoteAddress);
+		}
 
 		event.detail("Verb", verb).detail("Resource", url.resource).detail("ThisTry", thisTry);
 

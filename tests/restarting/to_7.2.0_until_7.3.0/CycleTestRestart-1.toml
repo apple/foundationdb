@@ -5,6 +5,7 @@ disableHostname = true
 encryptModes = ['disabled']
 tenantModes=['disabled']
 simHTTPServerEnabled=false
+simKmsVaultEnabled=false
 
 [[test]]
 testTitle = 'Clogged'

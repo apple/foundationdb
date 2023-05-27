@@ -1136,6 +1136,9 @@ public:
 	void addMockTCPEndpoint(const std::string& host,
 	                        const std::string& service,
 	                        const std::vector<NetworkAddress>& addresses) override {
+		for (const auto& address : addresses) {
+			TraceEvent("AddMockEndpoint").detail("H", host).detail("S", service).detail("Addr", address.toString());
+		}
 		mockDNS.add(host, service, addresses);
 	}
 	void removeMockTCPEndpoint(const std::string& host, const std::string& service) override {
@@ -1149,6 +1152,7 @@ public:
 	                                                       const std::string& service) override {
 		// If a <hostname, vector<NetworkAddress>> pair was injected to mock DNS, use it.
 		Optional<std::vector<NetworkAddress>> mock = mockDNS.find(host, service);
+		TraceEvent("MockDNSFind").detail("H", host).detail("S", service).detail("Present", mock.present());
 		if (mock.present()) {
 			return mock.get();
 		}

@@ -20,6 +20,7 @@
 
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
+#include "flow/NetworkAddress.h"
 #include "flow/Trace.h"
 #include "flow/Util.h"
 #include "flow/serialize.h"

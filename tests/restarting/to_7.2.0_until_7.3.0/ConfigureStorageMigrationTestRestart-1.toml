@@ -6,6 +6,7 @@ encryptModes = ['disabled']
 storageEngineExcludeTypes=[4]
 tenantModes=['disabled']
 simHTTPServerEnabled=false
+simKmsVaultEnabled=false
 
 [[test]]
 testTitle = 'CloggedConfigureDatabaseTest'

@@ -363,6 +363,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "simHTTPServerEnabled") {
 				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "simKmsVaultEnabled") {
+				simKmsVaultEnabled = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "allowDefaultTenant") {
 				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
 			}
@@ -439,6 +442,7 @@ public:
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
 	bool simHTTPServerEnabled = true;
+	bool simKmsVaultEnabled = true;
 
 	bool allowDefaultTenant = true;
 	bool allowCreatingTenants = true;
@@ -518,6 +522,7 @@ public:
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
 		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
+		    .add("simKmsVaultEnabled", &simKmsVaultEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
@@ -2264,12 +2269,12 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	CODE_PROBE(!sslEnabled, "SSL disabled");
 
 	// Use IPv6 25% of the time
-	bool useIPv6 = deterministicRandom()->random01() < 0.25;
+	bool useIPv6 = true; //! testConfig.simKmsVaultEnabled && deterministicRandom()->random01() < 0.25;
 	CODE_PROBE(useIPv6, "Use IPv6");
 	CODE_PROBE(!useIPv6, "Use IPv4");
 
 	// Use hostname 25% of the time, unless it is disabled
-	bool useHostname = !testConfig.disableHostname && deterministicRandom()->random01() < 0.25;
+	bool useHostname = deterministicRandom()->random01() < 0.25;
 	CODE_PROBE(useHostname, "Use hostname");
 	CODE_PROBE(!useHostname, "Use IP address");
 	NetworkAddressFromHostname fromHostname =
@@ -2782,7 +2787,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 
 	try {
 		// systemActors.push_back( startSystemMonitor(dataFolder) );
-		RestSimKms::initConfig();
+		if (testConfig.simKmsVaultEnabled) {
+			RestSimKms::initConfig(dataFolder);
+		}
 		if (rebooting) {
 			wait(timeoutError(restartSimulatedSystem(&systemActors,
 			                                         dataFolder,
@@ -2797,9 +2804,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 			if (restoring) {
 				startingConfiguration = "usable_regions=1"_sr;
 			}
-			wait(g_simulator->registerSimHTTPServer(RestSimKms::REST_SIM_KMS_HOSTNAME,
-			                                        RestSimKms::REST_SIM_KMS_SERVICE_PORT,
-			                                        makeReference<RestSimKms::VaultRequestHandler>()));
+			if (testConfig.simKmsVaultEnabled) {
+				wait(g_simulator->registerSimHTTPServer(RestSimKms::REST_SIM_KMS_HOSTNAME,
+				                                        RestSimKms::REST_SIM_KMS_SERVICE_PORT,
+				                                        makeReference<RestSimKms::VaultRequestHandler>()));
+			}
 		} else {
 			g_expect_full_pointermap = 1;
 			setupSimulatedSystem(&systemActors,
@@ -2812,9 +2821,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 			                     protocolVersion,
 			                     &tenantMode);
 			wait(delay(1.0)); // FIXME: WHY!!!  //wait for machines to boot
-			wait(g_simulator->registerSimHTTPServer(RestSimKms::REST_SIM_KMS_HOSTNAME,
-			                                        RestSimKms::REST_SIM_KMS_SERVICE_PORT,
-			                                        makeReference<RestSimKms::VaultRequestHandler>()));
+			if (testConfig.simKmsVaultEnabled) {
+				wait(g_simulator->registerSimHTTPServer(RestSimKms::REST_SIM_KMS_HOSTNAME,
+				                                        RestSimKms::REST_SIM_KMS_SERVICE_PORT,
+				                                        makeReference<RestSimKms::VaultRequestHandler>()));
+			}
 		}
 
 		// restartSimulatedSystem can adjust some testConfig params related to tenants
@@ -2900,7 +2911,9 @@ ACTOR void setupAndRun(std::string dataFolder,
 	TraceEvent("TracingMissingCodeProbes").log();
 	probe::traceMissedProbes(probe::ExecutionContext::Simulation);
 	TraceEvent("SimulatedSystemDestruct").log();
-	RestSimKms::cleanupConfig();
+	if (testConfig.simKmsVaultEnabled) {
+		RestSimKms::cleanupConfig();
+	}
 	g_simulator->stop();
 	destructed = true;
 	wait(Never());

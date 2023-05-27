@@ -20,6 +20,7 @@
 
 #include "fdbrpc/HTTP.h"
 #include "flow/IRandom.h"
+#include "flow/NetworkAddress.h"
 #include "flow/Trace.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
@@ -101,7 +102,6 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			    .detail("ConnID", conn->getDebugID())
 			    .detail("FromAddress", conn->getPeerAddress());
 		}
-		conn->close();
 	}
 	return Void();
 }
@@ -281,8 +281,9 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostna
 	state Reference<IConnection> conn;
 	loop {
 		try {
+			uint16_t flags = NetworkAddress::FLAG_PUBLIC;
 			if (!conn) {
-				wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
+				wait(store(conn, INetworkConnections::net()->connect(hostname, service, flags)));
 				ASSERT(conn.isValid());
 				wait(conn->connectHandshake());
 			}
