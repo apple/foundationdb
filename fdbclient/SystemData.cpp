@@ -623,6 +623,10 @@ void decodeServerKeysValue(const ValueRef& value,
 	}
 }
 
+bool physicalShardMoveEnabled(const UID& dataMoveId) {
+	return (dataMoveId.second() & 1U);
+}
+
 const KeyRef cacheKeysPrefix = "\xff\x02/cacheKeys/"_sr;
 
 const Key cacheKeysKey(uint16_t idx, const KeyRef& key) {
