@@ -117,7 +117,7 @@ class GlobalTagThrottlerImpl {
 	// Track various statistics per tag, aggregated across all storage servers
 	class PerTagStatistics {
 		Optional<ThrottleApi::TagQuotaValue> quota;
-		Smoother transactionCounter;
+		HoltLinearSmoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
 		double transactionsLastAdded;
