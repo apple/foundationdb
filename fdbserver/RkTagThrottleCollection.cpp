@@ -70,8 +70,8 @@ RkTagThrottleCollection& RkTagThrottleCollection::RkTagThrottleCollection::opera
 double RkTagThrottleCollection::computeTargetTpsRate(double currentBusyness,
                                                      double targetBusyness,
                                                      double requestRate) {
-	ASSERT_GT(currentBusyness, 0);
-
+	ASSERT_GT(currentBusyness, 0.0);
+	ASSERT_LE(currentBusyness, 1.0);
 	if (targetBusyness < 1) {
 		double targetFraction = targetBusyness * (1 - currentBusyness) / ((1 - targetBusyness) * currentBusyness);
 		return requestRate * targetFraction;
@@ -135,7 +135,8 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 		expiration = now() + SERVER_KNOBS->AUTO_TAG_THROTTLE_DURATION;
 	}
 
-	ASSERT(tpsRate.present() && tpsRate.get() >= 0);
+	ASSERT(tpsRate.present());
+	ASSERT_GE(tpsRate.get(), 0);
 
 	throttle.limits.tpsRate = tpsRate.get();
 	throttle.limits.expiration = expiration.get();
