@@ -401,7 +401,7 @@ std::string constructResourcePath(Reference<S3BlobStoreEndpoint> b, std::string 
 		resource += object;
 	}
 
-	return std::move(resource);
+	return resource;
 }
 
 ACTOR Future<bool> bucketExists_impl(Reference<S3BlobStoreEndpoint> b, std::string bucket) {
