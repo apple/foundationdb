@@ -225,7 +225,7 @@ class GlobalTagThrottlerImpl {
 		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE) {
 			return {};
 		} else {
-			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost.get() / transactionRate);
+			return cost.get() / transactionRate;
 		}
 	}
 
