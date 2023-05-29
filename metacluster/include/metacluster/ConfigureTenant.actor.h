@@ -54,6 +54,8 @@ struct ConfigureTenantImpl {
 	// Parameters set in updateManagementCluster
 	MetaclusterTenantMapEntry updatedEntry;
 
+	Optional<metacluster::TenantState> targetTenantState;
+
 	ConfigureTenantImpl(Reference<DB> managementDb,
 	                    TenantName tenantName,
 	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters,
@@ -158,6 +160,17 @@ struct ConfigureTenantImpl {
 			throw tenant_not_found();
 		}
 
+		if (self->targetTenantState.present()) {
+			ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState);
+			if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
+				TraceEvent(SevError, "TenantStateNotError").detail("Tenant", self->tenantName);
+				throw invalid_tenant_state();
+			}
+			self->updatedEntry = tenantEntry.get();
+			self->updatedEntry.tenantState = self->targetTenantState.get();
+			return true;
+		}
+
 		if (tenantEntry.get().tenantState != TenantState::READY &&
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) {
 			CODE_PROBE(true, "Configure tenant in invalid state");
@@ -233,6 +246,11 @@ struct ConfigureTenantImpl {
 			return Void();
 		}
 
+		if (self->updatedEntry.toTenantMapEntry() == tenantEntry) {
+			// No update to write to data cluster, just return.
+			return Void();
+		}
+
 		wait(TenantAPI::configureTenantTransaction(tr, tenantEntry.get(), self->updatedEntry.toTenantMapEntry()));
 		return Void();
 	}
@@ -243,11 +261,17 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry =
 		    wait(tryGetTenantTransaction(tr, self->updatedEntry.id));
 
-		if (!tenantEntry.present() || tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
+		if (!tenantEntry.present() ||
+		    (tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION &&
+		     !self->targetTenantState.present()) ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			CODE_PROBE(!tenantEntry.present(), "Tenant removed while configuring on management cluster");
 			CODE_PROBE(tenantEntry.present(), "Tenant configuration already applied on management cluster");
 			return Void();
+		}
+
+		if (self->targetTenantState.present()) {
+			ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState.get());
 		}
 
 		tenantEntry.get().tenantState = TenantState::READY;
@@ -257,6 +281,29 @@ struct ConfigureTenantImpl {
 	}
 
 	ACTOR static Future<Void> run(ConfigureTenantImpl* self) {
+		// Check whether we are setting tenant state and other properties together.
+		// If so, throw
+		if (self->configurationParameters.size() > 1) {
+			for (const auto& [configKey, configValue] : self->configurationParameters) {
+				if (configKey.compare("tenant_state"_sr) == 0) {
+					TraceEvent(SevError, "SetStateWithOtherProperties").detail("Tenant", self->tenantName);
+					throw invalid_tenant_configuration();
+				}
+			}
+		} else if (self->configurationParameters.size() == 1) {
+			auto configParamIter = self->configurationParameters.begin();
+			const auto& theConfigKey = configParamIter->first;
+			if (theConfigKey.compare("tenant_state"_sr) == 0) {
+				const auto& configValue = configParamIter->second;
+				if (!configValue.present() ||
+				    configValue.get().compare(metacluster::tenantStateToString(metacluster::TenantState::READY)) != 0) {
+					TraceEvent(SevError, "MustSetTenantStateToReady").detail("Tenant", self->tenantName);
+					throw invalid_tenant_configuration();
+				}
+				self->targetTenantState = metacluster::TenantState::READY;
+			}
+		}
+
 		bool configUpdated = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return updateManagementCluster(self, tr); }));
 
