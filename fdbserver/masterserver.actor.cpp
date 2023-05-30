@@ -627,6 +627,9 @@ ACTOR Future<Void> masterServerImpl(MasterInterface mi,
                                     bool forceRecovery) {
 	if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 		auto promise = Promise<Void>();
+		state PromiseStream<Future<Void>> addActor;
+		state Reference<MasterData> self(
+		    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
 		fdbserver_swift::masterServerSwift(
 		    mi,
 		    const_cast<AsyncVar<ServerDBInfo>*>(db.getPtr()),
@@ -677,10 +680,6 @@ ACTOR Future<Void> masterServer(MasterInterface mi,
 
 	state Future<Void> onDBChange = Void();
 	wait(onDBChange);
-	state PromiseStream<Future<Void>> addActor;
-	state Reference<MasterData> self(
-	    new MasterData(db, mi, coordinators, db->get().clusterInterface, ""_sr, addActor, forceRecovery));
-
 	wait(masterServerImpl(mi, db, ccInterface, coordinators, lifetime, forceRecovery));
 	return Void();
 }
