@@ -51,13 +51,16 @@
 #include "flow/FileIdentifier.h"
 #include "flow/WriteOnlySet.h"
 
+#ifdef WITH_SWIFT
 #include <swift/bridging>
 
 // Flow_CheckedContinuation.h depends on this header, so we first parse it
 // without relying on any imported Swift types.
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 #include "SwiftModules/Flow_CheckedContinuation.h"
-#endif
+#endif  /* WITH_SWIFT */
+
+#endif /* WITH_SWIFT */
 
 #include "pthread.h"
 
