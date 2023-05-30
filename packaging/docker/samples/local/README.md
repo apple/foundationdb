@@ -7,7 +7,7 @@ the server process to its host machine.
 
 This depends on having the FoundationDB client installed on your host machine
 to work properly. This can be done using one of the client packages available
-on our [Download](https://www.foundationdb.org/download/) page. The startup
+from our [GitHub Releases](https://github.com/apple/foundationdb/releases). The startup
 scripts included here depend on `fdbcli` from one of those packages, and any
 client that wishes to connect will need a copy of the FoundationDB native client
 in addition to its binding of choice. Both the CLI and the native client
