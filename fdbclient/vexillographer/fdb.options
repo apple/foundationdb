@@ -104,6 +104,8 @@ description is not currently required but encouraged.
     <Option name="TLS_password" code="54"
             paramType="String" paramDescription="key passphrase"
             description="Set the passphrase for encrypted private key. Password should be set before setting the key for the password to be used." />
+    <Option name="TLS_disable_plaintext_connection" code="55"
+            description="Prevent client from connecting to a non-TLS endpoint by throwing network connection failed error." />
     <Option name="disable_multi_version_client_api" code="60"
             description="Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network." />
     <Option name="callbacks_on_external_threads" code="61"

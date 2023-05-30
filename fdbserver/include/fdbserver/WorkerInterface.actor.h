@@ -627,7 +627,7 @@ struct InitializeTLogRequest {
 	int logRouterTags;
 	int txsTags;
 	Version recoveryTransactionVersion;
-	std::vector<Version> oldGenerationStartVersions;
+	std::vector<Version> oldGenerationRecoverAtVersions;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -654,7 +654,7 @@ struct InitializeTLogRequest {
 		           spillType,
 		           txsTags,
 		           recoveryTransactionVersion,
-		           oldGenerationStartVersions);
+		           oldGenerationRecoverAtVersions);
 	}
 };
 

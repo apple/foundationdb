@@ -130,9 +130,9 @@ RelocateData::RelocateData()
 RelocateData::RelocateData(RelocateShard const& rs)
   : parent_range(rs.getParentRange()), keys(rs.keys), priority(rs.priority),
     boundaryPriority(isBoundaryPriority(rs.priority) ? rs.priority : -1),
-    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), startTime(now()),
-    randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()), dataMoveId(rs.dataMoveId),
-    workFactor(0),
+    healthPriority(isHealthPriority(rs.priority) ? rs.priority : -1), reason(rs.reason), dmReason(rs.moveReason),
+    startTime(now()), randomId(rs.traceId.isValid() ? rs.traceId : deterministicRandom()->randomUniqueID()),
+    dataMoveId(rs.dataMoveId), workFactor(0),
     wantsNewServers(isDataMovementForMountainChopper(rs.moveReason) || isDataMovementForValleyFiller(rs.moveReason) ||
                     rs.moveReason == DataMovementReason::SPLIT_SHARD ||
                     rs.moveReason == DataMovementReason::TEAM_REDUNDANT),
@@ -942,7 +942,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 	[[maybe_unused]] int startedHere = 0;
 	double startTime = now();
 	// kick off relocators from items in the queue as need be
-	std::set<RelocateData, std::greater<RelocateData>>::iterator it = combined.begin();
+	auto it = combined.begin();
 	for (; it != combined.end(); it++) {
 		RelocateData rd(*it);
 
@@ -1046,14 +1046,16 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						rrs.dataMoveId =
-						    newDataMoveId(deterministicRandom()->randomUInt64(),
-						                  AssignEmptyRange::False,
-						                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
-						TraceEvent(SevInfo, "DDDataMoveInitiatedWithRandomDestID")
+						const bool enabled =
+						    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
+						                               AssignEmptyRange::False,
+						                               EnablePhysicalShardMove(enabled));
+						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
-						    .detail("Reason", rrs.reason.toString());
+						    .detail("Reason", rrs.reason.toString())
+						    .detail("DataMoveReason", static_cast<int>(rrs.dmReason));
 					}
 				} else {
 					rrs.dataMoveId = anonymousShardId;
@@ -1252,6 +1254,18 @@ void traceRelocateDecision(TraceEvent& ev, const UID& pairId, const RelocateDeci
 		ev.detail("ShardSize", decision.metrics.bytes).detail("ParentShardSize", decision.parentMetrics.get().bytes);
 	}
 }
+
+static int nonOverlappedServerCount(const std::vector<UID>& srcIds, const std::vector<UID>& destIds) {
+	std::unordered_set<UID> srcSet{ srcIds.begin(), srcIds.end() };
+	int count = 0;
+	for (int i = 0; i < destIds.size(); i++) {
+		if (srcSet.count(destIds[i]) == 0) {
+			count++;
+		}
+	}
+	return count;
+}
+
 // This actor relocates the specified keys to a good place.
 // The inFlightActor key range map stores the actor for each RelocateData
 ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
@@ -1620,12 +1634,14 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
-					                              AssignEmptyRange::False,
-					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
-					TraceEvent(SevInfo, "DDDataMoveInitiated")
+					const bool enabled =
+					    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+					rd.dataMoveId = newDataMoveId(
+					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
+					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
-					    .detail("Reason", rd.reason.toString());
+					    .detail("Reason", rd.reason.toString())
+					    .detail("DataMoveReason", static_cast<int>(rd.dmReason));
 					auto inFlightRange = self->inFlight.rangeContaining(rd.keys.begin);
 					inFlightRange.value().dataMoveId = rd.dataMoveId;
 					auto f = self->dataMoves.intersectingRanges(rd.keys);
@@ -1858,6 +1874,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					TraceEvent(relocateShardInterval.end(), distributorId)
 					    .detail("Duration", now() - startTime)
 					    .detail("Result", "Success");
+					TraceEvent("DataMoveStats", distributorId)
+					    .detail("Duration", now() - startTime)
+					    .detail("Bytes", metrics.bytes)
+					    .detail("Rate", static_cast<double>(metrics.bytes) / (now() - startTime))
+					    .detail("DataMoveID", rd.dataMoveId)
+					    .detail("PhysicalShardMove", physicalShardMoveEnabled(rd.dataMoveId));
 					if (now() - startTime > 600) {
 						TraceEvent(SevWarnAlways, "RelocateShardTooLong")
 						    .detail("Duration", now() - startTime)
@@ -1875,8 +1897,12 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						dataTransferComplete.send(rd);
 					}
 
+					// In the case of merge, rd.completeSources would be the intersection set of two source server
+					// lists, while rd.src would be the union set.
+					// FIXME. It is a bit over-estimated here with rd.completeSources.
+					const int nonOverlappingCount = nonOverlappedServerCount(rd.completeSources, destIds);
 					self->bytesWritten += metrics.bytes;
-					self->moveBytesRate.addSample(metrics.bytes);
+					self->moveBytesRate.addSample(metrics.bytes * nonOverlappingCount);
 					self->shardsAffectedByTeamFailure->finishMove(rd.keys);
 					relocationComplete.send(rd);
 
@@ -2280,8 +2306,7 @@ struct DDQueueImpl {
 	ACTOR static Future<Void> run(Reference<DDQueue> self,
 	                              Reference<AsyncVar<bool>> processingUnhealthy,
 	                              Reference<AsyncVar<bool>> processingWiggle,
-	                              FutureStream<Promise<int>> getUnhealthyRelocationCount,
-	                              const DDEnabledState* ddEnabledState) {
+	                              FutureStream<Promise<int>> getUnhealthyRelocationCount) {
 
 		state std::set<UID> serversToLaunchFrom;
 		state KeyRange keysToLaunchFrom;
@@ -2319,10 +2344,10 @@ struct DDQueueImpl {
 				// launched.
 				if (launchData.startTime != -1) {
 					// Launch dataDistributionRelocator actor to relocate the launchData
-					self->launchQueuedWork(launchData, ddEnabledState);
+					self->launchQueuedWork(launchData, self->ddEnabledState);
 					launchData = RelocateData();
 				} else if (!keysToLaunchFrom.empty()) {
-					self->launchQueuedWork(keysToLaunchFrom, ddEnabledState);
+					self->launchQueuedWork(keysToLaunchFrom, self->ddEnabledState);
 					keysToLaunchFrom = KeyRangeRef();
 				}
 
@@ -2333,9 +2358,9 @@ struct DDQueueImpl {
 						if (rs.isRestore()) {
 							ASSERT(rs.dataMove != nullptr);
 							ASSERT(rs.dataMoveId.isValid());
-							self->launchQueuedWork(RelocateData(rs), ddEnabledState);
+							self->launchQueuedWork(RelocateData(rs), self->ddEnabledState);
 						} else if (rs.cancelled) {
-							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, ddEnabledState);
+							self->enqueueCancelledDataMove(rs.dataMoveId, rs.keys, self->ddEnabledState);
 						} else {
 							bool wasEmpty = serversToLaunchFrom.empty();
 							self->queueRelocation(rs, serversToLaunchFrom);
@@ -2344,7 +2369,7 @@ struct DDQueueImpl {
 						}
 					}
 					when(wait(launchQueuedWorkTimeout)) {
-						self->launchQueuedWork(serversToLaunchFrom, ddEnabledState);
+						self->launchQueuedWork(serversToLaunchFrom, self->ddEnabledState);
 						serversToLaunchFrom = std::set<UID>();
 						launchQueuedWorkTimeout = Never();
 					}
@@ -2488,9 +2513,9 @@ Future<Void> DDQueue::run(Reference<DDQueue> self,
                           Reference<AsyncVar<bool>> processingWiggle,
                           FutureStream<Promise<int>> getUnhealthyRelocationCount,
                           const DDEnabledState* ddEnabledState) {
-	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount, ddEnabledState);
+	self->ddEnabledState = ddEnabledState;
+	return DDQueueImpl::run(self, processingUnhealthy, processingWiggle, getUnhealthyRelocationCount);
 }
-
 TEST_CASE("/DataDistribution/DDQueue/ServerCounterTrace") {
 	state double duration = 2.5 * SERVER_KNOBS->DD_QUEUE_COUNTER_REFRESH_INTERVAL;
 	state DDQueue self;

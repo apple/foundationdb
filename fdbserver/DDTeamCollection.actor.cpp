@@ -19,10 +19,13 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbrpc/simulator.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include "flow/network.h"
 #include <climits>
 
 namespace {
@@ -244,18 +247,19 @@ public:
 				}
 				if (customReplicas > self->configuration.storageTeamSize) {
 					auto newTeam = self->buildLargeTeam(customReplicas);
+					auto& firstFailureTime = self->firstLargeTeamFailure[customReplicas];
 					if (newTeam) {
 						if (newTeam->size() < customReplicas) {
-							if (!self->firstLargeTeamFailure.present()) {
-								self->firstLargeTeamFailure = now();
+							if (!firstFailureTime.present()) {
+								firstFailureTime = now();
 							}
-							if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+							if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 								req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 								return Void();
 							}
 							self->underReplication.insert(req.keys.get(), true);
 						} else {
-							self->firstLargeTeamFailure = Optional<double>();
+							firstFailureTime = Optional<double>();
 						}
 						TraceEvent("ReplicatingToLargeTeam", self->distributorId)
 						    .detail("Team", newTeam->getDesc())
@@ -265,10 +269,10 @@ public:
 						req.reply.send(std::make_pair(newTeam, foundSrc));
 						return Void();
 					} else {
-						if (!self->firstLargeTeamFailure.present()) {
-							self->firstLargeTeamFailure = now();
+						if (!firstFailureTime.present()) {
+							firstFailureTime = now();
 						}
-						if (now() - self->firstLargeTeamFailure.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
+						if (now() - firstFailureTime.get() < SERVER_KNOBS->DD_LARGE_TEAM_DELAY) {
 							req.reply.send(std::make_pair(Optional<Reference<IDataDistributionTeam>>(), foundSrc));
 							return Void();
 						}
@@ -276,7 +280,7 @@ public:
 						    .suppressFor(1.0)
 						    .detail("Replicas", customReplicas)
 						    .detail("StorageTeamSize", self->configuration.storageTeamSize)
-						    .detail("LargeTeamDiff", now() - self->firstLargeTeamFailure.get());
+						    .detail("LargeTeamDiff", now() - firstFailureTime.get());
 						self->underReplication.insert(req.keys.get(), true);
 					}
 				}
@@ -1076,8 +1080,11 @@ public:
 		state Future<Void> storageMetadataTracker = self->updateStorageMetadata(server);
 		try {
 			loop {
-				status.isUndesired = !self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get();
-				status.isWrongConfiguration = false;
+				state bool isBm = BlobMigratorInterface::isBlobMigrator(server->getLastKnownInterface().id());
+				status.isUndesired =
+				    (!self->disableFailingLaggingServers.get() && server->ssVersionTooFarBehind.get()) || isBm;
+
+				status.isWrongConfiguration = isBm;
 				status.isWiggling = false;
 				hasWrongDC = !self->isCorrectDC(*server);
 				hasInvalidLocality =
@@ -1229,7 +1236,7 @@ public:
 						    .detail("Server", server->getId())
 						    .detail("Excluded", worstAddr.toString());
 						wait(delay(0.0)); // Do not throw an error while still inside trackExcludedServers
-						while (!ddEnabledState->isDDEnabled()) {
+						while (!ddEnabledState->isEnabled()) {
 							wait(delay(1.0));
 						}
 						if (self->removeFailedServer.canBeSet()) {
@@ -1366,6 +1373,8 @@ public:
 								}
 							}
 							if (addedNewBadTeam && self->badTeamRemover.isReady()) {
+								// TODO: Improve simulation testing to test locality changes. Until then, we
+								// realistically don't expect this code probe to be hit.
 								CODE_PROBE(true, "Server locality change created bad teams", probe::decoration::rare);
 								self->doBuildTeams = true;
 								self->badTeamRemover = removeBadTeams(self);
@@ -1952,7 +1961,12 @@ public:
 	}
 
 	ACTOR static Future<Void> waitPerpetualWiggleDelay(DDTeamCollection* self) {
-		if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
+		if (g_network->isSimulated() && g_simulator->isConsistencyChecked) {
+			// Wiggle can cause consistency check to repeatedly restart. So we want to
+			// slow it down to avoid consistency check timeout.
+			wait(delay(300));
+			return Void();
+		} else if (SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY <= 60.0) {
 			wait(delay(SERVER_KNOBS->PERPETUAL_WIGGLE_DELAY));
 			return Void();
 		}
@@ -2566,7 +2580,6 @@ public:
 						// trigger restartRecruiting again, or the host will become healthy again, in which case we
 						// won't need to recruit on it and it would be counted with Excl1.
 						exclusions.insert(it.first);
-						CODE_PROBE(true, "DD excluding host with many failed storages", probe::decoration::rare);
 						TraceEvent(SevDebug, "DDRecruitExcl3")
 						    .detail("Primary", self->primary)
 						    .detail("Excluding", it.first.toString())

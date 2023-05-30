@@ -161,6 +161,8 @@ Future<Void> SimpleFailureMonitor::onDisconnectOrFailure(Endpoint const& endpoin
 		if (endpoint.token.first() == 0xffffffffffffffff) {
 			// well known endpoint
 			event.suppressFor(5.0);
+		} else {
+			event.suppressFor(0.1);
 		}
 		event.detail("Addr", endpoint.getPrimaryAddress())
 		    .detail("Reason", i == addressStatus.end() || i->second.isFailed() ? "Disconnected" : "EndpointFailed")

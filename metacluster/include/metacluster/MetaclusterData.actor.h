@@ -174,6 +174,7 @@ private:
 			}
 			MetaclusterTenantMapEntry const& entry = self->managementMetadata.tenantData.tenantMap[tenantId];
 			if (renaming) {
+				CODE_PROBE(true, "Loading metacluster data with renaming tenant");
 				ASSERT(entry.tenantState == TenantState::RENAMING || entry.tenantState == TenantState::REMOVING);
 				ASSERT(entry.renameDestination == tenantName);
 			} else {

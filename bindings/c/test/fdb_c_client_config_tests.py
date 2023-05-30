@@ -14,7 +14,7 @@ from threading import Thread
 import time
 from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
 from binary_download import FdbBinaryDownloader
-from local_cluster import LocalCluster, PortProvider
+from local_cluster import LocalCluster, PortProvider, TLSConfig
 from test_util import random_alphanum_string
 
 args = None
@@ -36,6 +36,9 @@ class TestCluster(LocalCluster):
     def __init__(
         self,
         version: str,
+        tls_config: TLSConfig = None,
+        mkcert_binary: str = None,
+        disable_server_side_tls: bool = False,
     ):
         self.client_config_tester_bin = Path(args.client_config_tester_bin).resolve()
         assert self.client_config_tester_bin.exists(), "{} does not exist".format(
@@ -46,7 +49,16 @@ class TestCluster(LocalCluster):
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
+
         self.tmp_dir.mkdir(parents=True)
+        if mkcert_binary:
+            self.mkcert_binary = Path(mkcert_binary).resolve()
+        else:
+            self.mkcert_binary = os.path.join(self.build_dir, "bin", "mkcert")
+        assert Path(self.mkcert_binary).exists(), "{} does not exist".format(
+            self.mkcert_binary
+        )
+
         self.version = version
         super().__init__(
             self.tmp_dir,
@@ -54,6 +66,9 @@ class TestCluster(LocalCluster):
             downloader.binary_path(version, "fdbmonitor"),
             downloader.binary_path(version, "fdbcli"),
             1,
+            tls_config=tls_config,
+            mkcert_binary=self.mkcert_binary,
+            disable_server_side_tls=disable_server_side_tls,
         )
         self.set_env_var("LD_LIBRARY_PATH", downloader.lib_dir(version))
 
@@ -97,6 +112,10 @@ class ClientConfigTest:
         self.status_json = None
 
         # Configuration parameters to be set directly as needed
+        self.tls_client_cert_file = None
+        self.tls_client_key_file = None
+        self.tls_client_ca_file = None
+        self.tls_client_disable_plaintext_connection = None
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -155,7 +174,6 @@ class ClientConfigTest:
         self.test_cluster_file = self.test_dir.joinpath(
             "{}.cluster".format(random_alphanum_string(16))
         )
-        port = self.cluster.port_provider.get_free_port()
         with open(self.test_cluster_file, "w") as file:
             file.write("abcde:fghijk@")
 
@@ -267,6 +285,18 @@ class ClientConfigTest:
         if self.disable_client_bypass:
             cmd_args += ["--network-option-disable_client_bypass", ""]
 
+        if self.tls_client_cert_file:
+            cmd_args += ["--network-option-tls_cert_path", self.tls_client_cert_file]
+
+        if self.tls_client_key_file:
+            cmd_args += ["--network-option-tls_key_path", self.tls_client_key_file]
+
+        if self.tls_client_ca_file:
+            cmd_args += ["--network-option-tls_ca_path", self.tls_client_ca_file]
+
+        if self.tls_client_disable_plaintext_connection:
+            cmd_args += ["--network-option-tls_disable_plaintext_connection", ""]
+
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
 
@@ -337,6 +367,16 @@ class ClientConfigTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.cluster.tear_down()
+
+    def test_disable_plaintext_connection(self):
+        # Local client only; Plaintext connections are disabled in a plaintext cluster; Timeout Expected
+        test = ClientConfigTest(self)
+        test.print_status = True
+        test.tls_client_disable_plaintext_connection = True
+        test.transaction_timeout = 100
+        test.expected_error = 1031  # Timeout
+        test.exec()
+        test.check_healthy_status(False)
 
     def test_local_client_only(self):
         # Local client only
@@ -582,6 +622,78 @@ class ClientConfigSeparateCluster(unittest.TestCase):
         finally:
             self.cluster.tear_down()
 
+    def test_tls_cluster_tls_client(self):
+        # Test connecting successfully to a TLS-enabled cluster
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=TLSConfig())
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = True
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS client
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_tls_cluster_tls_client_plaintext_disabled(self):
+        # Test connecting successfully to a TLS-enabled cluster with plain-text connections
+        # disabled in a TLS-configured client
+        disable_plaintext_connection = True
+        tls_config = TLSConfig(
+            client_disable_plaintext_connection=disable_plaintext_connection
+        )
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=tls_config)
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = disable_plaintext_connection
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client_plaintext_connection_disabled(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS-configured client with plaintext connections disabled
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = True
+            test.transaction_timeout = 100
+            test.expected_error = 1031  # Timeout
+            test.exec()
+        finally:
+            self.cluster.tear_down()
+
 
 # Test client-side tracing
 class ClientTracingTests(unittest.TestCase):
@@ -610,9 +722,9 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
-        prev_ver_trace = self.find_trace_file(
-            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
-        )
+        # prev_ver_trace = self.find_trace_file(
+        #     with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        # )
         # there have been sporadic check failures in the trace check below, so we comment this out for the time being
         # previous release version was likely not flushing trace correctly when network::stop() is called
         # TODO: re-enable this check when we bump up PREV_RELEASE_VERSION to one where there is such a guarantee
@@ -771,7 +883,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description="""
-        Unit tests for running FDB client with different configurations. 
+        Unit tests for running FDB client with different configurations.
         Also accepts python unit tests command line arguments.
         """,
     )

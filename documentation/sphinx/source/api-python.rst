@@ -109,7 +109,7 @@ Opening a database
 After importing the ``fdb`` module and selecting an API version, you probably want to open a :class:`Database` using :func:`open`::
 
     import fdb
-    fdb.api_version(720)
+    fdb.api_version(730)
     db = fdb.open()
 
 .. function:: open( cluster_file=None, event_model=None )
@@ -205,6 +205,10 @@ After importing the ``fdb`` module and selecting an API version, you probably wa
     .. method :: fdb.options.set_tls_password(password)
 
        |option-tls-password|
+
+    .. method :: fdb.options.set_tls_disable_plaintext_connection()
+
+       |option-tls-disable-plaintext-connection|
 
     .. method :: fdb.options.set_disable_local_client()
 

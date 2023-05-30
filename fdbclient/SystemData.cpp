@@ -43,7 +43,7 @@ SystemKey::SystemKey(Key const& k) : Key(k) {
 
 		if (!knownKeys.contains(k)) {
 			for (auto& known : knownKeys) {
-				if (!k.startsWith(known)) {
+				if (k.startsWith(known) || known.startsWith(k)) {
 					TraceEvent(SevError, "SystemKeyPrefixConflict").detail("NewKey", k).detail("ExistingKey", known);
 					UNSTOPPABLE_ASSERT(false);
 				}
@@ -327,26 +327,62 @@ const KeyRange auditKeyRange(const AuditType type) {
 	return prefixRange(wr.toValue());
 }
 
-const Key auditRangePrefixFor(const AuditType type, const UID& auditId) {
+const Key auditRangeBasedProgressPrefixFor(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditRangePrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
-	wr << auditId;
+	wr << bigEndian64(auditId.first());
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
 }
 
-const Key auditServerPrefixFor(const AuditType type, const UID& auditId, const UID& serverId) {
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type, const UID& auditId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const KeyRange auditRangeBasedProgressRangeFor(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditRangePrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const Key auditServerBasedProgressPrefixFor(const AuditType type, const UID& auditId, const UID& serverId) {
 	BinaryWriter wr(Unversioned());
 	wr.serializeBytes(auditServerPrefix);
 	wr << static_cast<uint8_t>(type);
 	wr.serializeBytes("/"_sr);
-	wr << auditId;
+	wr << bigEndian64(auditId.first());
 	wr.serializeBytes("/"_sr);
-	wr << serverId;
+	wr << bigEndian64(serverId.first());
 	wr.serializeBytes("/"_sr);
 	return wr.toValue();
+}
+
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type, const UID& auditId) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditServerPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	wr << bigEndian64(auditId.first());
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
+}
+
+const KeyRange auditServerBasedProgressRangeFor(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditServerPrefix);
+	wr << static_cast<uint8_t>(type);
+	wr.serializeBytes("/"_sr);
+	return prefixRange(wr.toValue());
 }
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState) {
@@ -585,6 +621,10 @@ void decodeServerKeysValue(const ValueRef& value,
 			enablePSM = EnablePhysicalShardMove::True;
 		}
 	}
+}
+
+bool physicalShardMoveEnabled(const UID& dataMoveId) {
+	return (dataMoveId.second() & 1U);
 }
 
 const KeyRef cacheKeysPrefix = "\xff\x02/cacheKeys/"_sr;
@@ -933,8 +973,6 @@ const KeyRef perpetualStorageWiggleStatsPrefix("\xff/storageWiggleStats/"_sr); /
 const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
-
-const KeyRef consistencyScanInfoKey = "\xff/consistencyScanInfo"_sr;
 
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
 const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
@@ -1397,6 +1435,7 @@ const KeyRangeRef configClassKeys("\xff\xff/configClasses/"_sr, "\xff\xff/config
 // Blob Manager + Worker stuff is all \xff\x02 to avoid Transaction State Store
 const KeyRef blobRangeChangeKey = "\xff\x02/blobRangeChange"_sr;
 const KeyRangeRef blobRangeKeys("\xff\x02/blobRange/"_sr, "\xff\x02/blobRange0"_sr);
+const KeyRangeRef blobRangeChangeLogKeys("\xff\x02/blobRangeLog/"_sr, "\xff\x02/blobRangeLog0"_sr);
 const KeyRef blobManagerEpochKey = "\xff\x02/blobManagerEpoch"_sr;
 
 const Value blobManagerEpochValueFor(int64_t epoch) {
@@ -1421,6 +1460,24 @@ bool isBlobRangeActive(const ValueRef& blobRangeValue) {
 	// "1" is active
 	// Support future change where serialized metadata struct is also active
 	return !blobRangeValue.empty() && blobRangeValue != blobRangeInactive;
+}
+
+const Key blobRangeChangeLogReadKeyFor(Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobRangeChangeLog()));
+	wr.serializeBytes(blobRangeChangeLogKeys.begin);
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+
+const Value blobRangeChangeLogValueFor(const Standalone<BlobRangeChangeLogRef>& value) {
+	return ObjectWriter::toValue(value, IncludeVersion(ProtocolVersion::withBlobRangeChangeLog()));
+}
+
+Standalone<BlobRangeChangeLogRef> decodeBlobRangeChangeLogValue(ValueRef const& value) {
+	Standalone<BlobRangeChangeLogRef> result;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(result);
+	return result;
 }
 
 const KeyRangeRef blobGranuleFileKeys("\xff\x02/bgf/"_sr, "\xff\x02/bgf0"_sr);
@@ -1777,65 +1834,6 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(id);
 	return id;
-}
-
-const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
-
-const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreCommandKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreCommandKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreCommandValueFor(BlobRestoreState restoreState) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << restoreState;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value) {
-	Standalone<BlobRestoreState> restoreState;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> restoreState;
-	return restoreState;
-}
-
-const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
-
-const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreArgKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreArgValueFor(BlobRestoreArg args) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << args;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
-	Standalone<BlobRestoreArg> args;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> args;
-	return args;
 }
 
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;

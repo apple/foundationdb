@@ -46,6 +46,7 @@ template <class DB>
 struct CreateTenantImpl {
 	MetaclusterOperationContext<DB> ctx;
 	AssignClusterAutomatically assignClusterAutomatically;
+	IgnoreCapacityLimit ignoreCapacityLimit;
 
 	// Initialization parameters
 	MetaclusterTenantMapEntry tenantEntry;
@@ -55,8 +56,10 @@ struct CreateTenantImpl {
 
 	CreateTenantImpl(Reference<DB> managementDb,
 	                 MetaclusterTenantMapEntry tenantEntry,
-	                 AssignClusterAutomatically assignClusterAutomatically)
-	  : ctx(managementDb), tenantEntry(tenantEntry), assignClusterAutomatically(assignClusterAutomatically) {}
+	                 AssignClusterAutomatically assignClusterAutomatically,
+	                 IgnoreCapacityLimit ignoreCapacityLimit)
+	  : ctx(managementDb), tenantEntry(tenantEntry), assignClusterAutomatically(assignClusterAutomatically),
+	    ignoreCapacityLimit(ignoreCapacityLimit) {}
 
 	ACTOR static Future<ClusterName> checkClusterAvailability(Reference<IDatabase> dataClusterDb,
 	                                                          ClusterName clusterName) {
@@ -86,17 +89,20 @@ struct CreateTenantImpl {
 			    existingEntry.get().tenantState != TenantState::REGISTERING) {
 				// The tenant already exists and is either completely created or has a different
 				// configuration
+				CODE_PROBE(true, "Create tenant that already exists");
 				throw tenant_already_exists();
 			} else if (!self->replaceExistingTenantId.present() ||
 			           self->replaceExistingTenantId.get() != existingEntry.get().id) {
 				// The tenant creation has already started, so resume where we left off
 				if (!self->assignClusterAutomatically &&
 				    existingEntry.get().assignedCluster != self->tenantEntry.assignedCluster) {
+					CODE_PROBE(true, "Resume tenant creation failed due to assigned cluster change");
 					TraceEvent("MetaclusterCreateTenantClusterMismatch")
 					    .detail("Preferred", self->tenantEntry.assignedCluster)
 					    .detail("Actual", existingEntry.get().assignedCluster);
 					throw invalid_tenant_configuration();
 				}
+				CODE_PROBE(true, "Resume tenant creation");
 				self->tenantEntry = existingEntry.get();
 				wait(self->ctx.setCluster(tr, existingEntry.get().assignedCluster));
 				return true;
@@ -104,6 +110,7 @@ struct CreateTenantImpl {
 				// The previous creation is permanently failed, so cleanup the tenant and create it again from
 				// scratch. We don't need to remove it from the tenant name index because we will overwrite the
 				// existing entry later in this transaction.
+				CODE_PROBE(true, "Recreate tenant after permanent failure of previous ID", probe::decoration::rare);
 				metadata::management::tenantMetadata().tenantMap.erase(tr, existingEntry.get().id);
 				metadata::management::tenantMetadata().tenantCount.atomicOp(tr, -1, MutationRef::AddValue);
 				metadata::management::clusterTenantCount().atomicOp(
@@ -121,6 +128,7 @@ struct CreateTenantImpl {
 				    tr, existingEntry.get(), &previousAssignedClusterMetadata));
 			}
 		} else if (self->replaceExistingTenantId.present()) {
+			CODE_PROBE(true, "Tenant removed during creation", probe::decoration::rare);
 			throw tenant_removed();
 		}
 
@@ -140,11 +148,15 @@ struct CreateTenantImpl {
 			if (groupEntry.present()) {
 				if (!self->assignClusterAutomatically &&
 				    groupEntry.get().assignedCluster != self->tenantEntry.assignedCluster) {
+					CODE_PROBE(true, "Attempt to create tenant in group on a different cluster");
 					TraceEvent("MetaclusterCreateTenantGroupClusterMismatch")
 					    .detail("TenantGroupCluster", groupEntry.get().assignedCluster)
 					    .detail("SpecifiedCluster", self->tenantEntry.assignedCluster);
 					throw invalid_tenant_configuration();
 				}
+				CODE_PROBE(self->assignClusterAutomatically, "Create tenant in an existing group with auto-assignment");
+				CODE_PROBE(!self->assignClusterAutomatically,
+				           "Create tenant in an existing group with assigned cluster");
 				return std::make_pair(groupEntry.get().assignedCluster, true);
 			}
 		}
@@ -157,7 +169,8 @@ struct CreateTenantImpl {
 		if (!self->assignClusterAutomatically) {
 			DataClusterMetadata dataClusterMetadata =
 			    wait(getClusterTransaction(tr, self->tenantEntry.assignedCluster));
-			if (!dataClusterMetadata.entry.hasCapacity()) {
+			if (!dataClusterMetadata.entry.hasCapacity() && !self->ignoreCapacityLimit) {
+				CODE_PROBE(true, "Selected cluster has no capacity");
 				throw cluster_no_capacity();
 			}
 			dataClusterNames.push_back(self->tenantEntry.assignedCluster);
@@ -171,6 +184,7 @@ struct CreateTenantImpl {
 			        Snapshot::False,
 			        Reverse::True));
 			if (availableClusters.results.empty()) {
+				CODE_PROBE(true, "Metacluster has no capacity");
 				throw metacluster_no_capacity();
 			}
 			for (auto const& clusterTuple : availableClusters.results) {
@@ -194,9 +208,13 @@ struct CreateTenantImpl {
 		    CLIENT_KNOBS->METACLUSTER_ASSIGNMENT_AVAILABILITY_TIMEOUT));
 
 		if (!clusterAvailabilityCheck.present()) {
+			CODE_PROBE(true, "Data cluster availability check timed out");
 			// If no clusters were available for long enough, then we throw an error and try again
 			throw transaction_too_old();
 		}
+
+		CODE_PROBE(clusterAvailabilityChecks[0].isReady(), "Preferred cluster available");
+		CODE_PROBE(!clusterAvailabilityChecks[0].isReady(), "Preferred cluster not available");
 
 		// Get the first cluster that was available
 		state Optional<ClusterName> chosenCluster;
@@ -205,6 +223,8 @@ struct CreateTenantImpl {
 				chosenCluster = f.get();
 				break;
 			}
+
+			CODE_PROBE(true, "Preferred cluster not available");
 		}
 
 		ASSERT(chosenCluster.present());
@@ -231,6 +251,7 @@ struct CreateTenantImpl {
 		// If the last tenant id is not present fetch the prefix from system keys and make it the prefix for the
 		// next allocated tenant id
 		if (!lastId.present()) {
+			CODE_PROBE(true, "Generating first tenant ID");
 			Optional<int64_t> tenantIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
 			ASSERT(tenantIdPrefix.present());
 			lastId = tenantIdPrefix.get() << 48;
@@ -252,6 +273,7 @@ struct CreateTenantImpl {
 		    metadata::management::clusterTenantCount().getD(tr, self->tenantEntry.assignedCluster, Snapshot::False, 0));
 
 		if (clusterTenantCount > CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER) {
+			CODE_PROBE(true, "Cluster tenant capacity exceeded");
 			throw cluster_no_capacity();
 		}
 
@@ -265,15 +287,20 @@ struct CreateTenantImpl {
 		// If we are part of a tenant group that is assigned to a cluster being removed from the metacluster,
 		// then we fail with an error.
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::REMOVING) {
+			CODE_PROBE(true, "Tenant created in cluster being removed", probe::decoration::rare);
 			throw cluster_removed();
 		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::RESTORING) {
+			CODE_PROBE(true, "Tenant created in cluster being restored", probe::decoration::rare);
 			throw cluster_restoring();
 		}
 
 		ASSERT(self->ctx.dataClusterMetadata.get().entry.clusterState == DataClusterState::READY);
 
-		internal::managementClusterAddTenantToGroup(
-		    tr, self->tenantEntry, &self->ctx.dataClusterMetadata.get(), GroupAlreadyExists(assignment.second));
+		internal::managementClusterAddTenantToGroup(tr,
+		                                            self->tenantEntry,
+		                                            &self->ctx.dataClusterMetadata.get(),
+		                                            GroupAlreadyExists(assignment.second),
+		                                            self->ignoreCapacityLimit);
 
 		return Void();
 	}
@@ -291,6 +318,7 @@ struct CreateTenantImpl {
 		// If the tenant map entry is empty, then we encountered a tombstone indicating that the tenant was
 		// simultaneously removed.
 		if (!dataClusterTenant.first.present()) {
+			CODE_PROBE(true, "Tenant creation encountered tombstone");
 			throw tenant_removed();
 		}
 
@@ -301,6 +329,7 @@ struct CreateTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> managementEntry =
 		    wait(tryGetTenantTransaction(tr, self->tenantEntry.id));
 		if (!managementEntry.present()) {
+			CODE_PROBE(true, "Tenant removed during creation");
 			throw tenant_removed();
 		}
 
@@ -309,13 +338,25 @@ struct CreateTenantImpl {
 			updatedEntry.tenantState = TenantState::READY;
 			metadata::management::tenantMetadata().tenantMap.set(tr, updatedEntry.id, updatedEntry);
 			metadata::management::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
+		} else {
+			CODE_PROBE(true, "Tenant creation already completed");
 		}
 
 		return Void();
 	}
 
 	ACTOR static Future<Void> run(CreateTenantImpl* self) {
+		if (!self->tenantEntry.assignedCluster.empty() && self->assignClusterAutomatically) {
+			CODE_PROBE(true, "Tenant creation invalid assigned cluster configuration", probe::decoration::rare);
+			throw invalid_tenant_configuration();
+		}
+		if (self->assignClusterAutomatically && self->ignoreCapacityLimit) {
+			TraceEvent("MetaclusterCreateTenantIgnoreCapacityAutoAssign").log();
+			CODE_PROBE(true, "Tenant creation ignoring capacity limit with auto-assignment on");
+			throw invalid_tenant_configuration();
+		}
 		if (self->tenantEntry.tenantName.startsWith("\xff"_sr)) {
+			CODE_PROBE(true, "Tenant creation with invalid name");
 			throw invalid_tenant_name();
 		}
 
@@ -352,8 +393,9 @@ struct CreateTenantImpl {
 ACTOR template <class DB>
 Future<Void> createTenant(Reference<DB> db,
                           MetaclusterTenantMapEntry tenantEntry,
-                          AssignClusterAutomatically assignClusterAutomatically) {
-	state internal::CreateTenantImpl<DB> impl(db, tenantEntry, assignClusterAutomatically);
+                          AssignClusterAutomatically assignClusterAutomatically,
+                          IgnoreCapacityLimit ignoreCapacityLimit) {
+	state internal::CreateTenantImpl<DB> impl(db, tenantEntry, assignClusterAutomatically, ignoreCapacityLimit);
 	wait(impl.run());
 	return Void();
 }

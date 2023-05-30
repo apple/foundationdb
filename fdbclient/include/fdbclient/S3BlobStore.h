@@ -320,20 +320,15 @@ public:
 
 	std::string getRegion() const { return region; }
 
-	// Prepend the HTTP request header to the given PacketBuffer, returning the new head of the buffer chain
-	static PacketBuffer* writeRequestHeader(std::string const& request,
-	                                        HTTP::Headers const& headers,
-	                                        PacketBuffer* dest);
-
 	// Do an HTTP request to the Blob Store, read the response.  Handles authentication.
 	// Every blob store interaction should ultimately go through this function
 
-	Future<Reference<HTTP::Response>> doRequest(std::string const& verb,
-	                                            std::string const& resource,
-	                                            const HTTP::Headers& headers,
-	                                            UnsentPacketQueue* pContent,
-	                                            int contentLen,
-	                                            std::set<unsigned int> successCodes);
+	Future<Reference<HTTP::IncomingResponse>> doRequest(std::string const& verb,
+	                                                    std::string const& resource,
+	                                                    const HTTP::Headers& headers,
+	                                                    UnsentPacketQueue* pContent,
+	                                                    int contentLen,
+	                                                    std::set<unsigned int> successCodes);
 
 	struct ObjectInfo {
 		std::string name;

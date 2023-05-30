@@ -110,14 +110,14 @@ abstract class NativeFuture<T> extends CompletableFuture<T> implements AutoClose
 	public boolean cancel(boolean mayInterruptIfRunning) {
 		boolean result = super.cancel(mayInterruptIfRunning);
 		try {
-			rwl.readLock().lock();
+			rwl.writeLock().lock();
 			if(cPtr != 0) {
 				Future_cancel(cPtr);
 			}
 			return result;
 		}
 		finally {
-			rwl.readLock().unlock();
+			rwl.writeLock().unlock();
 		}
 	}
 

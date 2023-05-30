@@ -214,7 +214,7 @@ class GlobalTagThrottlerImpl {
 			result += getCurrentCost(id, tag).orDefault(0);
 		}
 		// FIXME: Disabled due to noisy trace events. Fix the noise and reenabled
-		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", printable(tag)).detail("Cost", result);
+		//TraceEvent("GlobalTagThrottler_GetCurrentCost").detail("Tag", tag).detail("Cost", result);
 
 		return result;
 	}
@@ -231,9 +231,9 @@ class GlobalTagThrottlerImpl {
 			return {};
 		}
 		auto const transactionRate = stats.get().getTransactionRate();
-		// If there is less than GLOBAL_TAG_THROTTLING_MIN_TPS transactions per second, we do not have enough data
+		// If there is less than GLOBAL_TAG_THROTTLING_MIN_RATE transactions per second, we do not have enough data
 		// to accurately compute an average transaction cost.
-		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_TPS) {
+		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE) {
 			return {};
 		} else {
 			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost.get() / transactionRate);
@@ -252,7 +252,7 @@ class GlobalTagThrottlerImpl {
 		auto const transactionRate = stats.get().getTransactionRate();
 		te.detail("TransactionRate", transactionRate);
 		te.detail("Cost", cost);
-		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_TPS) {
+		if (transactionRate < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MIN_RATE) {
 			return {};
 		} else {
 			return std::max(static_cast<double>(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE), cost / transactionRate);
@@ -421,7 +421,7 @@ class GlobalTagThrottlerImpl {
 
 		isBusy = limitingTps.present() && limitingTps.get() < desiredTps;
 
-		te.detail("Tag", printable(tag))
+		te.detail("Tag", tag)
 		    .detail("TargetTps", targetTps)
 		    .detail("AverageTransactionCost", averageTransactionCost)
 		    .detail("LimitingTps", limitingTps)
@@ -447,7 +447,7 @@ public:
 				           "been reached");
 				TraceEvent("GlobalTagThrottler_IgnoringRequests")
 				    .suppressFor(60.0)
-				    .detail("Tag", printable(tag))
+				    .detail("Tag", tag)
 				    .detail("Count", count);
 			} else {
 				tagStatistics[tag].addTransactions(static_cast<double>(count));
@@ -465,7 +465,8 @@ public:
 		for (auto& [tag, stats] : tagStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
-			if (!stats.canLog()) {
+			bool const traceEnabled = stats.canLog();
+			if (traceEnabled) {
 				te.disable();
 			}
 			bool isBusy{ false };
@@ -477,7 +478,9 @@ public:
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
 				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
-				stats.updateLastLogged();
+				if (traceEnabled) {
+					stats.updateLastLogged();
+				}
 			} else {
 				te.disable();
 			}
@@ -531,7 +534,7 @@ public:
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		auto& ssInfo = ssInfos[ss.id];
 		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
-		                                                  SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		                                                  SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
 		ssInfo.zoneId = ss.locality.zoneId();
 
 		auto& tagToThroughputCounters = throughput[ss.id];
