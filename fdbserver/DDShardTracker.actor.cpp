@@ -230,6 +230,7 @@ ACTOR Future<Void> trackShardMetrics(DataDistributionTracker::SafeAccessor self,
 					}
 					bandwidthStatus = newBandwidthStatus;
 
+					++self()->metricsUpdates;
 					DisabledTraceEvent("ShardSizeUpdate", self()->distributorId)
 					    .detail("Keys", keys)
 					    .detail("UpdatedSize", metrics.first.get().bytes)
@@ -1448,8 +1449,10 @@ struct DataDistributionTrackerImpl {
 					req.send(self->getAverageShardBytes());
 				}
 				when(wait(loggingTrigger)) {
-					TraceEvent("DDTrackerStats", self->distributorId)
-					    .detail("Shards", self->shards->size())
+					TraceEvent e("DDTrackerStats", self->distributorId);
+
+					self->counters.logToTraceEvent(e);
+					e.detail("Shards", self->shards->size())
 					    .detail("TotalSizeBytes", self->dbSizeEstimate->get())
 					    .detail("SystemSizeBytes", self->systemSizeEstimate)
 					    .trackLatest(ddTrackerStatsEventHolder->trackingKey);

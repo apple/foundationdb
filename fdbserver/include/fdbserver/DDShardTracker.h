@@ -110,6 +110,9 @@ public:
 
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 
+	CounterCollection counters{ "DDTrackerCounter", distributorId.toString() };
+	Counter metricsUpdates{ "MetricsUpdate", counters };
+
 	DataDistributionTracker() = default;
 
 	~DataDistributionTracker() override;

@@ -11163,6 +11163,7 @@ ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetr
 }
 
 Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	++counters.waitMetrics;
 	return waitMetricsTenantAware_internal(this, req);
 }
 
