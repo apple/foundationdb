@@ -88,20 +88,84 @@ struct WorkerFitnessInfo {
 	  : worker(worker), fitness(fitness), used(used) {}
 };
 
+struct RecruitmentInfo {
+	DatabaseConfiguration configuration;
+	bool recruitSeedServers;
+	int maxOldLogRouters;
+
+	RecruitmentInfo() {}
+	explicit RecruitmentInfo(DatabaseConfiguration const& configuration, bool recruitSeedServers, int maxOldLogRouters)
+	  : configuration(configuration), recruitSeedServers(recruitSeedServers), maxOldLogRouters(maxOldLogRouters) {}
+};
+
+// Stores the interfaces for all the workers required for a functioning
+// transaction subsystem.
+struct WorkerRecruitment {
+	std::vector<WorkerInterface> grvProxies;
+	std::vector<WorkerInterface> commitProxies;
+	std::vector<WorkerInterface> resolvers;
+	std::vector<WorkerInterface> tLogs;
+	std::vector<WorkerInterface> satelliteTLogs;
+	std::vector<WorkerInterface> storageServers;
+	// During recovery, log routers for older generations will be recruited.
+	std::vector<WorkerInterface> oldLogRouters;
+	std::vector<WorkerInterface> backupWorkers;
+	// dcId is where the master is recruited. It prefers to be in
+	// configuration.primaryDcId, but it can be recruited from
+	// configuration.secondaryDc: The dcId will be the secondaryDcId and this
+	// generation's primaryDC in memory is different from
+	// configuration.primaryDcId.
+	Optional<Key> dcId;
+
+	// Satellite fallback mode is automatically enabled when one of two
+	// satellite datacenters become unavailable. In satellite fallback mode,
+	// mutations will only be sent to the single remaining satellite
+	// datacenter.
+	bool satelliteFallback;
+
+	WorkerRecruitment() : satelliteFallback(false) {}
+
+	// TODO(ljoswiak): Implement when refactoring `betterMasterExists`
+	bool operator==(WorkerRecruitment const& rhs) const { return true; }
+	bool operator<(WorkerRecruitment const& rhs) const { return true; }
+};
+
+struct RemoteRecruitmentInfo {
+	DatabaseConfiguration configuration;
+	Optional<Key> dcId;
+	int logRouterCount;
+	std::vector<UID> exclusionWorkerIds;
+	Optional<UID> dbgId;
+
+	RemoteRecruitmentInfo() {}
+	RemoteRecruitmentInfo(DatabaseConfiguration const& configuration,
+	                      Optional<Key> const& dcId,
+	                      int logRouterCount,
+	                      const std::vector<UID>& exclusionWorkerIds)
+	  : configuration(configuration), dcId(dcId), logRouterCount(logRouterCount),
+	    exclusionWorkerIds(exclusionWorkerIds) {}
+};
+
+struct RemoteWorkerRecruitment {
+	std::vector<WorkerInterface> remoteTLogs;
+	std::vector<WorkerInterface> logRouters;
+	Optional<UID> dbgId;
+};
+
 struct RecruitWorkersInfo : ReferenceCounted<RecruitWorkersInfo> {
-	RecruitFromConfigurationRequest req;
-	RecruitFromConfigurationReply rep;
+	RecruitmentInfo req;
+	WorkerRecruitment rep;
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitWorkersInfo(RecruitFromConfigurationRequest const& req) : req(req) {}
+	RecruitWorkersInfo(RecruitmentInfo const& info) : req(info) {}
 };
 
 struct RecruitRemoteWorkersInfo : ReferenceCounted<RecruitRemoteWorkersInfo> {
-	RecruitRemoteFromConfigurationRequest req;
-	RecruitRemoteFromConfigurationReply rep;
+	RemoteRecruitmentInfo req;
+	RemoteWorkerRecruitment rep;
 	AsyncTrigger waitForCompletion;
 	Optional<UID> dbgId;
 
-	RecruitRemoteWorkersInfo(RecruitRemoteFromConfigurationRequest const& req) : req(req) {}
+	RecruitRemoteWorkersInfo(RemoteRecruitmentInfo const& info) : req(info) {}
 };

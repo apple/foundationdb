@@ -1062,22 +1062,22 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitTransactionSu
 		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
 	}
 
-	RecruitFromConfigurationRequest recruitReq(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
-	state RecruitFromConfigurationReply recruits =
-	    wait(self->controllerData->recruiter.findWorkers(self->controllerData, recruitReq, self->dbgid));
+	RecruitmentInfo recruitmentInfo(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
+	state WorkerRecruitment recruitment =
+	    wait(self->controllerData->recruiter.findWorkers(self->controllerData, recruitmentInfo, self->dbgid));
 
 	std::string primaryDcIds, remoteDcIds;
 
 	self->primaryDcId.clear();
 	self->remoteDcIds.clear();
-	if (recruits.dcId.present()) {
-		self->primaryDcId.push_back(recruits.dcId);
+	if (recruitment.dcId.present()) {
+		self->primaryDcId.push_back(recruitment.dcId);
 		if (!primaryDcIds.empty()) {
 			primaryDcIds += ',';
 		}
-		primaryDcIds += printable(recruits.dcId);
+		primaryDcIds += printable(recruitment.dcId);
 		if (self->configuration.regions.size() > 1) {
-			Key remoteDcId = recruits.dcId.get() == self->configuration.regions[0].dcId
+			Key remoteDcId = recruitment.dcId.get() == self->configuration.regions[0].dcId
 			                     ? self->configuration.regions[1].dcId
 			                     : self->configuration.regions[0].dcId;
 			self->remoteDcIds.push_back(remoteDcId);
@@ -1087,25 +1087,25 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitTransactionSu
 			remoteDcIds += printable(remoteDcId);
 		}
 	}
-	self->backupWorkers.swap(recruits.backupWorkers);
+	self->backupWorkers.swap(recruitment.backupWorkers);
 
 	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
 	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
 	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
-	    .detail("CommitProxies", recruits.commitProxies.size())
-	    .detail("GrvProxies", recruits.grvProxies.size())
-	    .detail("TLogs", recruits.tLogs.size())
-	    .detail("Resolvers", recruits.resolvers.size())
-	    .detail("SatelliteTLogs", recruits.satelliteTLogs.size())
-	    .detail("OldLogRouters", recruits.oldLogRouters.size())
-	    .detail("StorageServers", recruits.storageServers.size())
+	    .detail("CommitProxies", recruitment.commitProxies.size())
+	    .detail("GrvProxies", recruitment.grvProxies.size())
+	    .detail("TLogs", recruitment.tLogs.size())
+	    .detail("Resolvers", recruitment.resolvers.size())
+	    .detail("SatelliteTLogs", recruitment.satelliteTLogs.size())
+	    .detail("OldLogRouters", recruitment.oldLogRouters.size())
+	    .detail("StorageServers", recruitment.storageServers.size())
 	    .detail("BackupWorkers", self->backupWorkers.size())
 	    .detail("PrimaryDcIds", primaryDcIds)
 	    .detail("RemoteDcIds", remoteDcIds)
 	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
 
 	state std::vector<Standalone<CommitTransactionRef>> confChanges =
-	    wait(self->controllerData->recruiter.recruitWorkers(self, recruits, seedServers, oldLogSystem));
+	    wait(self->controllerData->recruiter.recruitWorkers(self, recruitment, seedServers, oldLogSystem));
 
 	// Update recovery related information to the newly elected sequencer (master) process.
 	wait(brokenPromiseToNever(
