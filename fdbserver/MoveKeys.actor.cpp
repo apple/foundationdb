@@ -1961,9 +1961,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(waitForAll(actors));
 
 					if (range.end == dataMove.ranges.front().end) {
-						if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
-							wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
-						}
+						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 						tr.clear(dataMoveKeyFor(dataMoveId));
 						complete = true;
 						TraceEvent(sevDm, "FinishMoveShardsDeleteMetaData", dataMoveId)
@@ -2716,9 +2714,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				if (range.end == dataMove.ranges.front().end) {
-					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE) {
-						wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
-					}
+					wait(deleteCheckpoints(&tr, dataMove.checkpoints, dataMoveId));
 					tr.clear(dataMoveKeyFor(dataMoveId));
 					complete = true;
 					TraceEvent(sevDm, "CleanUpDataMoveDeleteMetaData", dataMoveId)
