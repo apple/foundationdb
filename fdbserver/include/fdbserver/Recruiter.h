@@ -47,17 +47,22 @@ class Recruiter {
 	// potentially failed.
 	const double startTime;
 
-	std::vector<Reference<RecruitWorkersInfo>> outstandingRecruitmentRequests;
-	std::vector<Reference<RecruitRemoteWorkersInfo>> outstandingRemoteRecruitmentRequests;
 	std::vector<std::pair<RecruitStorageRequest, double>> outstandingStorageRequests;
 	std::vector<std::pair<RecruitBlobWorkerRequest, double>> outstandingBlobWorkerRequests;
 
 public:
 	explicit Recruiter(UID const& id);
 
-	Future<WorkerRecruitment> findWorkers(ClusterControllerData* clusterControllerData,
-	                                      RecruitmentInfo const& info,
-	                                      Optional<UID> debugId = {});
+	// Returns a recruitment of workers that are suitable to run a complete
+	// transaction subsystem for the given database configuration. If no valid
+	// recruitment is possible, will throw `no_more_servers`. If
+	// `checkGoodRecruitment` is true, will throw an error if the recruitment
+	// is non-ideal.
+	//
+	// Since recruitment may fail, it is up to the caller to retry.
+	WorkerRecruitment findWorkers(ClusterControllerData* clusterControllerData,
+	                              RecruitmentInfo const& info,
+	                              bool checkGoodRecruitment);
 
 	// TODO: The return value is a little funny here - it returns a list of
 	// transactions that need to be run on the new system. I think this should
@@ -82,7 +87,6 @@ public:
 
 	// TODO: Make private eventually
 	void checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData);
-	void checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData);
 	void checkOutstandingStorageRequests(bool gotProcessClasses,
 	                                     std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker);
 	void checkOutstandingBlobWorkerRequests(bool gotProcessClasses,

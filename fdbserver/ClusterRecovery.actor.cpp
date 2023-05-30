@@ -1062,9 +1062,27 @@ ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitTransactionSu
 		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
 	}
 
-	RecruitmentInfo recruitmentInfo(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
-	state WorkerRecruitment recruitment =
-	    wait(self->controllerData->recruiter.findWorkers(self->controllerData, recruitmentInfo, self->dbgid));
+	// TODO(ljoswiak): Remove `RecruitmentInfo` struct, pass values directly to function
+	state RecruitmentInfo recruitmentInfo(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
+	state WorkerRecruitment recruitment;
+
+	loop {
+		try {
+			recruitment = self->controllerData->recruiter.findWorkers(self->controllerData, recruitmentInfo, true);
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
+				// recruitment not good enough, try again
+				TraceEvent("RecruitFromConfigurationRetry", self->controllerData->id)
+				    .error(e)
+				    .detail("GoodRecruitmentTimeReady", self->controllerData->goodRecruitmentTime.isReady());
+			} else {
+				TraceEvent(SevError, "RecruitFromConfigurationError", self->controllerData->id).error(e);
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
 
 	std::string primaryDcIds, remoteDcIds;
 

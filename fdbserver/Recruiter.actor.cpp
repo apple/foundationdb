@@ -1974,11 +1974,8 @@ public:
 			                                          std::max<int>(1, recr.tLogs.size())),
 			    exclusionWorkerIds);
 			remoteRecruitmentInfo.dbgId = clusterRecoveryData->dbgid;
-			state Reference<RecruitRemoteWorkersInfo> recruitWorkersInfo =
-			    makeReference<RecruitRemoteWorkersInfo>(remoteRecruitmentInfo);
-			recruitWorkersInfo->dbgId = clusterRecoveryData->dbgid;
 			Future<RemoteWorkerRecruitment> fRemoteWorkers =
-			    clusterRecruitRemoteFromConfiguration(self, clusterRecoveryData->controllerData, recruitWorkersInfo);
+			    clusterRecruitRemoteFromConfiguration(self, clusterRecoveryData->controllerData, remoteRecruitmentInfo);
 
 			clusterRecoveryData->primaryLocality = clusterRecoveryData->dcId_locality[recr.dcId];
 			clusterRecoveryData->logSystem = Reference<ILogSystem>(); // Cancels the actors in the previous log system.
@@ -2014,29 +2011,17 @@ public:
 	ACTOR static Future<RemoteWorkerRecruitment> clusterRecruitRemoteFromConfiguration(
 	    Recruiter* self,
 	    ClusterControllerData* clusterControllerData,
-	    Reference<RecruitRemoteWorkersInfo> req) {
-		// At the moment this doesn't really need to be an actor (it always completes immediately)
+	    RemoteRecruitmentInfo info) {
 		CODE_PROBE(true, "ClusterController RecruitTLogsRequest Remote");
 		loop {
 			try {
-				auto rep = findRemoteWorkersForConfiguration(self, clusterControllerData, req->req);
-				return rep;
+				return findRemoteWorkersForConfiguration(self, clusterControllerData, info);
 			} catch (Error& e) {
-				if (e.code() == error_code_no_more_servers &&
-				    clusterControllerData->goodRemoteRecruitmentTime.isReady()) {
-					self->outstandingRemoteRecruitmentRequests.push_back(req);
-					TraceEvent(SevWarn, "RecruitRemoteFromConfigurationNotAvailable", clusterControllerData->id)
-					    .error(e);
-					wait(req->waitForCompletion.onTrigger());
-					return req->rep;
-				} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
+				if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
 					// recruitment not good enough, try again
 					TraceEvent("RecruitRemoteFromConfigurationRetry", clusterControllerData->id)
 					    .error(e)
 					    .detail("GoodRecruitmentTimeReady", clusterControllerData->goodRemoteRecruitmentTime.isReady());
-					while (!clusterControllerData->goodRemoteRecruitmentTime.isReady()) {
-						wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-					}
 				} else {
 					TraceEvent(SevError, "RecruitRemoteFromConfigurationError", clusterControllerData->id).error(e);
 					throw;
@@ -2044,50 +2029,6 @@ public:
 			}
 			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 		}
-	}
-
-	ACTOR static Future<Void> clusterRecruitFromConfiguration(Recruiter* self,
-	                                                          ClusterControllerData* clusterControllerData,
-	                                                          Reference<RecruitWorkersInfo> req) {
-		// At the moment this doesn't really need to be an actor (it always completes immediately)
-		CODE_PROBE(true, "ClusterController RecruitTLogsRequest");
-		loop {
-			try {
-				req->rep = findWorkersForConfiguration(self, clusterControllerData, req->req);
-				return Void();
-			} catch (Error& e) {
-				if (e.code() == error_code_no_more_servers && clusterControllerData->goodRecruitmentTime.isReady()) {
-					self->outstandingRecruitmentRequests.push_back(req);
-					TraceEvent(SevWarn, "RecruitFromConfigurationNotAvailable", clusterControllerData->id).error(e);
-					wait(req->waitForCompletion.onTrigger());
-					return Void();
-				} else if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
-					// recruitment not good enough, try again
-					TraceEvent("RecruitFromConfigurationRetry", clusterControllerData->id)
-					    .error(e)
-					    .detail("GoodRecruitmentTimeReady", clusterControllerData->goodRecruitmentTime.isReady());
-					while (!clusterControllerData->goodRecruitmentTime.isReady()) {
-						wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-					}
-				} else {
-					TraceEvent(SevError, "RecruitFromConfigurationError", clusterControllerData->id).error(e);
-					throw;
-				}
-			}
-			wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
-		}
-	}
-
-	ACTOR static Future<WorkerRecruitment> findWorkers(Recruiter* self,
-	                                                   ClusterControllerData* clusterControllerData,
-	                                                   RecruitmentInfo info,
-	                                                   Optional<UID> debugId) {
-		state Reference<RecruitWorkersInfo> recruitWorkersInfo = makeReference<RecruitWorkersInfo>(info);
-		if (debugId.present()) {
-			recruitWorkersInfo->dbgId = debugId.get();
-		}
-		wait(RecruiterImpl::clusterRecruitFromConfiguration(self, clusterControllerData, recruitWorkersInfo));
-		return recruitWorkersInfo->rep;
 	}
 
 	ACTOR static Future<std::vector<Standalone<CommitTransactionRef>>> recruitWorkers(
@@ -2112,10 +2053,10 @@ public:
 
 Recruiter::Recruiter(UID const& id) : id(id), startTime(now()) {}
 
-Future<WorkerRecruitment> Recruiter::findWorkers(ClusterControllerData* clusterControllerData,
-                                                 RecruitmentInfo const& info,
-                                                 Optional<UID> debugId) {
-	return RecruiterImpl::findWorkers(this, clusterControllerData, info, debugId);
+WorkerRecruitment Recruiter::findWorkers(ClusterControllerData* clusterControllerData,
+                                         RecruitmentInfo const& info,
+                                         bool checkGoodRecruitment) {
+	return RecruiterImpl::findWorkersForConfigurationDispatch(this, clusterControllerData, info, checkGoodRecruitment);
 }
 
 Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitWorkers(
@@ -2253,50 +2194,6 @@ void Recruiter::checkRegions(ClusterControllerData* clusterControllerData, const
 	} catch (Error& e) {
 		if (e.code() != error_code_no_more_servers) {
 			throw;
-		}
-	}
-}
-
-void Recruiter::checkOutstandingRecruitmentRequests(ClusterControllerData* clusterControllerData) {
-	for (int i = 0; i < this->outstandingRecruitmentRequests.size(); i++) {
-		Reference<RecruitWorkersInfo> info = this->outstandingRecruitmentRequests[i];
-		try {
-			info->rep = RecruiterImpl::findWorkersForConfiguration(this, clusterControllerData, info->req);
-			if (info->dbgId.present()) {
-				TraceEvent("CheckOutstandingRecruitment", info->dbgId.get())
-				    .detail("Request", info->req.configuration.toString());
-			}
-			info->waitForCompletion.trigger();
-			swapAndPop(&this->outstandingRecruitmentRequests, i--);
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitTLogMatchingSetNotAvailable", this->id).error(e);
-			} else {
-				TraceEvent(SevError, "RecruitTLogsRequestError", this->id).error(e);
-				throw;
-			}
-		}
-	}
-}
-
-void Recruiter::checkOutstandingRemoteRecruitmentRequests(ClusterControllerData const* clusterControllerData) {
-	for (int i = 0; i < this->outstandingRemoteRecruitmentRequests.size(); i++) {
-		Reference<RecruitRemoteWorkersInfo> info = this->outstandingRemoteRecruitmentRequests[i];
-		try {
-			info->rep = RecruiterImpl::findRemoteWorkersForConfiguration(this, clusterControllerData, info->req);
-			if (info->dbgId.present()) {
-				TraceEvent("CheckOutstandingRemoteRecruitment", info->dbgId.get())
-				    .detail("Request", info->req.configuration.toString());
-			}
-			info->waitForCompletion.trigger();
-			swapAndPop(&this->outstandingRemoteRecruitmentRequests, i--);
-		} catch (Error& e) {
-			if (e.code() == error_code_no_more_servers || e.code() == error_code_operation_failed) {
-				TraceEvent(SevWarn, "RecruitRemoteTLogMatchingSetNotAvailable", this->id).error(e);
-			} else {
-				TraceEvent(SevError, "RecruitRemoteTLogsRequestError", this->id).error(e);
-				throw;
-			}
 		}
 	}
 }

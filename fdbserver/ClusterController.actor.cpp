@@ -578,7 +578,6 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			}
 		}
 
-		self->recruiter.checkOutstandingRecruitmentRequests(self);
 		self->recruiter.checkOutstandingStorageRequests(self->gotProcessClasses, self->id_worker);
 
 		if (self->db.blobGranulesEnabled.get()) {
@@ -600,30 +599,12 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 	return Void();
 }
 
-ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
-	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
-		while (!self->goodRemoteRecruitmentTime.isReady()) {
-			wait(self->goodRemoteRecruitmentTime);
-		}
-
-		self->recruiter.checkOutstandingRemoteRecruitmentRequests(self);
-	} catch (Error& e) {
-		if (e.code() != error_code_no_more_servers) {
-			TraceEvent(SevError, "CheckOutstandingError").error(e);
-		}
-	}
-	return Void();
-}
-
 void checkOutstandingRequests(ClusterControllerData* self) {
-	if (self->outstandingRemoteRequestChecker.isReady()) {
-		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
+	if (!self->outstandingRequestChecker.isReady()) {
+		return;
 	}
 
-	if (self->outstandingRequestChecker.isReady()) {
-		self->outstandingRequestChecker = doCheckOutstandingRequests(self);
-	}
+	self->outstandingRequestChecker = doCheckOutstandingRequests(self);
 }
 
 ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
