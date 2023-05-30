@@ -341,8 +341,8 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
 	return true;
 }
-std::string usageMessage = "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>"
-                           "<SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
+std::string usageMessage =
+    "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
@@ -357,9 +357,34 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 
 	return true;
 }
-ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
-ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
-ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {}
+ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() > 6) {
+		fmt::print(usageMessage);
+		return false;
+	}
+	TenantGroupName tenantGroup = tokens[3];
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
+	wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+
+	return true;
+}
+ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	if (tokens.size() > 7) {
+		fmt::print("Usage: tenant move finish <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> <RUN_ID> \n\n");
+		return false;
+	}
+	TenantGroupName tenantGroup = tokens[3];
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
+	UID runId = UID::fromString(tokens[6].toString());
+	wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster, runId));
+
+	return true;
+}
+ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	return true;
+}
 
 ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 6) {
