@@ -1026,7 +1026,9 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
 	}
+
 	void _swiftEnqueue(void* _job) override {
+#ifdef WITH_SWIFT
 		ASSERT(getCurrentProcess());
 		swift::Job* job = (swift::Job*)_job;
 		TaskPriority priority = swift_priority_to_net2(job->getPriority());
@@ -1036,7 +1038,9 @@ public:
 
 		auto t = new PromiseTask(machine, job);
 		taskQueue.addReady(priority, t);
+#endif /* WITH_SWIFT */		
 	}
+
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 

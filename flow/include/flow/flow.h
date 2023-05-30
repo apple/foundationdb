@@ -1009,9 +1009,11 @@ SWIFT_CONFORMS_TO(flow_swift, FlowFutureOps)
 Future {
 public:
 	using Element = T;
+#ifdef WITH_SWIFT
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 	using FlowCallbackForSwiftContinuation = FlowCallbackForSwiftContinuation<T>;
 #endif
+#endif /* WITH_SWIFT */
 
 	T const& get() const { return sav->get(); }
 	T getValue() const { return get(); }

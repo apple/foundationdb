@@ -107,6 +107,7 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 #define SWIFT_CXX_IMPORT_OWNED
 #define SWIFT_SENDABLE
 #define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)
+#define SWIFT_NAME(x)
 
 #if __has_feature(nullability)
 #define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
