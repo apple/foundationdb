@@ -204,7 +204,6 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		TraceEvent("SimHealthyKmsStart").log();
 		loop {
 			KMSHealthStatus status = wait(getKMSHealthStatus(self->dbInfo));
-			TraceEvent("Nim::hereo").detail("Status", status.toString());
 			if (status.canConnectToKms && status.canConnectToEKP) {
 				ASSERT_GE(status.lastUpdatedTS, 0);
 				ASSERT_GE(now(), status.lastUpdatedTS);
