@@ -102,6 +102,7 @@ ACTOR Future<Void> connectionHandler(Reference<HTTP::SimServerContext> server,
 			    .detail("ConnID", conn->getDebugID())
 			    .detail("FromAddress", conn->getPeerAddress());
 		}
+		conn->close();
 	}
 	return Void();
 }
