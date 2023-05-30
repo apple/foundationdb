@@ -18,5 +18,5 @@ EOF
   s.license = 'Apache-2.0'
   s.add_dependency('ffi', '~> 1.1', '>= 1.1.5')
   s.required_ruby_version = '>= 1.9.3'
-  s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://www.foundationdb.org/download/.'
+  s.requirements << 'These bindings require the FoundationDB client. The client can be obtained from https://github.com/apple/foundationdb/releases'
 end
