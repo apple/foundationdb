@@ -83,9 +83,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 	PerfIntCounter crossTenantGetPositive, crossTenantGetNegative, crossTenantCommitPositive, crossTenantCommitNegative,
 	    publicNonTenantRequestPositive, tLogReadNegative, keyLocationLeakNegative, bgLocationLeakNegative,
 	    crossTenantBGLocPositive, crossTenantBGLocNegative, crossTenantBGReqPositive, crossTenantBGReqNegative,
-	    crossTenantBGReadPositive, crossTenantBGReadNegative, crossTenantGetGranulesPositive,
-	    crossTenantGetGranulesNegative, blobbifyNegative, unblobbifyNegative, listBlobNegative, verifyBlobNegative,
-	    flushBlobNegative, purgeBlobNegative;
+	    crossTenantBGStreamPositive, crossTenantBGStreamNegative, crossTenantBGReadPositive, crossTenantBGReadNegative,
+	    crossTenantGetGranulesPositive, crossTenantGetGranulesNegative, blobbifyNegative, unblobbifyNegative,
+	    listBlobNegative, verifyBlobNegative, flushBlobNegative, purgeBlobNegative;
 	std::vector<std::function<Future<Void>(Database cx)>> testFunctions;
 	bool checkBlobGranules, checkBlobManagement;
 
@@ -97,6 +97,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	    keyLocationLeakNegative("KeyLocationLeakNegative"), bgLocationLeakNegative("BGLocationLeakNegative"),
 	    crossTenantBGLocPositive("CrossTenantBGLocPositive"), crossTenantBGLocNegative("CrossTenantBGLocNegative"),
 	    crossTenantBGReqPositive("CrossTenantBGReqPositive"), crossTenantBGReqNegative("CrossTenantBGReqNegative"),
+	    crossTenantBGStreamPositive("CrossTenantBGStreamPositive"),
+	    crossTenantBGStreamNegative("CrossTenantBGStreamNegative"),
 	    crossTenantBGReadPositive("CrossTenantBGReadPositive"), crossTenantBGReadNegative("CrossTenantBGReadNegative"),
 	    crossTenantGetGranulesPositive("CrossTenantGetGranulesPositive"),
 	    crossTenantGetGranulesNegative("CrossTenantGetGranulesNegative"), blobbifyNegative("BlobbifyNegative"),
@@ -139,6 +141,10 @@ struct AuthzSecurityWorkload : TestWorkload {
 			    [this](Database cx) { return testCrossTenantBGRequestDisallowed(this, cx, PositiveTestcase::True); });
 			testFunctions.push_back(
 			    [this](Database cx) { return testCrossTenantBGRequestDisallowed(this, cx, PositiveTestcase::False); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGStreamDisallowed(this, cx, PositiveTestcase::True); });
+			testFunctions.push_back(
+			    [this](Database cx) { return testCrossTenantBGStreamDisallowed(this, cx, PositiveTestcase::False); });
 			testFunctions.push_back(
 			    [this](Database cx) { return testCrossTenantBGReadDisallowed(this, cx, PositiveTestcase::True); });
 			testFunctions.push_back(
@@ -189,6 +195,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		if (checkBlobGranules) {
 			success &= bgLocationLeakNegative.getValue() > 0 && crossTenantBGLocPositive.getValue() > 0 &&
 			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
+			           crossTenantBGStreamNegative.getValue() > 0 && crossTenantBGStreamPositive.getValue() > 0 &&
 			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
 			           crossTenantBGReadNegative.getValue() > 0 && crossTenantGetGranulesPositive.getValue() > 0 &&
 			           crossTenantGetGranulesNegative.getValue() > 0;
@@ -215,6 +222,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 			m.push_back(crossTenantBGLocNegative.getMetric());
 			m.push_back(crossTenantBGReqPositive.getMetric());
 			m.push_back(crossTenantBGReqNegative.getMetric());
+			m.push_back(crossTenantBGStreamPositive.getMetric());
+			m.push_back(crossTenantBGStreamNegative.getMetric());
 			m.push_back(crossTenantBGReadPositive.getMetric());
 			m.push_back(crossTenantBGReadNegative.getMetric());
 			m.push_back(crossTenantGetGranulesPositive.getMetric());
@@ -629,7 +638,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	                                                           Reference<Tenant> tenant,
 	                                                           WipedString locToken,
 	                                                           WipedString reqToken,
-	                                                           Version committedVersion) {
+	                                                           Version committedVersion,
+	                                                           bool doStreamReqInstead = false) {
 		try {
 			ErrorOr<GetBlobGranuleLocationsReply> rep =
 			    wait(getGranuleLocations(self, cx, TenantInfo(tenant->id(), locToken), committedVersion));
@@ -646,11 +656,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 
 			ASSERT(!rep.get().results.empty());
 			ASSERT(!rep.get().bwInterfs.empty());
-			BlobGranuleFileRequest req;
-			req.arena.dependsOn(rep.get().arena);
-			req.keyRange = rep.get().results[locIdx].first;
-			req.tenantInfo = TenantInfo(tenant->id(), reqToken);
-			req.readVersion = committedVersion;
 
 			UID bwId = rep.get().results[locIdx].second;
 			ASSERT(bwId != UID());
@@ -662,14 +667,42 @@ struct AuthzSecurityWorkload : TestWorkload {
 			}
 			ASSERT(bwInterfIdx < rep.get().bwInterfs.size());
 			auto& bwInterf = rep.get().bwInterfs[bwInterfIdx];
-			ErrorOr<BlobGranuleFileReply> fileRep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(req));
-			if (fileRep.isError()) {
-				throw fileRep.getError();
+
+			if (!doStreamReqInstead) {
+				BlobGranuleFileRequest fileReq;
+				fileReq.arena.dependsOn(rep.get().arena);
+				fileReq.keyRange = rep.get().results[locIdx].first;
+				fileReq.tenantInfo = TenantInfo(tenant->id(), reqToken);
+				fileReq.readVersion = committedVersion;
+				ErrorOr<BlobGranuleFileReply> fileRep = wait(bwInterf.blobGranuleFileRequest.tryGetReply(fileReq));
+				if (fileRep.isError()) {
+					throw fileRep.getError();
+				}
+				ASSERT(!fileRep.get().chunks.empty());
+			} else {
+				BlobGranuleMutationStreamRequest streamReq;
+				streamReq.arena.dependsOn(rep.get().arena);
+				streamReq.keyRange = rep.get().results[locIdx].first;
+				streamReq.tenantInfo = TenantInfo(tenant->id(), reqToken);
+				streamReq.beginVersion = committedVersion;
+				streamReq.readVersion = committedVersion;
+				streamReq.replyBatchSize = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+
+				state ReplyPromiseStream<BlobGranuleMutationStreamReply> stream =
+				    bwInterf.mutationStreamRequest.getReplyStream(streamReq);
+				loop {
+					// expect end of stream eventually
+					BlobGranuleMutationStreamReply streamNext = waitNext(stream.getFuture());
+					ASSERT(!streamNext.newDeltas.empty());
+				}
 			}
-			ASSERT(!fileRep.get().chunks.empty());
 
 			return Optional<Error>();
 		} catch (Error& e) {
+			if (e.code() == error_code_end_of_stream) {
+				CODE_PROBE(true, "Authz blob granule stream request successful");
+				return Optional<Error>();
+			}
 			CODE_PROBE(e.code() == error_code_permission_denied,
 			           "Cross tenant blob granule read meets permission_denied");
 			return e;
@@ -756,6 +789,26 @@ struct AuthzSecurityWorkload : TestWorkload {
 		                               committedVersion));
 		checkCrossTenantOutcome(
 		    "BGRequest", self->crossTenantBGReqPositive, self->crossTenantBGReqNegative, outcome, positive);
+		return Void();
+	}
+
+	ACTOR static Future<Void> testCrossTenantBGStreamDisallowed(AuthzSecurityWorkload* self,
+	                                                            Database cx,
+	                                                            PositiveTestcase positive) {
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		state Version committedVersion =
+		    wait(setAndCommitKeyValueAndGetVersion(self, cx, self->tenant, self->signedToken, key, value));
+		Optional<Error> outcome =
+		    wait(tryBlobGranuleRequest(self,
+		                               cx,
+		                               self->tenant,
+		                               self->signedToken,
+		                               positive ? self->signedToken : self->signedTokenAnotherTenant,
+		                               committedVersion,
+		                               true));
+		checkCrossTenantOutcome(
+		    "BGStreamRequest", self->crossTenantBGStreamPositive, self->crossTenantBGStreamNegative, outcome, positive);
 		return Void();
 	}
 
