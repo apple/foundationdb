@@ -1038,7 +1038,7 @@ public:
 
 		auto t = new PromiseTask(machine, job);
 		taskQueue.addReady(priority, t);
-#endif /* WITH_SWIFT */		
+#endif /* WITH_SWIFT */
 	}
 
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {

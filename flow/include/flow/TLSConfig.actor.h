@@ -194,7 +194,7 @@ public:
 	std::string getCertificatePathSync() const;
 	std::string getKeyPathSync() const;
 	std::string getCAPathSync() const;
-	
+
 	bool getDisablePlainTextConnection() const;
 
 #ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP

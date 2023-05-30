@@ -124,5 +124,4 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 
 #endif /* WITH_SWIFT */
 
-
 #endif /* FLOW_SWIFT_SUPPORT_H */
