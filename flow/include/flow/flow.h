@@ -945,6 +945,7 @@ public:
 template <class T>
 class Promise;
 
+#ifdef WITH_SWIFT
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 using flow_swift::FlowCheckedContinuation;
 
@@ -996,7 +997,8 @@ public:
 		// TODO(swift): implement
 	}
 };
-#endif
+#endif /* SWIFT_HIDE_CHECKED_CONTINUATION */
+#endif /* WITH_SWIFT*/
 
 template <class T>
 class
