@@ -36,9 +36,7 @@ public:
 	TaskQueue() : tasksIssued(0), ready(FLOW_KNOBS->READY_QUEUE_RESERVED_SIZE) {}
 
 	// Add a task that is ready to be executed.
-	void addReady(TaskPriority taskId, Task* t) {
-		this->ready.push(OrderedTask(getFIFOPriority(taskId), taskId, t));
-	}
+	void addReady(TaskPriority taskId, Task* t) { this->ready.push(OrderedTask(getFIFOPriority(taskId), taskId, t)); }
 	// Add a task to be executed at a given future time instant (a "timer").
 	void addTimer(double at, TaskPriority taskId, Task* t) {
 		this->timers.push(DelayedTask(at, getFIFOPriority(taskId), taskId, t));

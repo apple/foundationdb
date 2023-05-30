@@ -751,11 +751,11 @@ private:
 };
 
 // FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
-#define SWIFT_CXX_REF_ASYNCVAR   					\
-    __attribute__((swift_attr("import_as_ref")))   	\
-    __attribute__((swift_attr("retain:immortal")))   \
-    __attribute__((swift_attr("release:immortal")))
-// // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates themselfes
+#define SWIFT_CXX_REF_ASYNCVAR                                                                                         \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("release:immortal")))
+// // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates
+// themselfes
 //    __attribute__((swift_attr("retain:addref_AsyncVar")))   \
 //    __attribute__((swift_attr("release:delref_AsyncVar")))
 
@@ -771,7 +771,7 @@ public:
 	}
 
 	V const& get() const { return value; }
-    V getCopy() const __attribute__((swift_attr("import_unsafe"))) { return value; }
+	V getCopy() const __attribute__((swift_attr("import_unsafe"))) { return value; }
 	Future<Void> onChange() const { return nextChange.getFuture(); }
 	void set(V const& v) {
 		if (v != value)

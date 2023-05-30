@@ -35,14 +35,12 @@
 #include "flow/swift_support.h"
 #include "flow/swift_future_support.h"
 
-
 using DBRecoveryCount = uint64_t;
 
 // A concrete type that can be referenced (in the context of Optional<set<Tag>>) in Swift.
 using SetTag = std::set<Tag>;
 using OptionalSetTag = Optional<SetTag>;
 using OptionalInt64 = Optional<int64_t>;
-
 
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
@@ -259,37 +257,34 @@ struct LifetimeToken {
 
 using MAP_UInt64_GetCommitVersionReply = std::map<uint64_t, GetCommitVersionReply>;
 
-inline void eraseReplies(MAP_UInt64_GetCommitVersionReply &replies,
-                         uint64_t untilUpperBound) {
-    replies.erase(replies.begin(),
-                  replies.upper_bound(untilUpperBound));
+inline void eraseReplies(MAP_UInt64_GetCommitVersionReply& replies, uint64_t untilUpperBound) {
+	replies.erase(replies.begin(), replies.upper_bound(untilUpperBound));
 }
 
 // Swift value type interface for Notified.
 template <class T>
 struct NotifiedValue {
-    using ValueType = decltype(std::declval<T>().get());
-    explicit NotifiedValue(ValueType v = 0) : value(std::make_shared<T>(v)) { }
+	using ValueType = decltype(std::declval<T>().get());
+	explicit NotifiedValue(ValueType v = 0) : value(std::make_shared<T>(v)) {}
 
-    [[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(const ValueType& limit) {
-        return value->whenAtLeast(limit);
-    }
+	[[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(const ValueType& limit) {
+		return value->whenAtLeast(limit);
+	}
 
-    [[nodiscard]] ValueType get() const { return value->get(); }
+	[[nodiscard]] ValueType get() const { return value->get(); }
 
-    void set(const ValueType& v) {
-        value->set(v);
-    }
+	void set(const ValueType& v) { value->set(v); }
+
 private:
-    std::shared_ptr<T> value;
+	std::shared_ptr<T> value;
 };
 
 using NotifiedVersionValue = NotifiedValue<NotifiedVersion>;
 using OptionalNotifiedVersionValue = Optional<NotifiedVersion>;
 
 struct CommitProxyVersionReplies {
-  MAP_UInt64_GetCommitVersionReply replies;
-    NotifiedVersion latestRequestNum;
+	MAP_UInt64_GetCommitVersionReply replies;
+	NotifiedVersion latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}

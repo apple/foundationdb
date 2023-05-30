@@ -18,60 +18,60 @@
 // * limitations under the License.
 // */
 //
-//#include <boost/asio.hpp>
-//#include <boost/asio/ssl.hpp>
-//#include <fmt/format.h>
-//#include <algorithm>
-//#include <iostream>
-//#include <cstdio>
-//#include <cstdlib>
-//#include "flow/Arena.h"
-//#include "flow/MkCert.h"
+// #include <boost/asio.hpp>
+// #include <boost/asio/ssl.hpp>
+// #include <fmt/format.h>
+// #include <algorithm>
+// #include <iostream>
+// #include <cstdio>
+// #include <cstdlib>
+// #include "flow/Arena.h"
+// #include "flow/MkCert.h"
 //
-//std::FILE* outp = stdout;
+// std::FILE* outp = stdout;
 //
-//template <class... Args>
-//void log(Args&&... args) {
+// template <class... Args>
+// void log(Args&&... args) {
 //	auto buf = fmt::memory_buffer{};
 //	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
 //	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 //}
 //
-//template <class... Args>
-//void logc(Args&&... args) {
+// template <class... Args>
+// void logc(Args&&... args) {
 //	auto buf = fmt::memory_buffer{};
 //	fmt::format_to(std::back_inserter(buf), "[CLIENT] ");
 //	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
 //	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 //}
 //
-//template <class... Args>
-//void logs(Args&&... args) {
+// template <class... Args>
+// void logs(Args&&... args) {
 //	auto buf = fmt::memory_buffer{};
 //	fmt::format_to(std::back_inserter(buf), "[SERVER] ");
 //	fmt::format_to(std::back_inserter(buf), std::forward<Args>(args)...);
 //	fmt::print(outp, "{}\n", std::string_view(buf.data(), buf.size()));
 //}
 //
-//using namespace boost::asio;
-//using ip::tcp;
+// using namespace boost::asio;
+// using ip::tcp;
 //
-//using ec_type = boost::system::error_code;
+// using ec_type = boost::system::error_code;
 //
-//using socket_type = ssl::stream<tcp::socket&>;
-//using work_guard_type = executor_work_guard<io_context::executor_type>;
+// using socket_type = ssl::stream<tcp::socket&>;
+// using work_guard_type = executor_work_guard<io_context::executor_type>;
 //
-//const_buffer toBuffer(StringRef s) {
+// const_buffer toBuffer(StringRef s) {
 //	ASSERT(!s.empty());
 //	return const_buffer(s.begin(), s.size());
 //}
 //
-//void trustRootCaCert(ssl::context& ctx, StringRef certPem) {
+// void trustRootCaCert(ssl::context& ctx, StringRef certPem) {
 //	if (!certPem.empty())
 //		ctx.add_certificate_authority(const_buffer(certPem.begin(), certPem.size()));
 //}
 //
-//void useChain(ssl::context& ctx, mkcert::CertChainRef chain) {
+// void useChain(ssl::context& ctx, mkcert::CertChainRef chain) {
 //	auto arena = Arena();
 //	auto chainStr = concatCertChain(arena, chain);
 //	if (!chainStr.empty())
@@ -81,7 +81,7 @@
 //		ctx.use_private_key(toBuffer(keyPem), ssl::context::pem);
 //}
 //
-//void initCerts(ssl::context& ctx, mkcert::CertChainRef myChain, StringRef peerRootPem) {
+// void initCerts(ssl::context& ctx, mkcert::CertChainRef myChain, StringRef peerRootPem) {
 //	trustRootCaCert(ctx, peerRootPem);
 //	if (myChain.size() > 1)
 //		myChain.pop_back();
@@ -89,7 +89,7 @@
 //		useChain(ctx, myChain);
 //}
 //
-//void initSslContext(ssl::context& ctx,
+// void initSslContext(ssl::context& ctx,
 //                    mkcert::CertChainRef myChain,
 //                    mkcert::CertChainRef peerChain,
 //                    mkcert::ESide side) {
@@ -99,8 +99,8 @@
 //	initCerts(ctx, myChain, peerChain.empty() ? StringRef() : peerChain.back().certPem);
 //}
 //
-//template <>
-//struct fmt::formatter<tcp::endpoint> {
+// template <>
+// struct fmt::formatter<tcp::endpoint> {
 //	constexpr auto parse(format_parse_context& ctx) -> decltype(ctx.begin()) { return ctx.begin(); }
 //
 //	template <class FormatContext>
@@ -109,7 +109,7 @@
 //	}
 //};
 //
-//void runTlsTest(int serverChainLen, int clientChainLen) {
+// void runTlsTest(int serverChainLen, int clientChainLen) {
 //	log("==== BEGIN TESTCASE ====");
 //	auto clientSsl = ssl::context(ssl::context::tls);
 //	auto serverSsl = ssl::context(ssl::context::tls);
@@ -242,7 +242,7 @@
 //	}
 //}
 //
-//int main() {
+// int main() {
 //	std::pair<int, int> inputs[] = { { 3, 2 }, { 4, 0 }, { -3, 1 }, { 3, -2 },  { -3, 0 },
 //		                             { 0, 0 }, { 0, 1 }, { 1, 3 },  { -1, -3 }, { 1, 0 } };
 //	for (auto input : inputs) {

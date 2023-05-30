@@ -138,7 +138,6 @@ inline INetwork* _swift_newNet2(const TLSConfig* tlsConfig, bool useThreadPool =
 	return newNet2(*tlsConfig, useThreadPool, useMetrics);
 }
 
-
 class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE INetwork {
 public:
 	// This interface abstracts the physical or simulated network, event loop and hardware that FoundationDB is running
@@ -292,9 +291,9 @@ protected:
 
 /// A wrapper for `g_network` value  that lets you access global properties from Swift.
 namespace SwiftGNetwork {
-  inline double timer() {
-    return g_network->timer();
-  }
+inline double timer() {
+	return g_network->timer();
 }
+} // namespace SwiftGNetwork
 
 #endif

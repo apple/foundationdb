@@ -1035,7 +1035,8 @@ public:
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 
-		if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated as infinite
+		if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
+		                     // as infinite
 			return Never();
 
 		PromiseTask* t = new PromiseTask(machine);
@@ -1237,7 +1238,7 @@ public:
 
 	// Starts a new thread, making sure to set any thread local state
 	THREAD_FUNC simStartThread(void* arg) {
-    SimThreadArgs* simArgs = (SimThreadArgs*)arg;
+		SimThreadArgs* simArgs = (SimThreadArgs*)arg;
 		ISimulator::currentProcess = simArgs->currentProcess;
 		simArgs->func(simArgs->arg);
 
@@ -2449,11 +2450,12 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
-    	swift::Job* _Nullable swiftJob = nullptr;
+		swift::Job* _Nullable swiftJob = nullptr;
 
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine), swiftJob(nullptr) {}
 		explicit PromiseTask(ProcessInfo* machine, swift::Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise)
+		  : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
@@ -2462,11 +2464,15 @@ public:
 		} else {
 			this->currentProcess = t.machine;
 			try {
+#ifdef WITH_SWIFT
 				if (t.swiftJob) {
 					swift_job_run(t.swiftJob, ExecutorRef::generic());
 				} else {
 					t.promise.send(Void());
 				}
+#else
+				t.promise.send(Void());
+#endif
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);

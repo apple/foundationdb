@@ -36,11 +36,11 @@ add_compile_options(-DHAVE_OPENSSL)
 ################################################################################
 
 if (WITH_SWIFT)
-  message(DEBUG "Building Swift")
+  message(DEBUG "Building with Swift")
   add_definitions(-DWITH_SWIFT)
   set(WITH_SWIFT ON)
 else()
-  message(DEBUG "Not building Swift")
+  message(DEBUG "Not building with Swift")
   set(WITH_SWIFT OFF)
 endif()
 
