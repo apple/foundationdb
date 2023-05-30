@@ -58,7 +58,7 @@
 // without relying on any imported Swift types.
 #ifndef SWIFT_HIDE_CHECKED_CONTINUTATION
 #include "SwiftModules/Flow_CheckedContinuation.h"
-#endif  /* WITH_SWIFT */
+#endif  /* SWIFT_HIDE_CHECKED_CONTINUATION */
 
 #endif /* WITH_SWIFT */
 
