@@ -210,9 +210,9 @@ public:
 
 	std::string getServerIDsStr() const;
 
-	void addDataInFlightToTeam(int64_t delta) override;
+	void addDataInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override;
 
-	void addReadInFlightToTeam(int64_t delta) override;
+	void addReadInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override;
 
 	int64_t getDataInFlightToTeam() const override;
 

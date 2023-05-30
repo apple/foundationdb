@@ -20,6 +20,7 @@
 
 #include <limits>
 #include <numeric>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -234,15 +235,15 @@ public:
 		return tempServerIDs;
 	}
 
-	void addDataInFlightToTeam(int64_t delta) override {
+	void addDataInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override {
 		for (auto& team : teams) {
-			team->addDataInFlightToTeam(delta);
+			team->addDataInFlightToTeam(delta, src);
 		}
 	}
 
-	void addReadInFlightToTeam(int64_t delta) override {
+	void addReadInFlightToTeam(const int64_t delta, const std::unordered_set<UID>& src) override {
 		for (auto& team : teams) {
-			team->addReadInFlightToTeam(delta);
+			team->addReadInFlightToTeam(delta, src);
 		}
 	}
 
@@ -1665,9 +1666,11 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				self->shardsAffectedByTeamFailure->moveShard(rd.keys, destinationTeams);
 			}
 
-			// FIXME: do not add data in flight to servers that were already in the src.
-			healthyDestinations.addDataInFlightToTeam(+metrics.bytes);
-			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond());
+			// In the case of Merge, using rd.completeSources will be overestimated, while rd.src will be
+			// underestimated when destination team is overlapped with source team.
+			state std::unordered_set<UID> completeSources(rd.completeSources.begin(), rd.completeSources.end());
+			healthyDestinations.addDataInFlightToTeam(+metrics.bytes, completeSources);
+			healthyDestinations.addReadInFlightToTeam(+metrics.readLoadKSecond(), completeSources);
 
 			launchDest(rd, bestTeams, self->destBusymap);
 
@@ -1804,16 +1807,19 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					}
 				}
 
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, completeSources);
 				auto readLoad = metrics.readLoadKSecond();
+				auto& tempCompleteSources = completeSources;
 				// Note: It’s equal to trigger([healthyDestinations, readLoad], which is a value capture of
 				// healthyDestinations. Have to create a reference to healthyDestinations because in ACTOR the state
 				// variable is actually a member variable, I can’t write trigger([healthyDestinations, readLoad]
 				// directly.
 				auto& destinationRef = healthyDestinations;
-				self->noErrorActors.add(
-				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
+				self->noErrorActors.add(trigger(
+				    [destinationRef, readLoad, tempCompleteSources]() mutable {
+					    destinationRef.addReadInFlightToTeam(-readLoad, tempCompleteSources);
+				    },
+				    delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
 				// onFinished.send( rs );
 				if (!error.code()) {
@@ -1866,12 +1872,15 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 				}
 			} else {
 				CODE_PROBE(true, "move to removed server", probe::decoration::rare);
-				healthyDestinations.addDataInFlightToTeam(-metrics.bytes);
+				healthyDestinations.addDataInFlightToTeam(-metrics.bytes, completeSources);
 				auto readLoad = metrics.readLoadKSecond();
 				auto& destinationRef = healthyDestinations;
-				self->noErrorActors.add(
-				    trigger([destinationRef, readLoad]() mutable { destinationRef.addReadInFlightToTeam(-readLoad); },
-				            delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
+				auto& tempCompleteSources = completeSources;
+				self->noErrorActors.add(trigger(
+				    [destinationRef, readLoad, tempCompleteSources]() mutable {
+					    destinationRef.addReadInFlightToTeam(-readLoad, tempCompleteSources);
+				    },
+				    delay(SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL)));
 
 				if (!signalledTransferComplete) {
 					// signalling transferComplete calls completeDest() in complete(), so doing so here would

@@ -21,6 +21,7 @@
 #pragma once
 
 #include "fdbclient/StorageServerInterface.h"
+#include <unordered_set>
 
 struct GetTeamRequest;
 namespace data_distribution {
@@ -58,8 +59,9 @@ struct IDataDistributionTeam {
 	virtual std::vector<StorageServerInterface> getLastKnownServerInterfaces() const = 0;
 	virtual int size() const = 0;
 	virtual std::vector<UID> const& getServerIDs() const = 0;
-	virtual void addDataInFlightToTeam(int64_t delta) = 0;
-	virtual void addReadInFlightToTeam(int64_t delta) = 0;
+	// Do not add data/read in flight to servers that were already in the src
+	virtual void addDataInFlightToTeam(int64_t delta, const std::unordered_set<UID>& src) = 0;
+	virtual void addReadInFlightToTeam(int64_t delta, const std::unordered_set<UID>& src) = 0;
 	virtual int64_t getDataInFlightToTeam() const = 0;
 	virtual int64_t getLoadBytes(bool includeInFlight = true, double inflightPenalty = 1.0) const = 0;
 	virtual int64_t getReadInFlightToTeam() const = 0;
