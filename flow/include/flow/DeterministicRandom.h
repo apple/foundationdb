@@ -31,12 +31,12 @@
 #include <random>
 
 // FIXME: Remove once https://github.com/apple/swift/issues/61620 is fixed.
-#define SWIFT_CXX_REF_DETERMINISTICRANDOM   							\
-    __attribute__((swift_attr("import_as_ref")))   					    \
-    __attribute__((swift_attr("retain:addref_DeterministicRandom")))    \
-    __attribute__((swift_attr("release:delref_DeterministicRandom")))
+#define SWIFT_CXX_REF_DETERMINISTICRANDOM                                                                              \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:addref_DeterministicRandom")))      \
+	__attribute__((swift_attr("release:delref_DeterministicRandom")))
 
-class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRandom, public ReferenceCounted<DeterministicRandom> {
+class SWIFT_CXX_REF_DETERMINISTICRANDOM DeterministicRandom final : public IRandom,
+                                                                    public ReferenceCounted<DeterministicRandom> {
 private:
 	std::mt19937 random;
 	uint64_t next;

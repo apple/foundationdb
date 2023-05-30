@@ -45,24 +45,22 @@ Future<class Void> flow_gNetwork_delay(double seconds, TaskPriority taskID) {
 	return g_network->delay(seconds, taskID);
 }
 
-
 // ==== ----------------------------------------------------------------------------------------------------------------
 // ==== Net2 hooks
 
 SWIFT_CC(swift)
-void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
-                                  void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
+void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swift::Job*) __attribute__((swiftcall))) {
 	// TODO: can't access Net2 since it's incomplete here, would be nicer to not expose API on INetwork I suppose
 	auto net = g_network;
 	ASSERT(net);
 
-//	auto swiftPriority = job->getPriority();
-//	int64_t priority = swift_priority_to_net2(swiftPriority); // default to lowest "Min"
-//
-//	TaskPriority taskID = TaskPriority::DefaultOnMainThread; // FIXME: how to determine
-//
-//	SwiftJobTask* jobTask = new SwiftJobTask(job);
-//	N2::OrderedTask* orderedTask = new N2::OrderedTask(priority, taskID, jobTask);
+	//	auto swiftPriority = job->getPriority();
+	//	int64_t priority = swift_priority_to_net2(swiftPriority); // default to lowest "Min"
+	//
+	//	TaskPriority taskID = TaskPriority::DefaultOnMainThread; // FIXME: how to determine
+	//
+	//	SwiftJobTask* jobTask = new SwiftJobTask(job);
+	//	N2::OrderedTask* orderedTask = new N2::OrderedTask(priority, taskID, jobTask);
 
 	net->_swiftEnqueue(job);
 }
@@ -70,4 +68,3 @@ void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job,
 void swift_job_run_generic(swift::Job* _Nonnull job) {
 	swift_job_run(job, ExecutorRef::generic());
 }
-

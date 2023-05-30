@@ -44,10 +44,10 @@ class Arena;
 //    assertion failures are preferable. This is the main reason we
 //    don't intend to use std::optional directly.
 template <class T>
-class SWIFT_CONFORMS_TO(flow_swift,FlowOptionalProtocol) Optional : public ComposedIdentifier<T, 4> {
+class SWIFT_CONFORMS_TO(flow_swift, FlowOptionalProtocol) Optional : public ComposedIdentifier<T, 4> {
 public:
 	using ValueType = T;
-    using Wrapped = T;
+	using Wrapped = T;
 
 	Optional() = default;
 
