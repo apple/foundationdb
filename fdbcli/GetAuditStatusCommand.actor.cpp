@@ -73,6 +73,17 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		for (const auto& it : res) {
 			printf("Audit result is:\n%s\n", it.toString().c_str());
 		}
+	} else if (tokencmp(tokens[2], "phase")) {
+		AuditPhase phase = stringToAuditPhase(tokens[3].toString());
+		if (phase == AuditPhase::Invalid) {
+			printUsage(tokens[0]);
+			return false;
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, phase));
+		for (const auto& it : res) {
+			printf("Audit result is:\n%s\n", it.toString().c_str());
+		}
 	} else {
 		printUsage(tokens[0]);
 		return false;
@@ -83,10 +94,12 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 
 CommandFactory getAuditStatusFactory(
     "get_audit_status",
-    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard|checkmigration] [id|recent] [ARGs]",
+    CommandHelp("get_audit_status [ha|replica|locationmetadata|ssshard|checkmigration] [id|recent|phase] [ARGs]",
                 "Retrieve audit storage status",
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
+                "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
+                "[running|complete|failed|error]'\n"
                 "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, \n"
                 "and `checkmigration`. If specified, `Count' is how many\n"
                 "rows to audit. If not specified, check all rows in audit.\n"

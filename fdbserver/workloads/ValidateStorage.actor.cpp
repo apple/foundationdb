@@ -198,6 +198,90 @@ struct ValidateStorage : TestWorkload {
 		return auditId;
 	}
 
+	void testStringToAuditPhase() {
+		AuditPhase phase = AuditPhase::Invalid;
+		std::string inputStr = "RUNNING";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Running) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "RUnnING";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Running) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "error";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Error) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "error123";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "123";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		inputStr = "12Failed";
+		phase = stringToAuditPhase(inputStr);
+		if (phase != AuditPhase::Invalid) {
+			TraceEvent(SevError, "TestStringToAuditPhaseError").detail("Input", inputStr);
+		}
+		return;
+	}
+
+	ACTOR Future<Void> testGetAuditState(ValidateStorage* self, Database cx, AuditType type) {
+		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
+		if (res.size() != 1) {
+			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res.size());
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Invalid));
+		if (res.size() != 0) {
+			TraceEvent(SevError, "TestExistingInvalidAudit")
+			    .detail("ActualResSize", res.size())
+			    .detail("InputPhase", AuditPhase::Invalid);
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Running));
+		if (res.size() != 0) {
+			TraceEvent(SevError, "TestExistingRunningAudit")
+			    .detail("ActualResSize", res.size())
+			    .detail("InputPhase", AuditPhase::Running);
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Complete));
+		for (const auto& auditState : res) {
+			if (auditState.getPhase() != AuditPhase::Complete) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Complete);
+			}
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Failed));
+		for (const auto& auditState : res) {
+			if (auditState.getPhase() != AuditPhase::Failed) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Failed);
+			}
+		}
+		std::vector<AuditStorageState> res =
+		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Error));
+		for (const auto& auditState : res) {
+			if (auditState.getPhase() != AuditPhase::Error) {
+				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
+				    .detail("ActualPhase", auditState.getPhase())
+				    .detail("InputPhase", AuditPhase::Error);
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<Void> testAuditStorageForType(ValidateStorage* self, Database cx, AuditType type) {
 		state UID auditIdA = wait(self->auditStorageForType(cx, type, "FirstRun"));
 		state UID auditIdB = wait(self->auditStorageForType(cx, type, "SecondRun"));
@@ -207,10 +291,7 @@ struct ValidateStorage : TestWorkload {
 			    .detail("AuditIDA", auditIdA)
 			    .detail("AuditIDB", auditIdB);
 		}
-		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
-		if (res.size() != 1) {
-			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res.size());
-		}
+		wait(self->testGetAuditState(self, cx, type));
 		return Void();
 	}
 
@@ -231,6 +312,8 @@ struct ValidateStorage : TestWorkload {
 			// NOTE: the value will be reset after consistency check
 			disableConnectionFailures("AuditStorage");
 		}
+
+		self->testStringToAuditPhase();
 
 		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr)));
 		TraceEvent("TestValidateValueVerified");

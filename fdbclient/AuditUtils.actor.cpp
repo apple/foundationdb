@@ -110,11 +110,30 @@ ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID audi
 	return Void();
 }
 
+AuditPhase stringToAuditPhase(std::string auditPhaseStr) {
+	// Convert chars of auditPhaseStr to lower case
+	std::transform(auditPhaseStr.begin(), auditPhaseStr.end(), auditPhaseStr.begin(), [](unsigned char c) {
+		return std::tolower(c);
+	});
+	if (auditPhaseStr == "running") {
+		return AuditPhase::Running;
+	} else if (auditPhaseStr == "complete") {
+		return AuditPhase::Complete;
+	} else if (auditPhaseStr == "failed") {
+		return AuditPhase::Failed;
+	} else if (auditPhaseStr == "error") {
+		return AuditPhase::Error;
+	} else {
+		return AuditPhase::Invalid;
+	}
+}
+
 // This is not transactional
 ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                             AuditType auditType,
                                                             bool newFirst,
-                                                            Optional<int> num = Optional<int>()) {
+                                                            Optional<int> num,
+                                                            Optional<AuditPhase> phase) {
 	state Transaction tr(cx);
 	state std::vector<AuditStorageState> auditStates;
 	state Key readBegin;
@@ -137,7 +156,11 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 				                                         Snapshot::False,
 				                                         reverse));
 				for (int i = 0; i < res.size(); ++i) {
-					auditStates.push_back(decodeAuditStorageState(res[i].value));
+					const AuditStorageState auditState = decodeAuditStorageState(res[i].value);
+					if (phase.present() && auditState.getPhase() != phase.get()) {
+						continue;
+					}
+					auditStates.push_back(auditState);
 					if (num.present() && auditStates.size() == num.get()) {
 						return auditStates; // since res.more is not reliable when GetRangeLimits is set to 1
 					}
