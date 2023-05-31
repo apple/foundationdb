@@ -207,6 +207,10 @@ struct ValidateStorage : TestWorkload {
 			    .detail("AuditIDA", auditIdA)
 			    .detail("AuditIDB", auditIdB);
 		}
+		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
+		if (res.size() != 1) {
+			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res.size());
+		}
 		return Void();
 	}
 

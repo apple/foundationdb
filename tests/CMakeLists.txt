@@ -31,7 +31,7 @@ if(WITH_PYTHON)
 
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
-  It is recommended to install the current stable version from https://www.foundationdb.org/download/ \
+  It is recommended to install the current stable version from https://github.com/apple/foundationdb/releases \
   Or provide a path to another fdbserver")
   endif()
 
