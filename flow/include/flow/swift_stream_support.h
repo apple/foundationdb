@@ -130,6 +130,7 @@ public:
 	}
 
 	void error(Error error) {
+		// TODO (Swift): TraceEvent?
 		printf("[c++][%s:%d](%s) [stream] cb=%p, ERROR: code=%d\n",
 		       __FILE_NAME__,
 		       __LINE__,

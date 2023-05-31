@@ -2053,10 +2053,11 @@ int main(int argc, char* argv[]) {
 			startNewSimulator(opts.printSimTime);
 
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
-				printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
-				       __FILE_NAME__,
-				       __LINE__,
-				       __FUNCTION__);
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: sim2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
 				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
 			}
 
@@ -2068,10 +2069,11 @@ int main(int argc, char* argv[]) {
 
 			if (SERVER_KNOBS->FLOW_WITH_SWIFT) {
 				installSwiftConcurrencyHooks(role == ServerRole::Simulation, g_network);
-				printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
-				       __FILE_NAME__,
-				       __LINE__,
-				       __FUNCTION__);
+				// TODO (Swift): Make it TraceEvent
+				// printf("[%s:%d](%s) Installed Swift concurrency hooks: net2 (g_network)\n",
+				//        __FILE_NAME__,
+				//        __LINE__,
+				//        __FUNCTION__);
 			}
 
 #if WITH_SWIFT

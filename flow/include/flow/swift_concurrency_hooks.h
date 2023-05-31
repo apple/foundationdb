@@ -289,16 +289,10 @@ void sim2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swi
 
 inline void installSwiftConcurrencyHooks(bool isSimulator, INetwork* _Nonnull net) {
 #ifdef WITH_SWIFT
-	printf("[c++] net        = %p\n", net);
-	printf("[c++] g_network  = %p\n", g_network);
-	printf("[c++] N2::g_net2 = %p\n", N2::g_net2);
-
 	if (isSimulator) {
 		swift_task_enqueueGlobal_hook = &sim2_enqueueGlobal_hook_impl;
-		printf("[c++][sim2+net2] configured: swift_task_enqueueGlobal_hook\n");
 	} else {
 		swift_task_enqueueGlobal_hook = &net2_enqueueGlobal_hook_impl;
-		printf("[c++][net2] configured: swift_task_enqueueGlobal_hook\n");
 	}
 #else
 	ASSERT(false && "Cannot install Swift Concurrency hooks when building without Swift.");
