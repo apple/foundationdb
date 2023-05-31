@@ -64,24 +64,10 @@ struct AuditStorageState {
 	void setPhase(AuditPhase phase) { this->phase = static_cast<uint8_t>(phase); }
 	AuditPhase getPhase() const { return static_cast<AuditPhase>(this->phase); }
 
-	// for fdbcli get_audit_status
-	std::string toStringForCLI() const {
-		std::string res = "AuditStorageState: [ID]: " + id.toString() +
-		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
-		if (!error.empty()) {
-			res += "[Error]: " + error;
-		}
-
-		return res;
-	}
-
-	// for traceevent
 	std::string toString() const {
 		std::string res = "AuditStorageState: [ID]: " + id.toString() +
 		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase) +
-		                  ", [AuditServerID]: " + auditServerId.toString();
+		                  ", [Type]: " + std::to_string(type) + ", [Phase]: " + std::to_string(phase);
 		if (!error.empty()) {
 			res += "[Error]: " + error;
 		}
