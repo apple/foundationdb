@@ -7,3 +7,5 @@ startDelay = 0
     testName = 'UnitTests'
     maxTestCases = 1
     testsMatching = 'Lredwood/correctness/btree'
+    maxRunTimeWallTime = 250.0
+    maxRunTimeSanitizerModeWallTime = 800.0
