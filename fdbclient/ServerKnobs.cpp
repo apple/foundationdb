@@ -963,6 +963,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
+	init( ROLE_REFRESH_LOGGING_INTERVAL,                        60.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
 	init( UNKNOWN_CC_TIMEOUT,                                  600.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); // FIXME: short interval causes false positive degraded state to flap, e.g. when everyone tries and fails to connect to dead coordinator: if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
