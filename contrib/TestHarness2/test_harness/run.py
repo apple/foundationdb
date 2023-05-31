@@ -393,7 +393,7 @@ class TestRun:
     def delete_simdir(self):
         shutil.rmtree(self.temp_path / Path("simfdb"))
 
-    def _run_rocksdb_logtool(self):
+    def _run_joshua_logtool(self):
         """Calls Joshua LogTool to upload the test logs if 1) test failed 2) test is RocksDB related"""
         if not os.path.exists("joshua_logtool.py"):
             raise RuntimeError("joshua_logtool.py missing")
@@ -407,7 +407,12 @@ class TestRun:
             str(self.temp_path),
             "--check-rocksdb",
         ]
-        subprocess.run(command, check=True)
+        result = subprocess.run(command, capture_output=True, text=True)
+        return {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "exit_code": result.returncode,
+        }
 
     def run(self):
         command: List[str] = []
@@ -498,10 +503,16 @@ class TestRun:
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
+        if not self.summary.is_negative_test and not self.summary.ok():
+            logtool_result = self._run_joshua_logtool()
+            if logtool_result["exit_code"] != 0:
+                child = SummaryTree("JoshuaLogTool")
+                child.attributes["ExitCode"] = str(logtool_result["exit_code"])
+                child.attributes["StdOut"] = logtool_result["stdout"]
+                child.attributes["StdErr"] = logtool_result["stderr"]
+                self.summary.out.append(child)
         self.summary.summarize(self.temp_path, " ".join(command))
 
-        if not self.summary.is_negative_test and not self.summary.ok():
-            self._run_rocksdb_logtool()
         return self.summary.ok()
 
 
