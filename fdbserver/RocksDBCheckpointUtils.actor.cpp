@@ -93,14 +93,14 @@ rocksdb::ExportImportFilesMetaData getMetaData(const CheckpointMetaData& checkpo
 		liveFileMetaData.oldest_blob_file_number = fileMetaData.oldest_blob_file_number;
 		liveFileMetaData.oldest_ancester_time = fileMetaData.oldest_ancester_time;
 		liveFileMetaData.file_creation_time = fileMetaData.file_creation_time;
-		liveFileMetaData.smallest = fileMetaData.smallest;
-		liveFileMetaData.largest = fileMetaData.largest;
-		liveFileMetaData.file_type = rocksdb::kTableFile;
 		liveFileMetaData.epoch_number = fileMetaData.epoch_number;
 		liveFileMetaData.name = fileMetaData.name;
 		liveFileMetaData.db_path = fileMetaData.db_path;
 		liveFileMetaData.column_family_name = fileMetaData.column_family_name;
 		liveFileMetaData.level = fileMetaData.level;
+		liveFileMetaData.smallest = fileMetaData.smallest;
+		liveFileMetaData.largest = fileMetaData.largest;
+		liveFileMetaData.file_type = rocksdb::kTableFile;
 		metaData.files.push_back(liveFileMetaData);
 	}
 
@@ -212,9 +212,10 @@ ACTOR Future<int64_t> doFetchCheckpointFile(Database cx,
 				offset += rep.data.size();
 			}
 		} catch (Error& e) {
-			if (e.code() != error_code_end_of_stream ||
-			    (g_network->isSimulated() && attempt == 1 && deterministicRandom()->coinflip())) {
-				TraceEvent(e.code() != error_code_end_of_stream ? SevWarnAlways : SevWarn, "FetchCheckpointFileError")
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			} else if (e.code() != error_code_end_of_stream) {
+				TraceEvent(SevWarnAlways, "FetchCheckpointFileError")
 				    .errorUnsuppressed(e)
 				    .detail("RemoteFile", remoteFile)
 				    .detail("LocalFile", localFile)
@@ -491,7 +492,7 @@ void RocksDBColumnFamilyReader::Reader::action(RocksDBColumnFamilyReader::Reader
 	}
 
 	if (!status.ok()) {
-		a.done.sendError(statusToError(status));
+		a.done.sendError(checkpoint_not_found());
 		return;
 	}
 
@@ -622,7 +623,10 @@ rocksdb::Status RocksDBColumnFamilyReader::Reader::importCheckpoint(const std::s
 
 	status = rocksdb::DB::Open(options, path, descriptors, &handles, &db);
 	if (!status.ok()) {
-		logRocksDBError(status, "CheckpointReaderOpen", logId);
+		TraceEvent(SevWarn, "CheckpointReaderOpenedFailed", logId)
+		    .detail("Status", status.ToString())
+		    .detail("Path", path)
+		    .detail("Checkpoint", checkpoint.toString());
 		return status;
 	}
 
@@ -809,8 +813,8 @@ KeyValue RocksDBCheckpointByteSampleReader::next() {
 	return res;
 }
 
-// RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint, and returns the serialized
-// checkpoint via nextChunk.
+// RocksDBCFCheckpointReader reads an exported RocksDB Column Family checkpoint files, and returns the
+// serialized checkpoint via nextChunk.
 class RocksDBCFCheckpointReader : public ICheckpointReader {
 public:
 	RocksDBCFCheckpointReader(const CheckpointMetaData& checkpoint, UID logId)
@@ -833,7 +837,7 @@ private:
 			self->file_ = _file;
 			TraceEvent("RocksDBCheckpointReaderOpenFile").detail("File", self->path_);
 		} catch (Error& e) {
-			TraceEvent(SevWarnAlways, "ServerGetCheckpointFileFailure")
+			TraceEvent(SevWarnAlways, "RocksDBCFCheckpointReaderInitError")
 			    .errorUnsuppressed(e)
 			    .detail("File", self->path_);
 			throw e;
@@ -842,7 +846,8 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self, int byteLimit) {
+	ACTOR static UNCANCELLABLE Future<Standalone<StringRef>> getNextChunk(RocksDBCFCheckpointReader* self,
+	                                                                      int byteLimit) {
 		int blockSize = std::min(64 * 1024, byteLimit); // Block size read from disk.
 		state Standalone<StringRef> buf = makeAlignedString(_PAGE_SIZE, blockSize);
 		int bytesRead = wait(self->file_->read(mutateString(buf), blockSize, self->offset_));
@@ -932,7 +937,6 @@ ACTOR Future<Void> fetchCheckpointFile(Database cx,
 
 // TODO: Return when a file exceeds a limit.
 ACTOR Future<Void> fetchCheckpointRange(Database cx,
-
                                         std::shared_ptr<CheckpointMetaData> metaData,
                                         KeyRange range,
                                         std::string dir,
@@ -1202,7 +1206,9 @@ ACTOR Future<Void> deleteRocksCheckpoint(CheckpointMetaData checkpoint) {
 		    .detail("RocksCF", rocksKv.toString());
 
 		for (const CheckpointFile& file : rocksKv.fetchedFiles) {
-			dirs.insert(file.path);
+			if (file.path != emptySstFilePath) {
+				dirs.insert(file.path);
+			}
 		}
 	} else {
 		ASSERT(false);

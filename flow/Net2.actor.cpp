@@ -1333,7 +1333,8 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("CertificatePath", tlsConfig.getCertificatePathSync())
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
-			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"))
+			    .detail("DisablePlainTextConnection", tlsConfig.getDisablePlainTextConnection());
 			auto loadedTlsConfig = tlsConfig.loadSync();
 			ConfigureSSLContext(loadedTlsConfig, newContext);
 			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
@@ -1787,10 +1788,12 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 }
 
 void Net2::_swiftEnqueue(void* _job) {
+#ifdef WITH_SWIFT
 	swift::Job* job = (swift::Job*)_job;
 	TaskPriority priority = swift_priority_to_net2(job->getPriority());
 	PromiseTask* t = new PromiseTask(job);
 	taskQueue.addReady(priority, t);
+#endif
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
@@ -1810,6 +1813,11 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
+	}
+
+	if (tlsConfig.getDisablePlainTextConnection()) {
+		TraceEvent(SevError, "PlainTextConnectionDisabled").detail("toAddr", toAddr);
+		throw connection_failed();
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);

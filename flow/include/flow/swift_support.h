@@ -22,6 +22,9 @@
 #define FLOW_SWIFT_SUPPORT_H
 
 #pragma once
+
+#ifdef WITH_SWIFT
+
 #include "flow/swift/ABI/Task.h"
 #include "flow/TaskPriority.h"
 
@@ -90,4 +93,35 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 #define SWIFT_END_NULLABILITY_ANNOTATIONS
 #endif
 
+#else
+
+// No-op macros for Swift support
+
+// ==== ----------------------------------------------------------------------------------------------------------------
+
+/// This annotation bridges immortal C++ singleton types
+/// that are always accessed via a pointer or a reference in C++ as immortal class types in Swift.
+#define SWIFT_CXX_IMMORTAL_SINGLETON_TYPE
+#define SWIFT_CXX_REF
+#define SWIFT_CXX_IMPORT_UNSAFE
+#define SWIFT_CXX_IMPORT_OWNED
+#define SWIFT_SENDABLE
+#define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)
+#define SWIFT_NAME(x)
+
+#if __has_feature(nullability)
+#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
+#define SWIFT_END_NULLABILITY_ANNOTATIONS
+#define _Nullable
+#define _Nonnull
+#define _Null_unspecified
+#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
+#define SWIFT_END_NULLABILITY_ANNOTATIONS
 #endif
+
+#define CONCAT2(id1, id2) id1##id2
+#define CONCAT3(id1, id2, id3) id1##id2##id3
+
+#endif /* WITH_SWIFT */
+
+#endif /* FLOW_SWIFT_SUPPORT_H */

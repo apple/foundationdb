@@ -107,7 +107,7 @@ Below is a sample Python script to write to the configuration database.
 ```python
 import fdb
 
-fdb.api_version(720)
+fdb.api_version(730)
 
 @fdb.transactional
 def set_knob(tr, knob_name, knob_value, config_class, description):

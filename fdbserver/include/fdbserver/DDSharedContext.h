@@ -24,6 +24,7 @@
 #include "fdbserver/DDShardTracker.h"
 #include "fdbserver/DDRelocationQueue.h"
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbserver/DataDistributorInterface.h"
 
 // The common info shared by all DD components. Normally the DD components should share the reference to the same
 // context.
@@ -38,6 +39,7 @@ public:
 	std::vector<IDDTeamCollection*> teamCollections;
 
 	// public:
+	DataDistributorInterface interface;
 	UID ddId;
 	MoveKeysLock lock;
 	bool trackerCancelled = false;
@@ -48,7 +50,9 @@ public:
 
 	DDSharedContext() = default;
 
-	DDSharedContext(UID id)
+	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
+
+	explicit DDSharedContext(UID id)
 	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
 	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
 
@@ -60,13 +64,7 @@ public:
 
 	decltype(auto) usableRegions() const { return configuration.usableRegions; }
 
-	bool isDDEnabled() const { return ddEnabledState->isDDEnabled(); };
-
-	void proposeRelocation(const RelocateShard& rs) const { return relocationQueue->relocationProducer.send(rs); }
-
-	void requestRestartShardTracker(KeyRange keys) const {
-		return shardsAffectedByTeamFailure->restartShardTracker.send(keys);
-	}
+	bool isDDEnabled() const { return ddEnabledState->isEnabled(); };
 };
 
 #endif // FOUNDATIONDB_DDSHAREDCONTEXT_H

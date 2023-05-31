@@ -205,7 +205,7 @@ class _ScopeLinter:
                 and self._scope_stack[-1].spelling == SCOPING_BEGIN_PUNCTUATION
             ):
                 return LinterIssue(
-                    token.file_name, token.line, f"Found wait inside when clause"
+                    token.file_name, token.line, "Found wait inside when clause"
                 )
             return None
         else:

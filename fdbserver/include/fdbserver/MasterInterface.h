@@ -33,7 +33,10 @@
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
 #include "flow/swift_support.h"
+
+#ifdef WITH_SWIFT
 #include "flow/swift_future_support.h"
+#endif /* WITH_SWIFT */
 
 using DBRecoveryCount = uint64_t;
 

@@ -432,15 +432,16 @@ struct TrackTLogRecoveryRequest {
 	constexpr static FileIdentifier file_identifier = 6876454;
 
 	// Reply when the TLog's oldest generation start version is higher than this version.
-	Version oldestGenStartVersion;
+	Version oldestGenRecoverAtVersion;
 	ReplyPromise<TrackTLogRecoveryReply> reply;
 
 	TrackTLogRecoveryRequest() {}
-	TrackTLogRecoveryRequest(Version oldestGenStartVersion) : oldestGenStartVersion(oldestGenStartVersion) {}
+	TrackTLogRecoveryRequest(Version oldestGenRecoverAtVersion)
+	  : oldestGenRecoverAtVersion(oldestGenRecoverAtVersion) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, oldestGenStartVersion, reply);
+		serializer(ar, oldestGenRecoverAtVersion, reply);
 	}
 };
 

@@ -151,7 +151,7 @@
 .. |atomic-versionstamps-tuple-warning-value| replace::
     At this time, versionstamped values are not compatible with the Tuple layer except in Java, Python, and Go. Note that this implies versionstamped values may not be used with the Subspace and Directory layers except in those languages.
 
-.. |api-version| replace:: 720
+.. |api-version| replace:: 730
 
 .. |streaming-mode-blurb1| replace::
     When using |get-range-func| and similar interfaces, API clients can request large ranges of the database to iterate over.  Making such a request doesn't necessarily mean that the client will consume all of the data in the range - sometimes the client doesn't know how far it intends to iterate in advance.  FoundationDB tries to balance latency and bandwidth by requesting data for iteration in batches.
@@ -611,6 +611,10 @@
 .. |option-tls-password| replace::
 
     Sets the passphrase for encrypted private key. Password should be set before setting the key for the password to be used.
+
+.. |option-tls-disable-plaintext-connection| replace::
+
+    Disable non-TLS connections from the client, allowing only TLS connections. Plaintext connections will timeout.
 
 .. |option-set-disable-local-client| replace::
 
