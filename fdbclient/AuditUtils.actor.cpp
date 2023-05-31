@@ -60,6 +60,7 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> serverListValue = wait(tr.get(serverListKeyFor(ssid)));
 			if (!serverListValue.present()) {
 				res = true; // SS is removed
@@ -88,6 +89,7 @@ ACTOR Future<Void> clearAuditMetadata_impl(Database cx, AuditType auditType, UID
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult res = wait(tr.getRange(auditKeyRange(auditType), 1, Snapshot::False, Reverse::True));
 			ASSERT(res.size() == 0 || res.size() == 1);
 			if (res.empty()) {
@@ -191,6 +193,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 			while (true) {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				KeyRangeRef rangeToRead(readBegin, readEnd);
 				state RangeResult res = wait(tr.getRange(rangeToRead,
 				                                         num.present() ? GetRangeLimits(num.get()) : GetRangeLimits(),
@@ -255,6 +258,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 				numFinishAuditCleaned = 0;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				for (const auto& auditState : auditStates) {
 					if (auditState.id.first() > maxAuditIdToClear.first()) {
 						continue; // ignore any audit with a larger auditId than the input threshold
@@ -357,6 +361,7 @@ ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, M
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
@@ -395,6 +400,7 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 				RangeResult res =
 				    wait(tr.getRange(auditKeyRange(auditState.getType()), 1, Snapshot::False, Reverse::True));
@@ -462,6 +468,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
 			// Clear persistent progress data of the new audit if complete
 			if (auditPhase == AuditPhase::Complete) {
@@ -510,6 +517,7 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> res_ = wait(tr.get(auditKey(type, id)));
 			res = res_;
 			TraceEvent(SevDebug, "AuditUtilReadAuditState", id)
@@ -547,6 +555,7 @@ ACTOR Future<std::string> checkMigrationProgress(Database cx) {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -585,6 +594,7 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!ddAuditState_.present()) {
 				throw audit_storage_cancelled();
@@ -638,6 +648,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditRangeBasedProgressPrefixFor(type, auditId),
 			                                     range,
@@ -677,6 +688,7 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!ddAuditState_.present()) {
 				throw audit_storage_cancelled();
@@ -723,6 +735,7 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			RangeResult res_ = wait(krmGetRanges(&tr,
 			                                     auditServerBasedProgressPrefixFor(type, auditId, auditServerId),
 			                                     range,
