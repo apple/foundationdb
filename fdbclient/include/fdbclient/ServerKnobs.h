@@ -770,8 +770,6 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below this threshold
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
-	// Used by global tag throttling counters
-	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
 	// until some existing tags expire
 	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
@@ -786,6 +784,11 @@ public:
 	// compute rates, but these rates won't be sent to GRV proxies for
 	// enforcement.
 	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+
+	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 

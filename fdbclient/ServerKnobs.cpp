@@ -838,18 +838,16 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( GLOBAL_TAG_THROTTLING,                                true ); if(isSimulated) GLOBAL_TAG_THROTTLING = deterministicRandom()->coinflip();
 	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,   GLOBAL_TAG_THROTTLING );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
-	// 10 seconds was chosen as a default value to ensure that
-	// the global tag throttler does not react too drastically to
-	// changes in workload. To make the global tag throttler more reactive,
-	// lower this knob. To make global tag throttler more smooth, raise this knob.
-	// Setting this knob lower than TAG_MEASUREMENT_INTERVAL can cause erratic
-	// behaviour and is not recommended.
-	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   10.0 );
 	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
 	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
 	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
 	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
+
+	init( GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME,        10.0 );
+	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
+	init( GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME,   10.0 );
+	init( GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,               10.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
