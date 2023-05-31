@@ -168,6 +168,7 @@ struct ConfigureTenantImpl {
 			}
 			self->updatedEntry = tenantEntry.get();
 			self->updatedEntry.tenantState = self->targetTenantState.get();
+			wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster));
 			return true;
 		}
 
@@ -337,6 +338,18 @@ Future<Void> changeTenantLockState(Reference<DB> db,
                                    TenantAPI::TenantLockState lockState,
                                    UID lockId) {
 	state internal::ConfigureTenantImpl<DB> impl(db, name, lockState, lockId);
+	wait(impl.run());
+	return Void();
+}
+
+ACTOR template <class DB>
+Future<Void> resetTenantStateToReady(Reference<DB> db, TenantName name) {
+	state internal::ConfigureTenantImpl<DB> impl(
+	    db,
+	    name,
+	    std::map<Standalone<StringRef>, Optional<Value>>{
+	        { "tenant_state"_sr, metacluster::tenantStateToString(metacluster::TenantState::READY) } },
+	    IgnoreCapacityLimit::False);
 	wait(impl.run());
 	return Void();
 }
