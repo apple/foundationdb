@@ -26,6 +26,7 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#include <string_view>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -804,10 +805,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			std::ostringstream o;
 			boost::system::error_code ec;
 			auto addr = socket.lowest_layer().remote_endpoint(ec);
-			if (ec.failed()) {
-				o << "invalidEndpoint";
-			}
-			o << addr;
+			o << (!ec.failed() ? addr.address().to_string() : std::string_view("0.0.0.0"));
 			return std::move(o).str();
 		}
 
