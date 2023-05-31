@@ -79,11 +79,14 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> verifyDatabase(Database cx) {
+		state UID randomID = nondeterministicRandom()->randomUniqueID();
+		TraceEvent("RestoreMultiRanges_Verify").detail("UID", randomID);
 		state Transaction tr(cx);
 		state KeyRangeRef range("a"_sr, "z"_sr);
 		loop {
 			try {
 				tr.reset();
+				tr.debugTransaction(randomID);
 				RangeResult kvs = wait(tr.getRange(range, 10));
 				if (kvs.size() != 4) {
 					logTestData(kvs);
@@ -103,6 +106,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 						return false;
 					}
 				}
+				TraceEvent("RestoreMultiRanges_VerifyPassed");
 				return true;
 			} catch (Error& e) {
 				wait(tr.onError(e));
@@ -111,12 +115,15 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _start(RestoreMultiRangesWorkload* self, Database cx) {
+		TraceEvent("RestoreMultiRanges_StartBackup");
+		wait(clearDatabase(cx));
 		wait(prepareDatabase(cx));
 
 		state std::string backupContainer = "file://simfdb/backups/";
 		state std::string tagName = "default";
 		state Standalone<VectorRef<KeyRangeRef>> backupRanges;
 		backupRanges.push_back_deep(backupRanges.arena(), KeyRangeRef("a"_sr, "z"_sr));
+		TraceEvent("RestoreMultiRanges_SubmitBackup");
 		try {
 			wait(self->backupAgent.submitBackup(cx,
 			                                    StringRef(backupContainer),
@@ -132,11 +139,14 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 				throw;
 		}
 
+		TraceEvent("RestoreMultiRanges_WaitBackup");
 		state Reference<IBackupContainer> container;
 		wait(success(self->backupAgent.waitBackup(cx, tagName, StopWhenDone::True, &container)));
 
+		TraceEvent("RestoreMultiRanges_ClearDatabase");
 		wait(clearDatabase(cx));
 
+		TraceEvent("RestoreMultiRanges_Restore");
 		state Standalone<VectorRef<KeyRangeRef>> ranges;
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("a"_sr, "aaaaa"_sr));
 		ranges.push_back_deep(ranges.arena(), KeyRangeRef("bb"_sr, "bbbbb"_sr)); // Skip "b"
@@ -149,6 +159,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 		                                       WaitForComplete::True,
 		                                       ::invalidVersion,
 		                                       Verbose::True)));
+		TraceEvent("RestoreMultiRanges_Success");
 		return Void();
 	}
 
