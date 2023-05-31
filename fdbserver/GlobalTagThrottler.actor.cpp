@@ -100,8 +100,8 @@ class GlobalTagThrottlerImpl {
 
 	public:
 		ThroughputCounters()
-		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME),
+		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
 
 		void updateCost(double newCost, OpType opType) {
 			if (opType == OpType::READ) {
@@ -125,10 +125,11 @@ class GlobalTagThrottlerImpl {
 
 	public:
 		explicit PerTagStatistics()
-		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME,
-		                       SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()), lastLogged(0) {}
+		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,
+		                       SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME),
+		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME),
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME), transactionsLastAdded(now()),
+		    lastLogged(0) {}
 
 		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
 
@@ -667,7 +668,7 @@ class MockStorageServer {
 		Smoother smoother;
 
 	public:
-		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
 		Cost& operator+=(double delta) {
 			smoother.addDelta(delta);
 			return *this;
