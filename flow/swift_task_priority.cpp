@@ -261,7 +261,7 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p) {
 		fp = TaskPriority::Zero;
 		break;
 	default: {
-		printf("[c++][%s:%d](%s) Unknown priority: %zu\n", __FILE_NAME__, __LINE__, __FUNCTION__, p);
+		printf("[c++]Unknown priority: %zu\n", p);
 		abort();
 	}
 	}
