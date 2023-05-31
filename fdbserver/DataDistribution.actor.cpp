@@ -709,6 +709,7 @@ inline std::shared_ptr<DDAudit> getAuditFromAuditMap(Reference<DataDistributor> 
 
 inline void removeAuditFromAuditMap(Reference<DataDistributor> self, AuditType auditType, UID auditID) {
 	ASSERT(self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+	self->audits[auditType][auditID]->cancel();
 	self->audits[auditType].erase(auditID);
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId)
 	    .detail("Ops", "removeAuditFromAuditMap")
@@ -735,7 +736,6 @@ void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditStates,
                      int retryCount,
                      std::string context);
-ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType);
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
@@ -845,10 +845,10 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 			} else if (auditState.getPhase() == AuditPhase::Failed) {
 				if (numFinishAuditsCleared < numFinishAuditsToClear) {
 					// Clear both audit metadata and corresponding progress metadata
-					self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
-					                                       auditState.getType(),
-					                                       auditState.id,
-					                                       /*clearProgressMetadata=*/true));
+					self->addActor.send(clearAuditMetadataBackground(self->txnProcessor->context(),
+					                                                 auditState.getType(),
+					                                                 auditState.id,
+					                                                 /*clearProgressMetadata=*/true));
 					numFinishAuditsCleared++;
 				}
 				continue;
@@ -857,10 +857,10 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 					// Clear audit metadata only
 					// No need to clear the corresponding progress metadata
 					// since it has been cleared for Complete audits
-					self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
-					                                       auditState.getType(),
-					                                       auditState.id,
-					                                       /*clearProgressMetadata=*/false));
+					self->addActor.send(clearAuditMetadataBackground(self->txnProcessor->context(),
+					                                                 auditState.getType(),
+					                                                 auditState.id,
+					                                                 /*clearProgressMetadata=*/false));
 					numFinishAuditsCleared++;
 				}
 				continue;
@@ -1852,6 +1852,8 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict) {
 			throw e; // throw to DD and DD will restart
+		} else if (e.code() == error_code_audit_storage_cancelled) {
+			// do nothing, silently quit
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && e.code() != error_code_not_implemented) {
 			audit->retryCount++;
 			audit->actors.clear(true);
@@ -1906,39 +1908,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			}
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
-		}
-	}
-	return Void();
-}
-
-// Wait until the audit completes or this actor gets cancelled
-ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType) {
-	loop {
-		try {
-			TraceEvent(SevVerbose, "WaitForAuditStorage", self->ddId)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType);
-			// auditMap keeps following invariants:
-			// (1) Any alive audit storage must be in auditMap
-			// (2) Any audit of auditMap must be alive
-			if (auditExistInAuditMap(self, auditType, auditID)) {
-				wait(delay(1));
-				continue;
-			} else {
-				TraceEvent(SevInfo, "WaitForAuditStorage", self->ddId)
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType);
-				break;
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			TraceEvent(SevDebug, "WaitForAuditStorage", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType);
-			continue;
 		}
 	}
 	return Void();
@@ -2071,6 +2040,49 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 		throw e;
 	}
 	return auditID;
+}
+
+ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
+	    req.getType() != AuditType::ValidateLocationMetadata &&
+	    req.getType() != AuditType::ValidateStorageServerShard) {
+		req.reply.sendError(not_implemented());
+		return Void();
+	}
+
+	try {
+		ASSERT(req.cancel);
+		ASSERT(req.id.isValid());
+		state bool cleared;
+		TraceEvent(SevDebug, "DDCancelAuditStorageStart", self->ddId)
+		    .detail("AuditType", req.getType())
+		    .detail("AuditID", req.id);
+		wait(store(cleared,
+		           clearAuditMetadataSync(
+		               self->txnProcessor->context(), req.getType(), req.id, /*clearProgressMetadata=*/true)));
+		if (!cleared) {
+			throw cancel_audit_storage_failed();
+		}
+		// Once clearAuditMetadata cleared, any ongoing audit will stop
+		// Then clear ongoing audit D/S
+		if (auditExistInAuditMap(self, req.getType(), req.id)) {
+			removeAuditFromAuditMap(self, req.getType(), req.id);
+		}
+		TraceEvent(SevVerbose, "DDCancelAuditStorageReply", self->ddId)
+		    .detail("AuditType", req.getType())
+		    .detail("AuditID", req.id);
+		req.reply.send(req.id);
+	} catch (Error& e) {
+		TraceEvent(SevWarn, "DDCancelAuditStorageError", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("AuditID", req.id)
+		    .detail("AuditType", req.getType());
+		req.reply.sendError(cancel_audit_storage_failed());
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+	}
+	return Void();
 }
 
 // Handling audit requests
@@ -2558,7 +2570,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", req.id)
+		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)
@@ -2572,7 +2584,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_not_implemented ||
-		    e.code() == error_code_audit_storage_exceeded_request_limit) {
+		    e.code() == error_code_audit_storage_exceeded_request_limit ||
+		    e.code() == error_code_audit_storage_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
@@ -2674,6 +2687,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(getStorageWigglerStates(self));
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
+				if (req.cancel) {
+					ASSERT(req.id.isValid());
+					actors.add(cancelAuditStorage(self, req));
+					continue;
+				}
 				if (!self->anyAuditStorageLaunching.contains(req.getType()) ||
 				    !self->anyAuditStorageLaunching[req.getType()]) {
 					actors.add(auditStorage(self, req));

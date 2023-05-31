@@ -39,6 +39,29 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		return UID();
 	}
 
+	if (tokencmp(tokens[1], "cancel")) {
+		if (tokens.size() != 4) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		AuditType type = AuditType::Invalid;
+		if (tokencmp(tokens[2], "ha")) {
+			type = AuditType::ValidateHA;
+		} else if (tokencmp(tokens[2], "replica")) {
+			type = AuditType::ValidateReplica;
+		} else if (tokencmp(tokens[2], "locationmetadata")) {
+			type = AuditType::ValidateLocationMetadata;
+		} else if (tokencmp(tokens[2], "ssshard")) {
+			type = AuditType::ValidateStorageServerShard;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		UID auditId = UID::fromString(tokens[3].toString());
+		UID auditId_ = wait(cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60));
+		return auditId_;
+	}
+
 	AuditType type = AuditType::Invalid;
 	if (tokencmp(tokens[1], "ha")) {
 		type = AuditType::ValidateHA;

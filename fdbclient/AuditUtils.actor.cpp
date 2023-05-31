@@ -77,37 +77,78 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 	return res;
 }
 
-ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
+// Return if the state is guaranteed to be cleared:
+// If the audit state is the latest one, mark it as failed
+// Otherwise, clear the audit state key
+ACTOR Future<Void> clearAuditMetadata_impl(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
 	state Transaction tr(cx);
 	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
 
-	try {
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			RangeResult res = wait(tr.getRange(auditKeyRange(auditType), 1, Snapshot::False, Reverse::True));
+			ASSERT(res.size() == 0 || res.size() == 1);
+			if (res.empty()) {
+				return Void(); // Nothing to clear
+			}
+			state AuditStorageState latestExistingAuditState = decodeAuditStorageState(res[0].value);
+
+			Optional<Value> res_ = wait(tr.get(auditKey(auditType, auditId)));
+			if (!res_.present()) { // has been cancelled
+				return Void(); // Nothing to clear
+			}
+			state AuditStorageState toClearState = decodeAuditStorageState(res_.get());
+			ASSERT(toClearState.id == auditId && toClearState.getType() == auditType);
+			if (latestExistingAuditState.id == toClearState.id) {
+				// If the following toClearState is the latest, mark it as failed
+				toClearState.setPhase(AuditPhase::Failed);
+				tr.set(auditKey(toClearState.getType(), toClearState.id), auditStorageStateValue(toClearState));
+			} else {
+				// For a zombie audit, it is in running state
 				// Clear audit metadata
 				tr.clear(auditKey(auditType, auditId));
 				// Clear progress metadata
 				if (clearProgressMetadata) {
 					clearAuditProgressMetadata(&tr, auditType, auditId);
 				}
-				wait(tr.commit());
-				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
-				    .detail("AuditKey", auditKey(auditType, auditId));
-				break;
-			} catch (Error& e) {
-				wait(tr.onError(e));
 			}
+			wait(tr.commit());
+			TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
+			    .detail("AuditKey", auditKey(auditType, auditId));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilClearAuditMetadataError", auditId)
+			    .detail("AuditKey", auditKey(auditType, auditId));
+			wait(tr.onError(e));
 		}
-	} catch (Error& e) {
-		TraceEvent(SevInfo, "AuditUtilClearAuditMetadataError", auditId)
-		    .errorUnsuppressed(e)
-		    .detail("AuditKey", auditKey(auditType, auditId));
-		// We do not want audit cleanup effects DD
 	}
 
 	return Void();
+}
+
+ACTOR Future<Void> clearAuditMetadataBackground(Database cx,
+                                                AuditType auditType,
+                                                UID auditId,
+                                                bool clearProgressMetadata) {
+	try {
+		wait(clearAuditMetadata_impl(cx, auditType, auditId, clearProgressMetadata));
+	} catch (Error& e) {
+		// We do not want audit cleanup effects DD
+		// pass
+	}
+	return Void();
+}
+
+ACTOR Future<bool> clearAuditMetadataSync(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
+	try {
+		wait(clearAuditMetadata_impl(cx, auditType, auditId, clearProgressMetadata));
+		return true;
+	} catch (Error& e) {
+		// We do not want audit cleanup effects DD
+		return false;
+	}
 }
 
 AuditPhase stringToAuditPhase(std::string auditPhaseStr) {
@@ -426,6 +467,16 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			if (auditPhase == AuditPhase::Complete) {
 				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
 			} // We keep the progess metadata of Failed and Error audits for further investigations
+			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!res_.present()) { // has been cancelled
+				throw audit_storage_cancelled();
+			} else {
+				const AuditStorageState currentState = decodeAuditStorageState(res_.get());
+				ASSERT(currentState.id == auditState.id && currentState.getType() == auditState.getType());
+				if (currentState.getPhase() == AuditPhase::Failed) {
+					throw audit_storage_cancelled();
+				}
+			}
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
@@ -536,16 +587,27 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!ddAuditState_.present()) {
-				throw audit_storage_failed();
+				throw audit_storage_cancelled();
 			}
 			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
-			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
-			if (ddAuditState.getPhase() != AuditPhase::Running) {
-				throw audit_storage_failed();
-			}
 			ASSERT(ddAuditState.ddId.isValid());
 			if (ddAuditState.ddId != auditState.ddId) {
 				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+			}
+			// It is possible ddAuditState is complete while some progress is about to persist
+			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)
+			// For this case, no need to proceed. Sliently exit
+			if (ddAuditState.getPhase() == AuditPhase::Complete) {
+				break;
+			}
+			// If this is the same dd, the phase must be following
+			TraceEvent("PersistAuditStateByRange")
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase());
+			ASSERT(ddAuditState.getPhase() == AuditPhase::Running || ddAuditState.getPhase() == AuditPhase::Failed);
+			if (ddAuditState.getPhase() == AuditPhase::Failed) {
+				throw audit_storage_cancelled();
 			}
 			wait(krmSetRange(&tr,
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
@@ -553,6 +615,11 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			                 auditStorageStateValue(auditState)));
 			break;
 		} catch (Error& e) {
+			TraceEvent("PersistAuditStateByRangeError")
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getPhase())
+			    .detail("AuditPhase", auditState.getPhase());
 			wait(tr.onError(e));
 		}
 	}
@@ -612,16 +679,23 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			Optional<Value> ddAuditState_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!ddAuditState_.present()) {
-				throw audit_storage_failed();
+				throw audit_storage_cancelled();
 			}
 			AuditStorageState ddAuditState = decodeAuditStorageState(ddAuditState_.get());
-			ASSERT(ddAuditState.getPhase() != AuditPhase::Invalid);
-			if (ddAuditState.getPhase() != AuditPhase::Running) {
-				throw audit_storage_failed();
-			}
 			ASSERT(ddAuditState.ddId.isValid());
 			if (ddAuditState.ddId != auditState.ddId) {
 				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+			}
+			// It is possible ddAuditState is complete while some progress is about to persist
+			// Since doAuditOnStorageServer may repeatedly issue multiple requests (see getReplyUnlessFailedFor)
+			// For this case, no need to proceed. Sliently exit
+			if (ddAuditState.getPhase() == AuditPhase::Complete) {
+				break;
+			}
+			// If this is the same dd, the phase must be following
+			ASSERT(ddAuditState.getPhase() == AuditPhase::Running || ddAuditState.getPhase() == AuditPhase::Failed);
+			if (ddAuditState.getPhase() == AuditPhase::Failed) {
+				throw audit_storage_cancelled();
 			}
 			wait(krmSetRange(
 			    &tr,
