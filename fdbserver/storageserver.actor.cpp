@@ -11163,6 +11163,7 @@ ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetr
 }
 
 Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	++counters.waitMetrics;
 	return waitMetricsTenantAware_internal(this, req);
 }
 
@@ -11715,7 +11716,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
 				TraceEvent("BusiestWriteTag", self->thisServerID)
 				    .detail("Elapsed", req.elapsed)
-				    .detail("Tag", printable(req.busiestTag))
+				    .detail("Tag", req.busiestTag)
 				    .detail("TagOps", req.opsSum)
 				    .detail("TagCost", req.costSum)
 				    .detail("TotalCost", req.totalWriteCosts)

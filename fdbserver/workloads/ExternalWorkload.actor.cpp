@@ -120,8 +120,6 @@ struct ExternalWorkload : TestWorkload, FDBWorkloadContext {
 		return format("lib%s.so", name.c_str());
 #elif defined(__APPLE__)
 		return format("lib%s.dylib", name.c_str());
-#elif defined(_WIN32)
-		return format("lib%s.dll", name.c_str());
 #else
 #error Port me!
 #endif

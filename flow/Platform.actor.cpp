@@ -18,11 +18,6 @@
  * limitations under the License.
  */
 
-#ifdef _WIN32
-// This has to come as the first include on Win32 for rand_s() to be found
-#define _CRT_RAND_S
-#endif // _WIN32
-
 #include "flow/Platform.h"
 
 #include <algorithm>
@@ -66,31 +61,6 @@
 static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<uint8_t, 16>>::value,
               "IPAddressStore must be std::array<uint8_t, 16>");
 
-#ifdef _WIN32
-
-#include <conio.h>
-#include <direct.h>
-#include <io.h>
-#include <math.h> // For _set_FMA3_enable workaround in platformInit
-#include <pdh.h>
-#include <pdhmsg.h>
-#include <processenv.h>
-#include <psapi.h>
-#include <stdlib.h>
-#include <windows.h>
-#include <winioctl.h>
-
-#pragma comment(lib, "pdh.lib")
-
-// for SHGetFolderPath
-#include <ShlObj.h>
-#pragma comment(lib, "Shell32.lib")
-
-#define CANONICAL_PATH_SEPARATOR '\\'
-#define PATH_MAX MAX_PATH
-#endif
-
-#ifdef __unixish__
 #define CANONICAL_PATH_SEPARATOR '/'
 
 #include <dirent.h>
@@ -102,7 +72,7 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <unistd.h>
 #include <sys/statvfs.h> /* Needed for disk capacity */
 
-#if !defined(__aarch64__) && !defined(__powerpc64__)
+#if !defined(__aarch64__)
 #include <cpuid.h>
 #endif
 
@@ -128,39 +98,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <sys/sysmacros.h>
 #endif // __linux__
 
-#ifdef __FreeBSD__
-/* Needed for processor affinity */
-#include <sys/sched.h>
-/* Needed for getProcessorTime and setpriority */
-#include <sys/syscall.h>
-/* Needed for setpriority */
-#include <sys/resource.h>
-/* Needed for crash handler */
-#include <sys/signal.h>
-/* Needed for proc info	*/
-#include <sys/user.h>
-/* Needed for vm info  */
-#include <sys/param.h>
-#include <sys/sysctl.h>
-#include <sys/vmmeter.h>
-#include <sys/cpuset.h>
-#include <sys/resource.h>
-/* Needed for sysctl info */
-#include <sys/sysctl.h>
-#include <sys/fcntl.h>
-/* Needed for network info */
-#include <net/if.h>
-#include <net/if_mib.h>
-#include <net/if_var.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <netinet/tcp_var.h>
-/* Needed for device info */
-#include <devstat.h>
-#include <kvm.h>
-#include <libutil.h>
-#endif // __FreeBSD__
-
 #ifdef __APPLE__
 /* Needed for cross-platform 'environ' */
 #include <crt_externs.h>
@@ -183,8 +120,6 @@ static_assert(std::is_same<boost::asio::ip::address_v6::bytes_type, std::array<u
 #include <IOKit/IOBSD.h>
 #endif // __APPLE_
 
-#endif // __unixish__
-
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 std::string removeWhitespace(const std::string& t) {
@@ -204,40 +139,8 @@ std::string removeWhitespace(const std::string& t) {
 	return str;
 }
 
-#ifdef _WIN32
-#define ALLOC_FAIL nullptr
-#elif defined(__unixish__)
 #define ALLOC_FAIL MAP_FAILED
-#else
-#error What platform is this?
-#endif
 
-#if defined(_WIN32)
-__int64 FiletimeAsInt64(FILETIME& t) {
-	return *(__int64*)&t;
-}
-#endif
-
-#ifdef _WIN32
-bool handlePdhStatus(const PDH_STATUS& status, std::string message) {
-	if (status != ERROR_SUCCESS) {
-		TraceEvent(SevWarnAlways, message.c_str()).GetLastError().detail("Status", status);
-		return false;
-	}
-	return true;
-}
-
-bool setPdhString(int id, std::string& out) {
-	char buf[512];
-	DWORD sz = 512;
-	if (!handlePdhStatus(PdhLookupPerfNameByIndex(nullptr, id, buf, &sz), "PdhLookupPerfByNameIndex"))
-		return false;
-	out = buf;
-	return true;
-}
-#endif
-
-#ifdef __unixish__
 static double getProcessorTimeGeneric(int who) {
 	struct rusage r_usage;
 
@@ -249,18 +152,10 @@ static double getProcessorTimeGeneric(int who) {
 	return (r_usage.ru_utime.tv_sec + (r_usage.ru_utime.tv_usec / double(1e6)) + r_usage.ru_stime.tv_sec +
 	        (r_usage.ru_stime.tv_usec / double(1e6)));
 }
-#endif
 
 double getProcessorTimeThread() {
 	INJECT_FAULT(platform_error, "getProcessorTimeThread"); // Get Thread CPU Time failed
-#if defined(_WIN32)
-	FILETIME ftCreate, ftExit, ftKernel, ftUser;
-	if (!GetThreadTimes(GetCurrentThread(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-		TraceEvent(SevError, "GetThreadCPUTime").GetLastError();
-		throw platform_error();
-	}
-	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	return getProcessorTimeGeneric(RUSAGE_THREAD);
 #elif defined(__APPLE__)
 	/* No RUSAGE_THREAD so we use the lower level interface */
@@ -280,19 +175,7 @@ double getProcessorTimeThread() {
 
 double getProcessorTimeProcess() {
 	INJECT_FAULT(platform_error, "getProcessorTimeProcess"); // Get CPU Process Time failed
-#if defined(_WIN32)
-	FILETIME ftCreate, ftExit, ftKernel, ftUser;
-	if (!GetProcessTimes(GetCurrentProcess(), &ftCreate, &ftExit, &ftKernel, &ftUser)) {
-		TraceEvent(SevError, "GetProcessCPUTime").GetLastError();
-		throw platform_error();
-	}
-	return FiletimeAsInt64(ftKernel) / double(1e7) + FiletimeAsInt64(ftUser) / double(1e7);
-#elif defined(__unixish__)
 	return getProcessorTimeGeneric(RUSAGE_SELF);
-#else
-#warning getProcessorTimeProcess unimplemented on this platform
-	return 0.0;
-#endif
 }
 
 uint64_t getResidentMemoryUsage() {
@@ -313,36 +196,6 @@ uint64_t getResidentMemoryUsage() {
 	rssize *= sysconf(_SC_PAGESIZE);
 
 	return rssize;
-#elif defined(__FreeBSD__)
-	uint64_t rssize = 0;
-
-	int status;
-	pid_t ppid = getpid();
-	int pidinfo[4];
-	pidinfo[0] = CTL_KERN;
-	pidinfo[1] = KERN_PROC;
-	pidinfo[2] = KERN_PROC_PID;
-	pidinfo[3] = (int)ppid;
-
-	struct kinfo_proc procstk;
-	size_t len = sizeof(procstk);
-
-	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-
-	rssize = (uint64_t)procstk.ki_rssize;
-
-	return rssize;
-#elif defined(_WIN32)
-	PROCESS_MEMORY_COUNTERS_EX pmc;
-	if (!GetProcessMemoryInfo(GetCurrentProcess(), (PPROCESS_MEMORY_COUNTERS)&pmc, sizeof(pmc))) {
-		TraceEvent(SevError, "GetResidentMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-	return pmc.WorkingSetSize;
 #elif defined(__APPLE__)
 	struct task_basic_info info;
 	mach_msg_type_number_t info_count = TASK_BASIC_INFO_COUNT;
@@ -373,36 +226,6 @@ uint64_t getMemoryUsage() {
 	vmsize *= sysconf(_SC_PAGESIZE);
 
 	return vmsize;
-#elif defined(__FreeBSD__)
-	uint64_t vmsize = 0;
-
-	int status;
-	pid_t ppid = getpid();
-	int pidinfo[4];
-	pidinfo[0] = CTL_KERN;
-	pidinfo[1] = KERN_PROC;
-	pidinfo[2] = KERN_PROC_PID;
-	pidinfo[3] = (int)ppid;
-
-	struct kinfo_proc procstk;
-	size_t len = sizeof(procstk);
-
-	status = sysctl(pidinfo, nitems(pidinfo), &procstk, &len, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-
-	vmsize = (uint64_t)procstk.ki_size >> PAGE_SHIFT;
-
-	return vmsize;
-#elif defined(_WIN32)
-	PROCESS_MEMORY_COUNTERS_EX pmc;
-	if (!GetProcessMemoryInfo(GetCurrentProcess(), (PPROCESS_MEMORY_COUNTERS)&pmc, sizeof(pmc))) {
-		TraceEvent(SevError, "GetMemoryUsage").GetLastError();
-		throw platform_error();
-	}
-	return pmc.PagefileUsage;
 #elif defined(__APPLE__)
 	struct task_basic_info info;
 	mach_msg_type_number_t info_count = TASK_BASIC_INFO_COUNT;
@@ -527,69 +350,6 @@ std::map<std::string, int64_t> reportCGroupCpuStat() {
 void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 #if defined(__linux__)
 	linux_os::getMachineRAMInfoImpl(memInfo);
-#elif defined(__FreeBSD__)
-	int status;
-
-	u_int page_size;
-	u_int free_count;
-	u_int active_count;
-	u_int inactive_count;
-	u_int wire_count;
-
-	size_t uint_size;
-
-	uint_size = sizeof(page_size);
-
-	status = sysctlbyname("vm.stats.vm.v_page_size", &page_size, &uint_size, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-	}
-
-	status = sysctlbyname("vm.stats.vm.v_free_count", &free_count, &uint_size, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-	}
-
-	status = sysctlbyname("vm.stats.vm.v_active_count", &active_count, &uint_size, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-	}
-
-	status = sysctlbyname("vm.stats.vm.v_inactive_count", &inactive_count, &uint_size, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-	}
-
-	status = sysctlbyname("vm.stats.vm.v_wire_count", &wire_count, &uint_size, nullptr, 0);
-	if (status < 0) {
-		TraceEvent(SevError, "GetMachineMemInfo").GetLastError();
-		throw platform_error();
-	}
-
-	memInfo.total = (int64_t)((free_count + active_count + inactive_count + wire_count) * (u_int64_t)(page_size));
-	memInfo.available = (int64_t)(free_count * (u_int64_t)(page_size));
-	memInfo.committed = memInfo.total - memInfo.available;
-#elif defined(_WIN32)
-	MEMORYSTATUSEX mem_status;
-	mem_status.dwLength = sizeof(mem_status);
-	if (!GlobalMemoryStatusEx(&mem_status)) {
-		TraceEvent(SevError, "WindowsGetMemStatus").GetLastError();
-		throw platform_error();
-	}
-
-	PERFORMACE_INFORMATION perf;
-	if (!GetPerformanceInfo(&perf, sizeof(perf))) {
-		TraceEvent(SevError, "WindowsGetMemPerformanceInfo").GetLastError();
-		throw platform_error();
-	}
-
-	memInfo.total = mem_status.ullTotalPhys;
-	memInfo.committed = perf.PageSize * perf.CommitTotal;
-	memInfo.available = memInfo.total - memInfo.committed;
 #elif defined(__APPLE__)
 	vm_statistics_data_t vm_stat;
 	vm_size_t pagesize;
@@ -610,25 +370,15 @@ void getMachineRAMInfo(MachineRAMInfo& memInfo) {
 }
 
 Error systemErrorCodeToError() {
-#if defined(_WIN32)
-	if (GetLastError() == ERROR_IO_DEVICE) {
-		return io_error();
-	}
-#elif defined(__unixish__)
 	if (errno == EIO || errno == EROFS) {
 		return io_error();
 	}
-#else
-#error Port me!
-#endif
-
 	return platform_error();
 }
 
 void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	INJECT_FAULT(platform_error, "getDiskBytes"); // Get disk bytes failed
-#if defined(__unixish__)
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	struct statvfs buf;
 	if (statvfs(directory.c_str(), &buf)) {
 		Error e = systemErrorCodeToError();
@@ -656,29 +406,8 @@ void getDiskBytes(std::string const& directory, int64_t& free, int64_t& total) {
 	// so that amount will be subtracted from the reported total since FDB can't use it.
 	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(),
 	                 (buf.f_blocks - (buf.f_bfree - buf.f_bavail)) * blockSize);
-
-#elif defined(_WIN32)
-	std::string fullPath = abspath(directory);
-	//TraceEvent("FullDiskPath").detail("Path", fullPath).detail("Disk", (char)toupper(fullPath[0]));
-
-	ULARGE_INTEGER freeSpace;
-	ULARGE_INTEGER totalSpace;
-	ULARGE_INTEGER totalFreeSpace;
-	if (!GetDiskFreeSpaceEx(fullPath.c_str(), &freeSpace, &totalSpace, &totalFreeSpace)) {
-		Error e = systemErrorCodeToError();
-		TraceEvent(SevError, "DiskFreeError").error(e).detail("Path", fullPath).GetLastError();
-		throw e;
-	}
-	total = std::min((uint64_t)std::numeric_limits<int64_t>::max(), totalSpace.QuadPart);
-	free = std::min((uint64_t)std::numeric_limits<int64_t>::max(), freeSpace.QuadPart);
-#else
-#warning getDiskBytes unimplemented on this platform
-	free = 1LL << 50;
-	total = 1LL << 50;
-#endif
 }
 
-#ifdef __unixish__
 const char* getInterfaceName(const IPAddress& _ip) {
 	INJECT_FAULT(platform_error, "getInterfaceName"); // Get interface name failed
 	static char iname[20];
@@ -721,7 +450,6 @@ const char* getInterfaceName(const IPAddress& _ip) {
 	else
 		return nullptr;
 }
-#endif
 
 #if defined(__linux__)
 void getNetworkTraffic(const IPAddress& ip,
@@ -963,210 +691,6 @@ dev_t getDeviceId(std::string path) {
 
 #endif
 
-#if defined(__FreeBSD__)
-void getNetworkTraffic(const IPAddress ip,
-                       uint64_t& bytesSent,
-                       uint64_t& bytesReceived,
-                       uint64_t& outSegs,
-                       uint64_t& retransSegs) {
-	INJECT_FAULT(platform_error, "getNetworkTraffic"); // Get Network traffic failed
-
-	const char* ifa_name = nullptr;
-	try {
-		ifa_name = getInterfaceName(ip);
-	} catch (Error& e) {
-		if (e.code() != error_code_platform_error) {
-			throw;
-		}
-	}
-
-	if (!ifa_name)
-		return;
-
-	struct ifaddrs* interfaces = nullptr;
-
-	if (getifaddrs(&interfaces)) {
-		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
-		throw platform_error();
-	}
-
-	int if_count, i;
-	int mib[6];
-	size_t ifmiblen;
-	struct ifmibdata ifmd;
-
-	mib[0] = CTL_NET;
-	mib[1] = PF_LINK;
-	mib[2] = NETLINK_GENERIC;
-	mib[3] = IFMIB_IFDATA;
-	mib[4] = IFMIB_IFCOUNT;
-	mib[5] = IFDATA_GENERAL;
-
-	ifmiblen = sizeof(ifmd);
-
-	for (i = 1; i <= if_count; i++) {
-		mib[4] = i;
-
-		sysctl(mib, 6, &ifmd, &ifmiblen, (void*)0, 0);
-
-		if (!strcmp(ifmd.ifmd_name, ifa_name)) {
-			bytesSent = ifmd.ifmd_data.ifi_obytes;
-			bytesReceived = ifmd.ifmd_data.ifi_ibytes;
-			break;
-		}
-	}
-
-	freeifaddrs(interfaces);
-
-	struct tcpstat tcpstat;
-	size_t stat_len;
-	stat_len = sizeof(tcpstat);
-	int tcpstatus = sysctlbyname("net.inet.tcp.stats", &tcpstat, &stat_len, nullptr, 0);
-	if (tcpstatus < 0) {
-		TraceEvent(SevError, "GetNetworkTrafficError").GetLastError();
-		throw platform_error();
-	}
-
-	outSegs = tcpstat.tcps_sndtotal;
-	retransSegs = tcpstat.tcps_sndrexmitpack;
-}
-
-void getMachineLoad(uint64_t& idleTime, uint64_t& totalTime, bool logDetails) {
-	INJECT_FAULT(platform_error, "getMachineLoad"); // Getting machine load failed
-
-	long cur[CPUSTATES], last[CPUSTATES];
-	size_t cur_sz = sizeof cur;
-	int cpustate;
-	long sum;
-
-	memset(last, 0, sizeof last);
-
-	if (sysctlbyname("kern.cp_time", &cur, &cur_sz, nullptr, 0) < 0) {
-		TraceEvent(SevError, "GetMachineLoad").GetLastError();
-		throw platform_error();
-	}
-
-	sum = 0;
-	for (cpustate = 0; cpustate < CPUSTATES; cpustate++) {
-		long tmp = cur[cpustate];
-		cur[cpustate] -= last[cpustate];
-		last[cpustate] = tmp;
-		sum += cur[cpustate];
-	}
-
-	totalTime = (uint64_t)(cur[CP_USER] + cur[CP_NICE] + cur[CP_SYS] + cur[CP_IDLE]);
-
-	idleTime = (uint64_t)(cur[CP_IDLE]);
-
-	// need to add logging here to TraceEvent
-}
-
-void getDiskStatistics(std::string const& directory,
-                       uint64_t& currentIOs,
-                       uint64_t& readMilliSecs,
-                       uint64_t& writeMilliSecs,
-                       uint64_t& IOMilliSecs,
-                       uint64_t& reads,
-                       uint64_t& writes,
-                       uint64_t& writeSectors,
-                       uint64_t& readSectors) {
-	INJECT_FAULT(platform_error, "getDiskStatistics"); // getting disk stats failed
-	currentIOs = 0;
-	readMilliSecs = 0; // This will not be used because we cannot get its value.
-	writeMilliSecs = 0; // This will not be used because we cannot get its value.
-	IOMilliSecs = 0;
-	reads = 0;
-	writes = 0;
-	writeSectors = 0;
-	readSectors = 0;
-
-	struct stat buf;
-	if (stat(directory.c_str(), &buf)) {
-		TraceEvent(SevError, "GetDiskStatisticsStatError").detail("Directory", directory).GetLastError();
-		throw platform_error();
-	}
-
-	static struct statinfo dscur;
-	double etime;
-	struct timespec ts;
-	static int num_devices;
-
-	kvm_t* kd = nullptr;
-
-	etime = ts.tv_nsec * 1e-6;
-	;
-
-	int dn;
-	u_int64_t total_transfers_read, total_transfers_write;
-	u_int64_t total_blocks_read, total_blocks_write;
-	u_int64_t queue_len;
-	long double ms_per_transaction;
-
-	dscur.dinfo = (struct devinfo*)calloc(1, sizeof(struct devinfo));
-	if (dscur.dinfo == nullptr) {
-		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-		throw platform_error();
-	}
-
-	if (devstat_getdevs(kd, &dscur) == -1) {
-		TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-		throw platform_error();
-	}
-
-	num_devices = dscur.dinfo->numdevs;
-
-	for (dn = 0; dn < num_devices; dn++) {
-
-		if (devstat_compute_statistics(&dscur.dinfo->devices[dn],
-		                               nullptr,
-		                               etime,
-		                               DSM_MS_PER_TRANSACTION,
-		                               &ms_per_transaction,
-		                               DSM_TOTAL_TRANSFERS_READ,
-		                               &total_transfers_read,
-		                               DSM_TOTAL_TRANSFERS_WRITE,
-		                               &total_transfers_write,
-		                               DSM_TOTAL_BLOCKS_READ,
-		                               &total_blocks_read,
-		                               DSM_TOTAL_BLOCKS_WRITE,
-		                               &total_blocks_write,
-		                               DSM_QUEUE_LENGTH,
-		                               &queue_len,
-		                               DSM_NONE) != 0) {
-			TraceEvent(SevError, "GetDiskStatisticsStatError").GetLastError();
-			throw platform_error();
-		}
-
-		currentIOs += queue_len;
-		IOMilliSecs += (u_int64_t)ms_per_transaction;
-		reads += total_transfers_read;
-		writes += total_transfers_write;
-		writeSectors += total_blocks_read;
-		readSectors += total_blocks_write;
-	}
-}
-
-dev_t getDeviceId(std::string path) {
-	struct stat statInfo;
-
-	while (true) {
-		int returnValue = stat(path.c_str(), &statInfo);
-		if (!returnValue)
-			break;
-
-		if (errno == ENOENT) {
-			path = parentDirectory(path);
-		} else {
-			TraceEvent(SevError, "GetDeviceIdError").detail("Path", path).GetLastError();
-			throw platform_error();
-		}
-	}
-
-	return statInfo.st_dev;
-}
-
-#endif
-
 #ifdef __APPLE__
 void getNetworkTraffic(const IPAddress& ip,
                        uint64_t& bytesSent,
@@ -1363,105 +887,12 @@ void getDiskStatistics(std::string const& directory,
 }
 #endif
 
-#if defined(_WIN32)
-std::vector<std::string> expandWildcardPath(const char* wildcardPath) {
-	PDH_STATUS Status;
-	char* EndOfPaths;
-	char* Paths = nullptr;
-	DWORD BufferSize = 0;
-	std::vector<std::string> results;
-
-	Status = PdhExpandCounterPath(wildcardPath, Paths, &BufferSize);
-	if (Status != PDH_MORE_DATA) {
-		TraceEvent(SevWarn, "PdhExpandCounterPathError")
-		    .detail("Reason", "Expand Path call made no sense")
-		    .detail("Status", Status);
-		goto Cleanup;
-	}
-
-	Paths = (char*)malloc(BufferSize);
-	Status = PdhExpandCounterPath(wildcardPath, Paths, &BufferSize);
-
-	if (Status != ERROR_SUCCESS) {
-		TraceEvent(SevWarn, "PdhExpandCounterPathError")
-		    .detail("Reason", "Expand Path call failed")
-		    .detail("Status", Status);
-		goto Cleanup;
-	}
-
-	if (Paths == nullptr) {
-		TraceEvent("WindowsPdhExpandCounterPathError").detail("Reason", "Path could not be expanded");
-		goto Cleanup;
-	}
-
-	EndOfPaths = Paths + BufferSize;
-
-	for (char* p = Paths; ((p != EndOfPaths) && (*p != '\0')); p += strlen(p) + 1) {
-		results.push_back(p);
-		// printf("Counter: %s\n", p);
-	}
-
-Cleanup:
-	if (Paths) {
-		free(Paths);
-	}
-	return results;
-}
-
-std::vector<HCOUNTER> addCounters(HQUERY Query, const char* path) {
-	std::vector<HCOUNTER> counters;
-
-	std::vector<std::string> paths = expandWildcardPath(path);
-
-	for (int i = 0; i < paths.size(); i++) {
-		HCOUNTER counter;
-		handlePdhStatus(PdhAddCounter(Query, paths[i].c_str(), 0, &counter), "PdhAddCounter");
-		counters.push_back(counter);
-	}
-	return counters;
-}
-#endif
-
 struct SystemStatisticsState {
 	double lastTime;
 	double lastClockThread;
 	double lastClockProcess;
 	uint64_t processLastSent;
 	uint64_t processLastReceived;
-#if defined(_WIN32)
-	struct {
-		std::string diskDevice;
-		std::string physicalDisk;
-		std::string processor;
-		std::string networkDevice;
-		std::string tcpv4;
-		std::string pctIdle;
-		std::string diskQueueLength;
-		std::string diskReadsPerSec;
-		std::string diskWritesPerSec;
-		std::string diskWriteBytesPerSec;
-		std::string bytesSentPerSec;
-		std::string bytesRecvPerSec;
-		std::string segmentsOutPerSec;
-		std::string segmentsRetransPerSec;
-	} pdhStrings;
-	PDH_STATUS Status;
-	HQUERY Query;
-	HCOUNTER QueueLengthCounter;
-	HCOUNTER DiskTimeCounter;
-	HCOUNTER ReadsCounter;
-	HCOUNTER WritesCounter;
-	HCOUNTER WriteBytesCounter;
-	std::vector<HCOUNTER> SendCounters;
-	std::vector<HCOUNTER> ReceiveCounters;
-	HCOUNTER SegmentsOutCounter;
-	HCOUNTER SegmentsRetransCounter;
-	HCOUNTER ProcessorIdleCounter;
-	SystemStatisticsState()
-	  : Query(nullptr), QueueLengthCounter(nullptr), DiskTimeCounter(nullptr), ReadsCounter(nullptr),
-	    WritesCounter(nullptr), WriteBytesCounter(nullptr), ProcessorIdleCounter(nullptr), lastTime(0),
-	    lastClockThread(0), lastClockProcess(0), processLastSent(0), processLastReceived(0) {}
-#elif defined(__unixish__)
 	uint64_t machineLastSent, machineLastReceived;
 	uint64_t machineLastOutSegs, machineLastRetransSegs;
 	uint64_t lastReadMilliSecs, lastWriteMilliSecs, lastIOMilliSecs, lastReads, lastWrites, lastWriteSectors,
@@ -1472,94 +903,7 @@ struct SystemStatisticsState {
 	    machineLastSent(0), machineLastReceived(0), machineLastOutSegs(0), machineLastRetransSegs(0),
 	    lastReadMilliSecs(0), lastWriteMilliSecs(0), lastIOMilliSecs(0), lastReads(0), lastWrites(0),
 	    lastWriteSectors(0), lastReadSectors(0), lastClockIdleTime(0), lastClockTotalTime(0) {}
-#else
-#error Port me!
-#endif
 };
-
-#if defined(_WIN32)
-void initPdhStrings(SystemStatisticsState* state, std::string dataFolder) {
-	if (setPdhString(234, state->pdhStrings.physicalDisk) && setPdhString(238, state->pdhStrings.processor) &&
-	    setPdhString(510, state->pdhStrings.networkDevice) && setPdhString(638, state->pdhStrings.tcpv4) &&
-	    setPdhString(1482, state->pdhStrings.pctIdle) && setPdhString(198, state->pdhStrings.diskQueueLength) &&
-	    setPdhString(214, state->pdhStrings.diskReadsPerSec) && setPdhString(216, state->pdhStrings.diskWritesPerSec) &&
-	    setPdhString(222, state->pdhStrings.diskWriteBytesPerSec) &&
-	    setPdhString(506, state->pdhStrings.bytesSentPerSec) && setPdhString(264, state->pdhStrings.bytesRecvPerSec) &&
-	    setPdhString(654, state->pdhStrings.segmentsOutPerSec) &&
-	    setPdhString(656, state->pdhStrings.segmentsRetransPerSec)) {
-
-		if (!dataFolder.empty()) {
-			dataFolder = abspath(dataFolder);
-			char buf[512], buf2[512];
-			DWORD sz = 512, sz2 = 512;
-
-			if (!GetVolumePathName(dataFolder.c_str(), buf, 512)) {
-				TraceEvent(SevWarn, "GetVolumePathName").GetLastError().detail("Path", dataFolder);
-				return;
-			}
-
-			if (!GetVolumeNameForVolumeMountPoint(buf, buf2, 512)) {
-				TraceEvent(SevWarn, "GetVolumeNameForVolumeMountPoint").GetLastError().detail("Path", dataFolder);
-				return;
-			}
-
-			if (!strlen(buf2)) {
-				TraceEvent(SevWarn, "WinDiskStatsGetPathError").detail("Path", dataFolder);
-				return;
-			}
-
-			if (buf2[strlen(buf2) - 1] == '\\')
-				buf2[strlen(buf2) - 1] = 0;
-
-			HANDLE hDevice = CreateFile(buf2, 0, 0, nullptr, OPEN_EXISTING, 0, nullptr);
-			if (hDevice == INVALID_HANDLE_VALUE) {
-				TraceEvent(SevWarn, "CreateFile").GetLastError().detail("Path", dataFolder);
-				return;
-			}
-
-			STORAGE_DEVICE_NUMBER storage_device;
-			if (!DeviceIoControl(hDevice,
-			                     IOCTL_STORAGE_GET_DEVICE_NUMBER,
-			                     nullptr,
-			                     0,
-			                     &storage_device,
-			                     sizeof(storage_device),
-			                     &sz,
-			                     nullptr)) {
-				TraceEvent(SevWarn, "DeviceIoControl").GetLastError().detail("Path", dataFolder);
-				return;
-			}
-
-			// Find the drive letter involved!
-			sz = 512;
-			if (handlePdhStatus(PdhEnumObjectItems(nullptr,
-			                                       nullptr,
-			                                       state->pdhStrings.physicalDisk.c_str(),
-			                                       buf2,
-			                                       &sz2,
-			                                       buf,
-			                                       &sz,
-			                                       PERF_DETAIL_NOVICE,
-			                                       0),
-			                    "PdhEnumObjectItems")) {
-				char* ptr = buf;
-				while (*ptr) {
-					if (isdigit(*ptr) && atoi(ptr) == storage_device.DeviceNumber) {
-						state->pdhStrings.diskDevice = ptr;
-						break;
-					}
-					ptr += strlen(ptr) + 1;
-				}
-			}
-
-			if (state->pdhStrings.diskDevice.empty()) {
-				TraceEvent(SevWarn, "WinDiskStatsGetPathError").detail("Path", dataFolder);
-				return;
-			}
-		}
-	}
-}
-#endif
 
 SystemStatistics getSystemStatistics(std::string const& dataFolder,
                                      const IPAddress* ip,
@@ -1596,142 +940,6 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 		returnStats.processDiskFreeBytes = diskFree;
 	}
 
-#if defined(_WIN32)
-	if ((*statState)->Query == nullptr) {
-		initPdhStrings(*statState, dataFolder);
-
-		TraceEvent("SetupQuery").log();
-		handlePdhStatus(PdhOpenQuery(nullptr, NULL, &(*statState)->Query), "PdhOpenQuery");
-
-		if (!(*statState)->pdhStrings.diskDevice.empty()) {
-			handlePdhStatus(
-			    PdhAddCounter((*statState)->Query,
-			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
-			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.pctIdle)
-			                      .c_str(),
-			                  0,
-			                  &(*statState)->DiskTimeCounter),
-			    "PdhAddCounter");
-			handlePdhStatus(
-			    PdhAddCounter((*statState)->Query,
-			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
-			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskQueueLength)
-			                      .c_str(),
-			                  0,
-			                  &(*statState)->QueueLengthCounter),
-			    "PdhAddCounter");
-			handlePdhStatus(
-			    PdhAddCounter((*statState)->Query,
-			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
-			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskReadsPerSec)
-			                      .c_str(),
-			                  0,
-			                  &(*statState)->ReadsCounter),
-			    "PdhAddCounter");
-			handlePdhStatus(
-			    PdhAddCounter((*statState)->Query,
-			                  ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
-			                   (*statState)->pdhStrings.diskDevice + ")\\" + (*statState)->pdhStrings.diskWritesPerSec)
-			                      .c_str(),
-			                  0,
-			                  &(*statState)->WritesCounter),
-			    "PdhAddCounter");
-			handlePdhStatus(PdhAddCounter((*statState)->Query,
-			                              ("\\" + (*statState)->pdhStrings.physicalDisk + "(" +
-			                               (*statState)->pdhStrings.diskDevice + ")\\" +
-			                               (*statState)->pdhStrings.diskWriteBytesPerSec)
-			                                  .c_str(),
-			                              0,
-			                              &(*statState)->WriteBytesCounter),
-			                "PdhAddCounter");
-		}
-		(*statState)->SendCounters = addCounters(
-		    (*statState)->Query,
-		    ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" + (*statState)->pdhStrings.bytesSentPerSec)
-		        .c_str());
-		(*statState)->ReceiveCounters = addCounters(
-		    (*statState)->Query,
-		    ("\\" + (*statState)->pdhStrings.networkDevice + "(*)\\" + (*statState)->pdhStrings.bytesRecvPerSec)
-		        .c_str());
-		handlePdhStatus(
-		    PdhAddCounter(
-		        (*statState)->Query,
-		        ("\\" + (*statState)->pdhStrings.tcpv4 + "\\" + (*statState)->pdhStrings.segmentsOutPerSec).c_str(),
-		        0,
-		        &(*statState)->SegmentsOutCounter),
-		    "PdhAddCounter");
-		handlePdhStatus(
-		    PdhAddCounter(
-		        (*statState)->Query,
-		        ("\\" + (*statState)->pdhStrings.tcpv4 + "\\" + (*statState)->pdhStrings.segmentsRetransPerSec).c_str(),
-		        0,
-		        &(*statState)->SegmentsRetransCounter),
-		    "PdhAddCounter");
-		handlePdhStatus(
-		    PdhAddCounter(
-		        (*statState)->Query,
-		        ("\\" + (*statState)->pdhStrings.processor + "(*)\\" + (*statState)->pdhStrings.pctIdle).c_str(),
-		        0,
-		        &(*statState)->ProcessorIdleCounter),
-		    "PdhAddCounter");
-	}
-	handlePdhStatus(PdhCollectQueryData((*statState)->Query), "PdhCollectQueryData");
-
-	PDH_FMT_COUNTERVALUE DisplayValue;
-	if (returnStats.initialized) {
-		if (!(*statState)->pdhStrings.diskDevice.empty()) {
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->DiskTimeCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "DiskTimeCounter"))
-				returnStats.processDiskIdleSeconds = DisplayValue.doubleValue * returnStats.elapsed / 100.0;
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->QueueLengthCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "QueueLengthCounter"))
-				returnStats.processDiskQueueDepth = DisplayValue.doubleValue;
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->ReadsCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "ReadsCounter"))
-				returnStats.processDiskRead = DisplayValue.doubleValue * returnStats.elapsed;
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->WritesCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "WritesCounter"))
-				returnStats.processDiskWrite = DisplayValue.doubleValue * returnStats.elapsed;
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->WriteBytesCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "WriteBytesCounter"))
-				returnStats.processDiskWriteSectors = DisplayValue.doubleValue * returnStats.elapsed / 512.0;
-		}
-		returnStats.machineMegabitsSent = 0.0;
-		for (int i = 0; i < (*statState)->SendCounters.size(); i++)
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->SendCounters[i], PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "SendCounter"))
-				returnStats.machineMegabitsSent += DisplayValue.doubleValue * 7.62939453e-6;
-		returnStats.machineMegabitsSent *= returnStats.elapsed;
-
-		returnStats.machineMegabitsReceived = 0.0;
-		for (int i = 0; i < (*statState)->ReceiveCounters.size(); i++)
-			if (handlePdhStatus(
-			        PdhGetFormattedCounterValue((*statState)->ReceiveCounters[i], PDH_FMT_DOUBLE, 0, &DisplayValue),
-			        "ReceiveCounter"))
-				returnStats.machineMegabitsReceived += DisplayValue.doubleValue * 7.62939453e-6;
-		returnStats.machineMegabitsReceived *= returnStats.elapsed;
-
-		if (handlePdhStatus(
-		        PdhGetFormattedCounterValue((*statState)->SegmentsOutCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-		        "SegmentsOutCounter"))
-			returnStats.machineOutSegs = DisplayValue.doubleValue * returnStats.elapsed;
-		if (handlePdhStatus(
-		        PdhGetFormattedCounterValue((*statState)->SegmentsRetransCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-		        "SegmentsRetransCounter"))
-			returnStats.machineRetransSegs = DisplayValue.doubleValue * returnStats.elapsed;
-
-		if (handlePdhStatus(
-		        PdhGetFormattedCounterValue((*statState)->ProcessorIdleCounter, PDH_FMT_DOUBLE, 0, &DisplayValue),
-		        "ProcessorIdleCounter"))
-			returnStats.machineCPUSeconds = (100 - DisplayValue.doubleValue) * returnStats.elapsed / 100.0;
-	}
-#elif defined(__unixish__)
 	uint64_t machineNowSent = (*statState)->machineLastSent;
 	uint64_t machineNowReceived = (*statState)->machineLastReceived;
 	uint64_t machineOutSegs = (*statState)->machineLastOutSegs;
@@ -1805,44 +1013,13 @@ SystemStatistics getSystemStatistics(std::string const& dataFolder,
 	                                    : 0;
 	(*statState)->lastClockIdleTime = clockIdleTime;
 	(*statState)->lastClockTotalTime = clockTotalTime;
-#endif
 	(*statState)->lastTime = nowTime;
 	(*statState)->lastClockProcess = nowClockProcess;
 	(*statState)->lastClockThread = nowClockThread;
 	return returnStats;
 }
 
-#ifdef _WIN32
-struct OffsetTimer {
-	double secondsPerCount, offset;
-
-	static const int64_t FILETIME_C_EPOCH =
-	    11644473600LL *
-	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
-
-	OffsetTimer() {
-		long long countsPerSecond;
-		if (!QueryPerformanceFrequency((LARGE_INTEGER*)&countsPerSecond))
-			throw performance_counter_error();
-		secondsPerCount = 1.0 / countsPerSecond;
-
-		FILETIME fileTime;
-
-		offset = 0;
-		double timer = now();
-		GetSystemTimeAsFileTime(&fileTime);
-		static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
-		offset = (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9 - timer;
-	}
-
-	double now() {
-		long long count;
-		if (!QueryPerformanceCounter((LARGE_INTEGER*)&count))
-			throw performance_counter_error();
-		return offset + count * secondsPerCount;
-	}
-};
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #define DOUBLETIME(ts) (double(ts.tv_sec) + (ts.tv_nsec * 1e-9))
 #ifndef CLOCK_MONOTONIC_RAW
 #define CLOCK_MONOTONIC_RAW                                                                                            \
@@ -1903,15 +1080,7 @@ double timer_monotonic() {
 }
 
 double timer() {
-#ifdef _WIN32
-	static const int64_t FILETIME_C_EPOCH =
-	    11644473600LL *
-	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
-	FILETIME fileTime;
-	GetSystemTimeAsFileTime(&fileTime);
-	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
-	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH) * 100e-9;
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return double(ts.tv_sec) + (ts.tv_nsec * 1e-9);
@@ -1925,15 +1094,7 @@ double timer() {
 };
 
 uint64_t timer_int() {
-#ifdef _WIN32
-	static const int64_t FILETIME_C_EPOCH =
-	    11644473600LL *
-	    10000000LL; // Difference between FILETIME epoch (1601) and Unix epoch (1970) in 100ns FILETIME ticks
-	FILETIME fileTime;
-	GetSystemTimeAsFileTime(&fileTime);
-	static_assert(sizeof(fileTime) == sizeof(uint64_t), "FILETIME size wrong");
-	return (*(uint64_t*)&fileTime - FILETIME_C_EPOCH);
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	struct timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	return uint64_t(ts.tv_sec) * 1e9 + ts.tv_nsec;
@@ -1947,19 +1108,10 @@ uint64_t timer_int() {
 };
 
 void getLocalTime(const time_t* timep, struct tm* result) {
-#ifdef _WIN32
-	if (localtime_s(result, timep) != 0) {
-		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
-		throw platform_error();
-	}
-#elif defined(__unixish__)
 	if (localtime_r(timep, result) == nullptr) {
 		TraceEvent(SevError, "GetLocalTimeError").GetLastError();
 		throw platform_error();
 	}
-#else
-#error Port me!
-#endif
 }
 
 // Outputs a GMT time string for the given epoch seconds, which looks like
@@ -1981,18 +1133,6 @@ std::string epochsToGMTString(double epochs) {
 std::vector<std::string> getEnvironmentKnobOptions() {
 	constexpr const size_t ENVKNOB_PREFIX_LEN = sizeof(ENVIRONMENT_KNOB_OPTION_PREFIX) - 1;
 	std::vector<std::string> knobOptions;
-#if defined(_WIN32)
-	auto e = GetEnvironmentStrings();
-	if (e == nullptr)
-		return {};
-	auto cleanup = ScopeExit([e]() { FreeEnvironmentStrings(e); });
-	while (*e) {
-		auto candidate = std::string_view(e);
-		if (boost::starts_with(candidate, ENVIRONMENT_KNOB_OPTION_PREFIX))
-			knobOptions.emplace_back(candidate.substr(ENVKNOB_PREFIX_LEN));
-		e += (candidate.size() + 1);
-	}
-#else
 	char** e = nullptr;
 #ifdef __linux__
 	e = environ;
@@ -2007,7 +1147,6 @@ std::vector<std::string> getEnvironmentKnobOptions() {
 			knobOptions.emplace_back(envOption.substr(ENVKNOB_PREFIX_LEN));
 		}
 	}
-#endif
 	return knobOptions;
 }
 
@@ -2020,22 +1159,7 @@ void setMemoryQuota(size_t limit) {
 	return;
 #endif
 	INJECT_FAULT(platform_error, "setMemoryQuota"); // setting memory quota failed
-#if defined(_WIN32)
-	HANDLE job = CreateJobObject(nullptr, nullptr);
-	if (!job) {
-		TraceEvent(SevError, "WinCreateJobError").GetLastError();
-		throw platform_error();
-	}
-	JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits;
-	limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_JOB_MEMORY;
-	limits.JobMemoryLimit = limit;
-	if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
-		TraceEvent(SevError, "FailedToSetInfoOnJobObject").detail("Limit", limit).GetLastError();
-		throw platform_error();
-	}
-	if (!AssignProcessToJobObject(job, GetCurrentProcess()))
-		TraceEvent(SevWarn, "FailedToSetMemoryLimit").GetLastError();
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	struct rlimit rlim;
 	if (getrlimit(RLIMIT_AS, &rlim)) {
 		TraceEvent(SevError, "GetMemoryLimit").GetLastError();
@@ -2052,62 +1176,16 @@ void setMemoryQuota(size_t limit) {
 #endif
 }
 
-#ifdef _WIN32
-static int ModifyPrivilege(const char* szPrivilege, bool fEnable) {
-	HRESULT hr = S_OK;
-	TOKEN_PRIVILEGES NewState;
-	LUID luid;
-	HANDLE hToken = nullptr;
-
-	// Open the process token for this process.
-	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hToken)) {
-		TraceEvent(SevWarn, "OpenProcessTokenError").error(large_alloc_failed()).GetLastError();
-		return ERROR_FUNCTION_FAILED;
-	}
-
-	// Get the local unique ID for the privilege.
-	if (!LookupPrivilegeValue(nullptr, szPrivilege, &luid)) {
-		CloseHandle(hToken);
-		TraceEvent(SevWarn, "LookupPrivilegeValue").error(large_alloc_failed()).GetLastError();
-		return ERROR_FUNCTION_FAILED;
-	}
-
-	// std::cout << luid.HighPart << " " << luid.LowPart << std::endl;
-
-	// Assign values to the TOKEN_PRIVILEGE structure.
-	NewState.PrivilegeCount = 1;
-	NewState.Privileges[0].Luid = luid;
-	NewState.Privileges[0].Attributes = (fEnable ? SE_PRIVILEGE_ENABLED : 0);
-
-	// Adjust the token privilege.
-	if (!AdjustTokenPrivileges(hToken, FALSE, &NewState, 0, nullptr, nullptr)) {
-		TraceEvent(SevWarn, "AdjustTokenPrivileges").error(large_alloc_failed()).GetLastError();
-		hr = ERROR_FUNCTION_FAILED;
-	}
-
-	// Close the handle.
-	CloseHandle(hToken);
-
-	return hr;
-}
-#endif
-
 static bool largePagesPrivilegeEnabled = false;
 
 static void enableLargePages() {
 	if (largePagesPrivilegeEnabled)
 		return;
-#ifdef _WIN32
-	ModifyPrivilege(SE_LOCK_MEMORY_NAME, true);
-	largePagesPrivilegeEnabled = true;
-#else
-		// SOMEDAY: can/should we teach the client how to enable large pages
-		// on Linux? Or just rely on the system to have been configured as
-		// desired?
-#endif
+	// SOMEDAY: can/should we teach the client how to enable large pages
+	// on Linux? Or just rely on the system to have been configured as
+	// desired?
 }
 
-#ifndef _WIN32
 static void* mmapSafe(void* addr, size_t len, int prot, int flags, int fd, off_t offset) {
 	void* result = mmap(addr, len, prot, flags, fd, offset);
 	if (result == MAP_FAILED) {
@@ -2151,25 +1229,17 @@ static void* mmapInternal(size_t length, int flags, bool guardPages) {
 		return mmapSafe(nullptr, length, PROT_READ | PROT_WRITE, flags, -1, 0);
 	}
 }
-#endif
 
 static void* allocateInternal(size_t length, bool largePages, bool guardPages) {
 
-#ifdef _WIN32
-	DWORD allocType = MEM_COMMIT | MEM_RESERVE;
-
-	if (largePages)
-		allocType |= MEM_LARGE_PAGES;
-
-	return VirtualAlloc(nullptr, length, allocType, PAGE_READWRITE);
-#elif defined(__linux__)
+#if defined(__linux__)
 	int flags = MAP_PRIVATE | MAP_ANONYMOUS;
 
 	if (largePages)
 		flags |= MAP_HUGETLB;
 
 	return mmapInternal(length, flags, guardPages);
-#elif defined(__APPLE__) || defined(__FreeBSD__)
+#elif defined(__APPLE__)
 	int flags = MAP_PRIVATE | MAP_ANON;
 
 	return mmapInternal(length, flags, guardPages);
@@ -2202,53 +1272,12 @@ void* allocate(size_t length, bool allowLargePages, bool includeGuardPages) {
 	return block;
 }
 
-#if 0
-void* numaAllocate(size_t size) {
-	void* thePtr = (void*)0xA00000000LL;
-	enableLargePages();
-
-	size_t vaPageSize = 2<<20;//64<<10;
-	int nVAPages = size / vaPageSize;
-
-	int nodes;
-	if (!GetNumaHighestNodeNumber((PULONG)&nodes)) {
-		TraceEvent(SevError, "GetNumaHighestNodeNumber").getLastError();
-		throw platform_error();
-	}
-	++nodes;
-
-	for(int i=0; i<nodes; i++) {
-		char* p = (char*)thePtr + i*nVAPages/nodes*vaPageSize;
-		char* e = (char*)thePtr + (i+1)*nVAPages/nodes*vaPageSize;
-		//printf("  %p + %lld\n", p, e-p);
-		// SOMEDAY: removed NUMA extensions for compatibity with Windows Server 2003 -- make execution dynamic
-		if (!VirtualAlloc/*ExNuma*/(/*GetCurrentProcess(),*/ p, e-p, MEM_COMMIT|MEM_RESERVE|MEM_LARGE_PAGES, PAGE_READWRITE/*, i*/)) {
-			Error e = platform_error();
-			TraceEvent(e, "VirtualAlloc").GetLastError();
-			throw e;
-		}
-	}
-	return thePtr;
-}
-#endif
-
 void setAffinity(int proc) {
-#if defined(_WIN32)
-	/*if (SetProcessAffinityMask(GetCurrentProcess(), 0x5555))//0x5555555555555555UL))
-	    printf("Set affinity mask\n");
-	else
-	    printf("Failed to set affinity mask: error %d\n", GetLastError());*/
-	SetThreadAffinityMask(GetCurrentThread(), 1ULL << proc);
-#elif defined(__linux__)
+#if defined(__linux__)
 	cpu_set_t set;
 	CPU_ZERO(&set);
 	CPU_SET(proc, &set);
 	sched_setaffinity(0, sizeof(cpu_set_t), &set);
-#elif defined(__FreeBSD__)
-	cpuset_t set;
-	CPU_ZERO(&set);
-	CPU_SET(proc, &set);
-	cpuset_setaffinity(CPU_LEVEL_WHICH, CPU_WHICH_PID, -1, sizeof(set), &set);
 #endif
 }
 
@@ -2258,19 +1287,12 @@ int getRandomSeed() {
 	INJECT_FAULT(platform_error, "getRandomSeed"); // getting a random seed failed
 	int randomSeed;
 
-#ifdef _WIN32
-	if (rand_s((unsigned int*)&randomSeed) != 0) {
-		TraceEvent(SevError, "WindowsRandomSeedError").log();
-		throw platform_error();
-	}
-#else
 	int devRandom = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
 	if (read(devRandom, &randomSeed, sizeof(randomSeed)) != sizeof(randomSeed)) {
 		TraceEvent(SevError, "OpenURandom").GetLastError();
 		throw platform_error();
 	}
 	close(devRandom);
-#endif
 
 	return randomSeed;
 }
@@ -2292,14 +1314,7 @@ void renamedFile() {
 
 void renameFile(std::string const& fromPath, std::string const& toPath) {
 	INJECT_FAULT(io_error, "renameFile"); // rename file failed
-#ifdef _WIN32
-	if (MoveFileExA(fromPath.c_str(),
-	                toPath.c_str(),
-	                MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-		// renamedFile();
-		return;
-	}
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	if (!rename(fromPath.c_str(), toPath.c_str())) {
 		// FIXME: We cannot inject faults after renaming the file, because we could end up with two asyncFileNonDurable
 		// open for the same file renamedFile();
@@ -2314,8 +1329,6 @@ void renameFile(std::string const& fromPath, std::string const& toPath) {
 
 #if defined(__linux__)
 #define FOPEN_CLOEXEC_MODE "e"
-#elif defined(_WIN32)
-#define FOPEN_CLOEXEC_MODE "N"
 #else
 #define FOPEN_CLOEXEC_MODE ""
 #endif
@@ -2330,10 +1343,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		f = textmode ? fopen(tempfilename.c_str(), "wt" FOPEN_CLOEXEC_MODE) : fopen(tempfilename.c_str(), "wb");
 		if (!f)
 			throw io_error();
-#ifdef _WIN32
-			// In Windows case, ReplaceFile API is used which preserves the ownership,
-			// ACLs and other attributes of the original file
-#elif defined(__unixish__)
 		// get the uid/gid/mode bits of old file and set it on new file, else fail
 		struct stat info;
 		bool exists = true;
@@ -2362,9 +1371,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 			deleteFile(tempfilename);
 			throw io_error();
 		}
-#else
-#error Port me!
-#endif
 
 		if (textmode && fprintf(f, "%s", content.c_str()) < 0)
 			throw io_error();
@@ -2375,25 +1381,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 		if (fflush(f) != 0)
 			throw io_error();
 
-#ifdef _WIN32
-		HANDLE h = (HANDLE)_get_osfhandle(_fileno(f));
-		if (!g_network->isSimulated()) {
-			if (!FlushFileBuffers(h))
-				throw io_error();
-		}
-
-		if (fclose(f) != 0) {
-			f = 0;
-			throw io_error();
-		}
-		f = 0;
-
-		if (!MoveFileExA(tempfilename.c_str(),
-		                 path.c_str(),
-		                 MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-			throw io_error();
-		}
-#elif defined(__unixish__)
 		if (!g_network->isSimulated()) {
 			if (fsync(fileno(f)) != 0)
 				throw io_error();
@@ -2407,9 +1394,6 @@ void atomicReplace(std::string const& path, std::string const& content, bool tex
 
 		if (rename(tempfilename.c_str(), path.c_str()) != 0)
 			throw io_error();
-#else
-#error Port me!
-#endif
 
 		INJECT_FAULT(io_error, "atomicReplace"); // io_error after atomic rename
 	} catch (Error& e) {
@@ -2427,19 +1411,10 @@ static bool deletedFile() {
 
 bool deleteFile(std::string const& filename) {
 	INJECT_FAULT(platform_error, "deleteFile"); // file deletion failed
-#ifdef _WIN32
-	if (DeleteFile(filename.c_str()))
-		return deletedFile();
-	if (GetLastError() == ERROR_FILE_NOT_FOUND)
-		return false;
-#elif defined(__unixish__)
 	if (!unlink(filename.c_str()))
 		return deletedFile();
 	if (errno == ENOENT)
 		return false;
-#else
-#error Port me!
-#endif
 	Error e = systemErrorCodeToError();
 	TraceEvent(SevError, "DeleteFile").error(e).detail("Filename", filename).GetLastError();
 	throw e;
@@ -2454,24 +1429,7 @@ namespace platform {
 bool createDirectory(std::string const& directory) {
 	INJECT_FAULT(platform_error, "createDirectory"); // create dir failed
 
-#ifdef _WIN32
-	if (CreateDirectory(directory.c_str(), nullptr)) {
-		createdDirectory();
-		return true;
-	}
-	if (GetLastError() == ERROR_ALREADY_EXISTS)
-		return false;
-	if (GetLastError() == ERROR_PATH_NOT_FOUND) {
-		size_t delim = directory.find_last_of("/\\");
-		if (delim != std::string::npos) {
-			createDirectory(directory.substr(0, delim));
-			return createDirectory(directory);
-		}
-	}
-	Error e = systemErrorCodeToError();
-	TraceEvent(SevError, "CreateDirectory").error(e).detail("Directory", directory).GetLastError();
-	throw e;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	size_t sep = 0;
 	do {
 		sep = directory.find_first_of('/', sep + 1);
@@ -2611,20 +1569,7 @@ std::string abspath(std::string const& path_, bool resolveLinks, bool mustExist)
 		return clean;
 	}
 
-#ifdef _WIN32
-	char nameBuffer[MAX_PATH];
-	if (!GetFullPathName(path.c_str(), MAX_PATH, nameBuffer, nullptr) || (mustExist && !fileExists(nameBuffer))) {
-		Error e = systemErrorCodeToError();
-		Severity sev = e.code() == error_code_io_error ? SevError : SevWarnAlways;
-		TraceEvent(sev, "AbsolutePathError").error(e).detail("Path", path).GetLastError();
-		throw e;
-	}
-	// Not totally obvious from the help whether GetFullPathName canonicalizes slashes, so let's do it...
-	for (char* x = nameBuffer; *x; x++)
-		if (*x == '/')
-			*x = CANONICAL_PATH_SEPARATOR;
-	return nameBuffer;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	char result[PATH_MAX];
 	// Must resolve links, so first try realpath on the whole thing
 	const char* r = realpath(path.c_str(), result);
@@ -2665,7 +1610,6 @@ std::string basename(std::string const& filename) {
 }
 
 std::string getUserHomeDirectory() {
-#if defined(__unixish__)
 	const char* ret = getenv("HOME");
 	if (!ret) {
 		if (struct passwd* pw = getpwuid(getuid())) {
@@ -2673,77 +1617,9 @@ std::string getUserHomeDirectory() {
 		}
 	}
 	return ret;
-#elif defined(_WIN32)
-	TCHAR szPath[MAX_PATH];
-	if (SHGetFolderPath(nullptr, CSIDL_PROFILE, nullptr, 0, szPath) != S_OK) {
-		TraceEvent(SevError, "GetUserHomeDirectory").GetLastError();
-		throw platform_error();
-	}
-	std::string path(szPath);
-	return path;
-#else
-#error Port me!
-#endif
 }
 
-#ifdef _WIN32
-#define FILE_ATTRIBUTE_DATA DWORD
-
-bool acceptFile(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension) {
-	return !(fileAttributes & FILE_ATTRIBUTE_DIRECTORY) && StringRef(name).endsWith(extension);
-}
-
-bool acceptDirectory(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension) {
-	return (fileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-}
-
-ACTOR Future<std::vector<std::string>> findFiles(std::string directory,
-                                                 std::string extension,
-                                                 bool directoryOnly,
-                                                 bool async) {
-	INJECT_FAULT(platform_error, "findFiles"); // findFiles failed (Win32)
-	state std::vector<std::string> result;
-	state int64_t tsc_begin = timestampCounter();
-
-	state WIN32_FIND_DATA fd;
-	state HANDLE h = FindFirstFile((directory + "/*" + extension).c_str(), &fd);
-	if (h == INVALID_HANDLE_VALUE) {
-		if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) {
-			TraceEvent(SevError, "FindFirstFile")
-			    .detail("Directory", directory)
-			    .detail("Extension", extension)
-			    .GetLastError();
-			throw platform_error();
-		}
-	} else {
-		loop {
-			std::string name = fd.cFileName;
-			if ((directoryOnly && acceptDirectory(fd.dwFileAttributes, name, extension)) ||
-			    (!directoryOnly && acceptFile(fd.dwFileAttributes, name, extension))) {
-				result.push_back(name);
-			}
-			if (!FindNextFile(h, &fd))
-				break;
-			if (async && timestampCounter() - tsc_begin > FLOW_KNOBS->TSC_YIELD_TIME && !g_network->isSimulated()) {
-				wait(yield());
-				tsc_begin = timestampCounter();
-			}
-		}
-		if (GetLastError() != ERROR_NO_MORE_FILES) {
-			TraceEvent(SevError, "FindNextFile")
-			    .detail("Directory", directory)
-			    .detail("Extension", extension)
-			    .GetLastError();
-			FindClose(h);
-			throw platform_error();
-		}
-		FindClose(h);
-	}
-	std::sort(result.begin(), result.end());
-	return result;
-}
-
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 #define FILE_ATTRIBUTE_DATA mode_t
 
 bool acceptFile(FILE_ATTRIBUTE_DATA fileAttributes, std::string const& name, std::string const& extension) {
@@ -2856,9 +1732,7 @@ ACTOR Future<Void> findFilesRecursivelyAsync(std::string path, std::vector<std::
 } // namespace platform
 
 void threadSleep(double seconds) {
-#ifdef _WIN32
-	Sleep((DWORD)(seconds * 1e3));
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	struct timespec req, rem;
 
 	req.tv_sec = seconds;
@@ -2874,25 +1748,12 @@ void threadSleep(double seconds) {
 }
 
 void threadYield() {
-#ifdef _WIN32
-	Sleep(0);
-#elif defined(__unixish__)
 	sched_yield();
-#else
-#error Port me!
-#endif
 }
 
 namespace platform {
 
-void makeTemporary(const char* filename) {
-#ifdef _WIN32
-	SetFileAttributes(filename, FILE_ATTRIBUTE_TEMPORARY);
-#endif
-}
-
 void setCloseOnExec(int fd) {
-#if defined(__unixish__)
 	int options = fcntl(fd, F_GETFD);
 	if (options != -1) {
 		options = fcntl(fd, F_SETFD, options | FD_CLOEXEC);
@@ -2900,16 +1761,11 @@ void setCloseOnExec(int fd) {
 	if (options == -1) {
 		TraceEvent(SevWarnAlways, "PlatformSetCloseOnExecError").suppressFor(60).GetLastError();
 	}
-#endif
 }
 
 } // namespace platform
 
-#ifdef _WIN32
-THREAD_HANDLE startThread(void (*func)(void*), void* arg, int stackSize, const char* name) {
-	return (void*)_beginthread(func, stackSize, arg);
-}
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const char* name) {
 	pthread_t t;
 	pthread_attr_t attr;
@@ -2954,9 +1810,7 @@ THREAD_HANDLE startThread(void* (*func)(void*), void* arg, int stackSize, const 
 #endif
 
 void waitThread(THREAD_HANDLE thread) {
-#ifdef _WIN32
-	WaitForSingleObject(thread, INFINITE);
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	pthread_join(thread, nullptr);
 #else
 #error Port me!
@@ -2967,7 +1821,6 @@ void setThreadPriority(int pri) {
 #ifdef __linux__
 	int tid = syscall(SYS_gettid);
 	setpriority(PRIO_PROCESS, tid, pri);
-#elif defined(_WIN32)
 #endif
 }
 
@@ -2980,26 +1833,15 @@ bool fileExists(std::string const& filename) {
 }
 
 bool directoryExists(std::string const& path) {
-#ifdef _WIN32
-	DWORD bits = ::GetFileAttributes(path.c_str());
-	return bits != INVALID_FILE_ATTRIBUTES && (bits & FILE_ATTRIBUTE_DIRECTORY);
-#else
 	DIR* d = opendir(path.c_str());
 	if (d == nullptr)
 		return false;
 	closedir(d);
 	return true;
-#endif
 }
 
 int64_t fileSize(std::string const& filename) {
-#ifdef _WIN32
-	struct _stati64 file_status;
-	if (_stati64(filename.c_str(), &file_status) != 0)
-		return 0;
-	else
-		return file_status.st_size;
-#elif (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 	struct stat file_status;
 	if (stat(filename.c_str(), &file_status) != 0)
 		return 0;
@@ -3067,53 +1909,18 @@ void writeFile(std::string const& filename, std::string const& content) {
 namespace platform {
 
 bool getEnvironmentVar(const char* name, std::string& value) {
-#if defined(__unixish__)
 	char* val = getenv(name);
 	if (val) {
 		value = std::string(val);
 		return true;
 	}
 	return false;
-#elif defined(_WIN32)
-	int len = GetEnvironmentVariable(name, nullptr, 0);
-	if (len == 0) {
-		if (GetLastError() == ERROR_ENVVAR_NOT_FOUND) {
-			return false;
-		}
-		TraceEvent(SevError, "GetEnvironmentVariable").detail("Name", name).GetLastError();
-		throw platform_error();
-	}
-	value.resize(len);
-	int rc = GetEnvironmentVariable(name, &value[0], len);
-	if (rc + 1 != len) {
-		TraceEvent(SevError, "WrongEnvVarLength").detail("ExpectedLength", len).detail("ReceivedLength", rc + 1);
-		throw platform_error();
-	}
-	value.resize(len - 1);
-	return true;
-#else
-#error Port me!
-#endif
 }
 
 int setEnvironmentVar(const char* name, const char* value, int overwrite) {
-#if defined(_WIN32)
-	int errcode = 0;
-	if (!overwrite) {
-		size_t envsize = 0;
-		errcode = getenv_s(&envsize, nullptr, 0, name);
-		if (errcode || envsize)
-			return errcode;
-	}
-	return _putenv_s(name, value);
-#else
 	return setenv(name, value, overwrite);
-#endif
 }
 
-#if defined(_WIN32)
-#define getcwd(buf, maxlen) _getcwd(buf, maxlen)
-#endif
 std::string getWorkingDirectory() {
 	char* buf;
 	if ((buf = getcwd(nullptr, 0)) == nullptr) {
@@ -3131,17 +1938,9 @@ extern std::string format(const char* form, ...);
 
 namespace platform {
 std::string getDefaultConfigPath() {
-#ifdef _WIN32
-	TCHAR szPath[MAX_PATH];
-	if (SHGetFolderPath(nullptr, CSIDL_COMMON_APPDATA, nullptr, 0, szPath) != S_OK) {
-		TraceEvent(SevError, "WindowsAppDataError").GetLastError();
-		throw platform_error();
-	}
-	std::string _filepath(szPath);
-	return _filepath + "\\foundationdb";
-#elif defined(__linux__)
+#if defined(__linux__)
 	return "/etc/foundationdb";
-#elif defined(__APPLE__) || defined(__FreeBSD__)
+#elif defined(__APPLE__)
 	return "/usr/local/etc/foundationdb";
 #else
 #error Port me!
@@ -3224,14 +2023,7 @@ void outOfMemory() {
 		char buf[1024];
 		std::vector<void*>* frames = i->second.backTrace;
 		std::string backTraceStr;
-#if defined(_WIN32)
-		for (int j = 1; j < frames->size(); j++) {
-			_snprintf(buf, 1024, "%p ", frames->at(j));
-			backTraceStr += buf;
-		}
-#else
 		backTraceStr = format_backtrace(&(*frames)[0], frames->size());
-#endif
 		TraceEvent("MemSample")
 		    .detail("Count", (int64_t)i->second.count)
 		    .detail("TotalSize", i->second.totalSize)
@@ -3275,9 +2067,7 @@ int __eraseDirectoryRecursiveCount;
 
 int eraseDirectoryRecursive(std::string const& dir) {
 	__eraseDirectoryRecursiveCount = 0;
-#ifdef _WIN32
-	system(("rd /s /q \"" + dir + "\"").c_str());
-#elif defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__)
+#if defined(__linux__) || defined(__APPLE__)
 	int error = nftw(
 	    dir.c_str(),
 	    [](const char* fpath, const struct stat* sb, int typeflag, struct FTW* ftwbuf) -> int {
@@ -3390,19 +2180,11 @@ extern "C" void flushAndExit(int exitCode) {
 #ifdef USE_GCOV
 	__gcov_flush();
 #endif
-#ifdef _WIN32
-	// This function is documented as being asynchronous, but we suspect it might actually be synchronous in the
-	// case that it is passed a handle to the current process. If not, then there may be cases where we escalate
-	// to the crashAndDie call below.
-	TerminateProcess(GetCurrentProcess(), exitCode);
-#else
 	_exit(exitCode);
-#endif
 	// should never reach here, but you never know
 	crashAndDie();
 }
 
-#ifdef __unixish__
 #include <dlfcn.h>
 
 #ifdef __linux__
@@ -3489,45 +2271,26 @@ std::string get_backtrace() {
 	return format_backtrace(addresses, size);
 }
 } // namespace platform
-#else
-
-namespace platform {
-std::string get_backtrace() {
-	return std::string();
-}
-std::string format_backtrace(void** addresses, int numAddresses) {
-	return std::string();
-}
-ImageInfo getImageInfo() {
-	return ImageInfo();
-}
-} // namespace platform
-#endif
 
 bool isLibraryLoaded(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
+#if !defined(__linux__) && !defined(__APPLE__)
 #error Port me!
 #endif
 
 	void* dlobj = nullptr;
 
-#if defined(__unixish__)
 	dlobj = dlopen(lib_path, RTLD_NOLOAD | RTLD_LAZY);
-#else
-	dlobj = GetModuleHandle(lib_path);
-#endif
 
 	return dlobj != nullptr;
 }
 
 void* loadLibrary(const char* lib_path) {
-#if !defined(__linux__) && !defined(__APPLE__) && !defined(_WIN32) && !defined(__FreeBSD__)
+#if !defined(__linux__) && !defined(__APPLE__)
 #error Port me!
 #endif
 
 	void* dlobj = nullptr;
 
-#if defined(__unixish__)
 	dlobj = dlopen(lib_path,
 	               RTLD_LAZY | RTLD_LOCAL
 #ifdef USE_SANITIZER // Keep alive dlopen()-ed libs for symbolized XSAN backtrace
@@ -3537,12 +2300,6 @@ void* loadLibrary(const char* lib_path) {
 	if (dlobj == nullptr) {
 		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).detail("Error", dlerror());
 	}
-#else
-	dlobj = LoadLibrary(lib_path);
-	if (dlobj == nullptr) {
-		TraceEvent(SevWarn, "LoadLibraryFailed").detail("Library", lib_path).GetLastError();
-	}
-#endif
 
 	return dlobj;
 }
@@ -3550,27 +2307,16 @@ void* loadLibrary(const char* lib_path) {
 void* loadFunction(void* lib, const char* func_name) {
 	void* dlfcn = nullptr;
 
-#if defined(__unixish__)
 	dlfcn = dlsym(lib, func_name);
 	if (dlfcn == nullptr) {
 		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).detail("Error", dlerror());
 	}
-#else
-	dlfcn = GetProcAddress((HINSTANCE)lib, func_name);
-	if (dlfcn == nullptr) {
-		TraceEvent(SevWarn, "LoadFunctionFailed").detail("Function", func_name).GetLastError();
-	}
-#endif
 
 	return dlfcn;
 }
 
 void closeLibrary(void* handle) {
-#ifdef __unixish__
 	dlclose(handle);
-#else
-	FreeLibrary(reinterpret_cast<HMODULE>(handle));
-#endif
 }
 
 std::string exePath() {
@@ -3580,20 +2326,6 @@ std::string exePath() {
 	if (len > 0 && len < PATH_MAX) {
 		buf[len] = '\0';
 		return std::string(buf.get());
-	} else {
-		throw platform_error();
-	}
-#elif defined(__FreeBSD__)
-	char binPath[2048];
-	int mib[4];
-	mib[0] = CTL_KERN;
-	mib[1] = KERN_PROC;
-	mib[2] = KERN_PROC_PATHNAME;
-	mib[3] = -1;
-	size_t len = sizeof(binPath);
-	if (sysctl(mib, 4, binPath, &len, nullptr, 0) != 0) {
-		binPath[0] = '\0';
-		return std::string(binPath);
 	} else {
 		throw platform_error();
 	}
@@ -3608,33 +2340,12 @@ std::string exePath() {
 			return std::string(buf.get());
 		}
 	}
-#elif defined(_WIN32)
-	DWORD bufSize = 1024;
-	std::unique_ptr<char[]> buf(new char[bufSize]);
-	while (true) {
-		auto s = GetModuleFileName(nullptr, buf.get(), bufSize);
-		if (s >= 0) {
-			if (GetLastError() == ERROR_INSUFFICIENT_BUFFER) {
-				bufSize *= 2;
-				buf.reset(new char[bufSize]);
-				continue;
-			}
-			return std::string(buf.get());
-		} else {
-			throw platform_error();
-		}
-	}
 #else
 #error Port me!
 #endif
 }
 
 void platformInit() {
-#ifdef WIN32
-	_set_FMA3_enable(
-	    0); // Workaround for VS 2013 code generation bug. See
-	        // https://connect.microsoft.com/VisualStudio/feedback/details/811093/visual-studio-2013-rtm-c-x64-code-generation-bug-for-avx2-instructions
-#endif
 #ifdef __linux__
 	struct timespec ts;
 	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
@@ -3992,13 +2703,6 @@ std::string getExecPath() {
 	} else {
 		throwExecPathError(platform_error(), path);
 	}
-#elif defined(_WIN32)
-	auto len = GetModuleFileName(nullptr, path, size);
-	if (len != 0) {
-		return std::string(path);
-	} else {
-		throwExecPathError(platform_error(), path);
-	}
 #endif
 	return "unsupported OS";
 }
@@ -4229,7 +2933,6 @@ int testPathFunction2(const char* name,
 	return r ? 0 : 1;
 }
 
-#ifndef _WIN32
 void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 	// Create some symlinks and test resolution (or non-resolution) of them
 	ASSERT(symlink("one/two", "simfdb/backups/four") == 0);
@@ -4284,9 +2987,6 @@ void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {
 	                            false,
 	                            joinPath(cwd, "simfdb/backups/one/"));
 }
-#else
-void platformSpecificDirectoryOpsTests(const std::string& cwd, int& errors) {}
-#endif
 
 TEST_CASE("/flow/Platform/directoryOps") {
 	int errors = 0;

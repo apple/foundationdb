@@ -21,13 +21,8 @@ if(WITH_PYTHON)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
-    if(WIN32)
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/@CTEST_CONFIGURATION_TYPE@/fdbserver.exe)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    else()
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    endif()
+    set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
+    set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
 
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
@@ -500,7 +495,7 @@ if(WITH_PYTHON)
 
   verify_testing()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32)
+  if(NOT OPEN_FOR_IDE)
     create_correctness_package()
 
     if(USE_VALGRIND)
@@ -512,7 +507,7 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
+  if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
     # setup venv for testing token-based authorization
     if(APPLE)
       set(ld_env_name "DYLD_LIBRARY_PATH")

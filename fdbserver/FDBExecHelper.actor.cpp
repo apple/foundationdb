@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#if !defined(_WIN32) && !defined(__APPLE__) && !defined(__INTEL_COMPILER)
+#if !defined(__APPLE__) && !defined(__INTEL_COMPILER)
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -233,7 +233,7 @@ ACTOR Future<int> spawnSimulated(std::vector<std::string> paramList,
 	return result;
 }
 
-#if defined(_WIN32) || defined(__APPLE__) || defined(__INTEL_COMPILER)
+#if defined(__APPLE__) || defined(__INTEL_COMPILER)
 ACTOR Future<int> spawnProcess(std::string binPath,
                                std::vector<std::string> paramList,
                                double maxWaitTime,

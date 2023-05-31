@@ -69,10 +69,6 @@ if __name__ == "__main__":
         default_lib = "libfdb_c.so"
         platform_name = "Linux"
         dlopen = "dlopen"
-    elif platform.system() == "Windows":
-        default_lib = "fdb_c.dll"
-        platform_name = "Windows"
-        dlopen = "LoadLibrary"
     elif platform.system() == "Darwin":
         default_lib = "libfdb_c.dylib"
         platform_name = "macOS"

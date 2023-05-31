@@ -28,7 +28,7 @@
 #include "flow/Error.h"
 #include "flow/Trace.h"
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #include <semaphore.h>
 #endif
 
@@ -51,7 +51,6 @@ constexpr size_t MAX_CACHE_LINE_SIZE = 64;
 
 class alignas(MAX_CACHE_LINE_SIZE) ThreadSpinLock {
 public:
-	// #ifdef _WIN32
 	ThreadSpinLock() {
 #if VALGRIND
 		ANNOTATE_RWLOCK_CREATE(this);
@@ -66,8 +65,6 @@ public:
 		while (isLocked.test_and_set(std::memory_order_acquire))
 #if defined(__aarch64__)
 			__asm__ volatile("isb");
-#elif defined(__powerpc64__)
-			__asm__ volatile("or 27,27,27" ::: "memory");
 #else
 			_mm_pause();
 #endif
@@ -134,9 +131,7 @@ public:
 	void block();
 
 private:
-#ifdef _WIN32
-	void* ev;
-#elif defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 	sem_t sem;
 #elif defined(__APPLE__)
 	mach_port_t self;

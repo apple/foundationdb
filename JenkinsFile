@@ -14,7 +14,11 @@ pipeline {
                     scmInfo = checkout scm
                     println("${scmInfo}")
                     precommit_job_status = "SUCCESS"
-                    labels = getLabels()
+                    user_id = ""
+                    labels = []
+                    if (env.BRANCH_NAME.startsWith("PR-")) {
+                        labels = getLabels()
+                    }
                 }
             }
         }
@@ -45,23 +49,76 @@ pipeline {
         stage('Check Git Comment') {
             steps {
                 script {
-                    def trigger_comment = "@fdb-ci precommit start"
-                    def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
-                    println("Build Trigger Cause : ${build_trigger_cause}")
+                    // Checking github comment is only needed if branch is PR-*
+                    if (env.BRANCH_NAME.startsWith("PR-")) {
+                        def trigger_comment = "@fdb-ci precommit start"
+                        def build_trigger_cause = "${currentBuild.getBuildCauses()[0].shortDescription}"
+                        println("Build Trigger Cause : ${build_trigger_cause}")
 
-                    if ("${build_trigger_cause}" == "GitHub pull request comment" &&
-                            "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
-                        println("Moving ahead with pipeline")
+                        if ("${build_trigger_cause}" == "GitHub pull request comment" &&
+                                "${currentBuild.getBuildCauses()[0].commentBody}".contains("${trigger_comment}")) {
+                            println("Moving ahead with pipeline")
 
-                        //extracting the LDAP portion from commentAuthor sfc-gh-xxx
-                        user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
-                        createCheck("github_comment", "Criteria Satisfied", "", "completed", "success");
-                    } else {
-                        def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
-                        createCheck("github_comment", triggerMessage, triggerMessage, "completed", "failure");
-                        println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
-                        currentBuild.result = 'FAILURE'
-                        error("Aborting the build.")
+                            //extracting the LDAP portion from commentAuthor sfc-gh-xxx
+                            user_id = "${currentBuild.getBuildCauses()[0].commentAuthor}".split("-")[2]
+                            createCheck("github_comment", "Criteria Satisfied", "", "completed", "success");
+                        } else {
+                            def triggerMessage = "To start Full CI, Please comment: @fdb-ci precommit start"
+                            createCheck("github_comment", triggerMessage, triggerMessage, "completed", "failure");
+                            println("FDB_Precommit build job execution is skipped. Please comment: ${trigger_comment}")
+                            currentBuild.result = 'FAILURE'
+                            error("Aborting the build.")
+                        }
+                    }
+                }
+            }
+        }
+        stage('FDB Build Image') {
+            steps {
+                script {
+                    def dryrun = "true"
+                    def isLatest = "false"
+                    def isRelease = "false"
+                    def git_branch = "${scmInfo.GIT_COMMIT}"
+
+                    // If branch is main, set isLatest = true
+                    if (env.BRANCH_NAME == "main") {
+                        isLatest = "true"
+                        dryrun = "false"
+                    }
+
+                    // If branch is release*, set git_branch='branch_name' to use it in image name tag
+                    if (env.BRANCH_NAME.startsWith("release")) {
+                        git_branch = env.BRANCH_NAME
+                        dryrun = "false"
+                    }
+                    // if any changes detected in path "/contrib/build_image/" run FDB_ECR/Build_Image job
+                    def changedFiles = getChangedFiles()
+                    if (changedFiles.contains("/contrib/build_image/")) {
+                        println("**** Starting FDB Build Image Job  **** ")
+                        createCheck("FDB Build Image", "FDB Build Image", "In Progress", "in_progress", "");
+                        def j = build job: "FDB_ECR/Build_Image",
+                                parameters: [
+                                    string(name: 'PLATFORM', value: "x86_64,aarch64"),
+                                    string(name: 'GIT_URL', value: "${repo_url}"),
+                                    string(name: 'GIT_BRANCH', value: "${git_branch}"),
+                                    string(name: 'DOCKER_PATH', value: "contrib/build_image/centos7"),
+                                    string(name: 'DOCKER_FILENAME', value: "Dockerfile"),
+                                    string(name: 'IMAGE_TEMPLATE', value: "frostdb/devel"),
+                                    booleanParam(name: 'LATEST', value: "${isLatest}"),
+                                    booleanParam(name: 'DRYRUN', value: "${dryrun}")
+                                ],
+                        propagate: false,
+                        wait: true
+
+                        if ("${j.result}" == "SUCCESS") {
+                            currentBuild.result = 'SUCCESS'
+                            createCheck("FDB Build Image", "FDB Build Image", j.absoluteUrl, "completed", "success");
+                        } else {
+                            currentBuild.result = 'FAILURE'
+                            println("FDB Build Image Job failure.")
+                            createCheck("FDB Build Image", "FDB Build Image", j.absoluteUrl, "completed", "failure");
+                        }
                     }
                 }
             }
@@ -214,7 +271,12 @@ void createCheck(context, title, summary, jobStatus, jobConclusion) {
     }
 }
 
-void getLabels() {
+def getChangedFiles() {
+    def git_dff = sh(script:"git diff HEAD~1 HEAD --name-only", returnStdout: true)
+    return git_dff
+}
+
+def getLabels() {
     //taking pr_id from branch i.e taking 167 from PR-167
     pr_id = env.BRANCH_NAME.split("-")[1]
     withCredentials([usernamePassword(credentialsId: 'Jenkins-FDB-GithubApp',

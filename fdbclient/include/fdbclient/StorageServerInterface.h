@@ -283,13 +283,14 @@ struct GetValueReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 1378929;
 	Optional<Value> value;
 	bool cached;
+	ReadMetrics readMetrics;
 
 	GetValueReply() : cached(false) {}
 	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value, cached);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, value, cached, readMetrics);
 	}
 };
 
@@ -377,12 +378,14 @@ struct GetKeyValuesReply : public LoadBalancedReply {
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
+	ReadMetrics readMetrics;
 
 	GetKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+		serializer(
+		    ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, readMetrics, arena);
 	}
 };
 
@@ -435,12 +438,14 @@ struct GetMappedKeyValuesReply : public LoadBalancedReply {
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
+	ReadMetrics readMetrics;
 
 	GetMappedKeyValuesReply() : version(invalidVersion), more(false), cached(false) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, arena);
+		serializer(
+		    ar, LoadBalancedReply::penalty, LoadBalancedReply::error, data, version, more, cached, readMetrics, arena);
 	}
 };
 
@@ -492,6 +497,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 	Version version; // useful when latestVersion was requested
 	bool more;
 	bool cached = false;
+	ReadMetrics readMetrics;
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
 	GetKeyValuesStreamReply(GetKeyValuesReply r)
@@ -508,6 +514,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 		           version,
 		           more,
 		           cached,
+		           readMetrics,
 		           arena);
 	}
 };
@@ -553,13 +560,14 @@ struct GetKeyReply : public LoadBalancedReply {
 	constexpr static FileIdentifier file_identifier = 11226513;
 	KeySelector sel;
 	bool cached;
+	ReadMetrics readMetrics;
 
 	GetKeyReply() : cached(false) {}
 	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel, cached);
+		serializer(ar, LoadBalancedReply::penalty, LoadBalancedReply::error, sel, cached, readMetrics);
 	}
 };
 

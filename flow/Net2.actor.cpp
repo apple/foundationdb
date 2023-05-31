@@ -69,9 +69,6 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
-#ifdef WIN32
-#include <mmsystem.h>
-#endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 // Defined to track the stack limit
@@ -80,7 +77,7 @@ intptr_t g_stackYieldLimit = 0;
 
 using namespace boost::asio::ip;
 
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #include <execinfo.h>
 
 std::atomic<int64_t> net2RunLoopIterations(0);
@@ -1413,6 +1410,19 @@ bool Net2::checkRunnable() {
 	return !started.exchange(true);
 }
 
+namespace {
+std::atomic<bool> runLoopActive = false;
+// Try to get this to run _before_ other destructors
+__attribute__((destructor(65535))) void checkRunLoopActive() {
+	if (runLoopActive) {
+		fprintf(
+		    stderr,
+		    "Global destructors called while fdb network thread still running! This can lead to undefined behavior.\n");
+		fflush(stderr);
+	}
+}
+} // namespace
+
 #ifdef ENABLE_SAMPLING
 ActorLineageSet& Net2::getActorLineageSet() {
 	return actorLineageSet;
@@ -1420,17 +1430,13 @@ ActorLineageSet& Net2::getActorLineageSet() {
 #endif
 
 void Net2::run() {
+	runLoopActive = true;
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
 
 	thread_network = this;
 
 	unsigned int tasksSinceReact = 0;
-
-#ifdef WIN32
-	if (timeBeginPeriod(1) != TIMERR_NOERROR)
-		TraceEvent(SevError, "TimeBeginPeriodError").log();
-#endif
 
 	timeOffsetLogger = logTimeOffset();
 	const char* flow_profiler_enabled = getenv("FLOW_PROFILER_ENABLED");
@@ -1615,10 +1621,7 @@ void Net2::run() {
 	for (auto& fn : stopCallbacks) {
 		fn();
 	}
-
-#ifdef WIN32
-	timeEndPeriod(1);
-#endif
+	runLoopActive = false;
 } // Net2::run
 
 // Updates the PriorityStats found in NetworkMetrics

@@ -39,11 +39,6 @@ extern "C" void stackSignalHandler(int sig) {
 	}
 }
 
-#ifdef _WIN32
-#define SIGUSR1 10
-#define SIGUSR2 12
-#endif
-
 void setupStackSignal() {
 	std::signal(SIGUSR1, &stackSignalHandler);
 }

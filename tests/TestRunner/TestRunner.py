@@ -84,9 +84,6 @@ class LogParser:
         addresses = self.sanitize_backtrace(obj)
         assert addresses is not None
         binary_ext = ""
-        if sys.platform == "win32":
-            # config = options.config
-            binary_ext = ".exe"
         fdbbin = os.path.realpath(
             os.path.join(basedir, "bin", "Release", "fdbserver" + binary_ext)
         )
@@ -376,9 +373,6 @@ class RestartTestPolicy:
 def run_simulation_test(basedir, options):
     config = ""
     binary_ext = ""
-    if sys.platform == "win32":
-        config = options.config
-        binary_ext = ".exe"
     fdbserver = os.path.realpath(
         os.path.join(basedir, "bin", config, "fdbserver" + binary_ext)
     )
