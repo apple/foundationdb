@@ -20,7 +20,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/KeyRangeMap.h"

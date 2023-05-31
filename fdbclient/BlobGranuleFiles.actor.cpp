@@ -1,5 +1,5 @@
 /*
- * BlobGranuleFiles.cpp
+ * BlobGranuleFiles.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
@@ -43,6 +43,8 @@
 #include <fstream> // for perf microbenchmark
 #include <limits>
 #include <vector>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 #define BG_READ_DEBUG false
 #define BG_FILES_TEST_DEBUG false

@@ -24,7 +24,7 @@
 #include "flow/IRandom.h"
 #include "flow/DeterministicRandom.h"
 
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "flow/flow.h"
 #include <cstdlib>
 #include <stdexcept>

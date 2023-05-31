@@ -1,5 +1,5 @@
 /*
- * BlobGranuleFiles.h
+ * BlobGranuleFiles.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BLOBGRANULEFILES_H
-#define FDBCLIENT_BLOBGRANULEFILES_H
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
+#if defined(NO_INTELLISENSE) && !defined(BLOB_GRANULE_FILES_ACTOR_CLIENT_G_H)
+#define BLOB_GRANULE_FILES_ACTOR_CLIENT_G_H
+#include "fdbclient/BlobGranuleFiles.actor.g.h"
+#elif !defined(BLOB_GRANULE_FILES_ACTOR_CLIENT_H)
+#define BLOB_GRANULE_FILES_ACTOR_CLIENT_H
 
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
@@ -27,6 +32,9 @@
 #include "fdbclient/SystemData.h"
 #include "flow/CompressionUtils.h"
 
+#include "flow/actorcompiler.h" // This must be the last #include.
+
+// TODO: future
 Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                const Standalone<GranuleSnapshot>& snapshot,
                                int chunkSize,
@@ -34,6 +42,7 @@ Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {},
                                bool isSnapshotSorted = true);
 
+// TODO: future
 Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
                                 const Standalone<GranuleDeltas>& deltas,
                                 const KeyRangeRef& fileRange,

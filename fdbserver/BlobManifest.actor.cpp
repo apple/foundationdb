@@ -25,7 +25,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
