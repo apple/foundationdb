@@ -108,19 +108,14 @@ TaskPriority swift_priority_to_net2(swift::JobPriority p);
 #define SWIFT_SENDABLE
 #define SWIFT_CONFORMS_TO(ModuleName, ProtocolName)
 #define SWIFT_NAME(x)
+#define CONCAT2(id1, id2) id1##id2
+#define CONCAT3(id1, id2, id3) id1##id2##id3
 
-#if __has_feature(nullability)
-#define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
-#define SWIFT_END_NULLABILITY_ANNOTATIONS
 #define _Nullable
 #define _Nonnull
 #define _Null_unspecified
 #define SWIFT_BEGIN_NULLABILITY_ANNOTATIONS
 #define SWIFT_END_NULLABILITY_ANNOTATIONS
-#endif
-
-#define CONCAT2(id1, id2) id1##id2
-#define CONCAT3(id1, id2, id3) id1##id2##id3
 
 #endif /* WITH_SWIFT */
 
