@@ -119,13 +119,14 @@ add_test(NAME mutual_tls_unittest
 include(GenerateModulemap)
 
 set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
-generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
-  OMIT
-  sse2neon.h
-  ppc-asm.h
-)
 
 if (WITH_SWIFT)
+    generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
+        OMIT
+        sse2neon.h
+        ppc-asm.h
+    )
+
     add_library(flow_swift STATIC
         FlowCheckedContinuation.swift
         stream_support.swift # general stream support types

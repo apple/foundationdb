@@ -98,8 +98,7 @@ if(WITH_SWIFT)
   # Generate the module map for FDBClient.
   include(GenerateModulemap)
   set(FDBCLIENT_BINARY_DIR "${CMAKE_BINARY_DIR}/fdbclient")
-  generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient
-  )
+  generate_modulemap("${CMAKE_BINARY_DIR}/fdbclient/include" "FDBClient" fdbclient)
 
   # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
   target_compile_options(fdbclient_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/fdbclient/include/headeroverlay.yaml>")
