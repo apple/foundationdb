@@ -1431,12 +1431,6 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
-	printf("[c++][%s:%d](%s) Running NET2! %s\n",
-	       __FILE_NAME__,
-	       __LINE__,
-	       __FUNCTION__,
-	       getLocalAddress().toString().c_str());
-
 	thread_network = this;
 
 	unsigned int tasksSinceReact = 0;
