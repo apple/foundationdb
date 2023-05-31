@@ -2500,7 +2500,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
-		if (e.code() == error_code_actor_cancelled) {
+		if (e.code() == error_code_actor_cancelled || e.code() == error_code_not_implemented ||
+		    e.code() == error_code_audit_storage_exceeded_request_limit) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;

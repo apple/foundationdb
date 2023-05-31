@@ -7,7 +7,7 @@ FoundationDB's Java bindings rely on native libraries that are installed as part
 FoundationDB client binaries installation (see 
 <a href="/foundationdb/api-general.html#installing-client-binaries" target="_blank">
 Installing FoundationDB client binaries</a>). The JAR can be downloaded from
-<a href="https://www.foundationdb.org/download/">our website</a>
+<a href="https://central.sonatype.com/artifact/org.foundationdb/fdb-java">maven central</a>
 and then added to your classpath.<br>
 <br>
 <h1>Getting started</h1>
