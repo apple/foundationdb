@@ -281,7 +281,7 @@ struct CodeProbeImpl : ICodeProbe {
 private:
 	CodeProbeImpl() { registerProbe(*this); }
 	inline static CodeProbeImpl _instance;
-	unsigned _hitCount = 0;
+	std::atomic<unsigned> _hitCount = 0;
 	Annotations annotations;
 };
 
