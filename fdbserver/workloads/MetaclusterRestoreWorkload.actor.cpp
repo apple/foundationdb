@@ -1182,6 +1182,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			ASSERT_EQ(self->managementTenantsBeforeRestore.size(), tenantMap.size());
 		}
 
+		state std::map<int64_t, metacluster::MetaclusterTenantMapEntry> tenantsInErrorState;
 		for (auto const& [tenantId, tenantData] : self->createdTenants) {
 			auto tenantItr = tenantMap.find(tenantId);
 			if (tenantItr == tenantMap.end()) {
@@ -1203,6 +1204,12 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				} else {
 					ASSERT_EQ(tenantItr->second.tenantState, metacluster::TenantState::READY);
 				}
+
+				if (tenantItr->second.tenantState == metacluster::TenantState::ERROR) {
+					// This can happen only if the tenant is present on the management cluster
+					// but missing on the data clusters.
+					tenantsInErrorState.emplace(tenantId, tenantItr->second);
+				}
 			}
 		}
 
@@ -1213,6 +1220,28 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				ASSERT(self->deletedTenants.count(tenantId));
 				ASSERT(self->recoverManagementCluster);
 				ASSERT(self->recoverDataClusters);
+			}
+		}
+
+		if (!tenantsInErrorState.empty()) {
+			CODE_PROBE(true, "One or more tenants in ERROR state");
+			std::vector<Future<Void>> resetErrorFutures;
+			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {
+				resetErrorFutures.emplace_back(
+				    metacluster::resetTenantStateToReady(self->managementDb, tenantEntry.tenantName));
+			}
+			wait(waitForAll(resetErrorFutures));
+			KeyBackedRangeResult<std::pair<int64_t, metacluster::MetaclusterTenantMapEntry>> _tenants =
+			    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+				    return metacluster::metadata::management::tenantMetadata().tenantMap.getRange(
+				        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
+			    }));
+			for (const auto& [tenantId, tenantEntry] : _tenants.results) {
+				ASSERT(tenantEntry.tenantState != metacluster::TenantState::ERROR);
+				if (tenantsInErrorState.contains(tenantId)) {
+					ASSERT_EQ(metacluster::TenantState::READY, tenantEntry.tenantState);
+				}
 			}
 		}
 
