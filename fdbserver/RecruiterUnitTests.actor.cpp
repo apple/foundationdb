@@ -32,8 +32,8 @@ void addWorker(ClusterControllerData& data, ProcessClass::ClassType classType) {
 	data.id_worker[id].details.processClass = ProcessClass(classType, ProcessClass::ClassSource::CommandLineSource);
 }
 
-void addWorkers(ClusterControllerData& data, ProcessClass::ClassType classType, size_t count) {
-	for (size_t i = 0; i < count; ++i) {
+void addWorkers(ClusterControllerData& data, ProcessClass::ClassType classType, int count) {
+	for (int i = 0; i < count; ++i) {
 		addWorker(data, classType);
 	}
 }
