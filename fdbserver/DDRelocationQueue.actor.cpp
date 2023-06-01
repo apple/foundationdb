@@ -1001,7 +1001,8 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 			double retentionTime = now() - rd.startTime;
 			queueRetentionTime.setTotal(retentionTime);
 			TraceEvent(SevDebug, "QueuedRelocationsPopped")
-			    .detail("ShardId", rd.randomId)
+			    .detail("DataMoveID", rd.dataMoveId)
+			    .detail("RandomID", rd.randomId)
 			    .detail("RetentionTime", retentionTime);
 			TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 			    .detail("DataMoveID", rd.dataMoveId)
