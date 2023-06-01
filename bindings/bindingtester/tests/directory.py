@@ -223,11 +223,6 @@ class DirectoryTest(Test):
                 self.dir_list.append(DirectoryStateTreeNode.get_layer(prefixes[0]))
 
             elif root_op == "DIRECTORY_CREATE_OR_OPEN":
-                # Because allocated prefixes are non-deterministic, we cannot have overlapping
-                # transactions that allocate/remove these prefixes in a comparison test
-                if op.endswith("_DATABASE") and args.concurrency == 1:
-                    test_util.blocking_commit(instructions)
-
                 path = generate_path()
                 # Partitions that use the high-contention allocator can result in non-determinism if they fail to commit,
                 # so we disallow them in comparison tests
@@ -243,9 +238,6 @@ class DirectoryTest(Test):
                     self.random,
                     self.prefix_log,
                 )
-
-                if not op.endswith("_DATABASE") and args.concurrency == 1:
-                    test_util.blocking_commit(instructions)
 
                 child_entry = dir_entry.get_descendent(path)
                 if child_entry is None:
@@ -264,13 +256,6 @@ class DirectoryTest(Test):
                     min_length=0,
                 )
 
-                # Because allocated prefixes are non-deterministic, we cannot have overlapping
-                # transactions that allocate/remove these prefixes in a comparison test
-                if (
-                    op.endswith("_DATABASE") and args.concurrency == 1
-                ):  # and allow_empty_prefix:
-                    test_util.blocking_commit(instructions)
-
                 path = generate_path()
                 op_args = test_util.with_length(path) + (layer, prefix)
                 if prefix is None:
@@ -286,11 +271,6 @@ class DirectoryTest(Test):
                 else:
                     instructions.push_args(*op_args)
                     instructions.append(op)
-
-                if (
-                    not op.endswith("_DATABASE") and args.concurrency == 1
-                ):  # and allow_empty_prefix:
-                    test_util.blocking_commit(instructions)
 
                 child_entry = dir_entry.get_descendent(path)
                 if child_entry is None:
@@ -362,11 +342,6 @@ class DirectoryTest(Test):
             elif (
                 root_op == "DIRECTORY_REMOVE" or root_op == "DIRECTORY_REMOVE_IF_EXISTS"
             ):
-                # Because allocated prefixes are non-deterministic, we cannot have overlapping
-                # transactions that allocate/remove these prefixes in a comparison test
-                if op.endswith("_DATABASE") and args.concurrency == 1:
-                    test_util.blocking_commit(instructions)
-
                 path = ()
                 count = random.randint(0, 1)
                 if count == 1:
@@ -431,6 +406,11 @@ class DirectoryTest(Test):
                     test_util.to_front(instructions, 1)
                     instructions.append("DIRECTORY_STRIP_PREFIX")
 
+            if root_op in directory_mutations:
+                # Because allocated prefixes are non-deterministic, we cannot have overlapping
+                # transactions that allocate/remove these prefixes in a comparison test
+                if args.concurrency == 1:
+                    test_util.blocking_commit(instructions)
         instructions.begin_finalization()
 
         test_util.blocking_commit(instructions)
