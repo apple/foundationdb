@@ -492,7 +492,9 @@ ACTOR Future<Void> getCipherKeysByBaseCipherKeyIds(Reference<EncryptKeyProxyData
 					                      "");
 				}
 			}
-			ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			if (keysByIdsRep.cipherKeyDetails.size() > 0) {
+				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			}
 		} catch (Error& e) {
 			if (isKmsConnectionError(e)) {
 				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ false, true, now() };
@@ -638,7 +640,9 @@ ACTOR Future<Void> getLatestCipherKeys(Reference<EncryptKeyProxyData> ekpProxyDa
 					                      "");
 				}
 			}
-			ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			if (keysByDomainIdRep.cipherKeyDetails.size() > 0) {
+				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			}
 		} catch (Error& e) {
 			if (isKmsConnectionError(e)) {
 				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ false, true, now() };
@@ -684,7 +688,7 @@ ACTOR Future<KMSHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
                                                   KmsConnectorInterface kmsConnectorInf) {
 	state UID debugId = deterministicRandom()->randomUniqueID();
 	if (DEBUG_ENCRYPT_KEY_PROXY) {
-		TraceEvent("KMSHealthCheckStart", ekpProxyData->myId);
+		TraceEvent(SevDebug, "KMSHealthCheckStart", ekpProxyData->myId);
 	}
 
 	// Health check will try to fetch the encryption details for the system key
@@ -697,12 +701,12 @@ ACTOR Future<KMSHealthStatus> getHealthStatusImpl(Reference<EncryptKeyProxyData>
 		                                                       FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
 		if (rep.cipherKeyDetails.size() < 1) {
 			TraceEvent(SevWarn, "KMSHealthCheckResponseEmpty");
-			throw encrypt_keys_fetch_failed();
+			throw encrypt_key_not_found();
 		}
 		EncryptCipherKeyDetailsRef cipherDetails = rep.cipherKeyDetails[0];
 		if (cipherDetails.encryptDomainId != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
 			TraceEvent(SevWarn, "KMSHealthCheckNoSystemKeyFound");
-			throw key_not_found();
+			throw encrypt_key_not_found();
 		}
 		CipherKeyValidityTS validityTS =
 		    getCipherKeyValidityTS(cipherDetails.refreshAfterSec, cipherDetails.expireAfterSec);
@@ -805,7 +809,9 @@ ACTOR Future<Void> refreshEncryptionKeysImpl(Reference<EncryptKeyProxyData> ekpP
 		}
 
 		ekpProxyData->baseCipherKeysRefreshed += rep.cipherKeyDetails.size();
-		ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+		if (rep.cipherKeyDetails.size() > 0) {
+			ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+		}
 		t.detail("NumKeys", rep.cipherKeyDetails.size());
 		CODE_PROBE(!rep.cipherKeyDetails.empty(), "EKP refresh cipherKeys");
 	} catch (Error& e) {
@@ -898,7 +904,9 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 					dbgTrace.get().detail("BMI" + std::to_string(item.domainId), "");
 				}
 			}
-			ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			if (kmsRep.metadataDetails.size() > 0) {
+				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+			}
 		} catch (Error& e) {
 			if (isKmsConnectionError(e)) {
 				ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ false, true, now() };
@@ -920,7 +928,7 @@ ACTOR Future<Void> getLatestBlobMetadata(Reference<EncryptKeyProxyData> ekpProxy
 
 ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpProxyData,
                                            KmsConnectorInterface kmsConnectorInf) {
-	state UID debugId = deterministicRandom()->randomUniqueID();
+	state UID debugId = ekpProxyData->myId;
 	state double startTime;
 
 	state TraceEvent t("RefreshBlobMetadataStart", ekpProxyData->myId);
@@ -960,7 +968,9 @@ ACTOR Future<Void> refreshBlobMetadataCore(Reference<EncryptKeyProxyData> ekpPro
 		}
 
 		ekpProxyData->blobMetadataRefreshed += rep.metadataDetails.size();
-		ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+		if (rep.metadataDetails.size() > 0) {
+			ekpProxyData->kmsConnectorHealthStatus = KMSHealthStatus{ true, true, now() };
+		}
 		t.detail("nKeys", rep.metadataDetails.size());
 	} catch (Error& e) {
 		if (isKmsConnectionError(e)) {
