@@ -905,14 +905,16 @@ public:
 
 		GetStorageMetricsReply low_s_low_r;
 		low_s_low_r.capacity.bytes = capacity;
-		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE / 2;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 2;
 		low_s_low_r.load.bytes = loadBytes;
 		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
 
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_reevaluation_enabled",
 		                                                          KnobValueRef::create(bool{ true }));
-		auto ratio = KnobValueRef::create(double{ 0.6 });
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio", ratio);
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.6 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.5 }));
 
 		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
 		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;

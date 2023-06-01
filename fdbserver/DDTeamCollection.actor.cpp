@@ -298,8 +298,8 @@ public:
 					    .detail("Src", req.src)
 					    .detail("CompleteSources", req.completeSources)
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
-					    .detail("SourceTeamSmoothCpu", sourceTeam.get()->getAverageCPU())
-					    .detail("PivotSmoothCpu", self->teamPivots.strictPivotCPU)
+					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
+					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
 					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
 					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAvailableSpaceRatio);
 					req.reply.send(std::make_pair(sourceTeam, foundSrc));
@@ -3355,7 +3355,6 @@ void DDTeamCollection::updateCpuPivots() {
 	std::vector<double> teamAverageCPU;
 	for (int i = 0; i < teams.size(); ++i) {
 		if (teams[i]->isHealthy()) {
-			teams[i]->updateSmoothCpu();
 			teamAverageCPU.emplace_back(teams[i]->getAverageCPU());
 			teamPivots.minTeamAvgCPU = std::min(teamPivots.minTeamAvgCPU, teamAverageCPU.back());
 		}

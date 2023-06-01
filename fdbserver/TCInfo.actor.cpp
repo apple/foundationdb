@@ -313,8 +313,7 @@ std::string TCMachineTeamInfo::getMachineIDsStr() const {
 
 TCTeamInfo::TCTeamInfo(std::vector<Reference<TCServerInfo>> const& servers, Optional<Reference<TCTenantInfo>> tenant)
   : servers(servers), tenant(tenant), healthy(true), wrongConfiguration(false),
-    priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()),
-    smoothCPU(SERVER_KNOBS->DD_GET_TEAM_CPU_SMOOTH_WINDOW) {
+    priority(SERVER_KNOBS->PRIORITY_TEAM_HEALTHY), id(deterministicRandom()->randomUniqueID()) {
 	if (servers.empty()) {
 		TraceEvent(SevInfo, "ConstructTCTeamFromEmptyServers").log();
 	}
@@ -416,7 +415,14 @@ double TCTeamInfo::getReadLoad(bool includeInFlight, double inflightPenalty) con
 }
 
 double TCTeamInfo::getAverageCPU() const {
-	return smoothCPU.smoothTotal();
+	double sum = 0;
+	for (const auto& server : servers) {
+		auto& stats = server->getStorageStats();
+		// If storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
+		// return 100.0;
+		sum += stats.present() ? stats.get().cpuUsage : 100.0;
+	}
+	return servers.empty() ? 0.0 : sum / servers.size();
 }
 
 int64_t TCTeamInfo::getMinAvailableSpace(bool includeInFlight) const {
@@ -510,21 +516,6 @@ int64_t TCTeamInfo::getLoadAverage() const {
 		bytesSum *= 2;
 
 	return added == 0 ? 0 : bytesSum / added;
-}
-
-void TCTeamInfo::updateSmoothCpu() {
-	double sum = 0;
-	for (const auto& server : servers) {
-		auto& stats = server->getStorageStats();
-		// If storage server hasn't gotten the health metrics updated, we assume it's too busy to respond so
-		// return 100.0;
-		sum += stats.present() ? stats.get().cpuUsage : 100.0;
-	}
-	if (servers.empty()) {
-		smoothCPU.setTotal(0);
-	} else {
-		smoothCPU.setTotal(sum / servers.size());
-	}
 }
 
 Future<Void> TCTeamInfo::updateStorageMetrics() {

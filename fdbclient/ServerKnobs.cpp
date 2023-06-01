@@ -177,7 +177,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO,                 0.5 ); if( randomize && BUGGIFY ) DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO = deterministicRandom()->random01() * 0.4 + 0.3;
 	init( DD_STRICT_CPU_PIVOT_RATIO,                             0.9 ); if( randomize && BUGGIFY ) DD_STRICT_CPU_PIVOT_RATIO = deterministicRandom()->random01() * 0.45 + 0.5;
 	init( DD_REEVALUATION_ENABLED,                              false); if( isSimulated ) DD_REEVALUATION_ENABLED = deterministicRandom()->coinflip();
-	init( DD_GET_TEAM_CPU_SMOOTH_WINDOW,                           60);
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.
 	// TODO: choose a meaning value for real cluster
 	init( MAX_DEST_CPU_PERCENT,                                 100.0);

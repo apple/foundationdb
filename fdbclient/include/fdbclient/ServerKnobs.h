@@ -209,8 +209,6 @@ public:
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
 	// DD would re-evaluate the CPU and AvailableSpace stats of source team when relocating a shard
 	bool DD_REEVALUATION_ENABLED;
-	// Smoother folding time for getTeam to smooth cpu percent stat.
-	double DD_GET_TEAM_CPU_SMOOTH_WINDOW;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
