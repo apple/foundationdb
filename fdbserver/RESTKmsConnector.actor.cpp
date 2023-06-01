@@ -154,6 +154,11 @@ struct KmsUrlCtx {
 			nResponseParseFailures++;
 		}
 	}
+
+	std::string toString() const {
+		return fmt::format(
+		    "{} {} {} {} {}", url, nRequests, nFailedResponses, nResponseParseFailures, unresponsivenessPenalty);
+	}
 };
 
 template <class Params>
@@ -177,6 +182,16 @@ struct KmsUrlStore {
 			url.refreshUnresponsivenessPenalty();
 		}
 
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+			std::string details;
+			for (const auto& url : kmsUrls) {
+				details.append(fmt::format("[ {} ], ", url.toString()));
+			}
+			TraceEvent("RESTKmsUrlStoreBeforeSort")
+			    .detail("Details", details)
+			    .detail("Penalize", toPenalize.toString());
+		}
+
 		// Reshuffle the URLs
 		std::sort(kmsUrls.begin(), kmsUrls.end(), [](const KmsUrlCtx<Params>& l, const KmsUrlCtx<Params>& r) {
 			// Sort the available URLs based on following rules:
@@ -194,6 +209,14 @@ struct KmsUrlStore {
 			return l.nResponseParseFailures < r.nResponseParseFailures;
 		});
 		lastReshuffleTS = now();
+
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+			std::string details;
+			for (const auto& url : kmsUrls) {
+				details.append(fmt::format("[ {} ], ", url.toString()));
+			}
+			TraceEvent("RESTKmsUrlStoreAfterSort").detail("Details", details);
+		}
 	}
 
 	double lastReshuffleTS;
@@ -733,11 +756,11 @@ Future<T> kmsRequestImpl(
 					return parsedResp;
 				} catch (Error& e) {
 					TraceEvent(SevWarn, "KmsRequestRespParseFailure").error(e).detail("RequestID", requestID);
-					urlCtx->penalize(KmsUrlCtx<KmsUrlPenaltyParams>::PenaltyType::MALFORMED_RESPONSE);
+					ctx->kmsUrlStore.penalize(*urlCtx, KmsUrlCtx<KmsUrlPenaltyParams>::PenaltyType::MALFORMED_RESPONSE);
 					// attempt to do request from next KmsUrl
 				}
 			} catch (Error& e) {
-				urlCtx->penalize(KmsUrlCtx<KmsUrlPenaltyParams>::PenaltyType::TIMEOUT);
+				ctx->kmsUrlStore.penalize(*urlCtx, KmsUrlCtx<KmsUrlPenaltyParams>::PenaltyType::TIMEOUT);
 				// Keep re-trying if KMS request time-out OR is server unreachable; otherwise, bubble up the error
 				if (!isKmsNotReachable(e.code())) {
 					TraceEvent(SevDebug, "KmsRequestFailedUnreachable", ctx->uid)
