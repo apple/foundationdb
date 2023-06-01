@@ -85,14 +85,14 @@ struct StartTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> lockSourceTenants(StartTenantMovementImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<Void> lockSourceTenants(StartTenantMovementImpl* self,
+	                                            Reference<typename DB::TransactionT> tr) {
 		std::vector<Future<Void>> lockFutures;
 		for (auto& tenantPair : self->tenantsInGroup) {
-			lockFutures.push_back(
-			    TenantAPI::changeLockState(tr, tenantPair.second, TenantAPI::TenantLockState::LOCKED, self->runID));
+			lockFutures.push_back(metacluster::changeTenantLockState(
+			    self->dataClusterDb, tenantPair.second, TenantAPI::TenantLockState::LOCKED, self->runID));
 		}
 		wait(waitForAll(lockFutures));
-		wait(safeThreadFutureToFuture(tr->commit()));
 		return Void();
 	}
 
@@ -179,8 +179,8 @@ struct StartTenantMovementImpl {
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return findTenantsInGroup(self, tr); }));
 
-		wait(self->ctx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return lockSourceTenants(self, tr); }));
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return lockSourceTenants(self, tr); }));
 
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return storeAllTenantsSplitPoints(self, tr); }));
@@ -264,7 +264,7 @@ struct SwitchTenantMovementImpl {
 					throw operation_failed();
 				}
 			}
-			dstTenant->verifyBlobRange(allKeys, Version());
+			wait(success(safeThreadFutureToFuture(dstTenant->verifyBlobRange(allKeys, latestVersion))));
 		}
 		return Void();
 	}
@@ -368,33 +368,89 @@ struct FinishTenantMovementImpl {
 		return true;
 	}
 
-	ACTOR static Future<Void> unlockDestinationTenants(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<Void> unlockDestinationTenants(FinishTenantMovementImpl* self,
+	                                                   Reference<typename DB::TransactionT> tr) {
 		std::vector<Future<Void>> unlockFutures;
 		for (auto& tenantPair : self->tenantsInGroup) {
-			unlockFutures.push_back(
-			    TenantAPI::changeLockState(tr, tenantPair.second, TenantAPI::TenantLockState::UNLOCKED, self->runID));
+			unlockFutures.push_back(metacluster::changeTenantLockState(
+			    self->dataClusterDb, tenantPair.second, TenantAPI::TenantLockState::UNLOCKED, self->runID));
 		}
 		wait(waitForAll(unlockFutures));
-		wait(safeThreadFutureToFuture(tr->commit()));
+		return Void();
+	}
+
+	ACTOR static Future<Void> purgeSourceBlobRanges(FinishTenantMovementImpl* self,
+	                                                Reference<typename DB::TransactionT> tr) {
+		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
+		state DataClusterMetadata srcClusterMetadata = wait(getClusterTransaction(tr, self->src));
+		state Reference<IDatabase> srcDb;
+		wait(store(srcDb, util::openDatabase(srcClusterMetadata.connectionString)));
+
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			Reference<ITenant> srcTenant = srcDb->openTenant(tName);
+			// safeThreadFutureToFuture doesn't seem to support ThreadFuture<Key>
+			safeThreadFutureToFuture(srcTenant->purgeBlobGranules(allKeys, latestVersion, false));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> checkValidDelete(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
+		// Assert tenant exists, is locked, and is assigned to the correct cluster
+		// Assert matching tenant exists on other cluster
+		// Assert other tenant is unlocked
+		// Assert matching tenant groups
+		return Void();
+	}
+
+	ACTOR static Future<Void> deleteSourceTenants(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
+		wait(self->ctx.clearCluster());
+		wait(self->ctx.setCluster(tr, self->src));
+		std::vector<Future<Void>> deleteFutures;
+		for (auto& tenantPair : self->tenantsInGroup) {
+			deleteFutures.push_back(
+			    TenantAPI::deleteTenantTransaction(tr, tenantPair.second, ClusterType::METACLUSTER_DATA));
+		}
+		wait(success(waitForAll(deleteFutures)));
+
 		return Void();
 	}
 
 	ACTOR static Future<Void> run(FinishTenantMovementImpl* self) {
-		wait(self->ctx.runManagementTransaction(
+		bool runIDValid = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return checkRunId(self, tr); }));
+
+		if (!runIDValid) {
+			return Void();
+		}
 
 		wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return findTenantsInGroup(self, tr); }));
 
-		bool success = wait(self->ctx.runManagementTransaction(
+		bool unlockValid = wait(self->ctx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return checkValidUnlock(self, tr); }));
 
-		if (!success) {
+		if (!unlockValid) {
+			return Void();
+		}
+
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return unlockDestinationTenants(self, tr); }));
+
+		wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return purgeSourceBlobRanges(self, tr); }));
+
+		bool deleteValid = wait(self->ctx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return checkValidDelete(self, tr); }));
+
+		if (!deleteValid) {
 			return Void();
 		}
 
 		wait(self->ctx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return unlockDestinationTenants(self, tr); }));
+		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
 
 		return Void();
 	}
