@@ -100,8 +100,8 @@ class GlobalTagThrottlerImpl {
 
 	public:
 		ThroughputCounters()
-		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME),
+		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
 
 		void updateCost(double newCost, OpType opType) {
 			if (opType == OpType::READ) {
@@ -117,7 +117,7 @@ class GlobalTagThrottlerImpl {
 	// Track various statistics per tag, aggregated across all storage servers
 	class PerTagStatistics {
 		Optional<ThrottleApi::TagQuotaValue> quota;
-		Smoother transactionCounter;
+		HoltLinearSmoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
 		double transactionsLastAdded;
@@ -125,9 +125,11 @@ class GlobalTagThrottlerImpl {
 
 	public:
 		explicit PerTagStatistics()
-		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME),
-		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME), transactionsLastAdded(now()), lastLogged(0) {}
+		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,
+		                       SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME),
+		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME),
+		    targetRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME), transactionsLastAdded(now()),
+		    lastLogged(0) {}
 
 		Optional<ThrottleApi::TagQuotaValue> getQuota() const { return quota; }
 
@@ -466,7 +468,7 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
 			bool const traceEnabled = stats.canLog();
-			if (traceEnabled) {
+			if (!traceEnabled) {
 				te.disable();
 			}
 			bool isBusy{ false };
@@ -497,7 +499,8 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
-			if (!stats.canLog()) {
+			bool const traceEnabled = stats.canLog();
+			if (!traceEnabled) {
 				te.disable();
 			}
 			auto const targetTps = getTargetTps(tag, isBusy, te);
@@ -510,7 +513,9 @@ public:
 				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
 				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
 				te.detail("ClientTps", clientRate.tpsRate);
-				stats.updateLastLogged();
+				if (traceEnabled) {
+					stats.updateLastLogged();
+				}
 			} else {
 				te.disable();
 			}
@@ -663,7 +668,7 @@ class MockStorageServer {
 		Smoother smoother;
 
 	public:
-		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FOLDING_TIME) {}
+		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
 		Cost& operator+=(double delta) {
 			smoother.addDelta(delta);
 			return *this;
