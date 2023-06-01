@@ -341,7 +341,7 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
 	return true;
 }
-std::string usageMessage =
+const std::string usageMessage =
     "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -353,7 +353,7 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
 	state UID runID = deterministicRandom()->randomUniqueID();
-	wait(metacluster::startTenantMovement(db, tenantGroup, runID, srcCluster, dstCluster));
+	wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster, runID));
 
 	return true;
 }
@@ -383,6 +383,8 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 	return true;
 }
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
+	fmt::print("Unimplemented\n");
+	ASSERT(false);
 	return true;
 }
 
@@ -393,15 +395,18 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	}
 	state Reference<ITransaction> tr = db->createTransaction();
 
-	try {
-		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-			fmt::print("Tenant movement should only be run on a management cluster.");
-			return false;
+	loop {
+		try {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
+			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+				fmt::print("Tenant movement should only be run on a management cluster.");
+				return false;
+			}
+			break;
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
-	} catch (Error& e) {
-		wait(safeThreadFutureToFuture(tr->onError(e)));
 	}
 	StringRef step = tokens[2];
 	if (step == "start"_sr) {

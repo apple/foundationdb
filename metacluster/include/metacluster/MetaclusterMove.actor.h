@@ -1,7 +1,13 @@
 #pragma once
+#if defined(NO_INTELLISENSE) && !defined(METACLUSTER_METACLUSTERMOVE_ACTOR_G_H)
+#define METACLUSTER_METACLUSTERMOVE_ACTOR_G_H
+#include "metacluster/MetaclusterMove.actor.g.h"
+#elif !defined(METACLUSTER_METACLUSTERMOVE_H)
+#define METACLUSTER_METACLUSTERMOVE_H
+
+#include "fdbclient/Tenant.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
-#ifndef FDB_METACLUSTER_METACLUSTERMOVE_H
-#define FDB_METACLUSTER_METACLUSTERMOVE_H
 
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/TagThrottle.actor.h"
@@ -12,7 +18,6 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/ReadYourWrites.h"
 
-#include "fdbclient/Tenant.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbrpc/TenantName.h"
 #include "flow/FastRef.h"
@@ -98,23 +103,24 @@ struct StartTenantMovementImpl {
 
 	ACTOR static Future<Void> storeTenantSplitPoints(StartTenantMovementImpl* self,
 	                                                 Reference<typename DB::TransactionT> tr,
-	                                                 Tenant tenant,
+	                                                 Tenant* tenant,
 	                                                 TenantName tenantName) {
 		state Reference<ReadYourWritesTransaction> ryw =
-		    makeReference<ReadYourWritesTransaction>(self->ctx.dataClusterDb, tenant);
+		    makeReference<ReadYourWritesTransaction>(self->ctx.dataClusterDb, *tenant);
 		// What should chunkSize be?
 		state Standalone<VectorRef<KeyRef>> splitPoints =
 		    wait(ryw->getRangeSplitPoints(KeyRangeRef(""_sr, "\xff"_sr), 1000));
 		state bool first = true;
 		state KeyRef lastKey;
+		state KeyRef iterKey;
 		for (auto& key : splitPoints) {
 			if (first) {
 				lastKey = key;
 				first = false;
 				continue;
 			}
-			wait(metadata::management::MovementMetadata::splitPointsMap().set(
-			    tr, Tuple::makeTuple(self->tenantGroup, self->runID, tenantName, lastKey), key));
+			metadata::management::MovementMetadata::splitPointsMap().set(
+			    tr, Tuple::makeTuple(self->tenantGroup, self->runID, tenantName, lastKey), key);
 			lastKey = key;
 		}
 		wait(tr->commit());
@@ -125,7 +131,7 @@ struct StartTenantMovementImpl {
 	                                                     Reference<typename DB::TransactionT> tr) {
 		for (auto& tenantPair : self->tenantsInGroup) {
 			Tenant t(tenantPair.second);
-			storeTenantSplitPoints(self, tr, t, tenantPair.first);
+			storeTenantSplitPoints(self, tr, &t, tenantPair.first);
 		}
 		ASSERT(self->tenantsInGroup.size());
 		TenantName firstTenant = self->tenantsInGroup[0].first;
@@ -252,15 +258,16 @@ struct SwitchTenantMovementImpl {
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
 		for (auto& tenantPair : tenantsInGroup) {
 			state TenantName tName = tenantPair.first;
-			Reference<ITenant> srcTenant = srcDb->openTenant(tName);
-			Reference<ITenant> dstTenant = dstDb->openTenant(tName);
+			state Reference<ITenant> srcTenant = srcDb->openTenant(tName);
+			state Reference<ITenant> dstTenant = dstDb->openTenant(tName);
 			ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> resultFuture =
 			    srcTenant->listBlobbifiedRanges(allKeys, rangeLimit);
 			state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(safeThreadFutureToFuture(resultFuture));
 			for (auto& blobRange : blobRanges) {
 				bool result = wait(safeThreadFutureToFuture(dstTenant->blobbifyRange(blobRange)));
+				state KeyRange traceRange = blobRange;
 				if (!result) {
-					TraceEvent("TenantMoveBlobbifyFailed").detail("TenantName", tName).detail("BlobRange", blobRange);
+					TraceEvent("TenantMoveBlobbifyFailed").detail("TenantName", tName).detail("BlobRange", traceRange);
 					throw operation_failed();
 				}
 			}
@@ -390,9 +397,10 @@ struct FinishTenantMovementImpl {
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
 		for (auto& tenantPair : tenantsInGroup) {
 			state TenantName tName = tenantPair.first;
-			Reference<ITenant> srcTenant = srcDb->openTenant(tName);
-			// safeThreadFutureToFuture doesn't seem to support ThreadFuture<Key>
-			safeThreadFutureToFuture(srcTenant->purgeBlobGranules(allKeys, latestVersion, false));
+			state Reference<ITenant> srcTenant = srcDb->openTenant(tName);
+			state ThreadFuture<Key> resultFuture = srcTenant->purgeBlobGranules(allKeys, latestVersion, false);
+			Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
+			wait(safeThreadFutureToFuture(srcTenant->waitPurgeGranulesComplete(purgeKey)));
 		}
 		return Void();
 	}
@@ -402,6 +410,7 @@ struct FinishTenantMovementImpl {
 		// Assert matching tenant exists on other cluster
 		// Assert other tenant is unlocked
 		// Assert matching tenant groups
+		wait(delay(1.0));
 		return Void();
 	}
 
@@ -520,4 +529,5 @@ Future<Void> abortTenantMovement(Reference<DB> db,
 
 } // namespace metacluster
 
+#include "flow/unactorcompiler.h"
 #endif
