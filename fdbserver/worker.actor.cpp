@@ -1901,6 +1901,7 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 					state IKeyValueStore* kvs = openKVStore(
 					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
 					wait(ready(kvs->init()));
+					TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
 					kvs->dispose();
 					CODE_PROBE(true, "Removed stale disk file");
 					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
