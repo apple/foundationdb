@@ -2156,6 +2156,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.granuleStatusStreamRequest);
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
+					DUMPTOKEN(recruited.mutationStreamRequest);
 
 					IKeyValueStore* data = openKVStore(s.storeType,
 					                                   s.filename,
