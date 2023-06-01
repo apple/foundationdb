@@ -412,7 +412,7 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
 			bool const traceEnabled = stats.canLog();
-			if (traceEnabled) {
+			if (!traceEnabled) {
 				te.disable();
 			}
 			bool isBusy{ false };
@@ -443,7 +443,8 @@ public:
 			// Currently there is no differentiation between batch priority and default priority transactions
 			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
-			if (!stats.canLog()) {
+			bool const traceEnabled = stats.canLog();
+			if (!traceEnabled) {
 				te.disable();
 			}
 			auto const targetTps = getTargetTps(tag, isBusy, te);
@@ -456,7 +457,9 @@ public:
 				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
 				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
 				te.detail("ClientTps", clientRate.tpsRate);
-				stats.updateLastLogged();
+				if (traceEnabled) {
+					stats.updateLastLogged();
+				}
 			} else {
 				te.disable();
 			}
