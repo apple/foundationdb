@@ -587,10 +587,10 @@ Optional<double> getTPSLimit(GlobalTagThrottler& globalTagThrottler, Transaction
 
 class MockStorageServer {
 	class Cost {
-		Smoother smoother;
+		HoltLinearSmoother smoother;
 
 	public:
-		Cost() : smoother(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
+		Cost() : smoother(1.0) {}
 		Cost& operator+=(double delta) {
 			smoother.addDelta(delta);
 			return *this;
