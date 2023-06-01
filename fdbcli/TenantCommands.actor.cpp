@@ -341,7 +341,7 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
 	return true;
 }
-const std::string usageMessage =
+constexpr char usageMessage[] =
     "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
@@ -384,6 +384,7 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 }
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	fmt::print("Unimplemented\n");
+	wait(delay(1.0));
 	ASSERT(false);
 	return true;
 }
@@ -409,18 +410,20 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 		}
 	}
 	StringRef step = tokens[2];
+	state bool result = false;
 	if (step == "start"_sr) {
-		return tenantMoveStartCommand(db, tokens);
+		wait(store(result, tenantMoveStartCommand(db, tokens)));
 	} else if (step == "switch"_sr) {
-		return tenantMoveSwitchCommand(db, tokens);
+		wait(store(result, tenantMoveSwitchCommand(db, tokens)));
 	} else if (step == "finish"_sr) {
-		return tenantMoveFinishCommand(db, tokens);
+		wait(store(result, tenantMoveFinishCommand(db, tokens)));
 	} else if (step == "abort"_sr) {
-		return tenantMoveAbortCommand(db, tokens);
+		wait(store(result, tenantMoveAbortCommand(db, tokens)));
 	} else {
 		fmt::print(usageMessage);
 		return false;
 	}
+	return result;
 	// switch (step) {
 	// case "start"_sr:
 	// 	return tenantMoveStartCommand(db, tokens);

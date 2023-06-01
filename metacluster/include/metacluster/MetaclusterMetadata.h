@@ -70,15 +70,17 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex();
 
 struct MovementMetadataSpecification {
 	Key subspace;
+	// UID is not supported by Tuple.h
+	// use UID::toString() and static UID::fromString instead
 
 	// emergency_movement/move(tenantGroup) = RunID
-	KeyBackedMap<TenantGroupName, UID> emergencyMovements;
+	KeyBackedMap<TenantGroupName, std::string> emergencyMovements;
 
 	// emergency_movement/version(tenantGroup, RunID) = Version
-	KeyBackedMap<std::pair<TenantGroupName, UID>, Version> movementVersions;
+	KeyBackedMap<std::pair<TenantGroupName, std::string>, Version> movementVersions;
 
 	// emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
-	KeyBackedMap<std::pair<TenantGroupName, UID>, std::pair<TenantName, Key>> movementQueue;
+	KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>> movementQueue;
 
 	// emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
 	KeyBackedMap<Tuple, Key> splitPointsMap;
