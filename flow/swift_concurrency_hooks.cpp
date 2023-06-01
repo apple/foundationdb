@@ -66,5 +66,8 @@ void net2_enqueueGlobal_hook_impl(swift::Job* _Nonnull job, void (*_Nonnull)(swi
 }
 
 void swift_job_run_generic(swift::Job* _Nonnull job) {
+	// NOTE: Guarded because swift_job_run is external import.
+#ifdef WITH_SWIFT
 	swift_job_run(job, ExecutorRef::generic());
+#endif
 }
