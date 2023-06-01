@@ -86,11 +86,14 @@ public:
 template <class T>
 class HoltLinearSmootherImpl {
 	// Times (t) are expected to be nondecreasing
-	double eFoldingTime;
+	double eDataFoldingTime, eTrendFoldingTime;
 	double total, lastEstimate, lastRateEstimate, lastTime;
 
 protected:
-	explicit HoltLinearSmootherImpl(double eFoldingTime) : eFoldingTime(eFoldingTime) { reset(0); }
+	explicit HoltLinearSmootherImpl(double eDataFoldingTime, double eTrendFoldingTime)
+	  : eDataFoldingTime(eDataFoldingTime), eTrendFoldingTime(eTrendFoldingTime) {
+		reset(0);
+	}
 
 public:
 	void reset(double value) {
@@ -115,7 +118,7 @@ public:
 
 	double smoothTotal(double t = T::now()) const {
 		double const elapsed = t - lastTime;
-		double const alpha = 1 - exp(-elapsed / eFoldingTime);
+		double const alpha = 1 - exp(-elapsed / eDataFoldingTime);
 		return alpha * total + (1 - alpha) * (lastEstimate + elapsed * lastRateEstimate);
 	}
 
@@ -123,8 +126,8 @@ public:
 		double const elapsed = t - lastTime;
 		if (elapsed) {
 			double const recentRate = (smoothTotal() - lastEstimate) / elapsed;
-			double const alpha = 1 - exp(-elapsed / eFoldingTime);
-			return alpha * recentRate + (1 - alpha) * lastRateEstimate;
+			double const beta = 1 - exp(-elapsed / eTrendFoldingTime);
+			return beta * recentRate + (1 - beta) * lastRateEstimate;
 		} else {
 			return lastRateEstimate;
 		}
@@ -136,10 +139,11 @@ public:
 class HoltLinearSmoother : public HoltLinearSmootherImpl<HoltLinearSmoother> {
 public:
 	static double now() { return ::now(); }
-	explicit HoltLinearSmoother(double eFoldingTime) : HoltLinearSmootherImpl<HoltLinearSmoother>(eFoldingTime) {}
+	explicit HoltLinearSmoother(double eDataFoldingTime, double eTrendFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
 };
 class HoltLinearTimerSmoother : public HoltLinearSmootherImpl<HoltLinearTimerSmoother> {
 	static double now() { return timer(); }
-	explicit HoltLinearTimerSmoother(double eFoldingTime)
-	  : HoltLinearSmootherImpl<HoltLinearTimerSmoother>(eFoldingTime) {}
+	explicit HoltLinearTimerSmoother(double eDataFoldingTime, double eTrendFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearTimerSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
 };
