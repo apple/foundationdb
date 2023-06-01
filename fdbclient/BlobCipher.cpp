@@ -51,11 +51,7 @@
 #include <utility>
 #include <variant>
 
-#ifndef _WIN32
 #include <unistd.h>
-#else
-#include <io.h>
-#endif
 
 #define BLOB_CIPHER_DEBUG DEBUG_ENCRYPT_KEY_CIPHER
 
@@ -1704,8 +1700,7 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 
 	CODE_PROBE(true, "decryptInplace: BlobCipher data decryption");
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
-	           "decryptInplace: Decryption authentication disabled",
-	           probe::decoration::rare);
+	           "decryptInplace: Decryption authentication disabled");
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_HMAC_SHA,
 	           "decryptInplace: Decryption HMAC_SHA Auth token verification");
 	CODE_PROBE(header.flags.authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,

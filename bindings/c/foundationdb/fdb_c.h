@@ -307,6 +307,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_uint64(FDBFuture* f, uin
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_double(FDBFuture* f, double* out);
 
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_bytes(FDBFuture* f,
+                                                              uint8_t const** out_bytes,
+                                                              int* out_bytes_length);
+
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_key(FDBFuture* f, uint8_t const** out_key, int* out_key_length);
 
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_value(FDBFuture* f,
@@ -346,6 +350,10 @@ DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_granule_summary_array(FD
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
                                                                             FDBBGFileDescription** out,
                                                                             int* desc_count);
+
+DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
+                                                                      float* server_busyness,
+                                                                      float* range_busyness);
 
 DLLEXPORT WARN_UNUSED_RESULT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
                                                                        int file_len,

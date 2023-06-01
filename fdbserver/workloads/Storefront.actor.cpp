@@ -102,7 +102,7 @@ struct StorefrontWorkload : TestWorkload {
 
 	ACTOR Future<Void> itemUpdater(Transaction* tr, StorefrontWorkload* self, int item, int quantity) {
 		state Key iKey = self->itemKey(item);
-		Optional<Value> val = wait(tr->get(iKey));
+		ValueReadResult val = wait(tr->get(iKey));
 		if (!val.present()) {
 			TraceEvent(SevError, "StorefrontItemMissing")
 			    .detail("Key", printable(iKey))
@@ -129,7 +129,7 @@ struct StorefrontWorkload : TestWorkload {
 				state Transaction tr(cx);
 				loop {
 					try {
-						Optional<Value> order = wait(tr.get(orderKey));
+						ValueReadResult order = wait(tr.get(orderKey));
 						if (order.present()) {
 							++self->spuriousCommitFailures;
 							break; // the order was already committed
@@ -181,7 +181,7 @@ struct StorefrontWorkload : TestWorkload {
 			try {
 				for (; idx < ids.size(); idx++) {
 					state orderID id = ids[idx];
-					Optional<Value> val = wait(tr.get(self->orderKey(id)));
+					ValueReadResult val = wait(tr.get(self->orderKey(id)));
 					if (!val.present()) {
 						TraceEvent(SevError, "TestFailure").detail("Reason", "OrderNotPresent").detail("OrderID", id);
 						return false;

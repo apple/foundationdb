@@ -199,14 +199,14 @@ struct ReadWriteCommonImpl {
 			self->readLatencyCount = 0;
 		}
 	}
-	ACTOR static Future<Void> logLatency(Future<Optional<Value>> f,
+	ACTOR static Future<Void> logLatency(Future<ValueReadResult> f,
 	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
 	                                     bool shouldRecord) {
 		state double readBegin = now();
-		Optional<Value> value = wait(f);
+		ValueReadResult value = wait(f);
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -268,7 +268,7 @@ Future<Void> ReadWriteCommon::tracePeriodically() {
 	return ReadWriteCommonImpl::tracePeriodically(this);
 }
 
-Future<Void> ReadWriteCommon::logLatency(Future<Optional<Value>> f, bool shouldRecord) {
+Future<Void> ReadWriteCommon::logLatency(Future<ValueReadResult> f, bool shouldRecord) {
 	return ReadWriteCommonImpl::logLatency(
 	    f, &readLatencies, &readLatencyTotal, &readLatencyCount, readMetric, shouldRecord);
 }

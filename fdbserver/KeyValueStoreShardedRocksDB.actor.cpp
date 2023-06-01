@@ -2780,9 +2780,6 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			result.more =
 			    (result.size() == a.rowLimit) || (result.size() == -a.rowLimit) || (accumulatedBytes >= a.byteLimit);
-			if (result.more) {
-				result.readThrough = result[result.size() - 1].key;
-			}
 			a.result.send(result);
 			if (a.getHistograms) {
 				double currTime = timer_monotonic();
@@ -3037,10 +3034,10 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
-	ACTOR static Future<Standalone<RangeResultRef>> read(Reader::ReadRangeAction* action,
-	                                                     FlowLock* semaphore,
-	                                                     IThreadPool* pool,
-	                                                     Counter* counter) {
+	ACTOR static Future<RangeResult> read(Reader::ReadRangeAction* action,
+	                                      FlowLock* semaphore,
+	                                      IThreadPool* pool,
+	                                      Counter* counter) {
 		state std::unique_ptr<Reader::ReadRangeAction> a(action);
 		state Optional<Void> slot = wait(timeout(semaphore->take(), SERVER_KNOBS->ROCKSDB_READ_QUEUE_WAIT));
 		if (!slot.present()) {
@@ -3052,7 +3049,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		auto fut = a->result.getFuture();
 		pool->post(a.release());
-		Standalone<RangeResultRef> result = wait(fut);
+		RangeResult result = wait(fut);
 
 		return result;
 	}

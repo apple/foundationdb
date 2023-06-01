@@ -567,6 +567,7 @@ public:
 	double WAIT_FOR_GOOD_RECRUITMENT_DELAY;
 	double WAIT_FOR_GOOD_REMOTE_RECRUITMENT_DELAY;
 	double ATTEMPT_RECRUITMENT_DELAY;
+	double ATTEMPT_STORAGE_RECRUITMENT_DELAY;
 	double WAIT_FOR_DISTRIBUTOR_JOIN_DELAY;
 	double WAIT_FOR_RATEKEEPER_JOIN_DELAY;
 	double WAIT_FOR_CONSISTENCYSCAN_JOIN_DELAY;
@@ -680,6 +681,7 @@ public:
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
 	int64_t AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
+	int64_t AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER;
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
@@ -724,10 +726,12 @@ public:
 	bool GLOBAL_TAG_THROTTLING;
 	// Enforce tag throttling on proxies rather than on clients
 	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
-	// Minimum number of transactions per second that the global tag throttler must allow for each tag
+	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
+	// When the measured tps for a tag gets too low, the denominator in the
+	// average cost calculation gets small, resulting in an unstable calculation.
+	// To protect against this, we do not compute the average cost when the
+	// measured tps drops below this threshold
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
-	// Used by global tag throttling counters
-	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
 	// until some existing tags expire
 	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
@@ -736,17 +740,17 @@ public:
 	int64_t GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER;
 	// Interval at which latency bands are logged for each tag on grv proxy
 	double GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL;
-	// When the measured tps for a tag gets too low, the denominator in the
-	// average cost calculation gets small, resulting in an unstable calculation.
-	// To protect against this, we do not compute the average cost when the
-	// measured tps drops below a certain threshold
-	double GLOBAL_TAG_THROTTLING_MIN_TPS;
 	// Interval at which ratekeeper logs statistics for each tag:
 	double GLOBAL_TAG_THROTTLING_TRACE_INTERVAL;
 	// If this knob is set to true, the global tag throttler will still
 	// compute rates, but these rates won't be sent to GRV proxies for
 	// enforcement.
 	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+
+	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -1049,6 +1053,10 @@ public:
 	double FILE_LATENCY_SKETCH_ACCURACY;
 	double LATENCY_METRICS_LOGGING_INTERVAL;
 
+	// Relocation request queue measurement
+	double RELOCATION_METRICS_SMOOTHING;
+	double RELOCATION_METRICS_WINDOW;
+
 	// Cluster recovery
 	std::string CLUSTER_RECOVERY_EVENT_NAME_PREFIX;
 
@@ -1127,13 +1135,10 @@ public:
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
-	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
-	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
-	std::string BLOB_RESTORE_MANIFEST_URL;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;

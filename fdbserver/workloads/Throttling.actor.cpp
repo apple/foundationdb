@@ -105,7 +105,7 @@ struct ThrottlingWorkload : KVWorkload {
 			try {
 				state int i;
 				for (i = 0; i < self->readsPerTransaction; ++i) {
-					state Optional<Value> value = wait(tr.get(self->getRandomKey()));
+					state ValueReadResult value = wait(tr.get(self->getRandomKey()));
 				}
 				for (i = 0; i < self->writesPerTransaction; ++i) {
 					tr.set(self->getRandomKey(), getRandomValue());

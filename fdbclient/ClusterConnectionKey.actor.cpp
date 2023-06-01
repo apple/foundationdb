@@ -42,7 +42,7 @@ ACTOR Future<Reference<ClusterConnectionKey>> ClusterConnectionKey::loadClusterC
 	state Transaction tr(db);
 	loop {
 		try {
-			Optional<Value> v = wait(tr.get(connectionStringKey));
+			ValueReadResult v = wait(tr.get(connectionStringKey));
 			if (!v.present()) {
 				throw connection_string_invalid();
 			}
@@ -122,7 +122,7 @@ ACTOR Future<bool> ClusterConnectionKey::persistImpl(Reference<ClusterConnection
 		state Transaction tr(self->db);
 		loop {
 			try {
-				Optional<Value> existingConnectionString = wait(tr.get(self->connectionStringKey));
+				ValueReadResult existingConnectionString = wait(tr.get(self->connectionStringKey));
 				// Someone has already updated the connection string to what we want
 				if (existingConnectionString.present() && existingConnectionString.get() == newConnectionString) {
 					self->lastPersistedConnectionString = newConnectionString;

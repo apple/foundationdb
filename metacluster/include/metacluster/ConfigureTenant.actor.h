@@ -78,15 +78,18 @@ struct ConfigureTenantImpl {
 		entryWithUpdatedGroup.tenantGroup = desiredGroup;
 
 		if (tenantEntry.tenantGroup == desiredGroup) {
+			CODE_PROBE(true, "Update tenant group to same group");
 			return Void();
 		}
 
 		// Removing a tenant group is only possible if we have capacity for more groups on the current cluster
 		else if (!desiredGroup.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity() && !self->ignoreCapacityLimit) {
+				CODE_PROBE(true, "Remove tenant group failed due to capacity limits");
 				throw cluster_no_capacity();
 			}
 
+			CODE_PROBE(true, "Remove tenant group");
 			wait(internal::managementClusterRemoveTenantFromGroup(
 			    tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
 			internal::managementClusterAddTenantToGroup(tr,
@@ -103,8 +106,11 @@ struct ConfigureTenantImpl {
 		// If we are creating a new tenant group, we need to have capacity on the current cluster
 		if (!tenantGroupEntry.present()) {
 			if (!self->ctx.dataClusterMetadata.get().entry.hasCapacity() && !self->ignoreCapacityLimit) {
+				CODE_PROBE(true, "Set tenant group to new group failed due to capacity limits");
 				throw cluster_no_capacity();
 			}
+
+			CODE_PROBE(true, "Set tenant group to new group");
 			wait(internal::managementClusterRemoveTenantFromGroup(
 			    tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
 			internal::managementClusterAddTenantToGroup(tr,
@@ -117,6 +123,7 @@ struct ConfigureTenantImpl {
 
 		// Moves between groups in the same cluster are freely allowed
 		else if (tenantGroupEntry.get().assignedCluster == tenantEntry.assignedCluster) {
+			CODE_PROBE(true, "Move tenant between groups on same cluster");
 			wait(internal::managementClusterRemoveTenantFromGroup(
 			    tr, tenantEntry, &self->ctx.dataClusterMetadata.get()));
 			internal::managementClusterAddTenantToGroup(tr,
@@ -129,6 +136,7 @@ struct ConfigureTenantImpl {
 
 		// We don't currently support movement between groups on different clusters
 		else {
+			CODE_PROBE(true, "Move tenant groups on different cluster failed");
 			TraceEvent("TenantGroupChangeToDifferentCluster")
 			    .detail("Tenant", self->tenantName)
 			    .detail("OriginalGroup", tenantEntry.tenantGroup)
@@ -146,11 +154,13 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
 
 		if (!tenantEntry.present()) {
+			CODE_PROBE(true, "Configure non-existent tenant");
 			throw tenant_not_found();
 		}
 
 		if (tenantEntry.get().tenantState != TenantState::READY &&
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) {
+			CODE_PROBE(true, "Configure tenant in invalid state");
 			throw invalid_tenant_state();
 		}
 
@@ -174,6 +184,7 @@ struct ConfigureTenantImpl {
 				    .detail("TenantName", tenantEntry.get().tenantName)
 				    .detail("OriginalAssignedCluster", tenantEntry.get().assignedCluster)
 				    .detail("NewAssignedCluster", newClusterName);
+				CODE_PROBE(true, "Attempt to change assigned cluster");
 				throw invalid_tenant_configuration();
 			}
 			self->updatedEntry.configure(configItr->first, configItr->second);
@@ -181,6 +192,11 @@ struct ConfigureTenantImpl {
 
 		if (self->lockState.present()) {
 			TenantAPI::checkLockState(tenantEntry.get(), self->lockState.get(), self->lockId.get());
+			CODE_PROBE(self->updatedEntry.tenantLockState == TenantAPI::TenantLockState::LOCKED, "Lock tenant");
+			CODE_PROBE(self->updatedEntry.tenantLockState == TenantAPI::TenantLockState::READ_ONLY,
+			           "Read-only lock tenant");
+			CODE_PROBE(self->updatedEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED, "Unlock tenant");
+
 			self->updatedEntry.tenantLockState = self->lockState.get();
 			if (self->updatedEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
 				self->updatedEntry.tenantLockId = {};
@@ -191,6 +207,7 @@ struct ConfigureTenantImpl {
 
 		if (self->updatedEntry.matchesConfiguration(tenantEntry.get()) &&
 		    tenantEntry.get().tenantState == TenantState::READY) {
+			CODE_PROBE(true, "Noop configure tenant");
 			return false;
 		}
 
@@ -211,6 +228,8 @@ struct ConfigureTenantImpl {
 		if (!tenantEntry.present() ||
 		    tenantEntry.get().configurationSequenceNum >= self->updatedEntry.configurationSequenceNum) {
 			// If the tenant isn't in the metacluster, it must have been concurrently removed
+			CODE_PROBE(!tenantEntry.present(), "Tenant removed while configuring on data cluster");
+			CODE_PROBE(tenantEntry.present(), "Tenant configuration already applied on data cluster");
 			return Void();
 		}
 
@@ -226,6 +245,8 @@ struct ConfigureTenantImpl {
 
 		if (!tenantEntry.present() || tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
+			CODE_PROBE(!tenantEntry.present(), "Tenant removed while configuring on management cluster");
+			CODE_PROBE(tenantEntry.present(), "Tenant configuration already applied on management cluster");
 			return Void();
 		}
 

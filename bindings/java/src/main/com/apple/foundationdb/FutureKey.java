@@ -24,8 +24,9 @@ import java.util.concurrent.Executor;
 
 import com.apple.foundationdb.EventKeeper.Events;
 
-class FutureKey extends NativeFuture<byte[]> {
+class FutureKey extends NativeFuture<ResultBytes> {
 	private final EventKeeper eventKeeper;
+
 	FutureKey(long cPtr, Executor executor, EventKeeper eventKeeper) {
 		super(cPtr);
 		this.eventKeeper = eventKeeper;
@@ -33,17 +34,17 @@ class FutureKey extends NativeFuture<byte[]> {
 	}
 
 	@Override
-	protected byte[] getIfDone_internal(long cPtr) throws FDBException {
+	protected ResultBytes getIfDone_internal(long cPtr) throws FDBException {
 		return FutureKey_get(cPtr);
 	}
-	
+
 	@Override
-	protected void postMarshal(byte[] value) {
-		if(value!=null && eventKeeper!=null){
-			eventKeeper.count(Events.BYTES_FETCHED, value.length);
+	protected void postMarshal(ResultBytes value){
+		if(value != null && eventKeeper != null){
+			eventKeeper.count(Events.BYTES_FETCHED, value.getBytes().length);
 		}
 		super.postMarshal(value);
 	}
 
-	private native byte[] FutureKey_get(long cPtr) throws FDBException;
+	private native ResultBytes FutureKey_get(long cPtr) throws FDBException;
 }

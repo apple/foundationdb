@@ -69,8 +69,8 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 					fmt::print("<empty>\n");
 				}
 			} else {
-				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
-				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
+				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
 				Optional<ThrottleApi::TagQuotaValue> quota =
 				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(val)); });
 
@@ -97,8 +97,8 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 			if (quotaType == QuotaType::STORAGE) {
 				TenantMetadata::storageQuota().set(tr, tag, value);
 			} else {
-				state ThreadFuture<Optional<Value>> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
-				Optional<Value> v = wait(safeThreadFutureToFuture(resultFuture));
+				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
+				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
 				ThrottleApi::TagQuotaValue quota;
 				if (v.present()) {
 					quota = ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(v.get()));

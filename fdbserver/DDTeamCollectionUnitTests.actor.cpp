@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
+#include <unordered_set>
 
 class DDTeamCollectionUnitTest {
 public:
@@ -639,6 +640,7 @@ public:
 		                             PreferLowerReadUtil::False,
 		                             forReadBalance);
 
+		// Case 1:
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		auto [resTeam, resTeamSrcFound] = req.reply.getFuture().get();
 		auto [resTeamHigh, resTeamHighSrcFound] = reqHigh.reply.getFuture().get();
@@ -651,12 +653,12 @@ public:
 		auto servers = resTeam.get()->getServerIDs(), serversHigh = resTeamHigh.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end()),
 		    selectedServersHigh(serversHigh.begin(), serversHigh.end());
-		// for (auto id : selectedServers)
-		// 	std::cout << id.toString() << std::endl;
 		ASSERT(expectedServers == selectedServers);
 		ASSERT(expectedServersHigh == selectedServersHigh);
 
-		resTeam.get()->addReadInFlightToTeam(50);
+		// Case 2: resTeam1 = {2, 0}
+		resTeam.get()->addReadInFlightToTeam(
+		    50, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
 		req.reply.reset();
 		wait(collection->getTeam(req));
 		auto [resTeam1, resTeam1Found] = req.reply.getFuture().get();
@@ -664,6 +666,49 @@ public:
 		auto servers1 = resTeam1.get()->getServerIDs();
 		const std::set<UID> selectedServers1(servers1.begin(), servers1.end());
 		ASSERT(expectedServers1 == selectedServers1);
+
+		// Case 3: resTeam2 = {2, 0}
+		resTeam1.get()->addReadInFlightToTeam(
+		    100, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam2, resTeam2Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers2{ UID(2, 0) };
+		auto servers2 = resTeam2.get()->getServerIDs();
+		const std::set<UID> selectedServers2(servers2.begin(), servers2.end());
+		ASSERT(expectedServers2 == selectedServers2);
+
+		// Case 4: resTeam3 = {4, 0}
+		resTeam2.get()->addReadInFlightToTeam(50, std::unordered_set<UID>{ UID(1, 0), UID(3, 0) });
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam3, resTeam3Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers3{ UID(4, 0) };
+		auto servers3 = resTeam3.get()->getServerIDs();
+		const std::set<UID> selectedServers3(servers3.begin(), servers3.end());
+		ASSERT(expectedServers3 == selectedServers3);
+
+		// Case 5: resTeam4 = {2, 0}
+		resTeam3.get()->addDataInFlightToTeam(
+		    600 * 1024 * 1024, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam4, resTeam4Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers4{ UID(2, 0) };
+		auto servers4 = resTeam4.get()->getServerIDs();
+		const std::set<UID> selectedServers4(servers4.begin(), servers4.end());
+		ASSERT(expectedServers4 == selectedServers4);
+
+		// Case 5: resTeam5 = {2, 0}
+		resTeam4.get()->addDataInFlightToTeam(
+		    600 * 1024 * 1024, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam5, resTeam5Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers5{ UID(2, 0) };
+		auto servers5 = resTeam5.get()->getServerIDs();
+		const std::set<UID> selectedServers5(servers5.begin(), servers5.end());
+		ASSERT(expectedServers5 == selectedServers5);
 
 		return Void();
 	}

@@ -38,7 +38,7 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <flow/Platform.h>
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(__AVX__)
+#if defined(__linux__) && defined(__AVX__)
 
 #ifdef __cplusplus
 extern "C" {
@@ -887,6 +887,6 @@ static inline uint64_t rte_rdtsc(void) {
 }
 #endif
 
-#endif /* defined (__linux__) || defined (__FreeBSD__) */
+#endif /* defined(__linux__) && defined(__AVX__) */
 
 #endif /* _RTE_MEMCPY_X86_64_H_ */

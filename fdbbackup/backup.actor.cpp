@@ -59,12 +59,6 @@
 #include <string>
 #include <iostream>
 #include <ctime>
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
-#endif
 #include <time.h>
 
 #ifdef __linux__
@@ -79,6 +73,9 @@
 
 #include "SimpleOpt/SimpleOpt.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+// TODO: Stub for --parentpid option
+#undef _HAVE_PARENTPID
 
 // Type of program being executed
 enum class ProgramExe { AGENT, BACKUP, RESTORE, FASTRESTORE_TOOL, DR_AGENT, DB_BACKUP, UNDEFINED };
@@ -209,7 +206,7 @@ CSimpleOpt::SOption g_rgOptions[] = { { OPT_VERSION, "-v", SO_NONE },
 	                                  SO_END_OF_OPTIONS };
 
 CSimpleOpt::SOption g_rgAgentOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -239,7 +236,7 @@ CSimpleOpt::SOption g_rgAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStartOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -289,7 +286,7 @@ CSimpleOpt::SOption g_rgBackupStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_TRACE, "--log", SO_NONE },
@@ -323,7 +320,7 @@ CSimpleOpt::SOption g_rgBackupModifyOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -353,7 +350,7 @@ CSimpleOpt::SOption g_rgBackupStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -380,7 +377,7 @@ CSimpleOpt::SOption g_rgBackupAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -407,7 +404,7 @@ CSimpleOpt::SOption g_rgBackupCleanupOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -436,7 +433,7 @@ CSimpleOpt::SOption g_rgBackupDiscontinueOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -465,7 +462,7 @@ CSimpleOpt::SOption g_rgBackupWaitOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -490,7 +487,7 @@ CSimpleOpt::SOption g_rgBackupPauseOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -527,7 +524,7 @@ CSimpleOpt::SOption g_rgBackupExpireOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_DESTCONTAINER, "-d", SO_REQ_SEP },
@@ -554,7 +551,7 @@ CSimpleOpt::SOption g_rgBackupDeleteOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -586,7 +583,7 @@ CSimpleOpt::SOption g_rgBackupDescribeOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -616,7 +613,7 @@ CSimpleOpt::SOption g_rgBackupDumpOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_CLUSTERFILE, "-C", SO_REQ_SEP },
@@ -632,7 +629,7 @@ CSimpleOpt::SOption g_rgBackupTagsOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupListOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_BASEURL, "-b", SO_REQ_SEP },
@@ -659,7 +656,7 @@ CSimpleOpt::SOption g_rgBackupListOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_TIMESTAMP, "--query-restore-timestamp", SO_REQ_SEP },
@@ -695,7 +692,7 @@ CSimpleOpt::SOption g_rgBackupQueryOptions[] = {
 
 // g_rgRestoreOptions is used by fdbrestore and fastrestore_tool
 CSimpleOpt::SOption g_rgRestoreOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_RESTORE_CLUSTERFILE_DEST, "--dest-cluster-file", SO_REQ_SEP },
@@ -739,12 +736,13 @@ CSimpleOpt::SOption g_rgRestoreOptions[] = {
 	{ OPT_RESTORE_BEGIN_VERSION, "--begin-version", SO_REQ_SEP },
 	{ OPT_RESTORE_INCONSISTENT_SNAPSHOT_ONLY, "--inconsistent-snapshot-only", SO_NONE },
 	{ OPT_ENCRYPTION_KEY_FILE, "--encryption-key-file", SO_REQ_SEP },
+	{ OPT_BLOB_MANIFEST_URL, "--blob-manifest-url", SO_REQ_SEP },
 	TLS_OPTION_FLAGS,
 	SO_END_OF_OPTIONS
 };
 
 CSimpleOpt::SOption g_rgDBAgentOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -775,7 +773,7 @@ CSimpleOpt::SOption g_rgDBAgentOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStartOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -807,7 +805,7 @@ CSimpleOpt::SOption g_rgDBStartOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBStatusOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -838,7 +836,7 @@ CSimpleOpt::SOption g_rgDBStatusOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -868,7 +866,7 @@ CSimpleOpt::SOption g_rgDBSwitchOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBAbortOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -899,7 +897,7 @@ CSimpleOpt::SOption g_rgDBAbortOptions[] = {
 };
 
 CSimpleOpt::SOption g_rgDBPauseOptions[] = {
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 	{ OPT_PARENTPID, "--parentpid", SO_REQ_SEP },
 #endif
 	{ OPT_SOURCE_CLUSTER, "-s", SO_REQ_SEP },
@@ -934,14 +932,17 @@ const KeyRef exeDatabaseBackup = "fdbdr"_sr;
 
 extern const char* getSourceVersion();
 
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 void parentWatcher(void* parentHandle) {
-	HANDLE parent = (HANDLE)parentHandle;
-	int signal = WaitForSingleObject(parent, INFINITE);
-	CloseHandle(parentHandle);
-	if (signal == WAIT_OBJECT_0)
-		criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
-	TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+	// Stub for parentWatcher()
+	/*
+HANDLE parent = (HANDLE)parentHandle;
+int signal = WaitForSingleObject(parent, INFINITE);
+CloseHandle(parentHandle);
+if (signal == WAIT_OBJECT_0)
+	criticalError(FDB_EXIT_SUCCESS, "ParentProcessExited", "Parent process exited");
+TraceEvent(SevError, "ParentProcessWaitFailed").detail("RetCode", signal).GetLastError();
+	*/
 }
 
 #endif
@@ -1002,9 +1003,7 @@ static void printAgentUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1146,9 +1145,7 @@ static void printBackupUsage(bool devhelp) {
 	printf("  -h, --help     Display this help and exit.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1214,6 +1211,8 @@ static void printRestoreUsage(bool devhelp) {
 	       "instead of the entire set.\n");
 	printf("  --encryption-key-file"
 	       "                 The AES-128-GCM key in the provided file is used for decrypting backup files.\n");
+	printf("  --blob-manifest-url URL\n"
+	       "                 Restore from blob granules. Manifest files are stored to the destination URL.\n");
 	printf(TLS_HELP);
 	printf("  -v DBVERSION   The version at which the database will be restored.\n");
 	printf("  --timestamp    Instead of a numeric version, use this to specify a timestamp in %s\n",
@@ -1233,8 +1232,7 @@ static void printRestoreUsage(bool devhelp) {
 	    "should NOT be used alongside --user-data (above) and CANNOT be used alongside other specified key ranges.\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1283,9 +1281,7 @@ static void printDBAgentUsage(bool devhelp) {
 	printf("  -v, --version  Print version information and exit.\n");
 	printf("  -h, --help     Display this help and exit.\n");
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1335,9 +1331,7 @@ static void printDBBackupUsage(bool devhelp) {
 	       "  KEYS FORMAT:   \"<BEGINKEY> <ENDKEY>\" [...]\n");
 
 	if (devhelp) {
-#ifdef _WIN32
-		printf("  -n             Create a new console.\n");
-		printf("  -q             Disable error dialog on crash.\n");
+#ifdef _HAVE_PARENTPID
 		printf("  --parentpid PID\n");
 		printf("                 Specify a process after whose termination to exit.\n");
 #endif
@@ -1384,18 +1378,6 @@ ProgramExe getProgramType(std::string programExe) {
 	// lowercase the string
 	std::transform(programExe.begin(), programExe.end(), programExe.begin(), ::tolower);
 
-	// Remove the extension, if Windows
-#ifdef _WIN32
-	size_t lastDot = programExe.find_last_of(".");
-	if (lastDot != std::string::npos) {
-		size_t lastSlash = programExe.find_last_of("\\");
-
-		// Ensure last dot is after last slash, if present
-		if ((lastSlash == std::string::npos) || (lastSlash < lastDot)) {
-			programExe = programExe.substr(0, lastDot);
-		}
-	}
-#endif
 	// For debugging convenience, remove .debug suffix if present.
 	if (StringRef(programExe).endsWith(".debug"_sr))
 		programExe = programExe.substr(0, programExe.size() - 6);
@@ -1582,7 +1564,7 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		state std::vector<Future<Reference<IBackupContainer>>> tagContainers;
 		state std::vector<Future<int64_t>> tagRangeBytes;
 		state std::vector<Future<int64_t>> tagLogBytes;
-		state Future<Optional<Value>> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fBackupPaused = tr->get(fba.taskBucket->getPauseKey(), snapshot);
 
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::LOCK_AWARE);
@@ -1640,11 +1622,11 @@ ACTOR Future<std::string> getLayerStatus(Reference<ReadYourWritesTransaction> tr
 		tr2->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr2->setOption(FDBTransactionOptions::LOCK_AWARE);
 		state RangeResult tagNames = wait(tr2->getRange(dba.tagNames.range(), 10000, snapshot));
-		state std::vector<Future<Optional<Key>>> backupVersion;
+		state std::vector<Future<ValueReadResult>> backupVersion;
 		state std::vector<Future<EBackupState>> backupStatus;
 		state std::vector<Future<int64_t>> tagRangeBytesDR;
 		state std::vector<Future<int64_t>> tagLogBytesDR;
-		state Future<Optional<Value>> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
+		state Future<ValueReadResult> fDRPaused = tr->get(dba.taskBucket->getPauseKey(), snapshot);
 
 		state std::vector<UID> drTagUids;
 		for (int i = 0; i < tagNames.size(); i++) {
@@ -2346,7 +2328,8 @@ ACTOR Future<Void> runRestore(Database db,
                               std::string removePrefix,
                               OnlyApplyMutationLogs onlyApplyMutationLogs,
                               InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                              Optional<std::string> encryptionKeyFile) {
+                              Optional<std::string> encryptionKeyFile,
+                              Optional<std::string> blobManifestUrl) {
 	ASSERT(!ranges.empty());
 
 	if (targetVersion != invalidVersion && !targetTimestamp.empty()) {
@@ -2390,6 +2373,9 @@ ACTOR Future<Void> runRestore(Database db,
 				    "No restore target version given, will use maximum restorable version from backup description.\n");
 
 			BackupDescription desc = wait(bc->describeBackup());
+			if (blobManifestUrl.present()) {
+				onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
+			}
 
 			if (onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 				targetVersion = desc.contiguousLogEnd.get() - 1;
@@ -2422,7 +2408,8 @@ ACTOR Future<Void> runRestore(Database db,
 			                                                   onlyApplyMutationLogs,
 			                                                   inconsistentSnapshotOnly,
 			                                                   beginVersion,
-			                                                   encryptionKeyFile));
+			                                                   encryptionKeyFile,
+			                                                   blobManifestUrl));
 
 			if (waitForDone && verbose) {
 				// If restore is now complete then report version restored
@@ -3551,11 +3538,6 @@ int main(int argc, char* argv[]) {
 			return FDB_EXIT_ERROR;
 		}
 
-#ifdef _WIN32
-		// Windows needs a gentle nudge to format floats correctly
-		//_set_output_format(_TWO_DIGIT_EXPONENT);
-#endif
-
 		while (args->Next()) {
 			lastError = args->LastError();
 
@@ -3896,17 +3878,20 @@ int main(int argc, char* argv[]) {
 				inconsistentSnapshotOnly.set(true);
 				break;
 			}
-#ifdef _WIN32
+#ifdef _HAVE_PARENTPID
 			case OPT_PARENTPID: {
 				auto pid_str = args->OptionArg();
 				int parent_pid = atoi(pid_str);
-				auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
-				if (!pHandle) {
-					TraceEvent("ParentProcessOpenError").GetLastError();
-					fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
-					throw platform_error();
-				}
-				startThread(&parentWatcher, pHandle);
+				// Stub for PARENTPID
+				/*
+auto pHandle = OpenProcess(SYNCHRONIZE, FALSE, parent_pid);
+if (!pHandle) {
+	TraceEvent("ParentProcessOpenError").GetLastError();
+	fprintf(stderr, "Could not open parent process at pid %d (error %d)", parent_pid, GetLastError());
+	throw platform_error();
+}
+startThread(&parentWatcher, pHandle);
+				*/
 				break;
 			}
 #endif
@@ -4387,7 +4372,8 @@ int main(int argc, char* argv[]) {
 				                         removePrefix,
 				                         onlyApplyMutationLogs,
 				                         inconsistentSnapshotOnly,
-				                         encryptionKeyFile));
+				                         encryptionKeyFile,
+				                         blobManifestUrl));
 
 				break;
 			case RestoreType::WAIT:

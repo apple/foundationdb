@@ -37,6 +37,7 @@
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbrpc/HTTP.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -281,6 +282,12 @@ public:
 	virtual void destroyProcess(ProcessInfo* p) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId) = 0;
 
+	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
+	virtual void removeSimHTTPProcess() = 0;
+	virtual Future<Void> registerSimHTTPServer(std::string hostname,
+	                                           std::string service,
+	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
+
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
@@ -342,6 +349,9 @@ public:
 	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
+	enum SimConsistencyScanState { DisabledStart = 0, Enabling = 1, Enabled = 2, Complete = 3, DisabledEnd = 4 };
+	SimConsistencyScanState consistencyScanState = SimConsistencyScanState::DisabledStart;
+
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
@@ -350,6 +360,11 @@ public:
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
+
+	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
+	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
+	std::set<IPAddress> httpServerIps;
+	bool httpProtected = false;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;

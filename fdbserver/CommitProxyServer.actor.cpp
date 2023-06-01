@@ -269,6 +269,7 @@ bool checkTenantNoWait(ProxyCommitData* commitData, int64_t tenant, const char* 
 				    .detail("Tenant", tenant)
 				    .detail("Context", context);
 			}
+			CODE_PROBE(true, "Commit proxy tenant not found");
 			return false;
 		}
 
@@ -286,6 +287,7 @@ ACTOR Future<bool> checkTenant(ProxyCommitData* commitData, int64_t tenant, Vers
 		} else if (currentVersion >= minVersion) {
 			return false;
 		} else {
+			CODE_PROBE(true, "Commit proxy tenant not found waiting for min version");
 			wait(commitData->version.whenAtLeast(currentVersion + 1));
 		}
 	}
@@ -301,6 +303,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 					    .detail("Tenant", req.tenantInfo.tenantId)
 					    .detail("Prefix", tenantPrefix)
 					    .detail("Key", m.param1);
+					CODE_PROBE(true, "Committed mutation tenant prefix mismatch", probe::decoration::rare);
 					return false;
 				}
 
@@ -310,6 +313,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 					    .detail("Tenant", req.tenantInfo.tenantId)
 					    .detail("Prefix", tenantPrefix)
 					    .detail("Key", m.param2);
+					CODE_PROBE(true, "Committed mutation clear range prefix mismatch", probe::decoration::rare);
 					return false;
 				} else if (m.type == MutationRef::SetVersionstampedKey) {
 					ASSERT(m.param1.size() >= 4);
@@ -322,9 +326,14 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 						    .detail("Prefix", tenantPrefix)
 						    .detail("Key", m.param1)
 						    .detail("Offset", *offset);
+						CODE_PROBE(true,
+						           "Committed mutation versionstamp offset inside tenant prefix",
+						           probe::decoration::rare);
 						return false;
 					}
 				}
+			} else {
+				CODE_PROBE(true, "Modifying metadata version key in tenant");
 			}
 		}
 
@@ -337,6 +346,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 				    .detail("Prefix", tenantPrefix)
 				    .detail("BeginKey", rc.begin)
 				    .detail("EndKey", rc.end);
+				CODE_PROBE(true, "Committed mutation read conflict prefix mismatch", probe::decoration::rare);
 				return false;
 			}
 		}
@@ -350,6 +360,7 @@ bool verifyTenantPrefix(ProxyCommitData* const commitData, const CommitTransacti
 				    .detail("Prefix", tenantPrefix)
 				    .detail("BeginKey", wc.begin)
 				    .detail("EndKey", wc.end);
+				CODE_PROBE(true, "Committed mutation write conflict prefix mismatch", probe::decoration::rare);
 				return false;
 			}
 		}
@@ -1066,7 +1077,9 @@ void assertResolutionStateMutationsSizeConsistent(const std::vector<ResolveTrans
 bool validTenantAccess(MutationRef m, std::map<int64_t, TenantName> const& tenantMap, Optional<int64_t>& tenantId) {
 	if (isSingleKeyMutation((MutationRef::Type)m.type)) {
 		tenantId = TenantAPI::extractTenantIdFromMutation(m);
-		return tenantMap.count(tenantId.get()) > 0;
+		bool isLegalTenant = tenantMap.count(tenantId.get()) > 0;
+		CODE_PROBE(!isLegalTenant, "Commit proxy access invalid tenant");
+		return isLegalTenant;
 	}
 	return true;
 }
@@ -1420,6 +1433,7 @@ Error validateAndProcessTenantAccess(Arena& arena,
 			TraceEvent(SevWarn, "IllegalTenantAccess", pProxyCommitData->dbgid)
 			    .suppressFor(10.0)
 			    .detail("Reason", "Tenant change and normal key write in same transaction");
+			CODE_PROBE(true, "Writing normal keys while changing the tenant map");
 			return illegal_tenant_access();
 		}
 		if (tenantId.present()) {
@@ -1442,6 +1456,7 @@ Error validateAndProcessTenantAccess(CommitTransactionRequest& tr,
 		return tenant_not_found();
 	}
 	if (!tr.isLockAware() && pProxyCommitData->lockedTenants.count(tr.tenantInfo.tenantId) > 0) {
+		CODE_PROBE(true, "Attempt access to locked tenant without lock awareness");
 		return tenant_locked();
 	}
 
@@ -1605,6 +1620,7 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 		if (e.code() != error_code_success) {
 			trs[t].reply.sendError(e);
 			self->committed[t] = ConflictBatch::TransactionTenantFailure;
+			CODE_PROBE(true, "Commit proxy transaction tenant failure");
 		} else if (self->committed[t] == ConflictBatch::TransactionCommitted &&
 		           (!self->locked || trs[t].isLockAware())) {
 			self->commitCount++;
@@ -2586,6 +2602,10 @@ ACTOR static Future<Void> doTenantLookupRequest(TenantLookupRequest req, ProxyCo
 	wait(commitData->validState.getFuture());
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
+	CODE_PROBE(
+	    req.minTenantVersion != latestVersion, "Tenant ID request with specific version", probe::decoration::rare);
+	CODE_PROBE(req.minTenantVersion == latestVersion, "Tenant ID request at latest version");
+
 	state ErrorOr<int64_t> tenantId;
 	state Version minTenantVersion =
 	    req.minTenantVersion == latestVersion ? commitData->stats.lastCommitVersionAssigned + 1 : req.minTenantVersion;
@@ -2596,6 +2616,7 @@ ACTOR static Future<Void> doTenantLookupRequest(TenantLookupRequest req, ProxyCo
 	                                            : Never();
 
 	if (minTenantVersion > commitData->version.get()) {
+		CODE_PROBE(true, "Tenant ID request trigger commit");
 		commitData->triggerCommit.set(true);
 	}
 
@@ -2603,8 +2624,11 @@ ACTOR static Future<Void> doTenantLookupRequest(TenantLookupRequest req, ProxyCo
 		// Wait until we are sure that we've received metadata updates through minTenantVersion
 		// If latestVersion is specified, this will wait until we have definitely received
 		// updates through the version at the time we received the request
-		when(wait(commitData->version.whenAtLeast(minTenantVersion))) {}
+		when(wait(commitData->version.whenAtLeast(minTenantVersion))) {
+			CODE_PROBE(true, "Tenant ID request wait for min version");
+		}
 		when(wait(futureVersionDelay)) {
+			CODE_PROBE(true, "Tenant ID request future version", probe::decoration::rare);
 			req.reply.sendError(future_version());
 			++commitData->stats.tenantLookupRequestOut;
 			++commitData->stats.tenantLookupRequestErrors;
@@ -2648,6 +2672,9 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetKeyServersLocations;
 	getCurrentLineage()->modify(&TransactionLineage::txID) = req.spanContext.traceID;
 
+	CODE_PROBE(req.minTenantVersion != latestVersion, "Key server location request with specific version");
+	CODE_PROBE(req.minTenantVersion == latestVersion, "Key server location request at latest version");
+
 	wait(commitData->validState.getFuture());
 
 	state Version minVersion =
@@ -2658,6 +2685,7 @@ ACTOR static Future<Void> doKeyServerLocationRequest(GetKeyServerLocationsReques
 	bool validTenant = wait(checkTenant(commitData, req.tenant.tenantId, minVersion, "GetKeyServerLocation"));
 
 	if (!validTenant) {
+		CODE_PROBE(true, "Key server location request with invalid tenant");
 		++commitData->stats.keyServerLocationOut;
 		req.reply.sendError(tenant_not_found());
 		return Void();
@@ -2817,7 +2845,7 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		// FIXME: potentially remove duplicate racing requests for same BW interface? Should only happen at CP startup
 		// or when BW joins cluster
 		std::unordered_set<UID> bwiLookedUp;
-		state std::vector<Future<Optional<Value>>> bwiLookupFutures;
+		state std::vector<Future<ValueReadResult>> bwiLookupFutures;
 		for (i = 0; i < blobGranuleMapping.size() - 1; i++) {
 			if (!blobGranuleMapping[i].value.size()) {
 				if (req.justGranules) {
@@ -2843,7 +2871,7 @@ ACTOR static Future<Void> doBlobGranuleLocationRequest(GetBlobGranuleLocationsRe
 		wait(waitForAll(bwiLookupFutures));
 
 		for (auto& f : bwiLookupFutures) {
-			Optional<Value> workerInterface = f.get();
+			ValueReadResult workerInterface = f.get();
 			// from the time the mapping was read from the db, the associated blob worker
 			// could have died and so its interface wouldn't be present as part of the blobWorkerList
 			// we persist in the db. So throw blob_granule_request_failed to have client retry to get the new mapping

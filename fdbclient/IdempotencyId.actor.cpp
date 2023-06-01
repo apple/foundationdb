@@ -79,12 +79,10 @@ Optional<CommitResult> kvContainsIdempotencyId(const KeyValueRef& kv, const Idem
 	StringRef needle = id.asStringRefUnsafe();
 	StringRef haystack = kv.value;
 
-#ifndef _WIN32
 	// The common case is that the kv does not contain the idempotency id, so early return if memmem is available
 	if (memmem(haystack.begin(), haystack.size(), needle.begin(), needle.size()) == nullptr) {
 		return {};
 	}
-#endif
 
 	// Even if id is a substring of value, it may still not actually contain it.
 	BinaryReader reader(kv.value.begin(), kv.value.size(), IncludeVersion());

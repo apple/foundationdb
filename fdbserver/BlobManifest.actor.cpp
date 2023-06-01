@@ -441,11 +441,7 @@ private:
 						if (!result.more) {
 							break;
 						}
-						if (result.readThrough.present()) {
-							begin = firstGreaterOrEqual(result.readThrough.get());
-						} else {
-							begin = firstGreaterThan(result.back().key);
-						}
+						begin = result.nextBeginKeySelector();
 					}
 				}
 
@@ -549,11 +545,7 @@ public:
 					if (!rows.more) {
 						break;
 					}
-					if (rows.readThrough.present()) {
-						begin = firstGreaterOrEqual(rows.readThrough.get());
-					} else {
-						begin = firstGreaterThan(rows.end()[-1].key);
-					}
+					begin = rows.nextBeginKeySelector();
 				}
 
 				// check each granule range
@@ -764,29 +756,6 @@ private:
 		return Void();
 	}
 
-	// Get manifest backup version
-	ACTOR static Future<Version> getManifestVersion(Database db) {
-		state Transaction tr(db);
-		loop {
-			try {
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				Optional<Value> value = wait(tr.get(blobManifestVersionKey));
-				if (value.present()) {
-					Version version;
-					BinaryReader reader(value.get(), Unversioned());
-					reader >> version;
-					return version;
-				}
-				TraceEvent("MissingBlobManifestVersion").log();
-				throw blob_restore_corrupted_manifest();
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// Find the newest granule for a key range. The newest granule has the max version and relevant files
 	ACTOR static Future<Standalone<BlobGranuleRestoreVersion>> getGranule(Transaction* tr, KeyRangeRef range) {
 		state Standalone<BlobGranuleRestoreVersion> granuleVersion;
@@ -871,11 +840,7 @@ private:
 			if (!results.more) {
 				break;
 			}
-			if (results.readThrough.present()) {
-				begin = firstGreaterOrEqual(results.readThrough.get());
-			} else {
-				begin = firstGreaterThan(results.end()[-1].key);
-			}
+			begin = results.nextBeginKeySelector();
 		}
 		return files;
 	}
@@ -965,15 +930,25 @@ ACTOR Future<int64_t> lastBlobEpoc(Database db,
 	return epoc;
 }
 
-ACTOR Future<std::string> getMutationLogUrl() {
-	state std::string baseUrl = SERVER_KNOBS->BLOB_RESTORE_MLOGS_URL;
-	if (baseUrl.starts_with("file://")) {
-		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(baseUrl, {}));
-		if (containers.size() == 0) {
-			throw blob_restore_missing_logs();
+// API to get manifest backup version
+ACTOR Future<Version> getManifestVersion(Database db) {
+	state Transaction tr(db);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			ValueReadResult value = wait(tr.get(blobManifestVersionKey));
+			if (value.present()) {
+				Version version;
+				BinaryReader reader(value.get(), Unversioned());
+				reader >> version;
+				return version;
+			}
+			TraceEvent("MissingBlobManifestVersion").log();
+			throw blob_restore_corrupted_manifest();
+		} catch (Error& e) {
+			wait(tr.onError(e));
 		}
-		return containers.back();
-	} else {
-		return baseUrl;
 	}
 }

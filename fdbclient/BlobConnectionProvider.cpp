@@ -45,91 +45,62 @@ private:
 	Reference<BackupContainerFileSystem> conn;
 };
 
-struct PartitionedBlobConnectionProvider : BlobConnectionProvider {
-	std::pair<Reference<BackupContainerFileSystem>, std::string> createForWrite(std::string newFileName) {
-		// choose a partition randomly, to distribute load
-		int writePartition = deterministicRandom()->randomInt(0, metadata.partitions.size());
-		return std::pair(conn, metadata.partitions[writePartition].toString() + newFileName);
-	}
-
-	Reference<BackupContainerFileSystem> getForRead(std::string filePath) {
-		CODE_PROBE(isExpired(), "partitioned blob connection using expired blob metadata for read!");
-		return conn;
-	}
-
-	void updateMetadata(const Standalone<BlobMetadataDetailsRef>& newMetadata, bool checkPrevious) {
-		ASSERT(newMetadata.base.present());
-		ASSERT(newMetadata.partitions.size() >= 2);
-		for (auto& it : newMetadata.partitions) {
-			// these should be suffixes, not whole blob urls
-			ASSERT(it.toString().find("://") == std::string::npos);
-		}
-		if (checkPrevious) {
-			if (newMetadata.expireAt <= metadata.expireAt) {
-				return;
-			}
-			// FIXME: validate only the credentials changed and the location is the same
-			ASSERT(newMetadata.partitions.size() == metadata.partitions.size());
-			for (int i = 0; i < newMetadata.partitions.size(); i++) {
-				ASSERT(newMetadata.partitions[i] == metadata.partitions[i]);
-			}
-		}
-		metadata = newMetadata;
-		conn = BackupContainerFileSystem::openContainerFS(metadata.base.get().toString(), {}, {}, false);
-	}
-
-	PartitionedBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
-		updateMetadata(metadata, false);
-	}
-
-	bool needsRefresh() const { return now() >= metadata.refreshAt; }
-
-	bool isExpired() const { return now() >= metadata.expireAt; }
-
-	void update(Standalone<BlobMetadataDetailsRef> newBlobMetadata) { updateMetadata(newBlobMetadata, true); }
-
-private:
-	Standalone<BlobMetadataDetailsRef> metadata;
-	Reference<BackupContainerFileSystem> conn;
-};
-
 // Could always include number of partitions as validation in sanity check or something?
 // Ex: partition_numPartitions/filename instead of partition/filename
 struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 	std::pair<Reference<BackupContainerFileSystem>, std::string> createForWrite(std::string newFileName) {
 		// choose a partition randomly, to distribute load
-		int writePartition = deterministicRandom()->randomInt(0, partitions.size());
-		// include partition information in the filename
-		return std::pair(partitions[writePartition], std::to_string(writePartition) + "/" + newFileName);
+		int writePartition = deterministicRandom()->randomInt(0, connections.size());
+		// include location id in the filename
+		BlobMetadataLocationId locationId = metadata.locations[writePartition].locationId;
+		return std::pair(connections[writePartition], std::to_string(locationId) + "/" + newFileName);
 	}
 
 	Reference<BackupContainerFileSystem> getForRead(std::string filePath) {
 		CODE_PROBE(isExpired(), "storage location blob connection using expired blob metadata for read!");
 		size_t slash = filePath.find("/");
 		ASSERT(slash != std::string::npos);
-		int partition = stoi(filePath.substr(0, slash));
-		ASSERT(partition >= 0);
-		ASSERT(partition < partitions.size());
-		return partitions[partition];
+
+		BlobMetadataLocationId locationId = stoll(filePath.substr(0, slash));
+		ASSERT(locationId >= 0);
+
+		auto conn = locationToConnectionIndex.find(locationId);
+		ASSERT(conn != locationToConnectionIndex.end());
+
+		int connectionIdx = conn->second;
+		ASSERT(connectionIdx >= 0);
+		ASSERT(connectionIdx < connections.size());
+		return connections[connectionIdx];
 	}
 
 	void updateMetadata(const Standalone<BlobMetadataDetailsRef>& newMetadata, bool checkPrevious) {
-		ASSERT(!newMetadata.base.present());
-		ASSERT(newMetadata.partitions.size() >= 2);
+		ASSERT(newMetadata.locations.size() >= 1);
 		if (checkPrevious) {
-			// FIXME: validate only the credentials changed and the locations are the same
-			ASSERT(newMetadata.partitions.size() == partitions.size());
+			CODE_PROBE(true, "Updating blob metadata details with new credentials");
+			// FIXME: validate only the credentials changed and the locations are the same. They don't necessarily need
+			// to be provided in the same order though.
+			ASSERT(newMetadata.locations.size() == metadata.locations.size());
+			ASSERT(newMetadata.locations.size() == locationToConnectionIndex.size());
+			for (int i = 0; i < newMetadata.locations.size(); i++) {
+				ASSERT(locationToConnectionIndex.count(newMetadata.locations[i].locationId));
+			}
 			if (newMetadata.expireAt <= metadata.expireAt) {
 				return;
 			}
 		}
 		metadata = newMetadata;
-		partitions.clear();
-		for (auto& it : metadata.partitions) {
+		connections.clear();
+		locationToConnectionIndex.clear();
+		for (int i = 0; i < metadata.locations.size(); i++) {
 			// these should be whole blob urls
-			ASSERT(it.toString().find("://") != std::string::npos);
-			partitions.push_back(BackupContainerFileSystem::openContainerFS(it.toString(), {}, {}, false));
+			auto& it = metadata.locations[i];
+			ASSERT(it.path.toString().find("://") != std::string::npos);
+			connections.push_back(BackupContainerFileSystem::openContainerFS(it.path.toString(), {}, {}, false));
+			locationToConnectionIndex[it.locationId] = i;
 		}
+
+		ASSERT(connections.size() == metadata.locations.size());
+		ASSERT(connections.size() == locationToConnectionIndex.size());
 	}
 
 	StorageLocationBlobConnectionProvider(const Standalone<BlobMetadataDetailsRef> metadata) {
@@ -144,7 +115,8 @@ struct StorageLocationBlobConnectionProvider : BlobConnectionProvider {
 
 private:
 	Standalone<BlobMetadataDetailsRef> metadata;
-	std::vector<Reference<BackupContainerFileSystem>> partitions;
+	std::vector<Reference<BackupContainerFileSystem>> connections;
+	std::unordered_map<BlobMetadataLocationId, int> locationToConnectionIndex;
 };
 
 Reference<BlobConnectionProvider> BlobConnectionProvider::newBlobConnectionProvider(std::string blobUrl) {
@@ -154,14 +126,5 @@ Reference<BlobConnectionProvider> BlobConnectionProvider::newBlobConnectionProvi
 
 Reference<BlobConnectionProvider> BlobConnectionProvider::newBlobConnectionProvider(
     Standalone<BlobMetadataDetailsRef> blobMetadata) {
-	if (blobMetadata.partitions.empty()) {
-		return makeReference<SingleBlobConnectionProvider>(blobMetadata.base.get().toString(), false);
-	} else {
-		ASSERT(blobMetadata.partitions.size() >= 2);
-		if (blobMetadata.base.present()) {
-			return makeReference<PartitionedBlobConnectionProvider>(blobMetadata);
-		} else {
-			return makeReference<StorageLocationBlobConnectionProvider>(blobMetadata);
-		}
-	}
+	return makeReference<StorageLocationBlobConnectionProvider>(blobMetadata);
 }

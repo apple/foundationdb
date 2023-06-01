@@ -39,9 +39,9 @@ namespace metacluster::internal {
 
 ACTOR template <class Transaction>
 Future<TenantMode> getClusterConfiguredTenantMode(Transaction tr) {
-	state typename transaction_future_type<Transaction, Optional<Value>>::type tenantModeFuture =
+	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(tenantModeConfKey);
-	Optional<Value> tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
 	return TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
 }
 
@@ -60,6 +60,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 	       tenantIdPrefix <= TenantAPI::TENANT_ID_PREFIX_MAX_VALUE);
 
 	if (name.startsWith("\xff"_sr)) {
+		CODE_PROBE(true, "Create metacluster with invalid name");
 		throw invalid_cluster_name();
 	}
 
@@ -78,8 +79,10 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			Optional<MetaclusterRegistrationEntry> existingRegistration = wait(metaclusterRegistrationFuture);
 			if (existingRegistration.present()) {
 				if (metaclusterUid.present() && metaclusterUid.get() == existingRegistration.get().metaclusterId) {
+					CODE_PROBE(true, "Create metacluster already succeeded");
 					return Optional<std::string>();
 				} else {
+					CODE_PROBE(true, "Metacluster already registered");
 					return fmt::format("cluster is already registered as a {} named `{}'",
 					                   existingRegistration.get().clusterType == ClusterType::METACLUSTER_DATA
 					                       ? "data cluster"
@@ -91,6 +94,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			wait(metaclusterEmptinessCheck);
 			TenantMode tenantMode = wait(tenantModeFuture);
 			if (tenantMode != TenantMode::DISABLED) {
+				CODE_PROBE(true, "Create metacluster with invalid tenant mode", probe::decoration::rare);
 				return fmt::format("cluster is configured with tenant mode `{}' when tenants should be disabled",
 				                   tenantMode.toString());
 			}
@@ -107,6 +111,9 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 			break;
 		} catch (Error& e) {
+			CODE_PROBE(e.code() == error_code_cluster_not_empty,
+			           "Create metacluster on non-empty cluster",
+			           probe::decoration::rare);
 			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 	}

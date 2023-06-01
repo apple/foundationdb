@@ -65,10 +65,8 @@
 #include <type_traits>
 #include <signal.h>
 
-#ifdef __unixish__
 #include <stdio.h>
 #include "linenoise/linenoise.h"
-#endif
 
 #include "fdbclient/versions.h"
 #include "fdbclient/BuildFlags.h"
@@ -690,8 +688,8 @@ ACTOR Future<Void> checkStatus(Future<Void> f,
 		StatusObject _s = wait(StatusClient::statusFetcher(localDb));
 		s = _s;
 	} else {
-		state ThreadFuture<Optional<Value>> statusValueF = tr->get("\xff\xff/status/json"_sr);
-		Optional<Value> statusValue = wait(safeThreadFutureToFuture(statusValueF));
+		state ThreadFuture<ValueReadResult> statusValueF = tr->get("\xff\xff/status/json"_sr);
+		ValueReadResult statusValue = wait(safeThreadFutureToFuture(statusValueF));
 		if (!statusValue.present()) {
 			fprintf(stderr, "ERROR: Failed to get status json from the cluster\n");
 			return Void();
@@ -922,6 +920,7 @@ struct CLIOptions {
 	std::string tlsVerifyPeers;
 	std::string tlsCAPath;
 	std::string tlsPassword;
+	bool tlsDisablePlainTextConnection = false;
 	uint64_t memLimit = 8uLL << 30;
 
 	std::vector<std::pair<std::string, std::string>> knobs;
@@ -1040,6 +1039,9 @@ struct CLIOptions {
 			break;
 		case TLSConfig::OPT_TLS_VERIFY_PEERS:
 			tlsVerifyPeers = args.OptionArg();
+			break;
+		case TLSConfig::OPT_TLS_DISABLE_PLAINTEXT_CONNECTION:
+			tlsDisablePlainTextConnection = true;
 			break;
 
 		case OPT_HELP:
@@ -1448,13 +1450,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "blobrestore")) {
-					bool _result = wait(makeInterruptable(blobRestoreCommandActor(localDb, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "unlock")) {
 					if ((tokens.size() != 2) || (tokens[1].size() != 32) ||
 					    !std::all_of(tokens[1].begin(), tokens[1].end(), &isxdigit)) {
@@ -1609,9 +1604,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								continue;
 							}
 						}
-						state ThreadFuture<Optional<Value>> valueF =
+						state ThreadFuture<ValueReadResult> valueF =
 						    getTransaction(db, tenant, tr, options, intrans)->get(tokens[1]);
-						Optional<Standalone<StringRef>> v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF)));
 
 						if (v.present())
 							printf("`%s' is `%s'\n", printable(tokens[1]).c_str(), printable(v.get()).c_str());
@@ -1922,10 +1917,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							t.append(tokens[2]);
 						}
 						t.append(tokens[1]);
-						state ThreadFuture<Optional<Value>> valueF_knob =
+						state ThreadFuture<ValueReadResult> valueF_knob =
 						    getTransaction(configDb, tenant, config_tr, options, intrans)->get(t.pack());
-						Optional<Standalone<StringRef>> v =
-						    wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
+						ValueReadResult v = wait(makeInterruptable(safeThreadFutureToFuture(valueF_knob)));
 						std::string knob_class = printable(tokens[1]);
 						if (tokens.size() == 3) {
 							std::string config_class = (" in configuration class " + printable(tokens[2]));
@@ -2339,7 +2333,6 @@ int main(int argc, char** argv) {
 
 	registerCrashHandler();
 
-#ifdef __unixish__
 	struct sigaction act;
 
 	// We don't want ctrl-c to quit
@@ -2347,7 +2340,6 @@ int main(int argc, char** argv) {
 	act.sa_flags = 0;
 	act.sa_handler = SIG_IGN;
 	sigaction(SIGINT, &act, nullptr);
-#endif
 
 	CLIOptions opt(argc, argv);
 	if (opt.exit_code != -1)
@@ -2409,6 +2401,15 @@ int main(int argc, char** argv) {
 		}
 	}
 
+	if (opt.tlsDisablePlainTextConnection) {
+		try {
+			setNetworkOption(FDBNetworkOptions::TLS_DISABLE_PLAINTEXT_CONNECTION);
+		} catch (Error& e) {
+			fprintf(stderr, "ERROR: cannot disable non-TLS connections (%s)\n", e.what());
+			return 1;
+		}
+	}
+
 	try {
 		setNetworkOption(FDBNetworkOptions::DISABLE_CLIENT_STATISTICS_LOGGING);
 	} catch (Error& e) {
@@ -2423,6 +2424,7 @@ int main(int argc, char** argv) {
 		printf("\tCertificate Path: %s\n", tlsConfig.getCertificatePathSync().c_str());
 		printf("\tKey Path: %s\n", tlsConfig.getKeyPathSync().c_str());
 		printf("\tCA Path: %s\n", tlsConfig.getCAPathSync().c_str());
+		printf("\tPlaintext Connection Disable: %s\n", tlsConfig.getDisablePlainTextConnection() ? "true" : "false");
 		try {
 			LoadedTLSConfig loaded = tlsConfig.loadSync();
 			printf("\tPassword: %s\n", loaded.getPassword().empty() ? "Not configured" : "Exists, but redacted");

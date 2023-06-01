@@ -257,8 +257,8 @@ namespace ThrottleApi {
 ACTOR template <class Tr>
 Future<Optional<bool>> getValidAutoEnabled(Reference<Tr> tr) {
 	// hold the returned standalone object's memory
-	state typename Tr::template FutureT<Optional<Value>> valueF = tr->get(tagThrottleAutoEnabledKey);
-	Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+	state typename Tr::template FutureT<ValueReadResult> valueF = tr->get(tagThrottleAutoEnabledKey);
+	ValueReadResult value = wait(safeThreadFutureToFuture(valueF));
 	if (!value.present()) {
 		return {};
 	} else if (value.get() == "1"_sr) {
@@ -337,8 +337,8 @@ void signalThrottleChange(Reference<Tr> tr) {
 
 ACTOR template <class Tr>
 Future<Void> updateThrottleCount(Reference<Tr> tr, int64_t delta) {
-	state typename Tr::template FutureT<Optional<Value>> countVal = tr->get(tagThrottleCountKey);
-	state typename Tr::template FutureT<Optional<Value>> limitVal = tr->get(tagThrottleLimitKey);
+	state typename Tr::template FutureT<ValueReadResult> countVal = tr->get(tagThrottleCountKey);
+	state typename Tr::template FutureT<ValueReadResult> limitVal = tr->get(tagThrottleLimitKey);
 
 	wait(success(safeThreadFutureToFuture(countVal)) && success(safeThreadFutureToFuture(limitVal)));
 
@@ -479,8 +479,8 @@ Future<bool> unthrottleTags(Reference<DB> db,
 	loop {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			state std::vector<typename DB::TransactionT::template FutureT<Optional<Value>>> valueFutures;
-			state std::vector<Future<Optional<Value>>> values;
+			state std::vector<typename DB::TransactionT::template FutureT<ValueReadResult>> valueFutures;
+			state std::vector<Future<ValueReadResult>> values;
 			values.reserve(keys.size());
 			for (auto key : keys) {
 				valueFutures.push_back(tr->get(key));
@@ -551,8 +551,8 @@ Future<Void> throttleTags(Reference<DB> db,
 		try {
 			if (throttleType == TagThrottleType::MANUAL) {
 				// hold the returned standalone object's memory
-				state typename DB::TransactionT::template FutureT<Optional<Value>> oldThrottleF = tr->get(key);
-				Optional<Value> oldThrottle = wait(safeThreadFutureToFuture(oldThrottleF));
+				state typename DB::TransactionT::template FutureT<ValueReadResult> oldThrottleF = tr->get(key);
+				ValueReadResult oldThrottle = wait(safeThreadFutureToFuture(oldThrottleF));
 				if (!oldThrottle.present()) {
 					wait(updateThrottleCount(tr, 1));
 				}
@@ -580,9 +580,9 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			// hold the returned standalone object's memory
-			state typename DB::TransactionT::template FutureT<Optional<Value>> valueF =
+			state typename DB::TransactionT::template FutureT<ValueReadResult> valueF =
 			    tr->get(tagThrottleAutoEnabledKey);
-			Optional<Value> value = wait(safeThreadFutureToFuture(valueF));
+			ValueReadResult value = wait(safeThreadFutureToFuture(valueF));
 			if (!value.present() || (enabled && value.get() != "1"_sr) || (!enabled && value.get() != "0"_sr)) {
 				tr->set(tagThrottleAutoEnabledKey, enabled ? "1"_sr : "0"_sr);
 				signalThrottleChange<typename DB::TransactionT>(tr);

@@ -230,8 +230,8 @@ struct SerializabilityWorkload : TestWorkload {
 
 	ACTOR static Future<Void> runTransaction(ReadYourWritesTransaction* tr,
 	                                         std::vector<TransactionOperation> ops,
-	                                         std::vector<Future<Optional<Value>>>* getFutures,
-	                                         std::vector<Future<Key>>* getKeyFutures,
+	                                         std::vector<Future<ValueReadResult>>* getFutures,
+	                                         std::vector<Future<KeyReadResult>>* getKeyFutures,
 	                                         std::vector<Future<RangeResult>>* getRangeFutures,
 	                                         std::vector<Future<Void>>* watchFutures,
 	                                         bool checkSnapshotReads) {
@@ -330,15 +330,15 @@ struct SerializabilityWorkload : TestWorkload {
 
 		loop {
 			state std::vector<ReadYourWritesTransaction> tr;
-			state std::vector<std::vector<Future<Optional<Value>>>> getFutures;
-			state std::vector<std::vector<Future<Key>>> getKeyFutures;
+			state std::vector<std::vector<Future<ValueReadResult>>> getFutures;
+			state std::vector<std::vector<Future<KeyReadResult>>> getKeyFutures;
 			state std::vector<std::vector<Future<RangeResult>>> getRangeFutures;
 			state std::vector<std::vector<Future<Void>>> watchFutures;
 
 			for (int i = 0; i < 5; i++) {
 				tr.push_back(ReadYourWritesTransaction(cx));
-				getFutures.push_back(std::vector<Future<Optional<Value>>>());
-				getKeyFutures.push_back(std::vector<Future<Key>>());
+				getFutures.push_back(std::vector<Future<ValueReadResult>>());
+				getKeyFutures.push_back(std::vector<Future<KeyReadResult>>());
 				getRangeFutures.push_back(std::vector<Future<RangeResult>>());
 				watchFutures.push_back(std::vector<Future<Void>>());
 			}

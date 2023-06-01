@@ -114,7 +114,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 		try {
 			loop {
-				state Standalone<RangeResultRef> results = wait(reader->getNext());
+				state RangeResult results = wait(reader->getNext());
 
 				for (const auto& rec : results) {
 					Key expectedKey = self->recordKey(nextExpectedRecord);

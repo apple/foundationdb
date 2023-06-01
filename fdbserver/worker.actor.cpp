@@ -83,7 +83,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
 #include "gperftools/heap-profiler.h"
@@ -1181,7 +1181,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 }
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+#if defined(__linux__) && defined(USE_GPERFTOOLS)
 // A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
 
@@ -1193,7 +1193,7 @@ int filter_in_thread(void* arg) {
 
 // Enables the calling thread to be profiled
 void registerThreadForProfiling() {
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+#if defined(__linux__) && defined(USE_GPERFTOOLS)
 	// Not sure if this is actually needed, but a call to backtrace was advised here:
 	// http://groups.google.com/group/google-perftools/browse_thread/thread/0dfd74532e038eb8/2686d9f24ac4365f?pli=1
 	profiledThreads.insert(std::this_thread::get_id());
@@ -1207,7 +1207,7 @@ void registerThreadForProfiling() {
 void updateCpuProfiler(ProfilerRequest req) {
 	switch (req.type) {
 	case ProfilerRequest::Type::GPROF:
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 		switch (req.action) {
 		case ProfilerRequest::Action::ENABLE: {
 			const char* path = (const char*)req.outputFile.begin();
@@ -2537,7 +2537,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				recruited.initEndpoints();
 				if (blobMigratorInterf->get().present()) {
 					recruited = blobMigratorInterf->get().get();
-					CODE_PROBE(true, "Recruited while already a blob migrator.", probe::decoration::rare);
+					CODE_PROBE(true, "Recruited while already a blob migrator.");
 				} else {
 					startRole(Role::BLOB_MIGRATOR, recruited.id(), interf.id());
 					DUMPTOKEN(recruited.haltBlobMigrator);
@@ -3143,19 +3143,6 @@ static std::set<int> const& normalWorkerErrors() {
 		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
-}
-
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
-	try {
-		wait(f);
-		return Void();
-	} catch (Error& e) {
-		if (e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
-			return Never();
-		}
-		throw;
-	}
 }
 
 ACTOR Future<Void> printTimeout() {
@@ -3831,10 +3818,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
-			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
-			// their files
-			actors.push_back(
-			    fileNotFoundToNever(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface)));
+			actors.push_back(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

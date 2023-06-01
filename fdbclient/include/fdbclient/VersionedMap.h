@@ -38,10 +38,6 @@
 // PTree also supports efficient finger searches.
 namespace PTreeImpl {
 
-#ifdef _MSC_VER
-#pragma warning(disable : 4800)
-#endif
-
 template <class T>
 struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCopyable {
 	uint32_t priority;

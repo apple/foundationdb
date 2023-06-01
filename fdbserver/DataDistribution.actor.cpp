@@ -710,7 +710,7 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 			if (self->context->ddEnabledState->sameId(req.requesterID) &&
 			    self->context->ddEnabledState->isBlobRestorePreparing()) {
 				// the sender use at-least once model, so we need to guarantee the idempotence
-				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest");
+				CODE_PROBE(true, "Receive repeated PrepareBlobRestoreRequest", probe::decoration::rare);
 				continue;
 			}
 			if (self->context->ddEnabledState->trySetBlobRestorePreparing(req.requesterID)) {
@@ -1094,7 +1094,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 				workersMap[worker.interf.address()] = worker.interf;
 			}
 
-			Optional<Value> regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
+			ValueReadResult regionsValue = wait(tr.get("usable_regions"_sr.withPrefix(configKeysPrefix)));
 			int usableRegions = 1;
 			if (regionsValue.present()) {
 				usableRegions = atoi(regionsValue.get().toString().c_str());
@@ -1148,7 +1148,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			}
 
 			// get coordinators
-			Optional<Value> coordinators = wait(tr.get(coordinatorsKey));
+			ValueReadResult coordinators = wait(tr.get(coordinatorsKey));
 			if (!coordinators.present()) {
 				CODE_PROBE(true, "Failed to read the coordinatorsKey", probe::decoration::rare);
 				throw operation_failed();

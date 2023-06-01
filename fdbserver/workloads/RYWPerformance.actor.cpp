@@ -71,13 +71,13 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 1) {
-			std::vector<Future<Optional<Value>>> gets;
+			std::vector<Future<ValueReadResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->get(self->keyForIndex(i)));
 			}
 			wait(waitForAll(gets));
 		} else if (type == 2) {
-			std::vector<Future<Optional<Value>>> gets;
+			std::vector<Future<ValueReadResult>> gets;
 			for (i = 0; i < self->nodes; i++) {
 				gets.push_back(tr->get(self->keyForIndex(i)));
 			}
@@ -86,7 +86,7 @@ struct RYWPerformanceWorkload : TestWorkload {
 				tr->set(self->keyForIndex(i), "foo"_sr);
 			}
 		} else if (type == 3) {
-			std::vector<Future<Optional<Value>>> gets;
+			std::vector<Future<ValueReadResult>> gets;
 			for (i = 0; i < self->nodes; i += 2) {
 				gets.push_back(tr->get(self->keyForIndex(i)));
 			}

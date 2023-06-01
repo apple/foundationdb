@@ -385,7 +385,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	BlobManagerStats stats;
 
 	Reference<BlobConnectionProvider> bstore;
-	Reference<BlobConnectionProvider> manifestStore;
 
 	std::unordered_map<UID, BlobWorkerInterface> workersById;
 	std::unordered_map<UID, BlobWorkerInfo> workerStats; // mapping between workerID -> workerStats
@@ -452,9 +451,6 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 			if (BM_DEBUG) {
 				fmt::print("BM {} constructed backup container\n", epoch);
 			}
-		}
-		if (SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL != "") {
-			manifestStore = BlobConnectionProvider::newBlobConnectionProvider(SERVER_KNOBS->BLOB_RESTORE_MANIFEST_URL);
 		}
 	}
 
@@ -1228,7 +1224,7 @@ static bool handleRangeAssign(Reference<BlobManagerData> bmData, RangeAssignment
 }
 
 ACTOR Future<Void> checkManagerLock(Transaction* tr, Reference<BlobManagerData> bmData) {
-	Optional<Value> currentLockValue = wait(tr->get(blobManagerEpochKey));
+	ValueReadResult currentLockValue = wait(tr->get(blobManagerEpochKey));
 	ASSERT(currentLockValue.present());
 	int64_t currentEpoch = decodeBlobManagerEpochValue(currentLockValue.get());
 	if (currentEpoch != bmData->epoch) {
@@ -1354,7 +1350,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 		state VectorRef<KeyRangeRef> rangesToAdd;
 		state VectorRef<KeyRangeRef> rangesToRemove;
 		state Arena ar;
-		state Optional<Value> ckvBegin;
+		state ValueReadResult ckvBegin;
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1562,7 +1558,7 @@ ACTOR Future<Void> monitorClientRanges(Reference<BlobManagerData> bmData) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
-				Optional<Value> ckvEnd = wait(tr->get(blobRangeChangeKey));
+				ValueReadResult ckvEnd = wait(tr->get(blobRangeChangeKey));
 
 				// clean up unreadable parts of change log (use 2* max read life versions because i'm paranoid)
 				Version changeLogCleanupVersion =
@@ -1754,7 +1750,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				return Void();
 			}
 
-			Optional<Value> prevLockValue = wait(tr->get(lockKey));
+			ValueReadResult prevLockValue = wait(tr->get(lockKey));
 			ASSERT(prevLockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevOwner = decodeBlobGranuleLockValue(prevLockValue.get());
 			int64_t prevOwnerEpoch = std::get<0>(prevOwner);
@@ -1764,7 +1760,7 @@ ACTOR Future<Void> reevaluateInitialSplit(Reference<BlobManagerData> bmData,
 				if (retried && prevOwnerEpoch == bmData->epoch && prevGranuleID == granuleID &&
 				    prevOwnerSeqno == std::numeric_limits<int64_t>::max()) {
 					// owner didn't change, last iteration of this transaction just succeeded but threw an error.
-					CODE_PROBE(true, "split too big adjustment succeeded after retry", probe::decoration::rare);
+					CODE_PROBE(true, "split too big adjustment succeeded after retry");
 					break;
 				}
 				CODE_PROBE(true, "split too big was since moved to another worker", probe::decoration::rare);
@@ -2055,7 +2051,7 @@ ACTOR Future<Void> maybeSplitRange(Reference<BlobManagerData> bmData,
 
 			// acquire lock for old granule to make sure nobody else modifies it
 			state Key lockKey = blobGranuleLockKeyFor(granuleRange);
-			Optional<Value> lockValue = wait(tr->get(lockKey));
+			ValueReadResult lockValue = wait(tr->get(lockKey));
 			ASSERT(lockValue.present());
 			std::tuple<int64_t, int64_t, UID> prevGranuleLock = decodeBlobGranuleLockValue(lockValue.get());
 			int64_t ownerEpoch = std::get<0>(prevGranuleLock);
@@ -2426,7 +2422,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 			for (parentIdx = 0; parentIdx < parentGranuleIDs.size(); parentIdx++) {
 				KeyRange parentRange(KeyRangeRef(parentGranuleRanges[parentIdx], parentGranuleRanges[parentIdx + 1]));
 				state Key lockKey = blobGranuleLockKeyFor(parentRange);
-				state Future<Optional<Value>> oldLockFuture = tr->get(lockKey);
+				state Future<ValueReadResult> oldLockFuture = tr->get(lockKey);
 
 				// Clear existing merge boundaries.
 				tr->clear(blobGranuleMergeBoundaryKeyFor(parentRange.begin));
@@ -2443,7 +2439,7 @@ ACTOR Future<bool> persistMergeGranulesDone(Reference<BlobManagerData> bmData,
 					           granuleIDToCFKey(parentGranuleIDs[parentIdx]).printable());
 				}
 
-				Optional<Value> oldLock = wait(oldLockFuture);
+				ValueReadResult oldLock = wait(oldLockFuture);
 				ASSERT(oldLock.present());
 				auto prevLock = decodeBlobGranuleLockValue(oldLock.get());
 				// Set lock to max value for this manager, so other reassignments can't race with this transaction
@@ -3625,7 +3621,7 @@ ACTOR Future<Void> updateEpoch(Reference<BlobManagerData> bmData, int64_t epoch)
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 		try {
-			Optional<Value> oldEpoch = wait(tr->get(blobManagerEpochKey));
+			ValueReadResult oldEpoch = wait(tr->get(blobManagerEpochKey));
 			state int64_t oldEpochValue = oldEpoch.present() ? decodeBlobManagerEpochValue(oldEpoch.get()) : 1;
 			if (oldEpochValue < epoch) {
 				tr->set(blobManagerEpochKey, blobManagerEpochValueFor(epoch));
@@ -3663,16 +3659,18 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	bool isFullRestore = wait(BlobRestoreController::isRestoring(restoreController));
 	bmData->isFullRestoreMode = isFullRestore;
 	if (bmData->isFullRestoreMode) {
-		Optional<BlobRestoreState> restoreState = wait(BlobRestoreController::getState(restoreController));
-		ASSERT(restoreState.present());
-		state BlobRestorePhase phase = restoreState.get().phase;
+		state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
 		if (phase == STARTING_MIGRATOR || phase == LOADING_MANIFEST) {
-			wait(BlobRestoreController::updateState(restoreController, LOADING_MANIFEST, {}));
+			wait(BlobRestoreController::setPhase(restoreController, LOADING_MANIFEST, {}));
 			try {
-				wait(loadManifest(bmData->db, bmData->dbInfo, bmData->manifestStore));
-				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, bmData->manifestStore));
+				auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+				std::string url = wait(BlobGranuleRestoreConfig().manifestUrl().getD(db));
+				state Reference<BlobConnectionProvider> manifestStore =
+				    BlobConnectionProvider::newBlobConnectionProvider(url);
+				wait(loadManifest(bmData->db, bmData->dbInfo, manifestStore));
+				int64_t epoc = wait(lastBlobEpoc(bmData->db, bmData->dbInfo, manifestStore));
 				wait(updateEpoch(bmData, epoc + 1));
-				wait(BlobRestoreController::updateState(restoreController, LOADED_MANIFEST, LOADING_MANIFEST));
+				wait(BlobRestoreController::setPhase(restoreController, LOADED_MANIFEST, {}));
 				TraceEvent("BlobManifestLoaded", bmData->id).log();
 			} catch (Error& e) {
 				if (e.code() != error_code_restore_missing_data &&
@@ -3682,7 +3680,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 				// terminate blob restore for non-retryable errors
 				TraceEvent("ManifestLoadError", bmData->id).error(e).detail("Phase", phase);
 				std::string errorMessage = fmt::format("Manifest loading error '{}'", e.what());
-				wait(BlobRestoreController::updateError(restoreController, StringRef(errorMessage)));
+				wait(BlobRestoreController::setError(restoreController, errorMessage));
 			}
 		}
 	}
@@ -4998,7 +4996,7 @@ ACTOR Future<Void> purgeRange(Reference<BlobManagerData> self, KeyRangeRef range
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				Optional<Value> persistedHistory = wait(tr.get(historyKey));
+				ValueReadResult persistedHistory = wait(tr.get(historyKey));
 				if (persistedHistory.present()) {
 					currHistoryNode = decodeBlobGranuleHistoryValue(persistedHistory.get());
 					foundHistory = true;
@@ -5625,6 +5623,19 @@ ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
 	return false;
 }
 
+ACTOR Future<std::string> getMutationLogBackupContainer(Database db) {
+	std::string url = wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(db.getReference())));
+	if (url.starts_with("file://")) {
+		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(url, {}));
+		if (containers.size() == 0) {
+			throw blob_restore_missing_logs();
+		}
+		return containers.back();
+	} else {
+		return url;
+	}
+}
+
 ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	loop {
 		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
@@ -5641,7 +5652,7 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 				return Void();
 			}
 
-			state std::string mlogsUrl = wait(getMutationLogUrl());
+			state std::string mlogsUrl = wait(getMutationLogBackupContainer(bmData->db));
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 			state BackupDescription desc = wait(bc->describeBackup());
 			if (!desc.contiguousLogEnd.present()) {
@@ -5686,12 +5697,6 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 	}
 }
 
-ACTOR Future<Reference<BlobConnectionProvider>> initManifestStore(Reference<BlobManagerData> bmData) {
-	auto db = SystemDBWriteLockedNow(bmData->db.getReference());
-	std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
-	return BlobConnectionProvider::newBlobConnectionProvider(url);
-}
-
 ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 	bmData->initBStore();
 
@@ -5703,18 +5708,20 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 			// Skip backup if no active blob ranges
 			bool shouldBackup = wait(shouldBackupManifest(bmData));
 			if (shouldBackup) {
-				if (bmData->manifestStore.isValid()) {
-					int64_t bytes = wait(dumpManifest(bmData->db,
-					                                  bmData->dbInfo,
-					                                  bmData->manifestStore,
-					                                  bmData->epoch,
-					                                  bmData->manifestDumperSeqNo,
-					                                  bmData->enableManifestEncryption));
-					bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
-					bmData->stats.manifestSizeInBytes += bytes;
-					bmData->stats.lastManifestDumpTs = now();
-					bmData->manifestDumperSeqNo++;
-				}
+				auto db = SystemDBWriteLockedNow(bmData->db.getReference());
+				std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
+				Reference<BlobConnectionProvider> manifestStore =
+				    BlobConnectionProvider::newBlobConnectionProvider(url);
+				int64_t bytes = wait(dumpManifest(bmData->db,
+				                                  bmData->dbInfo,
+				                                  manifestStore,
+				                                  bmData->epoch,
+				                                  bmData->manifestDumperSeqNo,
+				                                  bmData->enableManifestEncryption));
+				bmData->stats.lastManifestSeqNo = bmData->manifestDumperSeqNo;
+				bmData->stats.manifestSizeInBytes += bytes;
+				bmData->stats.lastManifestDumpTs = now();
+				bmData->manifestDumperSeqNo++;
 			}
 		} catch (Error& e) {
 			TraceEvent("BackupManifestError").error(e);
@@ -5741,7 +5748,7 @@ ACTOR Future<UID> fetchClusterId(Database db) {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
+			ValueReadResult clusterIdVal = wait(tr->get(clusterIdKey));
 			if (clusterIdVal.present()) {
 				UID clusterId = BinaryReader::fromStringRef<UID>(clusterIdVal.get(), IncludeVersion());
 				return clusterId;
@@ -5806,7 +5813,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 		self->addActor.send(monitorClientRanges(self));
 		self->addActor.send(monitorTenants(self));
 		self->addActor.send(monitorPurgeKeys(self));
-		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED) {
+		if (SERVER_KNOBS->BG_CONSISTENCY_CHECK_ENABLED && !self->isFullRestoreMode) {
 			self->addActor.send(bgConsistencyCheck(self));
 		}
 		if (SERVER_KNOBS->BG_ENABLE_MERGING) {

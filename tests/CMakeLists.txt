@@ -21,13 +21,8 @@ if(WITH_PYTHON)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
-    if(WIN32)
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/@CTEST_CONFIGURATION_TYPE@/fdbserver.exe)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    else()
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    endif()
+    set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
+    set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
 
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
@@ -172,6 +167,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -188,6 +184,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
+  add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/MockDDTrackerWorkload.toml)
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
   add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
@@ -312,9 +310,6 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_7.1.0_until_71.2.0/ConfigureTestRestart-1.toml
     restarting/from_7.1.0_until_71.2.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_7.1.0_until_71.2.0/SnapIncrementalRestore-1.txt
-    restarting/from_7.1.0_until_71.2.0/SnapIncrementalRestore-2.txt)
-  add_fdb_test(
     TEST_FILES restarting/from_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
@@ -338,6 +333,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-2.txt)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/ConfigureTestRestart-1.toml
     restarting/from_71.3.0/ConfigureTestRestart-2.toml)
@@ -363,17 +364,20 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
     restarting/from_71.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.txt
-    restarting/from_71.3.0/SnapCycleRestart-2.txt)
+    TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.toml
+    restarting/from_71.3.0/SnapCycleRestart-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/SnapTestAttrition-1.txt
-    restarting/from_71.3.0/SnapTestAttrition-2.txt)
+    TEST_FILES restarting/from_71.3.0/SnapIncrementalRestore-1.toml
+    restarting/from_71.3.0/SnapIncrementalRestore-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/SnapTestSimpleRestart-1.txt
-    restarting/from_71.3.0/SnapTestSimpleRestart-2.txt)
+    TEST_FILES restarting/from_71.3.0/SnapTestAttrition-1.toml
+    restarting/from_71.3.0/SnapTestAttrition-2.toml)
   add_fdb_test(
-    TEST_FILES restarting/from_71.3.0/SnapTestRestart-1.txt
-    restarting/from_71.3.0/SnapTestRestart-2.txt)
+    TEST_FILES restarting/from_71.3.0/SnapTestSimpleRestart-1.toml
+    restarting/from_71.3.0/SnapTestSimpleRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/SnapTestRestart-1.toml
+    restarting/from_71.3.0/SnapTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.3.0/StorefrontTestRestart-2.txt)
@@ -383,6 +387,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
+   add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
@@ -485,7 +495,7 @@ if(WITH_PYTHON)
 
   verify_testing()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32)
+  if(NOT OPEN_FOR_IDE)
     create_correctness_package()
 
     if(USE_VALGRIND)
@@ -497,7 +507,7 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
+  if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
     # setup venv for testing token-based authorization
     if(APPLE)
       set(ld_env_name "DYLD_LIBRARY_PATH")

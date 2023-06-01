@@ -191,7 +191,7 @@ public:
 
 	SpecialKeySpace(KeyRef spaceStartKey = Key(), KeyRef spaceEndKey = normalKeys.end, bool testOnly = true);
 
-	Future<Optional<Value>> get(ReadYourWritesTransaction* ryw, const Key& key);
+	Future<ValueReadResult> get(ReadYourWritesTransaction* ryw, const Key& key);
 
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeySelector begin,
@@ -237,7 +237,7 @@ public:
 	static const std::set<std::string>& getTracingOptions() { return tracingOptions; }
 
 private:
-	ACTOR static Future<Optional<Value>> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
+	ACTOR static Future<ValueReadResult> getActor(SpecialKeySpace* sks, ReadYourWritesTransaction* ryw, KeyRef key);
 
 	ACTOR static Future<RangeResult> checkRYWValid(SpecialKeySpace* sks,
 	                                               ReadYourWritesTransaction* ryw,
@@ -303,7 +303,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing conflicting keys in tenant");
+		return true;
+	};
 };
 
 class ReadConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -312,7 +315,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing read conflict ranges in tenant");
+		return true;
+	};
 };
 
 class WriteConflictRangeImpl : public SpecialKeyRangeReadImpl {
@@ -321,7 +327,10 @@ public:
 	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
 	                             KeyRangeRef kr,
 	                             GetRangeLimits limitsHint) const override;
-	bool supportsTenants() const override { return true; };
+	bool supportsTenants() const override {
+		CODE_PROBE(true, "Accessing write conflict ranges in tenant");
+		return true;
+	};
 };
 
 class DDStatsRangeImpl : public SpecialKeyRangeAsyncImpl {

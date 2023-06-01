@@ -44,12 +44,6 @@
 #include "flow/network.h"
 #include "flow/SimBugInjector.h"
 
-#ifdef _WIN32
-#include <windows.h>
-#undef max
-#undef min
-#endif
-
 // Allocations can only be logged when this value is 0.
 // Anybody that needs to disable tracing should increment this by 1 for the duration
 // that they need the disabling to be in effect.
@@ -170,6 +164,7 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
+		ASSERT(!isOpen());
 		SevErrorNames.init("TraceEvents.SevError"_sr);
 		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
 		SevWarnNames.init("TraceEvents.SevWarn"_sr);
@@ -430,9 +425,8 @@ public:
 		}
 	}
 
-	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		if (!logTraceEventMetrics)
-			return;
+	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
+		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch (severity) {
@@ -781,7 +775,8 @@ void openTraceFile(const Optional<NetworkAddress>& na,
                    std::string baseOfBase,
                    std::string logGroup,
                    std::string identifier,
-                   std::string tracePartialFileSuffix) {
+                   std::string tracePartialFileSuffix,
+                   InitializeTraceMetrics initializeTraceMetrics) {
 	if (g_traceLog.isOpen())
 		return;
 
@@ -808,6 +803,10 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 	}
 
+	if (initializeTraceMetrics) {
+		g_traceLog.initMetrics();
+	}
+
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
@@ -819,10 +818,6 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
-}
-
-void initTraceEventMetrics() {
-	g_traceLog.initMetrics();
 }
 
 void closeTraceFile() {
@@ -1285,11 +1280,7 @@ int BaseTraceEvent::getMaxEventLength() const {
 }
 
 BaseTraceEvent& BaseTraceEvent::GetLastError() {
-#ifdef _WIN32
-	return detailf("WinErrorCode", "%x", ::GetLastError());
-#elif defined(__unixish__)
 	return detailf("UnixErrorCode", "%x", errno).detail("UnixError", strerror(errno));
-#endif
 }
 
 unsigned long BaseTraceEvent::eventCounts[NUM_MAJOR_LEVELS_OF_EVENTS] = { 0, 0, 0, 0, 0 };
@@ -1340,17 +1331,17 @@ void BaseTraceEvent::log() {
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
-					if (g_traceLog.logTraceEventMetrics && isNetworkThread()) {
+					if (isNetworkThread() && g_traceLog.logTraceEventMetrics) {
 						// Get the persistent Event Metric representing this trace event and push the fields (details)
-						// accumulated in *this to it and then log() it. Note that if the event metric is disabled it
-						// won't actually be logged BUT any new fields added to it will be registered. If the event IS
-						// logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used
-						// if possible in the Sev* event metrics.
+						// accumulated in *this to it and then logMetrics() it. Note that if the event metric is
+						// disabled it won't actually be logged BUT any new fields added to it will be registered. If
+						// the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it
+						// through to be used if possible in the Sev* event metrics.
 
 						uint64_t event_ts =
 						    DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)
 						        ->setFieldsAndLogFrom(tmpEventMetric.get());
-						g_traceLog.log(severity, type, id, event_ts);
+						g_traceLog.logMetrics(severity, type, id, event_ts);
 					}
 				}
 			}
@@ -1422,14 +1413,10 @@ std::string BaseTraceEvent::printRealTime(double time) {
 		ts = Clock::to_time_t(Clock::now());
 	}
 	std::stringstream ss;
-#ifdef _WIN32
-	// MSVC gmtime is threadsafe
-	ss << std::put_time(::gmtime(&ts), "%Y-%m-%dT%H:%M:%SZ");
-#else
 	// use threadsafe gmt
 	struct tm result;
 	ss << std::put_time(::gmtime_r(&ts, &result), "%Y-%m-%dT%H:%M:%SZ");
-#endif
+
 	return ss.str();
 }
 

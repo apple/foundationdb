@@ -58,10 +58,13 @@ struct DeleteTenantImpl {
 	                                                                  Reference<typename DB::TransactionT> tr) {
 		state int64_t resolvedId = self->tenantId;
 		if (self->tenantId == -1) {
+			CODE_PROBE(true, "Delete tenant by name");
 			ASSERT(self->tenantName.present());
 			wait(store(resolvedId,
 			           metadata::management::tenantMetadata().tenantNameIndex.getD(
 			               tr, self->tenantName.get(), Snapshot::False, TenantInfo::INVALID_TENANT)));
+		} else {
+			CODE_PROBE(true, "Delete tenant by ID");
 		}
 
 		state MetaclusterTenantMapEntry tenantEntry = wait(getTenantTransaction(tr, resolvedId));
@@ -70,6 +73,7 @@ struct DeleteTenantImpl {
 		if (self->tenantName.present() && tenantEntry.tenantName != self->tenantName.get()) {
 			ASSERT(tenantEntry.tenantState == TenantState::RENAMING ||
 			       tenantEntry.tenantState == TenantState::REMOVING);
+			CODE_PROBE(true, "Delete tenant by new name during rename");
 			throw tenant_not_found();
 		}
 
@@ -86,12 +90,14 @@ struct DeleteTenantImpl {
 		state Optional<TenantMapEntry> tenantEntry = wait(TenantAPI::tryGetTenantTransaction(tr, self->tenantId));
 		if (!tenantEntry.present()) {
 			// The tenant must have been removed simultaneously
+			CODE_PROBE(true, "Tenant removed while deleting");
 			return Void();
 		}
 
 		ThreadFuture<RangeResult> rangeFuture = tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 		RangeResult result = wait(safeThreadFutureToFuture(rangeFuture));
 		if (!result.empty()) {
+			CODE_PROBE(true, "Attempt to delete non-empty tenant");
 			throw tenant_not_empty();
 		}
 
@@ -119,6 +125,7 @@ struct DeleteTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantId));
 
 		if (!tenantEntry.present()) {
+			CODE_PROBE(true, "Tenant removed during deletion");
 			return Void();
 		}
 
@@ -139,6 +146,7 @@ struct DeleteTenantImpl {
 		    tr, Tuple::makeTuple(tenantEntry.get().assignedCluster, tenantEntry.get().tenantName, self->tenantId));
 
 		if (tenantEntry.get().renameDestination.present()) {
+			CODE_PROBE(true, "Remove tenant that is being renamed");
 			// If renaming, remove the metadata associated with the tenant destination
 			metadata::management::tenantMetadata().tenantNameIndex.erase(tr, tenantEntry.get().renameDestination.get());
 
@@ -173,6 +181,8 @@ struct DeleteTenantImpl {
 			wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 				return markTenantInRemovingState(self, tr);
 			}));
+		} else {
+			CODE_PROBE(true, "Resume tenant deletion");
 		}
 
 		// Delete tenant on the data cluster

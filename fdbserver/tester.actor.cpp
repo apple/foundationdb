@@ -645,7 +645,7 @@ ACTOR Future<Void> pingDatabase(Database cx) {
 		try {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			Optional<Value> v =
+			ValueReadResult v =
 			    wait(tr.get(StringRef("/Liveness/" + deterministicRandom()->randomUniqueID().toString())));
 			tr.makeSelfConflicting();
 			wait(tr.commit());
@@ -813,7 +813,7 @@ ACTOR Future<Void> testerServerWorkload(WorkloadRequest work,
 		startRole(Role::TESTER, workIface.id(), UID(), details);
 
 		if (work.useDatabase) {
-			cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::True, locality);
+			cx = Database::createDatabase(ccr, ApiVersion::LATEST_VERSION, IsInternal::False, locality);
 			cx->defaultTenant = work.defaultTenant.castTo<TenantName>();
 			wait(delay(1.0));
 		}
@@ -917,6 +917,8 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
 				}
 			}
+
+			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
 
 			wait(waitForAll(deleteFutures));
 			wait(tr.commit());
