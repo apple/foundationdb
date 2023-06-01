@@ -356,7 +356,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 
 ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled) {
 	state Transaction tr(cx);
-	state bool isCancelled = false;
+	state bool hasCancelled = false;
 
 	loop {
 		try {
@@ -367,13 +367,13 @@ ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, M
 			// Check existing state
 			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!res_.present()) { // has been cancelled
-				isCancelled = true;
+				hasCancelled = true;
 				break; // exit
 			} else {
 				const AuditStorageState currentState = decodeAuditStorageState(res_.get());
 				ASSERT(currentState.id == auditState.id && currentState.getType() == auditState.getType());
 				if (currentState.getPhase() == AuditPhase::Failed) {
-					isCancelled = true;
+					hasCancelled = true;
 					break; // exit
 				}
 			}
@@ -393,7 +393,7 @@ ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, M
 	}
 
 	TraceEvent(SevDebug, "AuditUtilUpdateAuditStateEnd", auditState.id)
-	    .detail("Cancelled", isCancelled)
+	    .detail("Cancelled", hasCancelled)
 	    .detail("AuditID", auditState.id)
 	    .detail("AuditType", auditState.getType())
 	    .detail("AuditPhase", auditState.getPhase())
