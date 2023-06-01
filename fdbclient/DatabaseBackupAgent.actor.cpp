@@ -26,7 +26,9 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include <ctime>
 #include <climits>
+#include "fdbrpc/simulator.h"
 #include "flow/IAsyncFile.h"
+#include "flow/flow.h"
 #include "flow/genericactors.actor.h"
 #include "flow/Hash3.h"
 #include <numeric>
@@ -361,8 +363,10 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 
 					if ((!prevAdjacent || !nextAdjacent) &&
 					    rangeCount > ((prevAdjacent || nextAdjacent) ? CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT
-					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT)) {
-						CODE_PROBE(true, "range insert delayed because too versionMap is too large");
+					                                                 : CLIENT_KNOBS->BACKUP_MAP_KEY_LOWER_LIMIT) &&
+					    (!g_network->isSimulated() ||
+					     (isBuggifyEnabled(BuggifyType::General) && !g_simulator->speedUpSimulation))) {
+						CODE_PROBE(true, "range insert delayed because versionMap is too large");
 
 						if (rangeCount > CLIENT_KNOBS->BACKUP_MAP_KEY_UPPER_LIMIT)
 							TraceEvent(SevWarnAlways, "DBA_KeyRangeMapTooLarge").log();

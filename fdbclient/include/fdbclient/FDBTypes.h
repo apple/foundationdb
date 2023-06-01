@@ -829,7 +829,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
-	int logicalSize() const {
+	int64_t logicalSize() const {
 		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
 	}
 

@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 
-"""rocksdb_logtool.py
+"""joshua_logtool.py
 
 Provides uploading/downloading FoundationDB log files to Joshua cluster.
 """
@@ -129,7 +129,7 @@ def list_commands(ensemble_id: str):
 
 
 def _setup_args():
-    parser = argparse.ArgumentParser(prog="rocksdb_logtool.py")
+    parser = argparse.ArgumentParser(prog="joshua_logtool.py")
 
     parser.add_argument(
         "--cluster-file", type=str, default=None, help="Joshua FDB cluster file"
