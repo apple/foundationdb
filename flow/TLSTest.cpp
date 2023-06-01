@@ -1,11 +1,6 @@
-*
-* TLSTest.cpp
-*
-* This source file is part of the FoundationDB open source project
-*
-* Copyright 2013-2022 Apple Inc. and the FoundationDB project authors
-*
-* Licensed under the Apache License, Version 2.0 (the "License");
+**TLSTest.cpp **This source file is part of the FoundationDB open source project **Copyright 2013 -
+    2022 Apple Inc.and the FoundationDB project authors **Licensed under the Apache License,
+    Version 2.0(the "License");
 * you may not use this file except in compliance with the License.
 * You may obtain a copy of the License at
 *
@@ -90,9 +85,9 @@ void initCerts(ssl::context& ctx, mkcert::CertChainRef myChain, StringRef peerRo
 }
 
 void initSslContext(ssl::context& ctx,
-                   mkcert::CertChainRef myChain,
-                   mkcert::CertChainRef peerChain,
-                   mkcert::ESide side) {
+                    mkcert::CertChainRef myChain,
+                    mkcert::CertChainRef peerChain,
+                    mkcert::ESide side) {
 	ctx.set_options(ssl::context::default_workarounds);
 	ctx.set_verify_mode(ssl::context::verify_peer |
 	                    (side == mkcert::ESide::Server ? 0 : ssl::verify_fail_if_no_peer_cert));
