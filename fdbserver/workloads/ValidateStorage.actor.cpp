@@ -405,15 +405,15 @@ struct ValidateStorage : TestWorkload {
 	}
 
 	ACTOR Future<Void> testAuditStorageFunctionality(ValidateStorage* self, Database cx) {
-		UID auditId = wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality"));
+		UID auditIdA = wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalityHADone");
-		UID auditId =
+		UID auditIdB =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalityReplicaDone");
-		UID auditId = wait(
+		UID auditIdC = wait(
 		    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalityShardLocationMetadataDone");
-		UID auditId = wait(self->auditStorageForType(
+		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
 		TraceEvent("TestFunctionalitySSShardInfoDone");
 		return Void();

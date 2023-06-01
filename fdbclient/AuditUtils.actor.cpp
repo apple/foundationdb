@@ -356,6 +356,7 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 
 ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled) {
 	state Transaction tr(cx);
+	state bool isCancelled = false;
 
 	loop {
 		try {
@@ -363,14 +364,22 @@ ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, M
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			// Check existing state
+			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
+			if (!res_.present()) { // has been cancelled
+				isCancelled = true;
+				break; // exit
+			} else {
+				const AuditStorageState currentState = decodeAuditStorageState(res_.get());
+				ASSERT(currentState.id == auditState.id && currentState.getType() == auditState.getType());
+				if (currentState.getPhase() == AuditPhase::Failed) {
+					isCancelled = true;
+					break; // exit
+				}
+			}
 			// Persist audit result
 			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
 			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilUpdateAuditState", auditState.id)
-			    .detail("AuditID", auditState.id)
-			    .detail("AuditType", auditState.getType())
-			    .detail("AuditPhase", auditState.getPhase())
-			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
 			break;
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilUpdateAuditStateError", auditState.id)
@@ -382,6 +391,13 @@ ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, M
 			wait(tr.onError(e));
 		}
 	}
+
+	TraceEvent(SevDebug, "AuditUtilUpdateAuditStateEnd", auditState.id)
+	    .detail("Cancelled", isCancelled)
+	    .detail("AuditID", auditState.id)
+	    .detail("AuditType", auditState.getType())
+	    .detail("AuditPhase", auditState.getPhase())
+	    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
 
 	return Void();
 }
@@ -474,6 +490,7 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			if (auditPhase == AuditPhase::Complete) {
 				clearAuditProgressMetadata(&tr, auditState.getType(), auditState.id);
 			} // We keep the progess metadata of Failed and Error audits for further investigations
+			// Check existing state
 			Optional<Value> res_ = wait(tr.get(auditKey(auditState.getType(), auditState.id)));
 			if (!res_.present()) { // has been cancelled
 				throw audit_storage_cancelled();
