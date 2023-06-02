@@ -3145,6 +3145,7 @@ void testConfigurableEncryptionInvalidEncryptionKeyNoAuth(const int minDomainId)
 	                                                                   cipherKey->getBaseCipherKCV(),
 	                                                                   cipherKey->getRefreshAtTS(),
 	                                                                   cipherKey->getExpireAtTS());
+	// BlobCipherKey uses unique random salt to ensure generated encryption-keys are different
 	ASSERT(!tCipherKey->isEqual(cipherKey));
 	DecryptBlobCipherAes256Ctr decryptor(
 	    tCipherKey, Reference<BlobCipherKey>(), &noAuth.v1.iv[0], BlobCipherMetrics::TEST);
@@ -3234,7 +3235,7 @@ void testConfigurableEncryptionInvalidEncryptKeySingleAuthMode(const int minDoma
 		StringRef decryptedBuf = decryptor.decrypt(encryptedBuf.begin(), bufLen, headerRef, arena);
 
 		ASSERT_EQ(decryptedBuf.size(), bufLen);
-		ASSERT_EQ(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
+		ASSERT_NE(memcmp(decryptedBuf.begin(), &orgData[0], bufLen), 0);
 	} catch (Error& e) {
 		// underlying layer 'may' throw exception
 		TraceEvent("InvalidEncryptKeyError").error(e);
