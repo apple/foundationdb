@@ -549,7 +549,7 @@ DDQueue::DDQueue(DDQueueInitParams const& params)
     unhealthyRelocations(0), movedKeyServersEventHolder(makeReference<EventCacheHolder>("MovedKeyServers")),
     moveReusePhysicalShard(0), moveCreateNewPhysicalShard(0),
     retryFindDstReasonCount(static_cast<int>(RetryFindDstReason::NumberOfTypes), 0),
-    moveBytesRate(SERVER_KNOBS->DD_TRACE_MOVE_BYTES_AVERAGE_INTERVAL), relocateTotalCount(0), relocateToSourceCount(0) {
+    relocateTotalCount(0), relocateToSourceCount(0) {
 }
 
 void DDQueue::startRelocation(int priority, int healthPriority) {
