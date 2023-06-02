@@ -888,6 +888,9 @@ public:
 		} else {
 			// DB is opened with default shard.
 			ASSERT(handles.size() == 1);
+			// Clear the entire key space.
+			rocksdb::WriteOptions options;
+			db->DeleteRange(options, handles[0], toSlice(allKeys.begin), toSlice(specialKeys.end));
 
 			// Add SpecialKeys range. This range should not be modified.
 			std::shared_ptr<PhysicalShard> defaultShard = std::make_shared<PhysicalShard>(db, "default", handles[0]);
@@ -907,7 +910,6 @@ public:
 			writeBatch = std::make_unique<rocksdb::WriteBatch>();
 			dirtyShards = std::make_unique<std::set<PhysicalShard*>>();
 			persistRangeMapping(specialKeys, true);
-			rocksdb::WriteOptions options;
 			status = db->Write(options, writeBatch.get());
 			if (!status.ok()) {
 				return status;
@@ -1267,6 +1269,16 @@ public:
 		if (dbOptions.rate_limiter != nullptr) {
 			dbOptions.rate_limiter->SetBytesPerSecond((int64_t)5 << 30);
 		}
+
+		auto it = physicalShards.find(METADATA_SHARD_ID);
+		ASSERT(it != physicalShards.end());
+		auto metadataShard = it->second;
+
+		KeyRange metadataRange = prefixRange(shardMappingPrefix);
+		rocksdb::WriteOptions options;
+		db->DeleteRange(options, physicalShards["default"]->cf, toSlice(allKeys.begin), toSlice(specialKeys.end));
+		db->DeleteRange(options, metadataShard->cf, toSlice(metadataRange.begin), toSlice(metadataRange.end));
+
 		columnFamilyMap.clear();
 		physicalShards.clear();
 		// Close DB.
@@ -2534,10 +2546,27 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
-		wait(f);
-		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet())
+		try {
+			wait(f);
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseActionError").errorUnsuppressed(e);
+		}
+
+		try {
+			wait(self->writeThread->stop());
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
+		}
+
+		if (deleteOnClose && directoryExists(self->path)) {
+			TraceEvent(SevWarn, "DirectoryNotEmpty", self->id).detail("Path", self->path);
+			platform::eraseDirectoryRecursive(self->path);
+		}
+
+		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
+		}
+
 		delete self;
 	}
 
