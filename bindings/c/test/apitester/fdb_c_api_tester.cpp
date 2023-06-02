@@ -59,7 +59,6 @@ enum TesterOptionId {
 	OPT_TLS_KEY_FILE,
 	OPT_TLS_CA_FILE,
 	OPT_RETAIN_CLIENT_LIB_COPIES,
-	OPT_SWIFT_TEST_FILTER,
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
