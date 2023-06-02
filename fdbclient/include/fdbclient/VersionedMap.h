@@ -533,17 +533,15 @@ void split(Reference<PTree<T>> p, const X& x, Reference<PTree<T>>& left, Referen
 }
 
 template <class T>
-void rotate(Reference<PTree<T>>& p, Version at, bool right) {
-	auto r = p->child(!right, at);
-
-	auto n1 = r->child(!right, at);
-	auto n2 = r->child(right, at);
-	auto n3 = p->child(right, at);
-
-	auto newC = update(p, !right, n2, at);
-	newC = update(newC, right, n3, at);
-	p = update(r, !right, n1, at);
-	p = update(p, right, newC, at);
+void rotate(Reference<PTree<T>>& n, Version at, bool right) {
+	auto l = n->child(!right, at);
+	n = update(l, right, update(n, !right, l->child(right, at), at), at);
+	// Diagram for right = true
+	//   n      l
+	//  /        \
+	// l    ->    n
+	//  \        /
+	//   x      x
 }
 
 template <class T>
