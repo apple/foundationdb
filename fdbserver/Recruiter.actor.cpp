@@ -478,7 +478,7 @@ public:
 			}
 		}
 
-		if (resultSet.size() < required) {
+		if (required >= 0 && resultSet.size() < required) {
 			throw no_more_servers();
 		}
 
@@ -500,7 +500,7 @@ public:
 			}
 		}
 
-		ASSERT(resultSet.size() >= required && resultSet.size() <= desired);
+		ASSERT((required < 0 || resultSet.size() >= required) && resultSet.size() <= desired);
 
 		for (auto& result : resultSet) {
 			id_used[result.interf.locality.processId()]++;
