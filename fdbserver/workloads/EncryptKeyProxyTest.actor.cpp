@@ -26,6 +26,7 @@
 
 #include "fdbserver/Knobs.h"
 #include "fdbserver/ServerDBInfo.actor.h"
+#include "fdbserver/Status.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
@@ -199,6 +200,20 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR Future<Void> simHealthyKms(EncryptKeyProxyTestWorkload* self) {
+		TraceEvent("SimHealthyKmsStart").log();
+		loop {
+			KMSHealthStatus status = wait(getKMSHealthStatus(self->dbInfo));
+			if (status.canConnectToKms && status.canConnectToEKP) {
+				ASSERT_GE(status.lastUpdatedTS, 0);
+				ASSERT_GE(now(), status.lastUpdatedTS);
+				break;
+			}
+			wait(delay(20.0));
+		}
+		return Void();
+	}
+
 	// Following test cases are covered:
 	// 1. Simulate an empty domainIdCache.
 	// 2. Simulate an mixed lookup (partial cache-hit) for domainIdCache.
@@ -224,6 +239,11 @@ struct EncryptKeyProxyTestWorkload : TestWorkload {
 
 		// Simulate lookup BaseCipherIds which aren't yet cached
 		wait(self->simLookupInvalidKeyId(self));
+
+		// Simulate getting health status for healthy KMS
+		wait(self->simHealthyKms(self));
+
+		// TODO: Test unhealthy kms status when we implement kms http server in simulation
 
 		return Void();
 	}
