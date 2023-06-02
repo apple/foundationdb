@@ -35,51 +35,6 @@ bool isExcludedDegradedServer(ClusterControllerData const* clusterControllerData
 	return false;
 }
 
-void updateIdUsed(const std::vector<WorkerInterface>& workers,
-                  std::map<Optional<Standalone<StringRef>>, int>& id_used) {
-	for (auto& it : workers) {
-		id_used[it.locality.processId()]++;
-	}
-}
-
-void compareWorkers(std::map<Optional<Standalone<StringRef>>, WorkerInfo> const& id_worker,
-                    const DatabaseConfiguration& conf,
-                    const std::vector<WorkerInterface>& first,
-                    const std::map<Optional<Standalone<StringRef>>, int>& firstUsed,
-                    const std::vector<WorkerInterface>& second,
-                    const std::map<Optional<Standalone<StringRef>>, int>& secondUsed,
-                    ProcessClass::ClusterRole role,
-                    std::string description) {
-	std::vector<WorkerDetails> firstDetails;
-	for (auto& worker : first) {
-		auto w = id_worker.find(worker.locality.processId());
-		ASSERT(w != id_worker.end());
-		auto const& [_, workerInfo] = *w;
-		ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
-		firstDetails.push_back(workerInfo.details);
-		//TraceEvent("CompareAddressesFirst").detail(description.c_str(), w->second.details.interf.address());
-	}
-	RoleFitness firstFitness(firstDetails, role, firstUsed);
-
-	std::vector<WorkerDetails> secondDetails;
-	for (auto& worker : second) {
-		auto w = id_worker.find(worker.locality.processId());
-		ASSERT(w != id_worker.end());
-		auto const& [_, workerInfo] = *w;
-		ASSERT(!conf.isExcludedServer(workerInfo.details.interf.addresses()));
-		secondDetails.push_back(workerInfo.details);
-		//TraceEvent("CompareAddressesSecond").detail(description.c_str(), w->second.details.interf.address());
-	}
-	RoleFitness secondFitness(secondDetails, role, secondUsed);
-
-	if (!(firstFitness == secondFitness)) {
-		TraceEvent(SevError, "NonDeterministicRecruitment")
-		    .detail("FirstFitness", firstFitness.toString())
-		    .detail("SecondFitness", secondFitness.toString())
-		    .detail("ClusterRole", role);
-	}
-}
-
 bool isLongLivedStateless(ClusterControllerData const* clusterControllerData, Optional<Key> const& processId) {
 	return (clusterControllerData->db.serverInfo->get().distributor.present() &&
 	        clusterControllerData->db.serverInfo->get().distributor.get().locality.processId() == processId) ||
@@ -1086,109 +1041,6 @@ public:
 		}
 	}
 
-	static WorkerRecruitment findWorkersForConfiguration(Recruiter* self,
-	                                                     ClusterControllerData* clusterControllerData,
-	                                                     RecruitmentInfo const& info) {
-		WorkerRecruitment rep = findWorkersForConfigurationDispatch(self, clusterControllerData, info, true);
-		if (g_network->isSimulated()) {
-			try {
-				// FIXME: The logic to pick a satellite in a remote region is not
-				// deterministic and can therefore break this nondeterminism check.
-				// Since satellites will generally be in the primary region,
-				// disable the determinism check for remote region satellites.
-				bool remoteDCUsedAsSatellite = false;
-				if (info.configuration.regions.size() > 1) {
-					auto [region, remoteRegion] =
-					    getPrimaryAndRemoteRegion(info.configuration.regions, info.configuration.regions[0].dcId);
-					for (const auto& satellite : region.satellites) {
-						if (satellite.dcId == remoteRegion.dcId) {
-							remoteDCUsedAsSatellite = true;
-						}
-					}
-				}
-				if (!remoteDCUsedAsSatellite) {
-					WorkerRecruitment compare =
-					    findWorkersForConfigurationDispatch(self, clusterControllerData, info, false);
-
-					std::map<Optional<Standalone<StringRef>>, int> firstUsed;
-					std::map<Optional<Standalone<StringRef>>, int> secondUsed;
-					Recruiter::updateKnownIds(clusterControllerData, &firstUsed);
-					Recruiter::updateKnownIds(clusterControllerData, &secondUsed);
-
-					// auto mworker = id_worker.find(masterProcessId);
-					//TraceEvent("CompareAddressesMaster")
-					//    .detail("Master",
-					//            mworker != id_worker.end() ? mworker->second.details.interf.address() :
-					//            NetworkAddress());
-
-					updateIdUsed(rep.tLogs, firstUsed);
-					updateIdUsed(compare.tLogs, secondUsed);
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.tLogs,
-					               firstUsed,
-					               compare.tLogs,
-					               secondUsed,
-					               ProcessClass::TLog,
-					               "TLog");
-					updateIdUsed(rep.satelliteTLogs, firstUsed);
-					updateIdUsed(compare.satelliteTLogs, secondUsed);
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.satelliteTLogs,
-					               firstUsed,
-					               compare.satelliteTLogs,
-					               secondUsed,
-					               ProcessClass::TLog,
-					               "Satellite");
-					updateIdUsed(rep.commitProxies, firstUsed);
-					updateIdUsed(compare.commitProxies, secondUsed);
-					updateIdUsed(rep.grvProxies, firstUsed);
-					updateIdUsed(compare.grvProxies, secondUsed);
-					updateIdUsed(rep.resolvers, firstUsed);
-					updateIdUsed(compare.resolvers, secondUsed);
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.commitProxies,
-					               firstUsed,
-					               compare.commitProxies,
-					               secondUsed,
-					               ProcessClass::CommitProxy,
-					               "CommitProxy");
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.grvProxies,
-					               firstUsed,
-					               compare.grvProxies,
-					               secondUsed,
-					               ProcessClass::GrvProxy,
-					               "GrvProxy");
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.resolvers,
-					               firstUsed,
-					               compare.resolvers,
-					               secondUsed,
-					               ProcessClass::Resolver,
-					               "Resolver");
-					updateIdUsed(rep.backupWorkers, firstUsed);
-					updateIdUsed(compare.backupWorkers, secondUsed);
-					compareWorkers(clusterControllerData->id_worker,
-					               info.configuration,
-					               rep.backupWorkers,
-					               firstUsed,
-					               compare.backupWorkers,
-					               secondUsed,
-					               ProcessClass::Backup,
-					               "Backup");
-				}
-			} catch (Error& e) {
-				ASSERT(false); // Simulation only validation should not throw errors
-			}
-		}
-		return rep;
-	}
-
 	static ErrorOr<WorkerRecruitment> findWorkersForConfigurationFromDC(
 	    Recruiter* self,
 	    ClusterControllerData const* clusterControllerData,
@@ -1651,19 +1503,6 @@ public:
 		return recruitment;
 	}
 
-	static WorkerRecruitment findWorkersForConfigurationDispatch(Recruiter* self,
-	                                                             ClusterControllerData* clusterControllerData,
-	                                                             RecruitmentInfo const& info,
-	                                                             bool checkGoodRecruitment) {
-		if (info.configuration.regions.size() > 1) {
-			return findWorkersForMultiRegion(self, clusterControllerData, info, checkGoodRecruitment);
-		} else if (info.configuration.regions.size() == 1) {
-			return findWorkersForSingleRegion(self, clusterControllerData, info, checkGoodRecruitment);
-		} else {
-			return findWorkersForZeroRegion(self, clusterControllerData, info, checkGoodRecruitment);
-		}
-	}
-
 	static RemoteWorkerRecruitment findRemoteWorkersForConfiguration(Recruiter* self,
 	                                                                 ClusterControllerData const* clusterControllerData,
 	                                                                 RemoteRecruitmentInfo const& info) {
@@ -1991,7 +1830,13 @@ Recruiter::Recruiter(UID const& id) : id(id), startTime(now()) {}
 WorkerRecruitment Recruiter::findWorkers(ClusterControllerData* clusterControllerData,
                                          RecruitmentInfo const& info,
                                          bool checkGoodRecruitment) {
-	return RecruiterImpl::findWorkersForConfigurationDispatch(this, clusterControllerData, info, checkGoodRecruitment);
+	if (info.configuration.regions.size() > 1) {
+		return RecruiterImpl::findWorkersForMultiRegion(this, clusterControllerData, info, checkGoodRecruitment);
+	} else if (info.configuration.regions.size() == 1) {
+		return RecruiterImpl::findWorkersForSingleRegion(this, clusterControllerData, info, checkGoodRecruitment);
+	} else {
+		return RecruiterImpl::findWorkersForZeroRegion(this, clusterControllerData, info, checkGoodRecruitment);
+	}
 }
 
 Future<std::vector<Standalone<CommitTransactionRef>>> Recruiter::recruitWorkers(
