@@ -10132,7 +10132,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM) {
 	ASSERT(!keys.empty());
 	const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
-	TraceEvent(sevDm, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
+	TraceEvent(SevInfo, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
@@ -12498,6 +12498,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (!fFormat.get().present()) {
 		// The DB was never initialized
 		TraceEvent("DBNeverInitialized", data->thisServerID).log();
+		TraceEvent("KVSRemoved", data->thisServerID).detail("Reason", "DBNeverInitialized");
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
@@ -13614,6 +13615,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
 		// investigated?
+		TraceEvent("KVSRemoved", self.thisServerID).detail("Reason", e.name());
 		persistentData->dispose();
 	} else {
 		persistentData->close();
