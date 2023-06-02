@@ -49,7 +49,6 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
                                                             bool newFirst,
                                                             Optional<int> num);
 
-ACTOR Future<std::string> checkMigrationProgress(Database cx);
 ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState);
 ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
                                                                   AuditType type,
