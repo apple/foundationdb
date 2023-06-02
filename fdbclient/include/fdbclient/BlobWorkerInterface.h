@@ -160,7 +160,7 @@ struct BlobGranuleMutationStreamReply : public ReplyPromiseStreamReply {
 
 // this must only be for exactly one granule, the latest granule, and only streaming the memory mutations after the last
 // delta file returned for a request.
-struct BlobGranuleMutationStreamRequest : TimedRequest {
+struct BlobGranuleMutationStreamRequest {
 	constexpr static FileIdentifier file_identifier = 5837335;
 	Arena arena;
 	KeyRangeRef keyRange;
