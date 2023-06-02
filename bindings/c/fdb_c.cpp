@@ -19,7 +19,7 @@
  */
 
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "flow/ProtocolVersion.h"
 #include <cstdint>

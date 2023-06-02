@@ -20,7 +20,7 @@
 
 #include "fdbclient/ClientBooleanParams.h"
 #include "fdbclient/BlobCipher.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbclient/KeyRangeMap.h"
@@ -739,12 +739,12 @@ ACTOR Future<BlobFileIndex> writeDeltaFile(Reference<BlobWorkerData> bwData,
 
 	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
 	ASSERT(!bwData->encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
-	state Value serialized = serializeChunkedDeltaFile(StringRef(fileName),
-	                                                   deltasToWrite,
-	                                                   keyRange,
-	                                                   SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
-	                                                   compressFilter,
-	                                                   cipherKeysCtx);
+	state Value serialized = wait(serializeChunkedDeltaFile(StringRef(fileName),
+	                                                        &deltasToWrite,
+	                                                        keyRange,
+	                                                        SERVER_KNOBS->BG_DELTA_FILE_TARGET_CHUNK_BYTES,
+	                                                        compressFilter,
+	                                                        cipherKeysCtx));
 	state size_t logicalSize = deltasToWrite.expectedSize();
 	state size_t serializedSize = serialized.size();
 	bwData->stats.compressionBytesRaw += logicalSize;
@@ -1049,11 +1049,12 @@ ACTOR Future<BlobFileIndex> writeSnapshot(Reference<BlobWorkerData> bwData,
 
 	state Optional<CompressionFilter> compressFilter = getBlobFileCompressFilter();
 	ASSERT(!bwData->encryptMode.isEncryptionEnabled() || cipherKeysCtx.present());
-	state Value serialized = serializeChunkedSnapshot(StringRef(fileName),
-	                                                  snapshot,
-	                                                  SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
-	                                                  compressFilter,
-	                                                  cipherKeysCtx);
+	state Value serialized = wait(serializeChunkedSnapshot(StringRef(fileName),
+	                                                       &snapshot,
+	                                                       SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
+	                                                       compressFilter,
+	                                                       cipherKeysCtx,
+	                                                       true));
 	state size_t logicalSize = snapshot.expectedSize();
 	state size_t serializedSize = serialized.size();
 	bwData->stats.compressionBytesRaw += logicalSize;

@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/CoordinationInterface.h"
