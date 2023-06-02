@@ -1,7 +1,7 @@
 attrs==22.1.0
 Authlib==1.0.1
 cffi==1.15.1
-cryptography==39.0.1
+cryptography==41.0.0
 iniconfig==1.1.1
 packaging==21.3
 pluggy==1.0.0
