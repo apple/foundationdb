@@ -439,45 +439,45 @@ struct ValidateStorage : TestWorkload {
 	ACTOR Future<Void> testGetAuditStateWhenNoOngingAuditForType(ValidateStorage* self, Database cx, AuditType type) {
 		TraceEvent("TestGetAuditStateBegin").detail("AuditType", type);
 		;
-		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
-		if (res.size() != 1) {
-			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res.size());
+		std::vector<AuditStorageState> res1 = wait(getAuditStates(cx, type, /*newFirst=*/true, 1));
+		if (res1.size() != 1) {
+			TraceEvent(SevError, "TestGetAuditStatesError").detail("ActualResSize", res1.size());
 		}
-		std::vector<AuditStorageState> res =
+		std::vector<AuditStorageState> res2 =
 		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Invalid));
-		if (res.size() != 0) {
+		if (res2.size() != 0) {
 			TraceEvent(SevError, "TestExistingInvalidAudit")
-			    .detail("ActualResSize", res.size())
+			    .detail("ActualResSize", res2.size())
 			    .detail("InputPhase", AuditPhase::Invalid);
 		}
-		std::vector<AuditStorageState> res =
+		std::vector<AuditStorageState> res3 =
 		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Running));
-		if (res.size() != 0) {
+		if (res3.size() != 0) {
 			TraceEvent(SevError, "TestExistingRunningAudit")
-			    .detail("ActualResSize", res.size())
+			    .detail("ActualResSize", res3.size())
 			    .detail("InputPhase", AuditPhase::Running);
 		}
-		std::vector<AuditStorageState> res =
+		std::vector<AuditStorageState> res4 =
 		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Complete));
-		for (const auto& auditState : res) {
+		for (const auto& auditState : res4) {
 			if (auditState.getPhase() != AuditPhase::Complete) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
 				    .detail("InputPhase", AuditPhase::Complete);
 			}
 		}
-		std::vector<AuditStorageState> res =
+		std::vector<AuditStorageState> res5 =
 		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Failed));
-		for (const auto& auditState : res) {
+		for (const auto& auditState : res5) {
 			if (auditState.getPhase() != AuditPhase::Failed) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
 				    .detail("InputPhase", AuditPhase::Failed);
 			}
 		}
-		std::vector<AuditStorageState> res =
+		std::vector<AuditStorageState> res6 =
 		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, AuditPhase::Error));
-		for (const auto& auditState : res) {
+		for (const auto& auditState : res6) {
 			if (auditState.getPhase() != AuditPhase::Error) {
 				TraceEvent(SevError, "TestGetAuditStatesByPhaseError")
 				    .detail("ActualPhase", auditState.getPhase())
