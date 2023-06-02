@@ -8300,6 +8300,153 @@ struct BWLocationInfo : MultiInterface<ReferencedInterface<BlobWorkerInterface>>
 	explicit BWLocationInfo(const std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>>& v) : Locations(v) {}
 };
 
+ACTOR Future<Void> streamRemainingGranuleMutations(BlobWorkerInterface bwInterf,
+                                                   BlobGranuleFileReply* fileReply,
+                                                   Version readVersion,
+                                                   TenantInfo tenantInfo,
+                                                   int i) {
+	state bool retried = false;
+	state BlobGranuleMutationStreamRequest streamReq;
+	streamReq.keyRange = fileReply->chunks[i].keyRange;
+	streamReq.beginVersion = fileReply->chunks[i].includedVersion + 1;
+	streamReq.readVersion = readVersion;
+	streamReq.tenantInfo = tenantInfo;
+	streamReq.replyBatchSize = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	if (BUGGIFY_WITH_PROB(0.01)) {
+		streamReq.replyBatchSize = deterministicRandom()->randomSkewedUInt32(1, 2 * streamReq.replyBatchSize);
+	}
+
+	ASSERT(fileReply->chunks[i].includedVersion < readVersion);
+
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4}. Already have {5} mutations\n",
+		           streamReq.beginVersion,
+		           streamReq.readVersion,
+		           streamReq.keyRange.begin.printable(),
+		           streamReq.keyRange.end.printable(),
+		           bwInterf.id().shortString(),
+		           fileReply->chunks[i].newDeltas.size());
+	}
+
+	loop {
+		try {
+			resetReply(streamReq);
+			state ReplyPromiseStream<BlobGranuleMutationStreamReply> stream =
+			    bwInterf.mutationStreamRequest.getReplyStream(streamReq);
+			state Future<Void> onError = stream.onError();
+			loop {
+				choose {
+					when(BlobGranuleMutationStreamReply streamNext = waitNext(stream.getFuture())) {
+						ASSERT(!streamNext.newDeltas.empty());
+						ASSERT(streamNext.newDeltas.front().version >= streamReq.beginVersion);
+						ASSERT(streamNext.newDeltas.back().version <= streamReq.readVersion);
+
+						if (BG_REQUEST_DEBUG) {
+							fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4} got chunk "
+							           "{5} - {6} ({7})\n",
+							           streamReq.beginVersion,
+							           streamReq.readVersion,
+							           streamReq.keyRange.begin.printable(),
+							           streamReq.keyRange.end.printable(),
+							           bwInterf.id().shortString(),
+							           streamNext.newDeltas.front().version,
+							           streamNext.newDeltas.back().version,
+							           streamNext.newDeltas.size());
+						}
+
+						fileReply->arena.dependsOn(streamNext.arena);
+						fileReply->chunks[i].newDeltas.append(
+						    fileReply->arena, streamNext.newDeltas.begin(), streamNext.newDeltas.size());
+
+						fileReply->chunks[i].includedVersion = streamNext.newDeltas.back().version;
+						streamReq.beginVersion = fileReply->chunks[i].includedVersion + 1;
+					}
+					when(wait(onError)) {
+						// should throw
+						ASSERT(false);
+					}
+				}
+
+				// buggify inject wait delays so stream isn't always ready
+				if (BUGGIFY_WITH_PROB(0.01)) {
+					wait(delay(deterministicRandom()->random01()));
+				}
+			}
+		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4} got error {5}\n",
+				           streamReq.beginVersion,
+				           streamReq.readVersion,
+				           streamReq.keyRange.begin.printable(),
+				           streamReq.keyRange.end.printable(),
+				           bwInterf.id().shortString(),
+				           e.name());
+			}
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			// if stream request itself failed to connect and could be retried, do so in this loop
+			if (!retried &&
+			    (e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered)) {
+				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				retried = true;
+			} else {
+				throw e;
+			}
+		}
+	}
+
+	fileReply->chunks[i].includedVersion = streamReq.readVersion;
+	return Void();
+}
+
+ACTOR Future<BlobGranuleFileReply> getFullGranuleFileReply(BlobGranuleFileRequest req, BlobWorkerInterface bwInterf) {
+	std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
+	v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(bwInterf));
+	state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
+	    makeReference<BWLocationInfo>(v);
+	loop {
+		req.reply.reset();
+
+		state BlobGranuleFileReply rep;
+		wait(store(rep,
+		           loadBalance(location,
+		                       &BlobWorkerInterface::blobGranuleFileRequest,
+		                       req,
+		                       TaskPriority::DefaultPromiseEndpoint,
+		                       AtMostOnce::False,
+		                       nullptr)));
+
+		ASSERT(!rep.chunks.empty());
+
+		if (req.summarize) {
+			return rep;
+		}
+
+		state std::vector<Future<Void>> streamFutures;
+		for (int i = 0; i < rep.chunks.size(); i++) {
+			if (rep.chunks[i].includedVersion < req.readVersion) {
+				CODE_PROBE(true, "streaming remaining granule mutations");
+				// launch a stream request
+				streamFutures.push_back(
+				    streamRemainingGranuleMutations(bwInterf, &rep, req.readVersion, req.tenantInfo, i));
+			}
+		}
+
+		try {
+			wait(waitForAll(streamFutures));
+			return rep;
+		} catch (Error& e) {
+			if (e.code() != error_code_blob_granule_mutation_stream_too_old) {
+				throw e;
+			}
+			// blob_granule_mutation_stream_too_old is expected if a delta file was flushed during the read and these
+			// mutations are no longer in memory, which means that we need to redo the request since the mutation range
+			// is no longer in memory
+		}
+	}
+}
+
 ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
     Transaction* self,
     KeyRange range,
@@ -8427,19 +8574,16 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 		req.summarize = summarize;
 
-		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
-		v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(bwInterf));
-		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
-		    makeReference<BWLocationInfo>(v);
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			req.granuleMutationBytesLimit = 0;
+		} else if (BUGGIFY_WITH_PROB(0.1)) {
+			req.granuleMutationBytesLimit = deterministicRandom()->randomSkewedUInt32(1, 1000000);
+		}
+
 		// use load balance with one option for now for retry and error handling
 		try {
 			choose {
-				when(BlobGranuleFileReply rep = wait(loadBalance(location,
-				                                                 &BlobWorkerInterface::blobGranuleFileRequest,
-				                                                 req,
-				                                                 TaskPriority::DefaultPromiseEndpoint,
-				                                                 AtMostOnce::False,
-				                                                 nullptr))) {
+				when(BlobGranuleFileReply rep = wait(getFullGranuleFileReply(req, bwInterf))) {
 					if (BG_REQUEST_DEBUG) {
 						fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
 						           granule.begin.printable(),
@@ -8505,9 +8649,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				}
 				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
 				// retry indefinitely with one option
-				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
-				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
-				    FailureStatus(true)))) {
+				when(wait(IFailureMonitor::failureMonitor().onStateEqual(bwInterf.blobGranuleFileRequest.getEndpoint(),
+				                                                         FailureStatus(true)))) {
 					if (BG_REQUEST_DEBUG) {
 						fmt::print("readBlobGranules got BW {0} failed\n", bwInterf.id().toString());
 					}
@@ -8525,7 +8668,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
+			    e.code() == error_code_request_maybe_delivered) {
 				throw blob_granule_request_failed();
 			}
 			throw e;
