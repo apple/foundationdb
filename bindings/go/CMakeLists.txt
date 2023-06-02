@@ -145,6 +145,6 @@ add_dependencies(fdb_go_tester directory_go)
 # Ideally this wouldn't be necessary, but it looks like we distribute the go
 # bindings directly from the source on github.
 add_test(
- NAME update_bindings_go_src_fdb_generated_go
- COMMAND ${CMAKE_COMMAND} -E compare_files ${go_options_file} ${CMAKE_CURRENT_SOURCE_DIR}/src/fdb/generated.go
+  NAME update_bindings_go_src_fdb_generated_go
+  COMMAND ${CMAKE_COMMAND} -E compare_files ${go_options_file} ${CMAKE_CURRENT_SOURCE_DIR}/src/fdb/generated.go
 )
