@@ -51,14 +51,14 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	bool replacedPointer;
 	T data;
 
-	Reference<PTree> child(bool which, Version at) const {
+	const Reference<PTree>& child(bool which, Version at) const {
 		if (updated && lastUpdateVersion <= at && which == replacedPointer)
 			return pointer[2];
 		else
 			return pointer[which];
 	}
-	Reference<PTree> left(Version at) const { return child(false, at); }
-	Reference<PTree> right(Version at) const { return child(true, at); }
+	const Reference<PTree>& left(Version at) const { return child(false, at); }
+	const Reference<PTree>& right(Version at) const { return child(true, at); }
 
 	PTree(const T& data, Version ver) : lastUpdateVersion(ver), updated(false), data(data) {
 		priority = deterministicRandom()->randomUInt32();
