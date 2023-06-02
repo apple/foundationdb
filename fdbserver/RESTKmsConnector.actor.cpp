@@ -247,15 +247,17 @@ std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::str
 	return (suffix[0] == '/') ? fullUrl.append(suffix) : fullUrl.append("/").append(suffix);
 }
 
-void dropCachedKmsUrls(Reference<RESTKmsConnectorCtx> ctx) {
-	if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
-		for (const auto& url : ctx->kmsUrlStore.kmsUrls) {
+void dropCachedKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
+                       std::unordered_map<std::string, KmsUrlCtx<KmsUrlPenaltyParams>>* urlMap) {
+	for (const auto& url : ctx->kmsUrlStore.kmsUrls) {
+		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::VERBOSE) {
 			TraceEvent("RESTDropCachedKmsUrls", ctx->uid)
 			    .detail("Url", url.url)
 			    .detail("NumRequests", url.nRequests)
 			    .detail("NumFailedResponses", url.nFailedResponses)
 			    .detail("NumRespParseFailures", url.nResponseParseFailures);
 		}
+		urlMap->insert(std::make_pair(url.url, url));
 	}
 	ctx->kmsUrlStore.kmsUrls.clear();
 }
@@ -272,7 +274,8 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
                     const rapidjson::Document& doc,
                     Reference<HTTP::IncomingResponse> httpResp) {
 	// Refresh KmsUrls cache
-	dropCachedKmsUrls(ctx);
+	std::unordered_map<std::string, KmsUrlCtx<KmsUrlPenaltyParams>> urlMap;
+	dropCachedKmsUrls(ctx, &urlMap);
 	ASSERT_EQ(ctx->kmsUrlStore.kmsUrls.size(), 0);
 
 	for (const auto& url : doc[KMS_URLS_TAG].GetArray()) {
@@ -286,11 +289,22 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 		urlStr.resize(url.GetStringLength());
 		memcpy(urlStr.data(), url.GetString(), url.GetStringLength());
 
-		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
-			TraceEvent("RESTExtractDiscoverKmsUrlsAddUrl", ctx->uid).detail("Url", urlStr);
-		}
+		// preserve the KmsUrl stats while (re)discovering KMS URLs, preferable to select the servers with lesser count
+		// of unexpected events in the past
 
-		ctx->kmsUrlStore.kmsUrls.emplace_back(KmsUrlCtx<KmsUrlPenaltyParams>(urlStr));
+		auto itr = urlMap.find(urlStr);
+		if (itr != urlMap.end()) {
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTDiscoverExistingKmsUrl", ctx->uid).detail("UrlCtx", itr->second.toString());
+			}
+			ctx->kmsUrlStore.kmsUrls.emplace_back(itr->second);
+		} else {
+			auto urlCtx = KmsUrlCtx<KmsUrlPenaltyParams>(urlStr);
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTDiscoverNewKmsUrl", ctx->uid).detail("UrlCtx", urlCtx.toString());
+			}
+			ctx->kmsUrlStore.kmsUrls.emplace_back(urlCtx);
+		}
 	}
 
 	// Update Kms URLs refresh timestamp
