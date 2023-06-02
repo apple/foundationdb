@@ -278,11 +278,19 @@ public:
 		// copy necessary fields at start of actor BEFORE waits
 		state std::string fname = self->fileName(self->segmentNo_);
 		state Standalone<StringRef> filename = StringRef(fname);
-		state Standalone<GranuleSnapshot> rows = self->rows_;
+		state Standalone<GranuleSnapshot> rows;
 		state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = self->cipherKeysCtx_;
+
+		rows.reserve(rows.arena(), self->rows_.size());
+		rows.append_deep(rows.arena(), self->rows_.begin(), self->rows_.size());
+
 		Value bytes = wait(serializeChunkedSnapshot(
 		    filename, &rows, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, {}, cipherKeysCtx, false));
 		self->totalBytes_ += bytes.size();
+
+		// clear rows to reduce memory while writing file
+		rows = Standalone<GranuleSnapshot>();
+
 		wait(writeToFile(self, bytes, fname));
 
 		return Void();
