@@ -799,7 +799,6 @@ public:
 
 	template <class U>
 	void send(U&& value) {
-		// printf("[c++][%s:%d] send, ...\n", __FILE_NAME__, __LINE__);
 		ASSERT(canBeSet());
 		new (&value_storage) T(std::forward<U>(value));
 		this->error_state = Error::fromCode(SET_ERROR_CODE);
@@ -907,32 +906,24 @@ public:
 	virtual void cancel() {}
 
 	void addCallbackAndDelFutureRef(Callback<T>* cb) {
-		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
-
 		// We are always *logically* dropping one future reference from this, but if we are adding a first callback
 		// we also need to add one (since futures is defined as being +1 if there are any callbacks), so net nothing
 		if (Callback<T>::next != this)
 			delFutureRef();
 
-		// printf("[c++][%s:%d](%s) %p insert %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
 		cb->insert(this);
 	}
 
 	void addYieldedCallbackAndDelFutureRef(Callback<T>* cb) {
-		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
-
 		// Same contract as addCallbackAndDelFutureRef, except that the callback is placed at the end of the callback
 		// chain rather than at the beginning
 		if (Callback<T>::next != this)
 			delFutureRef();
 
-		// printf("[c++][%s:%d](%s) %p insertBack %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb, this);
 		cb->insertBack(this);
 	}
 
 	void addCallbackChainAndDelFutureRef(Callback<T>* cb) {
-		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
-
 		if (Callback<T>::next != this)
 			delFutureRef();
 		cb->insertChain(this);
@@ -1072,19 +1063,16 @@ public:
 	}
 
 	void addCallbackAndClear(Callback<T>* _Nonnull cb) {
-		// printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackAndDelFutureRef(cb);
 		sav = nullptr;
 	}
 
 	void addYieldedCallbackAndClear(Callback<T>* _Nonnull cb) {
-    // printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addYieldedCallbackAndDelFutureRef(cb);
 		sav = nullptr;
 	}
 
 	void addCallbackChainAndClear(Callback<T>* cb) {
-    // printf("[c++][%s:%d](%s) %p\n", __FILE_NAME__, __LINE__, __FUNCTION__, cb);
 		sav->addCallbackChainAndDelFutureRef(cb);
 		sav = nullptr;
 	}
@@ -1193,7 +1181,9 @@ private:
 
 template <class T>
 struct NotifiedQueue : private SingleCallback<T>
-//    , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+#ifndef WITH_SWIFT
+   , FastAllocated<NotifiedQueue<T>> // FIXME(swift): Swift can't deal with this type yet
+#endif /* WITH_SWIFT */
 {
 	int promises; // one for each promise (and one for an active actor if this is an actor)
 	int futures; // one for each future and one more if there are any callbacks
