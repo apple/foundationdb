@@ -3839,7 +3839,7 @@ void profileHandler(int sig) {
 #else
 	// FIXME: problem with Swift build: lib/libflow.a(Platform.actor.g.cpp.o):Platform.actor.g.cpp:function
 	// profileHandler(int): error: undefined reference to '__atomic_is_lock_free'
-	ps->timestamp = 0
+	ps->timestamp = 0;
 #endif /* WITH_SWIFT */
 
 #if defined(USE_SANITIZER)
