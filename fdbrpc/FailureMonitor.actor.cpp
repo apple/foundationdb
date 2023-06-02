@@ -202,8 +202,6 @@ FailureStatus SimpleFailureMonitor::getState(Endpoint const& endpoint) const {
 			return FailureStatus();
 		else
 			return a->second;
-		// printf("%s.getState(%s) = %s %p\n", g_network->getLocalAddress().toString(), endpoint.address.toString(),
-		//        a.failed ? "FAILED" : "OK", this);
 	}
 }
 

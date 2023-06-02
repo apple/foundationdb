@@ -1,0 +1,5 @@
+module @MODULE_NAME@ {
+@MODULE_HEADERS@
+
+export *
+}

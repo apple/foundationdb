@@ -23,6 +23,7 @@
 #pragma once
 
 #include <algorithm>
+#include <map>
 
 #include "fdbrpc/DDSketch.h"
 #include "fdbrpc/HealthMonitor.h"
