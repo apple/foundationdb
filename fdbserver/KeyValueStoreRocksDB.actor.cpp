@@ -610,15 +610,18 @@ public:
 
 	// Called for every ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME seconds in a loop.
 	void refreshIterators() {
-		std::lock_guard<std::mutex> lock(mutex);
-		it = iteratorsMap.begin();
-		auto currTime = now();
-		while (it != iteratorsMap.end()) {
-			if ((it->second.index <= deletedUptoIndex) ||
-			    ((currTime - it->second.creationTime) > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME)) {
-				it = iteratorsMap.erase(it);
-			} else {
-				it++;
+		if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS ||
+		    SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_BOUNDED_ITERATORS) {
+			std::lock_guard<std::mutex> lock(mutex);
+			it = iteratorsMap.begin();
+			auto currTime = now();
+			while (it != iteratorsMap.end()) {
+				if ((it->second.index <= deletedUptoIndex) ||
+					((currTime - it->second.creationTime) > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME)) {
+					it = iteratorsMap.erase(it);
+				} else {
+					it++;
+				}
 			}
 		}
 	}
