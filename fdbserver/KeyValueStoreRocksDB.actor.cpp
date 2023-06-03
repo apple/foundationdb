@@ -617,7 +617,7 @@ public:
 			auto currTime = now();
 			while (it != iteratorsMap.end()) {
 				if ((it->second.index <= deletedUptoIndex) ||
-					((currTime - it->second.creationTime) > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME)) {
+				    ((currTime - it->second.creationTime) > SERVER_KNOBS->ROCKSDB_READ_RANGE_ITERATOR_REFRESH_TIME)) {
 					it = iteratorsMap.erase(it);
 				} else {
 					it++;
