@@ -1666,7 +1666,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						is_error = true;
 					} else {
 						printf("%s audit: %s\n",
-						       tokencmp(tokens[1], "cancel") ? "Started" : "Cancelled",
+						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
 						       auditId.toString().c_str());
 					}
 					continue;
