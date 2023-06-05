@@ -272,7 +272,6 @@ CommandFactory locationMetadataFactory(
         "To check number of physical shards: `location_metadata physicalshards'\n"
         "To check the location of a key: `location_metadata resolve <key>'\n"
         "To check the location of a keyrange: `location_metadata resolve <begin> <end>'\n"
-        "To check the location of a keyrange: `location_metadata resolve <begin> <end>'\n"
         "To check shard assignments of a storage server: `location_metadata servershards <ssID>'\n"
         "To list <n> random physical shards: `location_metadata listshards <n> physical'\n"
         "To list <n> random non-physical shards: `location_metadata listshards <n>'\n"));
