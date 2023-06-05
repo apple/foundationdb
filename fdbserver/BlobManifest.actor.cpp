@@ -25,7 +25,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -273,23 +273,37 @@ public:
 		return Void();
 	}
 
+	// takes memory ownership of rows for duration of serializing the snapshot and writes the file to blob storage
+	ACTOR static Future<Void> writeSegment(BlobManifestFileSplitter* self) {
+		// copy necessary fields at start of actor BEFORE waits
+		state std::string fname = self->fileName(self->segmentNo_);
+		state Standalone<StringRef> filename = StringRef(fname);
+		state Standalone<GranuleSnapshot> rows;
+		state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = self->cipherKeysCtx_;
+
+		rows.reserve(rows.arena(), self->rows_.size());
+		rows.append_deep(rows.arena(), self->rows_.begin(), self->rows_.size());
+
+		Value bytes = wait(serializeChunkedSnapshot(
+		    filename, &rows, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, {}, cipherKeysCtx, false));
+		self->totalBytes_ += bytes.size();
+
+		// clear rows to reduce memory while writing file
+		rows = Standalone<GranuleSnapshot>();
+
+		wait(writeToFile(self, bytes, fname));
+
+		return Void();
+	}
+
 private:
 	// Write next segment
 	void flushNext() {
-		std::string fname = fileName(segmentNo_);
-		Optional<CompressionFilter> compressionFilter;
-		Value bytes = serializeChunkedSnapshot(StringRef(fname),
-		                                       rows_,
-		                                       SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
-		                                       compressionFilter,
-		                                       cipherKeysCtx_,
-		                                       false);
-		pendingFutures_.push_back(writeToFile(this, bytes, fname));
+		pendingFutures_.push_back(writeSegment(this));
 		TraceEvent("BlobManifestFile").detail("Rows", rows_.size()).detail("SegNo", segmentNo_);
 
 		rows_.clear();
 		segmentNo_++;
-		totalBytes_ += bytes.size();
 		logicalSize_ = 0;
 	}
 
