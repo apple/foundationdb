@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "flow/IRandom.h"
-#include "fdbclient/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
@@ -31,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -39,6 +38,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Tracing.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -675,5 +675,15 @@ namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 }
+
+ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                           Optional<TenantName> tenant,
+                                                           Key key,
+                                                           SpanID spanID,
+                                                           Optional<UID> debugID,
+                                                           UseProvisionalProxies useProvisionalProxies,
+                                                           Reverse isBackward,
+                                                           Version version);
+
 #include "flow/unactorcompiler.h"
 #endif
