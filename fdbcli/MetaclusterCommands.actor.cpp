@@ -20,14 +20,19 @@
 
 #include "fdbcli/fdbcli.actor.h"
 
+#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
+#include "fdbclient/MultiVersionTransaction.h"
 #include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/Schemas.h"
 
+#include "fdbclient/Tuple.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
+#include "flow/Optional.h"
 #include "flow/ThreadHelper.actor.h"
 
 #include "metacluster/Metacluster.h"
@@ -35,6 +40,13 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <string>
+#include <tuple>
+
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
 
 namespace fdb_cli {
 
@@ -605,6 +617,54 @@ Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> 
 		printUsage(tokens[0]);
 		return true;
 	}
+}
+
+// usecluster command
+ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(MetaclusterRegistrationEntry registrationEntry,
+                                                                       Database localDb,
+                                                                       Reference<IDatabase> db,
+                                                                       Reference<IDatabase> configDb,
+                                                                       Optional<Database> mgmtLocalDb,
+                                                                       Optional<Reference<IDatabase>> mgmtDb,
+                                                                       Optional<Reference<IDatabase>> mgmtConfigDb,
+                                                                       Optional<ClusterName> mgmtClusterName,
+                                                                       StringRef newClusterNameStr,
+                                                                       int apiVersion) {
+	ClusterName clusterName = registrationEntry.name;
+	ClusterType clusterType = registrationEntry.clusterType;
+
+	if (!mgmtDb.present()) {
+		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+			fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
+			return std::make_tuple(std::make_tuple(localDb, db, configDb),
+			                       std::make_tuple(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName),
+			                       false);
+		} else {
+			mgmtLocalDb = localDb;
+			mgmtDb = db;
+			mgmtConfigDb = configDb;
+			mgmtClusterName = clusterName;
+		}
+	}
+
+	if (tokencmp(newClusterNameStr, mgmtClusterName.get().toString().c_str())) {
+		db = mgmtDb.get();
+		localDb = mgmtLocalDb.get();
+		configDb = mgmtConfigDb.get();
+	} else {
+		metacluster::DataClusterMetadata clusterMetadata =
+		    wait(metacluster::getCluster(mgmtDb.get(), newClusterNameStr));
+		ClusterConnectionString connectionString = clusterMetadata.connectionString;
+		Reference<IClusterConnectionRecord> connectionRecord =
+		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
+		localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
+		db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
+	}
+	return std::make_tuple(std::make_tuple(localDb, db, configDb),
+	                       std::make_tuple(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName),
+	                       true);
 }
 
 void metaclusterGenerator(const char* text,

@@ -22,6 +22,9 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
+#include "fdbclient/MetaclusterRegistration.h"
+#include "flow/FastRef.h"
+#include "flow/Optional.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
@@ -49,6 +52,11 @@ constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
 constexpr char msgErrorKey[] = "error";
+
+typedef std::tuple<Database, Reference<IDatabase>, Reference<IDatabase>> DbConns;
+typedef std::
+    tuple<Optional<Database>, Optional<Reference<IDatabase>>, Optional<Reference<IDatabase>>, Optional<ClusterName>>
+        MgmtDbConns;
 
 struct CommandHelp {
 	std::string usage;
@@ -218,6 +226,18 @@ ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
 // metacluster command
 Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
+
+// usecluster command
+ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(MetaclusterRegistrationEntry registrationEntry,
+                                                                       Database localDb,
+                                                                       Reference<IDatabase> db,
+                                                                       Reference<IDatabase> configDb,
+                                                                       Optional<Database> mgmtLocalDb,
+                                                                       Optional<Reference<IDatabase>> mgmtDb,
+                                                                       Optional<Reference<IDatabase>> mgmtConfigDb,
+                                                                       Optional<ClusterName> mgmtClusterName,
+                                                                       StringRef newClusterNameStr,
+                                                                       int apiVersion);
 
 // changefeed command
 ACTOR Future<bool> changeFeedCommandActor(Database localDb,

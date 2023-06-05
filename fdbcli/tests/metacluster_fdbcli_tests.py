@@ -154,8 +154,17 @@ def remove_data_cluster(management_cluster_file, data_cluster_name):
     return rc, out, err
 
 
-def usecluster(cluster_file, *cluster_names):
-    subcmds = ["usecluster {};".format(cname) for cname in cluster_names]
+def usecluster(cluster_file, cluster_name):
+    rc, out, err = run_fdbcli_command(
+        cluster_file, "usecluster {}".format(cluster_name)
+    )
+    return rc, out, err
+
+
+def useclusters_and_check_status(cluster_file, *cluster_names):
+    subcmds = [
+        "usecluster {}; metacluster status;".format(cname) for cname in cluster_names
+    ]
     subcmds[-1] = subcmds[-1][:-1]
     rc, out, err = run_fdbcli_command(cluster_file, *subcmds)
     return rc, out, err
@@ -467,16 +476,16 @@ def usecluster_test(logger, cluster_files):
         assert output == "This cluster is not part of a metacluster"
 
     _, _, err = usecluster(cluster_files[0], "mgmt")
-    logger.debug(err)
     assert err == "ERROR: This cluster is not part of a metacluster"
 
     logger.debug("Setting up a metacluster")
     num_clusters = len(cluster_files)
+    max_tenant_groups_per_cluster = 1
     auto_assignment = ["enabled"] * (num_clusters - 1)
     setup_metacluster(
         [cluster_files[0], management_cluster_name],
         list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
-        max_tenant_groups_per_cluster=1,
+        max_tenant_groups_per_cluster,
     )
 
     _, output, err = usecluster(cluster_files[0], management_cluster_name)
@@ -485,20 +494,36 @@ def usecluster_test(logger, cluster_files):
     _, output, err = usecluster(cluster_files[1], data_cluster_names[1])
     assert err == "ERROR: Please first connect to a management cluster"
 
-    rc, output, err = usecluster(
+    rc, output, err = useclusters_and_check_status(
         cluster_files[0],
         data_cluster_names[0],
         data_cluster_names[1],
         management_cluster_name,
     )
     lines = output.split("\n")
-    assert lines[1] == "Using data cluster {}, with connection_string={}".format(
-        data_cluster_names[0], get_cluster_connection_str(cluster_files[1])
+    logger.debug(output)
+    assert lines[1] == "cluster changed to {}".format(data_cluster_names[0])
+    assert lines[
+        3
+    ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
+        data_cluster_names[0], management_cluster_name
     )
-    assert lines[3] == "Using data cluster {}, with connection_string={}".format(
-        data_cluster_names[1], get_cluster_connection_str(cluster_files[2])
+    assert lines[5] == "cluster changed to {}".format(data_cluster_names[1])
+    assert lines[
+        7
+    ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
+        data_cluster_names[1], management_cluster_name
     )
-    assert lines[5] == "Using management cluster {}".format(management_cluster_name)
+    assert lines[9] == "cluster changed to {}".format(management_cluster_name)
+    expected = """
+  number of data clusters: {}
+  tenant group capacity: {}
+  allocated tenant groups: 0
+"""
+    expected = expected.format(
+        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+    ).strip()
+    assert "\n".join([lines[11], lines[12], lines[13]]).strip() == expected
 
     _, _, err = usecluster(cluster_files[0], "data_cluster_not_exist")
     assert err == "ERROR: Data cluster does not exist (2163)"

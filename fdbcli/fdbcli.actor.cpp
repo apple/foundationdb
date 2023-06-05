@@ -19,6 +19,9 @@
  */
 
 #include "boost/lexical_cast.hpp"
+#include "fdbrpc/ReplicationTypes.h"
+#include "flow/Arena.h"
+#include "flow/Optional.h"
 #include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -616,7 +619,7 @@ void initHelp() {
 	                "on the raw key-space. This is the default behavior. The tenant cannot be configured while a "
 	                "transaction started with `begin' is open.");
 	helpMap["usecluster"] =
-	    CommandHelp("usecluster [NAME]",
+	    CommandHelp("usecluster <NAME>",
 	                "opens connections to a cluster in the metacluster",
 	                "User must first connect to a management cluster in order to use this command. "
 	                "This command opens connections to a cluster by cluster name. "
@@ -1111,7 +1114,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	state Optional<Database> mgmtLocalDb;
 	state Optional<Reference<IDatabase>> mgmtDb;
 	state Optional<Reference<IDatabase>> mgmtConfigDb;
-	state Optional<ClusterName> mgmtName;
+	state Optional<ClusterName> mgmtClusterName;
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<IDatabase> configDb;
@@ -2207,46 +2210,32 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						if (!registrationEntry.present()) {
 							fprintf(stderr, "ERROR: This cluster is not part of a metacluster\n");
 							is_error = true;
-						} else if (tokencmp(tokens[1], registrationEntry.get().name.toString().c_str())) {
-							printf("Using the current cluster, no changes made.\n");
+							continue;
+						}
+						state StringRef newClusterNameStr = tokens[1];
+						if (tokencmp(newClusterNameStr, registrationEntry.get().name.toString().c_str())) {
+							fmt::print("Using the current cluster, no changes made.\n");
+						} else if (intrans) {
+							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
+							is_error = true;
 						} else {
-							if (intrans) {
-								fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
+							std::tuple<DbConns, MgmtDbConns, bool> _result =
+							    wait(makeInterruptable(useClusterCommand(registrationEntry.get(),
+							                                             localDb,
+							                                             db,
+							                                             configDb,
+							                                             mgmtLocalDb,
+							                                             mgmtDb,
+							                                             mgmtConfigDb,
+							                                             mgmtClusterName,
+							                                             newClusterNameStr,
+							                                             opt.apiVersion)));
+							if (!std::get<2>(_result))
 								is_error = true;
-							} else {
-								if (!mgmtDb.present()) {
-									if (registrationEntry.get().clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-										fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
-										is_error = true;
-										continue;
-									} else {
-										mgmtDb = db;
-										mgmtLocalDb = localDb;
-										mgmtConfigDb = configDb;
-										mgmtName = registrationEntry.get().name;
-									}
-								}
-								if (tokencmp(tokens[1], mgmtName.get().toString().c_str())) {
-									db = mgmtDb.get();
-									localDb = mgmtLocalDb.get();
-									configDb = mgmtConfigDb.get();
-									fmt::print("Using management cluster {}\n", tokens[1].toString().c_str());
-								} else {
-									metacluster::DataClusterMetadata clusterMetadata =
-									    wait(metacluster::getCluster(mgmtDb.get(), tokens[1]));
-									ClusterConnectionString connectionString = clusterMetadata.connectionString;
-									Reference<IClusterConnectionRecord> connectionRecord =
-									    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-									localDb =
-									    Database::createDatabase(connectionRecord, opt.apiVersion, IsInternal::False);
-									db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-									configDb =
-									    API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-									configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
-									fmt::print("Using data cluster {}, with connection_string={}\n",
-									           tokens[1].toString().c_str(),
-									           connectionString.toString().c_str());
-								}
+							else {
+								std::tie(localDb, db, configDb) = std::get<0>(_result);
+								std::tie(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName) = std::get<1>(_result);
+								fmt::print("cluster changed to {}\n", newClusterNameStr);
 							}
 						}
 					}
@@ -2264,7 +2253,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 			}
 			if (e.code() == error_code_tenant_name_required) {
 				printAtCol("ERROR: tenant name required. Use the `usetenant' command to select a tenant or enable the "
-				           "`RAW_ACCESS' option to read raw keys. ",
+				           "`RAW_ACCESS' option to read raw keys.",
 				           80,
 				           stderr);
 			} else if (e.code() != error_code_actor_cancelled) {
