@@ -41,6 +41,56 @@ std::string describeUIDs(const std::vector<UID>& ids) {
 	return res;
 }
 
+ACTOR Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
+	state Key begin = allKeys.begin;
+	state int numShards = 0;
+
+	while (begin < allKeys.end && numShards < n) {
+		// RYW to optimize re-reading the same key ranges
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+
+				KeyRangeRef currentKeys(begin, allKeys.end);
+				RangeResult shards = wait(krmGetRanges(tr, keyServersPrefix, currentKeys, n, CLIENT_KNOBS->TOO_MANY));
+
+				for (int i = 0; i < shards.size() - 1 && numShards < n; ++i) {
+					const KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+					std::vector<UID> src;
+					std::vector<UID> dest;
+					UID srcId;
+					UID destId;
+					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
+					if (physicalShard == (srcId != anonymousShardId)) {
+						printf("Range: %s, IsPhysicalShard: %s, ShardID: %s, Src Servers: %s, Dest Servers: %s\n",
+						       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
+						       physicalShard ? "Yes" : "No",
+						       srcId.toString().c_str(),
+						       describeUIDs(src).c_str(),
+						       describeUIDs(dest).c_str());
+						++numShards;
+					}
+				}
+
+				begin = shards.back().key;
+				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	printf("Found %d %s shards\n", numShards, physicalShard ? "Physical" : "Non-physical");
+
+	return Void();
+}
+
 ACTOR Future<Void> printPhysicalShardCount(Database cx) {
 	state Key begin = allKeys.begin;
 	state int numShards = 0;
@@ -199,6 +249,13 @@ ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringR
 			return false;
 		}
 		wait(printServerShards(cx, UID::fromString(tokens[2].toString())));
+	} else if (tokencmp(tokens[1], "listshards")) {
+		if (tokens.size() == 4 && !tokencmp(tokens[3], "physical")) {
+			printUsage(tokens[0]);
+			return false;
+		}
+		const bool physical = tokens.size() == 4;
+		wait(printRandomShards(cx, std::stoi(tokens[2].toString()), physical));
 	} else {
 		printUsage(tokens[0]);
 		return false;
@@ -209,10 +266,14 @@ ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringR
 
 CommandFactory locationMetadataFactory(
     "location_metadata",
-    CommandHelp("location_metadata [physicalshards|resolve|servershards] [id|begin] [end]",
-                "Check location metadata",
-                "To check number of physical shards: `location_metadata physicalshards'\n"
-                "To check the location of a key: `location_metadata resolve <key>'\n"
-                "To check the location of a keyrange: `location_metadata resolve <begin> <end>'\n"
-                "To check shard assignments of a storage server: `location_metadata servershards <ssID>'\n"));
+    CommandHelp(
+        "location_metadata [physicalshards|resolve|servershards|listshards] [<id>|<begin>|<n>] [<end>|physical]",
+        "Check location metadata",
+        "To check number of physical shards: `location_metadata physicalshards'\n"
+        "To check the location of a key: `location_metadata resolve <key>'\n"
+        "To check the location of a keyrange: `location_metadata resolve <begin> <end>'\n"
+        "To check the location of a keyrange: `location_metadata resolve <begin> <end>'\n"
+        "To check shard assignments of a storage server: `location_metadata servershards <ssID>'\n"
+        "To list <n> random physical shards: `location_metadata listshards <n> physical'\n"
+        "To list <n> random non-physical shards: `location_metadata listshards <n>'\n"));
 } // namespace fdb_cli
