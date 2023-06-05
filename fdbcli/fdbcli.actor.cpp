@@ -1297,7 +1297,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 	}
 
 	state bool is_error = false;
-
 	state Future<Void> warn;
 	loop {
 		if (warn.isValid())
@@ -1661,6 +1660,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise) {
 						else
 							printf("`%s': not found\n", printable(tokens[1]).c_str());
 					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getlocation")) {
+					Version _v = wait(makeInterruptable(
+					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
+					bool _result = wait(makeInterruptable(getLocationCommandActor(localDb, tokens, _v)));
+					if (!_result)
+						is_error = true;
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "getall")) {
+					Version _v = wait(makeInterruptable(
+					    safeThreadFutureToFuture(getTransaction(db, tenant, tr, options, intrans)->getReadVersion())));
+					bool _result = wait(makeInterruptable(getallCommandActor(localDb, tokens, _v)));
+					if (!_result)
+						is_error = true;
 					continue;
 				}
 

@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "flow/IRandom.h"
-#include "flow/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
@@ -30,6 +28,8 @@
 #include "flow/BooleanParam.h"
 #include "flow/flow.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/IRandom.h"
+#include "flow/Tracing.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -552,6 +552,16 @@ int64_t getMaxWriteKeySize(KeyRef const& key, bool hasRawAccess);
 
 // Returns the maximum legal size of a key that can be cleared. Keys larger than this will be assumed not to exist.
 int64_t getMaxClearKeySize(KeyRef const& key);
+
+struct KeyRangeLocationInfo;
+ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                           Optional<TenantName> tenant,
+                                                           Key key,
+                                                           SpanID spanID,
+                                                           Optional<UID> debugID,
+                                                           UseProvisionalProxies useProvisionalProxies,
+                                                           Reverse isBackward,
+                                                           Version version);
 
 #include "flow/unactorcompiler.h"
 #endif

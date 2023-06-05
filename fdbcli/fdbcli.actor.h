@@ -215,6 +215,10 @@ ACTOR Future<bool> versionEpochCommandActor(Reference<IDatabase> db, Database cx
 // targetversion command
 ACTOR Future<bool> targetVersionCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 
+// debug commands: getlocation, getall
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+
 } // namespace fdb_cli
 
 #include "flow/unactorcompiler.h"
