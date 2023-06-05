@@ -9444,7 +9444,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	data->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistUpdatesRange.begin, persistUpdatesRange.end));
 
-	bool clearRecord = true;
+	state bool clearRecord = true;
 	if (moveInShard->failed()) {
 		for (const auto& mir : moveInShard->ranges()) {
 			auto existingShards = data->shards.intersectingRanges(mir);
