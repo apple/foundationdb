@@ -1,4 +1,5 @@
 #pragma once
+#include "fdbclient/SystemData.h"
 #if defined(NO_INTELLISENSE) && !defined(METACLUSTER_METACLUSTERMOVE_ACTOR_G_H)
 #define METACLUSTER_METACLUSTERMOVE_ACTOR_G_H
 #include "metacluster/MetaclusterMove.actor.g.h"
@@ -103,27 +104,28 @@ struct StartTenantMovementImpl {
 
 	ACTOR static Future<Void> storeTenantSplitPoints(StartTenantMovementImpl* self,
 	                                                 Reference<typename DB::TransactionT> tr,
-	                                                 Tenant* tenant,
 	                                                 TenantName tenantName) {
-		// state Reference<ReadYourWritesTransaction> ryw =
-		//     makeReference<ReadYourWritesTransaction>(self->ctx.dataClusterDb, *tenant);
-		// // What should chunkSize be?
-		// state Standalone<VectorRef<KeyRef>> splitPoints =
-		//     wait(ryw->getRangeSplitPoints(KeyRangeRef(""_sr, "\xff"_sr), 1000));
-		// state bool first = true;
-		// state KeyRef lastKey;
-		// state KeyRef iterKey;
-		// for (auto& key : splitPoints) {
-		// 	if (first) {
-		// 		lastKey = key;
-		// 		first = false;
-		// 		continue;
-		// 	}
-		// 	metadata::management::MovementMetadata::splitPointsMap().set(
-		// 	    tr, Tuple::makeTuple(self->tenantGroup, self->runID.toString(), tenantName, lastKey), key);
-		// 	lastKey = key;
-		// }
-		wait(delay(1.0));
+		Reference<ITenant> srcTenant = self->ctx.dataClusterDb->openTenant(tenantName);
+		Reference<ITransaction> srcTr = srcTenant->createTransaction();
+		// What should chunkSize be?
+		KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
+		int64_t chunkSize = 10000;
+		ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture = srcTr->getRangeSplitPoints(allKeys, chunkSize);
+		Standalone<VectorRef<KeyRef>> splitPoints = wait(safeThreadFutureToFuture(resultFuture));
+		bool first = true;
+		KeyRef lastKey;
+		KeyRef iterKey;
+		for (auto& key : splitPoints) {
+			if (first) {
+				lastKey = key;
+				first = false;
+				continue;
+			}
+			metadata::management::MovementMetadata::splitPointsMap().set(
+			    tr, Tuple::makeTuple(self->tenantGroup, self->runID.toString(), tenantName, lastKey), key);
+			lastKey = key;
+		}
+		wait(safeThreadFutureToFuture(tr->commit()));
 		return Void();
 	}
 
@@ -132,8 +134,7 @@ struct StartTenantMovementImpl {
 		// container of range-based for with continuation must be a state variable
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
 		for (auto& tenantPair : tenantsInGroup) {
-			Tenant t(tenantPair.second);
-			wait(success(storeTenantSplitPoints(self, tr, &t, tenantPair.first)));
+			wait(success(storeTenantSplitPoints(self, tr, tenantPair.first)));
 		}
 		ASSERT(self->tenantsInGroup.size());
 		TenantName firstTenant = self->tenantsInGroup[0].first;
