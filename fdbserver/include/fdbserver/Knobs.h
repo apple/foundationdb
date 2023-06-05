@@ -27,4 +27,8 @@
 
 #define SERVER_KNOBS (&IKnobCollection::getGlobalKnobCollection().getServerKnobs())
 
+inline const ServerKnobs& getServerKnobs() {
+	return *SERVER_KNOBS;
+}
+
 #endif // FDBSERVER_KNOBS_H

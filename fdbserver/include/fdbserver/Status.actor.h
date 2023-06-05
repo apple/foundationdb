@@ -61,5 +61,7 @@ ACTOR Future<Optional<std::pair<WorkerEvents, std::set<std::string>>>> latestEve
     std::vector<WorkerDetails> workers,
     std::string eventName);
 
+ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db);
+
 #include "flow/unactorcompiler.h"
 #endif

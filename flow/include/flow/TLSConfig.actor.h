@@ -135,6 +135,8 @@ public:
 	TLSConfig() = default;
 	explicit TLSConfig(TLSEndpointType endpointType) : endpointType(endpointType) {}
 
+	static TLSConfig* make() { return new TLSConfig(); }
+
 	void setCertificatePath(const std::string& path) {
 		tlsCertPath = path;
 		tlsCertBytes = "";
@@ -181,7 +183,7 @@ public:
 	// Load all specified certificates into memory, and return an object that
 	// allows access to them.
 	// If self has any certificates by path, they will be *asynchronously* loaded from disk.
-	Future<LoadedTLSConfig> loadAsync() const { return loadAsync(this); }
+	Future<LoadedTLSConfig> loadAsync() const { return loadAsync(this); } // FIXME: swift
 
 	// Return the explicitly set path.
 	// If one was not set, return the path from the environment.
@@ -195,8 +197,10 @@ public:
 
 	bool getDisablePlainTextConnection() const;
 
+#ifndef PRIVATE_EXCEPT_FOR_TLSCONFIG_CPP
 private:
-	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self);
+#endif
+	ACTOR static Future<LoadedTLSConfig> loadAsync(const TLSConfig* self); // FIXME
 	template <typename T>
 	friend class LoadAsyncActorState;
 
