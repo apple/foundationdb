@@ -1,0 +1,21 @@
+[configuration]
+allowDefaultTenant = false
+allowCreatingTenants = false
+extraDatabaseMode = 'Multiple'
+extraDatabaseCount = 3
+tenantModes = ['optional', 'required']
+config = 'triple'
+generateFearless = false
+processesPerMachine = 1
+machineCount = 5
+
+[[test]]
+testTitle = 'MetaclusterMoveTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'MetaclusterMove'
+	maxTenants = 100
+	maxTenantGroups = 10

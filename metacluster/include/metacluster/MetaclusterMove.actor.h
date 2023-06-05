@@ -376,9 +376,9 @@ struct FinishTenantMovementImpl {
 	ACTOR static Future<bool> checkValidUnlock(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr) {
 		// Assert the tenant we are unlocking is on the right cluster
-		// for (auto& tenantPair : self->tenantsInGroup) {
-		// 	// maybe read this from the clusterTenantIndex
-		// }
+		for (auto& tenantPair : self->tenantsInGroup) {
+			// maybe read this from the clusterTenantIndex
+		}
 		// Assert matching tenant exists on other cluster
 		// Assert other tenant is locked
 		// Assert other tenant has the correct tenant group
