@@ -22,6 +22,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
+#include "flow/swift_support.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
@@ -29,7 +30,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public KnobsImpl<ServerKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
@@ -204,7 +205,6 @@ public:
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
-	bool ENABLE_DD_PHYSICAL_SHARD_MOVE; // Enable physical shard move.
 	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
@@ -711,6 +711,7 @@ public:
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER;
 	int64_t SPRING_BYTES_STORAGE_SERVER;
 	int64_t AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
+	int64_t AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER;
 	int64_t TARGET_BYTES_PER_STORAGE_SERVER_BATCH;
 	int64_t SPRING_BYTES_STORAGE_SERVER_BATCH;
 	int64_t STORAGE_HARD_LIMIT_BYTES;
@@ -762,8 +763,6 @@ public:
 	// To protect against this, we do not compute the average cost when the
 	// measured tps drops below this threshold
 	double GLOBAL_TAG_THROTTLING_MIN_RATE;
-	// Used by global tag throttling counters
-	double GLOBAL_TAG_THROTTLING_FOLDING_TIME;
 	// Maximum number of tags tracked by global tag throttler. Additional tags will be ignored
 	// until some existing tags expire
 	int64_t GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED;
@@ -778,6 +777,11 @@ public:
 	// compute rates, but these rates won't be sent to GRV proxies for
 	// enforcement.
 	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+
+	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME;
+	double GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME;
 
 	double MAX_TRANSACTIONS_PER_BYTE;
 
@@ -865,7 +869,6 @@ public:
 	int SERVE_AUDIT_STORAGE_PARALLELISM;
 	int PERSIST_FINISH_AUDIT_COUNT; // Num of persist complete/failed audits for each type
 	int AUDIT_RETRY_COUNT_MAX;
-	int SS_AUDIT_AUTO_PROCEED_COUNT_MAX;
 	int CONCURRENT_AUDIT_TASK_COUNT_MAX;
 	int BUGGIFY_BLOCK_BYTES;
 	int64_t STORAGE_RECOVERY_VERSION_LAG_LIMIT;
@@ -1168,11 +1171,14 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
+	int BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
+	int BLOB_MANIFEST_RETRY_INTERVAL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
@@ -1200,6 +1206,9 @@ public:
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
 	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
 	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
+
+	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
+	bool FLOW_WITH_SWIFT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

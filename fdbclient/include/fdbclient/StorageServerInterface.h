@@ -1168,23 +1168,27 @@ struct GetStorageMetricsRequest {
 	}
 };
 
+// Tracks the busyness of tags on individual storage servers.
+struct BusyTagInfo {
+	constexpr static FileIdentifier file_identifier = 4528694;
+	TransactionTag tag;
+	double rate{ 0.0 };
+	double fractionalBusyness{ 0.0 };
+
+	BusyTagInfo() = default;
+	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
+	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+
+	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, tag, rate, fractionalBusyness);
+	}
+};
+
 struct StorageQueuingMetricsReply {
-	struct TagInfo {
-		constexpr static FileIdentifier file_identifier = 4528694;
-		TransactionTag tag;
-		double rate{ 0.0 };
-		double fractionalBusyness{ 0.0 };
-
-		TagInfo() = default;
-		TagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-		  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, tag, rate, fractionalBusyness);
-		}
-	};
-
 	constexpr static FileIdentifier file_identifier = 7633366;
 	double localTime;
 	int64_t instanceID; // changes if bytesDurable and bytesInput reset
@@ -1195,7 +1199,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage{ 0.0 };
 	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<TagInfo> busiestTags;
+	std::vector<BusyTagInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {

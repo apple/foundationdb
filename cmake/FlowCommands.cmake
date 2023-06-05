@@ -209,9 +209,16 @@ function(add_flow_target)
 
       set(in_file "${CMAKE_CURRENT_SOURCE_DIR}/${in_filename}")
       if(is_actor_file)
+        if(hdr)
+          list(APPEND HEADER_LIST ${in_file})
+        endif()
         set(out_file "${CMAKE_CURRENT_BINARY_DIR}/${out_filename}")
       else()
         set(out_file "${in_file}")
+      endif()
+
+      if(hdr)
+        list(APPEND HEADER_LIST ${out_file})
       endif()
 
       list(APPEND sources ${out_file})
@@ -278,6 +285,7 @@ function(add_flow_target)
     endforeach()
 
     set_property(TARGET ${AFT_NAME} PROPERTY SOURCE_FILES ${AFT_SRCS})
+    set_property(TARGET ${AFT_NAME} PROPERTY HEADER_FILES ${HEADER_LIST})
     set_property(TARGET ${AFT_NAME} PROPERTY COVERAGE_FILTERS ${AFT_SRCS})
 
     add_custom_target(${AFT_NAME}_actors DEPENDS ${generated_files})

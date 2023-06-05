@@ -119,26 +119,28 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStates(Database cx,
 	state std::vector<AuditStorageState> auditStates;
 	state Key readBegin;
 	state Key readEnd;
-	state RangeResult res;
 	state Reverse reverse = newFirst ? Reverse::True : Reverse::False;
-
+	if (num.present() && num.get() == 0) {
+		return auditStates;
+	}
 	loop {
 		try {
 			readBegin = auditKeyRange(auditType).begin;
 			readEnd = auditKeyRange(auditType).end;
 			auditStates.clear();
 			while (true) {
-				res.clear();
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				KeyRangeRef rangeToRead(readBegin, readEnd);
-				if (num.present()) {
-					wait(store(res, tr.getRange(rangeToRead, num.get(), Snapshot::False, reverse)));
-				} else {
-					wait(store(res, tr.getRange(rangeToRead, GetRangeLimits(), Snapshot::False, reverse)));
-				}
+				state RangeResult res = wait(tr.getRange(rangeToRead,
+				                                         num.present() ? GetRangeLimits(num.get()) : GetRangeLimits(),
+				                                         Snapshot::False,
+				                                         reverse));
 				for (int i = 0; i < res.size(); ++i) {
 					auditStates.push_back(decodeAuditStorageState(res[i].value));
+					if (num.present() && auditStates.size() == num.get()) {
+						return auditStates; // since res.more is not reliable when GetRangeLimits is set to 1
+					}
 				}
 				if (!res.more) {
 					break;
@@ -251,7 +253,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 			TraceEvent(SevDebug, "ConflictWithPreviousOwner");
 			throw movekeys_conflict(); // need a new name
 		}
-
 		// Take the lock
 		if (isWrite) {
 			BinaryWriter wrMyOwner(Unversioned());
@@ -267,7 +268,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 			    .detail("MyOwner", lock.myOwner.toString())
 			    .detail("Writer", lastWriter.toString());
 		}
-
 		return Void();
 	} else if (currentOwner == lock.myOwner) {
 		if (isWrite) {
@@ -278,13 +278,43 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
 			tr->makeSelfConflicting();
 		}
-
 		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner");
 		throw movekeys_conflict(); // need a new name
 	}
+}
+
+ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled) {
+	state Transaction tr(cx);
+
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
+			// Persist audit result
+			tr.set(auditKey(auditState.getType(), auditState.id), auditStorageStateValue(auditState));
+			wait(tr.commit());
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditState", auditState.id)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
+			break;
+		} catch (Error& e) {
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditStateError", auditState.id)
+			    .errorUnsuppressed(e)
+			    .detail("AuditID", auditState.id)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditPhase", auditState.getPhase())
+			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id));
+			wait(tr.onError(e));
+		}
+	}
+
+	return Void();
 }
 
 ACTOR Future<UID> persistNewAuditState(Database cx,
@@ -333,7 +363,6 @@ ACTOR Future<UID> persistNewAuditState(Database cx,
 				TraceEvent(SevDebug, "AuditUtilPersistedNewAuditState", auditId)
 				    .detail("AuditKey", auditKey(auditState.getType(), auditId));
 				break;
-
 			} catch (Error& e) {
 				TraceEvent(SevDebug, "AuditUtilPersistedNewAuditStateError", auditId)
 				    .errorUnsuppressed(e)
@@ -384,7 +413,6 @@ ACTOR Future<Void> persistAuditState(Database cx,
 			    .detail("AuditKey", auditKey(auditState.getType(), auditState.id))
 			    .detail("Context", context);
 			break;
-
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilPersistAuditStateError", auditState.id)
 			    .errorUnsuppressed(e)
@@ -415,7 +443,6 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 			    .detail("AuditType", type)
 			    .detail("AuditKey", auditKey(type, id));
 			break;
-
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilReadAuditStateError", id)
 			    .errorUnsuppressed(e)
@@ -493,12 +520,15 @@ ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState audit
 			if (ddAuditState.getPhase() != AuditPhase::Running) {
 				throw audit_storage_failed();
 			}
+			ASSERT(ddAuditState.ddId.isValid());
+			if (ddAuditState.ddId != auditState.ddId) {
+				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+			}
 			wait(krmSetRange(&tr,
 			                 auditRangeBasedProgressPrefixFor(auditState.getType(), auditState.id),
 			                 auditState.range,
 			                 auditStorageStateValue(auditState)));
 			break;
-
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -525,7 +555,6 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByRange(Database cx,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			auditStates = res_;
 			break;
-
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
 			wait(tr.onError(e));
@@ -567,13 +596,16 @@ ACTOR Future<Void> persistAuditStateByServer(Database cx, AuditStorageState audi
 			if (ddAuditState.getPhase() != AuditPhase::Running) {
 				throw audit_storage_failed();
 			}
+			ASSERT(ddAuditState.ddId.isValid());
+			if (ddAuditState.ddId != auditState.ddId) {
+				throw audit_storage_failed(); // a new dd starts and this audit task is outdated
+			}
 			wait(krmSetRange(
 			    &tr,
 			    auditServerBasedProgressPrefixFor(auditState.getType(), auditState.id, auditState.auditServerId),
 			    auditState.range,
 			    auditStorageStateValue(auditState)));
 			break;
-
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}
@@ -601,7 +633,6 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 			                                     CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
 			auditStates = res_;
 			break;
-
 		} catch (Error& e) {
 			TraceEvent(SevDebug, "AuditUtilGetAuditStateForRangeError").errorUnsuppressed(e).detail("AuditID", auditId);
 			wait(tr.onError(e));

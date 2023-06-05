@@ -109,3 +109,104 @@ else()
     add_executable(mkcert MkCertCli.cpp)
 endif()
 target_link_libraries(mkcert PUBLIC flow)
+
+set(FLOW_BINARY_DIR "${CMAKE_BINARY_DIR}/flow")
+if (WITH_SWIFT)
+    include(GenerateModulemap)
+
+    generate_modulemap("${CMAKE_BINARY_DIR}/flow/include" "Flow" flow
+        OMIT
+        sse2neon.h
+        ppc-asm.h
+    )
+
+    add_library(flow_swift STATIC
+        FlowCheckedContinuation.swift
+        stream_support.swift # general stream support types
+        flow_stream_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
+        error_support.swift
+        task_priority_support.swift
+        SwiftBridging.swift
+        SwiftFileB.swift
+        future_support.swift # general support types
+        trace_support.swift # general support types
+        flow_future_support.swift # conformances for future types that we vend with this module (E.g. CInt, Void)
+        reply_support.swift
+        clock_support.swift
+        flow_optional_support.swift
+    )
+
+    target_include_directories(flow_swift PUBLIC
+        "${CMAKE_BINARY_DIR}/flow/include"
+        "${CMAKE_SOURCE_DIR}/flow/include"
+        "${CMAKE_BINARY_DIR}/flow/"
+        "${CMAKE_BINARY_DIR}/fdbclient/include"
+        "${CMAKE_BINARY_DIR}/fdbserver/include"
+        "${CMAKE_SOURCE_DIR}/fdbrpc/include"
+        "${CMAKE_BINARY_DIR}/fdbrpc/include"
+        "${CMAKE_SOURCE_DIR}/contrib/fmt-8.1.1/include"
+        "${CMAKE_SOURCE_DIR}/contrib/md5/include"
+        "${CMAKE_SOURCE_DIR}/contrib/libb64/include"
+        "${CMAKE_SOURCE_DIR}/contrib/sqlite"
+        "${Boost_DIR}/../../../include"
+        "${msgpack_DIR}/include"
+    )
+
+    include(FindSwiftLibs)
+    swift_get_linker_search_paths(SWIFT_LINK_PATHS)
+    target_link_directories(flow PUBLIC "${SWIFT_LINK_PATHS}")
+
+    # We need to make sure that Swift, and the concurrency library is linked
+    # in every module that uses flow, because we implement the Swift hooks in flow.
+    # TODO(swift): With upcoming CMake 3.26 we can get rid of this as it should realize
+    #              that modules need Swift and use Swift for the linking which
+    #              will do the right thing.
+    target_link_options(flow PUBLIC
+        "-lswiftCore"
+        "-lswift_Concurrency"
+        "-lswift_StringProcessing")
+
+    # Link with runtime initialization stub (not needed on Darwin).
+    if (NOT APPLE)
+      string(REPLACE " " ";" SWIFT_LINK_PATHS_LIST "${SWIFT_LINK_PATHS}")
+      list(GET SWIFT_LINK_PATHS_LIST -1 LastPath) # get the last element the list
+      target_link_options(flow PUBLIC "${LastPath}/swiftrt.o")
+    endif()
+
+    # TODO: the TBD validation skip is because of swift_job_run_generic, though it seems weird why we need to do that?
+    target_compile_options(flow_swift PRIVATE "$<$<COMPILE_LANGUAGE:Swift>:SHELL:-Xcc -std=c++20 -Xfrontend -validate-tbd-against-ir=none -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml>")
+
+    # Ensure that C++ code in fdbserver can import Swift using a compatibility header.
+    include(SwiftToCXXInterop)
+
+    add_swift_to_cxx_header_gen_target(
+      flow_swift
+      flow_swift_checked_continuation_header
+      "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/Flow_CheckedContinuation.h"
+      SOURCES
+       "${CMAKE_CURRENT_SOURCE_DIR}/FlowCheckedContinuation.swift"
+       "${CMAKE_CURRENT_SOURCE_DIR}/flow_optional_support.swift"
+       FLAGS
+    -Xcc -std=c++20 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
+    # Important: This is needed to avoid including headers that depends on this generated header.
+    -Xcc -DSWIFT_FUTURE_SUPPORT_H -Xcc -DSWIFT_STREAM_SUPPORT_H -Xcc -DSWIFT_HIDE_CHECKED_CONTINUTATION
+    )
+
+    add_swift_to_cxx_header_gen_target(
+      flow_swift
+      flow_swift_header
+      "${CMAKE_CURRENT_BINARY_DIR}/include/SwiftModules/Flow"
+       FLAGS
+    -Xcc -std=c++20 -Xcc -DNO_INTELLISENSE -Xcc -ivfsoverlay${CMAKE_BINARY_DIR}/flow/include/headeroverlay.yaml
+    )
+
+    add_dependencies(flow_swift_checked_continuation_header flow_actors boost_target)
+    add_dependencies(flow_swift_header flow_swift_checked_continuation_header)
+    add_dependencies(flow_swift flow_swift_header)
+
+    add_dependencies(flow_swift flow_actors)
+    add_dependencies(flow_swift boost_target)
+    # TODO(swift): rdar://99107402 - this will only work once CMake 3.25 is released:
+    # target_link_libraries(flow PRIVATE flow_swift)
+    add_dependencies(flow flow_swift)
+endif() # WITH SWIFT
