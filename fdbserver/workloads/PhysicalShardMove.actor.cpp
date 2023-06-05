@@ -101,7 +101,6 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		                           newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                         AssignEmptyRange::False,
 		                                         EnablePhysicalShardMove::True),
-		                           //  EnablePhysicalShardMove::False),
 		                           KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
 		                           teamSize,
 		                           includes,

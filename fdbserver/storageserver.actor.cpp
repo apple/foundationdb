@@ -9462,6 +9462,10 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	}
 	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
 
+	if (clearRecord) {
+		data->moveInShards.erase(moveInShard->id());
+	}
+
 	return Void();
 }
 
@@ -13929,6 +13933,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 
 		self.ssLock->halt();
+
+		self.moveInShards.clear();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {
