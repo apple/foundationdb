@@ -33,6 +33,7 @@
 #include "fdbrpc/simulator.h"
 #include "flow/CodeProbe.h"
 #include "flow/FastRef.h"
+#include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupContainerFileSystem.h"
@@ -421,6 +422,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	int64_t seqNo = 1;
 	int64_t manifestDumperSeqNo = 1;
 	bool enableManifestEncryption = false;
+	AsyncTrigger manifestCompletitionTrigger;
 
 	Promise<Void> iAmReplaced;
 
@@ -5607,6 +5609,7 @@ ACTOR Future<int64_t> getLastFlushTs(Database db) {
 ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
 	bool enabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 	if (!enabled) {
+		TraceEvent("BackupManifestNotEnabled").log();
 		return false;
 	}
 
@@ -5620,20 +5623,10 @@ ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
 			return true; // there is at least one active blob range
 		}
 	}
+	TraceEvent("SkipManifestBackup")
+	    .detail("KnownRanges", knownRanges.empty())
+	    .detail("Total", bmData->knownBlobRanges.size());
 	return false;
-}
-
-ACTOR Future<std::string> getMutationLogBackupContainer(Database db) {
-	std::string url = wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(db.getReference())));
-	if (url.starts_with("file://")) {
-		state std::vector<std::string> containers = wait(IBackupContainer::listContainers(url, {}));
-		if (containers.size() == 0) {
-			throw blob_restore_missing_logs();
-		}
-		return containers.back();
-	} else {
-		return url;
-	}
 }
 
 ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
@@ -5644,15 +5637,16 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 			if (!shouldBackup) {
 				continue;
 			}
-
 			int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
 			bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+
 			if (!shouldFlush) {
 				TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
 				return Void();
 			}
 
-			state std::string mlogsUrl = wait(getMutationLogBackupContainer(bmData->db));
+			state std::string mlogsUrl = wait(
+			    BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
 			state BackupDescription desc = wait(bc->describeBackup());
 			if (!desc.contiguousLogEnd.present()) {
@@ -5662,13 +5656,41 @@ ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
 			state Version logEndVersion = desc.contiguousLogEnd.get();
 			TraceEvent("DescribedMutationLogs").detail("LogEndVersion", logEndVersion);
 
-			// Force flush in-memory data of all blob workers until end of log
-			FlushGranuleRequest req(bmData->epoch, normalKeys, logEndVersion, false);
-			wait(
-			    success(doBlobGranuleRequests(bmData->db, normalKeys, req, &BlobWorkerInterface::flushGranuleRequest)));
+			// Flush until end of the mutation log
+			state std::vector<KeyRange> flushRanges;
+			for (auto& it : bmData->knownBlobRanges.intersectingRanges(normalKeys)) {
+				if (it.cvalue()) {
+					flushRanges.push_back(it.range());
+				}
+			}
+			TraceEvent("FlushingBlobGranules").detail("Ranges", flushRanges.size());
+			state std::vector<Future<Void>> futures;
+			for (auto& range : flushRanges) {
+				FlushGranuleRequest req(bmData->epoch, range, logEndVersion, false);
+				Future<Void> future =
+				    success(doBlobGranuleRequests(bmData->db, range, req, &BlobWorkerInterface::flushGranuleRequest));
+				futures.push_back(future);
+				if (futures.size() > SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE) {
+					waitForAll(futures);
+					futures.clear();
+					TraceEvent("FlushedBlobGranules").detail("Completed", SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE);
+				}
+			}
+			waitForAll(futures);
 			wait(updateLastFlushTs(bmData->db));
 			bmData->stats.lastFlushVersion = logEndVersion;
 			TraceEvent("FlushedBlobGranules").detail("FlushVersion", logEndVersion);
+
+			// Wait for next manifest dumped
+			state int64_t seqNo = bmData->manifestDumperSeqNo;
+			loop {
+				TraceEvent("WaitingBlobManifest").detail("Seq", seqNo);
+				wait(bmData->manifestCompletitionTrigger.onTrigger());
+				if (bmData->manifestDumperSeqNo > seqNo) {
+					TraceEvent("BlobManifestDumped").detail("Seq", bmData->manifestDumperSeqNo);
+					break;
+				}
+			}
 
 			// Truncate mutation logs to max retention period
 			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
@@ -5708,6 +5730,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 			// Skip backup if no active blob ranges
 			bool shouldBackup = wait(shouldBackupManifest(bmData));
 			if (shouldBackup) {
+				TraceEvent("BackupManifest").log();
 				auto db = SystemDBWriteLockedNow(bmData->db.getReference());
 				std::string url = wait(BlobGranuleBackupConfig().manifestUrl().getD(db));
 				Reference<BlobConnectionProvider> manifestStore =
@@ -5722,6 +5745,7 @@ ACTOR Future<Void> backupManifest(Reference<BlobManagerData> bmData) {
 				bmData->stats.manifestSizeInBytes += bytes;
 				bmData->stats.lastManifestDumpTs = now();
 				bmData->manifestDumperSeqNo++;
+				bmData->manifestCompletitionTrigger.trigger();
 			}
 		} catch (Error& e) {
 			TraceEvent("BackupManifestError").error(e);
