@@ -1243,20 +1243,6 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	}
 }
 
-/*ACTOR Future<Void> consistencyScanStateClearStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
-    // read the keyspaces so the transaction conflicts on write (key-backed properties don't expose conflict ranges, and
-the extra work here is negligible because this is a rare manual command so performance is not a huge concern)
-    wait(success(cs->currentRoundStats().getD(tr)) && success(cs->lifetimeStats().getD(tr)) &&
-success(cs->roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
-
-    // update each of the stats keyspaces to empty
-    cs->currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
-    cs->lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
-    cs->roundStatsHistory().erase(tr, 0, MAX_VERSION);
-
-    return Void();
-}*/
-
 ///////////////////////////////////////////////////////
 // Everything below this line is not relevant to the ConsistencyScan Role anymore.
 // It is only used by workloads/ConsistencyCheck
