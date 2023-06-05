@@ -343,42 +343,40 @@ void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCiphe
 
 // BlobCipherMetrics methods
 
+const std::unordered_map<int, std::string> BlobCipherMetrics::usageTypeNames = {
+	{ BlobCipherMetrics::UsageType::ALL, "" },
+	{ BlobCipherMetrics::UsageType::TLOG, "TLog" },
+	{ BlobCipherMetrics::UsageType::TLOG_POST_RESOLUTION, "TLogPostResolution" },
+	{ BlobCipherMetrics::UsageType::KV_MEMORY, "KVMemory" },
+	{ BlobCipherMetrics::UsageType::KV_REDWOOD, "KVRedwood" },
+	{ BlobCipherMetrics::UsageType::BLOB_GRANULE, "BlobGranule" },
+	{ BlobCipherMetrics::UsageType::BACKUP, "Backup" },
+	{ BlobCipherMetrics::UsageType::RESTORE, "Restore" },
+	{ BlobCipherMetrics::UsageType::TEST, "Test" },
+};
+
 BlobCipherMetrics::CounterSet::CounterSet(CounterCollection& cc, std::string name)
-  : encryptCPUTimeNS(name + "EncryptCPUTimeNS", cc), decryptCPUTimeNS(name + "DecryptCPUTimeNS", cc),
+  : encryptCPUTimeNS(name + "EncryptCPUTimeNS", cc, true), decryptCPUTimeNS(name + "DecryptCPUTimeNS", cc, true),
     getCipherKeysLatency(name + "GetCipherKeysLatency",
                          UID(),
                          FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
+                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,
+						 true),
     getLatestCipherKeysLatency(name + "GetLatestCipherKeysLatency",
                                UID(),
                                FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY) {}
+                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,
+							   true) {}
 
 BlobCipherMetrics::BlobCipherMetrics()
   : cc("BlobCipher"), cipherKeyCacheHit("CipherKeyCacheHit", cc), cipherKeyCacheMiss("CipherKeyCacheMiss", cc),
     cipherKeyCacheExpired("CipherKeyCacheExpired", cc), latestCipherKeyCacheHit("LatestCipherKeyCacheHit", cc),
     latestCipherKeyCacheMiss("LatestCipherKeyCacheMiss", cc),
     latestCipherKeyCacheNeedsRefresh("LatestCipherKeyCacheNeedsRefresh", cc),
-    getCipherKeysLatency("GetCipherKeysLatency",
-                         UID(),
-                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                         FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
-    getLatestCipherKeysLatency("GetLatestCipherKeysLatency",
-                               UID(),
-                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                               FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
     getBlobMetadataLatency("GetBlobMetadataLatency",
                            UID(),
                            FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,
-                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY),
-    counterSets({ CounterSet(cc, "TLog"),
-                  CounterSet(cc, "TLogPostResolution"),
-                  CounterSet(cc, "KVMemory"),
-                  CounterSet(cc, "KVRedwood"),
-                  CounterSet(cc, "BlobGranule"),
-                  CounterSet(cc, "Backup"),
-                  CounterSet(cc, "Restore"),
-                  CounterSet(cc, "Test") }) {
+                           FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY) {
 	specialCounter(cc, "CacheSize", []() { return BlobCipherKeyCache::getInstance()->getSize(); });
 	traceFuture = cc.traceCounters("BlobCipherMetrics", UID(), FLOW_KNOBS->ENCRYPT_KEY_CACHE_LOGGING_INTERVAL);
 }
