@@ -926,7 +926,10 @@ public:
 		}
 		return Void();
 	}
-	// Evaluate source team cpu & available space utilization
+
+	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED=true, we would evaluate the cpu and available space of
+	// source team when we are relocating a shard. If both are better than pivot values, we would return the source team
+	// as new destination team.
 	ACTOR static Future<Void> GetTeam_EvaluateSourceTeam() {
 		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
 		state int processSize = 4;
@@ -960,6 +963,10 @@ public:
 		                                                          KnobValueRef::create(double{ 0.6 }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.5 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("available_space_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.5 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.9 }));
 
 		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
 		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;
