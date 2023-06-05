@@ -95,19 +95,8 @@ void setBGMutations(FDBBGMutation*** mutationsOut,
 	}
 }
 
-template <class ResponseType>
-ApiResponse createApiResponse(const ApiRequestRef& req) {
-	Arena arena(sizeof(ResponseType) + sizeof(FDBResponseHeader));
-	ResponseType* resp = new (arena) ResponseType();
-	resp->header = new (arena) FDBResponseHeader();
-	resp->header->request_type = req.getType();
-	resp->header->allocator.handle = arena.getPtr();
-	resp->header->allocator.ifc = req.getAllocatorInterface();
-	return ApiResponse((FDBResponse*)resp, arena);
-}
-
 ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransaction* tr, ApiRequest req) {
-	auto input = req.getRequest<FDBReadBGDescriptionRequest>();
+	auto input = req.getTypedRequest<FDBReadBGDescriptionRequest>();
 	Optional<Version> readVersion;
 	state Version readVersionOut;
 	if (input->read_version != latestVersion) {
@@ -116,17 +105,18 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 	    wait(tr->readBlobGranules((KeyRangeRef&)input->key_range, input->begin_version, readVersion, &readVersionOut));
 
-	ApiResponse res = createApiResponse<FDBReadBGDescriptionResponse>(req);
-	res.arena().dependsOn(chunks.arena());
+	ApiResponse res = ApiResponse::create<FDBReadBGDescriptionResponse>(req);
+	Arena& arena = res.arena();
+	arena.dependsOn(chunks.arena());
 
-	auto resp = res.getResponse<FDBReadBGDescriptionResponse>();
+	auto resp = res.getTypedResponse<FDBReadBGDescriptionResponse>();
 	resp->desc_count = chunks.size();
 	resp->read_version = readVersionOut;
 
-	resp->desc_arr = new (res.arena()) FDBBGFileDescription*[chunks.size()];
+	resp->desc_arr = new (arena) FDBBGFileDescription*[chunks.size()];
 	for (int chunkIdx = 0; chunkIdx < chunks.size(); chunkIdx++) {
 		const BlobGranuleChunkRef& chunk = chunks[chunkIdx];
-		resp->desc_arr[chunkIdx] = new (res.arena()) FDBBGFileDescription();
+		resp->desc_arr[chunkIdx] = new (arena) FDBBGFileDescription();
 		FDBBGFileDescription& desc = *resp->desc_arr[chunkIdx];
 
 		// set key range
@@ -152,22 +142,22 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 		// snapshot file
 		desc.snapshot_present = chunk.snapshotFile.present();
 		if (desc.snapshot_present) {
-			desc.snapshot_file_pointer = new (res.arena()) FDBBGFilePointer();
-			setBlobFilePointer(desc.snapshot_file_pointer, chunk.snapshotFile.get(), res.arena());
+			desc.snapshot_file_pointer = new (arena) FDBBGFilePointer();
+			setBlobFilePointer(desc.snapshot_file_pointer, chunk.snapshotFile.get(), arena);
 		}
 
 		// delta files
 		desc.delta_file_count = chunk.deltaFiles.size();
 		if (chunk.deltaFiles.size()) {
-			desc.delta_files = new (res.arena()) FDBBGFilePointer*[chunk.deltaFiles.size()];
+			desc.delta_files = new (arena) FDBBGFilePointer*[chunk.deltaFiles.size()];
 			for (int d = 0; d < chunk.deltaFiles.size(); d++) {
-				desc.delta_files[d] = new (res.arena()) FDBBGFilePointer();
-				setBlobFilePointer(desc.delta_files[d], chunk.deltaFiles[d], res.arena());
+				desc.delta_files[d] = new (arena) FDBBGFilePointer();
+				setBlobFilePointer(desc.delta_files[d], chunk.deltaFiles[d], arena);
 			}
 		}
 
 		setBGMutations(
-		    &desc.memory_mutations, &desc.memory_mutation_count, &desc.tenant_prefix, res.arena(), chunk.newDeltas);
+		    &desc.memory_mutations, &desc.memory_mutation_count, &desc.tenant_prefix, arena, chunk.newDeltas);
 	}
 	return res;
 }

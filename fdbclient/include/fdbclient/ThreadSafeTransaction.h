@@ -241,7 +241,7 @@ public:
 	void debugTrace(BaseTraceEvent&&) override;
 	void debugPrint(std::string const& message) override;
 
-	ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) override;
+	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 

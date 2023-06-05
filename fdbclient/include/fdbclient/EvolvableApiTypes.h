@@ -6,6 +6,7 @@
 
 #ifndef __FDBCLIENT_EVOLVABLE_API_TYPES_H__
 #define __FDBCLIENT_EVOLVABLE_API_TYPES_H__
+
 #pragma once
 
 #include "flow/Arena.h"
@@ -13,42 +14,104 @@
 
 struct ClientHandle;
 
-struct ApiRequestRef {
-	FDBRequest* request;
-	ApiRequestRef(FDBRequest* request) : request(request) {}
-	ApiRequestRef() = default;
+class ApiRequest {
+public:
+	ApiRequest() = default;
+	ApiRequest(const ApiRequest& r) = default;
+	ApiRequest(ApiRequest&& r) noexcept = default;
+	ApiRequest& operator=(const ApiRequest& r) = default;
+	ApiRequest& operator=(ApiRequest&& r) noexcept = default;
 
-	bool isValid() const {
-		return request != nullptr && request->header != nullptr && request->header->allocator.ifc != nullptr &&
-		       request->header->allocator.handle != nullptr;
+	bool hasValidHeader() const {
+		return reqRef.isValid() && reqRef.getPtr()->header != nullptr &&
+		       reqRef.getPtr()->header->allocator.ifc != nullptr &&
+		       reqRef.getPtr()->header->allocator.handle != nullptr;
 	}
 
-	bool isAllocatorCompatible(FDBAllocatorIfc* alloc) const { return getAllocatorInterface() == alloc; }
+	bool isAllocatorCompatible(FDBAllocatorIfc* alloc) const {
+		ASSERT(reqRef.isValid());
+		return getAllocatorInterface() == alloc;
+	}
 
-	Arena getArena() const { return Arena::addRef((ArenaBlock*)request->header->allocator.handle); }
+	int32_t getType() const {
+		ASSERT(reqRef.isValid());
+		return reqRef.getPtr()->header->request_type;
+	}
 
-	int32_t getType() const { return request->header->request_type; }
-
-	FDBAllocatorIfc* getAllocatorInterface() const { return request->header->allocator.ifc; }
+	FDBAllocatorIfc* getAllocatorInterface() const {
+		ASSERT(reqRef.isValid());
+		return reqRef.getPtr()->header->allocator.ifc;
+	}
 
 	template <class RequestType>
-	RequestType* getRequest() {
-		return reinterpret_cast<RequestType*>(request);
+	RequestType* getTypedRequest() const {
+		return reinterpret_cast<RequestType*>(reqRef.getPtr());
 	}
+
+	FDBRequest* getFDBRequest() const { return reqRef.getPtr(); }
+
+	static ApiRequest addRef(FDBRequest* response) {
+		ASSERT(response != NULL);
+		return ApiRequest(Reference<FDBRequestRefCounted>::addRef((FDBRequestRefCounted*)response));
+	}
+
+private:
+	struct FDBRequestRefCounted : public FDBRequest {
+		void addref() { header->allocator.ifc->addref(header->allocator.handle); }
+		void delref() { header->allocator.ifc->delref(header->allocator.handle); }
+	};
+
+	Reference<FDBRequestRefCounted> reqRef;
+
+	ApiRequest(Reference<FDBRequestRefCounted>&& ref) : reqRef(ref) {}
 };
 
-struct ApiResponseRef {
-	FDBResponse* response;
-	ApiResponseRef(FDBResponse* response) : response(response) {}
-	ApiResponseRef() = default;
+class ApiResponse {
+public:
+	ApiResponse() = default;
+	ApiResponse(const ApiResponse& r) = default;
+	ApiResponse(ApiResponse&& r) noexcept = default;
+	ApiResponse& operator=(const ApiResponse& r) = default;
+	ApiResponse& operator=(ApiResponse&& r) noexcept = default;
 
 	template <class ResponseType>
-	ResponseType* getResponse() {
-		return reinterpret_cast<ResponseType*>(response);
+	ResponseType* getTypedResponse() const {
+		return reinterpret_cast<ResponseType*>(respRef.getPtr());
 	}
-};
 
-using ApiRequest = Standalone<ApiRequestRef>;
-using ApiResponse = Standalone<ApiResponseRef>;
+	FDBResponse* getFDBResponse() const { return respRef.getPtr(); }
+
+	Arena& arena() {
+		ASSERT(respRef.isValid());
+		static_assert(sizeof(Arena) == sizeof(void*));
+		return *reinterpret_cast<Arena*>(&respRef.getPtr()->header->allocator.handle);
+	}
+
+	static ApiResponse addRef(FDBResponse* response) {
+		ASSERT(response != NULL);
+		return ApiResponse(Reference<FDBResponseRefCounted>::addRef((FDBResponseRefCounted*)response));
+	}
+
+	template <class ResponseType>
+	static ApiResponse create(const ApiRequest& req) {
+		Arena arena(sizeof(ResponseType) + sizeof(FDBResponseHeader));
+		ResponseType* resp = new (arena) ResponseType();
+		resp->header = new (arena) FDBResponseHeader();
+		resp->header->request_type = req.getType();
+		resp->header->allocator.handle = arena.getPtr();
+		resp->header->allocator.ifc = req.getAllocatorInterface();
+		return addRef((FDBResponse*)resp);
+	}
+
+private:
+	struct FDBResponseRefCounted : public FDBResponse {
+		void addref() { header->allocator.ifc->addref(header->allocator.handle); }
+		void delref() { header->allocator.ifc->delref(header->allocator.handle); }
+	};
+
+	Reference<FDBResponseRefCounted> respRef;
+
+	ApiResponse(Reference<FDBResponseRefCounted>&& ref) : respRef(ref) {}
+};
 
 #endif

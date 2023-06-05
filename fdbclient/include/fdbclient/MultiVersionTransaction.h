@@ -566,7 +566,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 
-	ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) override;
+	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 
@@ -815,7 +815,7 @@ public:
 	void debugTrace(BaseTraceEvent&& event) override;
 	void debugPrint(std::string const& message) override;
 
-	ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) override;
+	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 

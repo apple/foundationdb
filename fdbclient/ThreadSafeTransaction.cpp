@@ -798,8 +798,8 @@ void ThreadSafeTransaction::debugPrint(std::string const& message) {
 	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
-ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(const ApiRequestRef& request) {
-	if (!request.isValid()) {
+ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(ApiRequest request) {
+	if (!request.hasValidHeader()) {
 		return client_invalid_operation();
 	}
 	if (!request.isAllocatorCompatible(getAllocatorInterface())) {
@@ -808,10 +808,9 @@ ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(const ApiReque
 		return cluster_version_changed();
 	}
 	ISingleThreadTransaction* tr = this->tr;
-	ApiRequest req(request, request.getArena());
-	return onMainThread([tr, req]() -> Future<ApiResponse> {
+	return onMainThread([tr, request]() -> Future<ApiResponse> {
 		tr->checkDeferredError();
-		return handleEvolvableApiRequest(tr, req);
+		return handleEvolvableApiRequest(tr, request);
 	});
 }
 

@@ -151,7 +151,7 @@ public:
 		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
 	};
 
-	virtual ThreadFuture<ApiResponse> execAsyncRequest(const ApiRequestRef& request) = 0;
+	virtual ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) = 0;
 
 	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };

@@ -514,16 +514,16 @@ ThreadFuture<VersionVector> DLTransaction::getVersionVector() {
 	return VersionVector(); // not implemented
 }
 
-ThreadFuture<ApiResponse> DLTransaction::execAsyncRequest(const ApiRequestRef& request) {
+ThreadFuture<ApiResponse> DLTransaction::execAsyncRequest(ApiRequest request) {
 	if (!api->transactionExecAsync) {
 		return unsupported_operation();
 	}
-	FdbCApi::FDBFuture* f = api->transactionExecAsync(tr, request.request);
+	FdbCApi::FDBFuture* f = api->transactionExecAsync(tr, request.getFDBRequest());
 	return toThreadFuture<ApiResponse>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		FDBResponse* response;
 		FdbCApi::fdb_error_t error = api->futureGetResponse(f, &response);
 		ASSERT(!error);
-		return ApiResponse(response, Arena());
+		return ApiResponse::addRef(response);
 	});
 }
 
@@ -1992,8 +1992,8 @@ void MultiVersionTransaction::debugPrint(std::string const& message) {
 	tr.transaction->debugPrint(message);
 }
 
-ThreadFuture<ApiResponse> MultiVersionTransaction::execAsyncRequest(const ApiRequestRef& request) {
-	return executeOperation<ApiResponse>(&ITransaction::execAsyncRequest, request);
+ThreadFuture<ApiResponse> MultiVersionTransaction::execAsyncRequest(ApiRequest request) {
+	return executeOperation<ApiResponse>(&ITransaction::execAsyncRequest, std::forward<ApiRequest>(request));
 }
 
 FDBAllocatorIfc* MultiVersionTransaction::getAllocatorInterface() {

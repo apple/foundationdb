@@ -46,7 +46,7 @@ RequestType* create_request_impl(FDBTransaction* tr, int32_t request_type) {
 
 template <class RequestType>
 FDBFuture* exec_request_impl(FDBTransaction* tr, RequestType* request) {
-	return (FDBFuture*)((ITransaction*)tr)->execAsyncRequest((FDBRequest*)request).extractPtr();
+	return (FDBFuture*)((ITransaction*)tr)->execAsyncRequest(ApiRequest::addRef((FDBRequest*)request)).extractPtr();
 }
 
 } // namespace
@@ -60,11 +60,11 @@ extern "C" DLLEXPORT FDBAllocatorIfc* fdb_get_allocator_interface() {
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_exec_async(FDBTransaction* tx, FDBRequest* request) {
-	return (FDBFuture*)(((ITransaction*)(tx))->execAsyncRequest(request).extractPtr());
+	return (FDBFuture*)(((ITransaction*)(tx))->execAsyncRequest(ApiRequest::addRef(request)).extractPtr());
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_response(FDBFuture* f, FDBResponse** response) {
-	CATCH_AND_RETURN(*response = ((ThreadSingleAssignmentVar<ApiResponse>*)(f))->get().response;);
+	CATCH_AND_RETURN(*response = ((ThreadSingleAssignmentVar<ApiResponse>*)(f))->get().getFDBResponse(););
 }
 
 /**
