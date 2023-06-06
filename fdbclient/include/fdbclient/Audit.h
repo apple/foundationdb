@@ -115,25 +115,28 @@ struct AuditStorageRequest {
 
 // Triggers an audit of the specific type, an audit id is returned if an audit is scheduled successfully.
 // If there is an running audit, the corresponding id will be returned, unless force is true;
-// When force is set, the ongoing audit will be cancelled, and a new audit will be scheduled.
+// When cancel is set, the ongoing audit will be cancelled.
 struct TriggerAuditRequest {
 	constexpr static FileIdentifier file_identifier = 1384445;
 
 	TriggerAuditRequest() = default;
 	TriggerAuditRequest(AuditType type, KeyRange range)
-	  : type(static_cast<uint8_t>(type)), range(range), force(false) {}
+	  : type(static_cast<uint8_t>(type)), range(range), cancel(false) {}
+
+	TriggerAuditRequest(AuditType type, UID id) : type(static_cast<uint8_t>(type)), id(id), cancel(true) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, force, reply);
+		serializer(ar, type, range, id, cancel, reply);
 	}
 
+	UID id;
 	uint8_t type;
 	KeyRange range;
-	bool force;
+	bool cancel;
 	ReplyPromise<UID> reply;
 };
 

@@ -4906,6 +4906,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
                                               StorageServerInterface remoteServer,
                                               UID ddId) {
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerBegin", data->thisServerID)
+	    .detail("AuditType", auditState.getType())
 	    .detail("AuditID", auditState.id)
 	    .detail("Range", auditState.range)
 	    .detail("Version", version)
@@ -5049,6 +5050,8 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "ValidateRangeAgainstServerFailed", data->thisServerID)
 			    .errorUnsuppressed(e)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditId", auditState.id)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)
 			    .detail("Version", version);
@@ -5058,6 +5061,8 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 
 	if (!error.empty()) {
 		TraceEvent(SevError, "ValidateRangeAgainstServerError", data->thisServerID)
+		    .detail("AuditType", auditState.getType())
+		    .detail("AuditId", auditState.id)
 		    .detail("Range", range)
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
@@ -5070,6 +5075,8 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	}
 
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerEnd", data->thisServerID)
+	    .detail("AuditType", auditState.getType())
+	    .detail("AuditId", auditState.id)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("ValidatedKeys", validatedKeys)
@@ -5724,7 +5731,11 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
 		    .detail("AuditID", req.id);
 
-		req.reply.sendError(audit_storage_failed());
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else {
+			req.reply.sendError(audit_storage_failed());
+		}
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
@@ -5959,7 +5970,11 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID);
-		req.reply.sendError(audit_storage_failed());
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else {
+			req.reply.sendError(audit_storage_failed());
+		}
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
 		}
@@ -6029,10 +6044,12 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type)
 		    .detail("TargetServers", describe(req.targetServers));
-		if (e.code() != error_code_audit_storage_error) {
-			req.reply.sendError(audit_storage_failed());
-		} else {
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else if (e.code() == error_code_audit_storage_error) {
 			req.reply.sendError(audit_storage_error());
+		} else {
+			req.reply.sendError(audit_storage_failed());
 		}
 		if (e.code() == error_code_actor_cancelled) {
 			throw e;
