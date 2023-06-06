@@ -1668,7 +1668,9 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!auditId.isValid()) {
 						is_error = true;
 					} else {
-						printf("Started audit: %s\n", auditId.toString().c_str());
+						printf("%s audit: %s\n",
+						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
+						       auditId.toString().c_str());
 					}
 					continue;
 				}
