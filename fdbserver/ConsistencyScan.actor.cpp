@@ -106,7 +106,7 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 			}
 		}
 
-		wait(delay(1.0));
+		wait(delay(5.0));
 	}
 }
 
