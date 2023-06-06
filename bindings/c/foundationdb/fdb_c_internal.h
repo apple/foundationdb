@@ -20,22 +20,17 @@
 
 #ifndef FDB_C_INTERNAL_H
 #define FDB_C_INTERNAL_H
-#include "flow/ProtocolVersion.h"
 #pragma once
-
-#ifndef DLLEXPORT
-#define DLLEXPORT
-#endif
-
-#ifndef WARN_UNUSED_RESULT
-#define WARN_UNUSED_RESULT
-#endif
 
 #include "fdb_c_types.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* -------------------------------------------------------------------------------------------
+ *  Database state sharing among multiple client threads
+ */
 
 // forward declaration and typedef
 typedef struct DatabaseSharedState DatabaseSharedState;
@@ -47,6 +42,10 @@ DLLEXPORT void fdb_database_set_shared_state(FDBDatabase* db, DatabaseSharedStat
 DLLEXPORT WARN_UNUSED_RESULT fdb_error_t fdb_future_get_shared_state(FDBFuture* f, DatabaseSharedState** outPtr);
 
 DLLEXPORT void fdb_use_future_protocol_version();
+
+/* -------------------------------------------------------------------------------------------
+ *  Internal blob granule API
+ */
 
 // the logical read_blob_granules is broken out (at different points depending on the client type) into the asynchronous
 // start() that happens on the fdb network thread, and synchronous finish() that happens off it
@@ -68,6 +67,45 @@ DLLEXPORT FDBResult* fdb_transaction_read_blob_granules_finish(FDBTransaction* t
                                                                int64_t beginVersion,
                                                                int64_t readVersion,
                                                                FDBReadBlobGranuleContext* granuleContext);
+
+/* -------------------------------------------------------------------------------------------
+ *  Internal evolvable API
+ */
+
+typedef struct FDBAllocatorIfc_ {
+	void* (*allocate)(void** handle, uint64_t sz);
+	void (*addref)(void* handle);
+	void (*delref)(void* handle);
+} FDBAllocatorIfc;
+
+typedef struct FDBAllocator_ {
+	void* handle;
+	FDBAllocatorIfc* ifc;
+} FDBAllocator;
+
+typedef struct FDBRequestHeader_ {
+	FDBAllocator allocator;
+	int32_t request_type;
+} FDBRequestHeader;
+
+typedef struct FDBRequest_ {
+	FDBRequestHeader* header;
+} FDBRequest;
+
+typedef struct FDBResponseHeader_ {
+	FDBAllocator allocator;
+	int32_t request_type;
+} FDBResponseHeader;
+
+typedef struct FDBResponse_ {
+	FDBResponseHeader* header;
+} FDBResponse;
+
+DLLEXPORT FDBAllocatorIfc* fdb_get_allocator_interface();
+
+DLLEXPORT FDBFuture* fdb_transaction_exec_async(FDBTransaction* tx, FDBRequest* request);
+
+DLLEXPORT fdb_error_t fdb_future_get_response(FDBFuture* f, FDBResponse** response);
 
 #ifdef __cplusplus
 }

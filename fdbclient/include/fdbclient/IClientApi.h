@@ -27,7 +27,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
-#include "fdbclient/EvolvableApiTypes.h"
+#include "fdbclient/ApiRequest.h"
 #include "flow/ProtocolVersion.h"
 #include "flow/ThreadHelper.actor.h"
 

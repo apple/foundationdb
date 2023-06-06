@@ -1,18 +1,16 @@
 /*
- * EvolvableApiTypes.h
+ * ApiRequest.h
  *
  * Copyright (c) 2023 Snowflake Computing
  */
 
-#ifndef __FDBCLIENT_EVOLVABLE_API_TYPES_H__
-#define __FDBCLIENT_EVOLVABLE_API_TYPES_H__
+#ifndef __FDBCLIENT_API_REQUEST_H__
+#define __FDBCLIENT_API_REQUEST_H__
 
 #pragma once
 
+#include "foundationdb/fdb_c_internal.h"
 #include "flow/Arena.h"
-#include "foundationdb/fdb_c_evolvable_internal.h"
-
-struct ClientHandle;
 
 class ApiRequest {
 public:

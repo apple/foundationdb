@@ -30,7 +30,7 @@
 #include "fdbclient/MultiVersionAssignmentVars.h"
 #include "foundationdb/fdb_c.h"
 #include "foundationdb/fdb_c_internal.h"
-#include "foundationdb/fdb_c_evolvable.h"
+#include "foundationdb/fdb_c_requests.h"
 
 int g_api_version = 0;
 
@@ -145,6 +145,45 @@ extern "C" DLLEXPORT fdb_bool_t fdb_error_predicate(int predicate_test, fdb_erro
 		fprintf(stderr, "Unexpected FDB unknown error\n");                                                             \
 		abort();                                                                                                       \
 	}
+
+/* ------------------------------------------------------------------------------------------------------
+ * Convenience wrappers for the internal C API
+ */
+
+namespace {
+
+template <class RequestType>
+RequestType* createApiRequest(FDBTransaction* tr, int32_t request_type) {
+	FDBAllocatorIfc* allocIfc = ((ITransaction*)tr)->getAllocatorInterface();
+	void* alloc = nullptr;
+	RequestType* request = reinterpret_cast<RequestType*>(allocIfc->allocate(&alloc, sizeof(RequestType)));
+	request->header = reinterpret_cast<FDBRequestHeader*>(allocIfc->allocate(&alloc, sizeof(FDBRequestHeader)));
+	request->header->allocator.handle = alloc;
+	request->header->allocator.ifc = allocIfc;
+	request->header->request_type = request_type;
+	return request;
+}
+
+template <class RequestType>
+FDBFuture* executeApiRequest(FDBTransaction* tr, RequestType* request) {
+	return (FDBFuture*)((ITransaction*)tr)->execAsyncRequest(ApiRequest::addRef((FDBRequest*)request)).extractPtr();
+}
+
+template <class RequestType>
+void* copyBytesIntoApiRequest(RequestType* request, const void* begin, uint64_t length) {
+	FDBRequestHeader* header = request->header;
+	void* out = header->allocator.ifc->allocate(&header->allocator.handle, length);
+	memcpy(out, begin, length);
+	return out;
+}
+
+template <class RequestType>
+void releaseApiRequest(RequestType* request) {
+	FDBRequestHeader* header = request->header;
+	header->allocator.ifc->delref(header->allocator.handle);
+}
+
+} // namespace
 
 extern "C" DLLEXPORT fdb_error_t fdb_network_set_option(FDBNetworkOption option,
                                                         uint8_t const* value,
@@ -398,7 +437,7 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f
                                                                     int* desc_count) {
 
 	FDBReadBGDescriptionResponse* response;
-	fdb_error_t err = fdb_future_get_read_bg_description_response(f, &response);
+	fdb_error_t err = fdb_future_get_response(f, reinterpret_cast<FDBResponse**>(&response));
 	if (err) {
 		return err;
 	}
@@ -1265,16 +1304,17 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(F
                                                                                int end_key_name_length,
                                                                                int64_t begin_version,
                                                                                int64_t read_version) {
-	FDBReadBGDescriptionRequest* request = fdb_create_read_bg_description_request(tr);
+	FDBReadBGDescriptionRequest* request =
+	    createApiRequest<FDBReadBGDescriptionRequest>(tr, FDBApiRequest_ReadBGDescriptionRequest);
 	request->read_version = read_version;
 	request->begin_version = begin_version;
-	request->key_range.begin_key =
-	    (uint8_t*)fdb_copy_to_request(request->header, begin_key_name, begin_key_name_length);
+	request->key_range.begin_key = (uint8_t*)copyBytesIntoApiRequest(request, begin_key_name, begin_key_name_length);
 	request->key_range.begin_key_length = begin_key_name_length;
-	request->key_range.end_key = (uint8_t*)fdb_copy_to_request(request->header, end_key_name, end_key_name_length);
+	request->key_range.end_key = (uint8_t*)copyBytesIntoApiRequest(request, end_key_name, end_key_name_length);
 	request->key_range.end_key_length = end_key_name_length;
-
-	return fdb_execute_read_bg_description_request(tr, request);
+	FDBFuture* future = executeApiRequest<FDBReadBGDescriptionRequest>(tr, request);
+	releaseApiRequest(request);
+	return future;
 }
 
 #include "fdb_c_function_pointers.g.h"
@@ -1354,6 +1394,22 @@ extern "C" DLLEXPORT const char* fdb_get_client_version() {
 
 extern "C" DLLEXPORT void fdb_use_future_protocol_version() {
 	API->useFutureProtocolVersion();
+}
+
+/* -------------------------------------------------------------------------------------------
+ *  Internal evolvable API
+ */
+
+extern "C" DLLEXPORT FDBAllocatorIfc* fdb_get_allocator_interface() {
+	return API->getAllocatorInterface();
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_exec_async(FDBTransaction* tx, FDBRequest* request) {
+	return (FDBFuture*)(((ITransaction*)(tx))->execAsyncRequest(ApiRequest::addRef(request)).extractPtr());
+}
+
+extern "C" DLLEXPORT fdb_error_t fdb_future_get_response(FDBFuture* f, FDBResponse** response) {
+	CATCH_AND_RETURN(*response = ((ThreadSingleAssignmentVar<ApiResponse>*)(f))->get().getFDBResponse(););
 }
 
 #if defined(__APPLE__)

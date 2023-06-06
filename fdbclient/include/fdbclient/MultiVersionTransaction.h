@@ -20,8 +20,6 @@
 
 #ifndef FDBCLIENT_MULTIVERSIONTRANSACTION_H
 #define FDBCLIENT_MULTIVERSIONTRANSACTION_H
-#include "flow/Arena.h"
-#include "foundationdb/fdb_c_evolvable_internal.h"
 #pragma once
 
 #include "fdbclient/fdb_c_options.g.h"

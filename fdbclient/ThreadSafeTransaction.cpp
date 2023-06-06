@@ -26,7 +26,7 @@
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/versions.h"
 #include "fdbclient/GenericManagementAPI.actor.h"
-#include "fdbclient/EvolvableApiRequestHandler.h"
+#include "fdbclient/ApiRequestHandler.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "flow/Arena.h"
 #include "flow/ProtocolVersion.h"
@@ -810,7 +810,7 @@ ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(ApiRequest req
 	ISingleThreadTransaction* tr = this->tr;
 	return onMainThread([tr, request]() -> Future<ApiResponse> {
 		tr->checkDeferredError();
-		return handleEvolvableApiRequest(tr, request);
+		return handleApiRequest(tr, request);
 	});
 }
 

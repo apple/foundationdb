@@ -18,7 +18,6 @@
  * limitations under the License.
  */
 
-#include "foundationdb/fdb_c_evolvable_internal.h"
 #include <fcntl.h>
 
 #include "fdbclient/IClientApi.h"

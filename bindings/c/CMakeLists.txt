@@ -1,11 +1,9 @@
 set(FDB_C_SRCS
   fdb_c.cpp
-  fdb_c_evolvable.cpp
   foundationdb/fdb_c.h
   foundationdb/fdb_c_internal.h
   foundationdb/fdb_c_types.h
-  foundationdb/fdb_c_evolvable.h
-  foundationdb/fdb_c_evolvable_internal.h)
+  foundationdb/fdb_c_requests.h)
 
 file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/foundationdb)
 

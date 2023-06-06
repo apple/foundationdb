@@ -1,12 +1,11 @@
 /*
- * EvolvableApiRequestHandler.actor.cpp
+ * ApiRequestHandler.actor.cpp
  *
  * Copyright (c) 2023 Snowflake Computing
  */
 
-#include "fdbclient/EvolvableApiRequestHandler.h"
-#include "fdbclient/EvolvableApiTypes.h"
-#include "foundationdb/fdb_c_evolvable.h"
+#include "fdbclient/ApiRequestHandler.h"
+#include "foundationdb/fdb_c_requests.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 namespace {
@@ -164,7 +163,7 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 
 } // namespace
 
-Future<ApiResponse> handleEvolvableApiRequest(ISingleThreadTransaction* tr, ApiRequest req) {
+Future<ApiResponse> handleApiRequest(ISingleThreadTransaction* tr, ApiRequest req) {
 	switch (req.getType()) {
 	case FDBApiRequest_ReadBGDescriptionRequest:
 		return handleReadBgDescriptionRequest(tr, req);

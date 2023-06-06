@@ -22,10 +22,6 @@
 #define FDB_C_H
 #pragma once
 
-#ifndef DLLEXPORT
-#define DLLEXPORT
-#endif
-
 #include "fdb_c_apiversion.g.h"
 #if (defined FDB_USE_LATEST_API_VERSION)
 #define FDB_API_VERSION FDB_LATEST_API_VERSION
@@ -39,16 +35,6 @@
 #error API version no longer supported (upgrade to 13)
 #elif FDB_API_VERSION > FDB_LATEST_API_VERSION
 #error Requested API version requires a newer version of this header
-#endif
-
-#if FDB_API_VERSION >= 23 && !defined(WARN_UNUSED_RESULT)
-#ifdef __GNUG__
-#define WARN_UNUSED_RESULT __attribute__((warn_unused_result))
-#else
-#define WARN_UNUSED_RESULT
-#endif
-#else
-#define WARN_UNUSED_RESULT
 #endif
 
 /*
@@ -154,32 +140,6 @@ typedef struct mappedkeyvalue {
 	FDBGetRangeReqAndResult getRange;
 	unsigned char buffer[32];
 } FDBMappedKeyValue;
-
-typedef struct readgranulecontext {
-	/* User context to pass along to functions */
-	void* userContext;
-
-	/* Returns a unique id for the load. Asynchronous to support queueing multiple in parallel. */
-	int64_t (*start_load_f)(const char* filename,
-	                        int filenameLength,
-	                        int64_t offset,
-	                        int64_t length,
-	                        int64_t fullFileLength,
-	                        void* context);
-
-	/* Returns data for the load. Pass the loadId returned by start_load_f */
-	uint8_t* (*get_load_f)(int64_t loadId, void* context);
-
-	/* Frees data from load. Pass the loadId returned by start_load_f */
-	void (*free_load_f)(int64_t loadId, void* context);
-
-	/* Set this to true for testing if you don't want to read the granule files,
-	   just do the request to the blob workers */
-	fdb_bool_t debugNoMaterialize;
-
-	/* Number of granules to load in parallel */
-	int granuleParallelism;
-} FDBReadBlobGranuleContext;
 
 DLLEXPORT void fdb_future_cancel(FDBFuture* f);
 

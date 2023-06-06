@@ -44,7 +44,8 @@ namespace fdb {
 // hide C API to discourage mixing C/C++ API
 namespace native {
 #include <foundationdb/fdb_c.h>
-#include <foundationdb/fdb_c_evolvable.h>
+#include <foundationdb/fdb_c_internal.h>
+#include <foundationdb/fdb_c_requests.h>
 } // namespace native
 
 using ByteString = std::basic_string<uint8_t>;
@@ -344,7 +345,7 @@ struct ReadBlobGranulesDescriptionResponse {
 	using Type = fdb::ReadBlobGranulesDescriptionResponse;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
 		native::FDBReadBGDescriptionResponse* resp;
-		auto err = native::fdb_future_get_read_bg_description_response(f, &resp);
+		auto err = native::fdb_future_get_response(f, (native::FDBResponse**)&resp);
 		out.desc_arr = reinterpret_cast<GranuleDescriptionRef**>(resp->desc_arr);
 		out.desc_count = resp->desc_count;
 		out.read_version = resp->read_version;
