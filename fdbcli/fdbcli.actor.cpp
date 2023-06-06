@@ -738,7 +738,7 @@ ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(Metaclust
                                                                        Optional<ClusterName> mgmtClusterName,
                                                                        StringRef newClusterNameStr,
                                                                        int apiVersion) {
-																		
+
 	ASSERT(!tokencmp(newClusterNameStr, registrationEntry.name.toString().c_str()));
 
 	ClusterName clusterName = registrationEntry.name;
@@ -2290,7 +2290,10 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							else {
 								std::tie(localDb, db, configDb) = std::get<0>(_result);
 								std::tie(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName) = std::get<1>(_result);
-								fmt::print("cluster changed to {}\n", newClusterNameStr);
+								tenant = Reference<ITenant>();
+								tenantName = Optional<Standalone<StringRef>>();
+								tenantEntry = Optional<TenantMapEntry>();
+								fmt::print("cluster changed to {}, tenant reset to default.\n", newClusterNameStr);
 							}
 						}
 					}

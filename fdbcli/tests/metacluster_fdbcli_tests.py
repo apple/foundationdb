@@ -502,19 +502,25 @@ def usecluster_test(logger, cluster_files):
     )
     lines = output.split("\n")
     logger.debug(output)
-    assert lines[1] == "cluster changed to {}".format(data_cluster_names[0])
+    assert lines[1] == "cluster changed to {}, tenant reset to default.".format(
+        data_cluster_names[0]
+    )
     assert lines[
         3
     ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
         data_cluster_names[0], management_cluster_name
     )
-    assert lines[5] == "cluster changed to {}".format(data_cluster_names[1])
+    assert lines[5] == "cluster changed to {}, tenant reset to default.".format(
+        data_cluster_names[1]
+    )
     assert lines[
         7
     ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
         data_cluster_names[1], management_cluster_name
     )
-    assert lines[9] == "cluster changed to {}".format(management_cluster_name)
+    assert lines[9] == "cluster changed to {}, tenant reset to default.".format(
+        management_cluster_name
+    )
     expected = """
   number of data clusters: {}
   tenant group capacity: {}
