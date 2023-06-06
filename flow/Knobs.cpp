@@ -312,7 +312,7 @@ void FlowKnobs::initialize(Randomize randomize, IsSimulated isSimulated) {
 	init( ENCRYPT_KEY_HEALTH_CHECK_INTERVAL,                    10 );
 	if ( randomize && BUGGIFY) { ENCRYPT_KEY_HEALTH_CHECK_INTERVAL = deterministicRandom()->randomInt(10, 60); }
 	init( EKP_HEALTH_CHECK_REQUEST_TIMEOUT,                    10.0);
-	init( ENCRYPT_KEY_CACHE_ENABLE_DETAIL_LOGGING,           false );
+	init( ENCRYPT_KEY_CACHE_ENABLE_DETAIL_LOGGING,           false ); if( randomize && BUGGIFY ) ENCRYPT_KEY_CACHE_ENABLE_DETAIL_LOGGING = true;
 	init( ENCRYPT_KEY_CACHE_LOGGING_INTERVAL,                  5.0 );
 	init( ENCRYPT_KEY_CACHE_LATENCY_LOGGING_INTERVAL,         60.0 );
 	init( ENCRYPT_KEY_CACHE_LOGGING_SKETCH_ACCURACY,          0.01 );
