@@ -5710,6 +5710,7 @@ ACTOR Future<UID> fetchClusterId(Database db) {
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	loop {
 		try {
+			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			Optional<Value> clusterIdVal = wait(tr->get(clusterIdKey));
