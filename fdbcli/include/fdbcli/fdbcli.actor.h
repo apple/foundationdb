@@ -22,9 +22,6 @@
 
 // When actually compiled (NO_INTELLISENSE), include the generated
 // version of this file.  In intellisense use the source version.
-#include "fdbclient/MetaclusterRegistration.h"
-#include "flow/FastRef.h"
-#include "flow/Optional.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLI_FDBCLI_ACTOR_G_H)
 #define FDBCLI_FDBCLI_ACTOR_G_H
 #include "fdbcli/fdbcli.actor.g.h"
@@ -40,12 +37,6 @@
 #include "flow/Arena.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
-
-/*
- * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
- * instance (e.g. from ThreadSafeApi)
- */
-#define API ((IClientApi*)MultiVersionApi::api)
 
 namespace fdb_cli {
 

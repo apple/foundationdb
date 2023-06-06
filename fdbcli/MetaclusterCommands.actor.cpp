@@ -28,16 +28,13 @@
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
-#include "flow/Optional.h"
 #include "flow/ThreadHelper.actor.h"
 
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterUtil.actor.h"
 
-#include <string>
-#include <tuple>
-
 #include "flow/actorcompiler.h" // This must be the last #include.
+#include <string>
 
 namespace fdb_cli {
 

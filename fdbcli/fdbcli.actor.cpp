@@ -19,9 +19,6 @@
  */
 
 #include "boost/lexical_cast.hpp"
-#include "fdbrpc/ReplicationTypes.h"
-#include "flow/Arena.h"
-#include "flow/Optional.h"
 #include "fmt/format.h"
 #include "fdbclient/ClusterConnectionFile.h"
 #include "fdbclient/ClusterConnectionMemoryRecord.h"
@@ -78,6 +75,12 @@
 #include "metacluster/Metacluster.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
+
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
 
 extern const char* getSourceVersion();
 

@@ -756,7 +756,6 @@ def test_main(logger):
     configure_tenant_group_test(cluster_files)
 
     cleanup_after_test(cluster_files[0], data_cluster_names)
-
     logger.debug("Tests complete")
 
 
