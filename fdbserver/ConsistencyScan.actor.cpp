@@ -49,15 +49,40 @@
 
 #define DEBUG_SCAN_PROGRESS false
 
+struct ConsistencyScanStats {
+	CounterCollection cc;
+	Future<Void> logger;
+
+	Counter logicalBytesScanned;
+	Counter replicatedBytesRead;
+	Counter requests;
+	Counter failedRequests;
+	Counter inconsistencies;
+	Counter databasePollSuccesses;
+	Counter databasePollErrors;
+
+	bool waitingBetweenRounds = false;
+
+	explicit ConsistencyScanStats(UID id, double interval)
+	  : cc("ConsistencyScanStats", id.toString()), logicalBytesScanned("LogicalBytesScanned", cc),
+	    replicatedBytesRead("ReplicatedBytesRead", cc), requests("Requests", cc), failedRequests("FailedRequests", cc),
+	    inconsistencies("Inconsistencies", cc), databasePollSuccesses("DatabasePollSuccesses", cc),
+	    databasePollErrors("DatabasePollErrors", cc) {
+		specialCounter(cc, "WaitingBetweenRounds", [this]() { return this->waitingBetweenRounds; });
+		logger = cc.traceCounters("ConsistencyScanMetrics", id, interval, "ConsistencyScanMetrics");
+	}
+};
+
 // State that is explicitly not persisted anywhere for this consistency scan. Includes things like caches of system
-// information
+// information and stats for trace logs
 struct ConsistencyScanMemoryState : public ReferenceCounted<ConsistencyScanMemoryState> {
 	UID csId{};
 	AsyncVar<int64_t> databaseSize = -1;
 	Reference<AsyncVar<ServerDBInfo> const> dbInfo;
+	ConsistencyScanStats stats;
 
 	explicit ConsistencyScanMemoryState(Reference<AsyncVar<ServerDBInfo> const> dbInfo, UID csId)
-	  : dbInfo(dbInfo), csId(csId) {}
+	  : dbInfo(dbInfo), csId(csId), stats(csId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 };
 
 // TODO: test the test and write a canary key that the storage servers intentionally get wrong
@@ -88,6 +113,7 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 			CODE_PROBE(!ddWorkerInterf.present(), "Consistency Scan couldn't find DD worker");
 
 			if (ddWorkerInterf.present()) {
+				++memState->stats.databasePollSuccesses;
 				TraceEventFields md = wait(timeoutError(
 				    ddWorkerInterf.get().eventLogRequest.getReply(EventLogRequest("DDTrackerStats"_sr)), 5.0));
 				memState->databaseSize.set(md.getInt64("TotalSizeBytes"));
@@ -104,6 +130,7 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
+			++memState->stats.databasePollErrors;
 		}
 
 		wait(delay(1.0));
@@ -553,6 +580,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					if (statsCurrentRound.startVersion == 0) {
 						statsCurrentRound.startVersion = tr->getReadVersion().get();
 						statsCurrentRound.startTime = now();
+						statsCurrentRound.lastProgressTime = now();
 						cs.currentRoundStats().set(tr, statsCurrentRound);
 					}
 				}
@@ -703,6 +731,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					    KeyRangeRef(beginKey, shardBoundaries[1].key.removePrefix(keyServersPrefix));
 
 					bool scanRange = true;
+					statsCurrentRound.lastProgressVersion = tr->getReadVersion().get();
 
 					// Check if we are supposed to scan this range by finding the range that contains the start
 					// key in the Consistency Scan range config
@@ -807,6 +836,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 						loop {
 							state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 							state Optional<int> firstValidServer;
+							memState->stats.requests += storageServerInterfaces.size();
 							int newErrors = wait(consistencyCheckReadData(memState->csId,
 							                                              db,
 							                                              targetRange,
@@ -817,6 +847,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 							                                              &replicatedBytesRead,
 							                                              statsCurrentRound.startVersion));
 							errors += newErrors;
+							memState->stats.inconsistencies += newErrors;
 
 							// If any shard experienced an error, retry this key range
 							for (int i = 0; i < storageServerInterfaces.size(); i++) {
@@ -880,6 +911,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 									TraceEvent("ConsistencyScan_FailedRequest", memState->csId)
 									    .errorUnsuppressed(failedRequest.get())
 									    .suppressFor(5.0);
+									++memState->stats.failedRequests;
 								}
 								// FIXME: increment failed request count if error present
 								ASSERT(failedRequest.get().code() != error_code_operation_cancelled);
@@ -896,6 +928,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 
 						statsLifetime.logicalBytesScanned += logicalBytesRead;
 						statsLifetime.replicatedBytesRead += replicatedBytesRead;
+
+						memState->stats.logicalBytesScanned += logicalBytesRead;
+						memState->stats.replicatedBytesRead += replicatedBytesRead;
 
 						totalReadBytesFromStorageServers += replicatedBytesRead;
 						if (DEBUG_SCAN_PROGRESS) {
@@ -956,6 +991,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopSaving", memState->csId)
 					    .detail("ProgressKey", statsCurrentRound.lastEndKey);
 				}
+				statsCurrentRound.lastProgressTime = now();
 				loop {
 					if (DEBUG_SCAN_PROGRESS) {
 						TraceEvent(SevDebug, "ConsistencyScanProgressScanLoopSaveStart", memState->csId)
@@ -1011,7 +1047,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 				if (DEBUG_SCAN_PROGRESS) {
 					TraceEvent(SevDebug, "ConsistencyScanProgressWait", memState->csId);
 				}
+				memState->stats.waitingBetweenRounds = true;
 				wait(delayBeforeMainLoopRestart);
+				memState->stats.waitingBetweenRounds = false;
 				break;
 			}
 		} // Scan loop
@@ -1023,11 +1061,6 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 	state ConsistencyScanState cs;
 	ASSERT(g_network->isSimulated());
 	TraceEvent("ConsistencyScan_SimEnable", csId).log();
-	if (g_simulator->willRestart) {
-		// FIXME: better handling for checking for consistency scan in restarting tests
-		TraceEvent("ConsistencyScan_SimEnableSkipBeforeRestart", csId).log();
-		return Void();
-	}
 	loop {
 		try {
 			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
@@ -1051,8 +1084,16 @@ ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
 				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
 				                                        ISimulator::SimConsistencyScanState::Enabling);
 				config.enabled = true;
-			} else if (BUGGIFY_WITH_PROB(0.5)) {
-				config.minStartVersion = tr->getReadVersion().get();
+			} else {
+				if (config.enabled && g_simulator->restarted &&
+				    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::DisabledStart) {
+					TraceEvent("ConsistencyScan_SimEnableAlreadyDoneFromRestart", csId).log();
+					g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
+					                                        ISimulator::SimConsistencyScanState::Enabling);
+				}
+				if (BUGGIFY_WITH_PROB(0.5)) {
+					config.minStartVersion = tr->getReadVersion().get();
+				}
 			}
 			// also change the rate
 			config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
