@@ -738,10 +738,16 @@ ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(Metaclust
                                                                        Optional<ClusterName> mgmtClusterName,
                                                                        StringRef newClusterNameStr,
                                                                        int apiVersion) {
+																		
+	ASSERT(!tokencmp(newClusterNameStr, registrationEntry.name.toString().c_str()));
+
 	ClusterName clusterName = registrationEntry.name;
 	ClusterType clusterType = registrationEntry.clusterType;
 
 	if (!mgmtDb.present()) {
+		ASSERT(!mgmtLocalDb.present());
+		ASSERT(!mgmtConfigDb.present());
+		ASSERT(!mgmtClusterName.present());
 		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 			fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
 			return std::make_tuple(std::make_tuple(localDb, db, configDb),
@@ -754,6 +760,11 @@ ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(Metaclust
 			mgmtClusterName = clusterName;
 		}
 	}
+
+	ASSERT(mgmtDb.present());
+    ASSERT(mgmtLocalDb.present());
+    ASSERT(mgmtConfigDb.get());
+    ASSERT(mgmtClusterName.present());
 
 	if (tokencmp(newClusterNameStr, mgmtClusterName.get().toString().c_str())) {
 		db = mgmtDb.get();
