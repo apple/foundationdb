@@ -4481,12 +4481,14 @@ void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest 
 	CODE_PROBE(true, "consistency check injecting corruption");
 
 	// FIXME: code probe for each type?
-	// FIXME: weird memory issues when messing with actual response data, enable and figure out later
+
 	if (true /*deterministicRandom()->random01() < 0.3*/) {
 		// flip more flag
 		reply.more = !reply.more;
 		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
 	} else {
+		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
+		ASSERT(false);
 		// make deep copy of request, since some of the underlying memory can reference storage engine data directly
 		GetKeyValuesReply copy = reply;
 		reply = GetKeyValuesReply();
