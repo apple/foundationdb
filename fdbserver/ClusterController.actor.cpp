@@ -1921,7 +1921,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
 	state UID auditId;
-
+	ASSERT(!req.cancel);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
@@ -1951,14 +1951,49 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 	return Void();
 }
 
+ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+	ASSERT(req.cancel);
+	try {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.serverInfo->get().distributor.present()) {
+			wait(self->db.serverInfo->onChange());
+		}
+		TraceEvent(SevVerbose, "CCCancelAuditStorageBegin", self->id)
+		    .detail("AuditID", req.id)
+		    .detail("AuditType", req.getType())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TriggerAuditRequest fReq(req.getType(), req.id);
+		UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		TraceEvent(SevVerbose, "CCCancelAuditStorageEnd", self->id)
+		    .detail("ReturnedAuditID", auditId)
+		    .detail("AuditID", auditId)
+		    .detail("AuditType", req.getType());
+		ASSERT(auditId == req.id);
+		req.reply.send(auditId);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "CCCancelAuditStorageFailed", self->id)
+		    .errorUnsuppressed(e)
+		    .detail("AuditID", req.id)
+		    .detail("AuditType", req.getType());
+		req.reply.sendError(cancel_audit_storage_failed());
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
 		TraceEvent(SevVerbose, "CCTriggerAuditStorageReceived", self->id)
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
-		    .detail("AuditType", req.type);
-		self->addActor.send(triggerAuditStorage(self, req));
+		    .detail("AuditType", req.getType());
+		if (req.cancel) {
+			ASSERT(req.id.isValid());
+			self->addActor.send(cancelAuditStorage(self, req));
+		} else {
+			self->addActor.send(triggerAuditStorage(self, req));
+		}
 	}
 }
 
