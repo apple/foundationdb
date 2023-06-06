@@ -2948,6 +2948,9 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 				break;
 			}
 
+			// subtract size BEFORE filter, to avoid huge cpu loop and processing if very selective filter applied
+			remainingLimitBytes -= sizeof(MutationsAndVersionRef) + it->expectedSize();
+
 			MutationsAndVersionRef m;
 			if (doFilterMutations) {
 				m = filterMutations(memoryReply.arena, *it, req.range, req.encrypted, commonFeedPrefixLength);
@@ -3010,7 +3013,6 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		                            remainingDurableBytes,
 		                            req.options));
 		ssReadLock.release();
-
 		data->counters.kvScanBytes += res.logicalSize();
 		++data->counters.changeFeedDiskReads;
 
@@ -6594,23 +6596,16 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(T
                                                                                Database cx,
                                                                                KeyRangeRef keys,
                                                                                Version fetchVersion) {
-	loop {
-		state Standalone<VectorRef<BlobGranuleChunkRef>> results;
-		try {
-			state Standalone<VectorRef<KeyRangeRef>> ranges =
-			    wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
-			for (auto& range : ranges) {
-				KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
-				Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
-				    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
-				results.append(results.arena(), chunks.begin(), chunks.size());
-				results.arena().dependsOn(chunks.arena());
-			}
-			return results;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
+	state Standalone<VectorRef<BlobGranuleChunkRef>> results;
+	state Standalone<VectorRef<KeyRangeRef>> ranges = wait(cx->listBlobbifiedRanges(keys, CLIENT_KNOBS->TOO_MANY));
+	for (auto& range : ranges) {
+		KeyRangeRef intersectedRange(std::max(keys.begin, range.begin), std::min(keys.end, range.end));
+		Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
+		    wait(tryReadBlobGranuleChunks(tr, intersectedRange, fetchVersion));
+		results.append(results.arena(), chunks.begin(), chunks.size());
+		results.arena().dependsOn(chunks.arena());
 	}
+	return results;
 }
 
 // Read keys from blob storage
@@ -7417,7 +7412,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
 	// knob
 	state ReadOptions readOptions = ReadOptions(
-	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
+	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -7570,14 +7565,15 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 			state PromiseStream<RangeResult> results;
 			state Future<Void> hold;
 			if (isFullRestore) {
-				state BlobRestoreRangeState rangeStatus = wait(BlobRestoreController::getRangeState(restoreController));
+				state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(restoreController));
 				// Read from blob only when it's copying data for full restore. Otherwise it may cause data corruptions
 				// e.g we don't want to copy from blob any more when it's applying mutation logs(APPLYING_MLOGS)
-				if (rangeStatus.second.phase == BlobRestorePhase::COPYING_DATA ||
-				    rangeStatus.second.phase == BlobRestorePhase::ERROR) {
+				if (phase == BlobRestorePhase::COPYING_DATA || phase == BlobRestorePhase::ERROR) {
 					wait(loadBGTenantMap(&data->tenantData, &tr));
+					// only copy the range that intersects with full restore range
+					state KeyRangeRef range(std::max(keys.begin, normalKeys.begin), std::min(keys.end, normalKeys.end));
 					Version version = wait(BlobRestoreController::getTargetVersion(restoreController, fetchVersion));
-					hold = tryGetRangeFromBlob(results, &tr, data->cx, rangeStatus.first, version, &data->tenantData);
+					hold = tryGetRangeFromBlob(results, &tr, data->cx, range, version, &data->tenantData);
 				} else {
 					hold = tryGetRange(results, &tr, keys);
 				}
@@ -7927,7 +7923,6 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				data->newestDirtyVersion.insert(keys, data->data().getLatestVersion());
 			}
 		}
-
 		TraceEvent(SevError, "FetchKeysError", data->thisServerID)
 		    .error(e)
 		    .detail("Elapsed", now() - startTime)

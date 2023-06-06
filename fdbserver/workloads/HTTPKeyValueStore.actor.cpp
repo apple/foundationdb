@@ -181,6 +181,7 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 	int opsPerSecond;
 	Future<Void> client;
 	int64_t nextSeqNo = 1;
+	bool manualResolve;
 
 	// handle race where test phase killed put in progress
 	Optional<std::pair<std::string, std::string>> activePut;
@@ -202,6 +203,10 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		testDuration = getOption(options, "testDuration"_sr, 30.0);
 		nodeCount = getOption(options, "nodeCount"_sr, 100);
 		opsPerSecond = getOption(options, "nodeCount"_sr, 100);
+		manualResolve = getOption(options, "manualResolve"_sr, sharedRandomNumber % 2);
+		// it's important that we select this on a test-by-test basis and not a connection-by-connection basis as if one
+		// approach works but another doesn't, it would be hidden
+		sharedRandomNumber /= 2;
 	}
 
 	std::string getKey(int i) {
@@ -224,9 +229,24 @@ struct HTTPKeyValueStoreWorkload : TestWorkload {
 		loop {
 			try {
 				while (!self->conn) {
-					wait(store(self->conn,
-					           timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
-					                        FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT)));
+					// sometimes do resolve and connect directly, other times simulate what rest kms connector does and
+					// resolve endpoints themself and then connect to one directly
+					if (self->manualResolve) {
+						state std::vector<NetworkAddress> addrs =
+						    wait(INetworkConnections::net()->resolveTCPEndpoint(self->hostname, self->service));
+						ASSERT(!addrs.empty());
+						int idx = deterministicRandom()->randomInt(0, addrs.size());
+						wait(store(self->conn,
+						           timeoutError(INetworkConnections::net()->connect(
+						                            addrs[idx].ip.toString(), std::to_string(addrs[idx].port), false),
+						                        FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT)));
+
+					} else {
+						wait(store(
+						    self->conn,
+						    timeoutError(INetworkConnections::net()->connect(self->hostname, self->service, false),
+						                 FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT)));
+					}
 					if (self->conn.isValid()) {
 						wait(self->conn->connectHandshake());
 						++self->connectCount;

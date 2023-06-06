@@ -907,6 +907,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	//Worker
 	init( WORKER_LOGGING_INTERVAL,                               5.0 );
+	init( ROLE_REFRESH_LOGGING_INTERVAL,                        60.0 );
 	init( HEAP_PROFILER_INTERVAL,                               30.0 );
 	init( UNKNOWN_CC_TIMEOUT,                                  600.0 );
 	init( DEGRADED_RESET_INTERVAL,                          24*60*60 ); // FIXME: short interval causes false positive degraded state to flap, e.g. when everyone tries and fails to connect to dead coordinator: if ( randomize && BUGGIFY ) DEGRADED_RESET_INTERVAL = 10;
@@ -1109,13 +1110,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
 	init( BLOB_MANIFEST_BACKUP,                                false );
 	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 300.0 );
-	init( BLOB_FULL_RESTORE_MODE,                              false );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,     isSimulated ?  1.0 : 5.0 );
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
-	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "" );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
 	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
-	init( BLOB_RESTORE_MANIFEST_URL, isSimulated ? "file://simfdb/fdbblob/manifest" : "" );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );
 	init( BLOB_RESTORE_MLOGS_RETENTION_SECS,  isSimulated ?  120 : 3600 * 24 * 14 );
