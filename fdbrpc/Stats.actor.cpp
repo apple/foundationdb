@@ -29,9 +29,9 @@
 #include <string>
 #include "flow/actorcompiler.h" // has to be last include
 
-Counter::Counter(std::string const& name, CounterCollection& collection)
+Counter::Counter(std::string const& name, CounterCollection& collection, bool skipTraceOnSilentInterval)
   : name(name), interval_start(0), last_event(0), interval_sq_time(0), roughness_interval_start(0), interval_delta(0),
-    interval_start_value(0) {
+    interval_start_value(0), skip_trace_on_silent_interval(skipTraceOnSilentInterval) {
 	metric.init(collection.getName() + "." + (char)toupper(name.at(0)) + name.substr(1), collection.getId());
 	collection.addCounter(this);
 }
@@ -119,7 +119,9 @@ void CounterCollection::logToTraceEvent(TraceEvent& te) {
 			}
 			}
 		}
-		te.detail(c->getName().c_str(), c);
+		if (!c->suppressTrace()) {
+			te.detail(c->getName().c_str(), c);
+		}
 		c->resetInterval();
 	}
 }
@@ -215,9 +217,14 @@ LatencyBands::~LatencyBands() {
 	clearBands();
 }
 
-LatencySample::LatencySample(std::string name, UID id, double loggingInterval, double accuracy)
+LatencySample::LatencySample(std::string name,
+                             UID id,
+                             double loggingInterval,
+                             double accuracy,
+                             bool skipTraceOnSilentInterval)
   : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleEmit(now()), sketch(accuracy),
-    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
+    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)),
+    skipTraceOnSilentInterval(skipTraceOnSilentInterval) {
 	logger = recurring([this]() { logSample(); }, loggingInterval);
 	p50id = deterministicRandom()->randomUniqueID();
 	p90id = deterministicRandom()->randomUniqueID();
@@ -231,6 +238,9 @@ void LatencySample::addMeasurement(double measurement) {
 }
 
 void LatencySample::logSample() {
+	if (skipTraceOnSilentInterval && sketch.getPopulationSize() == 0) {
+		return;
+	}
 	double p25 = sketch.percentile(0.25);
 	double p50 = sketch.mean();
 	double p90 = sketch.percentile(0.9);
