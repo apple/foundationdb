@@ -20,8 +20,11 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -2965,6 +2968,24 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 		}
 	}
 }
+
+ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
+	try {
+		if (!db->get().client.encryptKeyProxy.present()) {
+			return KMSHealthStatus{ false, false, now() };
+		}
+		KMSHealthStatus reply = wait(timeoutError(
+		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
+		    FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
+		return reply;
+	} catch (Error& e) {
+		if (e.code() != error_code_timed_out) {
+			throw;
+		}
+		return KMSHealthStatus{ false, false, now() };
+	}
+}
+
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
 ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
                                                            DatabaseConfiguration conf,
@@ -3059,6 +3080,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
+
+		state JsonBuilderObject statusObj;
+
+		// Get EKP Health
+		if (db->get().client.encryptKeyProxy.present()) {
+			KMSHealthStatus status = wait(getKMSHealthStatus(db));
+			JsonBuilderObject _statusObj;
+			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
+			statusObj["encryption_at_rest"] = _statusObj;
+			statusObj["kms_is_healthy"] = status.canConnectToKms;
+			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
+			if (!status.canConnectToKms || !status.canConnectToEKP) {
+				return StatusReply(statusObj.getJson());
+			}
+		}
+
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -3186,7 +3223,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state WorkerEvents programStarts =
 		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
-		state JsonBuilderObject statusObj;
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
