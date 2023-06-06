@@ -1,5 +1,5 @@
 [configuration]
-tenantModes = ['disabled']
+allowDefaultTenant = false
 
 [[test]]
 testTitle = 'RestoreMultiRanges'

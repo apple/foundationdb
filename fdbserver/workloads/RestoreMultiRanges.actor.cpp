@@ -33,7 +33,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 
 	RestoreMultiRangesWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
-	static constexpr const char* NAME = "RestoreMultiRanges";
+	std::string description() const override { return "RestoreMultiRangesWorkload"; }
 
 	ACTOR static Future<Void> clearDatabase(Database cx) {
 		state Transaction tr(cx);
@@ -93,7 +93,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 					TraceEvent(SevError, "TestFailureInfo")
 					    .detail("DataSize", kvs.size())
 					    .detail("Expect", 4)
-					    .detail("Workload", NAME);
+					    .detail("Workload", "RestoreMultipleRanges");
 					return false;
 				}
 				KeyRef keys[4] = { "a"_sr, "aaaa"_sr, "bb"_sr, "bbb"_sr };
@@ -131,9 +131,7 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 			                                    deterministicRandom()->randomInt(0, 60),
 			                                    deterministicRandom()->randomInt(0, 100),
 			                                    tagName,
-			                                    backupRanges,
-			                                    true,
-			                                    StopWhenDone::True));
+			                                    backupRanges));
 		} catch (Error& e) {
 			if (e.code() != error_code_backup_unneeded && e.code() != error_code_backup_duplicate)
 				throw;
@@ -169,4 +167,4 @@ struct RestoreMultiRangesWorkload : TestWorkload {
 	void getMetrics(std::vector<PerfMetric>& m) override {}
 };
 
-WorkloadFactory<RestoreMultiRangesWorkload> RestoreMultiRangesWorkloadFactory;
+WorkloadFactory<RestoreMultiRangesWorkload> RestoreMultiRangesWorkloadFactory("RestoreMultiRanges");
