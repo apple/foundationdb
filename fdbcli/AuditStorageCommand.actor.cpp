@@ -91,8 +91,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 			end = allKeys.end;
 		}
 
-		UID startedAuditId =
-		    wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
+		UID startedAuditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
 		resAuditId = startedAuditId;
 	}
 	return resAuditId;
@@ -108,5 +107,5 @@ CommandFactory auditStorageFactory(
                 "For example, to audit the full key range: `audit_storage ha'\n"
                 "To audit a sub-range only: `audit_storage ha 0xa 0xb'\n"
                 "Returns an audit `ID'. See also `get_audit_status' command.\n"
-				"To cancel an audit: audit_storage cancel auditType auditId"));
+                "To cancel an audit: audit_storage cancel auditType auditId"));
 } // namespace fdb_cli
