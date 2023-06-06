@@ -41,6 +41,12 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+/*
+ * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
+ * instance (e.g. from ThreadSafeApi)
+ */
+#define API ((IClientApi*)MultiVersionApi::api)
+
 namespace fdb_cli {
 
 constexpr char msgTypeKey[] = "type";
@@ -226,18 +232,6 @@ ACTOR Future<bool> unlockDatabaseActor(Reference<IDatabase> db, UID uid);
 
 // metacluster command
 Future<bool> metaclusterCommand(Reference<IDatabase> db, std::vector<StringRef> tokens);
-
-// usecluster command
-ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(MetaclusterRegistrationEntry registrationEntry,
-                                                                       Database localDb,
-                                                                       Reference<IDatabase> db,
-                                                                       Reference<IDatabase> configDb,
-                                                                       Optional<Database> mgmtLocalDb,
-                                                                       Optional<Reference<IDatabase>> mgmtDb,
-                                                                       Optional<Reference<IDatabase>> mgmtConfigDb,
-                                                                       Optional<ClusterName> mgmtClusterName,
-                                                                       StringRef newClusterNameStr,
-                                                                       int apiVersion);
 
 // changefeed command
 ACTOR Future<bool> changeFeedCommandActor(Database localDb,

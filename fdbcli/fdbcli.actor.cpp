@@ -79,12 +79,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-/*
- * While we could just use the MultiVersionApi instance directly, this #define allows us to swap in any other IClientApi
- * instance (e.g. from ThreadSafeApi)
- */
-#define API ((IClientApi*)MultiVersionApi::api)
-
 extern const char* getSourceVersion();
 
 std::vector<std::string> validOptions;
@@ -729,6 +723,53 @@ Future<T> makeInterruptable(Future<T> f) {
 			throw operation_cancelled();
 		}
 	}
+}
+
+ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(MetaclusterRegistrationEntry registrationEntry,
+                                                                       Database localDb,
+                                                                       Reference<IDatabase> db,
+                                                                       Reference<IDatabase> configDb,
+                                                                       Optional<Database> mgmtLocalDb,
+                                                                       Optional<Reference<IDatabase>> mgmtDb,
+                                                                       Optional<Reference<IDatabase>> mgmtConfigDb,
+                                                                       Optional<ClusterName> mgmtClusterName,
+                                                                       StringRef newClusterNameStr,
+                                                                       int apiVersion) {
+	ClusterName clusterName = registrationEntry.name;
+	ClusterType clusterType = registrationEntry.clusterType;
+
+	if (!mgmtDb.present()) {
+		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+			fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
+			return std::make_tuple(std::make_tuple(localDb, db, configDb),
+			                       std::make_tuple(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName),
+			                       false);
+		} else {
+			mgmtLocalDb = localDb;
+			mgmtDb = db;
+			mgmtConfigDb = configDb;
+			mgmtClusterName = clusterName;
+		}
+	}
+
+	if (tokencmp(newClusterNameStr, mgmtClusterName.get().toString().c_str())) {
+		db = mgmtDb.get();
+		localDb = mgmtLocalDb.get();
+		configDb = mgmtConfigDb.get();
+	} else {
+		metacluster::DataClusterMetadata clusterMetadata =
+		    wait(metacluster::getCluster(mgmtDb.get(), newClusterNameStr));
+		ClusterConnectionString connectionString = clusterMetadata.connectionString;
+		Reference<IClusterConnectionRecord> connectionRecord =
+		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
+		localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
+		db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
+	}
+	return std::make_tuple(std::make_tuple(localDb, db, configDb),
+	                       std::make_tuple(mgmtLocalDb, mgmtDb, mgmtConfigDb, mgmtClusterName),
+	                       true);
 }
 
 ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
