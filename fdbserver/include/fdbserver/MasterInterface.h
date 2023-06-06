@@ -32,8 +32,18 @@
 #include "fdbclient/StorageServerInterface.h"
 #include "fdbserver/ResolverInterface.h"
 #include "fdbserver/TLogInterface.h"
+#include "flow/swift_support.h"
+
+#ifdef WITH_SWIFT
+#include "flow/swift_future_support.h"
+#endif /* WITH_SWIFT */
 
 using DBRecoveryCount = uint64_t;
+
+// A concrete type that can be referenced (in the context of Optional<set<Tag>>) in Swift.
+using SetTag = std::set<Tag>;
+using OptionalSetTag = Optional<SetTag>;
+using OptionalInt64 = Optional<int64_t>;
 
 struct MasterInterface {
 	constexpr static FileIdentifier file_identifier = 5979145;
@@ -136,7 +146,7 @@ struct GetCommitVersionReply {
 	}
 };
 
-struct GetCommitVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED GetCommitVersionRequest {
 	constexpr static FileIdentifier file_identifier = 16683181;
 	SpanContext spanContext;
 	uint64_t requestNum;
@@ -167,7 +177,7 @@ struct GetTLogPrevCommitVersionReply {
 	}
 };
 
-struct UpdateRecoveryDataRequest {
+struct SWIFT_CXX_IMPORT_OWNED UpdateRecoveryDataRequest {
 	constexpr static FileIdentifier file_identifier = 13605417;
 	Version recoveryTransactionVersion;
 	Version lastEpochEnd;
@@ -201,14 +211,14 @@ struct UpdateRecoveryDataRequest {
 	}
 };
 
-struct ReportRawCommittedVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED ReportRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 1853148;
 	Version version;
 	bool locked;
 	Optional<Value> metadataVersion;
 	Version minKnownCommittedVersion;
 	Optional<Version> prevVersion; // if present, wait for prevVersion to be committed before replying
-	Optional<std::set<Tag>> writtenTags;
+	Optional<SetTag> writtenTags;
 	ReplyPromise<Void> reply;
 
 	ReportRawCommittedVersionRequest() : version(invalidVersion), locked(false), minKnownCommittedVersion(0) {}
@@ -217,7 +227,7 @@ struct ReportRawCommittedVersionRequest {
 	                                 Optional<Value> metadataVersion,
 	                                 Version minKnownCommittedVersion,
 	                                 Optional<Version> prevVersion,
-	                                 Optional<std::set<Tag>> writtenTags = Optional<std::set<Tag>>())
+	                                 Optional<SetTag> writtenTags = Optional<SetTag>())
 	  : version(version), locked(locked), metadataVersion(metadataVersion),
 	    minKnownCommittedVersion(minKnownCommittedVersion), prevVersion(prevVersion), writtenTags(writtenTags) {}
 
@@ -248,12 +258,40 @@ struct LifetimeToken {
 	}
 };
 
+using MAP_UInt64_GetCommitVersionReply = std::map<uint64_t, GetCommitVersionReply>;
+
+inline void eraseReplies(MAP_UInt64_GetCommitVersionReply& replies, uint64_t untilUpperBound) {
+	replies.erase(replies.begin(), replies.upper_bound(untilUpperBound));
+}
+
+// Swift value type interface for Notified.
+template <class T>
+struct NotifiedValue {
+	using ValueType = decltype(std::declval<T>().get());
+	explicit NotifiedValue(ValueType v = 0) : value(std::make_shared<T>(v)) {}
+
+	[[nodiscard]] __attribute__((swift_attr("import_unsafe"))) Future<Void> whenAtLeast(const ValueType& limit) {
+		return value->whenAtLeast(limit);
+	}
+
+	[[nodiscard]] ValueType get() const { return value->get(); }
+
+	void set(const ValueType& v) { value->set(v); }
+
+private:
+	std::shared_ptr<T> value;
+};
+
+using NotifiedVersionValue = NotifiedValue<NotifiedVersion>;
+using OptionalNotifiedVersionValue = Optional<NotifiedVersion>;
+
 struct CommitProxyVersionReplies {
-	std::map<uint64_t, GetCommitVersionReply> replies;
+	MAP_UInt64_GetCommitVersionReply replies;
 	NotifiedVersion latestRequestNum;
 
 	CommitProxyVersionReplies(CommitProxyVersionReplies&& r) noexcept
 	  : replies(std::move(r.replies)), latestRequestNum(std::move(r.latestRequestNum)) {}
+
 	void operator=(CommitProxyVersionReplies&& r) noexcept {
 		replies = std::move(r.replies);
 		latestRequestNum = std::move(r.latestRequestNum);

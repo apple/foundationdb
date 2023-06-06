@@ -45,18 +45,12 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		type = AuditType::ValidateLocationMetadata;
 	} else if (tokencmp(tokens[1], "ssshard")) {
 		type = AuditType::ValidateStorageServerShard;
-	} else if (tokencmp(tokens[1], "checkmigration")) {
-		type = AuditType::CheckMigrationStatus;
 	} else {
 		printUsage(tokens[0]);
 		return false;
 	}
 
-	if (tokens.size() == 2) {
-		ASSERT(type == AuditType::CheckMigrationStatus);
-		std::string res = wait(checkMigrationProgress(cx));
-		printf("\n%s", res.c_str());
-	} else if (tokencmp(tokens[2], "id")) {
+	if (tokencmp(tokens[2], "id")) {
 		if (tokens.size() != 4) {
 			printUsage(tokens[0]);
 			return false;

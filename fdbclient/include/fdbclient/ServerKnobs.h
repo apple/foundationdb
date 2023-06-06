@@ -22,6 +22,7 @@
 
 #include "flow/BooleanParam.h"
 #include "flow/Knobs.h"
+#include "flow/swift_support.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 #include "fdbclient/ClientKnobs.h"
@@ -29,7 +30,7 @@
 // Disk queue
 static constexpr int _PAGE_SIZE = 4096;
 
-class ServerKnobs : public KnobsImpl<ServerKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ServerKnobs : public KnobsImpl<ServerKnobs> {
 public:
 	bool ALLOW_DANGEROUS_KNOBS;
 	// Versions
@@ -1170,11 +1171,14 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
+	int BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
+	int BLOB_MANIFEST_RETRY_INTERVAL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;
@@ -1202,6 +1206,9 @@ public:
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;
 	double IDEMPOTENCY_IDS_CLEANER_POLLING_INTERVAL;
 	double IDEMPOTENCY_IDS_MIN_AGE_SECONDS;
+
+	// Swift: Enable the Swift runtime hooks and use Swift implementations where possible
+	bool FLOW_WITH_SWIFT;
 
 	ServerKnobs(Randomize, ClientKnobs*, IsSimulated);
 	void initialize(Randomize, ClientKnobs*, IsSimulated);

@@ -558,51 +558,6 @@ ACTOR Future<AuditStorageState> getAuditState(Database cx, AuditType type, UID i
 	return decodeAuditStorageState(res.get());
 }
 
-ACTOR Future<std::string> checkMigrationProgress(Database cx) {
-	state Key begin = allKeys.begin;
-	state int numShards = 0;
-	state int numPhysicalShards = 0;
-
-	while (begin < allKeys.end) {
-		// RYW to optimize re-reading the same key ranges
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
-
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-
-				KeyRangeRef currentKeys(begin, allKeys.end);
-				RangeResult shards = wait(
-				    krmGetRanges(tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
-
-				for (int i = 0; i < shards.size() - 1; ++i) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId;
-					UID destId;
-					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-					if (srcId != anonymousShardId) {
-						++numPhysicalShards;
-					}
-				}
-
-				begin = shards.back().key;
-				numShards += shards.size() - 1;
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-	}
-
-	return fmt::format("Total number of shards: {}, number of physical shards: {}", numShards, numPhysicalShards);
-}
-
 ACTOR Future<Void> persistAuditStateByRange(Database cx, AuditStorageState auditState) {
 	state Transaction tr(cx);
 

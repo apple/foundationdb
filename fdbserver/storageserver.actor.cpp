@@ -8522,7 +8522,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
 	// knob
 	state ReadOptions readOptions = ReadOptions(
-	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
+	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -10149,7 +10149,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM) {
 	ASSERT(!keys.empty());
 	const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
-	TraceEvent(sevDm, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
+	TraceEvent(SevInfo, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
@@ -12515,6 +12515,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (!fFormat.get().present()) {
 		// The DB was never initialized
 		TraceEvent("DBNeverInitialized", data->thisServerID).log();
+		TraceEvent("KVSRemoved", data->thisServerID).detail("Reason", "DBNeverInitialized");
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
@@ -13631,6 +13632,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
 		// investigated?
+		TraceEvent("KVSRemoved", self.thisServerID).detail("Reason", e.name());
 		persistentData->dispose();
 	} else {
 		persistentData->close();
