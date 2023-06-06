@@ -10,6 +10,7 @@ storageEngineExcludeTypes = [4, 5]
 # encryption and tenants are not compatible between 71.2 and 71.3
 encryptModes = ['disabled']
 tenantModes=['disabled']
+simHTTPServerEnabled=false
 
 [[ knobs ]]
 # url was updated to correct default location under simfdb after 71.2, use old location

@@ -2041,8 +2041,16 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-			openTraceFile(
-			    opts.publicAddresses.address, opts.rollsize, opts.maxLogsSize, opts.logFolder, "trace", opts.logGroup);
+			openTraceFile(opts.publicAddresses.address,
+			              opts.rollsize,
+			              opts.maxLogsSize,
+			              opts.logFolder,
+			              "trace",
+			              opts.logGroup,
+			              /* identifier = */ "",
+			              /* tracePartialFileSuffix = */ "",
+			              InitializeTraceMetrics::True);
+
 			g_network->initTLS();
 			if (!opts.authzPublicKeyFile.empty()) {
 				try {
@@ -2086,7 +2094,6 @@ int main(int argc, char* argv[]) {
 			                              opts.fileSystemPath);
 			g_network->initMetrics();
 			FlowTransport::transport().initMetrics();
-			initTraceEventMetrics();
 		}
 
 		double start = timer(), startNow = now();
