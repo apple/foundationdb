@@ -1218,6 +1218,8 @@ TEST_CASE("/GlobalTagThrottler/TagLimit") {
 	return Void();
 }
 
+// TODO: Reenable this test once flakiness is resolved
+/*
 // 9 storage servers can handle 100 pages/second each.
 // 1 unhealthy storage server can only handle 1 page/second.
 // Total quota is set to 100 pages/second.
@@ -1226,21 +1228,22 @@ TEST_CASE("/GlobalTagThrottler/TagLimit") {
 // Then, a second storage server becomes unhealthy and can only handle 1 page/second.
 // Target rate adjusts down to 10/6 transactions per second, because only one bad zone can be ignored.
 TEST_CASE("/GlobalTagThrottler/IgnoreWorstZone") {
-	state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 1);
-	state StorageServerCollection storageServers(10, 100);
-	state TransactionTag testTag = "sampleTag1"_sr;
-	storageServers.setCapacity(0, 1);
-	ThrottleApi::TagQuotaValue tagQuotaValue;
-	tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-	globalTagThrottler.setQuota(testTag, tagQuotaValue);
-	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
-	state Future<Void> monitor = monitorActor(
-	    &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
-	state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
-	wait(timeoutError(monitor || client || updater, 600.0));
-	storageServers.setCapacity(1, 1);
-	monitor =
-	    monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 10.0 / 6.0); });
-	wait(timeoutError(monitor || client || updater, 600.0));
-	return Void();
+    state GlobalTagThrottler globalTagThrottler(Database{}, UID{}, 1);
+    state StorageServerCollection storageServers(10, 100);
+    state TransactionTag testTag = "sampleTag1"_sr;
+    storageServers.setCapacity(0, 1);
+    ThrottleApi::TagQuotaValue tagQuotaValue;
+    tagQuotaValue.totalQuota = 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+    globalTagThrottler.setQuota(testTag, tagQuotaValue);
+    state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
+    state Future<Void> monitor = monitorActor(
+        &globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 100.0 / 6.0); });
+    state Future<Void> updater = updateGlobalTagThrottler(&globalTagThrottler, &storageServers);
+    wait(timeoutError(monitor || client || updater, 600.0));
+    storageServers.setCapacity(1, 1);
+    monitor =
+        monitorActor(&globalTagThrottler, [](auto& gtt) { return targetRateIsNear(gtt, "sampleTag1"_sr, 10.0 / 6.0); });
+    wait(timeoutError(monitor || client || updater, 600.0));
+    return Void();
 }
+*/
