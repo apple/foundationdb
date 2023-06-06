@@ -39,7 +39,7 @@ ICheckpointReader* newCheckpointReader(const CheckpointMetaData& checkpoint,
 ACTOR Future<Void> deleteCheckpoint(CheckpointMetaData checkpoint) {
 	wait(delay(0, TaskPriority::FetchKeys));
 	const CheckpointFormat format = checkpoint.getFormat();
-	if (format == DataMoveRocksCF || format == RocksDB) {
+	if (format == DataMoveRocksCF || format == RocksDB || format == RocksDBKeyValues) {
 		if (!checkpoint.dir.empty()) {
 			platform::eraseDirectoryRecursive(checkpoint.dir);
 		} else {
@@ -89,6 +89,7 @@ ACTOR Future<CheckpointMetaData> fetchCheckpointRanges(Database cx,
 		}
 		initialState.setFormat(RocksDBKeyValues);
 		initialState.ranges = ranges;
+		initialState.dir = dir;
 		initialState.serializedCheckpoint = ObjectWriter::toValue(RocksDBCheckpointKeyValues(ranges), IncludeVersion());
 	}
 

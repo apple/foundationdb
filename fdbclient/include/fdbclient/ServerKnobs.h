@@ -204,7 +204,7 @@ public:
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
-	bool ENABLE_DD_PHYSICAL_SHARD_MOVE; // Enable physical shard move.
+	double DD_PHYSICAL_SHARD_MOVE_PROBABILITY; // Percentage of physical shard move, in the range of [0, 1].
 	int64_t MAX_PHYSICAL_SHARD_BYTES;
 	double PHYSICAL_SHARD_METRICS_DELAY;
 	double ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME;
@@ -319,6 +319,7 @@ public:
 	double DD_FAILURE_TIME;
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
+	int DD_SHARD_TRACKING_LOG_SEVERITY;
 	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
 	                                   // without yielding
@@ -910,6 +911,8 @@ public:
 	std::string STORAGESERVER_READTYPE_PRIORITY_MAP;
 	int SPLIT_METRICS_MAX_ROWS;
 	double STORAGE_SHARD_CONSISTENCY_CHECK_INTERVAL;
+	int PHYSICAL_SHARD_MOVE_LOG_SEVERITY;
+	int FETCH_SHARD_BUFFER_BYTE_LIMIT;
 
 	// Wait Failure
 	int MAX_OUTSTANDING_WAIT_FAILURE_REQUESTS;

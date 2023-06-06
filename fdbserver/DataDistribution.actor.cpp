@@ -106,6 +106,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 			TraceEvent(SevError, "DataMoveValidationError")
 			    .detail("Range", range)
 			    .detail("Reason", "DataMoveMissing")
+			    .detail("DestID", shard.destId)
 			    .detail("ShardPrimaryDest", describe(shard.primaryDest))
 			    .detail("ShardRemoteDest", describe(shard.remoteDest));
 		}

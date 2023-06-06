@@ -701,7 +701,7 @@ struct PhysicalShard {
 				    .detail("RocksKeyValuesCheckpoint", rcp.toString())
 				    .detail("Checkpoint", checkpoint.toString());
 			}
-			TraceEvent(SevInfo, "RocksDBServeRestoreFiles")
+			TraceEvent(SevInfo, "PhysicalShardRestoredFiles")
 			    .detail("Shard", id)
 			    .detail("CFName", cf->GetName())
 			    .detail("Checkpoint", checkpoint.toString())
@@ -719,7 +719,7 @@ struct PhysicalShard {
 			if (!this->isInitialized) {
 				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 				this->isInitialized.store(true);
-			} else {
+			} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
 				refreshReadIteratorPool();
 			}
 		}
@@ -1244,11 +1244,10 @@ public:
 					    .detail("PhysicalShard", existingShard->toString())
 					    .detail("Range", range)
 					    .detail("DataShardRange", shardRange);
+					// Force clear range.
+					writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
+					dirtyShards->insert(it.value()->physicalShard);
 				}
-
-				// Force clear range.
-				writeBatch->DeleteRange(it.value()->physicalShard->cf, toSlice(range.begin), toSlice(range.end));
-				dirtyShards->insert(it.value()->physicalShard);
 			}
 
 			TraceEvent(SevDebug, "ShardedRocksRemoveRange")
@@ -2213,11 +2212,14 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		for (const KeyRange& range : ranges) {
 			self->shardManager.addRange(range, shardId);
 		}
-		TraceEvent(SevDebug, "ShardedRocksRestoreAddRange", self->id)
+		const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
+		TraceEvent(sevDm, "ShardedRocksRestoreAddRange", self->id)
 		    .detail("Ranges", describe(ranges))
 		    .detail("ShardID", shardId)
 		    .detail("Checkpoints", describe(checkpoints));
-		auto a = new Writer::RestoreAction(&self->shardManager, self->path, shardId, ranges, checkpoints);
+		PhysicalShard* ps = self->shardManager.getPhysicalShardForAllRanges(ranges);
+		ASSERT(ps != nullptr);
+		auto a = new Writer::RestoreAction(&self->shardManager, ps, self->path, shardId, ranges, checkpoints);
 		auto res = a->done.getFuture();
 		self->writeThread->post(a);
 
@@ -2557,7 +2559,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			    .detail("PersistVersion", version);
 			ASSERT(a.request.version == version || a.request.version == latestVersion);
 
-			CheckpointMetaData res(ps->getAllRanges(), version, a.request.format, a.request.checkpointID);
+			CheckpointMetaData res(a.request.ranges, version, a.request.format, a.request.checkpointID);
 			s = rocksdb::Checkpoint::Create(a.shardManager->getDb(), &checkpoint);
 			if (!s.ok()) {
 				logRocksDBError(s, "CreateRocksDBCheckpoint");
@@ -2579,7 +2581,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				populateMetaData(&res, pMetadata);
 				rocksdb::ExportImportFilesMetaData metadata = *pMetadata;
 				delete pMetadata;
-				if (SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
+				if (!metadata.files.empty() && SERVER_KNOBS->ROCKSDB_ENABLE_CHECKPOINT_VALIDATION) {
 					rocksdb::ImportColumnFamilyOptions importOptions;
 					importOptions.move_files = false;
 					rocksdb::ColumnFamilyHandle* handle;
@@ -2661,15 +2663,18 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 		struct RestoreAction : TypedAction<Writer, RestoreAction> {
 			RestoreAction(ShardManager* shardManager,
+			              PhysicalShard* ps,
 			              const std::string& path,
 			              const std::string& shardId,
 			              const std::vector<KeyRange>& ranges,
 			              const std::vector<CheckpointMetaData>& checkpoints)
-			  : shardManager(shardManager), path(path), shardId(shardId), ranges(ranges), checkpoints(checkpoints) {}
+			  : shardManager(shardManager), ps(ps), path(path), shardId(shardId), ranges(ranges),
+			    checkpoints(checkpoints) {}
 
 			double getTimeEstimate() const override { return SERVER_KNOBS->COMMIT_TIME_ESTIMATE; }
 
 			ShardManager* shardManager;
+			PhysicalShard* ps;
 			const std::string path;
 			const std::string shardId;
 			std::vector<KeyRange> ranges;
@@ -2684,7 +2689,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 
 			ASSERT(!a.checkpoints.empty());
 
-			PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			// PhysicalShard* ps = a.shardManager->getPhysicalShardForAllRanges(a.ranges);
+			PhysicalShard* ps = a.ps;
 			ASSERT(ps != nullptr);
 
 			const CheckpointFormat format = a.checkpoints[0].getFormat();
@@ -3229,14 +3235,28 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		self->refreshHolder.cancel();
 		self->cleanUpJob.cancel();
 
-		wait(self->readThreads->stop());
+		try {
+			wait(self->readThreads->stop());
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseReadThreadError").errorUnsuppressed(e);
+		}
 		auto a = new Writer::CloseAction(&self->shardManager, deleteOnClose);
 		auto f = a->done.getFuture();
 		self->writeThread->post(a);
-		wait(f);
-		wait(self->writeThread->stop());
-		if (self->closePromise.canBeSet())
+		try {
+			wait(f);
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseActionError").errorUnsuppressed(e);
+		}
+
+		try {
+			wait(self->writeThread->stop());
+		} catch (Error& e) {
+			TraceEvent(SevError, "ShardedRocksCloseWriteThreadError").errorUnsuppressed(e);
+		}
+		if (self->closePromise.canBeSet()) {
 			self->closePromise.send(Void());
+		}
 		delete self;
 	}
 
