@@ -694,6 +694,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								}
 								// FIXME: increment failed request count if error present
 								ASSERT(failedRequest.get().code() != error_code_operation_cancelled);
+								totalReadBytesFromStorageServers += 100000;
 								break;
 							}
 						}
