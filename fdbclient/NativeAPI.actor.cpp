@@ -8406,6 +8406,7 @@ ACTOR Future<BlobGranuleFileReply> getFullGranuleFileReply(BlobGranuleFileReques
 	state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
 	    makeReference<BWLocationInfo>(v);
 	loop {
+
 		req.reply.reset();
 
 		state BlobGranuleFileReply rep;
@@ -8443,6 +8444,11 @@ ACTOR Future<BlobGranuleFileReply> getFullGranuleFileReply(BlobGranuleFileReques
 			// blob_granule_mutation_stream_too_old is expected if a delta file was flushed during the read and these
 			// mutations are no longer in memory, which means that we need to redo the request since the mutation range
 			// is no longer in memory
+
+			// explicitly cancel actors and wait for them to get cancelled so no weird races with still-running actors
+			// when we loop around again
+			streamFutures.clear();
+			wait(delay(0));
 		}
 	}
 }
