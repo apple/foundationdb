@@ -2295,7 +2295,8 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 		              "trace",
 		              networkOptions.traceLogGroup,
 		              identifier,
-		              networkOptions.tracePartialFileSuffix);
+		              networkOptions.tracePartialFileSuffix,
+		              InitializeTraceMetrics::True);
 
 		TraceEvent("ClientStart")
 		    .detail("SourceVersion", getSourceVersion())
@@ -2310,7 +2311,6 @@ void initializeClientTracing(Reference<IClusterConnectionRecord> connRecord, Opt
 
 		g_network->initMetrics();
 		FlowTransport::transport().initMetrics();
-		initTraceEventMetrics();
 	}
 
 	// Initialize system monitoring once the local IP is available
