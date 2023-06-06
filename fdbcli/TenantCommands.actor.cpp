@@ -342,7 +342,7 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 constexpr char usageMessage[] =
-    "Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
+    "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
@@ -401,7 +401,7 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
 			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print("Tenant movement should only be run on a management cluster.");
+				fmt::print(stderr, "ERROR: Tenant movement should only be run on a management cluster.");
 				return false;
 			}
 			break;
@@ -420,7 +420,7 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	} else if (step == "abort"_sr) {
 		wait(store(result, tenantMoveAbortCommand(db, tokens)));
 	} else {
-		fmt::print(usageMessage);
+		fmt::print(stderr, usageMessage);
 		return false;
 	}
 	return result;

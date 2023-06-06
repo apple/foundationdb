@@ -18,6 +18,7 @@
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterConsistency.actor.h"
 #include "metacluster/MetaclusterData.actor.h"
+#include "metacluster/MetaclusterMove.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -64,6 +65,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 	ClusterName sourceCluster;
 	ClusterName destinationCluster;
+	UID runID;
 
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
@@ -177,11 +179,14 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	ACTOR static Future<Void> startMove(MetaclusterMoveWorkload* self) {
 		self->sourceCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
 		self->destinationCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
+		self->runID = deterministicRandom()->randomUniqueID();
 		while (self->sourceCluster == self->destinationCluster) {
 			self->destinationCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
 		}
 
 		Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->sourceCluster);
+		metacluster::startTenantMovement(
+		    self->managementDb, tenantGroup.get(), self->sourceCluster, self->destinationCluster, self->runID);
 		return Void();
 	}
 
@@ -193,8 +198,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		metacluster::DataClusterEntry clusterEntry;
 		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
-		metacluster::util::SimulatedMetacluster simMetacluster =
-		    wait(metacluster::util::createSimulatedMetacluster(cx, self->initialTenantIdPrefix, clusterEntry));
+		metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
+		    cx,
+		    deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
+		                                     TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
+		    clusterEntry));
 
 		self->managementDb = simMetacluster.managementDb;
 		ASSERT(!simMetacluster.dataDbs.empty());

@@ -68,38 +68,23 @@ KeyBackedSet<Tuple>& clusterTenantIndex();
 // A set of (cluster, tenant group name) tuples ordered by cluster
 KeyBackedSet<Tuple>& clusterTenantGroupIndex();
 
-struct MovementMetadataSpecification {
-	Key subspace;
-	// UID is not supported by Tuple.h
-	// use UID::toString() and static UID::fromString instead
+namespace move {
+// UID is not supported by Tuple.h
+// use UID::toString() and static UID::fromString instead
 
-	// emergency_movement/move(tenantGroup) = RunID
-	KeyBackedMap<TenantGroupName, std::string> emergencyMovements;
+// emergency_movement/move(tenantGroup) = RunID
+KeyBackedMap<TenantGroupName, std::string>& emergencyMovements();
 
-	// emergency_movement/version(tenantGroup, RunID) = Version
-	KeyBackedMap<std::pair<TenantGroupName, std::string>, Version> movementVersions;
+// emergency_movement/version(tenantGroup, RunID) = Version
+KeyBackedMap<std::pair<TenantGroupName, std::string>, Version>& movementVersions();
 
-	// emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
-	KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>> movementQueue;
+// emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
+KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue();
 
-	// emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
-	KeyBackedMap<Tuple, Key> splitPointsMap;
+// emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
+KeyBackedMap<Tuple, Key>& splitPointsMap();
 
-	MovementMetadataSpecification(KeyRef prefix)
-	  : subspace(prefix.withSuffix("emergency_movement/"_sr)), splitPointsMap(subspace.withSuffix("split_points"_sr)),
-	    emergencyMovements(subspace.withSuffix("move"_sr)), movementVersions(subspace.withSuffix("version"_sr)),
-	    movementQueue(subspace.withSuffix("queue"_sr)) {}
-};
-
-struct MovementMetadata {
-	static MovementMetadataSpecification& instance();
-
-	static inline auto& subspace() { return instance().subspace; }
-	static inline auto& splitPointsMap() { return instance().splitPointsMap; }
-	static inline auto& emergencyMovements() { return instance().emergencyMovements; }
-	static inline auto& movementVersions() { return instance().movementVersions; }
-	static inline auto& movementQueue() { return instance().movementQueue; }
-};
+}; // namespace move
 
 } // namespace management
 

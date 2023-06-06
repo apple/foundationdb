@@ -70,14 +70,33 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex() {
 	return instance;
 }
 
-TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata() {
-	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
+namespace move {
+KeyBackedMap<TenantGroupName, std::string>& emergencyMovements() {
+	static KeyBackedMap<TenantGroupName, std::string> instance("emergency_movement/move/"_sr);
 	return instance;
 }
 
-MovementMetadataSpecification& MovementMetadata::instance() {
-	static MovementMetadataSpecification _instance = MovementMetadataSpecification(""_sr);
-	return _instance;
+KeyBackedMap<std::pair<TenantGroupName, std::string>, Version>& movementVersions() {
+	static KeyBackedMap<std::pair<TenantGroupName, std::string>, Version> instance("emergency_movement/version/"_sr);
+	return instance;
+}
+
+KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue() {
+	static KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>> instance(
+	    "emergency_movement/queue/"_sr);
+	return instance;
+}
+
+KeyBackedMap<Tuple, Key>& splitPointsMap() {
+	static KeyBackedMap<Tuple, Key> instance("emergency_movement/split_points/"_sr);
+	return instance;
+}
+
+}; // namespace move
+
+TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata() {
+	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);
+	return instance;
 }
 
 } // namespace management
