@@ -78,64 +78,39 @@ ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid) {
 	return res;
 }
 
-// Return if the state is guaranteed to be cleared:
-// If the audit state is the latest one, mark it as failed
-// Otherwise, clear the audit state key
-ACTOR Future<Void> clearAuditMetadata_impl(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
-	state Transaction tr(cx);
-	TraceEvent(SevDebug, "AuditUtilClearAuditMetadataStart", auditId).detail("AuditKey", auditKey(auditType, auditId));
-
-	loop {
-		try {
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult res = wait(tr.getRange(auditKeyRange(auditType), 1, Snapshot::False, Reverse::True));
-			ASSERT(res.size() == 0 || res.size() == 1);
-			if (res.empty()) {
-				return Void(); // Nothing to clear
-			}
-			state AuditStorageState latestExistingAuditState = decodeAuditStorageState(res[0].value);
-
-			Optional<Value> res_ = wait(tr.get(auditKey(auditType, auditId)));
-			if (!res_.present()) { // has been cancelled
-				return Void(); // Nothing to clear
-			}
-			state AuditStorageState toClearState = decodeAuditStorageState(res_.get());
-			ASSERT(toClearState.id == auditId && toClearState.getType() == auditType);
-			if (latestExistingAuditState.id == toClearState.id) {
-				// If the following toClearState is the latest, mark it as failed
-				toClearState.setPhase(AuditPhase::Failed);
-				tr.set(auditKey(toClearState.getType(), toClearState.id), auditStorageStateValue(toClearState));
-			} else {
+ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
+	try {
+		state Transaction tr(cx);
+		TraceEvent(SevDebug, "AuditUtilClearAuditMetadataStart", auditId)
+		    .detail("AuditKey", auditKey(auditType, auditId));
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> res_ = wait(tr.get(auditKey(auditType, auditId)));
+				if (!res_.present()) { // has been cleared
+					break; // Nothing to clear
+				}
+				state AuditStorageState toClearState = decodeAuditStorageState(res_.get());
+				ASSERT(toClearState.id == auditId && toClearState.getType() == auditType);
 				// For a zombie audit, it is in running state
 				// Clear audit metadata
 				tr.clear(auditKey(auditType, auditId));
-				// Clear progress metadata
+				// clear progress metadata
 				if (clearProgressMetadata) {
 					clearAuditProgressMetadata(&tr, auditType, auditId);
 				}
+				wait(tr.commit());
+				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
+				    .detail("AuditKey", auditKey(auditType, auditId));
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataError", auditId)
+				    .detail("AuditKey", auditKey(auditType, auditId));
+				wait(tr.onError(e));
 			}
-			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilClearAuditMetadataEnd", auditId)
-			    .detail("AuditKey", auditKey(auditType, auditId));
-			break;
-		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilClearAuditMetadataError", auditId)
-			    .detail("AuditKey", auditKey(auditType, auditId));
-			wait(tr.onError(e));
 		}
-	}
-
-	return Void();
-}
-
-ACTOR Future<Void> clearAuditMetadataBackground(Database cx,
-                                                AuditType auditType,
-                                                UID auditId,
-                                                bool clearProgressMetadata) {
-	try {
-		wait(clearAuditMetadata_impl(cx, auditType, auditId, clearProgressMetadata));
 	} catch (Error& e) {
 		// We do not want audit cleanup effects DD
 		// pass
@@ -143,14 +118,38 @@ ACTOR Future<Void> clearAuditMetadataBackground(Database cx,
 	return Void();
 }
 
-ACTOR Future<bool> clearAuditMetadataSync(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata) {
+ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId) {
 	try {
-		wait(clearAuditMetadata_impl(cx, auditType, auditId, clearProgressMetadata));
-		return true;
+		state Transaction tr(cx);
+		TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataStart", auditId)
+		    .detail("AuditKey", auditKey(auditType, auditId));
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				Optional<Value> res_ = wait(tr.get(auditKey(auditType, auditId)));
+				if (!res_.present()) { // has been cancelled
+					break; // Nothing to cancel
+				}
+				state AuditStorageState toCancelState = decodeAuditStorageState(res_.get());
+				ASSERT(toCancelState.id == auditId && toCancelState.getType() == auditType);
+				toCancelState.setPhase(AuditPhase::Failed);
+				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
+				wait(tr.commit());
+				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataEnd", auditId)
+				    .detail("AuditKey", auditKey(auditType, auditId));
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevDebug, "AuditUtilCancelAuditMetadataError", auditId)
+				    .detail("AuditKey", auditKey(auditType, auditId));
+				wait(tr.onError(e));
+			}
+		}
 	} catch (Error& e) {
-		// We do not want audit cleanup effects DD
-		return false;
+		throw cancel_audit_storage_failed();
 	}
+	return Void();
 }
 
 AuditPhase stringToAuditPhase(std::string auditPhaseStr) {

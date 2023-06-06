@@ -846,10 +846,10 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 			} else if (auditState.getPhase() == AuditPhase::Failed) {
 				if (numFinishAuditsCleared < numFinishAuditsToClear) {
 					// Clear both audit metadata and corresponding progress metadata
-					self->addActor.send(clearAuditMetadataBackground(self->txnProcessor->context(),
-					                                                 auditState.getType(),
-					                                                 auditState.id,
-					                                                 /*clearProgressMetadata=*/true));
+					self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
+					                                       auditState.getType(),
+					                                       auditState.id,
+					                                       /*clearProgressMetadata=*/true));
 					numFinishAuditsCleared++;
 				}
 				continue;
@@ -858,10 +858,10 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 					// Clear audit metadata only
 					// No need to clear the corresponding progress metadata
 					// since it has been cleared for Complete audits
-					self->addActor.send(clearAuditMetadataBackground(self->txnProcessor->context(),
-					                                                 auditState.getType(),
-					                                                 auditState.id,
-					                                                 /*clearProgressMetadata=*/false));
+					self->addActor.send(clearAuditMetadata(self->txnProcessor->context(),
+					                                       auditState.getType(),
+					                                       auditState.id,
+					                                       /*clearProgressMetadata=*/false));
 					numFinishAuditsCleared++;
 				}
 				continue;
@@ -2054,17 +2054,11 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 	try {
 		ASSERT(req.cancel);
 		ASSERT(req.id.isValid());
-		state bool cleared;
 		TraceEvent(SevDebug, "DDCancelAuditStorageStart", self->ddId)
 		    .detail("AuditType", req.getType())
 		    .detail("AuditID", req.id);
-		wait(store(cleared,
-		           clearAuditMetadataSync(
-		               self->txnProcessor->context(), req.getType(), req.id, /*clearProgressMetadata=*/true)));
-		if (!cleared) {
-			throw cancel_audit_storage_failed();
-		}
-		// Once clearAuditMetadata cleared, any ongoing audit will stop
+		wait(cancelAuditMetadata(self->txnProcessor->context(), req.getType(), req.id));
+		// Once clearAuditMetadata cancelled, any ongoing audit will stop
 		// Then clear ongoing audit D/S
 		if (auditExistInAuditMap(self, req.getType(), req.id)) {
 			removeAuditFromAuditMap(self, req.getType(), req.id);

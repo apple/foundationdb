@@ -31,7 +31,7 @@
 namespace fdb_cli {
 
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens) {
-	if (tokens.size() < 2 || tokens.size() > 4) {
+	if (tokens.size() < 2 || tokens.size() > 5) {
 		printUsage(tokens[0]);
 		return false;
 	}
@@ -79,8 +79,11 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 			printUsage(tokens[0]);
 			return false;
 		}
-		std::vector<AuditStorageState> res =
-		    wait(getAuditStates(cx, type, /*newFirst=*/true, CLIENT_KNOBS->TOO_MANY, phase));
+		int count = CLIENT_KNOBS->TOO_MANY;
+		if (tokens.size() == 5) {
+			count = std::stoi(tokens[4].toString());
+		}
+		std::vector<AuditStorageState> res = wait(getAuditStates(cx, type, /*newFirst=*/true, count, phase));
 		for (const auto& it : res) {
 			printf("Audit result is:\n%s\n", it.toString().c_str());
 		}
@@ -99,7 +102,7 @@ CommandFactory getAuditStatusFactory(
                 "To fetch audit status via ID: `get_audit_status [Type] id [ID]'\n"
                 "To fetch status of most recent audit: `get_audit_status [Type] recent [Count]'\n"
                 "To fetch status of audits in a specific phase: `get_audit_status [Type] phase "
-                "[running|complete|failed|error]'\n"
+                "[running|complete|failed|error] count'\n"
                 "Supported types include: 'ha', `replica`, `locationmetadata`, `ssshard`, \n"
                 "and `checkmigration`. If specified, `Count' is how many\n"
                 "rows to audit. If not specified, check all rows in audit.\n"

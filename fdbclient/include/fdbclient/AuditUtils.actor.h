@@ -36,11 +36,8 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
-ACTOR Future<Void> clearAuditMetadataBackground(Database cx,
-                                                AuditType auditType,
-                                                UID auditId,
-                                                bool clearProgressMetadata);
-ACTOR Future<bool> clearAuditMetadataSync(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
+ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
+ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 ACTOR Future<Void> persistAuditState(Database cx,
                                      AuditStorageState auditState,
