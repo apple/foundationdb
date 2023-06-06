@@ -56,6 +56,11 @@ using KeyRef = BytesRef;
 using Value = ByteString;
 using ValueRef = BytesRef;
 
+struct KeyRangeRef : native::FDBKeyRange {
+	KeyRef beginKey() const noexcept { return KeyRef(native::FDBKeyRange::begin_key, begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(native::FDBKeyRange::end_key, end_key_length); }
+};
+
 struct KeyValue {
 	Key key;
 	Value value;
@@ -64,6 +69,37 @@ struct KeyRange {
 	Key beginKey;
 	Key endKey;
 };
+
+template <class T>
+class VectorRef {
+public:
+	VectorRef(T* data, int size) : m_data(data), m_size(size) {}
+	VectorRef() = default;
+	VectorRef(const VectorRef& r) = default;
+	VectorRef(VectorRef&& r) noexcept = default;
+	VectorRef& operator=(const VectorRef& r) = default;
+	VectorRef& operator=(VectorRef&& r) noexcept = default;
+
+	int size() { return m_size; }
+	T* begin() { return m_data; }
+	T* end() { return m_data + m_size; }
+	T& front() { return *begin(); }
+	T& back() { return end()[-1]; }
+	T& operator[](int i) { return m_data[i]; }
+
+	const T* begin() const { return m_data; }
+	const T* end() const { return m_data + m_size; }
+	T const& front() const { return *begin(); }
+	T const& back() const { return end()[-1]; }
+	int size() const { return m_size; }
+	bool empty() const { return m_size == 0; }
+	const T& operator[](int i) const { return m_data[i]; }
+
+private:
+	T* m_data;
+	int m_size;
+};
+
 struct GranuleSummary {
 	KeyRange keyRange;
 	int64_t snapshotVersion;
@@ -81,88 +117,75 @@ struct GranuleSummary {
 	}
 };
 
-struct GranuleFilePointer {
-	ByteString filename;
-	int64_t offset;
-	int64_t length;
-	int64_t fullFileLength;
-	int64_t fileVersion;
-
-	// just keep raw data structures to pass to callbacks
-	native::FDBBGEncryptionCtx encryptionCtx;
-
-	GranuleFilePointer(const native::FDBBGFilePointer& nativePointer) {
-		filename = fdb::Key(nativePointer.filename_ptr, nativePointer.filename_length);
-		offset = nativePointer.file_offset;
-		length = nativePointer.file_length;
-		fullFileLength = nativePointer.full_file_length;
-		fileVersion = nativePointer.file_version;
-		encryptionCtx = *nativePointer.encryption_ctx;
-	}
-};
-
-struct GranuleMutation {
-	native::FDBBGMutationType type;
-	int64_t version;
-	ByteString param1;
-	ByteString param2;
-
-	GranuleMutation(const native::FDBBGMutation& nativeMutation) {
-		type = static_cast<native::FDBBGMutationType>(nativeMutation.type);
-		version = nativeMutation.version;
-		param1 = ByteString(nativeMutation.param1_ptr, nativeMutation.param1_length);
-		param2 = ByteString(nativeMutation.param2_ptr, nativeMutation.param2_length);
-	}
-};
-
-struct GranuleDescription {
-	KeyRange keyRange;
-	std::optional<GranuleFilePointer> snapshotFile;
-	std::vector<GranuleFilePointer> deltaFiles;
-	std::vector<GranuleMutation> memoryMutations;
-
-	// just keep raw data structures to pass to callbacks
-	native::FDBBGTenantPrefix tenantPrefix;
-
-	GranuleDescription(const native::FDBBGFileDescription& nativeDesc) {
-		keyRange.beginKey = fdb::Key(nativeDesc.key_range.begin_key, nativeDesc.key_range.begin_key_length);
-		keyRange.endKey = fdb::Key(nativeDesc.key_range.end_key, nativeDesc.key_range.end_key_length);
-		if (nativeDesc.snapshot_present) {
-			snapshotFile = GranuleFilePointer(*nativeDesc.snapshot_file_pointer);
-		}
-		if (nativeDesc.delta_file_count > 0) {
-			deltaFiles.reserve(nativeDesc.delta_file_count);
-			for (int i = 0; i < nativeDesc.delta_file_count; i++) {
-				deltaFiles.emplace_back(*nativeDesc.delta_files[i]);
-			}
-		}
-		if (nativeDesc.memory_mutation_count > 0) {
-			memoryMutations.reserve(nativeDesc.memory_mutation_count);
-			for (int i = 0; i < nativeDesc.memory_mutation_count; i++) {
-				memoryMutations.emplace_back(*nativeDesc.memory_mutations[i]);
-			}
-		}
-		tenantPrefix = nativeDesc.tenant_prefix;
-	}
-};
-
 // fdb_future_readbg_get_descriptions
 
+struct GranuleFilePointerRef : public native::FDBBGFilePointer {
+	GranuleFilePointerRef(const GranuleFilePointerRef&) = delete;
+	BytesRef filename() const noexcept { return BytesRef(filename_ptr, filename_length); }
+};
+
+struct GranuleMutationRef : public native::FDBBGMutation {
+	ByteString param1() const noexcept { return ByteString(param1_ptr, param1_length); }
+	ByteString param2() const noexcept { return ByteString(param2_ptr, param2_length); }
+};
+
 struct GranuleDescriptionRef : native::FDBBGFileDescription {
-	fdb::KeyRef beginKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.begin_key,
-		                   native::FDBBGFileDescription::key_range.begin_key_length);
+	GranuleDescriptionRef(const GranuleDescriptionRef&) = delete;
+	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
+	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(key_range.end_key, key_range.end_key_length); }
+	std::optional<GranuleFilePointerRef*> snapshotFile() const noexcept {
+		if (snapshot_present)
+			return (GranuleFilePointerRef*)snapshot_file_pointer;
+		else
+			return {};
 	}
-	fdb::KeyRef endKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.end_key,
-		                   native::FDBBGFileDescription::key_range.end_key_length);
+	VectorRef<GranuleFilePointerRef*> deltaFiles() const noexcept {
+		return VectorRef<GranuleFilePointerRef*>((GranuleFilePointerRef**)delta_files, delta_file_count);
+	}
+	VectorRef<GranuleMutationRef*> memoryMutations() const noexcept {
+		return VectorRef<GranuleMutationRef*>((GranuleMutationRef**)memory_mutations, memory_mutation_count);
 	}
 };
 
-struct ReadBlobGranulesDescriptionResponse {
-	GranuleDescriptionRef** desc_arr;
-	int desc_count;
-	int read_version;
+template <class RespType>
+class Response {
+public:
+	using NativeType = RespType;
+	Response(RespType* r) {
+		if (r) {
+			assert(r->header);
+			assert(r->header->allocator.handle);
+			assert(r->header->allocator.ifc);
+			resp = std::shared_ptr<RespType>(r, &destroy);
+			r->header->allocator.ifc->addref(r->header->allocator.handle);
+		}
+	}
+	Response() noexcept : Response(nullptr) {}
+	Response(const Response&) noexcept = default;
+	Response(Response&&) noexcept = default;
+	Response& operator=(const Response&) noexcept = default;
+	Response& operator=(Response&&) noexcept = default;
+
+	bool valid() const noexcept { return resp != nullptr; }
+
+	explicit operator bool() const noexcept { return valid(); }
+
+	RespType* data() const {
+		assert(valid());
+		return (RespType*)resp.get();
+	}
+
+private:
+	std::shared_ptr<RespType> resp;
+	static void destroy(RespType* resp) { resp->header->allocator.ifc->delref(resp->header->allocator.handle); }
+};
+
+class ReadBlobGranulesDescriptionResponse : public Response<native::FDBReadBGDescriptionResponse> {
+public:
+	VectorRef<GranuleDescriptionRef*> descs() const noexcept {
+		return VectorRef<GranuleDescriptionRef*>((GranuleDescriptionRef**)data()->desc_arr, data()->desc_count);
+	}
 };
 
 inline uint8_t const* toBytePtr(char const* ptr) noexcept {
@@ -306,10 +329,7 @@ struct KeyValueRefArray {
 		return Error(err);
 	}
 };
-struct KeyRangeRef : native::FDBKeyRange {
-	fdb::KeyRef beginKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::begin_key, begin_key_length); }
-	fdb::KeyRef endKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::end_key, end_key_length); }
-};
+
 struct KeyRangeRefArray {
 	using Type = std::tuple<KeyRangeRef const*, int>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -341,17 +361,20 @@ struct GranuleSummaryRefArray {
 	}
 };
 
-struct ReadBlobGranulesDescriptionResponse {
-	using Type = fdb::ReadBlobGranulesDescriptionResponse;
+template <class RespType>
+struct Response {
+	using Type = RespType;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
-		native::FDBReadBGDescriptionResponse* resp;
+		typename RespType::NativeType* resp;
 		auto err = native::fdb_future_get_response(f, (native::FDBResponse**)&resp);
-		out.desc_arr = reinterpret_cast<GranuleDescriptionRef**>(resp->desc_arr);
-		out.desc_count = resp->desc_count;
-		out.read_version = resp->read_version;
+		if (!err) {
+			((fdb::Response<typename RespType::NativeType>&)out) = fdb::Response<typename RespType::NativeType>(resp);
+		}
 		return Error(err);
 	}
 };
+
+using ReadBlobGranulesDescriptionResponse = Response<fdb::ReadBlobGranulesDescriptionResponse>;
 
 struct GranuleMutationRef : native::FDBBGMutation {
 	fdb::KeyRef param1() const noexcept {
@@ -473,15 +496,18 @@ public:
 		return ret;
 	}
 
-	Error getGranuleMutationArrayNothrow(GranuleMutationRefArray& out) const noexcept {
-		auto& [out_mutations, out_count] = out;
-		auto err_raw = native::fdb_result_get_bg_mutations_array(
-		    r.get(), reinterpret_cast<const native::FDBBGMutation**>(&out_mutations), &out_count);
+	Error getGranuleMutationArrayNothrow(VectorRef<GranuleMutationRef>& out) const noexcept {
+		const native::FDBBGMutation* out_mutations = nullptr;
+		int out_count = 0;
+		auto err_raw = native::fdb_result_get_bg_mutations_array(r.get(), &out_mutations, &out_count);
+		if (!err_raw) {
+			out = VectorRef<GranuleMutationRef>((GranuleMutationRef*)out_mutations, out_count);
+		}
 		return Error(err_raw);
 	}
 
-	GranuleMutationRefArray getGranuleMutationArray() const {
-		auto ret = GranuleMutationRefArray{};
+	VectorRef<GranuleMutationRef> getGranuleMutationArray() const {
+		VectorRef<GranuleMutationRef> ret;
 		if (auto err = getGranuleMutationArrayNothrow(ret))
 			throwError("ERROR: result_get_keyvalue_array(): ", err);
 		return ret;
@@ -529,7 +555,9 @@ protected:
 public:
 	Future() noexcept : Future(nullptr) {}
 	Future(const Future&) noexcept = default;
+	Future(Future&&) noexcept = default;
 	Future& operator=(const Future&) noexcept = default;
+	Future& operator=(Future&&) noexcept = default;
 
 	bool valid() const noexcept { return f != nullptr; }
 
@@ -591,6 +619,7 @@ class TypedFuture : public Future {
 	using Future::get;
 	using Future::getNothrow;
 	using Future::then;
+	TypedFuture(Future&& f) noexcept : Future(f) {}
 	TypedFuture(const Future& f) noexcept : Future(f) {}
 
 public:
