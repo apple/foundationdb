@@ -1056,74 +1056,6 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 	} // Main loop
 }
 
-ACTOR Future<Void> enableConsistencyScanInSim(Database db, UID csId) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state ConsistencyScanState cs;
-	ASSERT(g_network->isSimulated());
-	TraceEvent("ConsistencyScan_SimEnable", csId).log();
-	loop {
-		try {
-			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
-			state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
-
-			// Sometimes enable if disabled, otherwise sometimes update the scan min version to restart it
-			if (!config.enabled &&
-			    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::DisabledStart &&
-			    deterministicRandom()->random01() < 0.5) {
-				// just don't enable it!
-				TraceEvent("ConsistencyScan_SimEnableSkip", csId).log();
-				return Void();
-			}
-			if (!config.enabled && g_simulator->consistencyScanState < ISimulator::SimConsistencyScanState::Enabled) {
-				if (!g_simulator->doInjectConsistencyScanCorruption.present()) {
-					g_simulator->doInjectConsistencyScanCorruption = BUGGIFY_WITH_PROB(0.1);
-					TraceEvent("ConsistencyScan_DoInjectCorruption")
-					    .detail("Val", g_simulator->doInjectConsistencyScanCorruption.get());
-				}
-
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
-				                                        ISimulator::SimConsistencyScanState::Enabling);
-				config.enabled = true;
-			} else {
-				if (config.enabled && g_simulator->restarted &&
-				    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::DisabledStart) {
-					TraceEvent("ConsistencyScan_SimEnableAlreadyDoneFromRestart", csId).log();
-					g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::DisabledStart,
-					                                        ISimulator::SimConsistencyScanState::Enabling);
-				}
-				if (BUGGIFY_WITH_PROB(0.5)) {
-					config.minStartVersion = tr->getReadVersion().get();
-				}
-			}
-			// also change the rate
-			config.maxReadByteRate = deterministicRandom()->randomInt(1, 50e6);
-			config.targetRoundTimeSeconds = deterministicRandom()->randomSkewedUInt32(1, 200);
-			config.minRoundTimeSeconds = deterministicRandom()->randomSkewedUInt32(1, 200);
-
-			// TODO:  Reconfigure cs.rangeConfig() randomly
-
-			if (config.enabled) {
-				cs.config().set(tr, config);
-				wait(tr->commit());
-
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabling,
-				                                        ISimulator::SimConsistencyScanState::Enabled);
-				TraceEvent("ConsistencyScan_SimEnabled")
-				    .detail("MaxReadByteRate", config.maxReadByteRate)
-				    .detail("TargetRoundTimeSeconds", config.targetRoundTimeSeconds)
-				    .detail("MinRoundTimeSeconds", config.minRoundTimeSeconds);
-				CODE_PROBE(true, "Consistency Scan enabled in simulation");
-			}
-
-			break;
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	return Void();
-}
-
 ACTOR Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<ConsistencyScanMemoryState> memState) {
 	ASSERT(g_network->isSimulated());
 
@@ -1152,77 +1084,6 @@ ACTOR Future<Void> sometimesRandomlyClearStatsInSim(Database db, Reference<Consi
 	return Void();
 }
 
-ACTOR Future<Void> disableConsistencyScanInSim(Database db,
-                                               Reference<ConsistencyScanMemoryState> memState,
-                                               Future<Void> waitBeforeDisable) {
-	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	state ConsistencyScanState cs;
-	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
-	wait(waitBeforeDisable);
-	// FIXME: also wait until we've done the canary failure
-	// FIXME: sometimes maybe don't wait for scan to stop, just disable it anyway?
-	ASSERT(g_network->isSimulated());
-	loop {
-		bool waitForCorruption = g_simulator->doInjectConsistencyScanCorruption.present() &&
-		                         g_simulator->doInjectConsistencyScanCorruption.get();
-		if (g_simulator->speedUpSimulation &&
-		    ((waitForCorruption &&
-		      g_simulator->consistencyScanState >= ISimulator::SimConsistencyScanState::Enabled_FoundCorruption) ||
-		     (!waitForCorruption &&
-		      g_simulator->consistencyScanState >= ISimulator::SimConsistencyScanState::Enabled))) {
-			break;
-		}
-		double delayTime = std::max(1.0, FLOW_KNOBS->SIM_SPEEDUP_AFTER_SECONDS - now());
-		wait(delay(delayTime));
-	}
-	TraceEvent("ConsistencyScan_SimDisable", memState->csId).log();
-	loop {
-		try {
-			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
-			state ConsistencyScanState::Config config = wait(cs.config().getD(tr));
-			state bool skipDisable = false;
-			// see if any rounds have completed
-			state ConsistencyScanState::RoundStats statsCurrentRound = wait(cs.currentRoundStats().getD(tr));
-			state ConsistencyScanState::StatsHistoryMap::RangeResultType olderStats =
-			    wait(cs.roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False));
-			if (olderStats.results.empty() && !statsCurrentRound.complete) {
-				TraceEvent("ConsistencyScan_SimDisable_NoRoundsCompleted", memState->csId).log();
-				skipDisable = true;
-			}
-
-			// Enable if disable, else set the scan min version to restart it
-			if (config.enabled) {
-				// state was either enabled or enabled_foundcorruption
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled,
-				                                        ISimulator::SimConsistencyScanState::Complete);
-				g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_FoundCorruption,
-				                                        ISimulator::SimConsistencyScanState::Complete);
-				config.enabled = false;
-			} else {
-				TraceEvent("ConsistencyScan_SimDisableAlreadyDisabled", memState->csId).log();
-				return Void();
-			}
-
-			if (skipDisable) {
-				wait(delay(2.0));
-				tr->reset();
-			} else {
-				cs.config().set(tr, config);
-				wait(tr->commit());
-				break;
-			}
-		} catch (Error& e) {
-			wait(tr->onError(e));
-		}
-	}
-
-	g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Complete,
-	                                        ISimulator::SimConsistencyScanState::DisabledEnd);
-	CODE_PROBE(true, "Consistency Scan disabled in simulation");
-	TraceEvent("ConsistencyScan_SimDisabled", memState->csId).log();
-	return Void();
-}
-
 void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memState) {
 	if (!g_network->isSimulated()) {
 		return;
@@ -1248,14 +1109,9 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	actors.add(waitFailureServer(csInterf.waitFailure.getFuture()));
 	state Future<Void> core = consistencyScanCore(db, memState, ConsistencyScanState());
 
-	// Enable consistencyScan in simulation
-	// TODO: Move this to a BehaviorInjection workload once that concept exists.
 	if (g_network->isSimulated()) {
-		wait(enableConsistencyScanInSim(db, csInterf.id()));
-		// even if we don't enable it, if a previous incarnation did, we still need to disable it
-		Future<Void> chaosStatsClear = sometimesRandomlyClearStatsInSim(db, memState);
-		actors.add(chaosStatsClear);
-		actors.add(disableConsistencyScanInSim(db, memState, chaosStatsClear));
+		actors.add(sometimesRandomlyClearStatsInSim(db, memState));
+		// TODO:  Reconfigure cs.rangeConfig() randomly
 	}
 
 	loop {
