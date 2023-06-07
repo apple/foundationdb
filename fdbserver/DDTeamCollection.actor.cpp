@@ -190,6 +190,89 @@ public:
 		req.reply.send(std::make_pair(res, false));
 	}
 
+	static Optional<Reference<IDataDistributionTeam>> getBestTeam(DDTeamCollection* self,
+	                                                              const GetTeamRequest& req,
+	                                                              bool preferWithinShardLimit) {
+		auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
+		if (startIndex >= self->teams.size()) {
+			startIndex = 0;
+		}
+		Optional<Reference<IDataDistributionTeam>> bestOption;
+		int64_t bestLoadBytes = 0;
+		bool wigglingBestOption = false; // best option contains server in paused wiggle state
+		int bestIndex = startIndex;
+		for (int i = 0; i < self->teams.size(); i++) {
+			int currentIndex = (startIndex + i) % self->teams.size();
+			if (self->teams[currentIndex]->isHealthy()) {
+				int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
+				if (eligibilityType != data_distribution::EligibilityCounter::NONE &&
+				    self->teams[currentIndex]->getEligibilityCount(eligibilityType) <= 0) {
+					continue;
+				}
+
+				int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
+				auto team = ShardsAffectedByTeamFailure::Team(self->teams[currentIndex]->getServerIDs(), self->primary);
+				if ((!req.teamMustHaveShards || self->shardsAffectedByTeamFailure->hasShards(team)) &&
+				    // sort conditions
+				    (!bestOption.present() ||
+				     req.lessCompare(bestOption.get(), self->teams[currentIndex], bestLoadBytes, loadBytes))) {
+
+					// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+					// in this case
+					if (bestOption.present() && !wigglingBestOption &&
+					    self->teams[currentIndex]->hasWigglePausedServer()) {
+						continue;
+					}
+
+					if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && preferWithinShardLimit &&
+					    self->shardsAffectedByTeamFailure->getNumberOfShards(team) >
+					        SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM) {
+						continue;
+					}
+
+					bestLoadBytes = loadBytes;
+					bestOption = self->teams[currentIndex];
+					bestIndex = currentIndex;
+					wigglingBestOption = self->teams[bestIndex]->hasWigglePausedServer();
+				}
+			}
+		}
+		startIndex = bestIndex;
+		return bestOption;
+	}
+
+	static Optional<Reference<IDataDistributionTeam>> getBestTeamFromCandidates(
+	    DDTeamCollection* self,
+	    const GetTeamRequest& req,
+	    const std::vector<Reference<TCTeamInfo>>& candidates,
+	    bool preferWithinShardLimit) {
+		Optional<Reference<IDataDistributionTeam>> bestOption;
+		int64_t bestLoadBytes = 0;
+		bool wigglingBestOption = false; // best option contains server in paused wiggle state
+		for (int i = 0; i < candidates.size(); i++) {
+			int64_t loadBytes = candidates[i]->getLoadBytes(true, req.inflightPenalty);
+			if (!bestOption.present() || req.lessCompare(bestOption.get(), candidates[i], bestLoadBytes, loadBytes)) {
+
+				// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
+				// in this case
+				if (bestOption.present() && !wigglingBestOption && candidates[i]->hasWigglePausedServer()) {
+					continue;
+				}
+
+				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && preferWithinShardLimit &&
+				    self->shardsAffectedByTeamFailure->getNumberOfShards(ShardsAffectedByTeamFailure::Team(
+				        candidates[i]->getServerIDs(), self->primary)) > SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM) {
+					continue;
+				}
+
+				bestLoadBytes = loadBytes;
+				bestOption = candidates[i];
+				wigglingBestOption = candidates[i]->hasWigglePausedServer();
+			}
+		}
+		return bestOption;
+	}
+
 	// SOMEDAY: Make bestTeam better about deciding to leave a shard where it is (e.g. in PRIORITY_TEAM_HEALTHY case)
 	//		    use keys, src, dest, metrics, priority, system load, etc.. to decide...
 	ACTOR static Future<Void> getTeam(DDTeamCollection* self, GetTeamRequest req) {
@@ -234,10 +317,7 @@ public:
 				return Void();
 			}
 
-			int64_t bestLoadBytes = 0;
-			bool wigglingBestOption = false; // best option contains server in paused wiggle state
 			Optional<Reference<IDataDistributionTeam>> bestOption;
-			std::vector<Reference<TCTeamInfo>> randomTeams;
 
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
@@ -296,46 +376,18 @@ public:
 
 			if (req.teamSelect == TeamSelect::WANT_TRUE_BEST) {
 				ASSERT(!bestOption.present());
-				auto& startIndex = req.preferLowerDiskUtil ? self->lowestUtilizationTeam : self->highestUtilizationTeam;
-				if (startIndex >= self->teams.size()) {
-					startIndex = 0;
-				}
-
-				int bestIndex = startIndex;
-				for (int i = 0; i < self->teams.size(); i++) {
-					int currentIndex = (startIndex + i) % self->teams.size();
-					if (self->teams[currentIndex]->isHealthy()) {
-						int eligibilityType = data_distribution::EligibilityCounter::fromGetTeamRequest(req);
-						bool eligible = eligibilityType == data_distribution::EligibilityCounter::NONE ||
-						                self->teams[currentIndex]->getEligibilityCount(eligibilityType) > 0;
-						if (!eligible) {
-							continue;
-						}
-
-						int64_t loadBytes = self->teams[currentIndex]->getLoadBytes(true, req.inflightPenalty);
-						if ((!req.teamMustHaveShards ||
-						     self->shardsAffectedByTeamFailure->hasShards(ShardsAffectedByTeamFailure::Team(
-						         self->teams[currentIndex]->getServerIDs(), self->primary))) &&
-						    // sort conditions
-						    (!bestOption.present() ||
-						     req.lessCompare(bestOption.get(), self->teams[currentIndex], bestLoadBytes, loadBytes))) {
-
-							// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
-							// in this case
-							if (bestOption.present() && !wigglingBestOption &&
-							    self->teams[currentIndex]->hasWigglePausedServer()) {
-								continue;
-							}
-							bestLoadBytes = loadBytes;
-							bestOption = self->teams[currentIndex];
-							bestIndex = currentIndex;
-							wigglingBestOption = self->teams[bestIndex]->hasWigglePausedServer();
-						}
+				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
+					bestOption = getBestTeam(self, req, /*preferWithinShardLimit=*/true);
+					if (!bestOption.present()) {
+						TraceEvent("GetBestTeamPreferWithinShardLimitFailed").log();
 					}
 				}
-
-				startIndex = bestIndex;
+				if (!bestOption.present()) {
+					bestOption = getBestTeam(self, req, /*preferWithinShardLimit=*/false);
+				}
 			} else {
+				ASSERT(!bestOption.present());
+				std::vector<Reference<TCTeamInfo>> randomTeams;
 				int nTries = 0;
 				while (randomTeams.size() < SERVER_KNOBS->BEST_TEAM_OPTION_COUNT &&
 				       nTries < SERVER_KNOBS->BEST_TEAM_MAX_TEAM_TRIES) {
@@ -351,6 +403,7 @@ public:
 
 					for (int i = 0; ok && i < randomTeams.size(); i++) {
 						if (randomTeams[i]->getServerIDs() == dest->getServerIDs()) {
+							// Found a duplicate team. Skip `dest`.
 							ok = false;
 							break;
 						}
@@ -373,20 +426,17 @@ public:
 					self->bestTeamKeepStuckCount = 0;
 				}
 
-				for (int i = 0; i < randomTeams.size(); i++) {
-					int64_t loadBytes = randomTeams[i]->getLoadBytes(true, req.inflightPenalty);
-					if (!bestOption.present() ||
-					    req.lessCompare(bestOption.get(), randomTeams[i], bestLoadBytes, loadBytes)) {
-
-						// bestOption doesn't contain wiggling SS while current team does. Don't replace bestOption
-						// in this case
-						if (bestOption.present() && !wigglingBestOption && randomTeams[i]->hasWigglePausedServer()) {
-							continue;
+				if (!randomTeams.empty()) {
+					if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
+						bestOption = getBestTeamFromCandidates(self, req, randomTeams, /*preferWithinShardLimit=*/true);
+						if (!bestOption.present()) {
+							TraceEvent("GetBestTeamFromCandidatesPreferWithinShardLimitFailed").log();
 						}
+					}
 
-						bestLoadBytes = loadBytes;
-						bestOption = randomTeams[i];
-						wigglingBestOption = randomTeams[i]->hasWigglePausedServer();
+					if (!bestOption.present()) {
+						bestOption =
+						    getBestTeamFromCandidates(self, req, randomTeams, /*preferWithinShardLimit=*/false);
 					}
 				}
 			}
@@ -5887,7 +5937,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5941,7 +5992,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_COMPLETE_SRCS,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -5993,7 +6045,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6044,7 +6097,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::False,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6097,7 +6151,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6155,7 +6210,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6202,6 +6258,7 @@ public:
 		                         preferLowerDiskUtil,
 		                         teamMustHaveShards,
 		                         PreferLowerReadUtil::True,
+		                         PreferWithinShardLimit::False,
 		                         forReadBalance);
 		req.completeSources = completeSources;
 
@@ -6209,6 +6266,7 @@ public:
 		                             PreferLowerDiskUtil::False,
 		                             teamMustHaveShards,
 		                             PreferLowerReadUtil::False,
+		                             PreferWithinShardLimit::False,
 		                             forReadBalance);
 
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
@@ -6273,7 +6331,8 @@ public:
 		state GetTeamRequest req(TeamSelect::WANT_TRUE_BEST,
 		                         PreferLowerDiskUtil::True,
 		                         TeamMustHaveShards::False,
-		                         PreferLowerReadUtil::False);
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::False);
 		req.completeSources = completeSources;
 
 		wait(collection->getTeam(req));
@@ -6299,11 +6358,13 @@ public:
 		                             PreferLowerDiskUtil::True,
 		                             TeamMustHaveShards::False,
 		                             PreferLowerReadUtil::True,
+		                             PreferWithinShardLimit::False,
 		                             ForReadBalance::True);
 		state GetTeamRequest randomReq(TeamSelect::ANY,
 		                               PreferLowerDiskUtil::True,
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
+		                               PreferWithinShardLimit::False,
 		                               ForReadBalance::True);
 		collection->teamPivots.lastPivotValuesUpdate = -100;
 
