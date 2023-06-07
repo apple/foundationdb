@@ -25,7 +25,7 @@
 void forceLinkActorFuzzUnitTests() {}
 
 TEST_CASE("/actorFuzz") {
-    std::pair<int, int> result = actorFuzzTests();
-    ASSERT(result.first == result.second);
-    return Void();
+	std::pair<int, int> result = actorFuzzTests();
+	ASSERT(result.first == result.second);
+	return Void();
 }
