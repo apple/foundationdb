@@ -675,11 +675,10 @@ namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 }
-
 ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
-                                                           Optional<TenantName> tenant,
+                                                           TenantInfo tenant,
                                                            Key key,
-                                                           SpanID spanID,
+                                                           SpanContext spanContext,
                                                            Optional<UID> debugID,
                                                            UseProvisionalProxies useProvisionalProxies,
                                                            Reverse isBackward,

@@ -36,7 +36,7 @@ ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> t
 	}
 
 	KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
-	    cx, {}, tokens[1], SpanID(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
+	    cx, {}, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
 
 	if (loc.locations) {
 		printf("version is %ld\n", version);
@@ -63,7 +63,7 @@ ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens
 	}
 
 	KeyRangeLocationInfo loc = wait(getKeyLocation_internal(
-	    cx, {}, tokens[1], SpanID(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
+	    cx, {}, tokens[1], SpanContext(), Optional<UID>(), UseProvisionalProxies::False, Reverse::False, version));
 
 	if (loc.locations) {
 		printf("version is %ld\n", version);
