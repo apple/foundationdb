@@ -62,6 +62,38 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		UID cancelledAuditId = wait(cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60));
 		resAuditId = cancelledAuditId;
 
+	} else if (tokencmp(tokens[1], "schedule")) {
+		if (tokens.size() != 6) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		AuditType type = AuditType::Invalid;
+		if (tokencmp(tokens[2], "ha")) {
+			type = AuditType::ValidateHA;
+		} else if (tokencmp(tokens[2], "replica")) {
+			type = AuditType::ValidateReplica;
+		} else if (tokencmp(tokens[2], "locationmetadata")) {
+			type = AuditType::ValidateLocationMetadata;
+		} else if (tokencmp(tokens[2], "ssshard")) {
+			type = AuditType::ValidateStorageServerShard;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		Key begin = tokens[3];
+		Key end = tokens[4];
+		if (end > allKeys.end) {
+			end = allKeys.end;
+		}
+		const double periodHours = std::stod(tokens[5].toString());
+		if (periodHours <= 0) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		UID startedAuditId = wait(
+		    schedulePeriodAuditStorage(clusterFile, KeyRangeRef(begin, end), type, periodHours, /*timeoutSeconds=*/60));
+		resAuditId = startedAuditId;
+
 	} else {
 		AuditType type = AuditType::Invalid;
 		if (tokencmp(tokens[1], "ha")) {

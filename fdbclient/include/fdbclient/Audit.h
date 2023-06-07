@@ -120,23 +120,30 @@ struct TriggerAuditRequest {
 	constexpr static FileIdentifier file_identifier = 1384445;
 
 	TriggerAuditRequest() = default;
-	TriggerAuditRequest(AuditType type, KeyRange range)
-	  : type(static_cast<uint8_t>(type)), range(range), cancel(false) {}
 
-	TriggerAuditRequest(AuditType type, UID id) : type(static_cast<uint8_t>(type)), id(id), cancel(true) {}
+	TriggerAuditRequest(AuditType type, KeyRange range)
+	  : type(static_cast<uint8_t>(type)), range(range), cancel(false), periodic(false) {}
+
+	TriggerAuditRequest(AuditType type, KeyRange range, int periodHours)
+	  : type(static_cast<uint8_t>(type)), range(range), cancel(false), periodHours(periodHours), periodic(true) {}
+
+	TriggerAuditRequest(AuditType type, UID id)
+	  : type(static_cast<uint8_t>(type)), id(id), cancel(true), periodic(false) {}
 
 	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, id, cancel, reply);
+		serializer(ar, type, range, id, cancel, reply, periodic, periodHours);
 	}
 
 	UID id;
 	uint8_t type;
 	KeyRange range;
 	bool cancel;
+	bool periodic;
+	int periodHours;
 	ReplyPromise<UID> reply;
 };
 

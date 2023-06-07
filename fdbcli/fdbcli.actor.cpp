@@ -1665,9 +1665,15 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!auditId.isValid()) {
 						is_error = true;
 					} else {
-						printf("%s audit: %s\n",
-						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
-						       auditId.toString().c_str());
+						std::string auditStorageOperationStr = "";
+						if (tokencmp(tokens[1], "cancel")) {
+							auditStorageOperationStr = "Cancelled";
+						} else if (tokencmp(tokens[1], "schedule")) {
+							auditStorageOperationStr = "Scheduled";
+						} else {
+							auditStorageOperationStr = "Started";
+						}
+						printf("%s audit: %s\n", auditStorageOperationStr.c_str(), auditId.toString().c_str());
 					}
 					continue;
 				}

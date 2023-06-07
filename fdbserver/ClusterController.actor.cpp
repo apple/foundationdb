@@ -1942,6 +1942,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 	} catch (Error& e) {
 		TraceEvent(SevInfo, "CCTriggerAuditStorageFailed", self->id)
 		    .errorUnsuppressed(e)
+		    .detail("Periodic", req.periodic)
 		    .detail("AuditID", auditId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type);

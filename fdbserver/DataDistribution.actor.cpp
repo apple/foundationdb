@@ -2686,6 +2686,11 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					ASSERT(req.id.isValid());
 					actors.add(cancelAuditStorage(self, req));
 					continue;
+				} else if (req.periodic) {
+					// 1. perist periodic config (grab lock), 2. trigger background trigger
+					// background trigger starts when DD restarts
+					// When resume, we need load periodic config and trigger the background trigger
+					continue;
 				}
 				if (!self->anyAuditStorageLaunching.contains(req.getType()) ||
 				    !self->anyAuditStorageLaunching[req.getType()]) {
