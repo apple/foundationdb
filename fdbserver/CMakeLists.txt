@@ -266,6 +266,7 @@ set(FDBSERVER_SRCS
   workloads/ReportConflictingKeys.actor.cpp
   workloads/RestoreBackup.actor.cpp
   workloads/RestoreFromBlob.actor.cpp
+  workloads/RestoreMultiRanges.actor.cpp
   workloads/Rollback.actor.cpp
   workloads/RyowCorrectness.actor.cpp
   workloads/RYWDisable.actor.cpp
