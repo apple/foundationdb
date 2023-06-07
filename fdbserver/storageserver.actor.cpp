@@ -4474,6 +4474,60 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 	return KeyRangeRef(begin, end);
 }
 
+void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
+	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
+	    g_simulator->consistencyScanInjectedCorruptionType.present() ||
+	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+		return;
+	}
+
+	CODE_PROBE(true, "consistency check injecting corruption");
+
+	// FIXME: code probe for each type?
+
+	if (true /*deterministicRandom()->random01() < 0.3*/) {
+		// flip more flag
+		reply.more = !reply.more;
+		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+	} else {
+		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
+		ASSERT(false);
+		// make deep copy of request, since some of the underlying memory can reference storage engine data directly
+		GetKeyValuesReply copy = reply;
+		reply = GetKeyValuesReply();
+		reply.more = copy.more;
+		reply.cached = copy.cached;
+		reply.version = copy.version;
+		reply.data.append_deep(reply.arena, copy.data.begin(), copy.data.size());
+
+		if (reply.data.empty()) {
+			// add row to empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(
+			    reply.arena,
+			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
+			// change value in non-empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			reply.data.pop_back();
+		} else {
+			// chop off last byte of first value
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+
+			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
+		}
+	}
+
+	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
+	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("Version", req.version)
+	    .detail("Count", reply.data.size());
+}
+
 ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
@@ -4591,6 +4645,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, none);
+			}
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
@@ -4643,6 +4701,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, r);
+			}
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
