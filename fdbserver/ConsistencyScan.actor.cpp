@@ -904,8 +904,6 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, Reference<Consistenc
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
 	state ConsistencyScanState cs;
 	TraceEvent("ConsistencyScan_SimDisableWaiting", memState->csId).log();
-	// Also wait until we've scanned at least one round by checking stats
-	state bool waitForRoundComplete = true;
 	// FIXME: also wait until we've done the canary failure
 	ASSERT(g_network->isSimulated());
 	loop {
