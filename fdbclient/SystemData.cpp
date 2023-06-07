@@ -1428,6 +1428,74 @@ std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableVa
 	return std::make_pair(mutations, knownCommittedVersion);
 }
 
+const KeyRangeRef changeFeedCacheKeys("\xff\xff/cc/"_sr, "\xff\xff/cc0"_sr);
+const KeyRef changeFeedCachePrefix = changeFeedCacheKeys.begin;
+
+const Value changeFeedCacheKey(Key const& prefix, Key const& feed, KeyRange const& range, Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(prefix);
+	wr.serializeBytes(changeFeedCachePrefix);
+	wr << feed;
+	wr << range;
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+std::tuple<Key, KeyRange, Version> decodeChangeFeedCacheKey(KeyRef const& prefix, ValueRef const& key) {
+	Key feed;
+	KeyRange range;
+	Version version;
+	BinaryReader reader(key.removePrefix(prefix).removePrefix(changeFeedCachePrefix),
+	                    AssumeVersion(ProtocolVersion::withChangeFeed()));
+	reader >> feed;
+	reader >> range;
+	reader >> version;
+	return std::make_tuple(feed, range, bigEndian64(version));
+}
+const Value changeFeedCacheValue(Standalone<VectorRef<MutationsAndVersionRef>> const& mutations) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << mutations;
+	return wr.toValue();
+}
+Standalone<VectorRef<MutationsAndVersionRef>> decodeChangeFeedCacheValue(ValueRef const& value) {
+	Standalone<VectorRef<MutationsAndVersionRef>> mutations;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> mutations;
+	return mutations;
+}
+
+const KeyRangeRef changeFeedCacheFeedKeys("\xff\xff/ccd/"_sr, "\xff\xff/ccd0"_sr);
+const KeyRef changeFeedCacheFeedPrefix = changeFeedCacheFeedKeys.begin;
+
+const Value changeFeedCacheFeedKey(Key const& prefix, Key const& feed, KeyRange const& range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(changeFeedCacheFeedPrefix);
+	wr << prefix;
+	wr << feed;
+	wr << range;
+	return wr.toValue();
+}
+std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key) {
+	Key prefix;
+	Key feed;
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(changeFeedCacheFeedPrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
+	reader >> prefix;
+	reader >> feed;
+	reader >> range;
+	return std::make_tuple(prefix, feed, range);
+}
+const Value changeFeedCacheFeedValue(Version const& version) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << version;
+	return wr.toValue();
+}
+Version decodeChangeFeedCacheFeedValue(ValueRef const& value) {
+	Version version;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> version;
+	return version;
+}
+
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);

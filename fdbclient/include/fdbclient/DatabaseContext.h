@@ -221,6 +221,42 @@ struct OverlappingChangeFeedsInfo {
 	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
 };
 
+struct ChangeFeedCacheRange {
+	Key tenantPrefix;
+	Key rangeId;
+	KeyRange range;
+
+	ChangeFeedCacheRange(Key tenantPrefix, Key rangeId, KeyRange range)
+	  : tenantPrefix(tenantPrefix), rangeId(rangeId), range(range) {}
+	ChangeFeedCacheRange(std::tuple<Key, Key, KeyRange> range)
+	  : tenantPrefix(std::get<0>(range)), rangeId(std::get<1>(range)), range(std::get<2>(range)) {}
+
+	bool operator==(const ChangeFeedCacheRange& rhs) const {
+		return tenantPrefix == rhs.tenantPrefix && rangeId == rhs.rangeId && range == rhs.range;
+	}
+};
+
+struct ChangeFeedCacheData {
+	Version version = -1;
+	bool active = false;
+	double inactiveTime = 0;
+	bool popped = false;
+};
+
+namespace std {
+template <>
+struct hash<ChangeFeedCacheRange> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(ChangeFeedCacheRange const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.rangeId));
+		boost::hash_combine(seed, hashFunc(range.range.begin));
+		boost::hash_combine(seed, hashFunc(range.range.end));
+		return seed;
+	}
+};
+} // namespace std
+
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
 	static DatabaseContext* allocateOnForeignThread() {
@@ -401,7 +437,8 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true,
 	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
-	                                 bool encrypted = false);
+	                                 bool encrypted = false,
+	                                 Future<Key> tenantPrefix = Key());
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
@@ -517,7 +554,16 @@ public:
 	std::unordered_map<Key, KeyRange> changeFeedCache;
 	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
+
 	IKeyValueStore* storage = nullptr;
+	Future<Void> changeFeedStorageCommitter;
+	Future<Void> initializeChangeFeedCache = Void();
+	int64_t uncommittedCFBytes = 0;
+	Reference<AsyncVar<bool>> commitChangeFeedStorage;
+
+	std::unordered_map<ChangeFeedCacheRange, ChangeFeedCacheData> changeFeedCaches;
+
+	void setStorage(IKeyValueStore* storage);
 
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 	Version getMinimumChangeFeedVersion();

@@ -893,11 +893,12 @@ struct InitializeBlobWorkerRequest {
 	UID reqId;
 	UID interfaceId;
 	KeyValueStoreType storeType;
+	EncryptionAtRestMode encryptMode;
 	ReplyPromise<InitializeBlobWorkerReply> reply;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, reqId, interfaceId, storeType, reply);
+		serializer(ar, reqId, interfaceId, storeType, encryptMode, reply);
 	}
 };
 
