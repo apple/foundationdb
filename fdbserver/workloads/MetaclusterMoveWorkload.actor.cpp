@@ -185,8 +185,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 
 		Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->sourceCluster);
-		metacluster::startTenantMovement(
-		    self->managementDb, tenantGroup.get(), self->sourceCluster, self->destinationCluster, self->runID);
+		wait(metacluster::startTenantMovement(
+		    self->managementDb, tenantGroup.get(), self->sourceCluster, self->destinationCluster, self->runID));
 		return Void();
 	}
 

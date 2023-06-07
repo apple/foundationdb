@@ -182,6 +182,13 @@ struct MetaclusterOperationContext {
 		return runManagementTransaction(this, func);
 	}
 
+	static Future<Void> emptyFunc(Reference<typename DB::TransactionT> tr) { return Void(); }
+
+	Future<Void> initializeContext() {
+		// Use an empty lambda
+		return runManagementTransaction([](Reference<typename DB::TransactionT> tr) { return emptyFunc(tr); });
+	}
+
 	// Runs a transaction on the data cluster. This requires that a cluster name be set and that a transaction has
 	// already been run on the management cluster to populate the needed metadata. This verifies that the data
 	// cluster has the expected ID and is part of the metacluster that previous transactions have run on.
