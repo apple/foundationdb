@@ -5204,8 +5204,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						g_traceBatch.addEvent("TransactionDebug",
 						                      trState->readOptions.get().debugID.get().first(),
 						                      "NativeAPI.getExactRange.After");
-					RangeReadResult output(RangeResult(RangeResultRef(rep.data, rep.more), rep.arena),
-					                       rep.readMetrics);
+					RangeReadResult output(RangeResult(RangeResultRef(rep.data, rep.more), rep.arena), rep.readMetrics);
 
 					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
 						// shallow copy the reply with an arena depends, and send it to the duplicate stream for TSS

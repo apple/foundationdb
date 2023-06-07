@@ -330,16 +330,18 @@ struct BackupRangeTaskFunc : TaskFuncBase {
 					    tr->get(task->params[BackupAgentBase::keyConfigLogUid].withPrefix(applyMutationsEndRange.begin),
 					            Snapshot::True);
 					state Future<ValueReadResult> rangeCountValue = tr->get(rangeCountKey, Snapshot::True);
-					state Future<RangeReadResult> prevRange = tr->getRange(firstGreaterOrEqual(prefix),
-					                                                   lastLessOrEqual(rangeBegin.withPrefix(prefix)),
-					                                                   1,
-					                                                   Snapshot::True,
-					                                                   Reverse::True);
-					state Future<RangeReadResult> nextRange = tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
-					                                                   firstGreaterOrEqual(strinc(prefix)),
-					                                                   1,
-					                                                   Snapshot::True,
-					                                                   Reverse::False);
+					state Future<RangeReadResult> prevRange =
+					    tr->getRange(firstGreaterOrEqual(prefix),
+					                 lastLessOrEqual(rangeBegin.withPrefix(prefix)),
+					                 1,
+					                 Snapshot::True,
+					                 Reverse::True);
+					state Future<RangeReadResult> nextRange =
+					    tr->getRange(firstGreaterOrEqual(rangeEnd.withPrefix(prefix)),
+					                 firstGreaterOrEqual(strinc(prefix)),
+					                 1,
+					                 Snapshot::True,
+					                 Reverse::False);
 					state Future<Void> verified = taskBucket->keepRunning(tr, task);
 
 					wait(checkDatabaseLock(tr,

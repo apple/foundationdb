@@ -211,15 +211,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	ACTOR Future<MappedRangeReadResult> scanMappedRangeWithLimits(Database cx,
-	                                                          KeySelector beginSelector,
-	                                                          KeySelector endSelector,
-	                                                          Key mapper,
-	                                                          int limit,
-	                                                          int byteLimit,
-	                                                          int expectedBeginId,
-	                                                          GetMappedRangeWorkload* self,
-	                                                          int matchIndex,
-	                                                          bool allMissing) {
+	                                                              KeySelector beginSelector,
+	                                                              KeySelector endSelector,
+	                                                              Key mapper,
+	                                                              int limit,
+	                                                              int byteLimit,
+	                                                              int expectedBeginId,
+	                                                              GetMappedRangeWorkload* self,
+	                                                              int matchIndex,
+	                                                              bool allMissing) {
 
 		std::cout << "start scanMappedRangeWithLimits beginSelector:" << beginSelector.toString()
 		          << " endSelector:" << endSelector.toString() << " expectedBeginId:" << expectedBeginId
@@ -230,12 +230,12 @@ struct GetMappedRangeWorkload : ApiWorkload {
 			state Reference<TransactionWrapper> tr = self->createTransaction();
 			try {
 				MappedRangeReadResult result = wait(tr->getMappedRange(beginSelector,
-				                                                   endSelector,
-				                                                   mapper,
-				                                                   GetRangeLimits(limit, byteLimit),
-				                                                   matchIndex,
-				                                                   self->snapshot,
-				                                                   Reverse::False));
+				                                                       endSelector,
+				                                                       mapper,
+				                                                       GetRangeLimits(limit, byteLimit),
+				                                                       matchIndex,
+				                                                       self->snapshot,
+				                                                       Reverse::False));
 				//			showResult(result);
 				if (self->BAD_MAPPER) {
 					TraceEvent("GetMappedRangeWorkloadShouldNotReachable").detail("ResultSize", result.size());
@@ -295,15 +295,15 @@ struct GetMappedRangeWorkload : ApiWorkload {
 		          << " MAX_PARALLEL_QUICK_GET_VALUE: " << SERVER_KNOBS->MAX_PARALLEL_QUICK_GET_VALUE << std::endl;
 		while (true) {
 			MappedRangeReadResult result = wait(self->scanMappedRangeWithLimits(cx,
-			                                                                beginSelector,
-			                                                                endSelector,
-			                                                                mapper,
-			                                                                limit,
-			                                                                byteLimit,
-			                                                                expectedBeginId,
-			                                                                self,
-			                                                                matchIndex,
-			                                                                allMissing));
+			                                                                    beginSelector,
+			                                                                    endSelector,
+			                                                                    mapper,
+			                                                                    limit,
+			                                                                    byteLimit,
+			                                                                    expectedBeginId,
+			                                                                    self,
+			                                                                    matchIndex,
+			                                                                    allMissing));
 			expectedBeginId += result.size();
 			if (result.more) {
 				if (result.empty()) {
@@ -366,9 +366,9 @@ struct GetMappedRangeWorkload : ApiWorkload {
 	}
 
 	static Future<MappedRangeReadResult> runGetMappedRange(int beginId,
-	                                                   int endId,
-	                                                   Reference<TransactionWrapper>& tr,
-	                                                   GetMappedRangeWorkload* self) {
+	                                                       int endId,
+	                                                       Reference<TransactionWrapper>& tr,
+	                                                       GetMappedRangeWorkload* self) {
 		Key mapper = getMapper(self, false);
 		Key beginTuple = Tuple::makeTuple(prefix, INDEX, indexKey(beginId)).getDataAsStandalone();
 		KeySelector beginSelector = KeySelector(firstGreaterOrEqual(beginTuple));

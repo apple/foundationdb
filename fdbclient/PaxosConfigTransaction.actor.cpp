@@ -535,10 +535,10 @@ Future<ValueReadResult> PaxosConfigTransaction::get(Key const& key, Snapshot) {
 }
 
 Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
-                                                     KeySelector const& end,
-                                                     int limit,
-                                                     Snapshot snapshot,
-                                                     Reverse reverse) {
+                                                         KeySelector const& end,
+                                                         int limit,
+                                                         Snapshot snapshot,
+                                                         Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
@@ -546,10 +546,10 @@ Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector const& begi
 }
 
 Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector begin,
-                                                     KeySelector end,
-                                                     GetRangeLimits limits,
-                                                     Snapshot snapshot,
-                                                     Reverse reverse) {
+                                                         KeySelector end,
+                                                         GetRangeLimits limits,
+                                                         Snapshot snapshot,
+                                                         Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

@@ -271,8 +271,8 @@ public:
 	explicit TenantRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
 	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override {
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint) const override {
 		return getTenantRange(ryw, kr, limitsHint);
 	}
 

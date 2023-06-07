@@ -259,10 +259,10 @@ Future<ValueReadResult> SimpleConfigTransaction::get(Key const& key, Snapshot sn
 }
 
 Future<RangeReadResult> SimpleConfigTransaction::getRange(KeySelector const& begin,
-                                                      KeySelector const& end,
-                                                      int limit,
-                                                      Snapshot snapshot,
-                                                      Reverse reverse) {
+                                                          KeySelector const& end,
+                                                          int limit,
+                                                          Snapshot snapshot,
+                                                          Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
@@ -270,10 +270,10 @@ Future<RangeReadResult> SimpleConfigTransaction::getRange(KeySelector const& beg
 }
 
 Future<RangeReadResult> SimpleConfigTransaction::getRange(KeySelector begin,
-                                                      KeySelector end,
-                                                      GetRangeLimits limits,
-                                                      Snapshot snapshot,
-                                                      Reverse reverse) {
+                                                          KeySelector end,
+                                                          GetRangeLimits limits,
+                                                          Snapshot snapshot,
+                                                          Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

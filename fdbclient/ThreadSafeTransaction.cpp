@@ -467,10 +467,10 @@ ThreadFuture<Standalone<VectorRef<KeyRef>>> ThreadSafeTransaction::getRangeSplit
 }
 
 ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
-                                                          int limit,
-                                                          bool snapshot,
-                                                          bool reverse) {
+                                                              const KeySelectorRef& end,
+                                                              int limit,
+                                                              bool snapshot,
+                                                              bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
@@ -482,10 +482,10 @@ ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorR
 }
 
 ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorRef& begin,
-                                                          const KeySelectorRef& end,
-                                                          GetRangeLimits limits,
-                                                          bool snapshot,
-                                                          bool reverse) {
+                                                              const KeySelectorRef& end,
+                                                              GetRangeLimits limits,
+                                                              bool snapshot,
+                                                              bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 
@@ -497,12 +497,12 @@ ThreadFuture<RangeReadResult> ThreadSafeTransaction::getRange(const KeySelectorR
 }
 
 ThreadFuture<MappedRangeReadResult> ThreadSafeTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                      const KeySelectorRef& end,
-                                                                      const StringRef& mapper,
-                                                                      GetRangeLimits limits,
-                                                                      int matchIndex,
-                                                                      bool snapshot,
-                                                                      bool reverse) {
+                                                                          const KeySelectorRef& end,
+                                                                          const StringRef& mapper,
+                                                                          GetRangeLimits limits,
+                                                                          int matchIndex,
+                                                                          bool snapshot,
+                                                                          bool reverse) {
 	KeySelector b = begin;
 	KeySelector e = end;
 	Key h = mapper;

@@ -41,7 +41,8 @@ class TagThrottlerImpl {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
-					state Future<RangeReadResult> throttledTagKeys = tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
+					state Future<RangeReadResult> throttledTagKeys =
+					    tr.getRange(tagThrottleKeys, CLIENT_KNOBS->TOO_MANY);
 					state Future<ValueReadResult> autoThrottlingEnabled = tr.get(tagThrottleAutoEnabledKey);
 
 					if (!committed) {

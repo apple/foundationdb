@@ -140,34 +140,34 @@ public:
 	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
 	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
-	                                   int limit,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override;
+	                                       const KeySelectorRef& end,
+	                                       int limit,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override;
 	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
-	                                   GetRangeLimits limits,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override;
+	                                       const KeySelectorRef& end,
+	                                       GetRangeLimits limits,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override;
 	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
-	                                   int limit,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override {
+	                                       int limit,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
 	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
-	                                   GetRangeLimits limits,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override {
+	                                       GetRangeLimits limits,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
 	ThreadFuture<MappedRangeReadResult> getMappedRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               const StringRef& mapper,
-	                                               GetRangeLimits limits,
-	                                               int matchIndex,
-	                                               bool snapshot,
-	                                               bool reverse) override;
+	                                                   const KeySelectorRef& end,
+	                                                   const StringRef& mapper,
+	                                                   GetRangeLimits limits,
+	                                                   int matchIndex,
+	                                                   bool snapshot,
+	                                                   bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
