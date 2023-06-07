@@ -1909,6 +1909,7 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 					state IKeyValueStore* kvs = openKVStore(
 					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
 					wait(ready(kvs->init()));
+					TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
 					kvs->dispose();
 					CODE_PROBE(true, "Removed stale disk file");
 					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
@@ -2715,6 +2716,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
+					DUMPTOKEN(recruited.getHealthStatus);
 
 					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
@@ -3248,19 +3250,6 @@ static std::set<int> const& normalWorkerErrors() {
 		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
-}
-
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
-	try {
-		wait(f);
-		return Void();
-	} catch (Error& e) {
-		if (e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
-			return Never();
-		}
-		throw;
-	}
 }
 
 ACTOR Future<Void> printTimeout() {
@@ -3936,10 +3925,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
-			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
-			// their files
-			actors.push_back(
-			    fileNotFoundToNever(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface)));
+			actors.push_back(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

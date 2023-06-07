@@ -301,6 +301,22 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 	// History of scan round stats stored by their start version
 	StatsHistoryMap roundStatsHistory() { return { subspace.pack(__FUNCTION__sr), IncludeVersion() }; }
+
+	ACTOR static Future<Void> clearStatsActor(ConsistencyScanState* self, Reference<ReadYourWritesTransaction> tr) {
+		// read the keyspaces so the transaction conflicts on write (key-backed properties don't expose conflict ranges,
+		// and the extra work here is negligible because this is a rare manual command so performance is not a huge
+		// concern)
+		wait(success(self->currentRoundStats().getD(tr)) && success(self->lifetimeStats().getD(tr)) &&
+		     success(self->roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
+
+		// update each of the stats keyspaces to empty
+		self->currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
+		self->lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
+		self->roundStatsHistory().erase(tr, 0, MAX_VERSION);
+		return Void();
+	}
+
+	Future<Void> clearStats(Reference<ReadYourWritesTransaction> tr) { return clearStatsActor(this, tr); }
 };
 
 /////////////////////

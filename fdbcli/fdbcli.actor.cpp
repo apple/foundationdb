@@ -1665,13 +1665,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					if (!auditId.isValid()) {
 						is_error = true;
 					} else {
-						printf("Started audit: %s\n", auditId.toString().c_str());
+						printf("%s audit: %s\n",
+						       tokencmp(tokens[1], "cancel") ? "Cancelled" : "Started",
+						       auditId.toString().c_str());
 					}
 					continue;
 				}
 
 				if (tokencmp(tokens[0], "get_audit_status")) {
 					bool _result = wait(makeInterruptable(getAuditStatusCommandActor(localDb, tokens)));
+					if (!_result) {
+						is_error = true;
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "location_metadata")) {
+					bool _result = wait(makeInterruptable(locationMetadataCommandActor(localDb, tokens)));
 					if (!_result) {
 						is_error = true;
 					}

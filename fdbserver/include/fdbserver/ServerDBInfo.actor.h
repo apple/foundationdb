@@ -97,6 +97,7 @@ struct ServerDBInfo {
 		           infoGeneration);
 	}
 };
+using AsyncVar_ServerDBInfo = AsyncVar<ServerDBInfo>;
 
 struct UpdateServerDBInfoRequest {
 	constexpr static FileIdentifier file_identifier = 9467438;
