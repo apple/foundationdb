@@ -1372,7 +1372,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          PreferLowerReadUtil::True,
-						                          PreferWithinShardLimit::False,
+						                          PreferWithinShardLimit::True,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
 						                          rd.keys);
