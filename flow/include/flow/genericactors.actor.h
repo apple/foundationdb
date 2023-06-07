@@ -1338,7 +1338,8 @@ Future<Void> recurringAsync(
                                 // value AND/OR actor functor taking longer than expected to return, could cause actor
                                 // functor to run with no-delay
     double initialDelay, // Initial delay interval
-    TaskPriority taskID = TaskPriority::DefaultDelay) {
+    TaskPriority taskID = TaskPriority::DefaultDelay,
+    bool jittered = false) {
 
 	wait(delay(initialDelay));
 
@@ -1350,12 +1351,20 @@ Future<Void> recurringAsync(
 		if (absoluteIntervalDelay) {
 			wait(val);
 			// Ensure subsequent actorFunc executions observe client supplied delay interval.
-			wait(delay(interval));
+			if (jittered) {
+				wait(delayJittered(interval));
+			} else {
+				wait(delay(interval));
+			}
 		} else {
 			// Guarantee at-least client supplied interval delay; two possible scenarios:
 			// 1. The actorFunc executions finishes before 'interval' delay
 			// 2. The actorFunc executions takes > 'interval' delay.
-			wait(val && delay(interval));
+			if (jittered) {
+				wait(val && delayJittered(interval));
+			} else {
+				wait(val && delay(interval));
+			}
 		}
 	}
 }

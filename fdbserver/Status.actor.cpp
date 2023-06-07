@@ -20,8 +20,11 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
+#include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -2496,24 +2499,38 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std::set<std::string>* incompleteReason) {
 	state JsonBuilderObject statusObj;
+	state Transaction tr(db);
 	try {
-		Reference<BlobRestoreController> restoreController = makeReference<BlobRestoreController>(db, normalKeys);
-		Optional<BlobRestoreState> restoreState =
-		    wait(timeoutError(BlobRestoreController::getState(restoreController), 1.0));
-		if (restoreState.present()) {
-			statusObj["blob_full_restore_phase"] = restoreState.get().phase;
-			statusObj["blob_full_restore_phase_progress"] = restoreState.get().progress;
-			statusObj["blob_full_restore_phase_start_ts"] = restoreState.get().phaseStartTs[restoreState.get().phase];
-			statusObj["blob_full_restore_start_ts"] = restoreState.get().phaseStartTs[STARTING_MIGRATOR];
-			Optional<StringRef> error = restoreState.get().error;
-			statusObj["blob_full_restore_error"] = error.present() ? error.get() : ""_sr;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state BlobGranuleRestoreConfig config;
+				state BlobRestorePhase phase =
+				    wait(config.phase().getD(&tr, Snapshot::False, BlobRestorePhase::UNINIT));
+				if (phase > BlobRestorePhase::UNINIT) {
+					statusObj["blob_full_restore_phase"] = phase;
+					int progress = wait(config.progress().getD(&tr));
+					statusObj["blob_full_restore_phase_progress"] = progress;
+					int64_t phaseStartTs = wait(config.phaseStartTs().getD(&tr, phase));
+					statusObj["blob_full_restore_phase_start_ts"] = phaseStartTs;
+					int64_t startTs = wait(config.phaseStartTs().getD(&tr, BlobRestorePhase::INIT));
+					statusObj["blob_full_restore_start_ts"] = startTs;
+					std::string error = wait(config.error().getD(&tr));
+					statusObj["blob_full_restore_error"] = error;
+				}
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
 		}
-
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
 			throw;
 		incompleteReason->insert("Unable to query blob restore status");
 	}
+
 	return statusObj;
 }
 
@@ -2692,7 +2709,8 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 		zoneFailuresWithoutLosingData = std::min(zoneFailuresWithoutLosingData, minStorageReplicasRemaining - 1);
 	}
 
-	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or availability.
+	// oldLogFaultTolerance means max failures we can tolerate to lose logs data. -1 means we lose data or
+	// availability.
 	zoneFailuresWithoutLosingData = std::max(std::min(zoneFailuresWithoutLosingData, oldLogFaultTolerance), -1);
 	statusObj["max_zone_failures_without_losing_data"] = zoneFailuresWithoutLosingData;
 
@@ -2708,12 +2726,13 @@ static JsonBuilderObject faultToleranceStatusFetcher(DatabaseConfiguration confi
 
 static std::string getIssueDescription(std::string name) {
 	if (name == "incorrect_cluster_file_contents") {
-		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and its "
+		return "Cluster file contents do not match current cluster connection string. Verify the cluster file and "
+		       "its "
 		       "parent directory are writable and that the cluster file has not been overwritten externally.";
 	}
 
-	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which is
-	// currently the only possible message
+	// FIXME: name and description will be the same unless the message is 'incorrect_cluster_file_contents', which
+	// is currently the only possible message
 	return name;
 }
 
@@ -2952,6 +2971,24 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 		}
 	}
 }
+
+ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
+	try {
+		if (!db->get().client.encryptKeyProxy.present()) {
+			return KMSHealthStatus{ false, false, now() };
+		}
+		KMSHealthStatus reply = wait(timeoutError(
+		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
+		    FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
+		return reply;
+	} catch (Error& e) {
+		if (e.code() != error_code_timed_out) {
+			throw;
+		}
+		return KMSHealthStatus{ false, false, now() };
+	}
+}
+
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
 ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
                                                            DatabaseConfiguration conf,
@@ -3046,6 +3083,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
+
+		state JsonBuilderObject statusObj;
+
+		// Get EKP Health
+		if (db->get().client.encryptKeyProxy.present()) {
+			KMSHealthStatus status = wait(getKMSHealthStatus(db));
+			JsonBuilderObject _statusObj;
+			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
+			statusObj["encryption_at_rest"] = _statusObj;
+			statusObj["kms_is_healthy"] = status.canConnectToKms;
+			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
+			if (!status.canConnectToKms || !status.canConnectToEKP) {
+				return StatusReply(statusObj.getJson());
+			}
+		}
+
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -3123,7 +3176,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		// event requests but still end up in the unreachable set.
 		std::set<std::string> mergeUnreachable;
 
-		// For each (optional) pair, if the pair is present and not empty then add the unreachable workers to the set.
+		// For each (optional) pair, if the pair is present and not empty then add the unreachable workers to the
+		// set.
 		for (auto pair : workerEventsVec) {
 			if (pair.present() && !pair.get().second.empty())
 				mergeUnreachable.insert(pair.get().second.begin(), pair.get().second.end());
@@ -3173,7 +3227,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state WorkerEvents programStarts =
 		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
-		state JsonBuilderObject statusObj;
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}
@@ -3357,8 +3410,8 @@ ACTOR Future<StatusReply> clusterGetStatus(
 				statusObj["configuration"] = configObj;
 			}
 
-			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and adds to
-			// the dataOverlay object
+			// workloadStatusFetcher returns the workload section but also optionally writes the qos section and
+			// adds to the dataOverlay object
 			if (!workerStatuses[1].empty())
 				statusObj["workload"] = workerStatuses[1];
 

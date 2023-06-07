@@ -60,6 +60,7 @@ class UpgradeTest:
         self.downloader = FdbBinaryDownloader(args.build_dir)
         if not self.necessary_binaries_available():
             return
+        self.download_old_binaries()
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
         self.create_external_lib_dir()
