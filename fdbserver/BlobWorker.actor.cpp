@@ -1846,6 +1846,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		int toPop = 0;
 		// keep bytes in delta files pending here, then add back already durable delta files at end
 		metadata->bytesInNewDeltaFiles = 0;
+		metadata->newDeltaFileCount = 0;
 
 		for (auto& f : inFlightFiles) {
 			if (f.snapshot) {
@@ -1862,6 +1863,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 				} else {
 					metadata->pendingSnapshotVersion = f.version;
 					metadata->bytesInNewDeltaFiles = 0;
+					metadata->newDeltaFileCount = 0;
 				}
 			} else {
 				if (f.version > rollbackVersion) {
@@ -1878,6 +1880,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 					ASSERT(f.version > cfRollbackVersion);
 					cfRollbackVersion = f.version;
 					metadata->bytesInNewDeltaFiles += f.bytes;
+					metadata->newDeltaFileCount++;
 				}
 			}
 		}
@@ -1910,6 +1913,7 @@ Version doGranuleRollback(Reference<GranuleMetadata> metadata,
 		     i >= 0 && metadata->files.deltaFiles[i].version > metadata->pendingSnapshotVersion;
 		     i--) {
 			metadata->bytesInNewDeltaFiles += metadata->files.deltaFiles[i].logicalSize;
+			metadata->newDeltaFileCount++;
 		}
 
 		// Track that this rollback happened, since we have to re-read mutations up to the rollback
@@ -2195,6 +2199,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				for (int i = files.deltaFiles.size() - 1; i >= 0; i--) {
 					if (files.deltaFiles[i].version > snapshotVersion) {
 						metadata->bytesInNewDeltaFiles += files.deltaFiles[i].logicalSize;
+						metadata->newDeltaFileCount++;
 					}
 				}
 			}
@@ -2802,6 +2807,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				ASSERT(metadata->bufferedDeltaVersion <= lastDeltaVersion);
 				metadata->bufferedDeltaVersion = lastDeltaVersion; // In case flush was forced at non-mutation version
 				metadata->bytesInNewDeltaFiles += metadata->bufferedDeltaBytes;
+				metadata->newDeltaFileCount++;
 
 				bwData->stats.mutationBytesBuffered -= metadata->bufferedDeltaBytes;
 
@@ -2837,11 +2843,11 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			// making a bunch of extra delta files at some point, even if we don't consider it for a split
 			// yet
 
-			// If we have enough delta files, try to re-snapshot
-			// FIXME: have max file count in addition to bytes count
+			// If we have enough delta file data, try to re-snapshot
 			if (snapshotEligible &&
 			    (metadata->doEarlyReSnapshot() ||
-			     metadata->bytesInNewDeltaFiles >= metadata->writeAmpTarget.getBytesBeforeCompact())) {
+			     metadata->bytesInNewDeltaFiles >= metadata->writeAmpTarget.getBytesBeforeCompact() ||
+			     metadata->newDeltaFileCount >= 20)) {
 				if (BW_DEBUG && !inFlightFiles.empty()) {
 					fmt::print("Granule [{0} - {1}) ready to re-snapshot at {2} after {3} > {4} bytes, "
 					           "waiting for outstanding {5} files to finish\n",
@@ -2852,6 +2858,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					           metadata->writeAmpTarget.getBytesBeforeCompact(),
 					           inFlightFiles.size());
 				}
+
+				CODE_PROBE(metadata->doEarlyReSnapshot(), "granule snapshotting early");
+				CODE_PROBE(metadata->newDeltaFileCount >= 20, "granule snapshotting due to many small delta files");
 
 				// cancel previous candidate checker
 				checkMergeCandidate.cancel();
@@ -2891,6 +2900,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				// reset metadata
 				metadata->bytesInNewDeltaFiles = 0;
+				metadata->newDeltaFileCount = 0;
 				metadata->resetReadStats();
 
 				// If we have more than one snapshot file and that file is unblocked (committedVersion >=
