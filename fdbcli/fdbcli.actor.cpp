@@ -762,9 +762,9 @@ ACTOR Future<std::tuple<DbConns, MgmtDbConns, bool>> useClusterCommand(Metaclust
 	}
 
 	ASSERT(mgmtDb.present());
-    ASSERT(mgmtLocalDb.present());
-    ASSERT(mgmtConfigDb.get());
-    ASSERT(mgmtClusterName.present());
+	ASSERT(mgmtLocalDb.present());
+	ASSERT(mgmtConfigDb.get());
+	ASSERT(mgmtClusterName.present());
 
 	if (tokencmp(newClusterNameStr, mgmtClusterName.get().toString().c_str())) {
 		db = mgmtDb.get();
