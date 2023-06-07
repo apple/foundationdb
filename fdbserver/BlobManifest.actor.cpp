@@ -558,7 +558,7 @@ private:
 				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
 				limits.minRows = 0;
 				loop {
-					RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					RangeReadResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : result) {
 						if (shouldDumpFunc(row)) {
 							splitter->append(row);
