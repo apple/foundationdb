@@ -537,7 +537,7 @@ public:
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
 		auto& ssInfo = ssInfos[ss.id];
 		ssInfo.throttlingRatio = ss.getTagThrottlingRatio(SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,
-		                                                  SERVER_KNOBS->SPRING_BYTES_STORAGE_SERVER);
+		                                                  SERVER_KNOBS->AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER);
 		ssInfo.zoneId = ss.locality.zoneId();
 
 		auto& tagToThroughputCounters = throughput[ss.id];
