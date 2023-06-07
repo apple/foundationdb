@@ -535,7 +535,7 @@ ACTOR Future<Void> getValueQ(StorageCacheData* data, GetValueRequest req) {
 			                      req.options.get().debugID.get().first(),
 			                      "getValueQ.AfterRead"); //.detail("TaskID", g_network->getCurrentTask());
 
-		GetValueReply reply(v, true);
+		GetValueReply reply(v, true, ReadMetrics());
 		req.reply.send(reply);
 	} catch (Error& e) {
 		//TraceEvent(SevWarn, "SCGetValueQError", data->thisServerID).detail("Code",e.code()).detail("ReqKey",req.key)
@@ -894,7 +894,7 @@ ACTOR Future<Void> getKey(StorageCacheData* data, GetKeyRequest req) {
 		data->counters.bytesQueried += resultSize;
 		++data->counters.rowsQueried;
 
-		GetKeyReply reply(updated, true);
+		GetKeyReply reply(updated, true, ReadMetrics());
 		req.reply.send(reply);
 	} catch (Error& e) {
 		// if (e.code() == error_code_wrong_shard_server) TraceEvent("SCWrongCacheRangeServer").detail("In","getKey");
