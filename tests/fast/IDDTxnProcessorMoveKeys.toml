@@ -7,6 +7,15 @@ max_added_sources_multiplier = 0 # set to 0 because it's impossible to make sure
 shard_encode_location_metadata = false
 
 [[test]]
+testTitle = 'IDDTxnProcessorRawStartMovement'
+
+    [[test.workload]]
+    testName = 'IDDTxnProcessorApiCorrectness'
+    testDuration = 50.0
+    testStartOnly = true # only test startMovement implementation
+
+
+[[test]]
 testTitle = 'IDDTxnProcessorMoveKeys'
 
     [[test.workload]]
