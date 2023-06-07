@@ -29,16 +29,41 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace {
-std::string describeUIDs(const std::vector<UID>& ids) {
-	std::string res;
+ACTOR Future<std::string> describeServers(Reference<ReadYourWritesTransaction> tr, std::vector<UID> ids) {
+	std::vector<Future<Optional<Value>>> serverListEntries;
 	for (const UID& id : ids) {
+		serverListEntries.push_back(tr->get(serverListKeyFor(id)));
+	}
+	std::vector<Optional<Value>> serverListValues = wait(getAll(serverListEntries));
+	std::string res;
+	for (auto& v : serverListValues) {
+		StorageServerInterface ssi = decodeServerListValue(v.get());
 		if (!res.empty()) {
 			res += ", ";
 		}
-		res += id.toString();
+		res += fmt::format("ServerID: {}, Addr: {}", ssi.uniqueID.toString(), ssi.stableAddress().toString());
 	}
 
 	return res;
+}
+
+ACTOR Future<Void> printKeyServersEntry(Reference<ReadYourWritesTransaction> tr,
+                                        RangeResultRef UIDtoTagMap,
+                                        Value entry,
+                                        KeyRangeRef range) {
+	state std::vector<UID> src;
+	state std::vector<UID> dest;
+	state UID srcId;
+	state UID destId;
+	decodeKeyServersValue(UIDtoTagMap, entry, src, dest, srcId, destId);
+	state std::string srcDesc = wait(describeServers(tr, src));
+	std::string destDesc = wait(describeServers(tr, dest));
+	printf("Range: %s, ShardID: %s, Src Servers: %s, Dest Servers: %s\n",
+	       Traceable<KeyRangeRef>::toString(range).c_str(),
+	       srcId.toString().c_str(),
+	       srcDesc.c_str(),
+	       destDesc.c_str());
+	return Void();
 }
 
 ACTOR Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
@@ -53,27 +78,25 @@ ACTOR Future<Void> printRandomShards(Database cx, int n, bool physicalShard) {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				KeyRangeRef currentKeys(begin, allKeys.end);
-				RangeResult shards = wait(krmGetRanges(tr, keyServersPrefix, currentKeys, n, CLIENT_KNOBS->TOO_MANY));
+				state KeyRangeRef currentKeys(begin, allKeys.end);
+				state RangeResult shards =
+				    wait(krmGetRanges(tr, keyServersPrefix, currentKeys, n, CLIENT_KNOBS->TOO_MANY));
 
-				for (int i = 0; i < shards.size() - 1 && numShards < n; ++i) {
-					const KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+				state int i = 0;
+				for (; i < shards.size() - 1 && numShards < n; ++i) {
+					KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
 					std::vector<UID> src;
 					std::vector<UID> dest;
 					UID srcId;
 					UID destId;
 					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
 					if (physicalShard == (srcId != anonymousShardId)) {
-						printf("Range: %s, IsPhysicalShard: %s, ShardID: %s, Src Servers: %s, Dest Servers: %s\n",
-						       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
-						       physicalShard ? "Yes" : "No",
-						       srcId.toString().c_str(),
-						       describeUIDs(src).c_str(),
-						       describeUIDs(dest).c_str());
+						wait(printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange));
 						++numShards;
 					}
 				}
@@ -104,6 +127,7 @@ ACTOR Future<Void> printPhysicalShardCount(Database cx) {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
@@ -149,6 +173,7 @@ ACTOR Future<Void> printServerShards(Database cx, UID serverId) {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				RangeResult serverShards =
 				    wait(krmGetRanges(tr, serverKeysPrefixFor(serverId), KeyRangeRef(begin, allKeys.end)));
@@ -188,26 +213,19 @@ ACTOR Future<Void> resolveRange(Database cx, KeyRange range) {
 			try {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 
 				state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
-				KeyRangeRef currentKeys(begin, range.end);
-				RangeResult shards = wait(
+				state KeyRangeRef currentKeys(begin, range.end);
+				state RangeResult shards = wait(
 				    krmGetRanges(tr, keyServersPrefix, currentKeys, CLIENT_KNOBS->TOO_MANY, CLIENT_KNOBS->TOO_MANY));
 
-				for (int i = 0; i < shards.size() - 1; ++i) {
-					const KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId;
-					UID destId;
-					decodeKeyServersValue(UIDtoTagMap, shards[i].value, src, dest, srcId, destId);
-					printf("Range: %s, ShardID: %s, Src Servers: %s, Dest Servers: %s\n",
-					       Traceable<KeyRangeRef>::toString(currentRange).c_str(),
-					       srcId.toString().c_str(),
-					       describeUIDs(src).c_str(),
-					       describeUIDs(dest).c_str());
+				state int i = 0;
+				for (; i < shards.size() - 1; ++i) {
+					state KeyRangeRef currentRange(shards[i].key, shards[i + 1].key);
+					wait(printKeyServersEntry(tr, UIDtoTagMap, shards[i].value, currentRange));
 				}
 
 				begin = shards.back().key;
