@@ -79,11 +79,13 @@ class TLSConfig:
         self,
         server_chain_len: int = 3,
         client_chain_len: int = 2,
-        verify_peers="Check.Valid=1",
+        verify_peers: str = "Check.Valid=1",
+        client_disable_plaintext_connection: bool = False,
     ):
         self.server_chain_len = server_chain_len
         self.client_chain_len = client_chain_len
         self.verify_peers = verify_peers
+        self.client_disable_plaintext_connection = client_disable_plaintext_connection
 
 
 class LocalCluster:
@@ -154,6 +156,7 @@ knob_min_trace_severity=5
         custom_config: dict = {},
         authorization_kty: str = "",
         authorization_keypair_id: str = "",
+        disable_server_side_tls: bool = False,
     ):
         self.port_provider = PortProvider()
         self.basedir = Path(basedir)
@@ -202,6 +205,7 @@ knob_min_trace_severity=5
         self.use_legacy_conf_syntax = False
         self.coordinators = set()
         self.active_servers = set(self.server_ports.keys())
+        self.disable_server_side_tls = disable_server_side_tls
         self.tls_config = tls_config
         self.public_key_jwks_str = None
         self.public_key_json_file = None
@@ -287,7 +291,7 @@ knob_min_trace_severity=5
                     encrypt_config=encrypt_config,
                     tls_config=self.tls_conf_string(),
                     authz_public_key_config=self.authz_public_key_conf_string(),
-                    optional_tls=":tls" if self.tls_config is not None else "",
+                    optional_tls=self.tls_optional_string(),
                     custom_config="\n".join(
                         [
                             "{} = {}".format(key, value)
@@ -333,7 +337,7 @@ knob_min_trace_severity=5
             secret=self.cluster_secret,
             ip_addr=self.ip_address,
             server_port=self.server_ports[0],
-            optional_tls=":tls" if self.tls_config else "",
+            optional_tls=self.tls_optional_string(),
         )
         return conn_str
 
@@ -405,6 +409,8 @@ knob_min_trace_severity=5
                 "--tls-ca-file",
                 self.server_ca_file,
             ]
+            if self.tls_config.client_disable_plaintext_connection:
+                args += ["--tls-disable-plaintext-connection"]
         if self.use_future_protocol_version:
             args += ["--use-future-protocol-version"]
         res = subprocess.run(
@@ -476,7 +482,7 @@ knob_min_trace_severity=5
 
     # Materialize server's TLS configuration section
     def tls_conf_string(self):
-        if self.tls_config is None:
+        if self.tls_config is None or self.disable_server_side_tls:
             return ""
         else:
             conf_map = {
@@ -486,6 +492,12 @@ knob_min_trace_severity=5
                 "tls-verify-peers": self.tls_config.verify_peers,
             }
             return "\n".join("{} = {}".format(k, v) for k, v in conf_map.items())
+
+    def tls_optional_string(self):
+        if self.tls_config is None or self.disable_server_side_tls:
+            return ""
+        else:
+            return ":tls"
 
     def authz_public_key_conf_string(self):
         if self.public_key_json_file is not None:

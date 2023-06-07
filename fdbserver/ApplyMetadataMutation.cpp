@@ -621,22 +621,26 @@ private:
 		if (toCommit) {
 			CheckpointMetaData checkpoint = decodeCheckpointValue(m.param2);
 			for (const auto& ssID : checkpoint.src) {
-				Optional<Value> tagV = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
-				if (tagV.present()) {
-					Tag tag = decodeServerTagValue(tagV.get());
-					MutationRef privatized = m;
-					privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
-					TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
-					    .detail("Original", m)
-					    .detail("Privatized", privatized)
-					    .detail("Server", ssID)
-					    .detail("TagKey", serverTagKeyFor(ssID))
-					    .detail("Tag", tag.toString())
+				Optional<Value> tagValue = txnStateStore->readValue(serverTagKeyFor(ssID)).get();
+				if (!tagValue.present()) {
+					TraceEvent(SevWarn, "CheckpointServerTagNotFound", dbgid)
+					    .detail("StorageServerID", ssID)
 					    .detail("Checkpoint", checkpoint.toString());
-
-					toCommit->addTag(tag);
-					writeMutation(privatized);
+					continue;
 				}
+				const Tag tag = decodeServerTagValue(tagValue.get());
+				MutationRef privatized = m;
+				privatized.param1 = m.param1.withPrefix(systemKeys.begin, arena);
+				TraceEvent("SendingPrivateMutationCheckpoint", dbgid)
+				    .detail("Original", m)
+				    .detail("Privatized", privatized)
+				    .detail("Server", ssID)
+				    .detail("TagKey", serverTagKeyFor(ssID))
+				    .detail("Tag", tag.toString())
+				    .detail("Checkpoint", checkpoint.toString());
+
+				toCommit->addTag(tag);
+				writeMutation(privatized);
 			}
 		}
 	}
@@ -694,6 +698,7 @@ private:
 		if (m.param1.startsWith(prefix)) {
 			TenantMapEntry tenantEntry;
 			if (initialCommit) {
+				CODE_PROBE(true, "Recovering tenant from txn state store");
 				TenantMapEntryTxnStateStore txnStateStoreEntry = TenantMapEntryTxnStateStore::decode(m.param2);
 				tenantEntry.setId(txnStateStoreEntry.id);
 				tenantEntry.tenantName = txnStateStoreEntry.tenantName;
@@ -717,8 +722,10 @@ private:
 			}
 			if (lockedTenants) {
 				if (tenantEntry.tenantLockState == TenantAPI::TenantLockState::UNLOCKED) {
+					CODE_PROBE(true, "ApplyMetadataMutation unlock tenant");
 					lockedTenants->erase(tenantEntry.id);
 				} else {
+					CODE_PROBE(true, "ApplyMetadataMutation lock tenant");
 					lockedTenants->insert(tenantEntry.id);
 				}
 			}
@@ -1174,6 +1181,7 @@ private:
 					auto endItr = endId.present()
 					                  ? std::lower_bound(lockedTenants->begin(), lockedTenants->end(), endId.get())
 					                  : lockedTenants->end();
+					CODE_PROBE(startItr != endItr, "Deleting locked tenant");
 					lockedTenants->erase(startItr, endItr);
 				}
 			}

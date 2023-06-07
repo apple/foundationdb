@@ -384,6 +384,14 @@ void MockStorageServer::getStorageMetrics(const GetStorageMetricsRequest& req) {
 	metrics.getStorageMetrics(req, storageBytes, counters.bytesInput.getRate(), 0, now());
 }
 
+void MockStorageServer::getSplitMetrics(const SplitMetricsRequest& req) {
+	this->metrics.splitMetrics(req);
+}
+
+void MockStorageServer::getHotRangeMetrics(const ReadHotSubRangeRequest& req) {
+	this->metrics.getReadHotRanges(req);
+}
+
 Future<Void> MockStorageServer::run() {
 	ssi.initEndpoints();
 	ssi.startAcceptingRequests();

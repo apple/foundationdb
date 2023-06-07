@@ -382,6 +382,9 @@ class Summary:
             child.attributes["Path"] = str(trace_dir.absolute())
             child.attributes["Command"] = command
             self.out.append(child)
+            child = SummaryTree("Output")
+            child.attributes["StdErr"] = self.error_out
+            self.out.append(child)
             return
         self.summarize_files(trace_files[0])
         if config.joshua_dir is not None:
@@ -634,7 +637,11 @@ class Summary:
                 return
             self.test_end_found = True
             self.unseed = int(attrs["RandomUnseed"])
-            if self.expected_unseed is not None and self.unseed != self.expected_unseed:
+            if (
+                self.expected_unseed is not None
+                and self.unseed != self.expected_unseed
+                and self.unseed != -1
+            ):
                 severity = (
                     40
                     if ("UnseedMismatch", 40) not in self.severity_map

@@ -24,6 +24,8 @@
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
 #ifndef BOOST_SYSTEM_NO_LIB
@@ -114,7 +116,6 @@ DESCR struct SlowTask {
 
 namespace N2 { // No indent, it's the whole file
 
-class Net2;
 class Peer;
 class Connection;
 
@@ -171,6 +172,7 @@ public:
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
 	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
+	void _swiftEnqueue(void* task) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -259,11 +261,21 @@ public:
 
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
+		swift::Job* _Nullable swiftJob = nullptr;
 		PromiseTask() {}
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
+		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
 		void operator()() {
+#ifdef WITH_SWIFT
+			if (auto job = swiftJob) {
+				swift_job_run(job, ExecutorRef::generic());
+			} else {
+				promise.send(Void());
+			}
+#else
 			promise.send(Void());
+#endif
 			delete this;
 		}
 	};
@@ -1321,7 +1333,8 @@ void Net2::initTLS(ETLSInitState targetState) {
 			    .detail("CertificatePath", tlsConfig.getCertificatePathSync())
 			    .detail("KeyPath", tlsConfig.getKeyPathSync())
 			    .detail("HasPassword", !loaded.getPassword().empty())
-			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"));
+			    .detail("VerifyPeers", boost::algorithm::join(loaded.getVerifyPeers(), "|"))
+			    .detail("DisablePlainTextConnection", tlsConfig.getDisablePlainTextConnection());
 			auto loadedTlsConfig = tlsConfig.loadSync();
 			ConfigureSSLContext(loadedTlsConfig, newContext);
 			activeTlsPolicy = makeReference<TLSPolicy>(loadedTlsConfig, onPolicyFailure);
@@ -1418,7 +1431,6 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
-
 	thread_network = this;
 
 	unsigned int tasksSinceReact = 0;
@@ -1748,6 +1760,7 @@ Future<class Void> Net2::yield(TaskPriority taskID) {
 	return Void();
 }
 
+// TODO: can we wrap our swift task and insert it in here?
 Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
 	                     // as infinite
@@ -1768,6 +1781,15 @@ Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	return delay(seconds, taskId);
 }
 
+void Net2::_swiftEnqueue(void* _job) {
+#ifdef WITH_SWIFT
+	swift::Job* job = (swift::Job*)_job;
+	TaskPriority priority = swift_priority_to_net2(job->getPriority());
+	PromiseTask* t = new PromiseTask(job);
+	taskQueue.addReady(priority, t);
+#endif
+}
+
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {
 	if (stopped)
 		return;
@@ -1785,6 +1807,11 @@ Future<Reference<IConnection>> Net2::connect(NetworkAddress toAddr, tcp::socket*
 	if (toAddr.isTLS()) {
 		initTLS(ETLSInitState::CONNECT);
 		return SSLConnection::connect(&this->reactor.ios, this->sslContextVar.get(), toAddr, existingSocket);
+	}
+
+	if (tlsConfig.getDisablePlainTextConnection()) {
+		TraceEvent(SevError, "PlainTextConnectionDisabled").detail("toAddr", toAddr);
+		throw connection_failed();
 	}
 
 	return Connection::connect(&this->reactor.ios, toAddr);

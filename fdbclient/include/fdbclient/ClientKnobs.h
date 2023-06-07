@@ -29,7 +29,7 @@
 FDB_BOOLEAN_PARAM(Randomize);
 FDB_BOOLEAN_PARAM(IsSimulated);
 
-class ClientKnobs : public KnobsImpl<ClientKnobs> {
+class SWIFT_CXX_IMMORTAL_SINGLETON_TYPE ClientKnobs : public KnobsImpl<ClientKnobs> {
 public:
 	int TOO_MANY; // FIXME: this should really be split up so we can control these more specifically
 
@@ -180,6 +180,7 @@ public:
 	int RESTORE_DISPATCH_ADDTASK_SIZE;
 	int RESTORE_DISPATCH_BATCH_SIZE;
 	int RESTORE_WRITE_TX_SIZE;
+	int RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 	int APPLY_MAX_LOCK_BYTES;
 	int APPLY_MIN_LOCK_BYTES;
 	int APPLY_BLOCK_SIZE;
@@ -191,6 +192,8 @@ public:
 	double MIN_CLEANUP_SECONDS;
 	int64_t FASTRESTORE_ATOMICOP_WEIGHT; // workload amplication factor for atomic op
 	int RESTORE_RANGES_READ_BATCH;
+	int BLOB_GRANULE_RESTORE_CHECK_INTERVAL;
+	bool BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH;
 
 	// Configuration
 	int32_t DEFAULT_AUTO_COMMIT_PROXIES;
@@ -279,6 +282,7 @@ public:
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
 	int64_t BLOB_METADATA_REFRESH_INTERVAL;
+	bool DETERMINISTIC_BLOB_METADATA;
 	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
@@ -314,6 +318,7 @@ public:
 
 	// REST KMS configurations
 	bool REST_KMS_ALLOW_NOT_SECURE_CONNECTION;
+	int SIM_KMS_VAULT_MAX_KEYS;
 
 	ClientKnobs(Randomize randomize);
 	void initialize(Randomize randomize);

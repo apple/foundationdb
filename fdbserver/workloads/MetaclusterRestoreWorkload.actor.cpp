@@ -279,6 +279,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 				// A dry-run shouldn't change anything
 				if (simultaneousRestoreCount == 1) {
+					CODE_PROBE(true, "Checking data cluster dry-run with no simultaneous restores");
 					preDryRunMetaclusterData.assertEquals(postDryRunMetaclusterData);
 				} else {
 					preDryRunMetaclusterData.dataClusterMetadata[clusterName].assertEquals(
@@ -317,6 +318,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					}
 				}
 
+				CODE_PROBE(!successfulRestore, "Simultaneous restores all failed");
 				ASSERT(successfulRestore || restoreFutures.size() > 1);
 				numRestores = 1;
 			}
@@ -366,11 +368,13 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			// If the data cluster tenant is expected, then remove the management tenant
 			// Note that the management tenant may also have been expected
 			if (self->createdTenants.count(t.second.first)) {
+				CODE_PROBE(true, "Remove management tenant in restore collision");
 				removeTrackedTenant(t.second.second);
 				deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, t.second.second));
 			}
 			// We don't expect the data cluster tenant, so delete it
 			else {
+				CODE_PROBE(true, "Remove data cluster tenant in restore collision");
 				removeTrackedTenant(t.second.first);
 				deleteFutures.push_back(TenantAPI::deleteTenant(dataDb.getReference(), t.first, t.second.first));
 			}
@@ -413,6 +417,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			// Note that the management tenant group may also have been expected
 			auto itr = self->tenantGroups.find(*collisionItr);
 			if (itr->second.cluster == clusterName) {
+				CODE_PROBE(true, "Remove management tenant group in restore collision");
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "ManagementCluster")
 				    .detail("TenantGroup", *collisionItr);
@@ -426,10 +431,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					self->removeTrackedTenant(t);
 					deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, t));
 				}
-
 			}
 			// The tenant group from the management cluster is what we expect
 			else {
+				CODE_PROBE(true, "Remove data cluster tenant group in restore collision");
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadDeleteTenantGroupCollision")
 				    .detail("From", "DataCluster")
 				    .detail("TenantGroup", *collisionItr);
@@ -636,9 +641,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 						Optional<Error> nonConflictError;
 						for (int i = 0; i < restoreFutures.size(); ++i) {
 							ErrorOr<Void> result = restoreFutures[i].get();
-							fmt::print("Restore result for {}: {}\n",
-							           printable(clusterItr->first),
-							           result.isError() ? result.getError().what() : "success");
 							if (!result.isError()) {
 								ASSERT(!successfulRestore);
 								successfulRestore = true;
@@ -659,6 +661,9 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 							break;
 						}
 
+						CODE_PROBE(true,
+						           "Management cluster restore conflict for all simultaneous attempts",
+						           probe::decoration::rare);
 						ASSERT_GT(restoreFutures.size(), 1);
 
 						numRestores = 1;
@@ -711,7 +716,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				    wait(getDataClusterTenants(clusterItr->second.db));
 
 				// Restoring a management cluster from data clusters should not change the data clusters at all
-				fmt::print("Checking data clusters: {}\n", completed);
 				ASSERT_EQ(dataTenantsBeforeRestore.size(), dataTenantsAfterRestore.size());
 				for (int i = 0; i < dataTenantsBeforeRestore.size(); ++i) {
 					ASSERT_EQ(dataTenantsBeforeRestore[i].first, dataTenantsAfterRestore[i].first);
@@ -774,8 +778,10 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				metacluster::MetaclusterTenantMapEntry tenantEntry;
 				tenantEntry.tenantName = tenantName;
 				tenantEntry.tenantGroup = self->chooseTenantGroup();
-				wait(metacluster::createTenant(
-				    self->managementDb, tenantEntry, metacluster::AssignClusterAutomatically::True));
+				wait(metacluster::createTenant(self->managementDb,
+				                               tenantEntry,
+				                               metacluster::AssignClusterAutomatically::True,
+				                               metacluster::IgnoreCapacityLimit::False));
 				metacluster::MetaclusterTenantMapEntry createdEntry =
 				    wait(metacluster::getTenant(self->managementDb, tenantName));
 				TraceEvent(SevDebug, "MetaclusterRestoreWorkloadCreatedTenant")
@@ -1128,6 +1134,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				}
 			}
 
+			CODE_PROBE(unexpectedTenants > 0, "Deleted tenants reappeared during metacluster restore");
 			ASSERT_EQ(tenantMap.size() - unexpectedTenants, expectedTenantCount);
 		}
 
@@ -1174,6 +1181,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				// lost data in the process of recovering both the management and some data clusters
 				ASSERT_NE(tenantData.createTime, RestoreTenantData::AccessTime::BEFORE_BACKUP);
 				ASSERT(self->dataDbs[tenantData.cluster].restored && self->recoverManagementCluster);
+				CODE_PROBE(true, "Tenant lost when recovering management and data cluster");
 			} else {
 				if (tenantData.createTime != RestoreTenantData::AccessTime::BEFORE_BACKUP &&
 				    self->dataDbs[tenantData.cluster].restored) {
@@ -1182,6 +1190,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					        tenantData.createTime == RestoreTenantData::AccessTime::DURING_BACKUP));
 					if (tenantItr->second.tenantState == metacluster::TenantState::ERROR) {
 						ASSERT(self->dataDbs[tenantData.cluster].restoreHasMessages);
+						CODE_PROBE(true, "Tenant lost when recovering data cluster");
 					}
 				} else {
 					ASSERT_EQ(tenantItr->second.tenantState, metacluster::TenantState::READY);

@@ -22,8 +22,6 @@ package com.apple.foundationdb;
 
 import com.apple.foundationdb.tuple.ByteArrayUtil;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -102,20 +100,24 @@ public class MappedKeyValue extends KeyValue {
 			return false;
 
 		MappedKeyValue rhs = (MappedKeyValue) obj;
-		return Arrays.equals(rangeBegin, rhs.rangeBegin) && Arrays.equals(rangeEnd, rhs.rangeEnd) &&
-		    Objects.equals(rangeResult, rhs.rangeResult);
+		return Arrays.equals(getKey(), rhs.getKey()) && Arrays.equals(getValue(), rhs.getValue())
+			&& Arrays.equals(rangeBegin, rhs.rangeBegin) && Arrays.equals(rangeEnd, rhs.rangeEnd)
+			&& Objects.equals(rangeResult, rhs.rangeResult);
 	}
 
 	@Override
 	public int hashCode() {
 		int hashForResult = rangeResult == null ? 0 : rangeResult.hashCode();
-		return 17 + (29 * hashForResult + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
+		return 17 + (13 * Arrays.hashCode(getKey()) + 11 * Arrays.hashCode(getValue())
+			+ 29 * hashForResult + 37 * Arrays.hashCode(rangeBegin) + Arrays.hashCode(rangeEnd));
 	}
 
 	@Override
 	public String toString() {
 		final StringBuilder sb = new StringBuilder("MappedKeyValue{");
-		sb.append("rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
+		sb.append("key=").append(ByteArrayUtil.printable(getKey()));
+		sb.append(", value=").append(ByteArrayUtil.printable(getValue()));
+		sb.append(", rangeBegin=").append(ByteArrayUtil.printable(rangeBegin));
 		sb.append(", rangeEnd=").append(ByteArrayUtil.printable(rangeEnd));
 		sb.append(", rangeResult=").append(rangeResult);
 		sb.append('}');

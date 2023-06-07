@@ -23,6 +23,8 @@
 #include "flow/flow.h"
 #include <cmath>
 
+// Implements a basic exponential smoothing algorithm
+// (see https://en.wikipedia.org/wiki/Exponential_smoothing#Basic_(simple)_exponential_smoothing)
 template <class T>
 class SmootherImpl {
 	// Times (t) are expected to be nondecreasing
@@ -76,4 +78,72 @@ class TimerSmoother : public SmootherImpl<TimerSmoother> {
 public:
 	static double now() { return timer(); }
 	explicit TimerSmoother(double eFoldingTime) : SmootherImpl<TimerSmoother>(eFoldingTime) {}
+};
+
+// Implements a Holt linear smoothing algorithm
+// (see https://en.wikipedia.org/wiki/Exponential_smoothing#Double_exponential_smoothing_(Holt_linear))
+// This is more accurate than Smoother for metrics that have a trend.
+template <class T>
+class HoltLinearSmootherImpl {
+	// Times (t) are expected to be nondecreasing
+	double eDataFoldingTime, eTrendFoldingTime;
+	double total, lastEstimate, lastRateEstimate, lastTime;
+
+protected:
+	explicit HoltLinearSmootherImpl(double eDataFoldingTime, double eTrendFoldingTime)
+	  : eDataFoldingTime(eDataFoldingTime), eTrendFoldingTime(eTrendFoldingTime) {
+		reset(0);
+	}
+
+public:
+	void reset(double value) {
+		total = value;
+		lastEstimate = value;
+		lastRateEstimate = 0;
+		lastTime = 0;
+	}
+
+	void setTotal(double total, double t = T::now()) { addDelta(total - this->total, t); }
+
+	void addDelta(double delta, double t = T::now()) {
+		double const elapsed = t - lastTime;
+		if (elapsed) {
+			double const rateEstimate = smoothRate();
+			lastEstimate = smoothTotal();
+			lastRateEstimate = rateEstimate;
+			lastTime = t;
+		}
+		this->total += delta;
+	}
+
+	double smoothTotal(double t = T::now()) const {
+		double const elapsed = t - lastTime;
+		double const alpha = 1 - exp(-elapsed / eDataFoldingTime);
+		return alpha * total + (1 - alpha) * (lastEstimate + elapsed * lastRateEstimate);
+	}
+
+	double smoothRate(double t = T::now()) const {
+		double const elapsed = t - lastTime;
+		if (elapsed) {
+			double const recentRate = (smoothTotal() - lastEstimate) / elapsed;
+			double const beta = 1 - exp(-elapsed / eTrendFoldingTime);
+			return beta * recentRate + (1 - beta) * lastRateEstimate;
+		} else {
+			return lastRateEstimate;
+		}
+	}
+
+	double getTotal() const { return total; }
+};
+
+class HoltLinearSmoother : public HoltLinearSmootherImpl<HoltLinearSmoother> {
+public:
+	static double now() { return ::now(); }
+	explicit HoltLinearSmoother(double eDataFoldingTime, double eTrendFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
+};
+class HoltLinearTimerSmoother : public HoltLinearSmootherImpl<HoltLinearTimerSmoother> {
+	static double now() { return timer(); }
+	explicit HoltLinearTimerSmoother(double eDataFoldingTime, double eTrendFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearTimerSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
 };

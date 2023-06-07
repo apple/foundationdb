@@ -92,7 +92,7 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> txnDoBlobGranuleRequests(
 					           blobGranuleMapping[i + 1].key.printable());
 				}
 				// throw to force read version to increase and to retry reading mapping
-				throw transaction_too_old();
+				throw blob_granule_request_failed();
 			}
 		}
 
@@ -139,9 +139,9 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> txnDoBlobGranuleRequests(
 		}
 	}
 	if (i < blobGranuleMapping.size() - 1) {
-		// a request failed, retry from there after a sleep
+		// a request failed, retry from that point next time
 		*beginKey = blobGranuleMapping[i].key;
-		wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+		throw blob_granule_request_failed();
 	} else if (blobGranuleMapping.more) {
 		*beginKey = blobGranuleMapping.back().key;
 		// no requests failed but there is more to read, continue reading
@@ -170,6 +170,8 @@ Future<Standalone<VectorRef<REPLY_TYPE(Request)>>> doBlobGranuleRequests(
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			// raw access for avoiding tenant check in required mode
+			tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 			Standalone<VectorRef<REPLY_TYPE(Request)>> partialResults =
 			    wait(txnDoBlobGranuleRequests(&tr, &beginKey, endKey, request, channel));
 			if (!partialResults.empty()) {

@@ -8,6 +8,8 @@ remoteConfig = 'remote_double'
 
 [[knobs]]
 max_write_transaction_life_versions = 5000000
+record_recover_at_in_cstate = true
+track_tlog_recovery = true
 
 [[test]]
 testTitle = 'GcGenerations'

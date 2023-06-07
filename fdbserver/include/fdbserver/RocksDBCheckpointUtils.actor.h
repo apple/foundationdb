@@ -63,8 +63,8 @@ struct CheckpointFile {
 	bool isValid() const { return !path.empty(); }
 
 	std::string toString() const {
-		return "CheckpointFile:\nFile Name: " + this->path + "\nRange: " + range.toString() +
-		       "\nSize: " + std::to_string(size) + "\n";
+		return "CheckpointFile: [File Name]: " + this->path + ", [Range]: " + range.toString() +
+		       ", [Size]: " + std::to_string(size);
 	}
 
 	template <class Ar>

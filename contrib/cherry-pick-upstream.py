@@ -48,6 +48,8 @@ def _cherry_pick(commit_id: str):
 
 
 def _is_merge(commit_id: str) -> bool:
+    if commit_id is None:
+        return False
     cat_file = subprocess.check_output(["git", "cat-file", "-p", commit_id])
     # If the commit has two parents, it has to be a merge commit
     decoded = cat_file.decode("utf-8")
@@ -74,7 +76,7 @@ def _get_pull_request_info(pr: int):
 
     return {
         "commits": commits,
-        "merge_commit": output["mergeCommit"]["oid"],
+        "merge_commit": (output.get("mergeCommit") or {}).get("oid"),
         "repository": output["headRepository"]["name"],
         "owner": output["headRepositoryOwner"]["login"],
     }
@@ -102,6 +104,17 @@ def _prepare_pull_request(pr: int) -> None:
     subprocess.check_call(["git", "checkout", CURRENT_BRANCH])
 
 
+def _tag(pr: int):
+    tag = f"cherry-pick-pr-{pr}"
+    try:
+        subprocess.check_call(["git", "rev-parse", tag])
+        subprocess.check_call(["git", "tag", "-d", f"cherry-pick-pr-{pr}"])
+    except subprocess.CalledProcessError:
+        # The tag does not exist
+        pass
+    subprocess.check_call(["git", "tag", f"cherry-pick-pr-{pr}"])
+
+
 def _main():
     args = _args()
     prs = args.pr
@@ -117,7 +130,7 @@ def _main():
                 pr_info["merge_commit"]
             )
         else:
-            print(f"Using pull request branch")
+            print("Using pull request branch")
             # Might be a fast-forward merge without merge hash, need to cherry-pick from the original owner's repository
             _prepare_pull_request(pr)
             commits_to_be_cherry_picked = pr_info["commits"]
@@ -130,6 +143,8 @@ def _main():
                 _cherry_pick(commit)
             else:
                 print(f"Will cherry-pick {commit}")
+        # Tag the pr
+        _tag(pr)
 
 
 if __name__ == "__main__":

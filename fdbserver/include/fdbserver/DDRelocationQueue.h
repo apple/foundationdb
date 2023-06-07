@@ -45,6 +45,7 @@ public:
 	int boundaryPriority;
 	int healthPriority;
 	RelocateReason reason;
+	DataMovementReason dmReason;
 
 	double startTime;
 	UID randomId; // inherit from RelocateShard.traceId

@@ -144,6 +144,9 @@ ERROR( audit_storage_error, 1226, "Found data corruption" )
 ERROR( master_failed, 1227, "Cluster recovery terminating because master has failed")
 ERROR( test_failed, 1228, "Test failed" )
 ERROR( retry_clean_up_datamove_tombstone_added, 1229, "Need background datamove cleanup" )
+ERROR( persist_new_audit_metadata_error, 1230, "Persist new audit metadata error" )
+ERROR( cancel_audit_storage_failed, 1231, "Failed to cancel an audit" )
+ERROR( audit_storage_cancelled, 1232, "Audit has been cancelled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )
@@ -349,6 +352,7 @@ ERROR( blob_restore_corrupted_logs, 2385, "Corrupted mutation logs" )
 ERROR( blob_restore_invalid_manifest_url, 2386, "Invalid manifest URL" )
 ERROR( blob_restore_corrupted_manifest, 2387, "Corrupted manifest" )
 ERROR( blob_restore_missing_manifest, 2388, "Missing manifest" )
+ERROR( blob_migrator_replaced, 2389, "Blob migrator is replaced")
 
 ERROR( key_not_found, 2400, "Expected key is missing")
 ERROR( json_malformed, 2401, "JSON string was malformed")
