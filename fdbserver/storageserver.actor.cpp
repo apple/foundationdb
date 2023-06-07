@@ -8247,7 +8247,7 @@ void changeServerKeys(StorageServer* data,
 	for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 		if (nowAssigned != it->value()->assigned()) {
 			isDifferent = true;
-			TraceEvent("CSKRangeDifferent", data->thisServerID)
+			TraceEvent(SevDebug, "CSKRangeDifferent", data->thisServerID)
 			    .detail("KeyBegin", it->range().begin)
 			    .detail("KeyEnd", it->range().end);
 			break;
