@@ -6634,13 +6634,13 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = false;
 			} else {
 				rows.more = true;
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
 			results.send(rows);
 		}
 
 		if (chunks.size() == 0) {
 			RangeResult rows;
-			rows.readThrough = KeyRef(rows.arena(), keys.end);
 			results.send(rows);
 		}
 
