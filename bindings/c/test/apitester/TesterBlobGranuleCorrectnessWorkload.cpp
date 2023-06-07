@@ -413,12 +413,11 @@ private:
 		int64_t prevFileVersion = 0;
 
 		// validate snapshot file
-		ASSERT(desc->snapshotFile().has_value());
+		ASSERT(desc->snapshotFile());
 		if (BG_API_DEBUG_VERBOSE) {
-			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc->snapshotFile().value()->filename())));
+			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc->snapshotFile()->filename())));
 		}
-		validateSnapshotData(
-		    ctx, bgCtx, desc->snapshotFile().value(), desc->keyRange(), &desc->tenant_prefix, prevFileVersion);
+		validateSnapshotData(ctx, bgCtx, desc->snapshotFile(), desc->keyRange(), &desc->tenant_prefix, prevFileVersion);
 
 		// validate delta files
 		int64_t lastDFMaxVersion = 0;

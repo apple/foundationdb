@@ -115,7 +115,6 @@ typedef struct FDBBGEncryptionKey_ {
 } FDBBGEncryptionKey;
 
 typedef struct FDBBGEncryptionCtx_ {
-	fdb_bool_t present;
 	FDBBGEncryptionKey* textKey;
 	uint32_t textKCV;
 	FDBBGEncryptionKey* headerKey;
@@ -146,7 +145,6 @@ typedef struct FDBBGMutation_ {
 
 typedef struct FDBBGFileDescription_ {
 	FDBKeyRange key_range;
-	fdb_bool_t snapshot_present;
 	FDBBGFilePointer* snapshot_file_pointer;
 	int delta_file_count;
 	FDBBGFilePointer** delta_files;

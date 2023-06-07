@@ -134,12 +134,7 @@ struct GranuleDescriptionRef : native::FDBBGFileDescription {
 	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
 	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
 	KeyRef endKey() const noexcept { return KeyRef(key_range.end_key, key_range.end_key_length); }
-	std::optional<GranuleFilePointerRef*> snapshotFile() const noexcept {
-		if (snapshot_present)
-			return (GranuleFilePointerRef*)snapshot_file_pointer;
-		else
-			return {};
-	}
+	GranuleFilePointerRef* snapshotFile() const noexcept { return (GranuleFilePointerRef*)snapshot_file_pointer; }
 	VectorRef<GranuleFilePointerRef*> deltaFiles() const noexcept {
 		return VectorRef<GranuleFilePointerRef*>((GranuleFilePointerRef**)delta_files, delta_file_count);
 	}

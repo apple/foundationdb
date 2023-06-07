@@ -20,7 +20,6 @@ void setEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCipherKey& sour
 }
 
 void setEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source, Arena& ar) {
-	dest->present = true;
 	dest->textKey = new (ar) FDBBGEncryptionKey();
 	setEncryptionKey(dest->textKey, source.textCipherKey);
 	dest->textKCV = source.textCipherKey.baseCipherKCV;
@@ -40,11 +39,10 @@ void setBlobFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source
 	dest->file_version = source.fileVersion;
 
 	// handle encryption
-	dest->encryption_ctx = new (ar) FDBBGEncryptionCtx();
+	dest->encryption_ctx = nullptr;
 	if (source.cipherKeysCtx.present()) {
+		dest->encryption_ctx = new (ar) FDBBGEncryptionCtx();
 		setEncryptionKeyCtx(dest->encryption_ctx, source.cipherKeysCtx.get(), ar);
-	} else {
-		dest->encryption_ctx->present = false;
 	}
 }
 
@@ -139,8 +137,8 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 		}
 
 		// snapshot file
-		desc.snapshot_present = chunk.snapshotFile.present();
-		if (desc.snapshot_present) {
+		desc.snapshot_file_pointer = nullptr;
+		if (chunk.snapshotFile.present()) {
 			desc.snapshot_file_pointer = new (arena) FDBBGFilePointer();
 			setBlobFilePointer(desc.snapshot_file_pointer, chunk.snapshotFile.get(), arena);
 		}
