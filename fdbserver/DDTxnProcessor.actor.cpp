@@ -660,7 +660,6 @@ Future<Void> DDTxnProcessor::waitForAllDataRemoved(
     const UID& serverID,
     const Version& addedVersion,
     Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const {
-
 	return DDTxnProcessorImpl::waitForAllDataRemoved(cx, serverID, addedVersion, shardsAffectedByTeamFailure);
 }
 
@@ -1016,7 +1015,10 @@ ACTOR Future<Void> rawStartMovement(std::shared_ptr<MockGlobalState> mgs,
 	}
 	// 2. merge ops will coalesce the boundary in finishMovement;
 	intersectRanges = mgs->shardMapping->intersectingRanges(keys);
-	fmt::print("Keys: {}; intersect: {} {}\n", keys.toString(), intersectRanges.begin().begin(), intersectRanges.end().begin());
+	fmt::print("Keys: {}; intersect: {} {}\n",
+	           keys.toString(),
+	           intersectRanges.begin().begin(),
+	           intersectRanges.end().begin());
 	// NOTE: What if there is a split follow up by a merge?
 	// ASSERT(keys.begin == intersectRanges.begin().begin());
 	// ASSERT(keys.end == intersectRanges.end().begin());
