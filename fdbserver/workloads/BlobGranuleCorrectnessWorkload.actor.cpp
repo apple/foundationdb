@@ -352,10 +352,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				fmt::print("Dir {0}: RV={1}\n", threadData->directoryID, ver);
 				readVersion = ver;
 
-				state PromiseStream<Standalone<RangeResultRef>> results;
+				state PromiseStream<RangeReadResult> results;
 				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
 				loop {
-					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					RangeReadResult res = waitNext(results.getFuture());
 					totalRows += res.size();
 					for (auto& it : res) {
 						std::tie(key, id) = self->parseKey(it.key);
