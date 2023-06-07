@@ -364,8 +364,40 @@ public:
 	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
-	enum SimConsistencyScanState { DisabledStart = 0, Enabling = 1, Enabled = 2, Complete = 3, DisabledEnd = 4 };
+	enum SimConsistencyScanState {
+		DisabledStart = 0,
+		Enabling = 1,
+		Enabled = 2,
+		Enabled_InjectCorruption = 3,
+		Enabled_FoundCorruption = 4,
+		Complete = 5,
+		DisabledEnd = 6
+	};
 	SimConsistencyScanState consistencyScanState = SimConsistencyScanState::DisabledStart;
+
+	// check that validates that the state transition is valid
+	bool updateConsistencyScanState(SimConsistencyScanState expectedCurrent, SimConsistencyScanState desired) {
+		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {
+			consistencyScanState = desired;
+
+			if (desired == SimConsistencyScanState::Enabled_FoundCorruption) {
+				// reset other metadata
+				consistencyScanInjectedCorruptionType = {};
+				consistencyScanCorruptRequestKey = {};
+				consistencyScanCorruptor = {};
+			}
+
+			return true;
+		}
+		return false;
+	}
+
+	// Inject corruption only in consistency scan reads to ensure scan finds it.
+	enum SimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
+	Optional<SimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
+	Optional<bool> doInjectConsistencyScanCorruption;
+	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
+	Optional<UID> consistencyScanCorruptor;
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
