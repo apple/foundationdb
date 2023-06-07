@@ -2142,6 +2142,12 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 	return res;
 }
 
+ReadMetrics getReadMetrics() {
+	// For now, return 0.0 for range busyness. Eventually, this will be determined by looking at how much is
+	// attributable to the ranges associated with the read, which will be added as parameters to this function.
+	return ReadMetrics::fromFloats(g_network->networkInfo.metrics.lastRunLoopBusyness, 0.0);
+}
+
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	state Optional<TenantGroupName> tenantGroup;
@@ -2258,7 +2264,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// if (cached)
 		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
 
-		GetValueReply reply(v, cached);
+		GetValueReply reply(v, cached, getReadMetrics());
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -4346,6 +4352,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
@@ -4402,6 +4409,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
+			r.readMetrics = getReadMetrics();
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -5528,6 +5536,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
@@ -5580,6 +5589,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			}
 
 			r.penalty = data->getPenalty();
+			r.readMetrics = getReadMetrics();
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -5712,6 +5722,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			GetKeyValuesStreamReply none;
 			none.version = version;
 			none.more = false;
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
@@ -5750,6 +5761,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                                      req.tenantInfo.prefix));
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
+				r.readMetrics = getReadMetrics();
 
 				if (req.options.present() && req.options.get().debugID.present())
 					g_traceBatch.addEvent("TransactionDebug",
@@ -5893,7 +5905,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin",
 		// shard.begin).detail("End", shard.end);
 
-		GetKeyReply reply(updated, cached);
+		GetKeyReply reply(updated, cached, getReadMetrics());
 		reply.penalty = data->getPenalty();
 
 		req.reply.send(reply);
