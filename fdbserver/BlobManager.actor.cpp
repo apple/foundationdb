@@ -4087,7 +4087,9 @@ int numExistingBWOnAddr(Reference<BlobManagerData> self, const AddressExclusion&
 }
 
 // Tries to recruit a blob worker on the candidateWorker process
-ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, RecruitBlobWorkerReply candidateWorker) {
+ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self,
+                                        RecruitBlobWorkerReply candidateWorker,
+                                        DatabaseConfiguration config) {
 	const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port);
 	self->recruitingStream.set(self->recruitingStream.get() + 1);
@@ -4101,6 +4103,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
 		initReq.storeType = (KeyValueStoreType::StoreType)(SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
+		initReq.encryptMode = config.encryptionAtRestMode;
 
 		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
@@ -4187,6 +4190,8 @@ ACTOR Future<Void> blobWorkerRecruiter(
 		}
 	}
 
+	state DatabaseConfiguration config = wait(getDatabaseConfiguration(self->db, true));
+
 	loop {
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
@@ -4232,7 +4237,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				// when we get back a worker we can use, we will try to initialize a blob worker onto that
 				// process
 				when(RecruitBlobWorkerReply candidateWorker = wait(fCandidateWorker)) {
-					self->addActor.send(initializeBlobWorker(self, candidateWorker));
+					self->addActor.send(initializeBlobWorker(self, candidateWorker, config));
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
