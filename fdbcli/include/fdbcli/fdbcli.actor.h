@@ -50,10 +50,7 @@ constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
 constexpr char msgErrorKey[] = "error";
 
-typedef std::tuple<Database, Reference<IDatabase>, Reference<IDatabase>> DbConns;
-typedef std::
-    tuple<Optional<Database>, Optional<Reference<IDatabase>>, Optional<Reference<IDatabase>>, Optional<ClusterName>>
-        MgmtDbConns;
+using DatabaseConnections = std::tuple<Database, Reference<IDatabase>, Reference<IDatabase>>;
 
 struct CommandHelp {
 	std::string usage;
