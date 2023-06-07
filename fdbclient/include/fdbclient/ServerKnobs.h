@@ -224,6 +224,9 @@ public:
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
 	                                     // be considered hot
+	// When the sampled read operations changes more than this threshold, the
+	// shard metrics will update immediately
+	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
@@ -1117,13 +1120,10 @@ public:
 	double BGCC_MIN_INTERVAL;
 	bool BLOB_MANIFEST_BACKUP;
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
-	bool BLOB_FULL_RESTORE_MODE;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
-	std::string BLOB_RESTORE_MLOGS_URL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
-	std::string BLOB_RESTORE_MANIFEST_URL;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;

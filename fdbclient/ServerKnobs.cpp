@@ -200,7 +200,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( SHARD_BYTES_PER_SQRT_BYTES,                             45 ); if( buggifySmallShards ) SHARD_BYTES_PER_SQRT_BYTES = 0;//Approximately 10000 bytes per shard
 	init( MAX_SHARD_BYTES,                                 500000000 );
 	init( KEY_SERVER_SHARD_BYTES,                          500000000 );
+
 	init( SHARD_MAX_READ_OPS_PER_KSEC,                  45000 * 1000 );
+    init( SHARD_READ_OPS_CHANGE_THRESHOLD, SHARD_MAX_READ_OPS_PER_KSEC / 4); if(randomize && BUGGIFY) SHARD_READ_OPS_CHANGE_THRESHOLD = 2000;
  	/*
  	 * The assumption is when the read ops reach to 45k/s the Storage Server instance will be CPU-saturated.
  	 */
@@ -1106,13 +1108,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
 	init( BLOB_MANIFEST_BACKUP,                                false );
 	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 300.0 );
-	init( BLOB_FULL_RESTORE_MODE,                              false );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,     isSimulated ?  1.0 : 5.0 );
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
-	init( BLOB_RESTORE_MLOGS_URL, isSimulated ? "file://simfdb/backups/" : "" );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
 	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
-	init( BLOB_RESTORE_MANIFEST_URL, isSimulated ? "file://simfdb/fdbblob/manifest" : "" );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );
 	init( BLOB_RESTORE_MLOGS_RETENTION_SECS,  isSimulated ?  120 : 3600 * 24 * 14 );
