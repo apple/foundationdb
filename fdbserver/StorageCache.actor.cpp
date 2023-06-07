@@ -1203,7 +1203,7 @@ ACTOR Future<RangeResult> tryFetchRange(Database cx,
 
 	try {
 		loop {
-			RangeResult rep = wait(tr.getRange(begin, end, limits, Snapshot::True));
+			RangeReadResult rep = wait(tr.getRange(begin, end, limits, Snapshot::True));
 			limits.decrement(rep);
 
 			if (limits.isReached() || !rep.more) {
@@ -2147,7 +2147,7 @@ ACTOR Future<Void> storageCacheStartUpWarmup(StorageCacheData* self) {
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			try {
-				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				readVersion = tr.getReadVersion().get();
 				bool currCached = false;

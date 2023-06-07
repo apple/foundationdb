@@ -103,7 +103,7 @@ struct RegisterClusterImpl {
 
 				state Future<std::vector<std::pair<TenantName, int64_t>>> existingTenantsFuture =
 				    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
-				state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
+				state ThreadFuture<RangeReadResult> existingDataFuture = tr->getRange(normalKeys, 1);
 				state Future<bool> tombstoneFuture =
 				    metadata::registrationTombstones().exists(tr, self->clusterEntry.id);
 
@@ -141,7 +141,7 @@ struct RegisterClusterImpl {
 					throw cluster_not_empty();
 				}
 
-				RangeResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
+				RangeReadResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
 				if (!existingData.empty()) {
 					CODE_PROBE(true, "Registering cluster with data", probe::decoration::rare);
 					TraceEvent(SevWarn, "CannotRegisterClusterWithData").detail("ClusterName", self->clusterName);

@@ -247,7 +247,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							tssMapping.clear();
 							wait(readTSSMapping(&tr, &tssMapping));
 						}
-						RangeResult res = wait(tr.getRange(configKeys, 1000));
+						RangeReadResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
 							self->testFailure("Read too many configuration options");
@@ -993,7 +993,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
 				    wait(metadataMap.getRange(&tr, {}, {}, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!metadata.more && metadata.results.size() < CLIENT_KNOBS->TOO_MANY);
-				RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT_EQ(metadata.results.size(), serverList.size());
 				id_ssi = std::unordered_map<UID, StorageMetadataType>(metadata.results.begin(), metadata.results.end());

@@ -219,14 +219,14 @@ struct ReadWriteCommonImpl {
 		}
 		return Void();
 	}
-	ACTOR static Future<Void> logLatency(Future<RangeResult> f,
+	ACTOR static Future<Void> logLatency(Future<RangeReadResult> f,
 	                                     DDSketch<double>* latencies,
 	                                     double* totalLatency,
 	                                     int* latencyCount,
 	                                     EventMetricHandle<ReadMetric> readMetric,
 	                                     bool shouldRecord) {
 		state double readBegin = now();
-		RangeResult value = wait(f);
+		RangeReadResult value = wait(f);
 
 		double latency = now() - readBegin;
 		readMetric->readLatency = latency * 1e9;
@@ -273,7 +273,7 @@ Future<Void> ReadWriteCommon::logLatency(Future<ValueReadResult> f, bool shouldR
 	    f, &readLatencies, &readLatencyTotal, &readLatencyCount, readMetric, shouldRecord);
 }
 
-Future<Void> ReadWriteCommon::logLatency(Future<RangeResult> f, bool shouldRecord) {
+Future<Void> ReadWriteCommon::logLatency(Future<RangeReadResult> f, bool shouldRecord) {
 	return ReadWriteCommonImpl::logLatency(
 	    f, &readLatencies, &readLatencyTotal, &readLatencyCount, readMetric, shouldRecord);
 }
@@ -766,8 +766,8 @@ ACTOR Future<std::vector<std::pair<uint64_t, double>>> trackInsertionCount(Datab
 
 	while (currentCountIndex < countsOfInterest.size()) {
 		try {
-			state Future<RangeResult> countFuture = tr.getRange(keyPrefix, 1000000000);
-			state Future<RangeResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
+			state Future<RangeReadResult> countFuture = tr.getRange(keyPrefix, 1000000000);
+			state Future<RangeReadResult> bytesFuture = tr.getRange(bytesPrefix, 1000000000);
 			wait(success(countFuture) && success(bytesFuture));
 
 			RangeResult counts = countFuture.get();

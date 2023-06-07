@@ -130,19 +130,19 @@ ThreadFuture<KeyReadResult> DLTransaction::getKey(const KeySelectorRef& key, boo
 	});
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                  const KeySelectorRef& end,
-                                                  int limit,
-                                                  bool snapshot,
-                                                  bool reverse) {
+ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                      const KeySelectorRef& end,
+                                                      int limit,
+                                                      bool snapshot,
+                                                      bool reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
-                                                  const KeySelectorRef& end,
-                                                  GetRangeLimits limits,
-                                                  bool snapshot,
-                                                  bool reverse) {
+ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeySelectorRef& begin,
+                                                      const KeySelectorRef& end,
+                                                      GetRangeLimits limits,
+                                                      bool snapshot,
+                                                      bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetRange(tr,
 	                                                 begin.getKey().begin(),
 	                                                 begin.getKey().size(),
@@ -158,37 +158,46 @@ ThreadFuture<RangeResult> DLTransaction::getRange(const KeySelectorRef& begin,
 	                                                 0,
 	                                                 snapshot,
 	                                                 reverse);
-	return toThreadFuture<RangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<RangeReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBKeyValue* kvs;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetKeyValueArray(f, &kvs, &count, &more);
 		ASSERT(!error);
 
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena());
+		return RangeReadResult(
+		    RangeResult(RangeResultRef(VectorRef<KeyValueRef>((KeyValueRef*)kvs, count), more), Arena()),
+		    ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 	});
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
+ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeyRangeRef& keys, int limit, bool snapshot, bool reverse) {
 	return getRange(
 	    firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), GetRangeLimits(limit), snapshot, reverse);
 }
 
-ThreadFuture<RangeResult> DLTransaction::getRange(const KeyRangeRef& keys,
-                                                  GetRangeLimits limits,
-                                                  bool snapshot,
-                                                  bool reverse) {
+ThreadFuture<RangeReadResult> DLTransaction::getRange(const KeyRangeRef& keys,
+                                                      GetRangeLimits limits,
+                                                      bool snapshot,
+                                                      bool reverse) {
 	return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 }
 
-ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                              const KeySelectorRef& end,
-                                                              const StringRef& mapper,
-                                                              GetRangeLimits limits,
-                                                              int matchIndex,
-                                                              bool snapshot,
-                                                              bool reverse) {
+ThreadFuture<MappedRangeReadResult> DLTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                  const KeySelectorRef& end,
+                                                                  const StringRef& mapper,
+                                                                  GetRangeLimits limits,
+                                                                  int matchIndex,
+                                                                  bool snapshot,
+                                                                  bool reverse) {
 	FdbCApi::FDBFuture* f = api->transactionGetMappedRange(tr,
 	                                                       begin.getKey().begin(),
 	                                                       begin.getKey().size(),
@@ -207,16 +216,25 @@ ThreadFuture<MappedRangeResult> DLTransaction::getMappedRange(const KeySelectorR
 	                                                       matchIndex,
 	                                                       snapshot,
 	                                                       reverse);
-	return toThreadFuture<MappedRangeResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
+	return toThreadFuture<MappedRangeReadResult>(api, f, [](FdbCApi::FDBFuture* f, FdbCApi* api) {
 		const FdbCApi::FDBMappedKeyValue* kvms;
 		int count;
 		FdbCApi::fdb_bool_t more;
 		FdbCApi::fdb_error_t error = api->futureGetMappedKeyValueArray(f, &kvms, &count, &more);
 		ASSERT(!error);
 
+		float serverBusyness = 0.0;
+		float rangeBusyness = 0.0;
+		if (api->futureGetReadBusyness) {
+			error = api->futureGetReadBusyness(f, &serverBusyness, &rangeBusyness);
+			ASSERT(!error);
+		}
+
 		// The memory for this is stored in the FDBFuture and is released when the future gets destroyed
-		return MappedRangeResult(
-		    MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more), Arena());
+		return MappedRangeReadResult(
+		    MappedRangeResult(MappedRangeResultRef(VectorRef<MappedKeyValueRef>((MappedKeyValueRef*)kvms, count), more),
+		                      Arena()),
+		    ReadMetrics::fromFloats(serverBusyness, rangeBusyness));
 	});
 }
 
@@ -1493,61 +1511,61 @@ ThreadFuture<KeyReadResult> MultiVersionTransaction::getKey(const KeySelectorRef
 	return executeOperation(&ITransaction::getKey, key, std::forward<bool>(snapshot));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            int limit,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	return executeOperation<RangeResult>(&ITransaction::getRange,
-	                                     begin,
-	                                     end,
-	                                     std::forward<int>(limit),
-	                                     std::forward<bool>(snapshot),
-	                                     std::forward<bool>(reverse));
+ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                                const KeySelectorRef& end,
+                                                                int limit,
+                                                                bool snapshot,
+                                                                bool reverse) {
+	return executeOperation<RangeReadResult>(&ITransaction::getRange,
+	                                         begin,
+	                                         end,
+	                                         std::forward<int>(limit),
+	                                         std::forward<bool>(snapshot),
+	                                         std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
-                                                            const KeySelectorRef& end,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	return executeOperation<RangeResult>(&ITransaction::getRange,
-	                                     begin,
-	                                     end,
-	                                     std::forward<GetRangeLimits>(limits),
-	                                     std::forward<bool>(snapshot),
-	                                     std::forward<bool>(reverse));
+ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeySelectorRef& begin,
+                                                                const KeySelectorRef& end,
+                                                                GetRangeLimits limits,
+                                                                bool snapshot,
+                                                                bool reverse) {
+	return executeOperation<RangeReadResult>(&ITransaction::getRange,
+	                                         begin,
+	                                         end,
+	                                         std::forward<GetRangeLimits>(limits),
+	                                         std::forward<bool>(snapshot),
+	                                         std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                            int limit,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	return executeOperation<RangeResult>(&ITransaction::getRange,
-	                                     keys,
-	                                     std::forward<int>(limit),
-	                                     std::forward<bool>(snapshot),
-	                                     std::forward<bool>(reverse));
+ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                                int limit,
+                                                                bool snapshot,
+                                                                bool reverse) {
+	return executeOperation<RangeReadResult>(&ITransaction::getRange,
+	                                         keys,
+	                                         std::forward<int>(limit),
+	                                         std::forward<bool>(snapshot),
+	                                         std::forward<bool>(reverse));
 }
 
-ThreadFuture<RangeResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
-                                                            GetRangeLimits limits,
-                                                            bool snapshot,
-                                                            bool reverse) {
-	return executeOperation<RangeResult>(&ITransaction::getRange,
-	                                     keys,
-	                                     std::forward<GetRangeLimits>(limits),
-	                                     std::forward<bool>(snapshot),
-	                                     std::forward<bool>(reverse));
+ThreadFuture<RangeReadResult> MultiVersionTransaction::getRange(const KeyRangeRef& keys,
+                                                                GetRangeLimits limits,
+                                                                bool snapshot,
+                                                                bool reverse) {
+	return executeOperation<RangeReadResult>(&ITransaction::getRange,
+	                                         keys,
+	                                         std::forward<GetRangeLimits>(limits),
+	                                         std::forward<bool>(snapshot),
+	                                         std::forward<bool>(reverse));
 }
 
-ThreadFuture<MappedRangeResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
-                                                                        const KeySelectorRef& end,
-                                                                        const StringRef& mapper,
-                                                                        GetRangeLimits limits,
-                                                                        int matchIndex,
-                                                                        bool snapshot,
-                                                                        bool reverse) {
+ThreadFuture<MappedRangeReadResult> MultiVersionTransaction::getMappedRange(const KeySelectorRef& begin,
+                                                                            const KeySelectorRef& end,
+                                                                            const StringRef& mapper,
+                                                                            GetRangeLimits limits,
+                                                                            int matchIndex,
+                                                                            bool snapshot,
+                                                                            bool reverse) {
 	return executeOperation(&ITransaction::getMappedRange,
 	                        begin,
 	                        end,

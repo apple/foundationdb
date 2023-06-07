@@ -212,7 +212,7 @@ ACTOR static Future<Optional<Key>> getBoundary(Reference<ReadYourWritesTransacti
                                                Oldest oldest,
                                                Version* version,
                                                int64_t* time) {
-	RangeResult result =
+	RangeReadResult result =
 	    wait(tr->getRange(range, /*limit*/ 1, Snapshot::False, oldest ? Reverse::False : Reverse::True));
 	if (!result.size()) {
 		return Optional<Key>();

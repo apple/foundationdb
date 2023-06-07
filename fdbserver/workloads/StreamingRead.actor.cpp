@@ -120,7 +120,7 @@ struct StreamingReadWorkload : TestWorkload {
 						else if (currentIndex > maxIndex - thisRangeSize)
 							currentIndex = minIndex;
 
-						RangeResult values =
+						RangeReadResult values =
 						    wait(tr.getRange(firstGreaterOrEqual(self->keyForIndex(currentIndex)),
 						                     firstGreaterOrEqual(self->keyForIndex(currentIndex + thisRangeSize)),
 						                     thisRangeSize));

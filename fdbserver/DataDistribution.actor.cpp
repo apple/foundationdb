@@ -250,7 +250,7 @@ ACTOR Future<Void> debugCheckCoalescing(Database cx) {
 	state Transaction tr(cx);
 	loop {
 		try {
-			state RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			state int i;
@@ -1081,7 +1081,7 @@ ACTOR Future<std::map<NetworkAddress, std::pair<WorkerInterface, std::string>>> 
 			configuration = _configuration;
 
 			// get storages
-			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 			state std::vector<StorageServerInterface> storageServers;
 			storageServers.reserve(serverList.size());
@@ -1468,7 +1468,7 @@ ACTOR Future<Void> cacheServerWatcher(Database* db) {
 	loop {
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
-			RangeResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult range = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!range.more);
 			std::set<UID> caches;
 			for (auto& kv : range) {

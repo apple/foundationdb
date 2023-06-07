@@ -36,7 +36,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 		// use no-cache as this is either used for test validation, or the blob granule consistency check
 		tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
 		try {
-			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
 			// need consistent version snapshot of range
 			if (first) {
@@ -501,7 +501,7 @@ struct feed_cmp_f {
 };
 
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* tr) {
-	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
+	RangeReadResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
 	ASSERT(!feedResult.more);
 	std::vector<std::pair<Key, KeyRange>> results;
 	for (auto& it : feedResult) {

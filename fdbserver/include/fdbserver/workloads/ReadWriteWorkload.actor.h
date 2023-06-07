@@ -156,7 +156,7 @@ struct ReadWriteCommon : KVWorkload {
 
 	Future<Void> tracePeriodically();
 	Future<Void> logLatency(Future<ValueReadResult> f, bool shouldRecord);
-	Future<Void> logLatency(Future<RangeResult> f, bool shouldRecord);
+	Future<Void> logLatency(Future<RangeReadResult> f, bool shouldRecord);
 
 	Future<Void> setup(Database const& cx) override;
 	Future<bool> check(Database const& cx) override;

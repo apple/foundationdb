@@ -4507,10 +4507,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		}
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture =
+		Future<RangeReadResult> rangeResultFuture =
 		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
-		RangeResult rangeResult = wait(rangeResultFuture);
+		RangeReadResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
@@ -4959,7 +4959,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 					                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 					ASSERT(!shards.empty());
 
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (int i = 0; i < shards.size() - 1; ++i) {
@@ -6568,7 +6568,7 @@ public:
 	}
 };
 
-ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+ACTOR Future<Void> tryGetRange(PromiseStream<RangeReadResult> results, Transaction* tr, KeyRange keys) {
 	if (SERVER_KNOBS->FETCH_USING_STREAMING) {
 		wait(tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True));
 		return Void();
@@ -6581,7 +6581,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			state RangeReadResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			results.send(rep);
 
 			if (!rep.more) {
@@ -6644,7 +6644,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(T
 }
 
 // Read keys from blob storage
-ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
+ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeReadResult> results,
                                        Transaction* tr,
                                        Database cx,
                                        KeyRange keys,
@@ -6674,7 +6674,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = true;
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
-			results.send(rows);
+			results.send(RangeReadResult(std::move(rows)));
 		}
 
 		if (chunks.size() == 0) {
@@ -7599,7 +7599,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 
-			state PromiseStream<RangeResult> results;
+			state PromiseStream<RangeReadResult> results;
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
 			if (isFullRestore) {
@@ -7630,7 +7630,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					while (data->fetchKeysBudgetUsed.get()) {
 						wait(data->fetchKeysBudgetUsed.onChange());
 					}
-					state RangeResult this_block = waitNext(results.getFuture());
+					state RangeReadResult this_block = waitNext(results.getFuture());
 
 					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();

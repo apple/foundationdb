@@ -526,7 +526,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state RangeResult values = wait(tr.getRange(begin, end, limits));
+			state RangeReadResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -598,7 +598,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
+			state RangeReadResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -999,7 +999,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 			return Void();
 	}
 
-	state RangeResult backupVersions = wait(
+	state RangeReadResult backupVersions = wait(
 	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed
@@ -1091,7 +1091,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		RangeResult existingDestUidValues =
+		RangeReadResult existingDestUidValues =
 		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
@@ -1124,7 +1124,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult backupVersions = wait(tr->getRange(
+			state RangeReadResult backupVersions = wait(tr->getRange(
 			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 			state Version readVer = tr->getReadVersion().get();
 
@@ -1210,7 +1210,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult destUids = wait(
+			state RangeReadResult destUids = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 
 			for (auto destUid : destUids) {
