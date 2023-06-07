@@ -102,6 +102,7 @@ FDB_BOOLEAN_PARAM(TeamMustHaveShards);
 FDB_BOOLEAN_PARAM(ForReadBalance);
 FDB_BOOLEAN_PARAM(PreferLowerReadUtil);
 FDB_BOOLEAN_PARAM(FindTeamByServers);
+FDB_BOOLEAN_PARAM(PreferWithinShardLimit);
 
 class TeamSelect {
 public:
@@ -138,6 +139,7 @@ struct GetTeamRequest {
 	bool teamMustHaveShards;
 	bool forReadBalance;
 	bool preferLowerReadUtil; // only make sense when forReadBalance is true
+	bool preferWithinShardLimit;
 	double inflightPenalty;
 	bool findTeamByServers;
 	Optional<KeyRange> keys;
@@ -159,17 +161,19 @@ struct GetTeamRequest {
 	               PreferLowerDiskUtil preferLowerDiskUtil,
 	               TeamMustHaveShards teamMustHaveShards,
 	               PreferLowerReadUtil preferLowerReadUtil,
+	               PreferWithinShardLimit preferWithinShardLimit,
 	               ForReadBalance forReadBalance = ForReadBalance::False,
 	               double inflightPenalty = 1.0,
 	               Optional<KeyRange> keys = Optional<KeyRange>())
 	  : teamSelect(teamSelectRequest), preferLowerDiskUtil(preferLowerDiskUtil), teamMustHaveShards(teamMustHaveShards),
-	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil), inflightPenalty(inflightPenalty),
+	    forReadBalance(forReadBalance), preferLowerReadUtil(preferLowerReadUtil),
+	    preferWithinShardLimit(preferWithinShardLimit), inflightPenalty(inflightPenalty),
 	    findTeamByServers(FindTeamByServers::False), keys(keys) {}
 	GetTeamRequest(std::vector<UID> servers)
 	  : teamSelect(TeamSelect::WANT_COMPLETE_SRCS), preferLowerDiskUtil(PreferLowerDiskUtil::False),
 	    teamMustHaveShards(TeamMustHaveShards::False), forReadBalance(ForReadBalance::False),
-	    preferLowerReadUtil(PreferLowerReadUtil::False), inflightPenalty(1.0),
-	    findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
+	    preferLowerReadUtil(PreferLowerReadUtil::False), preferWithinShardLimit(PreferWithinShardLimit::False),
+	    inflightPenalty(1.0), findTeamByServers(FindTeamByServers::True), src(std::move(servers)) {}
 
 	// return true if a.score < b.score
 	[[nodiscard]] bool lessCompare(TeamRef a, TeamRef b, int64_t aLoadBytes, int64_t bLoadBytes) const {
@@ -184,6 +188,7 @@ struct GetTeamRequest {
 		std::stringstream ss;
 
 		ss << "TeamSelect:" << teamSelect.toString() << " PreferLowerDiskUtil:" << preferLowerDiskUtil
+		   << " PreferLowerReadUtil:" << preferLowerReadUtil << " PreferWithinShardLimit:" << preferWithinShardLimit
 		   << " teamMustHaveShards:" << teamMustHaveShards << " forReadBalance:" << forReadBalance
 		   << " inflightPenalty:" << inflightPenalty << " findTeamByServers:" << findTeamByServers << ";";
 		ss << "CompleteSources:";
