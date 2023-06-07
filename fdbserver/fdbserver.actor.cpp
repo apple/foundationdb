@@ -2453,7 +2453,7 @@ int main(int argc, char* argv[]) {
 			rc = FDB_EXIT_ERROR;
 		}
 
-		int unseed = noUnseed ? 0 : deterministicRandom()->randomInt(0, 100001);
+		int unseed = noUnseed ? -1 : deterministicRandom()->randomInt(0, 100001);
 		TraceEvent("ElapsedTime")
 		    .detail("SimTime", now() - startNow)
 		    .detail("RealTime", timer() - start)
