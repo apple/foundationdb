@@ -118,7 +118,7 @@ public:
 
 			// For status, report the busiest tag:
 			if (previousBusiestTags.empty()) {
-				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0);
+				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
 			} else {
 				auto busiestTagInfo = previousBusiestTags[0];
 				for (int i = 1; i < previousBusiestTags.size(); ++i) {
@@ -128,14 +128,14 @@ public:
 					}
 				}
 				TraceEvent("BusiestReadTag", thisServerID)
-				    .detail("Tag", printable(busiestTagInfo.tag))
+				    .detail("Tag", busiestTagInfo.tag)
 				    .detail("TagCost", busiestTagInfo.rate)
 				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
 			}
 
 			for (const auto& tagInfo : previousBusiestTags) {
 				TraceEvent("BusyReadTag", thisServerID)
-				    .detail("Tag", printable(tagInfo.tag))
+				    .detail("Tag", tagInfo.tag)
 				    .detail("TagCost", tagInfo.rate)
 				    .detail("FractionalBusyness", tagInfo.fractionalBusyness);
 			}
