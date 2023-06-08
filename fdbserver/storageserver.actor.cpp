@@ -1979,6 +1979,19 @@ void updateProcessStats(StorageServer* self) {
 #pragma region Queries
 #endif
 
+// Lightweight non-blocking function that sends version samples to actor responsible for maintaining version statistics
+// FIXME: probably not a good idea to put in the Queries region
+// Is this region stuff some code locality optimization that I need to adhear to?
+inline void sampleRequestVersions(StorageServer* self, StorageServer::EmptyVersionQueueEntry sample) {
+	if (sample.timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_SAMPLE_INTERVAL) {
+		DisabledTraceEvent("ValidSampleLogged", self->thisServerID)
+		    .detail("Timestamp", sample.timestamp)
+		    .detail("LastSampleTime", self->lastVersionSampleTime);
+		self->ssVersionFeed.send(StorageServer::EmptyVersionQueueEntry{ sample.version, sample.timestamp });
+		self->lastVersionSampleTime = sample.timestamp;
+	}
+}
+
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
 	state Span span("SS:WaitForVersion"_loc, spanContext);
 	choose {
@@ -2187,6 +2200,8 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// so we need to downgrade here
 		wait(data->getQueryDelay());
 		state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+
+		sampleRequestVersions(data, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
@@ -4280,6 +4295,8 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
+	sampleRequestVersions(data, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
+
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
@@ -5455,6 +5472,8 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
+	sampleRequestVersions(data, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
+
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
@@ -5658,6 +5677,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	sampleRequestVersions(data, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5865,6 +5886,8 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// so we need to downgrade here
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
+
+	sampleRequestVersions(data, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
@@ -11319,17 +11342,6 @@ ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
 	}
 }
 
-// Lightweight non-blocking function that sends version samples to actor responsible for maintaining version statistics
-inline void logVersionStatistics(StorageServer* self, StorageServer::EmptyVersionQueueEntry sample) {
-	if (sample.timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_SAMPLE_INTERVAL) {
-		DisabledTraceEvent("ValidSampleLogged", self->thisServerID)
-		    .detail("Timestamp", sample.timestamp)
-		    .detail("LastSampleTime", self->lastVersionSampleTime);
-		self->ssVersionFeed.send(StorageServer::EmptyVersionQueueEntry{ sample.version, sample.timestamp });
-		self->lastVersionSampleTime = sample.timestamp;
-	}
-}
-
 ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
@@ -11343,10 +11355,8 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 			req.reply.send(GetValueReply());
-		else {
+		else
 			self->actors.add(self->readGuard(req, getValueQ));
-			logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
-		}
 	}
 }
 
@@ -11358,7 +11368,6 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesQ));
-		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11372,7 +11381,6 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
 		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
-		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11384,7 +11392,6 @@ ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 		// downgrade before doing real work
 		// FIXME: add readGuard again
 		self->actors.add(getKeyValuesStreamQ(self, req));
-		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11395,7 +11402,6 @@ ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyR
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyQ));
-		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
