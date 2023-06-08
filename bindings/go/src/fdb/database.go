@@ -65,7 +65,7 @@ type DatabaseOptions struct {
 func (d *Database) Close() {
 	// Remove database object from the cached databases
 	if d.isCached {
-		delete(openDatabases, d.clusterFile)
+		openDatabases.Delete(d.clusterFile)
 	}
 
 	// Destroy the database
