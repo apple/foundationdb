@@ -11282,16 +11282,15 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
                                            FutureStream<StorageServer::EmptyVersionQueueEntry> tlogIn,
                                            FutureStream<StorageServer::EmptyVersionQueueEntry> ssIn) {
-	state int queueSizeLimit = 1000; // TODO: make this a KNOB probably
 	state std::deque<StorageServer::EmptyVersionQueueEntry> versionQueue;
 	loop {
 		choose {
 			when(StorageServer::EmptyVersionQueueEntry tlogSample = waitNext(tlogIn)) {
 				TraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", now());
-				// NOTE: This current approach incur (safe) skew in histogram because oldest sample out of queue bound
-				// will be discarded
-				if (versionQueue.size() >= queueSizeLimit)
-					versionQueue.pop_front();
+				// If queue piles up it means that there's not enough reads, so the queue is useless in this time
+				// window anyway, we do a cheap clear() and let it build up again
+				if (versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_QUEUE_MAX_LENGTH)
+					versionQueue.clear();
 				versionQueue.emplace_back(std::move(tlogSample));
 				TraceEvent("VersionQueueStats", self->thisServerID).detail("Size", versionQueue.size());
 			}
@@ -11312,10 +11311,7 @@ ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
 						double emptyVersionSafeDelay = sample.timestamp - versionQueue.front().timestamp;
 						TraceEvent("EmptyVersionSafeDelay", self->thisServerID)
 						    .detail("Timestamp", emptyVersionSafeDelay);
-						self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
-						self->emptyVersionSafeDelayHistogram->writeToLog();
-						// TraceEvent("EmptyVersionSafeDelayHistogram", self->thisServerID)
-						//     .detail("Histogram", self->emptyVersionSafeDelayHistogram->drawHistogram());
+						// self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
 					}
 				}
 			}
