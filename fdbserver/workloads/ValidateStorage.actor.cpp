@@ -164,6 +164,7 @@ struct ValidateStorage : TestWorkload {
 				}
 				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
+					    .detail("ExistCount", res.size())
 					    .detail("Context", context)
 					    .detail("AuditID", auditId)
 					    .detail("AuditType", type);
