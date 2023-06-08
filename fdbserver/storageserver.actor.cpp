@@ -5728,13 +5728,15 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID)
 		    .detail("Reason", failureReason);
-
 		// Make sure the history collection is not open due to this audit
 		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
@@ -5744,9 +5746,6 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			req.reply.sendError(audit_storage_cancelled());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -5974,6 +5973,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		}
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
@@ -5983,9 +5985,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			req.reply.sendError(audit_storage_cancelled());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -6047,6 +6046,9 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
@@ -6059,9 +6061,6 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 			req.reply.sendError(audit_storage_error());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -13569,6 +13568,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
 						    .detail("AuditId", req.id)
 						    .detail("AuditType", req.getType());
+						// Make sure the history collection is not open for the old audit
+						self->stopTrackShardAssignment();
 						self->auditTasks[req.getType()].second.clear(true);
 					}
 				}

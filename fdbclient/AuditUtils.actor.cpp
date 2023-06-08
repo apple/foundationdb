@@ -133,6 +133,7 @@ ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID aud
 					break; // Nothing to cancel
 				}
 				state AuditStorageState toCancelState = decodeAuditStorageState(res_.get());
+				// For a zombie audit, it is in running state
 				ASSERT(toCancelState.id == auditId && toCancelState.getType() == auditType);
 				toCancelState.setPhase(AuditPhase::Failed);
 				tr.set(auditKey(toCancelState.getType(), toCancelState.id), auditStorageStateValue(toCancelState));
@@ -278,6 +279,7 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 						clearAuditProgressMetadata(&tr, auditType, auditState.id);
 						numFinishAuditCleaned++;
 					}
+					// For a zombie audit, it is in running state
 				}
 				wait(tr.commit());
 				TraceEvent(SevDebug, "AuditUtilClearAuditMetadataForTypeEnd")
