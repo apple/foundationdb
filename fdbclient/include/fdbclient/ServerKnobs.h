@@ -320,8 +320,10 @@ public:
 	double DD_ZERO_HEALTHY_TEAM_DELAY;
 	int DD_BUILD_EXTRA_TEAMS_OVERRIDE; // build extra teams to allow data movement to progress. must be larger than 0
 	int DD_SHARD_TRACKING_LOG_SEVERITY;
-	bool ENFORCE_SHARD_COUNT_PER_TEAM;
-	int DESIRED_MAX_SHARDS_PER_TEAM;
+	bool ENFORCE_SHARD_COUNT_PER_TEAM; // Whether data movement selects dst team not exceeding
+	                                   // DESIRED_MAX_SHARDS_PER_TEAM.
+	int DESIRED_MAX_SHARDS_PER_TEAM; // When ENFORCE_SHARD_COUNT_PER_TEAM is true, this is the desired, but not strictly
+	                                 // enforced, max shard count per team.
 
 	int DD_MAX_SHARDS_ON_LARGE_TEAMS; // the maximum number of shards that can be assigned to large teams
 	int DD_MAXIMUM_LARGE_TEAM_CLEANUP; // the maximum number of large teams data distribution will attempt to cleanup
