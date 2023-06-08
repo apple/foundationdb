@@ -1380,9 +1380,6 @@ public:
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
 
-		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
-		Counter bytesInput;
 		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
 		// counted as 2 Bytes.
 		Counter logicalBytesInput;
@@ -1471,8 +1468,7 @@ public:
 		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
-		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
@@ -5780,13 +5776,15 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID)
 		    .detail("Reason", failureReason);
-
 		// Make sure the history collection is not open due to this audit
 		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
@@ -5796,9 +5794,6 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			req.reply.sendError(audit_storage_cancelled());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -6026,6 +6021,9 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 		}
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
@@ -6035,9 +6033,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			req.reply.sendError(audit_storage_cancelled());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -6099,6 +6094,9 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
@@ -6111,9 +6109,6 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 			req.reply.sendError(audit_storage_error());
 		} else {
 			req.reply.sendError(audit_storage_failed());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
 		}
 	}
 
@@ -13004,7 +12999,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 		wait(delay(0)); // prevent iterator invalidation of functions sending changes
 	}
-
+	// fmt::print("PopWaitMetricsMap {}\n", req.keys.toString());
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
 		auto& x = i->value();
@@ -13648,6 +13643,8 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
 						    .detail("AuditId", req.id)
 						    .detail("AuditType", req.getType());
+						// Make sure the history collection is not open for the old audit
+						self->stopTrackShardAssignment();
 						self->auditTasks[req.getType()].second.clear(true);
 					}
 				}
