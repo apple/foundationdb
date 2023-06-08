@@ -22,6 +22,8 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 
+#include "flow/actorcompiler.h" // This must be the last #include.
+
 namespace fdb_cli {
 
 // The command is used to get all storage server addresses for a given key.
