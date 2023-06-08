@@ -5657,9 +5657,11 @@ Future<Void> DDTeamCollection::printSnapshotTeamsInfo(Reference<DDTeamCollection
 
 class DDTeamCollectionUnitTest {
 public:
-	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
-	                                                            Reference<IReplicationPolicy> policy,
-	                                                            int processCount) {
+	static std::unique_ptr<DDTeamCollection> testTeamCollection(
+	    int teamSize,
+	    Reference<IReplicationPolicy> policy,
+	    int processCount,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) {
 		Database database = DatabaseContext::create(
 		    makeReference<AsyncVar<ClientDBInfo>>(), Never(), LocalityData(), EnableLocalityLoadBalance::False);
 		auto txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(database));
@@ -5672,7 +5674,7 @@ public:
 		                                                     UID(0, 0),
 		                                                     MoveKeysLock(),
 		                                                     PromiseStream<RelocateShard>(),
-		                                                     makeReference<ShardsAffectedByTeamFailure>(),
+		                                                     shardsAffectedByTeamFailure,
 		                                                     conf,
 		                                                     {},
 		                                                     {},
@@ -5700,6 +5702,14 @@ public:
 		}
 
 		return collection;
+	}
+
+	static std::unique_ptr<DDTeamCollection> testTeamCollection(int teamSize,
+	                                                            Reference<IReplicationPolicy> policy,
+	                                                            int processCount) {
+		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
+		    makeReference<ShardsAffectedByTeamFailure>();
+		return testTeamCollection(teamSize, policy, processCount, shardsAffectedByTeamFailure);
 	}
 
 	static std::unique_ptr<DDTeamCollection> testMachineTeamCollection(int teamSize,
@@ -6437,6 +6447,51 @@ public:
 		}
 		return Void();
 	}
+
+	ACTOR static Future<Void> GetTeam_PreferShardsWithinLimit() {
+		ASSERT(SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM);
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(3, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 5;
+		state int teamSize = 3;
+		Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure =
+		    makeReference<ShardsAffectedByTeamFailure>();
+		state std::unique_ptr<DDTeamCollection> collection =
+		    testTeamCollection(teamSize, policy, processSize, shardsAffectedByTeamFailure);
+
+		collection->addTeam(std::set<UID>({ UID(1, 0), UID(2, 0), UID(3, 0) }), IsInitialTeam::True);
+		collection->addTeam(std::set<UID>({ UID(2, 0), UID(3, 0), UID(4, 0) }), IsInitialTeam::True);
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		std::vector<Key> randomKeys;
+		for (int i = 0; i < SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM + 2; ++i) {
+			Key randomKey = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1500)));
+		}
+		std::sort(randomKeys.begin(), randomKeys.end());
+		ShardsAffectedByTeamFailure::Team highShardTeam({ UID(1, 0), UID(2, 0), UID(3, 0) }, true);
+		for (int i = 0; i < randomKeys.size() - 1; ++i) {
+			shardsAffectedByTeamFailure->assignRangeToTeams(KeyRangeRef(randomKeys[i], randomKeys[i + 1]),
+			                                                { highShardTeam });
+		}
+
+		state GetTeamRequest req(deterministicRandom()->coinflip() ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
+		                         PreferLowerDiskUtil::False,
+		                         TeamMustHaveShards::False,
+		                         PreferLowerReadUtil::False,
+		                         PreferWithinShardLimit::True);
+
+		wait(collection->getTeam(req));
+
+		const auto [resTeam, srcFound] = req.reply.getFuture().get();
+
+		std::set<UID> expectedServers{ UID(2, 0), UID(3, 0), UID(4, 0) };
+		ASSERT(resTeam.present());
+		auto servers = resTeam.get()->getServerIDs();
+		const std::set<UID> selectedServers(servers.begin(), servers.end());
+		ASSERT(expectedServers == selectedServers);
+
+		return Void();
+	}
 };
 
 TEST_CASE("DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -6586,5 +6641,13 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 
 TEST_CASE("/DataDistribution/GetTeam/CutOffByCpu") {
 	wait(DDTeamCollectionUnitTest::GetTeam_CutOffByCpu());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/PreferWithinShardRange") {
+	if (!SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM) {
+		return Void();
+	}
+	wait(DDTeamCollectionUnitTest::GetTeam_PreferShardsWithinLimit());
 	return Void();
 }
