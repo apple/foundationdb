@@ -2217,6 +2217,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		try {
 			wait(res);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			for (const KeyRange& range : ranges) {
 				self->shardManager.removeRange(range);
 			}
