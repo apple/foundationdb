@@ -4916,7 +4916,17 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
 					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
 				} else {
-					TraceEvent("BlobGranuleRestoreResume").log();
+					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
+					beginVersion = version;
+					restore.beginVersion().set(tr, beginVersion);
+					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
+					wait(tr->commit());
+					if (restoreVersion <= beginVersion) {
+						TraceEvent("BlobGranuleRestoreDone")
+						    .detail("BeginVersion", beginVersion)
+						    .detail("Target", restoreVersion);
+						return Void();
+					}
 					break;
 				}
 			} catch (Error& e) {
@@ -5061,6 +5071,23 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		if (firstVersion == invalidVersion) {
+			// For blob granule restore, we can complete the restore job if no mutation log is needed
+			state bool isBlobGranuleRestore;
+			wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+			if (isBlobGranuleRestore) {
+				state Version beginVersion;
+				state Version restoreVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				// no need to apply mutations if target version is less than begin version
+				if (restoreVersion <= beginVersion) {
+					wait(
+					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
+					wait(taskBucket->finish(tr, task));
+					return Void();
+				}
+			}
+
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -6235,7 +6262,8 @@ public:
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		if (!restoreSet.present()) {
+		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
+		if (!restoreSet.present() && !blobManifestUrl.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
