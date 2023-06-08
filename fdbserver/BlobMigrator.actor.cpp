@@ -487,7 +487,7 @@ private:
 
 		// Update applyMutationsKeyVersionMap
 		state int i;
-		state int stepSize = CLIENT_KNOBS->RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
+		state int stepSize = SERVER_KNOBS->BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 		for (i = 0; i < self->mlogRestoreRanges_.size(); i += stepSize) {
 			int end = std::min(i + stepSize, self->mlogRestoreRanges_.size());
 			wait(preloadApplyMutationsKeyVersionMap(
