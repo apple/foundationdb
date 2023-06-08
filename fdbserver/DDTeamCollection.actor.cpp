@@ -1541,18 +1541,30 @@ public:
 				if (self->server_status.get(interf.id()).initialized) {
 					bool unhealthy = self->server_status.get(interf.id()).isUnhealthy();
 					if (unhealthy && !status->isUnhealthy()) {
+						TraceEvent("StorageServerBecomeHealthy", self->distributorId)
+						    .detail("ServerID", interf.id())
+						    .detail("ServerIpAddress", interf.address());
 						self->unhealthyServers--;
 					}
 					if (!unhealthy && status->isUnhealthy()) {
+						TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+						    .detail("ServerID", interf.id())
+						    .detail("ServerIpAddress", interf.address());
 						self->unhealthyServers++;
 					}
 				} else if (status->isUnhealthy()) {
+					TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+					    .detail("ServerID", interf.id())
+					    .detail("ServerIpAddress", interf.address());
 					self->unhealthyServers++;
 				}
 			}
 
 			self->server_status.set(interf.id(), *status);
 			if (status->isFailed) {
+				TraceEvent("RestartRecruiting", self->distributorId)
+				    .detail("FailedServerID", interf.id())
+				    .detail("IsTSS", interf.isTss());
 				self->restartRecruiting.trigger();
 			}
 
