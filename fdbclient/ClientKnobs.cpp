@@ -180,7 +180,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( RESTORE_DISPATCH_ADDTASK_SIZE,           150 );
 	init( RESTORE_DISPATCH_BATCH_SIZE,           30000 ); if( randomize && BUGGIFY ) RESTORE_DISPATCH_BATCH_SIZE = 20;
 	init( RESTORE_WRITE_TX_SIZE,            256 * 1024 );
-	init( RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE, 10000);
 	init( APPLY_MAX_LOCK_BYTES,                    1e9 );
 	init( APPLY_MIN_LOCK_BYTES,                   11e6 ); //Must be bigger than TRANSACTION_SIZE_LIMIT
 	init( APPLY_BLOCK_SIZE,     LOG_RANGE_BLOCK_SIZE/5 );
