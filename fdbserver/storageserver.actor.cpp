@@ -24,11 +24,14 @@
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
+#include "flow/flow.h"
 #include "flow/network.h"
 #include "fmt/format.h"
 #include "fdbclient/Audit.h"
@@ -870,6 +873,7 @@ public:
 	Reference<Histogram> readRangeBytesReturnedHistogram;
 	Reference<Histogram> readRangeBytesLimitHistogram;
 	Reference<Histogram> readRangeKVPairsReturnedHistogram;
+	Reference<Histogram> emptyVersionSafeDelayHistogram;
 
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key, int64_t tenantId) const;
@@ -941,6 +945,24 @@ public:
 	Arena lastArena;
 	double cpuUsage;
 	double diskUsage;
+
+	// Maintain sampled statistics for received versions to dynamically postpone sync between storage server and tlog
+	struct EmptyVersionQueueEntry {
+		constexpr static FileIdentifier file_identifier = 15292781;
+		Version version;
+		double timestamp;
+
+		EmptyVersionQueueEntry() {}
+		explicit EmptyVersionQueueEntry(Version version, double timestamp) : version(version), timestamp(timestamp) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, version, timestamp);
+		}
+	};
+	double lastVersionSampleTime;
+	RequestStream<struct EmptyVersionQueueEntry> tlogVersionFeed;
+	RequestStream<struct EmptyVersionQueueEntry> ssVersionFeed;
 
 	std::map<Version, Standalone<VerUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VerUpdateRef>>& getMutableMutationLog() { return mutationLog; }
@@ -1455,13 +1477,16 @@ public:
 	    readRangeKVPairsReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
 	                                                              Histogram::Unit::bytes)),
+	    emptyVersionSafeDelayHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
+	                                                           SS_EMPTY_VERSION_SAFE_DELAY_HISTOGRAM,
+	                                                           Histogram::Unit::milliseconds)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
-	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
-	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
-	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
-	    byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0), numWatches(0),
-	    noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
+	    lastVersionSampleTime(0), storage(this, storage), shardChangeCounter(0), lastTLogVersion(0),
+	    lastVersionWithData(0), restoredVersion(0), prevVersion(0),
+	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
+	    knownCommittedVersion(0), versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db),
+	    actors(false), byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismChangeFeedLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_CHANGE_FEED),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
@@ -9284,6 +9309,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detail("Version", cursor->popped());
 			throw worker_removed();
 		}
+		data->tlogVersionFeed.send(StorageServer::EmptyVersionQueueEntry(cursor->getMaxKnownVersion(), now()));
 
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
@@ -11253,6 +11279,61 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 	}
 }
 
+ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
+                                           FutureStream<StorageServer::EmptyVersionQueueEntry> tlogIn,
+                                           FutureStream<StorageServer::EmptyVersionQueueEntry> ssIn) {
+	state int queueSizeLimit = 1000; // TODO: make this a KNOB probably
+	state std::deque<StorageServer::EmptyVersionQueueEntry> versionQueue;
+	loop {
+		choose {
+			when(StorageServer::EmptyVersionQueueEntry tlogSample = waitNext(tlogIn)) {
+				TraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", now());
+				// NOTE: This current approach incur (safe) skew in histogram because oldest sample out of queue bound
+				// will be discarded
+				if (versionQueue.size() >= queueSizeLimit)
+					versionQueue.pop_front();
+				versionQueue.emplace_back(std::move(tlogSample));
+				TraceEvent("VersionQueueStats", self->thisServerID).detail("Size", versionQueue.size());
+			}
+			when(StorageServer::EmptyVersionQueueEntry sample = waitNext(ssIn)) {
+				TraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", now());
+				if (sample.version != 0) { // FIXME: is there an invalid version construct? better to use that default
+					state bool popped = false;
+					// OPTIM: use lowerbound() instead, could be faster for longer queues
+					// OPTIM: specify implementation struct for deque
+					while (!versionQueue.empty() && versionQueue.front().version <= sample.version) {
+						versionQueue.pop_front();
+						popped = true;
+					}
+					// NOTE: This current approach does not incur skew in histogram, but miss logging data from
+					// 1. decreasing version number received at SS
+					// 2. increasing version number received at SS that does not cause queue pop
+					if (!versionQueue.empty() && popped) {
+						double emptyVersionSafeDelay = sample.timestamp - versionQueue.front().timestamp;
+						TraceEvent("EmptyVersionSafeDelay", self->thisServerID)
+						    .detail("Timestamp", emptyVersionSafeDelay);
+						self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
+						self->emptyVersionSafeDelayHistogram->writeToLog();
+						// TraceEvent("EmptyVersionSafeDelayHistogram", self->thisServerID)
+						//     .detail("Histogram", self->emptyVersionSafeDelayHistogram->drawHistogram());
+					}
+				}
+			}
+		}
+	}
+}
+
+// Lightweight non-blocking function that sends version samples to actor responsible for maintaining version statistics
+inline void logVersionStatistics(StorageServer* self, StorageServer::EmptyVersionQueueEntry sample) {
+	if (sample.timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_SAMPLE_INTERVAL) {
+		DisabledTraceEvent("ValidSampleLogged", self->thisServerID)
+		    .detail("Timestamp", sample.timestamp)
+		    .detail("LastSampleTime", self->lastVersionSampleTime);
+		self->ssVersionFeed.send(StorageServer::EmptyVersionQueueEntry{ sample.version, sample.timestamp });
+		self->lastVersionSampleTime = sample.timestamp;
+	}
+}
+
 ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
@@ -11266,8 +11347,10 @@ ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetVa
 
 		if (SHORT_CIRCUT_ACTUAL_STORAGE && normalKeys.contains(req.key))
 			req.reply.send(GetValueReply());
-		else
+		else {
 			self->actors.add(self->readGuard(req, getValueQ));
+			logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
+		}
 	}
 }
 
@@ -11279,6 +11362,7 @@ ACTOR Future<Void> serveGetKeyValuesRequests(StorageServer* self, FutureStream<G
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyValuesQ));
+		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11292,6 +11376,7 @@ ACTOR Future<Void> serveGetMappedKeyValuesRequests(StorageServer* self,
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so downgrade
 		// before doing real work
 		self->actors.add(self->readGuard(req, getMappedKeyValuesQ));
+		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11303,6 +11388,7 @@ ACTOR Future<Void> serveGetKeyValuesStreamRequests(StorageServer* self,
 		// downgrade before doing real work
 		// FIXME: add readGuard again
 		self->actors.add(getKeyValuesStreamQ(self, req));
+		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11313,6 +11399,7 @@ ACTOR Future<Void> serveGetKeyRequests(StorageServer* self, FutureStream<GetKeyR
 		// Warning: This code is executed at extremely high priority (TaskPriority::LoadBalancedEndpoint), so
 		// downgrade before doing real work
 		self->actors.add(self->readGuard(req, getKeyQ));
+		logVersionStatistics(self, StorageServer::EmptyVersionQueueEntry{ req.version, now() });
 	}
 }
 
@@ -11603,6 +11690,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(traceRole(Role::STORAGE_SERVER, ssi.id()));
 	self->actors.add(reportStorageServerState(self));
 	self->actors.add(storageEngineConsistencyCheck(self));
+	self->actors.add(updateVersionStatistics(self, self->tlogVersionFeed.getFuture(), self->ssVersionFeed.getFuture()));
 
 	self->transactionTagCounter.startNewInterval();
 	self->actors.add(
@@ -11631,7 +11719,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					    delay(std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION - (now() - self->lastUpdate), 0.1));
 				}
 			}
-			when(wait(dbInfoChange)) {
+			when(wait(dbInfoChange)) { // trigger on topology change, dbInfoChange essentially broadcasts
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
