@@ -1877,6 +1877,8 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					    .detail("Duration", now() - startTime)
 					    .detail("Bytes", metrics.bytes)
 					    .detail("Rate", static_cast<double>(metrics.bytes) / (now() - startTime))
+					    .detail("Reason", rd.reason.toString())
+					    .detail("DataMoveReason", static_cast<int>(rd.dmReason))
 					    .detail("DataMoveID", rd.dataMoveId)
 					    .detail("PhysicalShardMove", physicalShardMoveEnabled(rd.dataMoveId));
 					if (now() - startTime > 600) {
