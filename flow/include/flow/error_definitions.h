@@ -268,6 +268,7 @@ ERROR( cluster_no_capacity, 2141, "Cluster does not have capacity to perform the
 ERROR( tenant_removed, 2142, "The tenant was removed" )
 ERROR( invalid_tenant_state, 2143, "Operation cannot be applied to tenant in its current state" )
 ERROR( tenant_locked, 2144, "Tenant is locked" )
+ERROR( invalid_tenant_move, 2145, "The tenant movement is invalid")
 
 ERROR( invalid_cluster_name, 2160, "Data cluster name cannot begin with \\xff" )
 ERROR( invalid_metacluster_operation, 2161, "Metacluster operation performed on non-metacluster" )
