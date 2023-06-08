@@ -161,15 +161,6 @@ def usecluster(cluster_file, cluster_name):
     return rc, out, err
 
 
-def useclusters_and_check_status(cluster_file, *cluster_names):
-    subcmds = [
-        "usecluster {}; metacluster status;".format(cname) for cname in cluster_names
-    ]
-    subcmds[-1] = subcmds[-1][:-1]
-    rc, out, err = run_fdbcli_command(cluster_file, *subcmds)
-    return rc, out, err
-
-
 def cleanup_after_test(management_cluster_file, data_cluster_names):
     for data_cluster_name in data_cluster_names:
         rc, out, err = remove_data_cluster(management_cluster_file, data_cluster_name)
@@ -494,14 +485,17 @@ def usecluster_test(logger, cluster_files):
     _, output, err = usecluster(cluster_files[1], data_cluster_names[1])
     assert err == "ERROR: Please first connect to a management cluster"
 
-    rc, output, err = useclusters_and_check_status(
-        cluster_files[0],
-        data_cluster_names[0],
-        data_cluster_names[1],
-        management_cluster_name,
-    )
+    # test switch cluster and check status
+    subcmds = [
+        "usecluster {};".format(data_cluster_names[0]),
+        "metacluster status;",
+        "usecluster {};".format(data_cluster_names[1]),
+        "metacluster status;",
+        "usecluster {};".format(management_cluster_name),
+        "metacluster status",
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
     lines = output.split("\n")
-    logger.debug(output)
     assert lines[1] == "cluster changed to {}, tenant reset to default.".format(
         data_cluster_names[0]
     )
@@ -534,6 +528,47 @@ def usecluster_test(logger, cluster_files):
     _, _, err = usecluster(cluster_files[0], "data_cluster_not_exist")
     assert err == "ERROR: Data cluster does not exist (2163)"
 
+    # test combination of usecluster and usetenant
+    tenants = [
+        {"name": "tenant1", "assigned_cluster": "data1"},
+        {"name": "tenant2", "assigned_cluster": "data2"},
+    ]
+    setup_tenants(cluster_files[0], tenants)
+
+    subcmds = [
+        "usecluster {};".format(management_cluster_name),
+        "usetenant {}".format("tenant1"),
+    ]
+    _, _, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert err == "ERROR: Tenant `tenant1' does not exist"
+
+    subcmds = [
+        "usecluster {};".format("data1"),
+        "usetenant {};".format("tenant1"),
+        "writemode on;" "set key1 value1;",
+        "get key1;",
+        "clear key1;",
+        "usecluster {};".format("data2"),
+        "usetenant {};".format("tenant2"),
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    lines = output.split("\n")
+    assert lines[3] == "Using tenant `tenant1'"
+    assert lines[8] == "`key1' is `value1'"
+    assert lines[14] == "Using tenant `tenant2'"
+
+    subcmds = ["usecluster {};".format("data1"), "usetenant {};".format("tenant2")]
+    _, _, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert err == "ERROR: Tenant `tenant2' does not exist"
+
+    subcmds = ["usecluster {};".format("data1"), "writemode on;", "set key2 value2"]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert (
+        err
+        == "ERROR: tenant name required. Use the `usetenant' command to select a tenant or\nenable the `RAW_ACCESS' option to read raw keys."
+    )
+
+    clear_all_tenants(cluster_files[0])
     cleanup_after_test(cluster_files[0], data_cluster_names)
 
 
