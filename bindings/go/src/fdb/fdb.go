@@ -196,11 +196,7 @@ var apiVersion int
 var networkStarted bool
 var networkMutex sync.Mutex
 
-var openDatabases map[string]Database
-
-func init() {
-	openDatabases = make(map[string]Database)
-}
+var openDatabases sync.Map
 
 func startNetwork() error {
 	if e := C.fdb_setup_network(); e != 0 {
@@ -270,14 +266,16 @@ func OpenDatabase(clusterFile string) (Database, error) {
 		return Database{}, err
 	}
 
-	db, ok := openDatabases[clusterFile]
-	if !ok {
+	var db Database
+	var okDb bool
+	anyy, exist := openDatabases.Load(clusterFile)
+	if db, okDb = anyy.(Database); !exist || !okDb {
 		var e error
 		db, e = createDatabase(clusterFile)
 		if e != nil {
 			return Database{}, e
 		}
-		openDatabases[clusterFile] = db
+		openDatabases.Store(clusterFile, db)
 	}
 
 	return db, nil
