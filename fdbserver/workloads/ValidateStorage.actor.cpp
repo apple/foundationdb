@@ -264,6 +264,9 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageConcurrentRunForDifferentType(self, cx));
 		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
 
+		wait(self->testAuditStorageConcurrentRunForSameType(self, cx));
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone");
+
 		wait(self->testAuditStorageCancellation(self, cx));
 		TraceEvent("TestAuditStorageCancellationDone");
 

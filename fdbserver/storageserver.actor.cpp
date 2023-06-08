@@ -5781,8 +5781,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			req.reply.sendError(audit_storage_failed());
-			throw e;
+			return Void(); // sliently exit
 		}
 		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -6027,8 +6026,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			req.reply.sendError(audit_storage_failed());
-			throw e;
+			return Void(); // sliently exit
 		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -6101,8 +6099,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 		req.reply.send(res);
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			req.reply.sendError(audit_storage_failed());
-			throw e;
+			return Void(); // sliently exit
 		}
 		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
@@ -13650,7 +13647,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
 						    .detail("AuditId", req.id)
 						    .detail("AuditType", req.getType());
-						// Make sure the history collection is not open due to this old audit
+						// Make sure the history collection is not open for the old audit
 						self->stopTrackShardAssignment();
 						self->auditTasks[req.getType()].second.clear(true);
 					}
