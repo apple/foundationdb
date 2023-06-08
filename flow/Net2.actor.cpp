@@ -26,6 +26,7 @@
 #include "flow/Trace.h"
 #include <algorithm>
 #include <memory>
+#include <string_view>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -342,14 +343,20 @@ class BindPromise {
 	Promise<Void> p;
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
+	NetworkAddress peerAddr;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise&& r) noexcept
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
+
+	NetworkAddress getPeerAddr() const { return peerAddr; }
+
+	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -798,6 +805,14 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		Handshake(ssl_socket& socket, ssl_socket::handshake_type type) : socket(socket), type(type) {}
 		double getTimeEstimate() const override { return 0.001; }
 
+		std::string getPeerAddress() const {
+			std::ostringstream o;
+			boost::system::error_code ec;
+			auto addr = socket.lowest_layer().remote_endpoint(ec);
+			o << (!ec.failed() ? addr.address().to_string() : std::string_view("0.0.0.0"));
+			return std::move(o).str();
+		}
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
@@ -922,7 +937,8 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError"_audit, UID());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -1005,6 +1021,7 @@ public:
 			} else {
 				// Otherwise use flow network thread
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
