@@ -16,11 +16,19 @@ extern "C" {
 
 enum FDBApiRequestType {
 	FDBApiRequest_Invalid = 0, //
-	FDBApiRequest_ReadBGDescriptionRequest = 1 //
+	FDBApiRequest_ReadBGDescription = 1 //
+};
+
+enum FDBApiResultType {
+	FDBApiResult_Invalid = 0, //
+	FDBApiResult_Error = -1, //
+	FDBApiResult_ReadBGDescription = 1, //
+	FDBApiResult_ReadRange = 2, //
+	FDBApiResult_ReadBGMutations = 3, //
 };
 
 typedef struct FDBRequestHeader_ FDBRequestHeader;
-typedef struct FDBResponseHeader_ FDBResponseHeader;
+typedef struct FDBResultHeader_ FDBResultHeader;
 
 typedef struct FDBReadBGDescriptionRequest_ {
 	FDBRequestHeader* header;
@@ -29,12 +37,30 @@ typedef struct FDBReadBGDescriptionRequest_ {
 	int64_t read_version;
 } FDBReadBGDescriptionRequest;
 
-typedef struct FDBReadBGDescriptionResponse_ {
-	FDBResponseHeader* header;
+typedef struct FDBErrorResult_ {
+	FDBResultHeader* header;
+	fdb_error_t error;
+} FDBErrorResult;
+
+typedef struct FDBReadBGDescriptionResult_ {
+	FDBResultHeader* header;
 	FDBBGFileDescription** desc_arr;
 	int desc_count;
 	int64_t read_version;
-} FDBReadBGDescriptionResponse;
+} FDBReadBGDescriptionResult;
+
+typedef struct FDBReadRangeResult_ {
+	FDBResultHeader* header;
+	FDBKeyValue* kv_arr;
+	int kv_count;
+	fdb_bool_t more;
+} FDBReadRangeResult;
+
+typedef struct FDBReadBGMutationsResult_ {
+	FDBResultHeader* header;
+	FDBBGMutation* mutation_arr;
+	int mutation_count;
+} FDBReadBGMutationsResult;
 
 #ifdef __cplusplus
 }

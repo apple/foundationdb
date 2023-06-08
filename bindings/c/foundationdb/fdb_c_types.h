@@ -44,7 +44,7 @@ extern "C" {
 
 /* Pointers to these opaque types represent objects in the FDB API */
 typedef struct FDB_future FDBFuture;
-typedef struct FDB_result FDBResult;
+typedef struct FDBResult_ FDBResult;
 typedef struct FDB_cluster FDBCluster;
 typedef struct FDB_database FDBDatabase;
 typedef struct FDB_tenant FDBTenant;

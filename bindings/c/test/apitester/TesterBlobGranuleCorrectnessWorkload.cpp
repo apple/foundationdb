@@ -94,12 +94,12 @@ private:
 			    TesterGranuleContext testerContext(ctx->getBGBasePath());
 			    fdb::native::FDBReadBlobGranuleContext granuleContext = createGranuleContext(&testerContext);
 
-			    fdb::Result res = ctx->tx().readBlobGranules(keyRange.beginKey,
-			                                                 keyRange.endKey,
-			                                                 0 /* beginVersion */,
-			                                                 -2 /* latest read version */,
-			                                                 granuleContext);
-			    auto out = fdb::Result::KeyValueRefArray{};
+			    fdb::ReadRangeResult res = ctx->tx().readBlobGranules(keyRange.beginKey,
+			                                                          keyRange.endKey,
+			                                                          0 /* beginVersion */,
+			                                                          -2 /* latest read version */,
+			                                                          granuleContext);
+			    auto out = fdb::ReadRangeResult::KeyValueRefArray{};
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 			    ASSERT(err.code() != error_code_blob_granule_transaction_too_old);
 			    if (err.code() != error_code_success) {
@@ -329,8 +329,9 @@ private:
 		                                            snapshotFile->full_file_length,
 		                                            bgCtx.userContext);
 		fdb::BytesRef snapshotData(bgCtx.get_load_f(snapshotLoadId, bgCtx.userContext), snapshotFile->file_length);
-		fdb::Result snapshotRes = ctx->tx().parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
-		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::ReadRangeResult snapshotRes =
+		    ctx->tx().parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
+		auto out = fdb::ReadRangeResult::KeyValueRefArray{};
 		fdb::Error err = snapshotRes.getKeyValueArrayNothrow(out);
 		ASSERT(err.code() == error_code_success);
 		auto res = copyKeyValueArray(out);
@@ -370,7 +371,8 @@ private:
 
 		fdb::BytesRef deltaData(bgCtx.get_load_f(deltaLoadId, bgCtx.userContext), deltaFile->file_length);
 
-		fdb::Result deltaRes = ctx->tx().parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
+		fdb::ReadBGMutationsResult deltaRes =
+		    ctx->tx().parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
 		fdb::VectorRef<fdb::GranuleMutationRef> mutations;
 		fdb::Error err = deltaRes.getGranuleMutationArrayNothrow(mutations);
 		ASSERT(err.code() == error_code_success);
@@ -489,7 +491,7 @@ private:
 
 	void randomReadDescription(TTaskFct cont, std::optional<int> tenantId) {
 		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
-		auto results = std::make_shared<fdb::ReadBlobGranulesDescriptionResponse>();
+		auto results = std::make_shared<fdb::ReadBlobGranulesDescriptionResult>();
 
 		debugOp("ReadDesc", keyRange, tenantId, "starting");
 

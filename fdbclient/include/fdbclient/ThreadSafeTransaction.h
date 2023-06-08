@@ -177,22 +177,21 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granuleContext) override;
+	ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
+	                                    Version beginVersion,
+	                                    Optional<Version> readVersion,
+	                                    ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
 	                                                                               Version beginVersion,
 	                                                                               Optional<Version> readVersion,
 	                                                                               Version* readVersionOut) override;
 
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
+	ReadRangeApiResult readBlobGranulesFinish(ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	                                          const KeyRangeRef& keyRange,
+	                                          Version beginVersion,
+	                                          Version readVersion,
+	                                          ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
@@ -241,7 +240,7 @@ public:
 	void debugTrace(BaseTraceEvent&&) override;
 	void debugPrint(std::string const& message) override;
 
-	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 

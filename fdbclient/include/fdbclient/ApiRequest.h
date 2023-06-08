@@ -10,7 +10,10 @@
 #pragma once
 
 #include "foundationdb/fdb_c_internal.h"
+#include "foundationdb/fdb_c_requests.h"
 #include "flow/Arena.h"
+
+FDBAllocatorIfc* localAllocatorInterface();
 
 class ApiRequest {
 public:
@@ -48,9 +51,9 @@ public:
 
 	FDBRequest* getFDBRequest() const { return reqRef.getPtr(); }
 
-	static ApiRequest addRef(FDBRequest* response) {
-		ASSERT(response != NULL);
-		return ApiRequest(Reference<FDBRequestRefCounted>::addRef((FDBRequestRefCounted*)response));
+	static ApiRequest addRef(FDBRequest* request) {
+		ASSERT(request != NULL);
+		return ApiRequest(Reference<FDBRequestRefCounted>::addRef((FDBRequestRefCounted*)request));
 	}
 
 private:
@@ -64,52 +67,93 @@ private:
 	ApiRequest(Reference<FDBRequestRefCounted>&& ref) : reqRef(ref) {}
 };
 
-class ApiResponse {
+class ApiResult {
 public:
-	ApiResponse() = default;
-	ApiResponse(const ApiResponse& r) = default;
-	ApiResponse(ApiResponse&& r) noexcept = default;
-	ApiResponse& operator=(const ApiResponse& r) = default;
-	ApiResponse& operator=(ApiResponse&& r) noexcept = default;
+	ApiResult() = default;
+	ApiResult(const ApiResult& r) = default;
+	ApiResult(ApiResult&& r) noexcept = default;
+	ApiResult& operator=(const ApiResult& r) = default;
+	ApiResult& operator=(ApiResult&& r) noexcept = default;
 
-	template <class ResponseType>
-	ResponseType* getTypedResponse() const {
-		return reinterpret_cast<ResponseType*>(respRef.getPtr());
-	}
-
-	FDBResponse* getFDBResponse() const { return respRef.getPtr(); }
+	FDBResult* getPtr() const { return resRef.getPtr(); }
+	FDBResult* extractPtr() { return resRef.extractPtr(); }
 
 	Arena& arena() {
-		ASSERT(respRef.isValid());
+		ASSERT(resRef.isValid());
 		static_assert(sizeof(Arena) == sizeof(void*));
-		return *reinterpret_cast<Arena*>(&respRef.getPtr()->header->allocator.handle);
+		return *reinterpret_cast<Arena*>(&resRef.getPtr()->header->allocator.handle);
 	}
 
-	static ApiResponse addRef(FDBResponse* response) {
-		ASSERT(response != NULL);
-		return ApiResponse(Reference<FDBResponseRefCounted>::addRef((FDBResponseRefCounted*)response));
+	bool isError() const { return resRef->header->result_type == FDBApiResult_Error; }
+
+	Error getError() const {
+		if (!isError())
+			return success();
+		else
+			return Error(((FDBErrorResult*)getPtr())->error);
 	}
 
-	template <class ResponseType>
-	static ApiResponse create(const ApiRequest& req) {
-		Arena arena(sizeof(ResponseType) + sizeof(FDBResponseHeader));
-		ResponseType* resp = new (arena) ResponseType();
-		resp->header = new (arena) FDBResponseHeader();
-		resp->header->request_type = req.getType();
-		resp->header->allocator.handle = arena.getPtr();
-		resp->header->allocator.ifc = req.getAllocatorInterface();
-		return addRef((FDBResponse*)resp);
+	FDBResult* getData() {
+		if (isError()) {
+			throw Error(((FDBErrorResult*)getPtr())->error);
+		} else {
+			return getPtr();
+		}
 	}
 
-private:
-	struct FDBResponseRefCounted : public FDBResponse {
+	static ApiResult addRef(FDBResult* result) {
+		ASSERT(result != NULL);
+		return ApiResult(Reference<FDBResultRefCounted>::addRef((FDBResultRefCounted*)result));
+	}
+
+	static ApiResult fromPtr(FDBResult* result) {
+		return ApiResult(Reference<FDBResultRefCounted>((FDBResultRefCounted*)result));
+	}
+
+	static void release(FDBResult* result) {
+		if (result) {
+			((FDBResultRefCounted*)result)->delref();
+		}
+	}
+
+protected:
+	struct FDBResultRefCounted : public FDBResult {
 		void addref() { header->allocator.ifc->addref(header->allocator.handle); }
 		void delref() { header->allocator.ifc->delref(header->allocator.handle); }
 	};
 
-	Reference<FDBResponseRefCounted> respRef;
+	Reference<FDBResultRefCounted> resRef;
 
-	ApiResponse(Reference<FDBResponseRefCounted>&& ref) : respRef(ref) {}
+	ApiResult(Reference<FDBResultRefCounted>&& ref) : resRef(ref) {}
 };
+
+template <class ResultType>
+class TypedApiResult : public ApiResult {
+public:
+	explicit TypedApiResult(const ApiResult& r) : ApiResult(r) {}
+	explicit TypedApiResult(ApiResult&& r) : ApiResult(r) {}
+
+	ResultType* getPtr() { return reinterpret_cast<ResultType*>(ApiResult::getPtr()); }
+	ResultType* getData() { return reinterpret_cast<ResultType*>(ApiResult::getData()); }
+
+	static TypedApiResult<ResultType> create(FDBApiResultType resType) {
+		Arena arena(sizeof(ResultType) + sizeof(FDBResultHeader));
+		ResultType* res = new (arena) ResultType();
+		res->header = new (arena) FDBResultHeader();
+		res->header->result_type = resType;
+		res->header->allocator.handle = arena.getPtr();
+		res->header->allocator.ifc = localAllocatorInterface();
+		return TypedApiResult<ResultType>(addRef((FDBResult*)res));
+	}
+
+	static TypedApiResult<ResultType> createError(Error err) {
+		auto errRes = TypedApiResult<FDBErrorResult>::create(FDBApiResult_Error);
+		errRes.getPtr()->error = err.code();
+		return TypedApiResult<ResultType>(errRes);
+	}
+};
+
+using ReadRangeApiResult = TypedApiResult<FDBReadRangeResult>;
+using ReadBGMutationsApiResult = TypedApiResult<FDBReadBGMutationsResult>;
 
 #endif

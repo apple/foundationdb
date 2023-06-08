@@ -92,7 +92,7 @@ void setBGMutations(FDBBGMutation*** mutationsOut,
 	}
 }
 
-ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransaction* tr, ApiRequest req) {
+ACTOR Future<ApiResult> handleReadBgDescriptionRequest(ISingleThreadTransaction* tr, ApiRequest req) {
 	auto input = req.getTypedRequest<FDBReadBGDescriptionRequest>();
 	Optional<Version> readVersion;
 	state Version readVersionOut;
@@ -102,11 +102,11 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 	Standalone<VectorRef<BlobGranuleChunkRef>> chunks =
 	    wait(tr->readBlobGranules((KeyRangeRef&)input->key_range, input->begin_version, readVersion, &readVersionOut));
 
-	ApiResponse res = ApiResponse::create<FDBReadBGDescriptionResponse>(req);
+	auto res = TypedApiResult<FDBReadBGDescriptionResult>::create(FDBApiResult_ReadBGDescription);
 	Arena& arena = res.arena();
 	arena.dependsOn(chunks.arena());
 
-	auto resp = res.getTypedResponse<FDBReadBGDescriptionResponse>();
+	auto resp = res.getPtr();
 	resp->desc_count = chunks.size();
 	resp->read_version = readVersionOut;
 
@@ -161,12 +161,33 @@ ACTOR Future<ApiResponse> handleReadBgDescriptionRequest(ISingleThreadTransactio
 
 } // namespace
 
-Future<ApiResponse> handleApiRequest(ISingleThreadTransaction* tr, ApiRequest req) {
+Future<ApiResult> handleApiRequest(ISingleThreadTransaction* tr, ApiRequest req) {
 	switch (req.getType()) {
-	case FDBApiRequest_ReadBGDescriptionRequest:
+	case FDBApiRequest_ReadBGDescription:
 		return handleReadBgDescriptionRequest(tr, req);
 		break;
 	default:
 		return unknown_api_request();
 	}
+}
+
+ReadRangeApiResult createReadRangeApiResult(RangeResult rangeResult) {
+	auto ret = ReadRangeApiResult::create(FDBApiResult_ReadRange);
+	ret.arena().dependsOn(rangeResult.arena());
+	auto data = ret.getPtr();
+	static_assert(sizeof(FDBKeyValue) == sizeof(KeyValueRef));
+	data->kv_arr = (FDBKeyValue*)rangeResult.begin();
+	data->kv_count = rangeResult.size();
+	data->more = rangeResult.more;
+	return ret;
+}
+
+ReadBGMutationsApiResult createBGMutationsApiResult(Standalone<VectorRef<GranuleMutationRef>> mutationsResult) {
+	auto ret = ReadBGMutationsApiResult::create(FDBApiResult_ReadBGMutations);
+	ret.arena().dependsOn(mutationsResult.arena());
+	auto data = ret.getPtr();
+	static_assert(sizeof(FDBBGMutation) == sizeof(GranuleMutationRef));
+	data->mutation_arr = (FDBBGMutation*)mutationsResult.begin();
+	data->mutation_count = mutationsResult.size();
+	return ret;
 }

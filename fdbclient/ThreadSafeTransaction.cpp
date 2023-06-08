@@ -537,12 +537,12 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobG
 	});
 }
 
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                                  Version beginVersion,
-                                                                  Optional<Version> readVersion,
-                                                                  ReadBlobGranuleContext granule_context) {
+ReadRangeApiResult ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
+                                                           Version beginVersion,
+                                                           Optional<Version> readVersion,
+                                                           ReadBlobGranuleContext granule_context) {
 	// This should not be called directly, bypassMultiversionApi should not be set
-	return ThreadResult<RangeResult>(unsupported_operation());
+	return ReadRangeApiResult::createError(unsupported_operation());
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
@@ -560,7 +560,7 @@ ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::
 	    });
 }
 
-ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
+ReadRangeApiResult ThreadSafeTransaction::readBlobGranulesFinish(
     ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
     const KeyRangeRef& keyRange,
     Version beginVersion,
@@ -569,12 +569,14 @@ ThreadResult<RangeResult> ThreadSafeTransaction::readBlobGranulesFinish(
 	// do this work off of fdb network threads for performance!
 	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
 	GranuleMaterializeStats stats;
-	auto ret = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
-	if (!ret.isError()) {
+	auto res = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
+	if (!res.isError()) {
 		ISingleThreadTransaction* tr = this->tr;
 		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
+		return createReadRangeApiResult(res.get());
+	} else {
+		return ReadRangeApiResult::createError(res.getError());
 	}
-	return ret;
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
@@ -798,7 +800,7 @@ void ThreadSafeTransaction::debugPrint(std::string const& message) {
 	onMainThreadVoid([tr, message]() { tr->debugPrint(message); });
 }
 
-ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(ApiRequest request) {
+ThreadFuture<ApiResult> ThreadSafeTransaction::execAsyncRequest(ApiRequest request) {
 	if (!request.hasValidHeader()) {
 		return client_invalid_operation();
 	}
@@ -808,35 +810,11 @@ ThreadFuture<ApiResponse> ThreadSafeTransaction::execAsyncRequest(ApiRequest req
 		return cluster_version_changed();
 	}
 	ISingleThreadTransaction* tr = this->tr;
-	return onMainThread([tr, request]() -> Future<ApiResponse> {
+	return onMainThread([tr, request]() -> Future<ApiResult> {
 		tr->checkDeferredError();
 		return handleApiRequest(tr, request);
 	});
 }
-
-namespace {
-
-void* allocatorAllocate(void** handle, uint64_t sz) {
-	Reference<ArenaBlock> ref((ArenaBlock*)*handle);
-	void* res = ArenaBlock::allocate(ref, sz);
-	*handle = ref.extractPtr();
-	return res;
-}
-
-void allocatorAddRef(void* handle) {
-	((ArenaBlock*)handle)->addref();
-}
-
-void allocatorDelRef(void* handle) {
-	((ArenaBlock*)handle)->delref();
-}
-
-FDBAllocatorIfc* localAllocatorInterface() {
-	static FDBAllocatorIfc interface = { allocatorAllocate, allocatorAddRef, allocatorDelRef };
-	return &interface;
-}
-
-} // namespace
 
 FDBAllocatorIfc* ThreadSafeTransaction::getAllocatorInterface() {
 	return localAllocatorInterface();

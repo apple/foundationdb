@@ -35,7 +35,7 @@
 // All of the required functions loaded from that external library are stored in function pointers in this struct.
 struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	typedef struct FDB_future FDBFuture;
-	typedef struct FDB_result FDBResult;
+	typedef struct FDBResult_ FDBResult;
 	typedef struct FDB_cluster FDBCluster;
 	typedef struct FDB_database FDBDatabase;
 	typedef struct FDB_tenant FDBTenant;
@@ -446,7 +446,7 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	fdb_error_t (*futureGetGranuleSummaryArray)(FDBFuture* f, const FDBGranuleSummary** out_summaries, int* outCount);
 	fdb_error_t (*futureGetReadBusyness)(FDBFuture* f, float* server_busyness, float* range_busyness);
 	fdb_error_t (*futureGetSharedState)(FDBFuture* f, DatabaseSharedState** outPtr);
-	fdb_error_t (*futureGetResponse)(FDBFuture* f, FDBResponse** response);
+	fdb_error_t (*futureGetResult)(FDBFuture* f, FDBResult** response);
 	fdb_error_t (*futureSetCallback)(FDBFuture* f, FDBCallback callback, void* callback_parameter);
 	void (*futureCancel)(FDBFuture* f);
 	void (*futureDestroy)(FDBFuture* f);
@@ -507,22 +507,21 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
+	ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
+	                                    Version beginVersion,
+	                                    Optional<Version> readVersion,
+	                                    ReadBlobGranuleContext granule_context) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
 	                                                                               Version beginVersion,
 	                                                                               Optional<Version> readVersion,
 	                                                                               Version* readVersionOut) override;
 
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
+	ReadRangeApiResult readBlobGranulesFinish(ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	                                          const KeyRangeRef& keyRange,
+	                                          Version beginVersion,
+	                                          Version readVersion,
+	                                          ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
@@ -564,7 +563,7 @@ public:
 	void addref() override { ThreadSafeReferenceCounted<DLTransaction>::addref(); }
 	void delref() override { ThreadSafeReferenceCounted<DLTransaction>::delref(); }
 
-	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 
@@ -755,22 +754,21 @@ public:
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
 
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granule_context) override;
+	ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
+	                                    Version beginVersion,
+	                                    Optional<Version> readVersion,
+	                                    ReadBlobGranuleContext granule_context) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
 	                                                                               Version beginVersion,
 	                                                                               Optional<Version> readVersion,
 	                                                                               Version* readVersionOut) override;
 
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
+	ReadRangeApiResult readBlobGranulesFinish(ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
+	                                          const KeyRangeRef& keyRange,
+	                                          Version beginVersion,
+	                                          Version readVersion,
+	                                          ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
@@ -813,7 +811,7 @@ public:
 	void debugTrace(BaseTraceEvent&& event) override;
 	void debugPrint(std::string const& message) override;
 
-	ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) override;
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
 
 	FDBAllocatorIfc* getAllocatorInterface() override;
 
@@ -854,10 +852,7 @@ private:
 	ThreadFuture<T> makeTimeout();
 
 	template <class T>
-	ThreadResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
-
-	template <class T>
-	ThreadResult<T> abortableResult(ThreadResult<T> result, ThreadFuture<Void> abortSignal);
+	TypedApiResult<T> abortableTimeoutResult(ThreadFuture<Void> abortSignal);
 
 	TransactionInfo transaction;
 

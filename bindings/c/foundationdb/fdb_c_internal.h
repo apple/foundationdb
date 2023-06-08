@@ -92,20 +92,20 @@ typedef struct FDBRequest_ {
 	FDBRequestHeader* header;
 } FDBRequest;
 
-typedef struct FDBResponseHeader_ {
+typedef struct FDBResultHeader_ {
 	FDBAllocator allocator;
-	int32_t request_type;
-} FDBResponseHeader;
+	int32_t result_type;
+} FDBResultHeader;
 
-typedef struct FDBResponse_ {
-	FDBResponseHeader* header;
-} FDBResponse;
+typedef struct FDBResult_ {
+	FDBResultHeader* header;
+} FDBResult;
 
 DLLEXPORT FDBAllocatorIfc* fdb_get_allocator_interface();
 
 DLLEXPORT FDBFuture* fdb_transaction_exec_async(FDBTransaction* tx, FDBRequest* request);
 
-DLLEXPORT fdb_error_t fdb_future_get_response(FDBFuture* f, FDBResponse** response);
+DLLEXPORT fdb_error_t fdb_future_get_result(FDBFuture* f, FDBResult** result);
 
 #ifdef __cplusplus
 }

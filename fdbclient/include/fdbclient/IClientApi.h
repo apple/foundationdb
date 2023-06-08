@@ -83,10 +83,10 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                              int rowLimit) = 0;
 
-	virtual ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                                   Version beginVersion,
-	                                                   Optional<Version> readVersion,
-	                                                   ReadBlobGranuleContext granuleContext) = 0;
+	virtual ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
+	                                            Version beginVersion,
+	                                            Optional<Version> readVersion,
+	                                            ReadBlobGranuleContext granuleContext) = 0;
 
 	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(
 	    const KeyRangeRef& keyRange,
@@ -94,7 +94,7 @@ public:
 	    Optional<Version> readVersion,
 	    Version* readVersionOut) = 0;
 
-	virtual ThreadResult<RangeResult> readBlobGranulesFinish(
+	virtual ReadRangeApiResult readBlobGranulesFinish(
 	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
 	    const KeyRangeRef& keyRange,
 	    Version beginVersion,
@@ -151,7 +151,7 @@ public:
 		debugPrint(fmt::format(fmt::runtime(message), std::forward<Args>(args)...));
 	};
 
-	virtual ThreadFuture<ApiResponse> execAsyncRequest(ApiRequest request) = 0;
+	virtual ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) = 0;
 
 	virtual FDBAllocatorIfc* getAllocatorInterface() = 0;
 };
