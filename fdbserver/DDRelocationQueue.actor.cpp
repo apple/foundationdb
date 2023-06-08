@@ -146,9 +146,17 @@ bool RelocateData::isRestore() const {
 }
 
 bool RelocateData::operator>(const RelocateData& rhs) const {
-	return priority != rhs.priority
-	           ? priority > rhs.priority
-	           : (startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId);
+	if (priority != rhs.priority) {
+		return priority > rhs.priority;
+	} else if (startTime != rhs.startTime) {
+		return startTime < rhs.startTime;
+	} else if (randomId != rhs.randomId) {
+		return randomId > rhs.randomId;
+	} else if (keys.begin != rhs.keys.begin) {
+		return keys.begin < rhs.keys.begin;
+	} else {
+		return keys.end < rhs.keys.end;
+	}
 }
 
 bool RelocateData::operator==(const RelocateData& rhs) const {
@@ -795,11 +803,18 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// update fetchingSourcesQueue and the per-server queue based on truncated ranges after insertion, (re-)launch
 	// getSourceServers
 	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
+
+	// Put off erasing elements from fetchingSourcesQueue
+	std::set<RelocateData, std::greater<RelocateData>> delayDelete;
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
 		RelocateData& rrs = queueMapItr->value();
 
-		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.erase(rrs) > 0)) {
+		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.count(rrs) > 0)) {
+			if (fetchingSourcesQueue.count(rrs) > 0) {
+				delayDelete.insert(rrs);
+			}
+
 			rrs.keys = affectedQueuedItems[r];
 			rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
@@ -858,6 +873,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 	}
 
+	for (auto it : delayDelete) {
+		fetchingSourcesQueue.erase(it);
+	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
 	    .detail("KeyEnd", rd.keys.end)
