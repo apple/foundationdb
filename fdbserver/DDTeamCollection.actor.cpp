@@ -191,6 +191,8 @@ public:
 		req.reply.send(std::make_pair(res, false));
 	}
 
+	// Returns the overall best team that matches the requirement from `req`. When preferWithinShardLimit is true, it
+	// also tries to select a team whose existing team is less than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM.
 	static Optional<Reference<IDataDistributionTeam>> getBestTeam(DDTeamCollection* self,
 	                                                              const GetTeamRequest& req,
 	                                                              bool preferWithinShardLimit) {
@@ -242,6 +244,8 @@ public:
 		return bestOption;
 	}
 
+	// Returns the best team from `candidates` that matches the requirement from `req`. When preferWithinShardLimit is
+	// true, it also tries to select a team whose existing team is less than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM.
 	static Optional<Reference<IDataDistributionTeam>> getBestTeamFromCandidates(
 	    DDTeamCollection* self,
 	    const GetTeamRequest& req,
@@ -380,6 +384,7 @@ public:
 				if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 					bestOption = getBestTeam(self, req, /*preferWithinShardLimit=*/true);
 					if (!bestOption.present()) {
+						// In case, we may return a team whose shard count is more than DESIRED_MAX_SHARDS_PER_TEAM.
 						TraceEvent("GetBestTeamPreferWithinShardLimitFailed").log();
 					}
 				}
@@ -431,6 +436,7 @@ public:
 					if (SERVER_KNOBS->ENFORCE_SHARD_COUNT_PER_TEAM && req.preferWithinShardLimit) {
 						bestOption = getBestTeamFromCandidates(self, req, randomTeams, /*preferWithinShardLimit=*/true);
 						if (!bestOption.present()) {
+							// In case, we may return a team whose shard count is more than DESIRED_MAX_SHARDS_PER_TEAM.
 							TraceEvent("GetBestTeamFromCandidatesPreferWithinShardLimitFailed").log();
 						}
 					}
@@ -6458,6 +6464,7 @@ public:
 		collection->disableBuildingTeams();
 		collection->setCheckTeamDelay();
 
+		// Assign more than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM shards to the first team.
 		std::vector<Key> randomKeys;
 		for (int i = 0; i < SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM + 2; ++i) {
 			Key randomKey = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1500)));
@@ -6469,6 +6476,7 @@ public:
 			                                                { highShardTeam });
 		}
 
+		// Call getTeam and check that the second team should always be the selected team.
 		state GetTeamRequest req(deterministicRandom()->coinflip() ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 		                         PreferLowerDiskUtil::False,
 		                         TeamMustHaveShards::False,
