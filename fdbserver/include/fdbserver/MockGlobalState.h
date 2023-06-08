@@ -148,6 +148,10 @@ public:
 
 	void getStorageMetrics(const GetStorageMetricsRequest& req) override;
 
+	void getSplitMetrics(const SplitMetricsRequest& req) override;
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override;
+
 	template <class Reply>
 	static constexpr bool isLoadBalancedReply = std::is_base_of_v<LoadBalancedReply, Reply>;
 
