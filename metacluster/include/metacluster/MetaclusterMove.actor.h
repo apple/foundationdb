@@ -87,6 +87,17 @@ struct StartTenantMovementImpl {
 		}
 		if (!existingRunID.present()) {
 			metadata::management::move::emergencyMovements().set(tr, self->tenantGroup, self->runID.toString());
+
+			// clusterCapacityIndex to accoommodate for capacity calculations
+			state ClusterName dstName = self->dstCtx.clusterName.get();
+			DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, dstName));
+			DataClusterEntry currentEntry, updatedEntry = clusterMetadata.entry;
+			updatedEntry.allocated.numTenantGroups++;
+			internal::updateClusterCapacityIndex(tr, dstName, currentEntry, updatedEntry);
+
+			// clusterTenantCount to accoommodate for capacity calculations
+			int numTenants = self->tenantsInGroup.size();
+			metadata::management::clusterTenantCount().atomicOp(tr, dstName, numTenants, MutationRef::AddValue);
 		}
 		return true;
 	}
@@ -210,14 +221,14 @@ struct StartTenantMovementImpl {
 		wait(self->srcCtx.initializeContext());
 		wait(self->dstCtx.initializeContext());
 
+		wait(self->srcCtx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return findTenantsInGroup(self, tr); }));
+
 		bool success = wait(self->srcCtx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return storeRunId(self, tr); }));
 		if (!success) {
 			throw invalid_tenant_move();
 		}
-
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return findTenantsInGroup(self, tr); }));
 
 		wait(lockSourceTenants(self));
 
@@ -316,15 +327,12 @@ struct SwitchTenantMovementImpl {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		// clusterCapacityIndex()
-		// at the start, this should update the dst capacity of the cluster we're moving to by adding 1 group to it
-		// remove the capacity from the old one at some point
 		DataClusterMetadata clusterMetadata = wait(getClusterTransaction(tr, srcName));
 		DataClusterEntry currentEntry, updatedEntry = clusterMetadata.entry;
 		updatedEntry.allocated.numTenantGroups--;
 		internal::updateClusterCapacityIndex(tr, srcName, currentEntry, updatedEntry);
 
 		// clusterTenantCount()
-		// update at start by adding to dst as well
 		int numTenants = self->tenantsInGroup.size();
 		metadata::management::clusterTenantCount().atomicOp(tr, srcName, -numTenants, MutationRef::AddValue);
 
@@ -372,7 +380,6 @@ struct SwitchTenantMovementImpl {
 		metadata::management::tenantMetadata().tenantGroupMap.erase(tr, self->tenantGroup);
 		metadata::management::tenantMetadata().tenantGroupMap.set(tr, self->tenantGroup, groupEntry.get());
 
-		wait(safeThreadFutureToFuture(tr->commit()));
 		return Void();
 	}
 
@@ -477,7 +484,7 @@ struct FinishTenantMovementImpl {
 					return false;
 				}
 			}
-			// Reached the end of at least one of the ranges
+			// Reached the end of at least one of the ranges after the for loop completes
 			if (srcSize == dstSize) {
 				if (srcRange.more != dstRange.more) {
 					return false;
@@ -499,35 +506,36 @@ struct FinishTenantMovementImpl {
 
 	ACTOR static Future<bool> checkValidUnlock(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr) {
+		// TODO: Change ASSERTs to trace and throw errors
 		// container of range-based for with continuation must be a state variable
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
 		for (auto& tenantPair : tenantsInGroup) {
-			state std::pair<TenantName, int64_t> stateTenantPair = tenantPair;
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
 			// Assert the tenant we are unlocking is on the right cluster
-			Tuple indexTuple =
-			    Tuple::makeTuple(self->dstCtx.clusterName.get(), stateTenantPair.first, stateTenantPair.second);
+			Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
 			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
 			if (!result) {
-				TraceEvent(SevError, "TenantMoveFinishTenantClusterMismatch")
-				    .detail("TenantName", stateTenantPair.first)
-				    .detail("TenantID", stateTenantPair.second)
+				TraceEvent(SevError, "TenantMoveFinishUnlockTenantClusterMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
 				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
 				return false;
 			}
 			// Assert matching tenant exists on other cluster
 			state TenantMapEntry srcEntry;
-			wait(store(srcEntry, TenantAPI::getTenant(self->srcCtx.dataClusterDb, stateTenantPair.first)));
+			wait(store(srcEntry, TenantAPI::getTenant(self->srcCtx.dataClusterDb, tName)));
 			// Assert other tenant has the correct tenant group
 			ASSERT(srcEntry.tenantGroup.present());
 			ASSERT_EQ(srcEntry.tenantGroup.get(), self->tenantGroup);
 			// Assert other tenant is locked
 			ASSERT_EQ(srcEntry.tenantLockState, TenantAPI::TenantLockState::LOCKED);
 			// Assert tenant data matches
-			bool dataMatch = wait(checkTenantData(self, stateTenantPair.first));
+			bool dataMatch = wait(checkTenantData(self, tName));
 			if (!dataMatch) {
-				TraceEvent(SevError, "TenantMoveFinishDataMismatch")
-				    .detail("TenantName", stateTenantPair.first)
-				    .detail("TenantID", stateTenantPair.second);
+				TraceEvent(SevError, "TenantMoveFinishUnlockDataMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId);
 				return false;
 			}
 		}
@@ -561,30 +569,35 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<bool> checkValidDelete(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<bool> checkValidDelete(FinishTenantMovementImpl* self,
+	                                           Reference<typename DB::TransactionT> tr) {
+		// TODO: Change ASSERTs to trace and throw errors
 		// container of range-based for with continuation must be a state variable
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
 		for (auto& tenantPair : tenantsInGroup) {
-			state std::pair<TenantName, int64_t> stateTenantPair = tenantPair;
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
 			// Assert the tenant we are deleting is on the right cluster
 			state TenantMapEntry srcEntry;
-			wait(store(srcEntry, TenantAPI::getTenant(self->srcCtx.dataClusterDb, stateTenantPair.first)));
+			wait(store(srcEntry, TenantAPI::getTenant(self->srcCtx.dataClusterDb, tName)));
 
 			// Assert tenant is locked
 			ASSERT_EQ(srcEntry.tenantLockState, TenantAPI::TenantLockState::LOCKED);
 
 			// Assert matching tenant exists in metacluster metadata
-			Tuple indexTuple =
-			    Tuple::makeTuple(self->dstCtx.clusterName.get(), stateTenantPair.first, stateTenantPair.second);
+			Tuple indexTuple = Tuple::makeTuple(self->dstCtx.clusterName.get(), tName, tId);
 			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
 			if (!result) {
-				// TODO: proper error and trace
+				TraceEvent(SevError, "TenantMoveFinishDeleteDataMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
+				    .detail("ExpectedCluster", self->dstCtx.clusterName.get());
 				return false;
 			}
 
 			// Assert matching tenant exists on other cluster
 			state TenantMapEntry dstEntry;
-			wait(store(dstEntry, TenantAPI::getTenant(self->dstCtx.dataClusterDb, stateTenantPair.first)));
+			wait(store(dstEntry, TenantAPI::getTenant(self->dstCtx.dataClusterDb, tName)));
 
 			// Assert other tenant is unlocked
 			ASSERT_EQ(dstEntry.tenantLockState, TenantAPI::TenantLockState::UNLOCKED);
@@ -659,12 +672,255 @@ struct AbortTenantMovementImpl {
 	TenantGroupName tenantGroup;
 	UID runID;
 
-	AbortTenantMovementImpl(Reference<DB> managementDb,
-	                        TenantGroupName tenantGroup,
-	                        ClusterName src,
-	                        ClusterName dst,
-	                        UID runID)
-	  : srcCtx(managementDb, src), dstCtx(managementDb, dst), tenantGroup(tenantGroup), runID(runID) {}
+	// Parameters filled in during the run
+	std::vector<std::pair<TenantName, int64_t>> tenantsInGroup;
+
+	AbortTenantMovementImpl(Reference<DB> managementDb, TenantGroupName tenantGroup, ClusterName src, ClusterName dst)
+	  : srcCtx(managementDb, src), dstCtx(managementDb, dst), tenantGroup(tenantGroup) {}
+
+	ACTOR static Future<bool> checkRunId(AbortTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
+		Optional<std::string> existingRunID =
+		    wait(metadata::management::move::emergencyMovements().get(tr, self->tenantGroup));
+		if (!existingRunID.present()) {
+			TraceEvent("TenantMoveAbortNotInProgress").detail("TenantGroup", self->tenantGroup);
+			return false;
+		}
+
+		self->runID = UID::fromString(existingRunID.get());
+		return true;
+	}
+
+	ACTOR static Future<Void> findTenantsInGroup(AbortTenantMovementImpl* self,
+	                                             Reference<typename DB::TransactionT> tr) {
+		wait(store(self->tenantsInGroup,
+		           listTenantGroupTenantsTransaction(tr,
+		                                             self->tenantGroup,
+		                                             TenantName(""_sr),
+		                                             TenantName("\xff"_sr),
+		                                             CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER)));
+		return Void();
+	}
+
+	ACTOR static Future<Void> clearMovementMetadata(AbortTenantMovementImpl* self,
+	                                                Reference<typename DB::TransactionT> tr) {
+		metadata::management::move::emergencyMovements().clear(tr);
+		metadata::management::move::movementVersions().clear(tr);
+		metadata::management::move::movementQueue().clear(tr);
+		metadata::management::move::splitPointsMap().clear(tr);
+		return Void();
+	}
+
+	ACTOR static Future<bool> checkValidUnlock(AbortTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
+		// TODO: Change ASSERTs to trace and throw errors
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
+			// Assert the tenant we are unlocking is on the right cluster
+			Tuple indexTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
+			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
+			if (!result) {
+				TraceEvent(SevError, "TenantMoveAbortUnlockTenantClusterMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
+				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
+				return false;
+			}
+			// Assert matching tenant exists on other cluster
+			state TenantMapEntry dstEntry;
+			wait(store(dstEntry, TenantAPI::getTenant(self->dstCtx.dataClusterDb, tName)));
+			// Assert other tenant has the correct tenant group
+			ASSERT(dstEntry.tenantGroup.present());
+			ASSERT_EQ(dstEntry.tenantGroup.get(), self->tenantGroup);
+			// Assert other tenant is locked
+			ASSERT_EQ(dstEntry.tenantLockState, TenantAPI::TenantLockState::LOCKED);
+
+			/* Probably don't need this for abort. Data on source should be unchanged because of locks
+			// Assert tenant data matches
+			bool dataMatch = wait(checkTenantData(self, tName));
+			if (!dataMatch) {
+			    TraceEvent(SevError, "TenantMoveAbortUnlockDataMismatch")
+			        .detail("TenantName", tName)
+			        .detail("TenantID", tId);
+			    return false;
+			}
+			*/
+		}
+		return true;
+	}
+
+	ACTOR static Future<Void> unlockSourceTenants(AbortTenantMovementImpl* self,
+	                                              Reference<typename DB::TransactionT> tr) {
+		std::vector<Future<Void>> unlockFutures;
+		for (auto& tenantPair : self->tenantsInGroup) {
+			unlockFutures.push_back(metacluster::changeTenantLockState(
+			    self->srcCtx.managementDb, tenantPair.first, TenantAPI::TenantLockState::UNLOCKED, self->runID));
+		}
+		wait(waitForAll(unlockFutures));
+		return Void();
+	}
+
+	ACTOR static Future<bool> checkValidDelete(AbortTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
+		// TODO: Change ASSERTs to trace and throw errors
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
+			// Assert the tenant we are deleting is on the right cluster
+			state TenantMapEntry dstEntry;
+			wait(store(dstEntry, TenantAPI::getTenant(self->dstCtx.dataClusterDb, stateTenantPair.first)));
+
+			// Assert tenant is locked
+			ASSERT_EQ(dstEntry.tenantLockState, TenantAPI::TenantLockState::LOCKED);
+
+			// Assert matching tenant exists in metacluster metadata
+			// Abort will have switched metadata to source by this point
+			Tuple indexTuple = Tuple::makeTuple(self->srcCtx.clusterName.get(), tName, tId);
+			bool result = wait(metadata::management::clusterTenantIndex().exists(tr, indexTuple));
+			if (!result) {
+				TraceEvent(SevError, "TenantMoveFinishDeleteDataMismatch")
+				    .detail("TenantName", tName)
+				    .detail("TenantID", tId)
+				    .detail("ExpectedCluster", self->srcCtx.clusterName.get());
+				return false;
+			}
+
+			// Assert matching tenant exists on other cluster
+			state TenantMapEntry srcEntry;
+			wait(store(srcEntry, TenantAPI::getTenant(self->srcCtx.dataClusterDb, tName)));
+
+			// Assert other tenant is unlocked
+			ASSERT_EQ(srcEntry.tenantLockState, TenantAPI::TenantLockState::UNLOCKED);
+
+			// Assert matching tenant groups
+			ASSERT_EQ(srcEntry.tenantGroup, dstEntry.tenantGroup);
+		}
+		return true;
+	}
+
+	ACTOR static Future<Void> deleteDestinationData(AbortTenantMovementImpl* self, TenantName tName) {
+		state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
+		state Reference<ITransaction> dstTr = dstTenant->createTransaction();
+		state KeyRangeRef normalKeys(""_sr, "\xff"_sr);
+		dstTr->clear(normalKeys);
+		return Void();
+	}
+
+	ACTOR static Future<Void> deleteDestinationTenants(AbortTenantMovementImpl* self, Reference<ITransaction> tr) {
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
+			wait(deleteDestinationData(self, tName));
+			TenantAPI::deleteTenantTransaction(tr, tId);
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> purgeDestinationBlobRanges(AbortTenantMovementImpl* self) {
+		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
+
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
+			state ThreadFuture<Key> resultFuture = dstTenant->purgeBlobGranules(allKeys, latestVersion, false);
+			Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
+			state ThreadFuture<Void> resultFuture2 = dstTenant->waitPurgeGranulesComplete(purgeKey);
+			wait(safeThreadFutureToFuture(resultFuture2));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> switchMetadataToSource(AbortTenantMovementImpl* self,
+	                                                 Reference<typename DB::TransactionT> tr) {
+		state ClusterName srcName = self->srcCtx.clusterName.get();
+		state ClusterName dstName = self->dstCtx.clusterName.get();
+		// clusterCapacityIndex()
+		DataClusterMetadata srcClusterMetadata = wait(getClusterTransaction(tr, srcName));
+		DataClusterEntry srcCurrentEntry, srcUpdatedEntry = srcClusterMetadata.entry;
+		srcUpdatedEntry.allocated.numTenantGroups++;
+		internal::updateClusterCapacityIndex(tr, srcName, srcCurrentEntry, srcUpdatedEntry);
+
+		DataClusterMetadata dstClusterMetadata = wait(getClusterTransaction(tr, dstName));
+		DataClusterEntry dstCurrentEntry, dstUpdatedEntry = dstClusterMetadata.entry;
+		dstUpdatedEntry.allocated.numTenantGroups--;
+		internal::updateClusterCapacityIndex(tr, dstName, dstCurrentEntry, dstUpdatedEntry);
+
+		// clusterTenantCount()
+		int numTenants = self->tenantsInGroup.size();
+		metadata::management::clusterTenantCount().atomicOp(tr, srcName, numTenants, MutationRef::AddValue);
+		metadata::management::clusterTenantCount().atomicOp(tr, dstName, -numTenants, MutationRef::AddValue);
+
+		// container of range-based for with continuation must be a state variable
+		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
+		for (auto& tenantPair : tenantsInGroup) {
+			state TenantName tName = tenantPair.first;
+			state int64_t tId = tenantPair.second;
+
+			// tenantMetadata().tenantMap
+			state Optional<MetaclusterTenantMapEntry> tenantEntry;
+			wait(store(tenantEntry, metadata::management::tenantMetadata().tenantMap.get(tr, tId)));
+			if (!tenantEntry.present()) {
+				// TODO: Throw appropriate error and log events
+				throw operation_failed();
+			}
+			if (tenantEntry.get().assignedCluster != dstName) {
+				// TODO: Throw appropriate error and log events
+				throw operation_failed();
+			}
+			tenantEntry.get().assignedCluster = srcName;
+			metadata::management::tenantMetadata().tenantMap.erase(tr, tId);
+			metadata::management::tenantMetadata().tenantMap.set(tr, tId, tenantEntry.get());
+
+			// clusterTenantIndex
+			metadata::management::clusterTenantIndex().erase(tr, Tuple::makeTuple(dstName, tName, tId));
+			metadata::management::clusterTenantIndex().insert(tr, Tuple::makeTuple(srcName, tName, tId));
+		}
+		// clusterTenantGroupIndex
+		metadata::management::clusterTenantGroupIndex().erase(tr, Tuple::makeTuple(dstName, self->tenantGroup));
+		metadata::management::clusterTenantGroupIndex().insert(tr, Tuple::makeTuple(srcName, self->tenantGroup));
+
+		// tenantMetadata().tenantGroupMap
+		state Optional<MetaclusterTenantGroupEntry> groupEntry;
+		wait(store(groupEntry, metadata::management::tenantMetadata().tenantGroupMap.get(tr, self->tenantGroup)));
+		if (!groupEntry.present()) {
+			// TODO: Throw appropriate error and log events
+			throw operation_failed();
+		}
+		if (groupEntry.get().assignedCluster != dstName) {
+			// TODO: Throw appropriate error and log events
+			throw operation_failed();
+		}
+		groupEntry.get().assignedCluster = srcName;
+		metadata::management::tenantMetadata().tenantGroupMap.erase(tr, self->tenantGroup);
+		metadata::management::tenantMetadata().tenantGroupMap.set(tr, self->tenantGroup, groupEntry.get());
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> run(AbortTenantMovementImpl* self) {
+		wait(self->srcCtx.initializeContext());
+		wait(self->dstCtx.initializeContext());
+		bool success = wait(self->srcCtx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return checkRunId(self, tr); }));
+		if (!success) {
+			throw invalid_tenant_move();
+		}
+
+		wait(self->srcCtx.runManagementTransaction(
+		    [self = self](Reference<typename DB::TransactionT> tr) { return findTenantsInGroup(self, tr); }));
+
+		// Determine how far in the move process we've progressed and begin unwinding
+
+		return Void();
+	}
+
+	Future<Void> run() { return run(this); }
 };
 
 } // namespace internal
@@ -699,12 +955,8 @@ Future<Void> finishTenantMovement(Reference<DB> db,
 }
 
 ACTOR template <class DB>
-Future<Void> abortTenantMovement(Reference<DB> db,
-                                 TenantGroupName tenantGroup,
-                                 ClusterName src,
-                                 ClusterName dst,
-                                 UID runID) {
-	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, src, dst, runID);
+Future<Void> abortTenantMovement(Reference<DB> db, TenantGroupName tenantGroup, ClusterName src, ClusterName dst) {
+	state internal::AbortTenantMovementImpl<DB> impl(db, tenantGroup, src, dst);
 	wait(impl.run());
 	return Void();
 }

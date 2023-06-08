@@ -383,9 +383,15 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 	return true;
 }
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	fmt::print("Unimplemented\n");
-	wait(delay(1.0));
-	ASSERT(false);
+	if (tokens.size() > 6) {
+		fmt::print(usageMessage);
+		return false;
+	}
+	TenantGroupName tenantGroup = tokens[3];
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
+	wait(metacluster::abortTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+
 	return true;
 }
 
