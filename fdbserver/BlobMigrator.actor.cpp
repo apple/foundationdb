@@ -473,10 +473,11 @@ private:
 					beginVersion = *std::min_element(self->mlogRestoreBeginVersions_.begin(),
 					                                 self->mlogRestoreBeginVersions_.end());
 				}
+				BlobGranuleRestoreConfig().beginVersion().set(tr, beginVersion);
+
 				Value versionEncoded = BinaryWriter::toValue(beginVersion, Unversioned());
 				Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
 				wait(krmSetRange(tr, prefix, allKeys, versionEncoded));
-
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
