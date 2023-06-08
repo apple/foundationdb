@@ -28,6 +28,7 @@
 #include "flow/IRandom.h"
 #include "flow/IndexedSet.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbrpc/SimulatorProcessInfo.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
