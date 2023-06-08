@@ -2455,8 +2455,15 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		bool backupEnabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
+		state BlobGranuleBackupConfig config;
+		bool backupEnabled = wait(config.enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
 		statusObj["blob_granules_backup_enabled"] = backupEnabled;
+		if (backupEnabled) {
+			std::string manifestUrl = wait(config.manifestUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_manifest_url"] = manifestUrl;
+			std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_mlogs_url"] = mlogsUrl;
+		}
 		// Blob manager status
 		if (managerIntf.present()) {
 			Optional<TraceEventFields> fields = wait(timeoutError(
@@ -2528,6 +2535,8 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 					statusObj["blob_full_restore_start_ts"] = startTs;
 					std::string error = wait(config.error().getD(&tr));
 					statusObj["blob_full_restore_error"] = error;
+					Version targetVersion = wait(config.targetVersion().getD(&tr));
+					statusObj["blob_full_restore_version"] = targetVersion;
 				}
 				break;
 			} catch (Error& e) {

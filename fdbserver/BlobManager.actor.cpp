@@ -5628,92 +5628,100 @@ ACTOR Future<bool> shouldBackupManifest(Reference<BlobManagerData> bmData) {
 }
 
 ACTOR Future<Void> truncateMutationLogs(Reference<BlobManagerData> bmData) {
-	loop {
-		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
-		try {
-			bool shouldBackup = wait(shouldBackupManifest(bmData));
-			if (!shouldBackup) {
-				continue;
-			}
-			int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
-			bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	bool shouldBackup = wait(shouldBackupManifest(bmData));
+	if (!shouldBackup) {
+		return Void();
+	}
+	int64_t lastFlushTs = wait(getLastFlushTs(bmData->db));
+	bool shouldFlush = (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
 
-			if (!shouldFlush) {
-				TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
-				return Void();
-			}
+	if (!shouldFlush) {
+		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+		return Void();
+	}
 
-			state std::string mlogsUrl = wait(
-			    BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
-			state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
-			state BackupDescription desc = wait(bc->describeBackup());
-			if (!desc.contiguousLogEnd.present()) {
-				TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
-				return Void(); // skip truncation if no valid backup for mutation logs
-			}
-			state Version logEndVersion = desc.contiguousLogEnd.get();
-			TraceEvent("DescribedMutationLogs").detail("LogEndVersion", logEndVersion);
+	state std::string mlogsUrl =
+	    wait(BlobGranuleBackupConfig().mutationLogsUrl().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	state Reference<IBackupContainer> bc = IBackupContainer::openContainer(mlogsUrl, {}, {});
+	state BackupDescription desc = wait(bc->describeBackup());
+	if (!desc.contiguousLogEnd.present()) {
+		TraceEvent("SkipBlobGranulesFlush").detail("LogUrl", mlogsUrl);
+		return Void(); // skip truncation if no valid backup for mutation logs
+	}
+	state Version logEndVersion = desc.contiguousLogEnd.get();
+	TraceEvent("DescribedMutationLogs").detail("LogEndVersion", logEndVersion);
 
-			// Flush until end of the mutation log
-			state std::vector<KeyRange> flushRanges;
-			for (auto& it : bmData->knownBlobRanges.intersectingRanges(normalKeys)) {
-				if (it.cvalue()) {
-					flushRanges.push_back(it.range());
-				}
-			}
-			TraceEvent("FlushingBlobGranules").detail("Ranges", flushRanges.size());
-			state std::vector<Future<Void>> futures;
-			for (auto& range : flushRanges) {
-				FlushGranuleRequest req(bmData->epoch, range, logEndVersion, false);
-				Future<Void> future =
-				    success(doBlobGranuleRequests(bmData->db, range, req, &BlobWorkerInterface::flushGranuleRequest));
-				futures.push_back(future);
-				if (futures.size() > SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE) {
-					waitForAll(futures);
-					futures.clear();
-					TraceEvent("FlushedBlobGranules").detail("Completed", SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE);
-				}
-			}
+	// Flush until end of the mutation log
+	state std::vector<KeyRange> flushRanges;
+	for (auto& it : bmData->knownBlobRanges.intersectingRanges(normalKeys)) {
+		if (it.cvalue()) {
+			flushRanges.push_back(it.range());
+		}
+	}
+	TraceEvent("FlushingBlobGranules").detail("Ranges", flushRanges.size());
+	state std::vector<Future<Void>> futures;
+	for (auto& range : flushRanges) {
+		FlushGranuleRequest req(bmData->epoch, range, logEndVersion, false);
+		Future<Void> future =
+		    success(doBlobGranuleRequests(bmData->db, range, req, &BlobWorkerInterface::flushGranuleRequest));
+		futures.push_back(future);
+		if (futures.size() > SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE) {
 			waitForAll(futures);
-			wait(updateLastFlushTs(bmData->db));
-			bmData->stats.lastFlushVersion = logEndVersion;
-			TraceEvent("FlushedBlobGranules").detail("FlushVersion", logEndVersion);
+			futures.clear();
+			TraceEvent("FlushedBlobGranules").detail("Completed", SERVER_KNOBS->BLOB_GRANULES_FLUSH_BATCH_SIZE);
+		}
+	}
+	waitForAll(futures);
+	wait(updateLastFlushTs(bmData->db));
+	bmData->stats.lastFlushVersion = logEndVersion;
+	TraceEvent("FlushedBlobGranules").detail("FlushVersion", logEndVersion);
 
-			// Wait for next manifest dumped
-			state int64_t seqNo = bmData->manifestDumperSeqNo;
-			loop {
-				TraceEvent("WaitingBlobManifest").detail("Seq", seqNo);
-				wait(bmData->manifestCompletitionTrigger.onTrigger());
-				if (bmData->manifestDumperSeqNo > seqNo) {
-					TraceEvent("BlobManifestDumped").detail("Seq", bmData->manifestDumperSeqNo);
-					break;
-				}
-			}
+	// Wait for next manifest dumped
+	state int64_t seqNo = bmData->manifestDumperSeqNo;
+	loop {
+		TraceEvent("WaitingBlobManifest").detail("Seq", seqNo);
+		wait(bmData->manifestCompletitionTrigger.onTrigger());
+		if (bmData->manifestDumperSeqNo > seqNo) {
+			TraceEvent("BlobManifestDumped").detail("Seq", bmData->manifestDumperSeqNo);
+			break;
+		}
+	}
 
-			// Truncate mutation logs to max retention period
-			Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
-			Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
-			if (!logEndEpochs.present()) {
-				TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
-				return Void(); // skip truncation if no timestamp about log end
-			}
+	// Truncate mutation logs to max retention period
+	Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(bmData->db));
+	Optional<int64_t> logEndEpochs = wait(timeKeeperEpochsFromVersion(logEndVersion, tr));
+	if (!logEndEpochs.present()) {
+		TraceEvent("SkipMutationLogTruncation").detail("LogEndVersion", logEndVersion);
+		return Void(); // skip truncation if no timestamp about log end
+	}
 
-			// Find timestamp and version to truncate
-			int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
-			if (epochs <= 0) {
-				TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
-				return Void();
-			}
-			state std::string timestamp = BackupAgentBase::formatTime(epochs);
-			state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
+	// Find timestamp and version to truncate
+	int64_t epochs = logEndEpochs.get() - SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	if (epochs <= 0) {
+		TraceEvent("SkipMutationLogTruncation").detail("Epochs", epochs);
+		return Void();
+	}
+	state std::string timestamp = BackupAgentBase::formatTime(epochs);
+	state Version truncVersion = wait(timeKeeperVersionFromDatetime(timestamp, bmData->db));
 
-			wait(bc->expireData(truncVersion, true));
-			bmData->stats.lastMLogTruncationVersion = truncVersion;
-			TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
-			CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	wait(bc->expireData(truncVersion, true));
+	bmData->stats.lastMLogTruncationVersion = truncVersion;
+	TraceEvent("TruncateMutationLogs").detail("Version", truncVersion).detail("Timestamp", timestamp);
+	CODE_PROBE(true, "Flush blob granules and truncate mutation logs");
+	return Void();
+}
+
+ACTOR Future<Void> truncateMutationLogsLoop(Reference<BlobManagerData> bmData) {
+	loop {
+		try {
+			wait(truncateMutationLogs(bmData));
 		} catch (Error& e) {
+			if (e.code() == error_code_operation_cancelled) {
+				throw;
+			}
 			TraceEvent("TruncateMutationLogsError").error(e); // skip and retry next time
 		}
+		wait(delay(SERVER_KNOBS->BLOB_MANIFEST_BACKUP_INTERVAL));
 	}
 }
 
@@ -5843,7 +5851,7 @@ ACTOR Future<Void> blobManager(BlobManagerInterface bmInterf,
 			self->addActor.send(granuleMergeChecker(self));
 		}
 		self->addActor.send(backupManifest(self));
-		self->addActor.send(truncateMutationLogs(self));
+		self->addActor.send(truncateMutationLogsLoop(self));
 
 		if (BUGGIFY && !self->isFullRestoreMode) {
 			self->addActor.send(chaosRangeMover(self));
