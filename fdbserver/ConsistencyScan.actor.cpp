@@ -57,18 +57,21 @@ struct ConsistencyScanStats {
 	Counter replicatedBytesRead;
 	Counter requests;
 	Counter failedRequests;
+	Counter scanLoops;
 	Counter inconsistencies;
 	Counter databasePollSuccesses;
 	Counter databasePollErrors;
 
 	bool waitingBetweenRounds = false;
+	int targetRate = 0;
 
 	explicit ConsistencyScanStats(UID id, double interval)
 	  : cc("ConsistencyScanStats", id.toString()), logicalBytesScanned("LogicalBytesScanned", cc),
 	    replicatedBytesRead("ReplicatedBytesRead", cc), requests("Requests", cc), failedRequests("FailedRequests", cc),
-	    inconsistencies("Inconsistencies", cc), databasePollSuccesses("DatabasePollSuccesses", cc),
-	    databasePollErrors("DatabasePollErrors", cc) {
+	    scanLoops("ScanLoops", cc), inconsistencies("Inconsistencies", cc),
+	    databasePollSuccesses("DatabasePollSuccesses", cc), databasePollErrors("DatabasePollErrors", cc) {
 		specialCounter(cc, "WaitingBetweenRounds", [this]() { return this->waitingBetweenRounds; });
+		specialCounter(cc, "TargetRate", [this]() { return this->targetRate; });
 		logger = cc.traceCounters("ConsistencyScanMetrics", id, interval, "ConsistencyScanMetrics");
 	}
 };
@@ -667,6 +670,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					TraceEvent("ConsistencyScan_ChangeRate", memState->csId).detail("RateBytes", readRateLimit);
 				}
 				readRateControl = Reference<IRateControl>(new SpeedLimit(readRateLimit, 1));
+				memState->stats.targetRate = configuredRate;
 			}
 
 			// This will store how many total bytes we read from all replicas in this loop iteration, including retries,
@@ -681,6 +685,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 			tr->reset();
 			loop {
 				try {
+					++memState->stats.scanLoops;
 					statsCurrentRound = savedCurrentRoundState;
 					systemDB->setOptions(tr);
 
@@ -918,6 +923,15 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								totalReadBytesFromStorageServers += 100000;
 								break;
 							}
+
+							// we want to make a decent amount of progress per transaction here to reduce overhead, but
+							// we also don't want to alternate bursting for 5 seconds and then sleeping for many seconds
+							// As a compromise, only sleep for some tunable percentage of the target here, and sleep the
+							// rest at the end
+							int sleepBytes = (int)(totalReadBytesFromStorageServers *
+							                       SERVER_KNOBS->CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO);
+							totalReadBytesFromStorageServers -= sleepBytes;
+							wait(readRateControl->getAllowance(sleepBytes));
 						}
 
 						statsCurrentRound.errorCount += errors;
@@ -1035,8 +1049,6 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 			}
 
 			// Wait for the rate control to generate enough budget to match what we read.
-			// FIXME: this will result in bursting a shard and then sleeping for a bit, do we want to throttle more over
-			// the course of one shard?
 			wait(readRateControl->getAllowance(totalReadBytesFromStorageServers));
 
 			if (DEBUG_SCAN_PROGRESS) {
