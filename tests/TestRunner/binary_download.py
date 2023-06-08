@@ -10,13 +10,14 @@ import hashlib
 
 from local_cluster import random_secret_string
 
-CURRENT_VERSION = "7.2.8"
+CURRENT_VERSION = "7.2.10"
 FUTURE_VERSION = "7.3.0"
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 SUPPORTED_VERSIONS = [
     FUTURE_VERSION,
     CURRENT_VERSION,
+    "7.2.8",
     "7.2.0",
     "7.1.9",
     "7.1.8",
