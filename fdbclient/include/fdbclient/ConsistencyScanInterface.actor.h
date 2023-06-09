@@ -209,6 +209,8 @@ struct ConsistencyScanState : public KeyBackedClass {
 		double startTime = 0;
 		Version endVersion = 0;
 		double endTime = 0;
+		Version lastProgressVersion = 0;
+		double lastProgressTime = 0;
 
 		// Whether the scan finished, useful for history round stats.
 		bool complete = false;
@@ -260,6 +262,12 @@ struct ConsistencyScanState : public KeyBackedClass {
 			if (endTime != 0) {
 				doc["end_timestamp"] = endTime;
 				doc["end_datetime"] = epochsToGMTString(endTime);
+			}
+
+			doc["last_progress_version"] = lastProgressVersion;
+			if (lastProgressTime != 0) {
+				doc["last_progress_timestamp"] = lastProgressTime;
+				doc["last_progress_datetime"] = epochsToGMTString(lastProgressTime);
 			}
 
 			doc["logical_bytes_scanned"] = logicalBytesScanned;

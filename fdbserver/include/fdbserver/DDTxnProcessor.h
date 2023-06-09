@@ -59,11 +59,16 @@ public:
 	virtual Database context() const = 0;
 	virtual bool isMocked() const = 0;
 	// get the source server list and complete source server list for range
-	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) { return SourceServers{}; };
+	virtual Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) = 0;
 
 	virtual Future<std::vector<DDRangeLocations>> getSourceServerInterfacesForRange(const KeyRangeRef range) {
 		return std::vector<DDRangeLocations>();
 	}
+
+	virtual Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const = 0;
 
 	// get the storage server list and Process class, only throw transaction non-retryable exceptions
 	virtual Future<ServerWorkerInfos> getServerListAndProcessClasses() = 0;
@@ -79,7 +84,7 @@ public:
 
 	[[nodiscard]] virtual Future<MoveKeysLock> takeMoveKeysLock(const UID& ddId) const { return MoveKeysLock(); }
 
-	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const { return DatabaseConfiguration(); }
+	virtual Future<DatabaseConfiguration> getDatabaseConfiguration() const = 0;
 
 	virtual Future<Void> updateReplicaKeys(const std::vector<Optional<Key>>& primaryIds,
 	                                       const std::vector<Optional<Key>>& remoteIds,
@@ -133,7 +138,7 @@ public:
 
 	virtual Future<HealthMetrics> getHealthMetrics(bool detailed = false) const = 0;
 
-	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const { return {}; }
+	virtual Future<Optional<Value>> readRebalanceDDIgnoreKey() const = 0;
 
 	virtual Future<Void> waitDDTeamInfoPrintSignal() const { return Never(); }
 
@@ -226,6 +231,11 @@ public:
 
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
 
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
+
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);
 
@@ -300,6 +310,17 @@ public:
 	}
 
 	Future<Optional<HealthMetrics::StorageStats>> getStorageStats(const UID& id, double maxStaleness) const override;
+
+	Future<DatabaseConfiguration> getDatabaseConfiguration() const override;
+
+	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
+
+	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
+
+	Future<Void> waitForAllDataRemoved(
+	    const UID& serverID,
+	    const Version& addedVersion,
+	    Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure) const override;
 
 protected:
 	Future<Void> rawStartMovement(const MoveKeysParams& params, std::map<UID, StorageServerInterface>& tssMapping);

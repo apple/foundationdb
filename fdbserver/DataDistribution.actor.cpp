@@ -45,14 +45,15 @@
 #include "fdbserver/TenantCache.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/workloads/workloads.actor.h"
+#include "fdbserver/MockDataDistributor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Arena.h"
 #include "flow/BooleanParam.h"
 #include "flow/Trace.h"
 #include "flow/UnitTest.h"
-#include "flow/actorcompiler.h" // This must be the last #include.
 #include "flow/genericactors.actor.h"
 #include "flow/serialize.h"
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 void RelocateShard::setParentRange(KeyRange const& parent) {
 	ASSERT(reason == RelocateReason::WRITE_SPLIT || reason == RelocateReason::SIZE_SPLIT);
@@ -125,7 +126,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	ASSERT(!this->meta.ranges.empty() && this->meta.ranges.front().contains(range));
 
 	if (!shard.hasDest) {
-		TraceEvent(SevError, "DataMoveValidationError")
+		TraceEvent(SevWarnAlways, "DataMoveValidationError")
 		    .detail("Range", range)
 		    .detail("Reason", "ShardMissingDest")
 		    .detail("DataMoveMetaData", this->meta.toString())
@@ -136,7 +137,7 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 	}
 
 	if (shard.destId != this->meta.id) {
-		TraceEvent(SevError, "DataMoveValidationError")
+		TraceEvent(SevWarnAlways, "DataMoveValidationError")
 		    .detail("Range", range)
 		    .detail("Reason", "DataMoveIDMissMatch")
 		    .detail("DataMoveMetaData", this->meta.toString())
@@ -145,10 +146,8 @@ void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int pr
 		return;
 	}
 
-	if (!std::includes(
-	        this->primaryDest.begin(), this->primaryDest.end(), shard.primaryDest.begin(), shard.primaryDest.end()) ||
-	    !std::includes(
-	        this->remoteDest.begin(), this->remoteDest.end(), shard.remoteDest.begin(), shard.remoteDest.end())) {
+	if (!std::equal(this->primaryDest.begin(), this->primaryDest.end(), shard.primaryDest.begin()) ||
+	    !std::equal(this->remoteDest.begin(), this->remoteDest.end(), shard.remoteDest.begin())) {
 		TraceEvent(SevError, "DataMoveValidationError")
 		    .detail("Range", range)
 		    .detail("Reason", "DataMoveDestMissMatch")
@@ -314,7 +313,7 @@ public:
 	// State initialized when bootstrap
 	Reference<IDDTxnProcessor> txnProcessor;
 	MoveKeysLock& lock; // reference to context->lock
-	DatabaseConfiguration configuration;
+	DatabaseConfiguration& configuration; // reference to context->configuration
 	std::vector<Optional<Key>> primaryDcId;
 	std::vector<Optional<Key>> remoteDcIds;
 	Reference<InitialDataDistribution> initData;
@@ -337,18 +336,26 @@ public:
 
 	std::unordered_map<AuditType, std::unordered_map<UID, std::shared_ptr<DDAudit>>> audits;
 	Promise<Void> auditInitialized;
-	std::unordered_map<AuditType, bool> anyAuditStorageLaunching;
+	FlowLock auditStorageHaLaunchingLock;
+	FlowLock auditStorageReplicaLaunchingLock;
+	FlowLock auditStorageLocationMetadataLaunchingLock;
+	FlowLock auditStorageSsShardLaunchingLock;
 	std::unordered_map<AuditType, AsyncVar<int>> remainingBudgetForAuditTasks;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
+	// monitor DD configuration change
+	Promise<Version> configChangeWatching;
+	Future<Void> onConfigChange;
+
 	DataDistributor(Reference<AsyncVar<ServerDBInfo> const> const& db, UID id, Reference<DDSharedContext> context)
 	  : dbInfo(db), context(context), ddId(id), txnProcessor(nullptr), lock(context->lock),
-	    initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
+	    configuration(context->configuration), initialDDEventHolder(makeReference<EventCacheHolder>("InitialDD")),
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
-	    teamCollection(nullptr) {}
+	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
+	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1) {}
 
 	// bootstrap steps
 
@@ -652,8 +659,9 @@ public:
 		}
 
 		// Trigger background cleanup for datamove tombstones
-		self->addActor.send((self->removeDataMoveTombstoneBackground(self)));
-
+		if (!self->txnProcessor->isMocked()) {
+			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
+		}
 		return Void();
 	}
 
@@ -683,7 +691,35 @@ public:
 	Future<Void> removeStorageServer(const UID& serverID, const Optional<UID>& tssPairID = Optional<UID>()) const {
 		return txnProcessor->removeStorageServer(serverID, tssPairID, lock, context->ddEnabledState.get());
 	}
+
+	Future<Void> initDDConfigWatch();
+
+	Future<Void> initTenantCache();
 };
+
+Future<Void> DataDistributor::initDDConfigWatch() {
+	if (txnProcessor->isMocked()) {
+		onConfigChange = Never();
+		return Void();
+	}
+	onConfigChange = map(DDConfiguration().trigger.onChange(
+	                         SystemDBWriteLockedNow(txnProcessor->context().getReference()), {}, configChangeWatching),
+	                     [](Version v) {
+		                     CODE_PROBE(true, "DataDistribution change detected");
+		                     TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
+		                     throw dd_config_changed();
+		                     return Void();
+	                     });
+
+	return success(configChangeWatching.getFuture());
+}
+
+Future<Void> DataDistributor::initTenantCache() {
+	// SOMEDAY: support tenant cache in MockDD
+	ASSERT(!txnProcessor->isMocked());
+	ddTenantCache = makeReference<TenantCache>(txnProcessor->context(), ddId);
+	return ddTenantCache.get()->build();
+}
 
 inline void addAuditToAuditMap(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
 	AuditType auditType = audit->coreState.getType();
@@ -805,7 +841,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(SevWarnAlways, "ResumeAuditStorageUnableUpdateMetadata", self->ddId).errorUnsuppressed(e);
+				TraceEvent(SevWarnAlways, "AuditStorageResumeUnableUpdateMetadata", self->ddId).errorUnsuppressed(e);
 				return Void();
 			}
 			retryCount++;
@@ -951,39 +987,28 @@ ACTOR Future<Void> serveBlobMigratorRequests(Reference<DataDistributor> self,
 
 // Runs the data distribution algorithm for FDB, including the DD Queue, DD tracker, and DD team collection
 ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
-                                    PromiseStream<GetMetricsListRequest> getShardMetricsList) {
-	state Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
-	cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
-	self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+                                    PromiseStream<GetMetricsListRequest> getShardMetricsList,
+                                    IsMocked isMocked) {
 
-	// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
-	// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
-	// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
-	// );
-
-	// wait(debugCheckCoalescing(cx));
-	// FIXME: wrap the bootstrap process into class DataDistributor
-	state Reference<DDTeamCollection> primaryTeamCollection;
-	state Reference<DDTeamCollection> remoteTeamCollection;
-	state bool trackerCancelled;
-
-	// Start watching for changes before reading the config in init() below
-	state Promise<Version> configChangeWatching;
-	state Future<Void> onConfigChange =
-	    map(DDConfiguration().trigger.onChange(SystemDBWriteLockedNow(cx.getReference()), {}, configChangeWatching),
-	        [](Version v) {
-		        CODE_PROBE(true, "DataDistribution change detected");
-		        TraceEvent("DataDistributionConfigChanged").detail("ChangeVersion", v);
-		        throw dd_config_changed();
-		        return Void();
-	        });
+	if (!isMocked) {
+		Database cx = openDBOnServer(self->dbInfo, TaskPriority::DataDistributionLaunch, LockAware::True);
+		cx->locationCacheSize = SERVER_KNOBS->DD_LOCATION_CACHE_SIZE;
+		// cx->setOption( FDBDatabaseOptions::LOCATION_CACHE_SIZE, StringRef((uint8_t*)
+		// &SERVER_KNOBS->DD_LOCATION_CACHE_SIZE, 8) ); ASSERT( cx->locationCacheSize ==
+		// SERVER_KNOBS->DD_LOCATION_CACHE_SIZE
+		// );
+		self->txnProcessor = Reference<IDDTxnProcessor>(new DDTxnProcessor(cx));
+		// wait(debugCheckCoalescing(self->txnProcessor->context()));
+	} else {
+		ASSERT(self->txnProcessor.isValid() && self->txnProcessor->isMocked());
+	}
 
 	// Make sure that the watcher has established a baseline before init() below so the watcher will
 	// see any changes that occur after init() has read the config state.
-	wait(success(configChangeWatching.getFuture()));
+	wait(self->initDDConfigWatch());
 
 	loop {
-		trackerCancelled = false;
+		self->context->trackerCancelled = false;
 		// whether all initial shard are tracked
 		self->initialized = Promise<Void>();
 		self->auditInitialized = Promise<Void>();
@@ -993,6 +1018,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 		state KeyRangeMap<ShardTrackedData> shards;
 		state Promise<UID> removeFailedServer;
 		try {
+
 			wait(DataDistributor::init(self));
 
 			// When/If this assertion fails, Evan owes Ben a pat on the back for his foresight
@@ -1006,8 +1032,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			state Reference<AsyncVar<bool>> processingWiggle(new AsyncVar<bool>(false));
 
 			if (SERVER_KNOBS->DD_TENANT_AWARENESS_ENABLED || SERVER_KNOBS->STORAGE_QUOTA_ENABLED) {
-				self->ddTenantCache = makeReference<TenantCache>(cx, self->ddId);
-				wait(self->ddTenantCache.get()->build());
+				wait(self->initTenantCache());
 			}
 
 			self->shardsAffectedByTeamFailure = makeReference<ShardsAffectedByTeamFailure>();
@@ -1023,7 +1048,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			int replicaSize = self->configuration.storageTeamSize;
 
 			std::vector<Future<Void>> actors; // the container of ACTORs
-			actors.push_back(onConfigChange);
+			actors.push_back(self->onConfigChange);
 
 			if (self->configuration.usableRegions > 1) {
 				tcis.push_back(TeamCollectionInterface());
@@ -1040,7 +1065,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 
 			actors.push_back(self->pollMoveKeysLock());
 
-			auto shardTracker = makeReference<DataDistributionTracker>(
+			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
 			                                       .distributorId = self->ddId,
 			                                       .readyToStart = self->initialized,
@@ -1049,9 +1074,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                       .physicalShardCollection = self->physicalShardCollection,
 			                                       .anyZeroHealthyTeams = anyZeroHealthyTeams,
 			                                       .shards = &shards,
-			                                       .trackerCancelled = &trackerCancelled,
+			                                       .trackerCancelled = &self->context->trackerCancelled,
 			                                       .ddTenantCache = self->ddTenantCache });
-			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(shardTracker,
+			actors.push_back(reportErrorsExcept(DataDistributionTracker::run(self->context->tracker,
 			                                                                 self->initData,
 			                                                                 getShardMetrics.getFuture(),
 			                                                                 getTopKShardMetrics.getFuture(),
@@ -1061,7 +1086,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			auto ddQueue = makeReference<DDQueue>(
+			self->context->ddQueue = makeReference<DDQueue>(
 			    DDQueueInitParams{ .id = self->ddId,
 			                       .lock = self->lock,
 			                       .db = self->txnProcessor,
@@ -1075,7 +1100,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                       .relocationConsumer = self->relocationConsumer.getFuture(),
 			                       .getShardMetrics = getShardMetrics,
 			                       .getTopKMetrics = getTopKShardMetrics });
-			actors.push_back(reportErrorsExcept(DDQueue::run(ddQueue,
+			actors.push_back(reportErrorsExcept(DDQueue::run(self->context->ddQueue,
 			                                                 processingUnhealthy,
 			                                                 processingWiggle,
 			                                                 getUnhealthyRelocationCount.getFuture(),
@@ -1102,7 +1127,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			}
 
 			std::vector<DDTeamCollection*> teamCollectionsPtrs;
-			primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
+			self->context->primaryTeamCollection = makeReference<DDTeamCollection>(DDTeamCollectionInitParams{
 			    self->txnProcessor,
 			    self->ddId,
 			    self->lock,
@@ -1120,11 +1145,14 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			    removeFailedServer,
 			    getUnhealthyRelocationCount,
 			    getAverageShardBytes });
-			teamCollectionsPtrs.push_back(primaryTeamCollection.getPtr());
-			auto recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
-			    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
+			teamCollectionsPtrs.push_back(self->context->primaryTeamCollection.getPtr());
+			Reference<IAsyncListener<RequestStream<RecruitStorageRequest>>> recruitStorage;
+			if (!isMocked) {
+				recruitStorage = IAsyncListener<RequestStream<RecruitStorageRequest>>::create(
+				    self->dbInfo, [](auto const& info) { return info.clusterInterface.recruitStorage; });
+			}
 			if (self->configuration.usableRegions > 1) {
-				remoteTeamCollection = makeReference<DDTeamCollection>(
+				self->context->remoteTeamCollection = makeReference<DDTeamCollection>(
 				    DDTeamCollectionInitParams{ self->txnProcessor,
 				                                self->ddId,
 				                                self->lock,
@@ -1142,9 +1170,9 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                removeFailedServer,
 				                                getUnhealthyRelocationCount,
 				                                getAverageShardBytes });
-				teamCollectionsPtrs.push_back(remoteTeamCollection.getPtr());
-				remoteTeamCollection->teamCollections = teamCollectionsPtrs;
-				actors.push_back(reportErrorsExcept(DDTeamCollection::run(remoteTeamCollection,
+				teamCollectionsPtrs.push_back(self->context->remoteTeamCollection.getPtr());
+				self->context->remoteTeamCollection->teamCollections = teamCollectionsPtrs;
+				actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->remoteTeamCollection,
 				                                                          self->initData,
 				                                                          tcis[1],
 				                                                          recruitStorage,
@@ -1152,11 +1180,11 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				                                    "DDTeamCollectionSecondary",
 				                                    self->ddId,
 				                                    &normalDDQueueErrors()));
-				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(remoteTeamCollection));
+				actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->remoteTeamCollection));
 			}
-			primaryTeamCollection->teamCollections = teamCollectionsPtrs;
-			self->teamCollection = primaryTeamCollection.getPtr();
-			actors.push_back(reportErrorsExcept(DDTeamCollection::run(primaryTeamCollection,
+			self->context->primaryTeamCollection->teamCollections = teamCollectionsPtrs;
+			self->teamCollection = self->context->primaryTeamCollection.getPtr();
+			actors.push_back(reportErrorsExcept(DDTeamCollection::run(self->context->primaryTeamCollection,
 			                                                          self->initData,
 			                                                          tcis[0],
 			                                                          recruitStorage,
@@ -1165,35 +1193,37 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			                                    self->ddId,
 			                                    &normalDDQueueErrors()));
 
-			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(primaryTeamCollection));
+			actors.push_back(DDTeamCollection::printSnapshotTeamsInfo(self->context->primaryTeamCollection));
 			actors.push_back(yieldPromiseStream(self->relocationProducer.getFuture(), self->relocationConsumer));
 			if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 				actors.push_back(monitorPhysicalShardStatus(self->physicalShardCollection));
 			}
 
-			actors.push_back(serveBlobMigratorRequests(self, shardTracker, ddQueue));
+			actors.push_back(serveBlobMigratorRequests(self, self->context->tracker, self->context->ddQueue));
 
 			wait(waitForAll(actors));
 			ASSERT_WE_THINK(false);
 			return Void();
 		} catch (Error& e) {
-			trackerCancelled = true;
+			self->context->tracker.clear();
+			self->context->ddQueue.clear();
+			self->context->markTrackerCancelled();
 			state Error err = e;
 			TraceEvent("DataDistributorDestroyTeamCollections", self->ddId).error(e);
 			state std::vector<UID> teamForDroppedRange;
 			if (removeFailedServer.getFuture().isReady() && !removeFailedServer.getFuture().isError()) {
 				// Choose a random healthy team to host the to-be-dropped range.
 				const UID serverID = removeFailedServer.getFuture().get();
-				std::vector<UID> pTeam = primaryTeamCollection->getRandomHealthyTeam(serverID);
+				std::vector<UID> pTeam = self->context->primaryTeamCollection->getRandomHealthyTeam(serverID);
 				teamForDroppedRange.insert(teamForDroppedRange.end(), pTeam.begin(), pTeam.end());
 				if (self->configuration.usableRegions > 1) {
-					std::vector<UID> rTeam = remoteTeamCollection->getRandomHealthyTeam(serverID);
+					std::vector<UID> rTeam = self->context->remoteTeamCollection->getRandomHealthyTeam(serverID);
 					teamForDroppedRange.insert(teamForDroppedRange.end(), rTeam.begin(), rTeam.end());
 				}
 			}
 			self->teamCollection = nullptr;
-			primaryTeamCollection = Reference<DDTeamCollection>();
-			remoteTeamCollection = Reference<DDTeamCollection>();
+			self->context->primaryTeamCollection = Reference<DDTeamCollection>();
+			self->context->remoteTeamCollection = Reference<DDTeamCollection>();
 			if (err.code() == error_code_actor_cancelled) {
 				// When cancelled, we cannot clear asyncronously because
 				// this will result in invalid memory access. This should only
@@ -1843,6 +1873,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevDebug, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
@@ -1851,7 +1884,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditType", auditType)
 		    .detail("Range", audit->coreState.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict) {
+		if (e.code() == error_code_movekeys_conflict) {
 			throw e; // throw to DD and DD will restart
 		} else if (e.code() == error_code_audit_storage_cancelled) {
 			// do nothing, silently quit
@@ -2023,7 +2056,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 				    .detail("AuditID", auditID_)
 				    .detail("AuditType", auditType)
 				    .detail("Range", auditRange);
-				throw operation_cancelled(); // Trigger DD restart and check if resume audit is correct
+				throw operation_failed(); // Trigger DD restart and check if resume audit is correct
 			}
 			TraceEvent(SevInfo, "DDAuditStorageLaunchPersistNewAuditID", self->ddId)
 			    .detail("AuditID", auditID_)
@@ -2034,6 +2067,9 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			runAuditStorage(self, auditState, 0, "LaunchAudit");
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDAuditStorageLaunchError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditType", auditType)
@@ -2044,9 +2080,20 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 }
 
 ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
-	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
-	    req.getType() != AuditType::ValidateLocationMetadata &&
-	    req.getType() != AuditType::ValidateStorageServerShard) {
+	state FlowLock::Releaser holder;
+	if (req.getType() == AuditType::ValidateHA) {
+		wait(self->auditStorageHaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageHaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateReplica) {
+		wait(self->auditStorageReplicaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageReplicaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateLocationMetadata) {
+		wait(self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageLocationMetadataLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+		wait(self->auditStorageSsShardLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageSsShardLaunchingLock);
+	} else {
 		req.reply.sendError(not_implemented());
 		return Void();
 	}
@@ -2068,14 +2115,14 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 		    .detail("AuditID", req.id);
 		req.reply.send(req.id);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevWarn, "DDCancelAuditStorageError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
 		    .detail("AuditType", req.getType());
 		req.reply.sendError(cancel_audit_storage_failed());
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		}
 	}
 	return Void();
 }
@@ -2090,14 +2137,24 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 // For 1 and 2, we believe no new audit is persisted; For 3, we do not know whether a new
 // audit is persisted, but DD will restart and the new audit will be resume if created.
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
-	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
-	    req.getType() != AuditType::ValidateLocationMetadata &&
-	    req.getType() != AuditType::ValidateStorageServerShard) {
+	state FlowLock::Releaser holder;
+	if (req.getType() == AuditType::ValidateHA) {
+		wait(self->auditStorageHaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageHaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateReplica) {
+		wait(self->auditStorageReplicaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageReplicaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateLocationMetadata) {
+		wait(self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageLocationMetadataLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+		wait(self->auditStorageSsShardLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageSsShardLaunchingLock);
+	} else {
 		req.reply.sendError(not_implemented());
 		return Void();
 	}
-	ASSERT(!self->anyAuditStorageLaunching.contains(req.getType()) || !self->anyAuditStorageLaunching[req.getType()]);
-	self->anyAuditStorageLaunching[req.getType()] = true;
+
 	state int retryCount = 0;
 	loop {
 		try {
@@ -2114,15 +2171,16 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("Range", req.range)
 			    .detail("AuditID", auditID);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
 			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range);
-			if (e.code() == error_code_actor_cancelled) {
-				req.reply.sendError(audit_storage_failed());
-				self->anyAuditStorageLaunching[req.getType()] = false;
-				throw audit_storage_failed();
+			if (e.code() == error_code_operation_failed && g_network->isSimulated()) {
+				throw audit_storage_failed(); // to trigger dd restart
 			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
 				req.reply.sendError(audit_storage_exceeded_request_limit());
 			} else if (e.code() == error_code_persist_new_audit_metadata_error) {
@@ -2137,7 +2195,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		}
 		break;
 	}
-	self->anyAuditStorageLaunching[req.getType()] = false;
 	return Void();
 }
 
@@ -2195,15 +2252,14 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		    .detail("AuditType", auditType);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevWarn, "DDDispatchAuditStorageServerShardError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2285,16 +2341,15 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2362,15 +2417,14 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 		    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevWarn, "DDDispatchAuditStorageError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2511,17 +2565,16 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDScheduleAuditOnRangeError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", range)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2565,6 +2618,9 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
@@ -2578,8 +2634,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_not_implemented ||
-		    e.code() == error_code_audit_storage_exceeded_request_limit ||
+		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
 		    e.code() == error_code_audit_storage_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
@@ -2610,25 +2665,31 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 	return Void();
 }
 
-ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
-	state Reference<DDSharedContext> context(new DDSharedContext(di));
-	state Reference<DataDistributor> self(new DataDistributor(db, di.id(), context));
+ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
+                                        Reference<DataDistributor> self,
+                                        IsMocked isMocked) {
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
 	state PromiseStream<GetMetricsListRequest> getShardMetricsList;
-	state Database cx = openDBOnServer(db, TaskPriority::DefaultDelay, LockAware::True);
+	state Database cx;
 	state ActorCollection actors(false);
 	state std::map<UID, DistributorSnapRequest> ddSnapReqMap;
 	state std::map<UID, ErrorOr<Void>> ddSnapReqResultMap;
+
+	TraceEvent("DataDistributorRunning", di.id()).detail("IsMocked", isMocked);
 	self->addActor.send(actors.getResult());
 	self->addActor.send(traceRole(Role::DATA_DISTRIBUTOR, di.id()));
+	self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
+	if (!isMocked) {
+		cx = openDBOnServer(self->dbInfo, TaskPriority::DefaultDelay, LockAware::True);
+		self->addActor.send(cacheServerWatcher(&cx));
+	}
+
+	state Future<Void> distributor = reportErrorsExcept(dataDistribution(self, getShardMetricsList, isMocked),
+	                                                    "DataDistribution",
+	                                                    di.id(),
+	                                                    &normalDataDistributorErrors());
 
 	try {
-		TraceEvent("DataDistributorRunning", di.id());
-		self->addActor.send(waitFailureServer(di.waitFailure.getFuture()));
-		self->addActor.send(cacheServerWatcher(&cx));
-		state Future<Void> distributor = reportErrorsExcept(
-		    dataDistribution(self, getShardMetricsList), "DataDistribution", di.id(), &normalDataDistributorErrors());
-
 		loop choose {
 			when(wait(distributor || collection)) {
 				ASSERT(false);
@@ -2668,10 +2729,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 						    ddSnapReqResultMapPtr->erase(snapUID);
 						    return Void();
 					    },
-					    delayed(
-					        ddSnapCreate(
-					            snapReq, db, self->context->ddEnabledState.get(), &ddSnapReqMap, &ddSnapReqResultMap),
-					        SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
+					    delayed(ddSnapCreate(snapReq,
+					                         self->dbInfo,
+					                         self->context->ddEnabledState.get(),
+					                         &ddSnapReqMap,
+					                         &ddSnapReqResultMap),
+					            SERVER_KNOBS->SNAP_MINIMUM_TIME_GAP)));
 				}
 			}
 			when(DistributorExclusionSafetyCheckRequest exclCheckReq =
@@ -2692,12 +2755,7 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 					// When resume, we need load periodic config and trigger the background trigger
 					continue;
 				}
-				if (!self->anyAuditStorageLaunching.contains(req.getType()) ||
-				    !self->anyAuditStorageLaunching[req.getType()]) {
-					actors.add(auditStorage(self, req));
-				} else { // Only one audit storage is allowed at any time
-					req.reply.sendError(audit_storage_exceeded_request_limit());
-				}
+				actors.add(auditStorage(self, req));
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));
@@ -2712,6 +2770,18 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 	}
 
 	return Void();
+}
+
+Future<Void> MockDataDistributor::run(Reference<DDSharedContext> context, Reference<DDMockTxnProcessor> txnProcessor) {
+	Reference<DataDistributor> dd =
+	    makeReference<DataDistributor>(Reference<AsyncVar<ServerDBInfo> const>(nullptr), context->ddId, context);
+	dd->txnProcessor = txnProcessor;
+	return dataDistributor_impl(context->interface, dd, IsMocked::True);
+}
+
+Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncVar<ServerDBInfo> const> db) {
+	return dataDistributor_impl(
+	    di, makeReference<DataDistributor>(db, di.id(), makeReference<DDSharedContext>(di)), IsMocked::False);
 }
 
 namespace data_distribution_test {

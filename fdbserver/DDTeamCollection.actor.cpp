@@ -1096,6 +1096,8 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
+					if (self->db->isMocked())
+						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -1599,18 +1601,30 @@ public:
 				if (self->server_status.get(interf.id()).initialized) {
 					bool unhealthy = self->server_status.get(interf.id()).isUnhealthy();
 					if (unhealthy && !status->isUnhealthy()) {
+						TraceEvent("StorageServerBecomeHealthy", self->distributorId)
+						    .detail("ServerID", interf.id())
+						    .detail("ServerIpAddress", interf.address());
 						self->unhealthyServers--;
 					}
 					if (!unhealthy && status->isUnhealthy()) {
+						TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+						    .detail("ServerID", interf.id())
+						    .detail("ServerIpAddress", interf.address());
 						self->unhealthyServers++;
 					}
 				} else if (status->isUnhealthy()) {
+					TraceEvent(SevWarn, "StorangeServerUnhealthy", self->distributorId)
+					    .detail("ServerID", interf.id())
+					    .detail("ServerIpAddress", interf.address());
 					self->unhealthyServers++;
 				}
 			}
 
 			self->server_status.set(interf.id(), *status);
 			if (status->isFailed) {
+				TraceEvent("RestartRecruiting", self->distributorId)
+				    .detail("FailedServerID", interf.id())
+				    .detail("IsTSS", interf.isTss());
 				self->restartRecruiting.trigger();
 			}
 
@@ -1663,37 +1677,6 @@ public:
 		}
 
 		return Void(); // Don't ignore failures
-	}
-
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* self, UID serverID, Version addedVersion) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Version ver = wait(tr->getReadVersion());
-
-				// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
-				// could cause us to not store the mutations sent to the short lived storage server.
-				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
-					    .detail("Server", serverID)
-					    .detail("CanRemove", canRemove)
-					    .detail("Shards", self->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-					ASSERT_GE(self->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
-					if (canRemove && self->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
-						return Void();
-					}
-				}
-
-				// Wait for any change to the serverKeys for this server
-				wait(delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution));
-				tr->reset();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
 	}
 
 	ACTOR static Future<Void> machineTeamRemover(DDTeamCollection* self) {
@@ -2999,12 +2982,12 @@ public:
 
 			// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 			// they are always running.
-			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
-			self->addActor.send(self->monitorStorageServerRecruitment());
-			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 			self->addActor.send(self->monitorHealthyTeams());
 
 			if (!self->db->isMocked()) {
+				self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+				self->addActor.send(self->monitorStorageServerRecruitment());
+				self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 				self->addActor.send(self->trackExcludedServers());
 				self->addActor.send(self->waitHealthyZoneChange());
 				self->addActor.send(self->monitorPerpetualStorageWiggle());
@@ -3358,6 +3341,12 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
 
+			DisabledTraceEvent(SevDebug, "EligiblityTeamDebug")
+			    .detail("TeamId", team->getTeamID())
+			    .detail("CPU", team->getAverageCPU())
+			    .detail("AvailableSpace", team->getMinAvailableSpace())
+			    .detail("AvailableSpaceRatio", team->getMinAvailableSpaceRatio());
+
 			if (lowDiskUtil) {
 				lowDiskUtilTotal++;
 				team->increaseEligibilityCount(data_distribution::EligibilityCounter::LOW_DISK_UTIL);
@@ -3653,7 +3642,7 @@ Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
 }
 
 Future<Void> DDTeamCollection::waitForAllDataRemoved(UID serverID, Version addedVersion) const {
-	return DDTeamCollectionImpl::waitForAllDataRemoved(this, serverID, addedVersion);
+	return db->waitForAllDataRemoved(serverID, addedVersion, shardsAffectedByTeamFailure);
 }
 
 Future<Void> DDTeamCollection::machineTeamRemover() {
@@ -3815,6 +3804,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
+	if (db->isMocked())
+		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 

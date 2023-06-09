@@ -1,6 +1,0 @@
-[[test]]
-testTitle = 'FuzzTest'
-useDB = false
-
-    [[test.workload]]
-    testName = 'ActorFuzz'
