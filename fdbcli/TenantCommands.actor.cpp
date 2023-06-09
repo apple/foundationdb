@@ -342,7 +342,10 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	return true;
 }
 constexpr char usageMessage[] =
-    "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n";
+    "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
+    "Helps orchestrate the move of a tenant group across 2 data clusters in a metacluster.\n"
+    "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement"
+    "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
@@ -370,15 +373,14 @@ ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<
 	return true;
 }
 ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
-	if (tokens.size() > 7) {
-		fmt::print("Usage: tenant move finish <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> <RUN_ID> \n\n");
+	if (tokens.size() > 6) {
+		fmt::print(usageMessage);
 		return false;
 	}
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
-	UID runId = UID::fromString(tokens[6].toString());
-	wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster, runId));
+	wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster));
 
 	return true;
 }

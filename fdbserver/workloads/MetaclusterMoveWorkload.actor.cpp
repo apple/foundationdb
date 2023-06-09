@@ -174,7 +174,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		}
 	}
 
-	ACTOR static Future<Void> populateData(MetaclusterMoveWorkload* self) { return Void(); }
+	ACTOR static Future<Void> populateData(MetaclusterMoveWorkload* self) {
+		wait(delay(1.0));
+		return Void();
+	}
 
 	ACTOR static Future<Void> startMove(MetaclusterMoveWorkload* self) {
 		self->sourceCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
@@ -190,9 +193,15 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> switchMove(MetaclusterMoveWorkload* self) { return Void(); }
+	ACTOR static Future<Void> switchMove(MetaclusterMoveWorkload* self) {
+		wait(delay(1.0));
+		return Void();
+	}
 
-	ACTOR static Future<Void> finishMove(MetaclusterMoveWorkload* self) { return Void(); }
+	ACTOR static Future<Void> finishMove(MetaclusterMoveWorkload* self) {
+		wait(delay(1.0));
+		return Void();
+	}
 
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterMoveWorkload* self) {
 		metacluster::DataClusterEntry clusterEntry;
@@ -222,7 +231,19 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) { return Void(); }
+	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
+		state ClusterName srcCluster = self->chooseClusterName();
+		state ClusterName dstCluster = self->chooseClusterName();
+		// Expect an error if the same cluster is picked
+
+		Optional<TenantGroupName> optionalTenantGroup = self->chooseTenantGroup(srcCluster);
+		while (!optionalTenantGroup.present()) {
+			optionalTenantGroup = self->chooseTenantGroup(srcCluster);
+		}
+		state TenantGroupName tenantGroup = optionalTenantGroup.get();
+
+		return Void();
+	}
 
 	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
