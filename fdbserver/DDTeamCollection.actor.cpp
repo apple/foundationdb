@@ -6471,11 +6471,13 @@ public:
 
 		// Assign more than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM shards to the first team.
 		std::vector<Key> randomKeys;
-		for (int i = 0; i < SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM + 2; ++i) {
+		for (int i = 0; i < SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM + 10; ++i) {
 			Key randomKey = Key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(1, 1500)));
+			randomKeys.push_back(randomKey);
 		}
 		std::sort(randomKeys.begin(), randomKeys.end());
 		ShardsAffectedByTeamFailure::Team highShardTeam({ UID(1, 0), UID(2, 0), UID(3, 0) }, true);
+		ASSERT(!randomKeys.empty());
 		for (int i = 0; i < randomKeys.size() - 1; ++i) {
 			shardsAffectedByTeamFailure->assignRangeToTeams(KeyRangeRef(randomKeys[i], randomKeys[i + 1]),
 			                                                { highShardTeam });
