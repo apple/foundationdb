@@ -145,6 +145,8 @@ bool RelocateData::isRestore() const {
 	return this->dataMove != nullptr;
 }
 
+// Note: C++ standard library uses the Compare operator, uniqueness is determined by !comp(a, b) && !comp(b, a).
+// So operator == and != is not used by std::set<RelocateData, std::greater<RelocateData>>
 bool RelocateData::operator>(const RelocateData& rhs) const {
 	if (priority != rhs.priority) {
 		return priority > rhs.priority;
