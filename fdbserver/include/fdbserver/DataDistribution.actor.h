@@ -524,20 +524,9 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 
 bool ddLargeTeamEnabled();
 
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
-// FIXME(xwang): Delete Old DD Actors once the refactoring is done
-/////////////////////////////// Old DD Actors //////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region Old DD Actors
-#endif
-
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
-
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif

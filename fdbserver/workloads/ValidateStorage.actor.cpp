@@ -100,7 +100,11 @@ struct ValidateStorage : TestWorkload {
 		return auditId;
 	}
 
-	ACTOR Future<Void> waitAuditStorageUntilComplete(Database cx, AuditType type, UID auditId, std::string context) {
+	ACTOR Future<Void> waitAuditStorageUntilComplete(Database cx,
+	                                                 AuditType type,
+	                                                 UID auditId,
+	                                                 std::string context,
+	                                                 bool stopWaitWhenCleared) {
 		state AuditStorageState auditState;
 		loop {
 			try {
@@ -123,6 +127,9 @@ struct ValidateStorage : TestWorkload {
 					UNREACHABLE();
 				}
 			} catch (Error& e) {
+				if (stopWaitWhenCleared && e.code() == error_code_key_not_found) {
+					break; // this audit has been cleared
+				}
 				TraceEvent("TestAuditStorageWaitError")
 				    .errorUnsuppressed(e)
 				    .detail("Context", context)
@@ -164,6 +171,7 @@ struct ValidateStorage : TestWorkload {
 				}
 				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
+					    .detail("ExistCount", res.size())
 					    .detail("Context", context)
 					    .detail("AuditID", auditId)
 					    .detail("AuditType", type);
@@ -262,6 +270,9 @@ struct ValidateStorage : TestWorkload {
 
 		wait(self->testAuditStorageConcurrentRunForDifferentType(self, cx));
 		TraceEvent("TestAuditStorageConcurrentRunForDifferentTypeDone");
+
+		wait(self->testAuditStorageConcurrentRunForSameType(self, cx));
+		TraceEvent("TestAuditStorageConcurrentRunForSameTypeDone");
 
 		wait(self->testAuditStorageCancellation(self, cx));
 		TraceEvent("TestAuditStorageCancellationDone");
@@ -394,11 +405,15 @@ struct ValidateStorage : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<UID> auditStorageForType(ValidateStorage* self, Database cx, AuditType type, std::string context) {
+	ACTOR Future<UID> auditStorageForType(ValidateStorage* self,
+	                                      Database cx,
+	                                      AuditType type,
+	                                      std::string context,
+	                                      bool stopWaitWhenCleared = false) {
 		// Send audit request until the server accepts the request
 		state UID auditId = wait(self->triggerAuditStorageForType(cx, type, context));
 		// Wait until the request completes
-		wait(self->waitAuditStorageUntilComplete(cx, type, auditId, context));
+		wait(self->waitAuditStorageUntilComplete(cx, type, auditId, context, stopWaitWhenCleared));
 		// Check internal persist state
 		wait(self->checkAuditStorageInternalState(cx, type, auditId, context));
 		return auditId;
@@ -529,18 +544,22 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageConcurrentRunForSameTypeBegin");
 		state std::vector<Future<Void>> fs;
 		state std::vector<UID> auditIds = { UID(), UID(), UID(), UID() };
-		fs.push_back(
-		    store(auditIds[0],
-		          self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType")));
-		fs.push_back(
-		    store(auditIds[1],
-		          self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType")));
-		fs.push_back(
-		    store(auditIds[2],
-		          self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType")));
-		fs.push_back(
-		    store(auditIds[3],
-		          self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType")));
+		fs.push_back(store(
+		    auditIds[0],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[1],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[2],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
+		fs.push_back(store(
+		    auditIds[3],
+		    self->auditStorageForType(
+		        self, cx, AuditType::ValidateReplica, "TestConcurrentRunForSameType", /*stopWaitWhenCleared=*/true)));
 		wait(waitForAll(fs));
 		TraceEvent("TestAuditStorageConcurrentRunForSameTypeEnd");
 		return Void();

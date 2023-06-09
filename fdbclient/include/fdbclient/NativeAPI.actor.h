@@ -19,8 +19,6 @@
  */
 
 #pragma once
-#include "flow/IRandom.h"
-#include "fdbclient/Tracing.h"
 #if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_NATIVEAPI_ACTOR_G_H)
 #define FDBCLIENT_NATIVEAPI_ACTOR_G_H
 #include "fdbclient/NativeAPI.actor.g.h"
@@ -31,6 +29,7 @@
 #include "flow/flow.h"
 #include "flow/WipedString.h"
 #include "flow/TDMetric.actor.h"
+#include "flow/IRandom.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/ClientBooleanParams.h"
@@ -39,6 +38,7 @@
 #include "fdbclient/ClusterInterface.h"
 #include "fdbclient/ClientLogEvents.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "fdbclient/Tracing.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // CLIENT_BUGGIFY should be used to randomly introduce failures at run time (like BUGGIFY but for client side testing)
@@ -618,13 +618,21 @@ ACTOR Future<bool> checkSafeExclusions(Database cx, std::vector<AddressExclusion
 // Measured in bytes, rounded up to the nearest page size. Multiply by fungibility ratio
 // because writes are more expensive than reads.
 inline uint64_t getWriteOperationCost(uint64_t bytes) {
-	return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
-	       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
+	if (bytes == 0) {
+		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	} else {
+		return CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE *
+		       ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1);
+	}
 }
 
 // Measured in bytes, rounded up to the nearest page size.
 inline uint64_t getReadOperationCost(uint64_t bytes) {
-	return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	if (bytes == 0) {
+		return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	} else {
+		return ((bytes - 1) / CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE + 1) * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	}
 }
 
 // Create a transaction to set the value of system key \xff/conf/perpetual_storage_wiggle. If enable == true, the value
@@ -675,5 +683,14 @@ namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
 }
+ACTOR Future<KeyRangeLocationInfo> getKeyLocation_internal(Database cx,
+                                                           TenantInfo tenant,
+                                                           Key key,
+                                                           SpanContext spanContext,
+                                                           Optional<UID> debugID,
+                                                           UseProvisionalProxies useProvisionalProxies,
+                                                           Reverse isBackward,
+                                                           Version version);
+
 #include "flow/unactorcompiler.h"
 #endif
