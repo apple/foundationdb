@@ -1000,7 +1000,12 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 
 		if (!rd.isRestore()) {
 			queuedRelocations--;
-			queueRetentionTime.setTotal(now() - rd.startTime);
+			double retentionTime = now() - rd.startTime;
+			queueRetentionTime.setTotal(retentionTime);
+			TraceEvent(SevDebug, "QueuedRelocationsPopped")
+			    .detail("DataMoveID", rd.dataMoveId)
+			    .detail("RandomID", rd.randomId)
+			    .detail("RetentionTime", retentionTime);
 			TraceEvent(SevVerbose, "QueuedRelocationsChanged")
 			    .detail("DataMoveID", rd.dataMoveId)
 			    .detail("RandomID", rd.randomId)
