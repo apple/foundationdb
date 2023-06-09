@@ -96,25 +96,6 @@ constexpr double LAST_30MIN_PENALTY_WEIGHT = 0.50;
 constexpr double LAST_HOUR_PENALTY_WEIGHT = 0.25;
 constexpr double MORE_THAN_HOUR_PENALTY = 0.05;
 
-// Routine to determine penalty for cached KMSUrl based on unresponsive KMS behavior observed in recent past. The
-// routine is desgined to assign a maximum penalty if KMS responses are unacceptable in very recent past, with time the
-// the penalty weight deteorates (matches real world outage OR server overload scenario)
-
-struct KmsUrlPenaltyParams {
-	static double penalty(int64_t timeSinceLastPenalty) {
-		if (timeSinceLastPenalty <= 5) {
-			return LAST_5MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 5 && timeSinceLastPenalty <= 15) {
-			return LAST_15MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 15 && timeSinceLastPenalty <= 30) {
-			return LAST_30MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 30 && timeSinceLastPenalty <= 60) {
-			return LAST_HOUR_PENALTY_WEIGHT;
-		}
-		return MORE_THAN_HOUR_PENALTY;
-	}
-};
-
 } // namespace
 
 template <class Params>
@@ -220,6 +201,25 @@ struct KmsUrlStore {
 
 FDB_BOOLEAN_PARAM(RefreshPersistedUrls);
 FDB_BOOLEAN_PARAM(IsCipherType);
+
+// Routine to determine penalty for cached KMSUrl based on unresponsive KMS behavior observed in recent past. The
+// routine is desgined to assign a maximum penalty if KMS responses are unacceptable in very recent past, with time the
+// the penalty weight deteorates (matches real world outage OR server overload scenario)
+
+struct KmsUrlPenaltyParams {
+	static double penalty(int64_t timeSinceLastPenalty) {
+		if (timeSinceLastPenalty <= 5) {
+			return LAST_5MIN_PENALTY_WEIGHT;
+		} else if (timeSinceLastPenalty > 5 && timeSinceLastPenalty <= 15) {
+			return LAST_15MIN_PENALTY_WEIGHT;
+		} else if (timeSinceLastPenalty > 15 && timeSinceLastPenalty <= 30) {
+			return LAST_30MIN_PENALTY_WEIGHT;
+		} else if (timeSinceLastPenalty > 30 && timeSinceLastPenalty <= 60) {
+			return LAST_HOUR_PENALTY_WEIGHT;
+		}
+		return MORE_THAN_HOUR_PENALTY;
+	}
+};
 
 struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	UID uid;
