@@ -163,9 +163,6 @@ struct KmsUrlCtx {
 
 template <class Params>
 struct KmsUrlStore {
-
-	KmsUrlStore() : lastReshuffleTS(0.0) {}
-
 	void penalize(const KmsUrlCtx<Params>& toPenalize, const typename KmsUrlCtx<Params>::PenaltyType type) {
 		bool found = false;
 		for (KmsUrlCtx<Params>& urlCtx : kmsUrls) {
@@ -208,7 +205,6 @@ struct KmsUrlStore {
 			}
 			return l.nResponseParseFailures < r.nResponseParseFailures;
 		});
-		lastReshuffleTS = now();
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			std::string details;
@@ -219,7 +215,6 @@ struct KmsUrlStore {
 		}
 	}
 
-	double lastReshuffleTS;
 	std::vector<KmsUrlCtx<Params>> kmsUrls;
 };
 
@@ -230,12 +225,14 @@ struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
 	UID uid;
 	KmsUrlStore<KmsUrlPenaltyParams> kmsUrlStore;
 	double lastKmsUrlsRefreshTs;
+	double lastKmsUrlDiscoverTS;
 	RESTClient restClient;
 	ValidationTokenMap validationTokenMap;
 	PromiseStream<Future<Void>> addActor;
 
-	RESTKmsConnectorCtx() : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0) {}
-	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0) {}
+	RESTKmsConnectorCtx()
+	  : uid(deterministicRandom()->randomUniqueID()), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
+	explicit RESTKmsConnectorCtx(const UID& id) : uid(id), lastKmsUrlsRefreshTs(0), lastKmsUrlDiscoverTS(0.0) {}
 };
 
 std::string getFullRequestUrl(Reference<RESTKmsConnectorCtx> ctx, const std::string& url, const std::string& suffix) {
@@ -334,6 +331,10 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 	// <url1>\n
 	// <url2>\n
 
+	std::unordered_map<std::string, KmsUrlCtx<KmsUrlPenaltyParams>> urlMap;
+	dropCachedKmsUrls(ctx, &urlMap);
+	ASSERT_EQ(ctx->kmsUrlStore.kmsUrls.size(), 0);
+
 	std::stringstream ss(buff.toString());
 	std::string url;
 	while (std::getline(ss, url, DISCOVER_URL_FILE_URL_SEP)) {
@@ -346,8 +347,19 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 			// Empty URL, ignore and continue
 			continue;
 		}
-		TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("OrgUrl", url).detail("TrimUrl", trimedUrl);
-		ctx->kmsUrlStore.kmsUrls.emplace_back(KmsUrlCtx<KmsUrlPenaltyParams>(trimedUrl));
+		auto itr = urlMap.find(trimedUrl);
+		if (itr != urlMap.end()) {
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTParseDiscoverKmsUrlsExistingUrl", ctx->uid).detail("UrlCtx", itr->second.toString());
+			}
+			ctx->kmsUrlStore.kmsUrls.emplace_back(itr->second);
+		} else {
+			auto urlCtx = KmsUrlCtx<KmsUrlPenaltyParams>(trimedUrl);
+			if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+				TraceEvent("RESTParseDiscoverKmsUrlsAddUrl", ctx->uid).detail("UrlCtx", urlCtx.toString());
+			}
+			ctx->kmsUrlStore.kmsUrls.emplace_back(urlCtx);
+		}
 	}
 
 	return Void();
@@ -378,6 +390,8 @@ ACTOR Future<Void> discoverKmsUrls(Reference<RESTKmsConnectorCtx> ctx, RefreshPe
 	} else {
 		throw not_implemented();
 	}
+
+	ctx->lastKmsUrlDiscoverTS = now();
 
 	return Void();
 }
@@ -786,8 +800,15 @@ Future<T> kmsRequestImpl(
 				// attempt to do request from next KmsUrl
 			}
 
-			// UrlStore might have reshuffled the URLs, if done, enumerate URLs in newer order
-			if (start < ctx->kmsUrlStore.lastReshuffleTS) {
+			// Possible scenarios:
+			// 1. URLs got reshuffled since the start of the enumeration.
+			// 2. All cached URLs aren't working, KMS URLs got re-discovered since start of enumeration.
+			// For #1, let the code continue enumerating cached URLs, an attempt to reset enumeration order could
+			// cause deadlock when: all cached URLs aren't working and multiple requests keep updating penalities
+			// and reshuffling the order. For #2, reset the enumeration order to re-attempt operation after
+			// re-discovery for KMS URL is done (stale cached KMS URLs)
+
+			if (start < ctx->lastKmsUrlDiscoverTS) {
 				idx = 0;
 			}
 		}
@@ -1844,6 +1865,57 @@ ACTOR Future<Void> testParseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ct
 	return Void();
 }
 
+ACTOR Future<Void> testParseDiscoverKmsUrlFileAlreadyExisting(Reference<RESTKmsConnectorCtx> ctx) {
+	std::unordered_map<std::string, KmsUrlCtx<KmsUrlPenaltyParams>> urlMap;
+	dropCachedKmsUrls(ctx, &urlMap);
+	ASSERT_EQ(ctx->kmsUrlStore.kmsUrls.size(), 0);
+
+	auto urlCtx = KmsUrlCtx<KmsUrlPenaltyParams>("https://127.0.0.1/foo2");
+	urlCtx.nFailedResponses = 1;
+	urlCtx.nRequests = 2;
+	urlCtx.nResponseParseFailures = 3;
+	ctx->kmsUrlStore.kmsUrls.push_back(KmsUrlCtx<KmsUrlPenaltyParams>("https://127.0.0.1/foo4"));
+	ctx->kmsUrlStore.kmsUrls.push_back(KmsUrlCtx<KmsUrlPenaltyParams>("https://127.0.0.1/foo5"));
+	ctx->kmsUrlStore.kmsUrls.push_back(KmsUrlCtx<KmsUrlPenaltyParams>(urlCtx));
+
+	state std::shared_ptr<platform::TmpFile> tmpFile = std::make_shared<platform::TmpFile>("/tmp");
+	ASSERT(fileExists(tmpFile->getFileName()));
+
+	state std::unordered_set<std::string> urls;
+	urls.emplace("https://127.0.0.1/foo  ");
+	urls.emplace("  https://127.0.0.1/foo1");
+	urls.emplace("  https://127.0.0.1/foo2  ");
+
+	state std::unordered_set<std::string> compareUrls;
+	compareUrls.emplace("https://127.0.0.1/foo");
+	compareUrls.emplace("https://127.0.0.1/foo1");
+	compareUrls.emplace("https://127.0.0.1/foo2");
+
+	std::string content;
+	for (auto& url : urls) {
+		content.append(url);
+		content.push_back(DISCOVER_URL_FILE_URL_SEP);
+	}
+	tmpFile->write((const uint8_t*)content.data(), content.size());
+	wait(parseDiscoverKmsUrlFile(ctx, tmpFile->getFileName()));
+
+	ASSERT_EQ(ctx->kmsUrlStore.kmsUrls.size(), urls.size());
+	for (const auto& url : ctx->kmsUrlStore.kmsUrls) {
+		ASSERT(compareUrls.find(url.url) != compareUrls.end());
+		if (url.url == "https://127.0.0.1/foo2") {
+			ASSERT_EQ(url.nFailedResponses, 1);
+			ASSERT_EQ(url.nRequests, 2);
+			ASSERT_EQ(url.nResponseParseFailures, 3);
+		} else {
+			ASSERT_EQ(url.nFailedResponses, 0);
+			ASSERT_EQ(url.nRequests, 0);
+			ASSERT_EQ(url.nResponseParseFailures, 0);
+		}
+	}
+
+	return Void();
+}
+
 void setKnobs() {
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
 	g_knobs.setKnob("rest_kms_current_cipher_request_version", KnobValueRef::create(int{ 1 }));
@@ -1865,6 +1937,7 @@ TEST_CASE("/KmsConnector/REST/ParseKmsDiscoveryUrls") {
 
 	wait(testParseDiscoverKmsUrlFileNotFound(ctx));
 	wait(testParseDiscoverKmsUrlFile(ctx));
+	wait(testParseDiscoverKmsUrlFileAlreadyExisting(ctx));
 
 	return Void();
 }
