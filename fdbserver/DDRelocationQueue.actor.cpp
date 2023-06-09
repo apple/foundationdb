@@ -820,7 +820,7 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		RelocateData& rrs = queueMapItr->value();
 
 		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.count(rrs) > 0)) {
-			if (fetchingSourcesQueue.count(rrs) > 0) {
+			if (rrs.keys != rd.keys) {
 				delayDelete.insert(rrs);
 			}
 
