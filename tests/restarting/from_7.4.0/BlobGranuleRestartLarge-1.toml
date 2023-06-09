@@ -1,0 +1,72 @@
+# Blob Granules are only upgrade-able as of snowflake/release-71.2.3 and release
+
+[configuration]
+testClass = "BlobGranuleRestart"
+blobGranulesEnabled = true
+allowDefaultTenant = false
+injectTargetedSSRestart = true
+injectSSDelay = true
+# FIXME: re-enable rocks at some point
+storageEngineExcludeTypes = [4, 5]
+
+[[knobs]]
+enable_blob_granule_file_logical_size=false
+
+[[test]]
+testTitle = 'BlobGranuleRestartLarge'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName = 'ReadWrite'
+    testDuration = 60.0
+    transactionsPerSecond = 200
+    writesPerTransactionA = 5
+    readsPerTransactionA = 1
+    writesPerTransactionB = 10
+    readsPerTransactionB = 1
+    alpha = 0.5
+    nodeCount = 2000000
+    valueBytes = 128
+    discardEdgeMeasurements = false
+    warmingDelay = 10.0
+    setup = false
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 60.0
+    # don't delete state after test
+    clearAndMergeCheck = false
+    doForcePurge = false
+    initAtEnd = false
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 60.0
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 60.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=60.0
