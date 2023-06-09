@@ -236,11 +236,12 @@ struct ChangeFeedCacheRange {
 	}
 };
 
-struct ChangeFeedCacheData {
+struct ChangeFeedCacheData : ReferenceCounted<ChangeFeedCacheData> {
 	Version version = -1;
+	Version latest = -1;
+	Version popped = -1;
 	bool active = false;
 	double inactiveTime = 0;
-	bool popped = false;
 };
 
 namespace std {
@@ -561,7 +562,8 @@ public:
 	int64_t uncommittedCFBytes = 0;
 	Reference<AsyncVar<bool>> commitChangeFeedStorage;
 
-	std::unordered_map<ChangeFeedCacheRange, ChangeFeedCacheData> changeFeedCaches;
+	std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>> changeFeedCaches;
+	std::unordered_map<Key, std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>>> rangeId_cacheData;
 
 	void setStorage(IKeyValueStore* storage);
 

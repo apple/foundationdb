@@ -9479,13 +9479,24 @@ ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 	wait(delay(60.0));
 	loop {
 		for (auto it = db->changeFeedCaches.begin(); it != db->changeFeedCaches.end(); ++it) {
-			if (!it->second.active && now() - it->second.inactiveTime > 60.0) {
+			if (!it->second->active && now() - it->second->inactiveTime > 60.0) {
 				Key beginKey = changeFeedCacheKey(it->first.tenantPrefix, it->first.rangeId, it->first.range, 0);
 				Key endKey =
 				    changeFeedCacheKey(it->first.tenantPrefix, it->first.rangeId, it->first.range, MAX_VERSION);
 				db->storage->clear(KeyRangeRef(beginKey, endKey));
 				db->storage->clear(
 				    singleKeyRange(changeFeedCacheFeedKey(it->first.tenantPrefix, it->first.rangeId, it->first.range)));
+
+				db->uncommittedCFBytes += beginKey.size() + endKey.size();
+				if (db->uncommittedCFBytes > 1e6) {
+					db->commitChangeFeedStorage->set(true);
+				}
+
+				auto& rangeIdCache = db->rangeId_cacheData[it->first.rangeId];
+				rangeIdCache.erase(it->first);
+				if (rangeIdCache.empty()) {
+					db->rangeId_cacheData.erase(it->first.rangeId);
+				}
 				db->changeFeedCaches.erase(it);
 				break;
 			}
@@ -9507,11 +9518,12 @@ ACTOR Future<Void> initializeCFCache(DatabaseContext* db) {
 		}
 		for (auto& kv : res) {
 			ChangeFeedCacheRange cf(decodeChangeFeedCacheFeedKey(kv.key));
-			ChangeFeedCacheData data;
-			data.version = decodeChangeFeedCacheFeedValue(kv.value);
-			data.active = false;
-			data.inactiveTime = now();
+			Reference<ChangeFeedCacheData> data = makeReference<ChangeFeedCacheData>();
+			data->version = decodeChangeFeedCacheFeedValue(kv.value);
+			data->active = false;
+			data->inactiveTime = now();
 			db->changeFeedCaches[cf] = data;
+			db->rangeId_cacheData[cf.rangeId][cf] = data;
 		}
 		if (!res.more) {
 			break;
@@ -10127,7 +10139,7 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
                                                  Version end,
                                                  UID mergeCursorUID,
                                                  Reference<DatabaseContext> db,
-                                                 bool durable,
+                                                 Reference<ChangeFeedCacheData> cacheData,
                                                  Key tenantPrefix) {
 	state Promise<Void> refresh = results->refresh;
 	// with empty version handling in the partial cursor, all streams will always have a next element with version >=
@@ -10225,13 +10237,21 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 			ASSERT(results->mutations.isEmpty());
 		} else {
 			ASSERT(nextOut.back().version > results->lastReturnedVersion.get());
-			if (durable) {
-				Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.back().version);
-				Value durableValue = changeFeedCacheValue(nextOut);
-				db->storage->set(KeyValueRef(durableKey, durableValue));
-				db->uncommittedCFBytes += durableKey.size() + durableValue.size();
-				if (db->uncommittedCFBytes > 1e6) {
-					db->commitChangeFeedStorage->set(true);
+			if (cacheData) {
+				ASSERT(cacheData->active);
+				Standalone<VectorRef<MutationsAndVersionRef>> cacheOut = nextOut;
+				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
+					cacheOut.pop_front(1);
+				}
+				if (!cacheOut.back().mutations.empty()) {
+					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.front().version);
+					Value durableValue = changeFeedCacheValue(cacheOut);
+					db->storage->set(KeyValueRef(durableKey, durableValue));
+					cacheData->latest = cacheOut.back().version;
+					db->uncommittedCFBytes += durableKey.size() + durableValue.size();
+					if (db->uncommittedCFBytes > 1e6) {
+						db->commitChangeFeedStorage->set(true);
+					}
 				}
 			}
 			results->mutations.send(nextOut);
@@ -10256,7 +10276,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
                                          bool canReadPopped,
                                          ReadOptions readOptions,
                                          bool encrypted,
-                                         bool durable,
+                                         Reference<ChangeFeedCacheData> cacheData,
                                          Key tenantPrefix) {
 	state std::vector<Future<Void>> fetchers(interfs.size());
 	state std::vector<Future<Void>> onErrors(interfs.size());
@@ -10339,7 +10359,7 @@ ACTOR Future<Void> mergeChangeFeedStream(Reference<DatabaseContext> db,
 
 	wait(waitForAny(onErrors) ||
 	     mergeChangeFeedStreamInternal(
-	         results, rangeID, range, interfs, streams, begin, end, mergeCursorUID, db, durable, tenantPrefix));
+	         results, rangeID, range, interfs, streams, begin, end, mergeCursorUID, db, cacheData, tenantPrefix));
 
 	return Void();
 }
@@ -10393,7 +10413,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
                                                   Version end,
                                                   Optional<ChangeFeedTSSValidationData>* tssData,
                                                   Reference<DatabaseContext> db,
-                                                  bool durable,
+                                                  Reference<ChangeFeedCacheData> cacheData,
                                                   Key tenantPrefix) {
 
 	state Promise<Void> refresh = results->refresh;
@@ -10450,13 +10470,21 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 				tssData->get().send(feedReply);
 			}
 
-			if (durable) {
-				Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, feedReply.mutations.front().version);
-				Value durableValue = changeFeedCacheValue(feedReply.mutations);
-				db->storage->set(KeyValueRef(durableKey, durableValue));
-				db->uncommittedCFBytes += durableKey.size() + durableValue.size();
-				if (db->uncommittedCFBytes > 1e6) {
-					db->commitChangeFeedStorage->set(true);
+			if (cacheData) {
+				ASSERT(cacheData->active);
+				Standalone<VectorRef<MutationsAndVersionRef>> cacheOut = feedReply.mutations;
+				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
+					cacheOut.pop_front(1);
+				}
+				if (!cacheOut.back().mutations.empty()) {
+					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.front().version);
+					Value durableValue = changeFeedCacheValue(cacheOut);
+					db->storage->set(KeyValueRef(durableKey, durableValue));
+					cacheData->latest = cacheOut.back().version;
+					db->uncommittedCFBytes += durableKey.size() + durableValue.size();
+					if (db->uncommittedCFBytes > 1e6) {
+						db->commitChangeFeedStorage->set(true);
+					}
 				}
 			}
 			results->mutations.send(
@@ -10510,7 +10538,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
                                           bool canReadPopped,
                                           ReadOptions readOptions,
                                           bool encrypted,
-                                          bool durable,
+                                          Reference<ChangeFeedCacheData> cacheData,
                                           Key tenantPrefix) {
 	state Database cx(db);
 	state ChangeFeedStreamRequest req;
@@ -10554,7 +10582,7 @@ ACTOR Future<Void> singleChangeFeedStream(Reference<DatabaseContext> db,
 	    req, interf.changeFeedStream, cx->enableLocalityLoadBalance ? &cx->queueModel : nullptr, &tssData);
 
 	wait(results->streams[0].onError() ||
-	     singleChangeFeedStreamInternal(range, results, rangeID, begin, end, &tssData, db, durable, tenantPrefix));
+	     singleChangeFeedStreamInternal(range, results, rangeID, begin, end, &tssData, db, cacheData, tenantPrefix));
 
 	return Void();
 }
@@ -10642,7 +10670,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
                                             bool canReadPopped,
                                             ReadOptions readOptions,
                                             bool encrypted,
-                                            bool durable,
+                                            Reference<ChangeFeedCacheData> cacheData,
                                             Key tenantPrefix) {
 	state Database cx(db);
 	state Span span("NAPI:GetChangeFeedStream"_loc);
@@ -10745,7 +10773,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				                           canReadPopped,
 				                           readOptions,
 				                           encrypted,
-				                           durable,
+				                           cacheData,
 				                           tenantPrefix) ||
 				     cx->connectionFileChanged());
 			} else {
@@ -10762,7 +10790,7 @@ ACTOR Future<Void> getChangeFeedStreamActor(Reference<DatabaseContext> db,
 				                            canReadPopped,
 				                            readOptions,
 				                            encrypted,
-				                            durable,
+				                            cacheData,
 				                            tenantPrefix) ||
 				     cx->connectionFileChanged());
 			}
@@ -10838,7 +10866,7 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
                                             bool encrypted,
                                             Future<Key> tenantPrefix) {
 	state Optional<ChangeFeedCacheRange> cacheRange;
-	state bool durable = false;
+	state Reference<ChangeFeedCacheData> data;
 	state Error err = success();
 	results->endVersion = end;
 	db->usedAnyChangeFeeds = true;
@@ -10847,25 +10875,35 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 			wait(db->initializeChangeFeedCache);
 			Key prefix = wait(tenantPrefix);
 			cacheRange = ChangeFeedCacheRange(prefix, rangeID, range);
-			if (db->changeFeedCaches.count(cacheRange.get()) &&
-			    db->changeFeedCaches[cacheRange.get()].version <= begin) {
-				wait(getChangeFeedStreamFromDisk(db, results, rangeID, &begin, end, range, prefix));
+			if (db->changeFeedCaches.count(cacheRange.get())) {
+				auto cacheData = db->changeFeedCaches[cacheRange.get()];
+				if (begin < cacheData->popped) {
+					results->mutations.sendError(change_feed_popped());
+					results->refresh.sendError(change_feed_cancelled());
+					results->streams.clear();
+					results->storageData.clear();
+					return Void();
+				}
+				if (cacheData->version <= begin) {
+					wait(getChangeFeedStreamFromDisk(db, results, rangeID, &begin, end, range, prefix));
+				}
 			}
 			if (end == MAX_VERSION) {
 				if (!db->changeFeedCaches.count(cacheRange.get())) {
-					ChangeFeedCacheData data;
-					data.version = begin;
-					data.active = true;
+					data = makeReference<ChangeFeedCacheData>();
+					data->version = begin;
+					data->active = true;
 					db->changeFeedCaches[cacheRange.get()] = data;
+					db->rangeId_cacheData[cacheRange.get().rangeId][cacheRange.get()] = data;
 					Key durableFeedKey = changeFeedCacheFeedKey(cacheRange.get().tenantPrefix, rangeID, range);
 					Value durableFeedValue = changeFeedCacheFeedValue(begin);
 					db->storage->set(KeyValueRef(durableFeedKey, durableFeedValue));
-					durable = true;
 				} else {
-					ChangeFeedCacheData& data = db->changeFeedCaches[cacheRange.get()];
-					if (!data.active && data.version <= begin) {
-						data.active = true;
-						durable = true;
+					data = db->changeFeedCaches[cacheRange.get()];
+					if (!data->active && data->version <= begin) {
+						data->active = true;
+					} else {
+						data = Reference<ChangeFeedCacheData>();
 					}
 				}
 			}
@@ -10880,15 +10918,14 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 		                              canReadPopped,
 		                              readOptions,
 		                              encrypted,
-		                              durable,
+		                              data,
 		                              cacheRange.present() ? cacheRange.get().tenantPrefix : Key()));
 	} catch (Error& e) {
 		err = e;
 	}
-	if (durable && db->changeFeedCaches.count(cacheRange.get())) {
-		ChangeFeedCacheData& data = db->changeFeedCaches[cacheRange.get()];
-		data.active = false;
-		data.inactiveTime = now();
+	if (data) {
+		data->active = false;
+		data->inactiveTime = now();
 	}
 	if (err.code() != error_code_success) {
 		throw err;
@@ -11064,6 +11101,22 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 	state Span span("NAPI:PopChangeFeedMutations"_loc);
 	db->usedAnyChangeFeeds = true;
 	++db->feedPops;
+
+	if (db->rangeId_cacheData.count(rangeID)) {
+		auto& feeds = db->rangeId_cacheData[rangeID];
+		for (auto& it : feeds) {
+			if (version > it.second->popped) {
+				it.second->popped = version;
+				Key beginKey = changeFeedCacheKey(it.first.tenantPrefix, it.first.rangeId, it.first.range, 0);
+				Key endKey = changeFeedCacheKey(it.first.tenantPrefix, it.first.rangeId, it.first.range, version);
+				db->storage->clear(KeyRangeRef(beginKey, endKey));
+				db->uncommittedCFBytes += beginKey.size() + endKey.size();
+				if (db->uncommittedCFBytes > 1e6) {
+					db->commitChangeFeedStorage->set(true);
+				}
+			}
+		}
+	}
 
 	state KeyRange keys = wait(getChangeFeedRange(db, cx, rangeID));
 
