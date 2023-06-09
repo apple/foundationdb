@@ -328,7 +328,10 @@ public:
 
 	std::unordered_map<AuditType, std::unordered_map<UID, std::shared_ptr<DDAudit>>> audits;
 	Promise<Void> auditInitialized;
-	std::unordered_map<AuditType, bool> anyAuditStorageLaunching;
+	FlowLock auditStorageHaLaunchingLock;
+	FlowLock auditStorageReplicaLaunchingLock;
+	FlowLock auditStorageLocationMetadataLaunchingLock;
+	FlowLock auditStorageSsShardLaunchingLock;
 	std::unordered_map<AuditType, AsyncVar<int>> remainingBudgetForAuditTasks;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
@@ -339,7 +342,8 @@ public:
 	    movingDataEventHolder(makeReference<EventCacheHolder>("MovingData")),
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
-	    teamCollection(nullptr) {}
+	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
+	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1) {}
 
 	// bootstrap steps
 
@@ -699,6 +703,7 @@ inline std::shared_ptr<DDAudit> getAuditFromAuditMap(Reference<DataDistributor> 
 
 inline void removeAuditFromAuditMap(Reference<DataDistributor> self, AuditType auditType, UID auditID) {
 	ASSERT(self->audits.contains(auditType) && self->audits[auditType].contains(auditID));
+	self->audits[auditType][auditID]->cancel();
 	self->audits[auditType].erase(auditID);
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId)
 	    .detail("Ops", "removeAuditFromAuditMap")
@@ -725,7 +730,6 @@ void runAuditStorage(Reference<DataDistributor> self,
                      AuditStorageState auditStates,
                      int retryCount,
                      std::string context);
-ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType);
 ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     UID auditID,
                                     AuditType auditType,
@@ -794,7 +798,7 @@ ACTOR Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
 				throw e;
 			}
 			if (retryCount > 50) {
-				TraceEvent(SevWarnAlways, "ResumeAuditStorageUnableUpdateMetadata", self->ddId).errorUnsuppressed(e);
+				TraceEvent(SevWarnAlways, "AuditStorageResumeUnableUpdateMetadata", self->ddId).errorUnsuppressed(e);
 				return Void();
 			}
 			retryCount++;
@@ -1772,6 +1776,9 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevDebug, "DDAuditStorageCoreError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
@@ -1780,8 +1787,10 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("AuditType", auditType)
 		    .detail("Range", audit->coreState.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_movekeys_conflict) {
+		if (e.code() == error_code_movekeys_conflict) {
 			throw e; // throw to DD and DD will restart
+		} else if (e.code() == error_code_audit_storage_cancelled) {
+			// do nothing, silently quit
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && e.code() != error_code_not_implemented) {
 			audit->retryCount++;
 			audit->actors.clear(true);
@@ -1836,39 +1845,6 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			}
 			removeAuditFromAuditMap(self, audit->coreState.getType(),
 			                        audit->coreState.id); // remove audit
-		}
-	}
-	return Void();
-}
-
-// Wait until the audit completes or this actor gets cancelled
-ACTOR Future<Void> waitForAuditStorage(Reference<DataDistributor> self, UID auditID, AuditType auditType) {
-	loop {
-		try {
-			TraceEvent(SevVerbose, "WaitForAuditStorage", self->ddId)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType);
-			// auditMap keeps following invariants:
-			// (1) Any alive audit storage must be in auditMap
-			// (2) Any audit of auditMap must be alive
-			if (auditExistInAuditMap(self, auditType, auditID)) {
-				wait(delay(1));
-				continue;
-			} else {
-				TraceEvent(SevInfo, "WaitForAuditStorage", self->ddId)
-				    .detail("AuditID", auditID)
-				    .detail("AuditType", auditType);
-				break;
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			TraceEvent(SevDebug, "WaitForAuditStorage", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("AuditID", auditID)
-			    .detail("AuditType", auditType);
-			continue;
 		}
 	}
 	return Void();
@@ -1983,7 +1959,7 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 				    .detail("AuditID", auditID_)
 				    .detail("AuditType", auditType)
 				    .detail("Range", auditRange);
-				throw operation_cancelled(); // Trigger DD restart and check if resume audit is correct
+				throw operation_failed(); // Trigger DD restart and check if resume audit is correct
 			}
 			TraceEvent(SevInfo, "DDAuditStorageLaunchPersistNewAuditID", self->ddId)
 			    .detail("AuditID", auditID_)
@@ -1994,6 +1970,9 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			runAuditStorage(self, auditState, 0, "LaunchAudit");
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDAuditStorageLaunchError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditType", auditType)
@@ -2001,6 +1980,54 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 		throw e;
 	}
 	return auditID;
+}
+
+ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	state FlowLock::Releaser holder;
+	if (req.getType() == AuditType::ValidateHA) {
+		wait(self->auditStorageHaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageHaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateReplica) {
+		wait(self->auditStorageReplicaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageReplicaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateLocationMetadata) {
+		wait(self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageLocationMetadataLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+		wait(self->auditStorageSsShardLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageSsShardLaunchingLock);
+	} else {
+		req.reply.sendError(not_implemented());
+		return Void();
+	}
+
+	try {
+		ASSERT(req.cancel);
+		ASSERT(req.id.isValid());
+		TraceEvent(SevDebug, "DDCancelAuditStorageStart", self->ddId)
+		    .detail("AuditType", req.getType())
+		    .detail("AuditID", req.id);
+		wait(cancelAuditMetadata(self->txnProcessor->context(), req.getType(), req.id));
+		// Once clearAuditMetadata cancelled, any ongoing audit will stop
+		// Then clear ongoing audit D/S
+		if (auditExistInAuditMap(self, req.getType(), req.id)) {
+			removeAuditFromAuditMap(self, req.getType(), req.id);
+		}
+		TraceEvent(SevVerbose, "DDCancelAuditStorageReply", self->ddId)
+		    .detail("AuditType", req.getType())
+		    .detail("AuditID", req.id);
+		req.reply.send(req.id);
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevWarn, "DDCancelAuditStorageError", self->ddId)
+		    .errorUnsuppressed(e)
+		    .detail("AuditID", req.id)
+		    .detail("AuditType", req.getType());
+		req.reply.sendError(cancel_audit_storage_failed());
+	}
+	return Void();
 }
 
 // Handling audit requests
@@ -2013,14 +2040,24 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 // For 1 and 2, we believe no new audit is persisted; For 3, we do not know whether a new
 // audit is persisted, but DD will restart and the new audit will be resume if created.
 ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
-	if (req.getType() != AuditType::ValidateHA && req.getType() != AuditType::ValidateReplica &&
-	    req.getType() != AuditType::ValidateLocationMetadata &&
-	    req.getType() != AuditType::ValidateStorageServerShard) {
+	state FlowLock::Releaser holder;
+	if (req.getType() == AuditType::ValidateHA) {
+		wait(self->auditStorageHaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageHaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateReplica) {
+		wait(self->auditStorageReplicaLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageReplicaLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateLocationMetadata) {
+		wait(self->auditStorageLocationMetadataLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageLocationMetadataLaunchingLock);
+	} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+		wait(self->auditStorageSsShardLaunchingLock.take(TaskPriority::DefaultYield));
+		holder = FlowLock::Releaser(self->auditStorageSsShardLaunchingLock);
+	} else {
 		req.reply.sendError(not_implemented());
 		return Void();
 	}
-	ASSERT(!self->anyAuditStorageLaunching.contains(req.getType()) || !self->anyAuditStorageLaunching[req.getType()]);
-	self->anyAuditStorageLaunching[req.getType()] = true;
+
 	state int retryCount = 0;
 	loop {
 		try {
@@ -2037,15 +2074,16 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("Range", req.range)
 			    .detail("AuditID", auditID);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw e;
+			}
 			TraceEvent(SevInfo, "DDAuditStorageError", self->ddId)
 			    .errorUnsuppressed(e)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range);
-			if (e.code() == error_code_actor_cancelled) {
-				req.reply.sendError(audit_storage_failed());
-				self->anyAuditStorageLaunching[req.getType()] = false;
-				throw audit_storage_failed();
+			if (e.code() == error_code_operation_failed && g_network->isSimulated()) {
+				throw audit_storage_failed(); // to trigger dd restart
 			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
 				req.reply.sendError(audit_storage_exceeded_request_limit());
 			} else if (e.code() == error_code_persist_new_audit_metadata_error) {
@@ -2060,7 +2098,6 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 		}
 		break;
 	}
-	self->anyAuditStorageLaunching[req.getType()] = false;
 	return Void();
 }
 
@@ -2118,15 +2155,14 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 		    .detail("AuditType", auditType);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevWarn, "DDDispatchAuditStorageServerShardError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2208,16 +2244,15 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDScheduleAuditStorageShardOnServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2285,15 +2320,14 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 		    .detail("CompleteRatio", completedCount * 1.0 / totalCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevWarn, "DDDispatchAuditStorageError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("AuditType", auditType);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2434,17 +2468,16 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 		    .detail("IssuedDoAuditCountInThisSchedule", issueDoAuditCount);
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
 		TraceEvent(SevInfo, "DDScheduleAuditOnRangeError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", audit->coreState.id)
 		    .detail("Range", range)
 		    .detail("AuditType", auditType)
 		    .detail("IssuedDoAuditCount", issueDoAuditCount);
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
-		} else {
-			audit->auditStorageAnyChildFailed = true;
-		}
+		audit->auditStorageAnyChildFailed = true;
 	}
 
 	return Void();
@@ -2488,7 +2521,10 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
 	} catch (Error& e) {
-		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", req.id)
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		TraceEvent(SevInfo, "DDDoAuditOnStorageServerError", self->ddId)
 		    .errorUnsuppressed(e)
 		    .detail("AuditID", req.id)
 		    .detail("Range", req.range)
@@ -2501,8 +2537,8 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
 		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_not_implemented ||
-		    e.code() == error_code_audit_storage_exceeded_request_limit) {
+		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
+		    e.code() == error_code_audit_storage_cancelled) {
 			throw e;
 		} else if (e.code() == error_code_audit_storage_error) {
 			audit->foundError = true;
@@ -2604,12 +2640,12 @@ ACTOR Future<Void> dataDistributor(DataDistributorInterface di, Reference<AsyncV
 				req.reply.send(getStorageWigglerStates(self));
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
-				if (!self->anyAuditStorageLaunching.contains(req.getType()) ||
-				    !self->anyAuditStorageLaunching[req.getType()]) {
-					actors.add(auditStorage(self, req));
-				} else { // Only one audit storage is allowed at any time
-					req.reply.sendError(audit_storage_exceeded_request_limit());
+				if (req.cancel) {
+					ASSERT(req.id.isValid());
+					actors.add(cancelAuditStorage(self, req));
+					continue;
 				}
+				actors.add(auditStorage(self, req));
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));

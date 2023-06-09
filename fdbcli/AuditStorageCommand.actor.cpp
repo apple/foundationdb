@@ -39,36 +39,62 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
 		return UID();
 	}
 
-	AuditType type = AuditType::Invalid;
-	if (tokencmp(tokens[1], "ha")) {
-		type = AuditType::ValidateHA;
-	} else if (tokencmp(tokens[1], "replica")) {
-		type = AuditType::ValidateReplica;
-	} else if (tokencmp(tokens[1], "locationmetadata")) {
-		type = AuditType::ValidateLocationMetadata;
-	} else if (tokencmp(tokens[1], "ssshard")) {
-		type = AuditType::ValidateStorageServerShard;
-	} else {
-		printUsage(tokens[0]);
-		return UID();
-	}
+	state UID resAuditId;
+	if (tokencmp(tokens[1], "cancel")) {
+		if (tokens.size() != 4) {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		AuditType type = AuditType::Invalid;
+		if (tokencmp(tokens[2], "ha")) {
+			type = AuditType::ValidateHA;
+		} else if (tokencmp(tokens[2], "replica")) {
+			type = AuditType::ValidateReplica;
+		} else if (tokencmp(tokens[2], "locationmetadata")) {
+			type = AuditType::ValidateLocationMetadata;
+		} else if (tokencmp(tokens[2], "ssshard")) {
+			type = AuditType::ValidateStorageServerShard;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		const UID auditId = UID::fromString(tokens[3].toString());
+		UID cancelledAuditId = wait(cancelAuditStorage(clusterFile, type, auditId, /*timeoutSeconds=*/60));
+		resAuditId = cancelledAuditId;
 
-	Key begin = allKeys.begin, end = allKeys.end;
-	if (tokens.size() == 3) {
-		begin = tokens[2];
-	} else if (tokens.size() == 4) {
-		begin = tokens[2];
-		end = tokens[3];
 	} else {
-		printUsage(tokens[0]);
-		return UID();
-	}
-	if (end > allKeys.end) {
-		end = allKeys.end;
-	}
+		AuditType type = AuditType::Invalid;
+		if (tokencmp(tokens[1], "ha")) {
+			type = AuditType::ValidateHA;
+		} else if (tokencmp(tokens[1], "replica")) {
+			type = AuditType::ValidateReplica;
+		} else if (tokencmp(tokens[1], "locationmetadata")) {
+			type = AuditType::ValidateLocationMetadata;
+		} else if (tokencmp(tokens[1], "ssshard")) {
+			type = AuditType::ValidateStorageServerShard;
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
 
-	UID auditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
-	return auditId;
+		Key begin = allKeys.begin, end = allKeys.end;
+		if (tokens.size() == 3) {
+			begin = tokens[2];
+		} else if (tokens.size() == 4) {
+			begin = tokens[2];
+			end = tokens[3];
+		} else {
+			printUsage(tokens[0]);
+			return UID();
+		}
+		if (end > allKeys.end) {
+			end = allKeys.end;
+		}
+
+		UID startedAuditId = wait(auditStorage(clusterFile, KeyRangeRef(begin, end), type, /*timeoutSeconds=*/60));
+		resAuditId = startedAuditId;
+	}
+	return resAuditId;
 }
 
 CommandFactory auditStorageFactory(
@@ -80,5 +106,6 @@ CommandFactory auditStorageFactory(
                 "optionally a sub-range with `BeginKey' and `EndKey'.\n"
                 "For example, to audit the full key range: `audit_storage ha'\n"
                 "To audit a sub-range only: `audit_storage ha 0xa 0xb'\n"
-                "Returns an audit `ID'. See also `get_audit_status' command.\n"));
+                "Returns an audit `ID'. See also `get_audit_status' command.\n"
+                "To cancel an audit: audit_storage cancel auditType auditId"));
 } // namespace fdb_cli
