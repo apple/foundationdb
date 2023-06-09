@@ -1484,16 +1484,19 @@ std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key)
 	reader >> range;
 	return std::make_tuple(prefix, feed, range);
 }
-const Value changeFeedCacheFeedValue(Version const& version) {
+const Value changeFeedCacheFeedValue(Version const& version, Version const& popped) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << version;
+	wr << popped;
 	return wr.toValue();
 }
-Version decodeChangeFeedCacheFeedValue(ValueRef const& value) {
+std::pair<Version, Version> decodeChangeFeedCacheFeedValue(ValueRef const& value) {
 	Version version;
+	Version popped;
 	BinaryReader reader(value, IncludeVersion());
 	reader >> version;
-	return version;
+	reader >> popped;
+	return std::make_pair(version, popped);
 }
 
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;

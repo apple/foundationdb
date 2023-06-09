@@ -650,8 +650,8 @@ extern const KeyRef changeFeedCacheFeedPrefix;
 
 const Value changeFeedCacheFeedKey(Key const& prefix, Key const& feed, KeyRange const& range);
 std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key);
-const Value changeFeedCacheFeedValue(Version const& version);
-Version decodeChangeFeedCacheFeedValue(ValueRef const& value);
+const Value changeFeedCacheFeedValue(Version const& version, Version const& popped);
+std::pair<Version, Version> decodeChangeFeedCacheFeedValue(ValueRef const& value);
 
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;

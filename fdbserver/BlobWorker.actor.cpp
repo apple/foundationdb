@@ -2383,53 +2383,53 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 		metadata->readable.send(Void());
 
 		loop {
-				// check outstanding snapshot/delta files for completion
-				while (inFlightFiles.size() > 0) {
-					if (inFlightFiles.front().future.isReady()) {
-						BlobFileIndex completedFile = wait(inFlightFiles.front().future);
-						if (inFlightFiles.front().snapshot) {
-							ASSERT(!inFlightFiles.front().emptyDeltaFile);
-							if (metadata->files.deltaFiles.empty()) {
-								ASSERT(completedFile.version == metadata->initialSnapshotVersion);
-							} else {
-								ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
-							}
-
-							metadata->files.snapshotFiles.push_back(completedFile);
-							metadata->durableSnapshotVersion.set(completedFile.version);
-							writeAmpTarget.newSnapshotSize(completedFile.length);
-							pendingSnapshots--;
+			// check outstanding snapshot/delta files for completion
+			while (inFlightFiles.size() > 0) {
+				if (inFlightFiles.front().future.isReady()) {
+					BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+					if (inFlightFiles.front().snapshot) {
+						ASSERT(!inFlightFiles.front().emptyDeltaFile);
+						if (metadata->files.deltaFiles.empty()) {
+							ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 						} else {
-							handleCompletedDeltaFile(bwData,
-							                         metadata,
-							                         completedFile,
-							                         cfKey,
-							                         startState.changeFeedStartVersion,
-							                         &rollbacksCompleted,
-							                         inFlightPops,
-							                         inFlightFiles.front().emptyDeltaFile);
+							ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
 						}
 
-						inFlightFiles.pop_front();
-						wait(yield(TaskPriority::BlobWorkerUpdateStorage));
+						metadata->files.snapshotFiles.push_back(completedFile);
+						metadata->durableSnapshotVersion.set(completedFile.version);
+						writeAmpTarget.newSnapshotSize(completedFile.length);
+						pendingSnapshots--;
 					} else {
-						break;
+						handleCompletedDeltaFile(bwData,
+						                         metadata,
+						                         completedFile,
+						                         cfKey,
+						                         startState.changeFeedStartVersion,
+						                         &rollbacksCompleted,
+						                         inFlightPops,
+						                         inFlightFiles.front().emptyDeltaFile);
 					}
-				}
 
-				// also check outstanding pops for errors
-				while (!inFlightPops.empty() && inFlightPops.front().isReady()) {
-					wait(inFlightPops.front());
-					inFlightPops.pop_front();
-				}
-
-				// inject delay into reading change feed stream
-				if (BUGGIFY_WITH_PROB(0.001)) {
-					wait(delay(deterministicRandom()->random01(), TaskPriority::BlobWorkerReadChangeFeed));
+					inFlightFiles.pop_front();
+					wait(yield(TaskPriority::BlobWorkerUpdateStorage));
 				} else {
-					// FIXME: if we're already BlobWorkerReadChangeFeed, don't do a delay?
-					wait(delay(0, TaskPriority::BlobWorkerReadChangeFeed));
+					break;
 				}
+			}
+
+			// also check outstanding pops for errors
+			while (!inFlightPops.empty() && inFlightPops.front().isReady()) {
+				wait(inFlightPops.front());
+				inFlightPops.pop_front();
+			}
+
+			// inject delay into reading change feed stream
+			if (BUGGIFY_WITH_PROB(0.001)) {
+				wait(delay(deterministicRandom()->random01(), TaskPriority::BlobWorkerReadChangeFeed));
+			} else {
+				// FIXME: if we're already BlobWorkerReadChangeFeed, don't do a delay?
+				wait(delay(0, TaskPriority::BlobWorkerReadChangeFeed));
+			}
 
 			state Standalone<VectorRef<MutationsAndVersionRef>> mutations;
 			try {
@@ -2986,28 +2986,28 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 					while (waitIdx > 0) {
 						CODE_PROBE(true, "Granule blocking on previous snapshot");
 						// TODO don't duplicate code
-							BlobFileIndex completedFile = wait(inFlightFiles.front().future);
-							if (inFlightFiles.front().snapshot) {
-								ASSERT(!inFlightFiles.front().emptyDeltaFile);
-								if (metadata->files.deltaFiles.empty()) {
-									ASSERT(completedFile.version == metadata->initialSnapshotVersion);
-								} else {
-									ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
-								}
-								metadata->files.snapshotFiles.push_back(completedFile);
-								metadata->durableSnapshotVersion.set(completedFile.version);
-								writeAmpTarget.newSnapshotSize(completedFile.length);
-								pendingSnapshots--;
+						BlobFileIndex completedFile = wait(inFlightFiles.front().future);
+						if (inFlightFiles.front().snapshot) {
+							ASSERT(!inFlightFiles.front().emptyDeltaFile);
+							if (metadata->files.deltaFiles.empty()) {
+								ASSERT(completedFile.version == metadata->initialSnapshotVersion);
 							} else {
-								handleCompletedDeltaFile(bwData,
-								                         metadata,
-								                         completedFile,
-								                         cfKey,
-								                         startState.changeFeedStartVersion,
-								                         &rollbacksCompleted,
-								                         inFlightPops,
-								                         inFlightFiles.front().emptyDeltaFile);
+								ASSERT(completedFile.version == metadata->files.deltaFiles.back().version);
 							}
+							metadata->files.snapshotFiles.push_back(completedFile);
+							metadata->durableSnapshotVersion.set(completedFile.version);
+							writeAmpTarget.newSnapshotSize(completedFile.length);
+							pendingSnapshots--;
+						} else {
+							handleCompletedDeltaFile(bwData,
+							                         metadata,
+							                         completedFile,
+							                         cfKey,
+							                         startState.changeFeedStartVersion,
+							                         &rollbacksCompleted,
+							                         inFlightPops,
+							                         inFlightFiles.front().emptyDeltaFile);
+						}
 
 						inFlightFiles.pop_front();
 						waitIdx--;

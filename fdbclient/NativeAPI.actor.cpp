@@ -9484,10 +9484,11 @@ ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 				Key endKey =
 				    changeFeedCacheKey(it->first.tenantPrefix, it->first.rangeId, it->first.range, MAX_VERSION);
 				db->storage->clear(KeyRangeRef(beginKey, endKey));
-				db->storage->clear(
-				    singleKeyRange(changeFeedCacheFeedKey(it->first.tenantPrefix, it->first.rangeId, it->first.range)));
+				KeyRange feedRange =
+				    singleKeyRange(changeFeedCacheFeedKey(it->first.tenantPrefix, it->first.rangeId, it->first.range));
+				db->storage->clear(feedRange);
 
-				db->uncommittedCFBytes += beginKey.size() + endKey.size();
+				db->uncommittedCFBytes += beginKey.size() + endKey.size() + feedRange.expectedSize();
 				if (db->uncommittedCFBytes > 1e6) {
 					db->commitChangeFeedStorage->set(true);
 				}
@@ -9519,7 +9520,9 @@ ACTOR Future<Void> initializeCFCache(DatabaseContext* db) {
 		for (auto& kv : res) {
 			ChangeFeedCacheRange cf(decodeChangeFeedCacheFeedKey(kv.key));
 			Reference<ChangeFeedCacheData> data = makeReference<ChangeFeedCacheData>();
-			data->version = decodeChangeFeedCacheFeedValue(kv.value);
+			auto val = decodeChangeFeedCacheFeedValue(kv.value);
+			data->version = val.first;
+			data->popped = val.second;
 			data->active = false;
 			data->inactiveTime = now();
 			db->changeFeedCaches[cf] = data;
@@ -10244,7 +10247,7 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 					cacheOut.pop_front(1);
 				}
 				if (!cacheOut.back().mutations.empty()) {
-					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.front().version);
+					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.back().version);
 					Value durableValue = changeFeedCacheValue(cacheOut);
 					db->storage->set(KeyValueRef(durableKey, durableValue));
 					cacheData->latest = cacheOut.back().version;
@@ -10477,7 +10480,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 					cacheOut.pop_front(1);
 				}
 				if (!cacheOut.back().mutations.empty()) {
-					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.front().version);
+					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.back().version);
 					Value durableValue = changeFeedCacheValue(cacheOut);
 					db->storage->set(KeyValueRef(durableKey, durableValue));
 					cacheData->latest = cacheOut.back().version;
@@ -10643,12 +10646,17 @@ ACTOR Future<Void> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
 		state int idx = 0;
 		while (idx < res.size()) {
 			Standalone<VectorRef<MutationsAndVersionRef>> mutations = decodeChangeFeedCacheValue(res[idx].value);
-			*begin = mutations.back().version;
-			results->mutations.send(mutations);
-			wait(results->mutations.onEmpty());
-			wait(delay(0));
-			if (*begin > results->lastReturnedVersion.get()) {
-				results->lastReturnedVersion.set(*begin);
+			while (!mutations.empty() && mutations.front().version < *begin) {
+				mutations.pop_front(1);
+			}
+			if (!mutations.empty()) {
+				*begin = mutations.back().version;
+				results->mutations.send(mutations);
+				wait(results->mutations.onEmpty());
+				wait(delay(0));
+				if (*begin > results->lastReturnedVersion.get()) {
+					results->lastReturnedVersion.set(*begin);
+				}
 			}
 			(*begin)++;
 			idx++;
@@ -10896,7 +10904,7 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 					db->changeFeedCaches[cacheRange.get()] = data;
 					db->rangeId_cacheData[cacheRange.get().rangeId][cacheRange.get()] = data;
 					Key durableFeedKey = changeFeedCacheFeedKey(cacheRange.get().tenantPrefix, rangeID, range);
-					Value durableFeedValue = changeFeedCacheFeedValue(begin);
+					Value durableFeedValue = changeFeedCacheFeedValue(begin, 0);
 					db->storage->set(KeyValueRef(durableFeedKey, durableFeedValue));
 				} else {
 					data = db->changeFeedCaches[cacheRange.get()];
@@ -11110,7 +11118,11 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 				Key beginKey = changeFeedCacheKey(it.first.tenantPrefix, it.first.rangeId, it.first.range, 0);
 				Key endKey = changeFeedCacheKey(it.first.tenantPrefix, it.first.rangeId, it.first.range, version);
 				db->storage->clear(KeyRangeRef(beginKey, endKey));
-				db->uncommittedCFBytes += beginKey.size() + endKey.size();
+				Key durableFeedKey = changeFeedCacheFeedKey(it.first.tenantPrefix, it.first.rangeId, it.first.range);
+				Value durableFeedValue = changeFeedCacheFeedValue(it.second->version, it.second->popped);
+				db->storage->set(KeyValueRef(durableFeedKey, durableFeedValue));
+				db->uncommittedCFBytes +=
+				    beginKey.size() + endKey.size() + durableFeedKey.size() + durableFeedValue.size();
 				if (db->uncommittedCFBytes > 1e6) {
 					db->commitChangeFeedStorage->set(true);
 				}
