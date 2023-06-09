@@ -8,6 +8,7 @@ set(FDBCLI_SRCS
   ConsistencyCheckCommand.actor.cpp
   CoordinatorsCommand.actor.cpp
   DataDistributionCommand.actor.cpp
+  DebugCommands.actor.cpp
   ExcludeCommand.actor.cpp
   ExpensiveDataCheckCommand.actor.cpp
   FileConfigureCommand.actor.cpp
