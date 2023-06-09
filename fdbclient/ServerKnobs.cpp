@@ -1152,6 +1152,8 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
 	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
 
+	init( CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO,                0.5 ); if( randomize && BUGGIFY ) CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO = deterministicRandom()->random01();
+
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.
 	init( IDEMPOTENCY_ID_IN_MEMORY_LIFETIME,                       10);
