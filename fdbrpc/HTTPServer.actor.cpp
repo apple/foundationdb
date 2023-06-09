@@ -282,9 +282,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequestTest(std::string hostna
 	state Reference<IConnection> conn;
 	loop {
 		try {
-			uint16_t flags = NetworkAddress::FLAG_PUBLIC;
 			if (!conn) {
-				wait(store(conn, INetworkConnections::net()->connect(hostname, service, flags)));
+				wait(store(conn, INetworkConnections::net()->connect(hostname, service, false)));
 				ASSERT(conn.isValid());
 				wait(conn->connectHandshake());
 			}

@@ -66,16 +66,16 @@ const std::string missingTokenCode = "0123";
 
 const std::string bgUrl = "file://simfdb/fdbblob/";
 
+Future<Void> discoverUrlFileReaper = Future<Void>();
+
+} // namespace
+
 struct VaultResponse {
 	bool failed;
 	std::string buff;
 
 	VaultResponse() : failed(false), buff("") {}
 };
-
-Future<Void> discoverUrlFileReaper = Future<Void>();
-
-} // namespace
 
 int64_t getRefreshInterval(const int64_t now, const int64_t defaultTtl) {
 	if (BUGGIFY) {

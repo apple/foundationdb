@@ -23,6 +23,7 @@
 #include <boost/asio.hpp>
 
 #include "flow/Arena.h"
+#include "flow/NetworkAddress.h"
 #include "flow/network.h"
 #include "flow/IUDPSocket.h"
 #include "flow/flow.h"
@@ -358,14 +359,14 @@ TEST_CASE("/flow/DNSCacheParsing") {
 
 Future<Reference<IConnection>> INetworkConnections::connect(const std::string& host,
                                                             const std::string& service,
-                                                            Optional<uint16_t> flags) {
+                                                            const bool isTLS) {
 	// Use map to create an actor that returns an endpoint or throws
 	Future<NetworkAddress> pickEndpoint =
 	    map(resolveTCPEndpoint(host, service), [=](std::vector<NetworkAddress> const& addresses) -> NetworkAddress {
 		    NetworkAddress addr = INetworkConnections::pickOneAddress(addresses);
 		    addr.fromHostname = true;
-		    if (flags.present()) {
-			    addr.flags = flags.get();
+		    if (isTLS) {
+			    addr.flags = NetworkAddress::FLAG_TLS;
 		    }
 		    return addr;
 	    });

@@ -754,10 +754,6 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 	}
 	bool isTLS = b->knobs.isTLS();
 	state Reference<IConnection> conn;
-	uint16_t flags = NetworkAddress::FLAG_PUBLIC;
-	if (isTLS) {
-		flags |= NetworkAddress::FLAG_TLS;
-	}
 	if (b->useProxy) {
 		if (isTLS) {
 			Reference<IConnection> _conn =
@@ -766,11 +762,11 @@ ACTOR Future<S3BlobStoreEndpoint::ReusableConnection> connect_impl(Reference<S3B
 		} else {
 			host = b->proxyHost.get();
 			service = b->proxyPort.get();
-			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, flags));
+			Reference<IConnection> _conn = wait(INetworkConnections::net()->connect(host, service, isTLS));
 			conn = _conn;
 		}
 	} else {
-		wait(store(conn, INetworkConnections::net()->connect(host, service, flags)));
+		wait(store(conn, INetworkConnections::net()->connect(host, service, isTLS)));
 	}
 	wait(conn->connectHandshake());
 
