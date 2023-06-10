@@ -164,7 +164,6 @@ Future<std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>> _get
 		when(wait(_onEncryptKeyProxyChange(db))) {}
 	}
 	double elapsed = now() - startTime;
-	BlobCipherMetrics::getInstance()->getLatestCipherKeysLatency.addMeasurement(elapsed);
 	BlobCipherMetrics::counters(usageType).getLatestCipherKeysLatency.addMeasurement(elapsed);
 	return cipherKeys;
 }
@@ -302,7 +301,6 @@ Future<std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>> _getEncr
 		when(wait(_onEncryptKeyProxyChange(db))) {}
 	}
 	double elapsed = now() - startTime;
-	BlobCipherMetrics::getInstance()->getCipherKeysLatency.addMeasurement(elapsed);
 	BlobCipherMetrics::counters(usageType).getCipherKeysLatency.addMeasurement(elapsed);
 	return cipherKeys;
 }
