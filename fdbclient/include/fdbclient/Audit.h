@@ -127,11 +127,13 @@ struct TriggerAuditRequest {
 	TriggerAuditRequest(AuditType type, KeyRange range, int periodHours)
 	  : type(static_cast<uint8_t>(type)), range(range), cancel(false), periodHours(periodHours), periodic(true) {}
 
+	TriggerAuditRequest(AuditType type) : type(static_cast<uint8_t>(type)), cancel(true), periodic(true) {}
+
 	TriggerAuditRequest(AuditType type, UID id)
 	  : type(static_cast<uint8_t>(type)), id(id), cancel(true), periodic(false) {}
 
-	void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
-	AuditType getType() const { return static_cast<AuditType>(this->type); }
+	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
+	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -143,8 +145,39 @@ struct TriggerAuditRequest {
 	KeyRange range;
 	bool cancel;
 	bool periodic;
-	int periodHours;
+	double periodHours;
 	ReplyPromise<UID> reply;
+};
+
+struct AuditStorageScheduleState {
+	constexpr static FileIdentifier file_identifier = 1384446;
+
+	AuditStorageScheduleState() = default;
+
+	AuditStorageScheduleState(TriggerAuditRequest req)
+	  : type(static_cast<uint8_t>(req.getType())), range(req.range), periodHours(req.periodHours) {}
+
+	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
+	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
+
+	inline void setAuditId(UID AuditId) { latestAuditId = AuditId; }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, latestAuditId, type, range, periodHours);
+	}
+
+	std::string toString() const {
+		std::string res = "AuditStorageScheduleState: [ID]: " + latestAuditId.toString() +
+		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(type) + ", [PeriodHours]: " + std::to_string(periodHours);
+		return res;
+	}
+
+	UID latestAuditId;
+	uint8_t type;
+	KeyRange range;
+	double periodHours;
 };
 
 #endif

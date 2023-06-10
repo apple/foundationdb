@@ -103,7 +103,10 @@ extern const KeyRangeRef auditKeys;
 extern const KeyRef auditPrefix;
 extern const KeyRangeRef auditRanges;
 extern const KeyRef auditRangePrefix;
+extern const KeyRangeRef auditScheduleKeys;
 
+// Key for audit schedule
+const Key auditStorageScheduleKey(const AuditType type);
 // Key for a particular audit
 const Key auditKey(const AuditType type, const UID& auditId);
 // KeyRange for whole audit
@@ -121,6 +124,9 @@ const KeyRange auditServerBasedProgressRangeFor(const AuditType type);
 
 const Value auditStorageStateValue(const AuditStorageState& auditStorageState);
 AuditStorageState decodeAuditStorageState(const ValueRef& value);
+
+const Value auditStorageScheduleStateValue(const AuditStorageScheduleState& auditScheduleState);
+AuditStorageScheduleState decodeAuditStorageScheduleState(const ValueRef& value);
 
 // "\xff/checkpoint/[[UID]] := [[CheckpointMetaData]]"
 extern const KeyRef checkpointPrefix;

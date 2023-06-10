@@ -110,6 +110,17 @@ struct DDAudit {
 	bool isCancelled() const { return cancelled; }
 };
 
+struct DDAuditSchedule {
+	DDAuditSchedule() = default;
+	DDAuditSchedule(AuditStorageScheduleState scheduleState) : coreState(scheduleState) {}
+
+	inline void setTrigger(Future<Void> actor) { trigger = actor; }
+	inline void cancelTrigger() { return trigger.cancel(); }
+
+	AuditStorageScheduleState coreState;
+	Future<Void> trigger;
+};
+
 void DataMove::validateShard(const DDShardInfo& shard, KeyRangeRef range, int priority) {
 	if (!valid) {
 		if (shard.hasDest && shard.destId != anonymousShardId) {
@@ -343,6 +354,7 @@ public:
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
 	std::unordered_map<AuditType, AsyncVar<int>> remainingBudgetForAuditTasks;
+	std::unordered_map<AuditType, std::shared_ptr<DDAuditSchedule>> auditSchedules;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
@@ -781,7 +793,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
                                     std::string context,
                                     int currentRetryCount);
 ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRange, AuditType auditType);
-ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req);
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req, std::string context);
 void loadAndDispatchAudit(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, KeyRange range);
 ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit);
 ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> self,
@@ -797,6 +809,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           std::shared_ptr<DDAudit> audit,
                                           StorageServerInterface ssi,
                                           AuditStorageRequest req);
+ACTOR Future<Void> auditStoragePeriodicTrigger(Reference<DataDistributor> self, AuditType auditType);
 
 void cancelAllAuditsInAuditMap(Reference<DataDistributor> self) {
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId).detail("Ops", "cancelAllAuditsInAuditMap");
@@ -807,6 +820,17 @@ void cancelAllAuditsInAuditMap(Reference<DataDistributor> self) {
 		}
 	}
 	self->audits.clear();
+	return;
+}
+
+void resumeAuditStorageSchedule(Reference<DataDistributor> self) {
+	for (const auto& auditScheduleState : self->initData->auditScheduleStates) {
+		std::shared_ptr<DDAuditSchedule> auditSchedule =
+		    std::make_shared<DDAuditSchedule>(DDAuditSchedule(auditScheduleState));
+		self->auditSchedules[auditScheduleState.getType()] = auditSchedule;
+		self->auditSchedules[auditScheduleState.getType()]->setTrigger(
+		    auditStoragePeriodicTrigger(self, auditScheduleState.getType()));
+	}
 	return;
 }
 
@@ -1063,6 +1087,7 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
 
+			resumeAuditStorageSchedule(self);
 			actors.push_back(resumeStorageAudits(self));
 
 			actors.push_back(self->pollMoveKeysLock());
@@ -1800,6 +1825,70 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
+ACTOR Future<Void> auditStoragePeriodicTrigger(Reference<DataDistributor> self, AuditType auditType) {
+	try {
+		if (!self->auditSchedules.contains(auditType)) {
+			return Void();
+		}
+		ASSERT(self->auditSchedules[auditType]->coreState.getType() == auditType);
+		state KeyRange range = self->auditSchedules[auditType]->coreState.range;
+		state double periodHours = self->auditSchedules[auditType]->coreState.periodHours;
+		ActorCollection actors;
+		actors.add(auditStorage(self, TriggerAuditRequest(auditType, range), "PeriodicTrigger"));
+		actors.add(delay(periodHours * 3600));
+		wait(actors.getResult());
+		self->auditSchedules[auditType]->setTrigger(auditStoragePeriodicTrigger(self, auditType));
+	} catch (Error& e) {
+		throw e;
+	}
+	return Void();
+}
+
+ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	state MoveKeyLockInfo lockInfo;
+	lockInfo.myOwner = self->lock.myOwner;
+	lockInfo.prevOwner = self->lock.prevOwner;
+	lockInfo.prevWrite = self->lock.prevWrite;
+	state AuditStorageScheduleState auditScheduleState(req);
+	try {
+		wait(persistAuditScheduleState(
+		    self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
+		std::shared_ptr<DDAuditSchedule> auditSchedule =
+		    std::make_shared<DDAuditSchedule>(DDAuditSchedule(auditScheduleState));
+		self->auditSchedules[req.getType()] = auditSchedule;
+		self->auditSchedules[req.getType()]->setTrigger(auditStoragePeriodicTrigger(self, req.getType()));
+		req.reply.send(UID());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		req.reply.sendError(audit_storage_schedule_failed());
+	}
+	return Void();
+}
+
+ACTOR Future<Void> cancelAuditStorageSchedule(Reference<DataDistributor> self, TriggerAuditRequest req) {
+	state MoveKeyLockInfo lockInfo;
+	lockInfo.myOwner = self->lock.myOwner;
+	lockInfo.prevOwner = self->lock.prevOwner;
+	lockInfo.prevWrite = self->lock.prevWrite;
+	try {
+		wait(clearAuditScheduleState(
+		    self->txnProcessor->context(), req.getType(), lockInfo, self->context->isDDEnabled()));
+		if (self->auditSchedules.contains(req.getType())) {
+			self->auditSchedules[req.getType()]->cancelTrigger();
+			self->auditSchedules.erase(req.getType());
+		}
+		req.reply.send(UID());
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw e;
+		}
+		req.reply.sendError(cancel_audit_storage_schedule_failed());
+	}
+	return Void();
+}
+
 // Maintain an alive state of an audit until the audit completes
 // Automatically retry until if errors of the auditing process happen
 // Return if (1) audit completes; (2) retry times exceed the maximum retry times
@@ -2138,7 +2227,7 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 // 2. failed to persist new audit state; 3. DD is cancelled during persisting new audit state
 // For 1 and 2, we believe no new audit is persisted; For 3, we do not know whether a new
 // audit is persisted, but DD will restart and the new audit will be resume if created.
-ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req) {
+ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditRequest req, std::string context) {
 	state FlowLock::Releaser holder;
 	if (req.getType() == AuditType::ValidateHA) {
 		wait(self->auditStorageHaLaunchingLock.take(TaskPriority::DefaultYield));
@@ -2164,14 +2253,16 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range)
-			    .detail("IsReady", self->auditInitialized.getFuture().isReady());
+			    .detail("IsReady", self->auditInitialized.getFuture().isReady())
+			    .detail("Context", context);
 			UID auditID = wait(launchAudit(self, req.range, req.getType()));
 			req.reply.send(auditID);
-			TraceEvent(SevVerbose, "DDAuditStorageReply", self->ddId)
+			TraceEvent(SevDebug, "DDAuditStorageReply", self->ddId)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
 			    .detail("Range", req.range)
-			    .detail("AuditID", auditID);
+			    .detail("AuditID", auditID)
+			    .detail("Context", context);
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled) {
 				throw e;
@@ -2180,7 +2271,8 @@ ACTOR Future<Void> auditStorage(Reference<DataDistributor> self, TriggerAuditReq
 			    .errorUnsuppressed(e)
 			    .detail("RetryCount", retryCount)
 			    .detail("AuditType", req.getType())
-			    .detail("Range", req.range);
+			    .detail("Range", req.range)
+			    .detail("Context", context);
 			if (e.code() == error_code_operation_failed && g_network->isSimulated()) {
 				throw audit_storage_failed(); // to trigger dd restart
 			} else if (e.code() == error_code_audit_storage_exceeded_request_limit) {
@@ -2747,17 +2839,16 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 				req.reply.send(getStorageWigglerStates(self));
 			}
 			when(TriggerAuditRequest req = waitNext(di.triggerAudit.getFuture())) {
-				if (req.cancel) {
+				if (req.cancel && !req.periodic) {
 					ASSERT(req.id.isValid());
 					actors.add(cancelAuditStorage(self, req));
-					continue;
-				} else if (req.periodic) {
-					// 1. perist periodic config (grab lock), 2. trigger background trigger
-					// background trigger starts when DD restarts
-					// When resume, we need load periodic config and trigger the background trigger
-					continue;
+				} else if (!req.cancel && req.periodic) {
+					actors.add(auditStorageSchedule(self, req));
+				} else if (req.cancel && req.periodic) {
+					actors.add(cancelAuditStorageSchedule(self, req));
+				} else {
+					actors.add(auditStorage(self, req, "ClientRequest"));
 				}
-				actors.add(auditStorage(self, req));
 			}
 			when(TenantsOverStorageQuotaRequest req = waitNext(di.tenantsOverStorageQuota.getFuture())) {
 				req.reply.send(getTenantsOverStorageQuota(self));

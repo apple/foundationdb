@@ -74,6 +74,43 @@ struct ValidateStorage : TestWorkload {
 		return _start(this, cx);
 	}
 
+	ACTOR Future<Void> triggerAuditScheduleStorageForType(Database cx, AuditType type, double periodHours) {
+		// Send audit schedule request until the cluster accepts the request
+		loop {
+			try {
+				wait(schedulePeriodAuditStorage(cx->getConnectionRecord(),
+				                                allKeys,
+				                                type,
+				                                periodHours,
+				                                /*timeoutSecond=*/300));
+				TraceEvent("TestAuditStorageScheduled").detail("AuditType", type);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TestAuditStorageScheduleError").errorUnsuppressed(e).detail("AuditType", type);
+				wait(delay(1));
+			}
+		}
+		return Void();
+	}
+
+	ACTOR Future<Void> cancelAuditScheduleStorageForType(Database cx, AuditType type) {
+		loop {
+			try {
+				wait(cancelSchedulePeriodAuditStorage(cx->getConnectionRecord(),
+				                                      type,
+				                                      /*timeoutSecond=*/300));
+				TraceEvent("TestAuditStorageScheduleCancelled").detail("AuditType", type);
+				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TestAuditStorageScheduleCancelError")
+				    .errorUnsuppressed(e)
+				    .detail("AuditType", type);
+				wait(delay(1));
+			}
+		}
+		return Void();
+	}
+
 	ACTOR Future<UID> triggerAuditStorageForType(Database cx, AuditType type, std::string context) {
 		// Send audit request until the cluster accepts the request
 		state UID auditId;
@@ -276,6 +313,9 @@ struct ValidateStorage : TestWorkload {
 
 		wait(self->testAuditStorageCancellation(self, cx));
 		TraceEvent("TestAuditStorageCancellationDone");
+
+		wait(self->testAuditStorageScheduleAndCancellation(self, cx));
+		TraceEvent("TestAuditStorageScheduleAndCancellationDone");
 
 		return Void();
 	}
@@ -602,6 +642,49 @@ struct ValidateStorage : TestWorkload {
 			}
 		}
 		TraceEvent("TestAuditStorageCancellationEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageScheduleAndCancellation(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageScheduleAndCancellationBegin");
+		state UID auditId1 = wait(self->triggerAuditStorageForType(
+		    cx, AuditType::ValidateReplica, "TestAuditStorageScheduleAndCancellation"));
+		state UID auditId2 = wait(
+		    self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditStorageScheduleAndCancellation"));
+		state std::vector<Future<Void>> fs;
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 10.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 300.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 10.0 / 3600));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateHA));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateHA));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 100.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateReplica, 100.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateLocationMetadata, 100.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateLocationMetadata, 100.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateLocationMetadata, 200.0 / 3600));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateLocationMetadata));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateStorageServerShard));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateStorageServerShard));
+		wait(waitForAll(fs));
+		fs.clear();
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 10.0 / 3600));
+		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateReplica, 400.0 / 3600));
+		wait(waitForAll(fs));
+		state UID auditId3 = wait(self->triggerAuditStorageForType(
+		    cx, AuditType::ValidateReplica, "TestAuditStorageScheduleAndCancellation"));
+		state UID auditId4 = wait(
+		    self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditStorageScheduleAndCancellation"));
+		fs.clear();
+		fs.push_back(self->checkAuditStorageInternalState(
+		    cx, AuditType::ValidateHA, auditId2, "TestAuditStorageScheduleAndCancellation"));
+		fs.push_back(self->checkAuditStorageInternalState(
+		    cx, AuditType::ValidateReplica, auditId1, "TestAuditStorageScheduleAndCancellation"));
+		fs.push_back(self->checkAuditStorageInternalState(
+		    cx, AuditType::ValidateHA, auditId4, "TestAuditStorageScheduleAndCancellation"));
+		fs.push_back(self->checkAuditStorageInternalState(
+		    cx, AuditType::ValidateReplica, auditId3, "TestAuditStorageScheduleAndCancellation"));
+		wait(waitForAll(fs));
+		TraceEvent("TestAuditStorageScheduleAndCancellationEnd");
 		return Void();
 	}
 

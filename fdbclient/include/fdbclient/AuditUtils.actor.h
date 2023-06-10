@@ -69,5 +69,11 @@ ACTOR Future<Void> clearAuditMetadataForType(Database cx,
 ACTOR Future<bool> checkStorageServerRemoved(Database cx, UID ssid);
 ACTOR Future<Void> updateAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
 AuditPhase stringToAuditPhase(std::string auditPhaseStr);
+ACTOR Future<Void> persistAuditScheduleState(Database cx,
+                                             AuditStorageScheduleState auditScheduleState,
+                                             MoveKeyLockInfo lock,
+                                             bool ddEnabled);
+ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled);
+ACTOR Future<std::vector<AuditStorageScheduleState>> getAuditSchedules(Database cx);
 #include "flow/unactorcompiler.h"
 #endif

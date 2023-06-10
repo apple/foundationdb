@@ -1921,7 +1921,7 @@ ACTOR Future<Void> handleForcedRecoveries(ClusterControllerData* self, ClusterCo
 
 ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
 	state UID auditId;
-	ASSERT(!req.cancel);
+	ASSERT(!req.periodic && !req.cancel);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
@@ -1953,7 +1953,7 @@ ACTOR Future<Void> triggerAuditStorage(ClusterControllerData* self, TriggerAudit
 }
 
 ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
-	ASSERT(req.cancel);
+	ASSERT(!req.periodic && req.cancel);
 	try {
 		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
 		       !self->db.serverInfo->get().distributor.present()) {
@@ -1967,7 +1967,7 @@ ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditR
 		UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
 		TraceEvent(SevVerbose, "CCCancelAuditStorageEnd", self->id)
 		    .detail("ReturnedAuditID", auditId)
-		    .detail("AuditID", auditId)
+		    .detail("AuditID", req.id)
 		    .detail("AuditType", req.getType());
 		ASSERT(auditId == req.id);
 		req.reply.send(auditId);
@@ -1982,6 +1982,57 @@ ACTOR Future<Void> cancelAuditStorage(ClusterControllerData* self, TriggerAuditR
 	return Void();
 }
 
+ACTOR Future<Void> scheduleAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+	ASSERT(req.periodic && !req.cancel);
+	try {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.serverInfo->get().distributor.present()) {
+			wait(self->db.serverInfo->onChange());
+		}
+		TraceEvent(SevVerbose, "CCScheduleAuditStorageBegin", self->id)
+		    .detail("PeriodHours", req.periodHours)
+		    .detail("AuditType", req.getType())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TriggerAuditRequest fReq(req.getType(), req.range, req.periodHours);
+		UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		TraceEvent(SevVerbose, "CCScheduleAuditStorageEnd", self->id)
+		    .detail("PeriodHours", req.periodHours)
+		    .detail("AuditType", req.getType());
+		req.reply.send(UID());
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "CCScheduleAuditStorageFailed", self->id)
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", req.getType());
+		req.reply.sendError(audit_storage_schedule_failed());
+	}
+
+	return Void();
+}
+
+ACTOR Future<Void> cancelScheduleAuditStorage(ClusterControllerData* self, TriggerAuditRequest req) {
+	ASSERT(req.periodic && req.cancel);
+	try {
+		while (self->db.serverInfo->get().recoveryState < RecoveryState::ACCEPTING_COMMITS ||
+		       !self->db.serverInfo->get().distributor.present()) {
+			wait(self->db.serverInfo->onChange());
+		}
+		TraceEvent(SevVerbose, "CCCancelScheduleAuditStorageBegin", self->id)
+		    .detail("AuditType", req.getType())
+		    .detail("DDId", self->db.serverInfo->get().distributor.get().id());
+		TriggerAuditRequest fReq(req.getType());
+		UID auditId = wait(self->db.serverInfo->get().distributor.get().triggerAudit.getReply(fReq));
+		TraceEvent(SevVerbose, "CCCancelAuditStorageEnd", self->id).detail("AuditType", req.getType());
+		req.reply.send(UID());
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "CCCancelAuditStorageFailed", self->id)
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", req.getType());
+		req.reply.sendError(cancel_audit_storage_schedule_failed());
+	}
+
+	return Void();
+}
+
 ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, ClusterControllerFullInterface interf) {
 	loop {
 		TriggerAuditRequest req = waitNext(interf.clientInterface.triggerAudit.getFuture());
@@ -1989,11 +2040,15 @@ ACTOR Future<Void> handleTriggerAuditStorage(ClusterControllerData* self, Cluste
 		    .detail("ClusterControllerDcId", self->clusterControllerDcId)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.getType());
-		if (req.cancel) {
+		if (req.cancel && !req.periodic) {
 			ASSERT(req.id.isValid());
 			self->addActor.send(cancelAuditStorage(self, req));
-		} else {
+		} else if (!req.cancel && !req.periodic) {
 			self->addActor.send(triggerAuditStorage(self, req));
+		} else if (!req.cancel && req.periodic) {
+			self->addActor.send(scheduleAuditStorage(self, req));
+		} else {
+			self->addActor.send(cancelScheduleAuditStorage(self, req));
 		}
 	}
 }

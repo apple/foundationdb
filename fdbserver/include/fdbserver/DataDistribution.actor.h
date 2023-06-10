@@ -500,6 +500,7 @@ struct InitialDataDistribution : ReferenceCounted<InitialDataDistribution> {
 	Optional<Key> initHealthyZoneValue; // set for maintenance mode
 	KeyRangeMap<std::shared_ptr<DataMove>> dataMoveMap;
 	std::vector<AuditStorageState> auditStates;
+	std::vector<AuditStorageScheduleState> auditScheduleStates;
 	Reference<DDConfiguration::RangeConfigMapSnapshot> userRangeConfig;
 };
 

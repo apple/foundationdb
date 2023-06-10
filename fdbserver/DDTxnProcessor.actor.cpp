@@ -371,6 +371,13 @@ class DDTxnProcessorImpl {
 					result->auditStates.push_back(auditState);
 				}
 
+				RangeResult adss = wait(tr.getRange(auditScheduleKeys, CLIENT_KNOBS->TOO_MANY));
+				ASSERT(!adss.more && adss.size() < CLIENT_KNOBS->TOO_MANY);
+				for (int i = 0; i < adss.size(); ++i) {
+					auto auditScheduleState = decodeAuditStorageScheduleState(adss[i].value);
+					result->auditScheduleStates.push_back(auditScheduleState);
+				}
+
 				succeeded = true;
 
 				break;

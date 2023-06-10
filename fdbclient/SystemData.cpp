@@ -309,6 +309,15 @@ const KeyRangeRef auditRanges = KeyRangeRef("\xff/auditRanges/"_sr, "\xff/auditR
 const KeyRef auditRangePrefix = auditRanges.begin;
 const KeyRangeRef auditServers = KeyRangeRef("\xff/auditServers/"_sr, "\xff/auditServers0"_sr);
 const KeyRef auditServerPrefix = auditServers.begin;
+const KeyRangeRef auditScheduleKeys = KeyRangeRef("\xff/auditSchedules/"_sr, "\xff/auditSchedules0"_sr);
+const KeyRef auditSchedulePrefix = auditScheduleKeys.begin;
+
+const Key auditStorageScheduleKey(const AuditType type) {
+	BinaryWriter wr(Unversioned());
+	wr.serializeBytes(auditSchedulePrefix);
+	wr << static_cast<uint8_t>(type);
+	return wr.toValue();
+}
 
 const Key auditKey(const AuditType type, const UID& auditId) {
 	BinaryWriter wr(Unversioned());
@@ -394,6 +403,17 @@ AuditStorageState decodeAuditStorageState(const ValueRef& value) {
 	ObjectReader reader(value.begin(), IncludeVersion());
 	reader.deserialize(auditState);
 	return auditState;
+}
+
+const Value auditStorageScheduleStateValue(const AuditStorageScheduleState& auditScheduleState) {
+	return ObjectWriter::toValue(auditScheduleState, IncludeVersion());
+}
+
+AuditStorageScheduleState decodeAuditStorageScheduleState(const ValueRef& value) {
+	AuditStorageScheduleState auditScheduleState;
+	ObjectReader reader(value.begin(), IncludeVersion());
+	reader.deserialize(auditScheduleState);
+	return auditScheduleState;
 }
 
 const KeyRef checkpointPrefix = "\xff/checkpoint/"_sr;

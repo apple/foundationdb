@@ -147,6 +147,8 @@ ERROR( retry_clean_up_datamove_tombstone_added, 1229, "Need background datamove 
 ERROR( persist_new_audit_metadata_error, 1230, "Persist new audit metadata error" )
 ERROR( cancel_audit_storage_failed, 1231, "Failed to cancel an audit" )
 ERROR( audit_storage_cancelled, 1232, "Audit has been cancelled" )
+ERROR( audit_storage_schedule_failed, 1233, "Audit is failed to be scheduled" )
+ERROR( cancel_audit_storage_schedule_failed, 1234, "Audit schedule is failed to be cancelled" )
 
 // 15xx Platform errors
 ERROR( platform_error, 1500, "Platform error" )

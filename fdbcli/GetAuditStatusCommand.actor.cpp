@@ -36,6 +36,14 @@ ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef
 		return false;
 	}
 
+	if (tokencmp(tokens[1], "schedule")) {
+		std::vector<AuditStorageScheduleState> res = wait(getAuditSchedules(cx));
+		for (const auto& it : res) {
+			printf("Audit schedule is:\n%s\n", it.toString().c_str());
+		}
+		return true;
+	}
+
 	AuditType type = AuditType::Invalid;
 	if (tokencmp(tokens[1], "ha")) {
 		type = AuditType::ValidateHA;
