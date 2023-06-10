@@ -160,21 +160,19 @@ struct AuditStorageScheduleState {
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
-	inline void setAuditId(UID AuditId) { latestAuditId = AuditId; }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, latestAuditId, type, range, periodHours);
+		serializer(ar, type, range, periodHours);
 	}
 
 	std::string toString() const {
-		std::string res = "AuditStorageScheduleState: [ID]: " + latestAuditId.toString() +
-		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
-		                  ", [Type]: " + std::to_string(type) + ", [PeriodHours]: " + std::to_string(periodHours);
+		std::string res = "AuditStorageScheduleState: "
+		                  "[Range]: " +
+		                  Traceable<KeyRangeRef>::toString(range) + ", [Type]: " + std::to_string(type) +
+		                  ", [PeriodHours]: " + std::to_string(periodHours);
 		return res;
 	}
 
-	UID latestAuditId;
 	uint8_t type;
 	KeyRange range;
 	double periodHours;

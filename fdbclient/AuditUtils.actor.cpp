@@ -802,6 +802,7 @@ ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, Mov
 ACTOR Future<std::vector<AuditStorageScheduleState>> getAuditSchedules(Database cx) {
 	state Transaction tr(cx);
 	state std::vector<AuditStorageScheduleState> auditScheduleStates;
+
 	loop {
 		try {
 			auditScheduleStates.clear();
@@ -819,5 +820,6 @@ ACTOR Future<std::vector<AuditStorageScheduleState>> getAuditSchedules(Database 
 			wait(tr.onError(e));
 		}
 	}
+
 	return auditScheduleStates;
 }
