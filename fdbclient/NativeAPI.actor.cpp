@@ -9537,9 +9537,6 @@ ACTOR Future<Void> handleShutdown(DatabaseContext* db) {
 	try {
 		wait(db->storage->getError());
 	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			throw;
-		}
 		TraceEvent("ChangeFeedCacheDiskError").error(e);
 	}
 	db->initializeChangeFeedCache = Void();
