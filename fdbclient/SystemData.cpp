@@ -1451,6 +1451,8 @@ std::tuple<Key, KeyRange, Version> decodeChangeFeedCacheKey(KeyRef const& prefix
 	reader >> version;
 	return std::make_tuple(feed, range, bigEndian64(version));
 }
+
+// The versions of these mutations must be less than or equal to the version in the changeFeedCacheKey
 const Value changeFeedCacheValue(Standalone<VectorRef<MutationsAndVersionRef>> const& mutations) {
 	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
 	wr << mutations;

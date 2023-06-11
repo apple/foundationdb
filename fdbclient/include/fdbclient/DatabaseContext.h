@@ -237,9 +237,10 @@ struct ChangeFeedCacheRange {
 };
 
 struct ChangeFeedCacheData : ReferenceCounted<ChangeFeedCacheData> {
-	Version version = -1;
-	Version latest = -1;
-	Version popped = -1;
+	Version version = -1; // The first version durably stored in the cache
+	Version latest =
+	    -1; // The last version durably store in the cache; this version will not be readable from disk before a commit
+	Version popped = -1; // The popped version of this change feed
 	bool active = false;
 	double inactiveTime = 0;
 };
