@@ -10907,6 +10907,7 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 						results->streams.clear();
 						results->storageData.clear();
 						return Void();
+					}
 				}
 			}
 			if (end == MAX_VERSION) {
