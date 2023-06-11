@@ -9509,7 +9509,9 @@ ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 ACTOR Future<Void> initializeCFCache(DatabaseContext* db) {
 	state Key beginKey = changeFeedCacheFeedKeys.begin;
 	loop {
-		RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, changeFeedCacheFeedKeys.end), 5e5, 5e5));
+		RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, changeFeedCacheFeedKeys.end),
+		                                              CLIENT_KNOBS->CHANGE_FEED_CACHE_LIMIT_BYTES,
+		                                              CLIENT_KNOBS->CHANGE_FEED_CACHE_LIMIT_BYTES));
 		if (res.size()) {
 			beginKey = keyAfter(res.back().key);
 		} else {
@@ -10639,7 +10641,9 @@ ACTOR Future<bool> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
 	loop {
 		Key beginKey = changeFeedCacheKey(tenantPrefix, rangeID, range, *begin);
 		Key endKey = changeFeedCacheKey(tenantPrefix, rangeID, range, MAX_VERSION);
-		state RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, endKey), 5e5, 5e5));
+		state RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, endKey),
+		                                                    CLIENT_KNOBS->CHANGE_FEED_CACHE_LIMIT_BYTES,
+		                                                    CLIENT_KNOBS->CHANGE_FEED_CACHE_LIMIT_BYTES));
 		state int idx = 0;
 
 		while (!foundEnd && idx < res.size()) {

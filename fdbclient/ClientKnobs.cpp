@@ -86,6 +86,7 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_COALESCE_LOCATIONS,        false ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
 	init( CHANGE_FEED_CACHE_FLUSH_BYTES,          10e6 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_FLUSH_BYTES = deterministicRandom()->randomInt64(1, 1e6);
 	init( CHANGE_FEED_CACHE_EXPIRE_TIME,          60.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_EXPIRE_TIME = 1.0;
+	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
