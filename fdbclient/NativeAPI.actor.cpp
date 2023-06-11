@@ -10238,7 +10238,7 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
 					cacheOut.pop_front(1);
 				}
-				if (!cacheOut.back().mutations.empty()) {
+				if (!cacheOut.empty()) {
 					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.back().version);
 					Value durableValue = changeFeedCacheValue(cacheOut);
 					db->storage->set(KeyValueRef(durableKey, durableValue));
@@ -10471,7 +10471,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
 					cacheOut.pop_front(1);
 				}
-				if (!cacheOut.back().mutations.empty()) {
+				if (!cacheOut.empty()) {
 					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.back().version);
 					Value durableValue = changeFeedCacheValue(cacheOut);
 					db->storage->set(KeyValueRef(durableKey, durableValue));
