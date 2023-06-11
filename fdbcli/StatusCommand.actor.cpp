@@ -26,6 +26,7 @@
 #include "fdbclient/IClientApi.h"
 #include "fdbclient/Knobs.h"
 #include "fdbclient/StatusClient.h"
+#include "fdbclient/BlobRestoreCommon.h"
 
 #include "flow/Arena.h"
 #include "flow/FastRef.h"

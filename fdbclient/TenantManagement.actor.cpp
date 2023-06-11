@@ -83,6 +83,7 @@ int64_t computeNextTenantId(int64_t baseId, int64_t delta) {
 		TraceEvent(g_network->isSimulated() ? SevWarnAlways : SevError, "NoMoreTenantIds")
 		    .detail("LastTenantId", baseId)
 		    .detail("TenantIdPrefix", getTenantIdPrefix(baseId));
+		CODE_PROBE(true, "Tenant IDs exhausted");
 		throw cluster_no_capacity();
 	}
 

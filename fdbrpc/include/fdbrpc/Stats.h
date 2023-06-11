@@ -27,6 +27,7 @@
 #include "flow/serialize.h"
 #include <string>
 #include <type_traits>
+#include "flow/swift_support.h"
 #pragma once
 
 // Yet another performance statistics interface
@@ -61,6 +62,7 @@ struct ICounter : public IMetric {
 	virtual void resetInterval() = 0;
 
 	virtual void remove() {}
+	virtual bool suppressTrace() const { return false; }
 };
 
 template <>
@@ -114,7 +116,7 @@ struct Counter final : public ICounter, NonCopyable {
 public:
 	typedef int64_t Value;
 
-	Counter(std::string const& name, CounterCollection& collection);
+	Counter(std::string const& name, CounterCollection& collection, bool skipTraceOnSilentInterval = false);
 
 	void operator+=(Value delta);
 	void operator++() { *this += 1; }
@@ -144,11 +146,14 @@ public:
 	bool hasRate() const override { return true; }
 	bool hasRoughness() const override { return true; }
 
+	bool suppressTrace() const override { return skip_trace_on_silent_interval && getIntervalDelta() == 0; }
+
 private:
 	std::string name;
 	double interval_start, last_event, interval_sq_time, roughness_interval_start;
 	Value interval_delta, interval_start_value;
 	Int64MetricHandle metric;
+	bool skip_trace_on_silent_interval;
 };
 
 template <>
@@ -226,7 +231,11 @@ public:
 
 class LatencySample : public IMetric {
 public:
-	LatencySample(std::string name, UID id, double loggingInterval, double accuracy);
+	LatencySample(std::string name,
+	              UID id,
+	              double loggingInterval,
+	              double accuracy,
+	              bool skipTraceOnSilentInterval = false);
 	void addMeasurement(double measurement);
 
 private:
@@ -247,6 +256,7 @@ private:
 
 	DDSketch<double> sketch;
 	Future<Void> logger;
+	bool skipTraceOnSilentInterval;
 
 	Reference<EventCacheHolder> latencySampleEventHolder;
 

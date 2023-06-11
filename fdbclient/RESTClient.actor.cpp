@@ -97,6 +97,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 	state UnsentPacketQueue content;
 	req->data.content = &content;
 	req->data.contentLen = url.body.size();
+	req->data.headers = headers;
 	req->data.headers["Host"] = url.host;
 	req->verb = verb;
 	req->resource = url.resource;

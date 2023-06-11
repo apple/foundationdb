@@ -5,11 +5,14 @@ processesPerMachine = 1
 coordinators = 3
 machineCount = 15
 allowDefaultTenant = false
+disableTss = true
 
 [[knobs]]
 shard_encode_location_metadata = true
-enable_dd_physical_shard = true
-min_byte_sampling_probability = 0.99
+# enable_dd_physical_shard = true
+# min_byte_sampling_probability = 0.99
+# rocksdb_read_range_reuse_iterators = false
+dd_physical_shard_move_probability = 1.0
 
 [[test]]
 testTitle = 'PhysicalShardMove'

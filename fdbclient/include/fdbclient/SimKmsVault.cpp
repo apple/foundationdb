@@ -20,6 +20,7 @@
 
 #include "fdbclient/SimKmsVault.h"
 #include "fdbclient/BlobCipher.h"
+#include "fdbclient/BlobMetadataUtils.h"
 #include "fdbclient/ClientKnobs.h"
 
 #include "fdbclient/Knobs.h"
@@ -28,6 +29,10 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/network.h"
+
+// The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
+// restarts. Keep it as global static state in simulation.
+static std::unordered_map<BlobMetadataDomainId, Standalone<BlobMetadataDetailsRef>> simBlobMetadataStore;
 
 SimKmsVaultKeyCtx::SimKmsVaultKeyCtx(EncryptCipherBaseKeyId kId, const uint8_t* data, const int dataLen)
   : id(kId), keyLen(dataLen) {
@@ -146,6 +151,19 @@ Reference<SimKmsVaultKeyCtx> getByDomainId(const EncryptCipherDomainId domainId)
 uint32_t maxSimKeys() {
 	Reference<SimKmsVaultCtx> vaultCtx = SimKmsVaultCtx::getInstance();
 	return vaultCtx->maxKeys();
+}
+
+Standalone<BlobMetadataDetailsRef> getBlobMetadata(const BlobMetadataDomainId domainId, const std::string& bgUrl) {
+	auto it = simBlobMetadataStore.find(domainId);
+	if (it == simBlobMetadataStore.end()) {
+		// construct new blob metadata
+		it = simBlobMetadataStore.insert({ domainId, createRandomTestBlobMetadata(bgUrl, domainId) }).first;
+	} else if (now() >= it->second.expireAt) {
+		// update random refresh and expire time
+		it->second.refreshAt = now() + deterministicRandom()->random01() * 30;
+		it->second.expireAt = it->second.refreshAt + deterministicRandom()->random01() * 10;
+	}
+	return it->second;
 }
 
 } // namespace SimKmsVault

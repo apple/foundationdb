@@ -56,6 +56,7 @@
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IConnection.h"
+#include "fdbserver/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -436,7 +437,7 @@ public:
 	Optional<std::string> remoteConfig;
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
-	bool simHTTPServerEnabled = false; // TODO default to true
+	bool simHTTPServerEnabled = true;
 
 	bool allowDefaultTenant = true;
 	bool allowCreatingTenants = true;
@@ -651,14 +652,16 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 }
 
 ACTOR Future<Void> runSimHTTPServer() {
+	TraceEvent("SimHTTPServerStarting");
 	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
 	g_simulator->addSimHTTPProcess(context);
 
 	try {
 		wait(context->actors.getResult());
 	} catch (Error& e) {
-		TraceEvent(SevError, "SimHTTPServerDied").error(e);
+		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
 		context->stop();
+		g_simulator->removeSimHTTPProcess();
 		throw e;
 	}
 	throw internal_error();
@@ -801,7 +804,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					futures.push_back(runDr(connRecord));
 				}
 				if (processRunHTTPServer(processMode)) {
-					fmt::print("Process run http server\n");
+					fmt::print("Process {0} run http server\n", ip.toString());
 					futures.push_back(runSimHTTPServer());
 				}
 
@@ -1013,8 +1016,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
 				platform::createDirectory(myFolders[i]);
 
-				if (!useSeedFile)
+				if (!useSeedFile) {
 					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+				}
 			}
 		}
 
@@ -1022,14 +1026,21 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				// Fall back to use seed string if fdb.cluster not present
-				// It can happen when a process failed before it persisted the connection string to disk
-				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
-				                                     : new ClusterConnectionFile(path));
-				const int listenPort = i * listenPerProcess + 1;
 				ProcessMode ipProcessMode =
 				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;
+
+				// for some reason http servers are having issues with seed files which doesn't matter because they
+				// don't use the db
+				Reference<IClusterConnectionRecord> clusterFile;
+				if (ipProcessMode != SimHTTPServer) {
+					// Fall back to use seed string if fdb.cluster not present
+					// It can happen when a process failed before it persisted the connection string to disk
+					clusterFile = Reference<IClusterConnectionRecord>(
+					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
+					                                     : new ClusterConnectionFile(path));
+				}
+				const int listenPort = i * listenPerProcess + 1;
+
 				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
@@ -1317,10 +1328,12 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 		auto tssModeStr = ini.GetValue("META", "tssMode");
 		auto tenantMode = ini.GetValue("META", "tenantMode");
 		if (tenantMode != nullptr) {
+			CODE_PROBE(true, "Restarting test with tenant mode set");
 			testConfig->tenantModes.push_back(tenantMode);
 		}
 		std::string defaultTenant = ini.GetValue("META", "defaultTenant", "");
 		if (!defaultTenant.empty()) {
+			CODE_PROBE(true, "Restarting test with default tenant set");
 			testConfig->defaultTenant = defaultTenant;
 		}
 		if (tssModeStr != nullptr) {
@@ -1434,7 +1447,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     baseFolder,
 			                     true,
 			                     i == useSeedForMachine,
-			                     FDBDAndBackupAgent,
+			                     processClass == ProcessClass::SimHTTPServerClass ? SimHTTPServer : FDBDAndBackupAgent,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
@@ -1693,6 +1706,10 @@ void SimulationConfig::setStorageEngine(const TestConfig& testConfig) {
 		while (testConfig.excludedStorageEngineType(storage_engine_type)) {
 			storage_engine_type = deterministicRandom()->randomInt(0, 6);
 		}
+	}
+
+	if (storage_engine_type == 5) {
+		set_config("encryption_at_rest_mode=disabled");
 	}
 
 	switch (storage_engine_type) {
@@ -2147,7 +2164,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+	if (!testConfig.singleRegion &&
+	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
 	setMachineCount(testConfig);
@@ -2180,6 +2198,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	*tenantMode = simconfig.db.tenantMode;
+
+	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
+		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
+	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
@@ -2461,9 +2483,8 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
 		if (testConfig.simHTTPServerEnabled) {
-			// FIXME: more eventually?
-			fmt::print("sim http machines = 1\n");
-			simHTTPMachines = 1;
+			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
+			fmt::print("sim http machines = {0}\n", simHTTPMachines);
 		}
 
 		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
@@ -2712,6 +2733,18 @@ ACTOR void setupAndRun(std::string dataFolder,
 		testConfig.storageEngineExcludeTypes.push_back(5);
 	}
 
+	if (std::string_view(testFile).find("Encrypt") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
+
+	if (std::string_view(testFile).find("BlobGranule") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
+
+	if (std::string_view(testFile).find("ChangeFeed") != std::string_view::npos) {
+		testConfig.storageEngineExcludeTypes.push_back(5);
+	}
+
 	state ProtocolVersion protocolVersion = currentProtocolVersion();
 	if (testConfig.startIncompatibleProcess) {
 		// isolates right most 1 bit of compatibleProtocolVersionMask to make this protocolVersion incompatible
@@ -2863,10 +2896,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	destructed = true;
 	wait(Never());
 	ASSERT(false);
-}
-
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
-	return generateBasicSimulationConfig(testConfig).db;
 }
 
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {

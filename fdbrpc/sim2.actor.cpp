@@ -52,6 +52,9 @@
 #include "crc32/crc32c.h"
 #include "fdbrpc/TraceFileIO.h"
 #include "flow/flow.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
+#include "flow/swift/ABI/Task.h"
 #include "flow/genericactors.actor.h"
 #include "flow/network.h"
 #include "flow/TLSConfig.actor.h"
@@ -560,7 +563,12 @@ private:
 	}
 
 	ACTOR static Future<Void> trackLeakedConnection(Sim2Conn* self) {
+		// FIXME: we could also just implement connection idle closing for sim http server instead
+		if (g_simulator->httpServerIps.count(self->process->address.ip)) {
+			return Void();
+		}
 		wait(g_simulator->onProcess(self->process));
+
 		if (self->process->address.isPublic()) {
 			wait(delay(FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * FLOW_KNOBS->CONNECTION_MONITOR_IDLE_TIMEOUT * 1.5 +
 			           FLOW_KNOBS->CONNECTION_MONITOR_LOOP_TIME * 2.1 + FLOW_KNOBS->CONNECTION_MONITOR_TIMEOUT));
@@ -1018,6 +1026,21 @@ public:
 		ASSERT(taskID >= TaskPriority::Min && taskID <= TaskPriority::Max);
 		return delay(seconds, taskID, currentProcess, true);
 	}
+
+	void _swiftEnqueue(void* _job) override {
+#ifdef WITH_SWIFT
+		ASSERT(getCurrentProcess());
+		swift::Job* job = (swift::Job*)_job;
+		TaskPriority priority = swift_priority_to_net2(job->getPriority());
+		ASSERT(priority >= TaskPriority::Min && priority <= TaskPriority::Max);
+
+		ISimulator::ProcessInfo* machine = currentProcess;
+
+		auto t = new PromiseTask(machine, job);
+		taskQueue.addReady(priority, t);
+#endif /* WITH_SWIFT */
+	}
+
 	Future<class Void> delay(double seconds, TaskPriority taskID, ProcessInfo* machine, bool ordered = false) {
 		ASSERT(seconds >= -0.0001);
 
@@ -2415,68 +2438,94 @@ public:
 		machines.erase(machineId);
 	}
 
+	// Assumes the simulator is already onProcess for proc
+	void startRequestHandlerOnProcess(ProcessInfo* process,
+	                                  Reference<HTTP::SimServerContext> serverContext,
+	                                  Reference<HTTP::SimRegisteredHandlerContext> handlerContext) {
+		try {
+			NetworkAddress addr = serverContext->newAddress();
+			process->listenerMap[addr] = Reference<IListener>(new Sim2Listener(process, addr));
+			addressMap[addr] = process;
+			handlerContext->addAddress(addr);
+			serverContext->registerNewServer(addr, handlerContext->requestHandler->clone());
+		} catch (Error& e) {
+			// this should never happen, but would cause weird behavior if it did like unintentionally switching
+			// processes, so just fail
+			TraceEvent(SevError, "UnexpectedErrorRegisteringHTTPServer").errorUnsuppressed(e);
+			ASSERT(false);
+		}
+	}
+
 	// add a simulated http server process. New http servers called by registerHTTPServer will run on this process
 	void addSimHTTPProcess(Reference<HTTP::SimServerContext> context) override {
 		ProcessInfo* p = getCurrentProcess();
+
+		if (!g_simulator->httpProtected) {
+			// always protect one http server process so that if others are killed permanently, one will always be
+			// rebooted
+			fmt::print("SimHTTPServer protecting {0}\n", p->address.toString());
+			TraceEvent(SevDebug, "HTTPProcessProtected").detail("Address", p->address);
+			g_simulator->httpProtected = true;
+			protectedAddresses.insert(p->address);
+		}
 		// make sure this process isn't already added
 		for (int i = 0; i < httpServerProcesses.size(); i++) {
 			ASSERT(p != httpServerProcesses[i].first);
 		}
 		httpServerProcesses.push_back({ p, context });
 		httpServerIps.insert(p->address.ip);
+
+		for (auto& it : httpHandlers) {
+			startRequestHandlerOnProcess(p, context, it.second);
+		}
+	}
+
+	void removeSimHTTPProcess() override {
+		ProcessInfo* p = getCurrentProcess();
+
+		bool found = false;
+		for (int i = 0; i < httpServerProcesses.size(); i++) {
+			if (p == httpServerProcesses[i].first) {
+				swapAndPop(&httpServerProcesses, i);
+				found = true;
+				break;
+			}
+		}
+		ASSERT(found);
+
+		// FIXME: potentially instead delay removing from DNS for a bit so we still briefly try to talk to dead server
+		for (auto& it : httpHandlers) {
+			it.second->removeIp(p->address.ip);
+		}
 	}
 
 	ACTOR static Future<Void> registerSimHTTPServerActor(Sim2* self,
 	                                                     std::string hostname,
 	                                                     std::string service,
-	                                                     int numAddresses,
 	                                                     Reference<HTTP::IRequestHandler> requestHandler) {
 		// handle race where test client tries to register server before all processes are up, but time out eventually
 		// FIXME: make this so a server that starts after this or a server that restarts will automatically re-add
 		// itself, register the handler, and register with dns
-		state int checks = 0;
-		while (self->httpServerProcesses.empty()) {
-			TraceEvent(SevWarn, "NoAvailableHTTPServerProcesses").detail("Checks", checks);
-			checks++;
-			ASSERT(checks < 10);
-			wait(self->delay(1.0, TaskPriority::DefaultDelay));
-		}
-		ASSERT(!self->httpServerProcesses.empty());
-		ASSERT(!self->httpServerHostnames.count(hostname));
-		ASSERT(numAddresses > 0);
+		std::string id = hostname + ":" + service;
+		ASSERT(!self->httpHandlers.count(id));
 
-		self->httpServerHostnames.insert(hostname);
+		state Reference<HTTP::SimRegisteredHandlerContext> handlerContext =
+		    makeReference<HTTP::SimRegisteredHandlerContext>(hostname, service, requestHandler);
+		self->httpHandlers.insert({ id, handlerContext });
 
-		state std::vector<NetworkAddress> addresses;
-		addresses.reserve(numAddresses);
-
-		// randomize order and round-robin servers among numAddresses
-		deterministicRandom()->randomShuffle(self->httpServerProcesses);
-
+		// start process on all running HTTP servers
 		state ProcessInfo* callingProcess = self->getCurrentProcess();
 		state int i = 0;
-		for (; i < numAddresses; i++) {
-			state ProcessInfo* serverProcess = self->httpServerProcesses[i % self->httpServerProcesses.size()].first;
+		// copy the processes before waits just to ensure no races with addSimHTTPProcess
+		state std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> procsCopy =
+		    self->httpServerProcesses;
+		for (; i < procsCopy.size(); i++) {
+			state ProcessInfo* serverProcess = procsCopy[i].first;
 			wait(self->onProcess(serverProcess, TaskPriority::DefaultYield));
-			try {
-				auto& proc = self->httpServerProcesses[i % self->httpServerProcesses.size()].second;
-				NetworkAddress addr = proc->newAddress();
-				addresses.push_back(addr);
-				serverProcess->listenerMap[addr] = Reference<IListener>(new Sim2Listener(serverProcess, addr));
-				self->addressMap[addr] = serverProcess;
-
-				proc->registerNewServer(addr, requestHandler->clone());
-			} catch (Error& e) {
-				// this should never happen, but would cause weird behavior if it did like unintentionally switching
-				// processes, so just fail
-				TraceEvent(SevError, "UnexpectedErrorRegisteringHTTPServer").errorUnsuppressed(e);
-				ASSERT(false);
-			}
+			self->startRequestHandlerOnProcess(serverProcess, procsCopy[i].second, handlerContext);
 		}
 
 		wait(self->onProcess(callingProcess, TaskPriority::DefaultYield));
-
-		INetworkConnections::net()->addMockTCPEndpoint(hostname, service, addresses);
 
 		return Void();
 	}
@@ -2484,9 +2533,8 @@ public:
 	// starts a numAddresses http servers with the dns alias hostname:service with the provided server callback
 	Future<Void> registerSimHTTPServer(std::string hostname,
 	                                   std::string service,
-	                                   int numAddresses,
 	                                   Reference<HTTP::IRequestHandler> requestHandler) override {
-		return registerSimHTTPServerActor(this, hostname, service, numAddresses, requestHandler);
+		return registerSimHTTPServerActor(this, hostname, service, requestHandler);
 	}
 
 	Sim2(bool printSimTime)
@@ -2504,7 +2552,7 @@ public:
 		// create a key pair for AuthZ testing
 		auto key = mkcert::makeEcP256();
 		authKeys.insert(std::make_pair(Standalone<StringRef>("DefaultKey"_sr), key));
-		g_network = net2 = newNet2(TLSConfig(), false, true);
+		g_network = net2 = newNet2(TLSConfig(), /*useThreadPool=*/false, true);
 		g_network->addStopCallback(Net2FileSystem::stop);
 		Net2FileSystem::newFileSystem();
 		check_yield(TaskPriority::Zero);
@@ -2514,8 +2562,12 @@ public:
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
 		ProcessInfo* machine;
-		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
+		swift::Job* _Nullable swiftJob = nullptr;
+
+		explicit PromiseTask(ProcessInfo* machine) : machine(machine), swiftJob(nullptr) {}
+		explicit PromiseTask(ProcessInfo* machine, swift::Job* swiftJob) : machine(machine), swiftJob(swiftJob) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise)
+		  : machine(machine), promise(std::move(promise)), swiftJob(nullptr) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
@@ -2524,7 +2576,15 @@ public:
 		} else {
 			this->currentProcess = t.machine;
 			try {
+#ifdef WITH_SWIFT
+				if (t.swiftJob) {
+					swift_job_run(t.swiftJob, ExecutorRef::generic());
+				} else {
+					t.promise.send(Void());
+				}
+#else
 				t.promise.send(Void());
+#endif
 				ASSERT(this->currentProcess == t.machine);
 			} catch (Error& e) {
 				TraceEvent(SevError, "UnhandledSimulationEventError").errorUnsuppressed(e);

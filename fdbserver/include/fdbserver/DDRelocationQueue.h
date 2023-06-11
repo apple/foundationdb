@@ -45,6 +45,7 @@ public:
 	int boundaryPriority;
 	int healthPriority;
 	RelocateReason reason;
+	DataMovementReason dmReason;
 
 	double startTime;
 	UID randomId; // inherit from RelocateShard.traceId
@@ -235,7 +236,7 @@ public:
 	ActorCollectionNoErrors noErrorActors; // has to be the last one to be destroyed because other Actors may use it.
 	UID distributorId;
 	MoveKeysLock lock;
-	Database cx;
+	// Should always use txnProcessor to access Database object
 	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;

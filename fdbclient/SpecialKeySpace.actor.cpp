@@ -137,6 +137,7 @@ ACTOR Future<Void> moveKeySelectorOverRangeActor(const SpecialKeyRangeReadImpl* 
 
 	// Throw error if module doesn't support tenants and we have a tenant
 	if (ryw->getTenant().present() && !skrImpl->supportsTenants()) {
+		CODE_PROBE(true, "Illegal tenant access to special keys module");
 		throw illegal_tenant_access();
 	}
 
@@ -372,6 +373,7 @@ ACTOR Future<RangeResult> SpecialKeySpace::getRangeAggregationActor(SpecialKeySp
 				continue;
 			}
 			if (!iter->value()->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant access to special keys module");
 				throw illegal_tenant_access();
 			}
 		}
@@ -503,6 +505,7 @@ void SpecialKeySpace::set(ReadYourWritesTransaction* ryw, const KeyRef& key, con
 		throw special_keys_no_write_module_found();
 	}
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant write to special keys module");
 		throw illegal_tenant_access();
 	}
 	return impl->set(ryw, key, value);
@@ -523,6 +526,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRangeRef& r
 		throw special_keys_no_write_module_found();
 	}
 	if (!begin->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear range to special keys module");
 		throw illegal_tenant_access();
 	}
 	return begin->clear(ryw, range);
@@ -535,6 +539,7 @@ void SpecialKeySpace::clear(ReadYourWritesTransaction* ryw, const KeyRef& key) {
 	if (impl == nullptr)
 		throw special_keys_no_write_module_found();
 	if (!impl->supportsTenants() && ryw->getTenant().present()) {
+		CODE_PROBE(true, "Illegal tenant clear to special keys module", probe::decoration::rare);
 		throw illegal_tenant_access();
 	}
 	return impl->clear(ryw, key);
@@ -629,6 +634,7 @@ ACTOR Future<Void> commitActor(SpecialKeySpace* sks, ReadYourWritesTransaction* 
 	if (ryw->getTenant().present()) {
 		for (it = writeModulePtrs.begin(); it != writeModulePtrs.end(); ++it) {
 			if (!(*it)->supportsTenants()) {
+				CODE_PROBE(true, "Illegal tenant commit to special keys module", probe::decoration::rare);
 				throw illegal_tenant_access();
 			}
 		}
@@ -999,7 +1005,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 	state int64_t totalKvStoreFreeBytes = 0;
 	state int64_t totalKvStoreFreeBytesNotExcluded = 0;
 	state int64_t totalKvStoreUsedBytes = 0;
-	state int64_t totalKvStoreUsedBytesNonExcluded = 0;
+	state int64_t totalKvStoreUsedBytesNotExcluded = 0;
 	state int64_t totalKvStoreAvailableBytes = 0;
 	// Keep track if we exclude any storage process with the provided adddresses
 	state bool excludedAddressesContainsStorageRole = false;
@@ -1026,6 +1032,9 @@ ACTOR Future<bool> checkExclusion(Database db,
 			for (StatusObjectReader role : rolesArray) {
 				if (role["role"].get_str() == "storage") {
 					ssTotalCount++;
+					if (excluded) {
+						ssExcludedCount++;
+					}
 
 					// Check if we are excluding a process that serves the storage role. We only have to check the free
 					// capacity if we are excluding at least one process that serves the storage role.
@@ -1059,7 +1068,7 @@ ACTOR Future<bool> checkExclusion(Database db,
 					totalKvStoreAvailableBytes += available_bytes;
 
 					if (!excluded) {
-						totalKvStoreUsedBytesNonExcluded += used_bytes;
+						totalKvStoreUsedBytesNotExcluded += used_bytes;
 
 						if (disk_id.empty() || diskLocalities.find(disk_id) == diskLocalities.end()) {
 							totalKvStoreFreeBytesNotExcluded += free_bytes;
@@ -1068,10 +1077,6 @@ ACTOR Future<bool> checkExclusion(Database db,
 							}
 						}
 					}
-				}
-
-				if (excluded) {
-					ssExcludedCount++;
 				}
 			}
 		}
@@ -1089,10 +1094,20 @@ ACTOR Future<bool> checkExclusion(Database db,
 
 	// The numerator is the total space in use by FDB that is not immediately reusable.
 	// This is calculated as: used + free - available = used + free - (free - reusable) = used - reusable.
-	// The denominator is the total capacity usable by FDB (either used or unused currently).
+	// The denominator is the total capacity usable by FDB (either used or unused currently) on non-excluded servers.
 	double finalUnavailableRatio =
-	    (totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
-	    std::max((totalKvStoreUsedBytesNonExcluded + totalKvStoreFreeBytesNotExcluded), (int64_t)1);
+	    (double)(totalKvStoreUsedBytes + totalKvStoreFreeBytes - totalKvStoreAvailableBytes) /
+	    std::max((double)(totalKvStoreUsedBytesNotExcluded + totalKvStoreFreeBytesNotExcluded), (double)1);
+
+	TraceEvent(SevInfo, "CheckExclusionDetails")
+	    .detail("SsTotalCount", ssTotalCount)
+	    .detail("SsExcludedCount", ssExcludedCount)
+	    .detail("FinalUnavailableRatio", finalUnavailableRatio)
+	    .detail("TotalKvStoreUsedBytes", totalKvStoreUsedBytes)
+	    .detail("TotalKvStoreFreeBytes", totalKvStoreFreeBytes)
+	    .detail("TotalKvStoreAvailableBytes", totalKvStoreAvailableBytes)
+	    .detail("TotalKvStoreUsedBytesNotExcluded", totalKvStoreUsedBytesNotExcluded)
+	    .detail("TotalKvStoreFreeBytesNotExcluded", totalKvStoreFreeBytesNotExcluded);
 
 	if (ssExcludedCount == ssTotalCount || finalUnavailableRatio > 0.9) {
 		std::string temp = "ERROR: This exclude may cause the total available space in the cluster to drop below 10%.\n"

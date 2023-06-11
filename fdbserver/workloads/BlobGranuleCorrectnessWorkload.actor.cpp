@@ -55,6 +55,10 @@ struct WriteData {
 	// start as MAX_VERSION while uncommitted/uncleared so that they're ignored by concurrent readers
 	explicit WriteData(int32_t val, int16_t valLength)
 	  : writeVersion(MAX_VERSION), clearVersion(MAX_VERSION), val(val), valLength(valLength) {}
+
+	// loading existing write data from the database
+	explicit WriteData(Version writeVersion, Version clearVersion, int32_t val, int16_t valLength)
+	  : writeVersion(writeVersion), clearVersion(clearVersion), val(val), valLength(valLength) {}
 };
 
 struct KeyData {
@@ -87,6 +91,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 	int16_t targetValLength;
 	double reuseKeyProb;
 	int targetIDsPerKey;
+	uint32_t nextSeqKey = 0;
 
 	// communication between workers
 	Promise<Void> firstWriteSuccessful;
@@ -229,6 +234,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		doMergeCheckAtEnd = randomness % 10 == 0;
 		randomness /= 10;
 
+		if (g_network->isSimulated() && g_simulator->willRestart) {
+			doMergeCheckAtEnd = false;
+		}
+
 		// randomize between low and high directory count
 		int64_t targetDirectories = 1 + (randomness % 8);
 		randomness /= 8;
@@ -238,6 +247,11 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 		int64_t targetMyDirectories =
 		    (targetDirectories / clientCount) + ((targetDirectories % clientCount > clientId) ? 1 : 0);
+
+		if (g_network->isSimulated() && g_simulator->restarted) {
+			// load directories later
+			targetMyDirectories = 0;
+		}
 
 		if (targetMyDirectories > 0) {
 			int myDirectories = 1;
@@ -292,6 +306,235 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
 
+	std::pair<uint32_t, uint32_t> parseKey(const KeyRef& key) {
+		Tuple t = Tuple::unpackUserType(key, true);
+		uint32_t k = t.getInt(0);
+		Tuple::UserTypeStr userType = t.getUserType(1);
+		std::stringstream ss(userType.str.toString());
+		// ss.seekg(32); // skip first 32 zeroes?
+		uint32_t id;
+		ss >> id;
+
+		return { k, id };
+	}
+
+	uint32_t parseVal(const ValueRef& val) {
+		uint32_t v;
+		sscanf(val.toString().substr(0, 8).c_str(), "%08x", &v);
+		return v;
+	}
+
+	// because we don't have write versions for all of previous data, don't time travel back past restart and set all
+	// write/clear versions to the read version of the data
+	ACTOR Future<Void> loadPreviousDirectoryData(BlobGranuleCorrectnessWorkload* self,
+	                                             Database cx,
+	                                             Reference<ThreadData> threadData) {
+		state uint32_t key;
+		state uint32_t id;
+		state uint32_t val;
+
+		// read the old tenant's data and parse the keys from it
+		state Transaction tr(cx, threadData->tenant);
+		state KeyRange keyRange = normalKeys;
+		state bool gotEOS = false;
+		state int64_t totalRows = 0;
+		state uint32_t lastKey = -1;
+		state uint32_t lastId = -1;
+		state std::map<uint32_t, KeyData>::iterator lastKeyData = threadData->keyData.end();
+
+		fmt::print("Loading previous directory data for {0}\n", threadData->directoryID);
+
+		loop {
+			state Version readVersion = invalidVersion;
+			state int64_t bufferedBytes = 0;
+			try {
+				state Version ver = wait(tr.getReadVersion());
+				fmt::print("Dir {0}: RV={1}\n", threadData->directoryID, ver);
+				readVersion = ver;
+
+				state PromiseStream<Standalone<RangeResultRef>> results;
+				state Future<Void> stream = tr.getRangeStream(results, keyRange, GetRangeLimits());
+				loop {
+					Standalone<RangeResultRef> res = waitNext(results.getFuture());
+					totalRows += res.size();
+					for (auto& it : res) {
+						std::tie(key, id) = self->parseKey(it.key);
+
+						if (key != lastKey) {
+							auto insert = threadData->keyData.insert({ key, KeyData() });
+							ASSERT(insert.second);
+							lastKeyData = insert.first;
+							lastKeyData->second.nextClearIdx = id;
+							threadData->usedKeys.push_back(key);
+
+							// all previous ids must have been cleared, fake clear version and value
+							for (int clearedId = 0; clearedId < id; clearedId++) {
+								lastKeyData->second.writes.emplace_back(ver, ver, 0, 20);
+							}
+							lastKey = key;
+						}
+
+						val = self->parseVal(it.value);
+
+						// TODO REMOVE
+						fmt::print("Dir {0}: ({1}, {2}) = {3}\n", threadData->directoryID, key, id, val);
+
+						// insert new WriteData for key
+						lastKeyData->second.writes.emplace_back(ver, MAX_VERSION, val, it.value.size());
+
+						lastId = id;
+					}
+
+					if (!res.empty()) {
+						keyRange = KeyRangeRef(keyAfter(res.back().key), keyRange.end);
+					} else {
+						// TODOREMOVE
+						fmt::print(
+						    "Empty range for [{0} - {1})\n", keyRange.begin.printable(), keyRange.end.printable());
+					}
+				}
+			} catch (Error& e) {
+				fmt::print("Error reading range for [{0} - {1}): {2}\n",
+				           keyRange.begin.printable(),
+				           keyRange.end.printable(),
+				           e.name());
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() == error_code_end_of_stream) {
+					gotEOS = true;
+				} else {
+					wait(tr.onError(e));
+				}
+			}
+
+			if (gotEOS) {
+				break;
+			}
+		}
+
+		threadData->nextSeqKey = key + 1;
+
+		fmt::print("Found {0} rows for  previous directory {1}\n", totalRows, threadData->directoryID);
+
+		return Void();
+	}
+
+	ACTOR Future<Void> loadPreviousTenants(BlobGranuleCorrectnessWorkload* self, Database cx, BGTenantMap* tenantData) {
+		state std::vector<std::pair<int64_t, TenantMapEntry>> allTenants;
+		state Transaction tr(cx);
+		state int i;
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+
+				KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantList =
+				    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
+				ASSERT(tenantList.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER && !tenantList.more);
+
+				ASSERT(!tenantList.results.empty());
+
+				allTenants = tenantList.results;
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+		// TODO REMOVE
+		fmt::print("Loaded {0} previous tenants\n", allTenants.size());
+
+		// ignore tenants that aren't blobbified, might be default tenants created for other workloads
+		state std::vector<std::pair<int64_t, TenantMapEntry>> blobbifiedTenants;
+		for (i = 0; i < allTenants.size(); i++) {
+			Reference<Tenant> tenant = makeReference<Tenant>(allTenants[i].first);
+			Standalone<VectorRef<KeyRangeRef>> blobbifiedRanges = wait(cx->listBlobbifiedRanges(normalKeys, 1, tenant));
+			if (!blobbifiedRanges.empty()) {
+				blobbifiedTenants.push_back(allTenants[i]);
+			}
+		}
+		tenantData->addTenants(blobbifiedTenants);
+		ASSERT(!blobbifiedTenants.empty());
+
+		// TODO REMOVE
+		fmt::print("Found {0} previous blobbified tenants\n", blobbifiedTenants.size());
+
+		// load tenants that exist, this actor takes the ones that have idx % total clients == my client id
+		// init each tenant directory with the same randomized params that we do in the constructor
+		int myDirectories = 0;
+		// could do this with math but it's more obvious to read this way IMO
+		for (i = self->clientId; i < blobbifiedTenants.size(); i += self->clientCount) {
+			myDirectories++;
+		}
+
+		fmt::print("Client {0} loading {1} directories\n", self->clientId, myDirectories);
+
+		if (myDirectories == 0) {
+			return Void();
+		}
+
+		int denom = std::min(self->clientCount, (int)myDirectories);
+		state int targetByteRate =
+		    2 * SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / deterministicRandom()->randomInt(1, 5) / denom;
+
+		// either do equal across all of my directories, or skewed
+		bool skewed = myDirectories > 1 && deterministicRandom()->random01() < 0.4;
+		state int skewMultiplier;
+		if (skewed) {
+			// first directory has 1/2, second has 1/4, third has 1/8, etc...
+			skewMultiplier = 2;
+			targetByteRate /= 2;
+		} else {
+			skewMultiplier = 1;
+			targetByteRate /= myDirectories;
+		}
+
+		state std::vector<Future<Void>> dataLoaders;
+		for (i = self->clientId; i < blobbifiedTenants.size(); i += self->clientCount) {
+			int dirId = atoi(blobbifiedTenants[i].second.tenantName.printable().c_str());
+			if (BGW_DEBUG) {
+				fmt::print("Client {0}/{1} re-creating directory {2}\n", self->clientId, self->clientCount, dirId);
+			}
+			state Reference<ThreadData> threadData = makeReference<ThreadData>(dirId, targetByteRate);
+
+			wait(threadData->openTenant(cx));
+			auto& tenantEntry = blobbifiedTenants[i].second;
+			threadData->tenantEntry = tenantEntry;
+			threadData->directoryRange = KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
+
+			self->directories.push_back(threadData);
+			dataLoaders.push_back(self->loadPreviousDirectoryData(self, cx, threadData));
+
+			targetByteRate /= skewMultiplier;
+		}
+
+		wait(waitForAll(dataLoaders));
+
+		fmt::print("Client {0}/{1} recreated {2} directories\n", self->clientId, self->clientCount, dataLoaders.size());
+
+		return Void();
+	}
+
+	ACTOR Future<Void> initializeTenants(BlobGranuleCorrectnessWorkload* self, Database cx, BGTenantMap* tenantData) {
+		state int directoryIdx = 0;
+		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
+
+		for (; directoryIdx < self->directories.size(); directoryIdx++) {
+			// Set up the blob range first
+			state TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
+			wait(self->directories[directoryIdx]->openTenant(cx));
+			self->directories[directoryIdx]->tenantEntry = tenantEntry;
+			self->directories[directoryIdx]->directoryRange =
+			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
+			tenants.push_back({ self->directories[directoryIdx]->tenant->id(), tenantEntry });
+			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
+			ASSERT(_success);
+		}
+		tenantData->addTenants(tenants);
+
+		return Void();
+	}
+
 	ACTOR Future<Void> _setup(Database cx, BlobGranuleCorrectnessWorkload* self) {
 		if (self->doSetup) {
 			// FIXME: run the actual FDBCLI command instead of copy/pasting its implementation
@@ -306,29 +549,17 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			g_simulator->dataAtRestPlaintextMarker = BG_ENCRYPTION_AT_REST_MARKER_STRING;
 		}
 
-		if (self->directories.empty()) {
-			return Void();
-		}
-
-		state int directoryIdx = 0;
-		state std::vector<std::pair<int64_t, TenantMapEntry>> tenants;
 		state BGTenantMap tenantData(self->dbInfo);
-		state Reference<GranuleTenantData> data;
-		for (; directoryIdx < self->directories.size(); directoryIdx++) {
-			// Set up the blob range first
-			state TenantMapEntry tenantEntry = wait(self->setUpTenant(cx, self->directories[directoryIdx]->tenantName));
-			wait(self->directories[directoryIdx]->openTenant(cx));
-			self->directories[directoryIdx]->tenantEntry = tenantEntry;
-			self->directories[directoryIdx]->directoryRange =
-			    KeyRangeRef(tenantEntry.prefix, tenantEntry.prefix.withSuffix(normalKeys.end));
-			tenants.push_back({ self->directories[directoryIdx]->tenant->id(), tenantEntry });
-			bool _success = wait(cx->blobbifyRange(self->directories[directoryIdx]->directoryRange));
-			ASSERT(_success);
+
+		if (g_network->isSimulated() && g_simulator->restarted) {
+			wait(self->loadPreviousTenants(self, cx, &tenantData));
+		} else {
+			wait(self->initializeTenants(self, cx, &tenantData));
 		}
-		tenantData.addTenants(tenants);
 
 		// wait for tenant data to be loaded
-
+		state Reference<GranuleTenantData> data;
+		state int directoryIdx = 0;
 		for (directoryIdx = 0; directoryIdx < self->directories.size(); directoryIdx++) {
 			wait(store(data, tenantData.getDataForGranule(self->directories[directoryIdx]->directoryRange)));
 			wait(data->bstoreLoaded.getFuture());
@@ -384,6 +615,16 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		}
 	}
 
+	void logKey(Optional<Key> key) {
+		if (!key.present()) {
+			fmt::print("<missing>\n");
+		} else {
+			uint32_t k, id;
+			std::tie(k, id) = parseKey(key.get());
+			fmt::print("({0}, {1}) : {2}\n", k, id, key.get().printable());
+		}
+	}
+
 	void logMismatch(Reference<ThreadData> threadData,
 	                 const Optional<Key>& lastMatching,
 	                 const Optional<Key>& expectedKey,
@@ -413,7 +654,8 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 		           beginVersion,
 		           readVersion);
 		if (lastMatching.present()) {
-			fmt::print("    last correct: {}\n", lastMatching.get().printable());
+			fmt::print("    last correct: ");
+			logKey(lastMatching);
 		}
 		if (expectedValue.present() || blobValue.present()) {
 			// value mismatch
@@ -425,8 +667,10 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 			           blobValue.get().printable());
 		} else {
 			// key mismatch
-			fmt::print("    Expected Key: {0}\n", expectedKey.present() ? expectedKey.get().printable() : "<missing>");
-			fmt::print("      Actual Key: {0}\n", blobKey.present() ? blobKey.get().printable() : "<missing>");
+			fmt::print("    Expected Key: ");
+			logKey(expectedKey);
+			fmt::print("      Actual Key: ");
+			logKey(blobKey);
 		}
 
 		fmt::print("Chunks: {0}\n", blob.second.size());
@@ -813,12 +1057,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				if (threadData->keyData.empty() || deterministicRandom()->random01() > threadData->reuseKeyProb) {
 					// new key
 					if (threadData->nextKeySequential) {
-						key = threadData->usedKeys.size();
+						key = threadData->nextSeqKey;
+						++threadData->nextSeqKey;
 					} else {
 						key = std::numeric_limits<uint32_t>::max();
 						while (key == std::numeric_limits<uint32_t>::max() ||
 						       threadData->keyData.find(key) != threadData->keyData.end()) {
-							key = deterministicRandom()->randomUInt32();
+							// leave half of the end of the keyspace in case restarting test switches to sequential
+							key = deterministicRandom()->randomUInt32() / 2;
 						}
 					}
 
@@ -860,6 +1106,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				try {
 					// write rows in txn
 					for (auto& it : keyAndIdToWrite) {
+						if (DEBUG_KEY_OP(threadData->directoryID, std::get<0>(it))) {
+							fmt::print("DBG: {0} PREWRITE ({1}, {2}) = {3}:{4}\n",
+							           threadData->directoryID,
+							           std::get<0>(it),
+							           std::get<1>(it),
+							           std::get<2>(it),
+							           std::get<3>(it));
+						}
 						Value v = self->genVal(std::get<2>(it), std::get<3>(it));
 						tr.set(threadData->getKey(std::get<0>(it), std::get<1>(it)), v);
 					}
@@ -870,11 +1124,14 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 					wait(tr.commit());
 					break;
 				} catch (Error& e) {
+					fmt::print("Writer error {0}\n", e.name());
 					wait(tr.onError(e));
 				}
 			}
 
 			Version commitVersion = tr.getCommittedVersion();
+			// TODO REMOVE
+			fmt::print("Writer committed @ {0}\n", commitVersion);
 
 			// once txn is committed, update write map
 

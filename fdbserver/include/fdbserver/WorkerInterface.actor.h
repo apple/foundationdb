@@ -158,7 +158,7 @@ struct WorkerDetails {
 
 // This interface and its serialization depend on slicing, since the client will deserialize only the first part of this
 // structure
-struct ClusterControllerFullInterface {
+struct SWIFT_CXX_IMPORT_OWNED ClusterControllerFullInterface {
 	constexpr static FileIdentifier file_identifier = ClusterControllerClientInterface::file_identifier;
 	ClusterInterface clientInterface;
 	RequestStream<struct RecruitFromConfigurationRequest> recruitFromConfiguration;
@@ -232,6 +232,8 @@ struct ClusterControllerFullInterface {
 		           getEncryptionAtRestMode);
 	}
 };
+
+using AsyncVar_Optional_ClusterControllerFullInterface = AsyncVar<Optional<ClusterControllerFullInterface>>;
 
 struct RegisterWorkerReply {
 	constexpr static FileIdentifier file_identifier = 16475696;
@@ -625,7 +627,7 @@ struct InitializeTLogRequest {
 	int logRouterTags;
 	int txsTags;
 	Version recoveryTransactionVersion;
-	std::vector<Version> oldGenerationStartVersions;
+	std::vector<Version> oldGenerationRecoverAtVersions;
 
 	ReplyPromise<struct TLogInterface> reply;
 
@@ -652,7 +654,7 @@ struct InitializeTLogRequest {
 		           spillType,
 		           txsTags,
 		           recoveryTransactionVersion,
-		           oldGenerationStartVersions);
+		           oldGenerationRecoverAtVersions);
 	}
 };
 
@@ -1164,6 +1166,7 @@ void startRole(const Role& role,
                const std::map<std::string, std::string>& details = std::map<std::string, std::string>(),
                const std::string& origination = "Recruited");
 void endRole(const Role& role, UID id, std::string reason, bool ok = true, Error e = Error());
+
 ACTOR Future<Void> traceRole(Role role, UID roleId);
 
 struct ServerDBInfo;
@@ -1262,7 +1265,7 @@ ACTOR Future<Void> resolver(ResolverInterface resolver,
 ACTOR Future<Void> logRouter(TLogInterface interf,
                              InitializeLogRouterRequest req,
                              Reference<AsyncVar<ServerDBInfo> const> db);
-ACTOR Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
+Future<Void> dataDistributor(DataDistributorInterface ddi, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> ratekeeper(RatekeeperInterface rki, Reference<AsyncVar<ServerDBInfo> const> db);
 ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);
 ACTOR Future<Void> blobManager(BlobManagerInterface bmi, Reference<AsyncVar<ServerDBInfo> const> db, int64_t epoch);

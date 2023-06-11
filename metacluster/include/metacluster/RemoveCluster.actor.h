@@ -83,10 +83,12 @@ struct RemoveClusterImpl {
 		     !self->legalClusterStates.count(clusterMetadata.entry.clusterState))) {
 			// The type of error is currently ignored, and this is only used to terminate the remove operation.
 			// If that changes in the future, we may want to introduce a more suitable error type.
+			CODE_PROBE(true, "Remove cluster terminating due to invalid state");
 			throw operation_failed();
 		}
 
 		if (!self->forceRemove && self->ctx.dataClusterMetadata.get().entry.allocated.numTenantGroups > 0) {
+			CODE_PROBE(true, "Remove nonempty cluster");
 			throw cluster_not_empty();
 		} else if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::REMOVING) {
 			// Mark the cluster in a removing state while we finish the remaining removal steps. This prevents new
@@ -111,6 +113,7 @@ struct RemoveClusterImpl {
 
 		// Get the last allocated tenant ID to be used on the detached data cluster
 		if (self->forceRemove) {
+			CODE_PROBE(true, "Force remove cluster");
 			Optional<int64_t> lastId = wait(metadata::management::tenantMetadata().lastTenantId.get(tr));
 			self->lastTenantId = lastId;
 		}
@@ -138,9 +141,12 @@ struct RemoveClusterImpl {
 				if (!lastId.present() || (TenantAPI::getTenantIdPrefix(lastId.get()) ==
 				                              TenantAPI::getTenantIdPrefix(self->lastTenantId.get()) &&
 				                          lastId.get() < self->lastTenantId.get())) {
+					CODE_PROBE(true, "Advance tenant ID on removed cluster");
 					TenantMetadata::lastTenantId().set(tr, self->lastTenantId.get());
 				}
 			}
+		} else {
+			CODE_PROBE(true, "Data cluster remove non-existent cluster");
 		}
 
 		// Insert a tombstone marking this cluster removed even if we aren't registered
@@ -192,6 +198,8 @@ struct RemoveClusterImpl {
 		metadata::management::clusterTenantCount().atomicOp(
 		    tr, self->ctx.clusterName.get(), -erasedTenants, MutationRef::AddValue);
 
+		CODE_PROBE(tenantEntries.more, "More tenants to purge");
+		CODE_PROBE(tenantEntries.results.empty(), "No tenants purged");
 		return std::make_pair(!tenantEntries.more, !tenantEntries.results.empty());
 	}
 
@@ -225,6 +233,7 @@ struct RemoveClusterImpl {
 			                     keyAfter(tenantGroupEntries.results.rbegin()->getString(1))));
 		}
 
+		CODE_PROBE(!tenantGroupEntries.more, "More tenant groups to purge");
 		return !tenantGroupEntries.more;
 	}
 
@@ -267,6 +276,7 @@ struct RemoveClusterImpl {
 
 		state bool deleteTenants = true;
 
+		CODE_PROBE(true, "Purging data cluster");
 		loop {
 			bool clearedAll = wait(self->ctx.runManagementTransaction(
 			    [self = self, clusterTupleRange = clusterTupleRange, deleteTenants = &deleteTenants](
@@ -292,6 +302,7 @@ struct RemoveClusterImpl {
 	// Useful when reconstructing a management cluster when the original is lost.
 	ACTOR static Future<Void> dataClusterForgetMetacluster(RemoveClusterImpl* self) {
 		state Reference<typename DB::TransactionT> tr = self->db->createTransaction();
+		CODE_PROBE(true, "Data cluster forget metacluster");
 
 		loop {
 			try {
@@ -300,6 +311,7 @@ struct RemoveClusterImpl {
 				    wait(metadata::metaclusterRegistration().get(tr));
 
 				if (!metaclusterRegistrationEntry.present()) {
+					CODE_PROBE(true, "Data cluster already unregistered");
 					return Void();
 				}
 
@@ -308,6 +320,7 @@ struct RemoveClusterImpl {
 					    .detail("ClusterName", self->clusterName)
 					    .detail("MetaclusterRegistration",
 					            metaclusterRegistrationEntry.map(&MetaclusterRegistrationEntry::toString));
+					CODE_PROBE(true, "Attempt to remove non-data cluster", probe::decoration::rare);
 					throw invalid_metacluster_operation();
 				}
 
@@ -316,6 +329,7 @@ struct RemoveClusterImpl {
 					    .detail("ExpectedName", self->clusterName)
 					    .detail("MetaclusterRegistration",
 					            metaclusterRegistrationEntry.map(&MetaclusterRegistrationEntry::toString));
+					CODE_PROBE(true, "Attempt to remove data cluster using incorrect name", probe::decoration::rare);
 					throw metacluster_mismatch();
 				}
 
@@ -333,6 +347,7 @@ struct RemoveClusterImpl {
 		// On data clusters, we forget the metacluster information without updating the management cluster
 		if (self->clusterType == ClusterType::METACLUSTER_DATA) {
 			if (!self->forceRemove) {
+				CODE_PROBE(true, "Data cluster forget metacluster without force", probe::decoration::rare);
 				throw invalid_metacluster_operation();
 			}
 
@@ -366,6 +381,8 @@ struct RemoveClusterImpl {
 			wait(f);
 			self->dataClusterUpdated = true;
 		} catch (Error& e) {
+			CODE_PROBE(true, "Data cluster removal timed out");
+
 			// If this transaction gets retried, the metacluster information may have already been erased.
 			if (e.code() == error_code_cluster_removed) {
 				self->dataClusterUpdated = true;

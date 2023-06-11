@@ -197,6 +197,9 @@ public:
 	// Total number of file blocks in the fileMap
 	KeyBackedBinaryValue<int64_t> fileBlockCount() { return configSpace.pack(__FUNCTION__sr); }
 
+	// True for blob granule restore
+	KeyBackedBinaryValue<bool> isBlobGranuleRestore() { return configSpace.pack(__FUNCTION__sr); }
+
 	Future<std::vector<KeyRange>> getRestoreRangesOrDefault(Reference<ReadYourWritesTransaction> tr) {
 		return getRestoreRangesOrDefault_impl(this, tr);
 	}
@@ -3595,6 +3598,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 	                                  Reference<TaskBucket> taskBucket,
 	                                  Reference<FutureBucket> futureBucket,
 	                                  Reference<Task> task) {
+
 		wait(checkTaskVersion(tr->getDatabase(), task, name, version));
 
 		state RestoreConfig restore(task);
@@ -3616,8 +3620,21 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 		restore.clearApplyMutationsKeys(tr);
 
 		wait(taskBucket->finish(tr, task));
+
 		if (unlockDB) {
 			wait(unlockDatabase(tr, restore.getUid()));
+		}
+
+		bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
+		if (bgRestoreEnabled) {
+			// No support to access historical data after blob granules restore. so cleanup the following keys
+			TraceEvent("BlobGranuleRestoreCleanup").log();
+			CODE_PROBE(true, "Cleanup blob granules keys after restore");
+			tr->clear(blobGranuleHistoryKeys);
+			tr->clear(blobGranuleFileKeys);
+			tr->clear(blobGranuleMappingKeys);
+			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
+			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
 		}
 
 		return Void();
@@ -3783,12 +3800,13 @@ struct RestoreRangeTaskFunc : RestoreFileTaskFuncBase {
 		}
 
 		// First and last key are the range for this file
-		state KeyRange fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
+		state KeyRange fileRange;
 		state std::vector<KeyRange> originalFileRanges;
 		// If fileRange doesn't intersect restore range then we're done.
 		state int index;
 		for (index = 0; index < restoreRanges.get().size(); index++) {
 			auto& restoreRange = restoreRanges.get()[index];
+			fileRange = KeyRangeRef(blockData.front().key, blockData.back().key);
 			if (!fileRange.intersects(restoreRange))
 				continue;
 
@@ -4767,6 +4785,15 @@ ACTOR Future<ERestoreState> abortRestore(Reference<ReadYourWritesTransaction> tr
 
 	// Cancel the backup tasks on this tag
 	wait(tag.cancel(tr));
+
+	bool bgRestoreEnabled = wait(restore.isBlobGranuleRestore().getD(tr));
+	if (bgRestoreEnabled) {
+		BlobGranuleRestoreConfig bgRestoreConfig;
+		bgRestoreConfig.phase().set(tr, BlobRestorePhase::ERROR);
+		bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::ERROR, now());
+		bgRestoreConfig.error().set(tr, "Aborted");
+	}
+
 	wait(unlockDatabase(tr, current.get().first));
 	return ERestoreState::ABORTED;
 }
@@ -4829,6 +4856,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 		state std::vector<KeyRange> ranges;
 		state bool logsOnly;
 		state bool inconsistentSnapshotOnly;
+		state bool isBlobGranuleRestore;
 
 		loop {
 			try {
@@ -4843,7 +4871,7 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				wait(store(logsOnly, restore.onlyApplyMutationLogs().getD(tr, Snapshot::False, false)));
 				wait(store(inconsistentSnapshotOnly,
 				           restore.inconsistentSnapshotOnly().getD(tr, Snapshot::False, false)));
-
+				wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
 				wait(taskBucket->keepRunning(tr, task));
 
 				ERestoreState oldState = wait(restore.stateEnum().getD(tr));
@@ -4863,6 +4891,45 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 				wait(tr->commit());
 				break;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+
+		loop {
+			if (!isBlobGranuleRestore) {
+				break; // Skip this loop if it's not blob granule restore
+			}
+			CODE_PROBE(true, "Blob granule restore - wait data copy for completion");
+			try {
+				tr->reset();
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+
+				state BlobRestorePhase phase = wait(BlobGranuleRestoreConfig().phase().getD(tr));
+				TraceEvent("BlobGranuleRestoreWaitPhase").detail("BlobRestorePhase", phase);
+				if (phase == BlobRestorePhase::ERROR) {
+					TraceEvent("BlobGranuleRestoreError").log();
+					restore.stateEnum().set(tr, ERestoreState::ABORTED);
+					wait(tr->commit());
+					return Void();
+				}
+				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
+					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
+				} else {
+					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
+					beginVersion = version;
+					restore.beginVersion().set(tr, beginVersion);
+					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
+					wait(tr->commit());
+					if (restoreVersion <= beginVersion) {
+						TraceEvent("BlobGranuleRestoreDone")
+						    .detail("BeginVersion", beginVersion)
+						    .detail("Target", restoreVersion);
+						return Void();
+					}
+					break;
+				}
 			} catch (Error& e) {
 				wait(tr->onError(e));
 			}
@@ -5005,6 +5072,23 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		if (firstVersion == invalidVersion) {
+			// For blob granule restore, we can complete the restore job if no mutation log is needed
+			state bool isBlobGranuleRestore;
+			wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+			if (isBlobGranuleRestore) {
+				state Version beginVersion;
+				state Version restoreVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				// no need to apply mutations if target version is less than begin version
+				if (restoreVersion <= beginVersion) {
+					wait(
+					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
+					wait(taskBucket->finish(tr, task));
+					return Void();
+				}
+			}
+
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -5451,7 +5535,8 @@ public:
 	                                        OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                        InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                        Version beginVersion,
-	                                        UID uid) {
+	                                        UID uid,
+	                                        Optional<std::string> blobManifestUrl) {
 		KeyRangeMap<int> restoreRangeSet;
 		for (auto& range : ranges) {
 			restoreRangeSet.insert(range, 1);
@@ -5495,7 +5580,7 @@ public:
 			oldRestore.clear(tr);
 		}
 
-		if (!onlyApplyMutationLogs) {
+		if (!onlyApplyMutationLogs || blobManifestUrl.present()) {
 			state int index;
 			for (index = 0; index < restoreRanges.size(); index++) {
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
@@ -5531,7 +5616,22 @@ public:
 				restore.restoreRangeSet().insert(tr, range);
 			}
 		}
-
+		if (blobManifestUrl.present()) {
+			state BlobGranuleRestoreConfig bgRestoreConfig;
+			BlobRestorePhase phase = wait(bgRestoreConfig.phase().getD(tr, Snapshot::True, BlobRestorePhase::MAX));
+			if (phase < BlobRestorePhase::DONE) {
+				fprintf(stderr, "ERROR: Abort existing blob granules restore first before creating new one.\n");
+				throw restore_error();
+			} else {
+				bgRestoreConfig.manifestUrl().set(tr, blobManifestUrl.get());
+				bgRestoreConfig.mutationLogsUrl().set(tr, backupURL.toString());
+				bgRestoreConfig.phase().set(tr, BlobRestorePhase::INIT);
+				bgRestoreConfig.uid().set(tr, uid);
+				bgRestoreConfig.targetVersion().set(tr, restoreVersion);
+				bgRestoreConfig.phaseStartTs().set(tr, BlobRestorePhase::INIT, now());
+				restore.isBlobGranuleRestore().set(tr, true);
+			}
+		}
 		// this also sets restore.add/removePrefix.
 		restore.initApplyMutations(tr, addPrefix, removePrefix, onlyApplyMutationLogs);
 
@@ -6033,8 +6133,8 @@ public:
 							        .c_str(),
 							    e.second.first.c_str());
 
-							// If error version is at or more recent than the latest restorable version then it could be
-							// inhibiting progress
+							// If error version is at or more recent than the latest restorable version then it
+							// could be inhibiting progress
 							if (v >= latestRestorableVersion.orDefault(0)) {
 								recentErrors += msg;
 							} else {
@@ -6131,7 +6231,8 @@ public:
 	                                     OnlyApplyMutationLogs onlyApplyMutationLogs,
 	                                     InconsistentSnapshotOnly inconsistentSnapshotOnly,
 	                                     Optional<std::string> encryptionKeyFileName,
-	                                     UID randomUid) {
+	                                     UID randomUid,
+	                                     Optional<std::string> blobManifestUrl) {
 		// The restore command line tool won't allow ranges to be empty, but correctness workloads somehow might.
 		if (ranges.empty()) {
 			throw restore_error();
@@ -6151,6 +6252,9 @@ public:
 		if (targetVersion == invalidVersion && onlyApplyMutationLogs && desc.contiguousLogEnd.present()) {
 			targetVersion = desc.contiguousLogEnd.get() - 1;
 		}
+		if (blobManifestUrl.present()) {
+			onlyApplyMutationLogs = OnlyApplyMutationLogs::True;
+		}
 
 		state Version beginVersion = invalidVersion; // min begin version for all ranges
 		if (!beginVersions.empty()) {
@@ -6159,7 +6263,8 @@ public:
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		if (!restoreSet.present()) {
+		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
+		if (!restoreSet.present() && !blobManifestUrl.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
@@ -6170,12 +6275,6 @@ public:
 
 		if (verbose) {
 			printf("Restoring backup to version: %lld\n", (long long)targetVersion);
-		}
-
-		// Preload applyMutationsKeyVersionMap for only-apply-mutation-log restore. It's
-		// a workaround for case when the map is large and may exceed transaction limit.
-		if (onlyApplyMutationLogs) {
-			wait(preloadApplyMutationsKeyVersionMap(cx, randomUid, ranges, beginVersions));
 		}
 
 		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
@@ -6197,7 +6296,8 @@ public:
 				                   onlyApplyMutationLogs,
 				                   inconsistentSnapshotOnly,
 				                   beginVersion,
-				                   randomUid));
+				                   randomUid,
+				                   blobManifestUrl));
 
 				wait(tr->commit());
 				break;
@@ -6216,82 +6316,6 @@ public:
 		}
 
 		return targetVersion;
-	}
-
-	ACTOR static Future<Void> preloadApplyMutationsKeyVersionMap(Database cx,
-	                                                             UID uid,
-	                                                             Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                                             Standalone<VectorRef<Version>> versions) {
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-
-		// Init applyMutationsKeyVersionMap, applyMutationsKeyVersionCount, applyMutationsEnd, applyMutationsBegin
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-
-				Key mapStart = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-				tr->clear(KeyRangeRef(mapStart, strinc(mapStart)));
-				int64_t startCount = 0;
-				tr->set(uidPrefixKey(applyMutationsKeyVersionCountRange.begin, uid),
-				        StringRef((uint8_t*)&startCount, 8));
-				tr->set(mapStart, BinaryWriter::toValue<Version>(invalidVersion, Unversioned()));
-
-				tr->clear(uidPrefixKey(applyMutationsEndRange.begin, uid));
-				tr->clear(uidPrefixKey(applyMutationsBeginRange.begin, uid));
-
-				// If this is an incremental restore, we need to set the applyMutationsMapPrefix
-				// to the earliest log version so no mutations are missed
-				Version beginVersion = *std::min_element(versions.begin(), versions.end());
-				Value versionEncoded = BinaryWriter::toValue(beginVersion, Unversioned());
-				Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-				wait(krmSetRange(tr, prefix, allKeys, versionEncoded));
-
-				wait(tr->commit());
-				break;
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
-
-		// Update applyMutationsKeyVersionMap
-		state int i;
-		state int stepSize = 1000;
-		for (i = 0; i < ranges.size(); i += stepSize) {
-			int end = std::min(i + stepSize, ranges.size());
-			wait(preloadApplyMutationsKeyVersionMap(cx, uid, ranges, versions, i, end));
-		}
-		TraceEvent("PreloadApplyMutationsKeyVersionMap", uid).detail("Size", ranges.size());
-		return Void();
-	}
-
-	ACTOR static Future<Void> preloadApplyMutationsKeyVersionMap(Database cx,
-	                                                             UID uid,
-	                                                             Standalone<VectorRef<KeyRangeRef>> ranges,
-	                                                             Standalone<VectorRef<Version>> versions,
-	                                                             int start,
-	                                                             int end) {
-		state Reference<ReadYourWritesTransaction> tr(new ReadYourWritesTransaction(cx));
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-				state int i;
-				for (i = start; i < end; ++i) {
-					Version version = versions[i];
-					if (version == invalidVersion) {
-						version = 0;
-					}
-					Value versionEncoded = BinaryWriter::toValue(version, Unversioned());
-					Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
-					wait(krmSetRangeCoalescing(tr, prefix, ranges[i], allKeys, versionEncoded));
-				}
-				wait(tr->commit());
-				return Void();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
 	}
 
 	// used for correctness only, locks the database before discontinuing the backup and that same lock is then used
@@ -6459,7 +6483,8 @@ public:
 				                     OnlyApplyMutationLogs::False,
 				                     InconsistentSnapshotOnly::False,
 				                     {},
-				                     randomUid)));
+				                     randomUid,
+				                     {})));
 				state Reference<ReadYourWritesTransaction> rywTransaction =
 				    Reference<ReadYourWritesTransaction>(new ReadYourWritesTransaction(cx));
 				// clear old restore config associated with system keys
@@ -6495,7 +6520,8 @@ public:
 			                                 OnlyApplyMutationLogs::False,
 			                                 InconsistentSnapshotOnly::False,
 			                                 {},
-			                                 randomUid));
+			                                 randomUid,
+			                                 {}));
 			return ver;
 		}
 	}
@@ -6559,7 +6585,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          UnlockDB unlockDB,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
 	return FileBackupAgentImpl::restore(this,
 	                                    cx,
 	                                    cxOrig,
@@ -6578,7 +6605,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	                                    onlyApplyMutationLogs,
 	                                    inconsistentSnapshotOnly,
 	                                    encryptionKeyFileName,
-	                                    deterministicRandom()->randomUniqueID());
+	                                    deterministicRandom()->randomUniqueID(),
+	                                    blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -6597,7 +6625,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
 	Standalone<VectorRef<Version>> beginVersions;
 	for (auto i = 0; i < ranges.size(); ++i) {
 		beginVersions.push_back(beginVersions.arena(), beginVersion);
@@ -6618,7 +6647,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               unlockDB,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::restore(Database cx,
@@ -6636,7 +6666,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
                                          OnlyApplyMutationLogs onlyApplyMutationLogs,
                                          InconsistentSnapshotOnly inconsistentSnapshotOnly,
                                          Version beginVersion,
-                                         Optional<std::string> const& encryptionKeyFileName) {
+                                         Optional<std::string> const& encryptionKeyFileName,
+                                         Optional<std::string> blobManifestUrl) {
 	Standalone<VectorRef<KeyRangeRef>> rangeRef;
 	if (range.begin.empty() && range.end.empty()) {
 		addDefaultBackupRanges(rangeRef);
@@ -6662,7 +6693,8 @@ Future<Version> FileBackupAgent::restore(Database cx,
 	               UnlockDB::True,
 	               onlyApplyMutationLogs,
 	               inconsistentSnapshotOnly,
-	               encryptionKeyFileName);
+	               encryptionKeyFileName,
+	               blobManifestUrl);
 }
 
 Future<Version> FileBackupAgent::atomicRestore(Database cx,

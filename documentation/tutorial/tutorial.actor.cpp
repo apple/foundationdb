@@ -58,8 +58,7 @@ ACTOR Future<Void> simpleTimer() {
 	}
 }
 
-// A actor that demonstrates how choose-when
-// blocks work.
+// A actor that demonstrates how choose-when blocks work.
 ACTOR Future<Void> someFuture(Future<int> ready) {
 	// loop choose {} works as well here - the braces are optional
 	loop choose {

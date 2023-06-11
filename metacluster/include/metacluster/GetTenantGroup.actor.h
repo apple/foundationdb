@@ -37,6 +37,7 @@ namespace metacluster {
 
 template <class Transaction>
 Future<Optional<MetaclusterTenantGroupEntry>> tryGetTenantGroupTransaction(Transaction tr, TenantGroupName name) {
+	CODE_PROBE(true, "Try get tenant group");
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 	return metadata::management::tenantMetadata().tenantGroupMap.get(tr, name);
 }
