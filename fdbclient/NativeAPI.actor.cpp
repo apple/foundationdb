@@ -9468,10 +9468,10 @@ ACTOR Future<Void> changeFeedCommitter(IKeyValueStore* storage,
 
 ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 	wait(db->initializeChangeFeedCache);
-	wait(delay(60.0));
+	wait(delay(CLIENT_KNOBS->CHANGE_FEED_CACHE_EXPIRE_TIME));
 	loop {
 		for (auto it = db->changeFeedCaches.begin(); it != db->changeFeedCaches.end(); ++it) {
-			if (!it->second->active && now() - it->second->inactiveTime > 60.0) {
+			if (!it->second->active && now() - it->second->inactiveTime > CLIENT_KNOBS->CHANGE_FEED_CACHE_EXPIRE_TIME) {
 				Key beginKey = changeFeedCacheKey(it->first.tenantPrefix, it->first.rangeId, it->first.range, 0);
 				Key endKey =
 				    changeFeedCacheKey(it->first.tenantPrefix, it->first.rangeId, it->first.range, MAX_VERSION);
@@ -9481,7 +9481,7 @@ ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 				db->storage->clear(feedRange);
 
 				db->uncommittedCFBytes += beginKey.size() + endKey.size() + feedRange.expectedSize();
-				if (db->uncommittedCFBytes > 1e6) {
+				if (db->uncommittedCFBytes > CLIENT_KNOBS->CHANGE_FEED_CACHE_FLUSH_BYTES) {
 					db->commitChangeFeedStorage->set(true);
 				}
 
@@ -9499,8 +9499,6 @@ ACTOR Future<Void> cleanupChangeFeedCache(DatabaseContext* db) {
 }
 
 ACTOR Future<Void> initializeCFCache(DatabaseContext* db) {
-	wait(db->storage->init());
-	wait(db->storage->commit());
 	state Key beginKey = changeFeedCacheFeedKeys.begin;
 	loop {
 		RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, changeFeedCacheFeedKeys.end), 5e5, 5e5));
@@ -9531,6 +9529,10 @@ ACTOR Future<Void> handleShutdown(DatabaseContext* db) {
 	try {
 		wait(db->storage->getError());
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			throw;
+		}
+		TraceEvent("ChangeFeedCacheDiskError").error(e);
 	}
 	db->initializeChangeFeedCache = Void();
 	db->storage = nullptr;
@@ -9539,6 +9541,10 @@ ACTOR Future<Void> handleShutdown(DatabaseContext* db) {
 }
 
 void DatabaseContext::setStorage(IKeyValueStore* store) {
+	if (storage != nullptr) {
+		TraceEvent(SevError, "NativeClientMultipleSetStorage");
+		return;
+	}
 	storage = store;
 	commitChangeFeedStorage = makeReference<AsyncVar<bool>>(false);
 	initializeChangeFeedCache = initializeCFCache(this);
@@ -10125,6 +10131,31 @@ ACTOR Future<Void> partialChangeFeedStream(StorageServerInterface interf,
 	}
 }
 
+void writeMutationsToCache(Reference<ChangeFeedCacheData> cacheData,
+                           Reference<DatabaseContext> db,
+                           Standalone<VectorRef<MutationsAndVersionRef>> cacheOut,
+                           Key rangeID,
+                           KeyRange range,
+                           Key tenantPrefix) {
+	if (!cacheData) {
+		return;
+	}
+	ASSERT(cacheData->active);
+	while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
+		cacheOut.pop_front();
+	}
+	if (!cacheOut.empty()) {
+		Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.back().version);
+		Value durableValue = changeFeedCacheValue(cacheOut);
+		db->storage->set(KeyValueRef(durableKey, durableValue));
+		cacheData->latest = cacheOut.back().version;
+		db->uncommittedCFBytes += durableKey.size() + durableValue.size();
+		if (db->uncommittedCFBytes > CLIENT_KNOBS->CHANGE_FEED_CACHE_FLUSH_BYTES) {
+			db->commitChangeFeedStorage->set(true);
+		}
+	}
+}
+
 ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> results,
                                                  Key rangeID,
                                                  KeyRange range,
@@ -10232,23 +10263,7 @@ ACTOR Future<Void> mergeChangeFeedStreamInternal(Reference<ChangeFeedData> resul
 			ASSERT(results->mutations.isEmpty());
 		} else {
 			ASSERT(nextOut.back().version > results->lastReturnedVersion.get());
-			if (cacheData) {
-				ASSERT(cacheData->active);
-				Standalone<VectorRef<MutationsAndVersionRef>> cacheOut = nextOut;
-				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
-					cacheOut.pop_front(1);
-				}
-				if (!cacheOut.empty()) {
-					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, nextOut.back().version);
-					Value durableValue = changeFeedCacheValue(cacheOut);
-					db->storage->set(KeyValueRef(durableKey, durableValue));
-					cacheData->latest = cacheOut.back().version;
-					db->uncommittedCFBytes += durableKey.size() + durableValue.size();
-					if (db->uncommittedCFBytes > 1e6) {
-						db->commitChangeFeedStorage->set(true);
-					}
-				}
-			}
+			writeMutationsToCache(cacheData, db, nextOut, rangeID, range, tenantPrefix);
 			results->mutations.send(nextOut);
 			wait(results->mutations.onEmpty());
 			wait(delay(0));
@@ -10465,23 +10480,7 @@ ACTOR Future<Void> singleChangeFeedStreamInternal(KeyRange range,
 				tssData->get().send(feedReply);
 			}
 
-			if (cacheData) {
-				ASSERT(cacheData->active);
-				Standalone<VectorRef<MutationsAndVersionRef>> cacheOut = feedReply.mutations;
-				while (!cacheOut.empty() && cacheOut.front().version <= cacheData->latest) {
-					cacheOut.pop_front(1);
-				}
-				if (!cacheOut.empty()) {
-					Key durableKey = changeFeedCacheKey(tenantPrefix, rangeID, range, cacheOut.back().version);
-					Value durableValue = changeFeedCacheValue(cacheOut);
-					db->storage->set(KeyValueRef(durableKey, durableValue));
-					cacheData->latest = cacheOut.back().version;
-					db->uncommittedCFBytes += durableKey.size() + durableValue.size();
-					if (db->uncommittedCFBytes > 1e6) {
-						db->commitChangeFeedStorage->set(true);
-					}
-				}
-			}
+			writeMutationsToCache(cacheData, db, feedReply.mutations, rangeID, range, tenantPrefix);
 			results->mutations.send(
 			    Standalone<VectorRef<MutationsAndVersionRef>>(feedReply.mutations, feedReply.arena));
 
@@ -10641,7 +10640,7 @@ ACTOR Future<bool> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
 		while (!foundEnd && idx < res.size()) {
 			Standalone<VectorRef<MutationsAndVersionRef>> mutations = decodeChangeFeedCacheValue(res[idx].value);
 			while (!mutations.empty() && mutations.front().version < *begin) {
-				mutations.pop_front(1);
+				mutations.pop_front();
 			}
 			while (!mutations.empty() && mutations.back().version >= end) {
 				mutations.pop_back();
@@ -10886,18 +10885,12 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 				auto cacheData = db->changeFeedCaches[cacheRange.get()];
 				if (begin < cacheData->popped) {
 					results->mutations.sendError(change_feed_popped());
-					results->refresh.sendError(change_feed_cancelled());
-					results->streams.clear();
-					results->storageData.clear();
 					return Void();
 				}
 				if (cacheData->version <= begin) {
 					bool foundEnd = wait(getChangeFeedStreamFromDisk(db, results, rangeID, &begin, end, range, prefix));
 					if (foundEnd) {
 						results->mutations.sendError(end_of_stream());
-						results->refresh.sendError(change_feed_cancelled());
-						results->streams.clear();
-						results->storageData.clear();
 						return Void();
 					}
 				}
@@ -10916,8 +10909,11 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 					data = db->changeFeedCaches[cacheRange.get()];
 					if (!data->active && data->version <= begin) {
 						data->active = true;
-						if (originalBegin > data->latest) {
+						if (originalBegin > data->latest + 1) {
 							data->version = originalBegin;
+							Key durableFeedKey = changeFeedCacheFeedKey(cacheRange.get().tenantPrefix, rangeID, range);
+							Value durableFeedValue = changeFeedCacheFeedValue(originalBegin, data->popped);
+							db->storage->set(KeyValueRef(durableFeedKey, durableFeedValue));
 						}
 					} else {
 						data = Reference<ChangeFeedCacheData>();
@@ -11132,7 +11128,7 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 				db->storage->set(KeyValueRef(durableFeedKey, durableFeedValue));
 				db->uncommittedCFBytes +=
 				    beginKey.size() + endKey.size() + durableFeedKey.size() + durableFeedValue.size();
-				if (db->uncommittedCFBytes > 1e6) {
+				if (db->uncommittedCFBytes > CLIENT_KNOBS->CHANGE_FEED_CACHE_FLUSH_BYTES) {
 					db->commitChangeFeedStorage->set(true);
 				}
 			}
