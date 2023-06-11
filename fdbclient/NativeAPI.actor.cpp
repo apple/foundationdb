@@ -10632,22 +10632,28 @@ void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
 	locations = coalesced;
 }
 
-ACTOR Future<Void> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
+ACTOR Future<bool> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
                                                Reference<ChangeFeedData> results,
                                                Key rangeID,
                                                Version* begin,
                                                Version end,
                                                KeyRange range,
                                                Key tenantPrefix) {
+	state bool foundEnd = false;
 	loop {
 		Key beginKey = changeFeedCacheKey(tenantPrefix, rangeID, range, *begin);
 		Key endKey = changeFeedCacheKey(tenantPrefix, rangeID, range, MAX_VERSION);
 		state RangeResult res = wait(db->storage->readRange(KeyRangeRef(beginKey, endKey), 5e5, 5e5));
 		state int idx = 0;
-		while (idx < res.size()) {
+
+		while (!foundEnd && idx < res.size()) {
 			Standalone<VectorRef<MutationsAndVersionRef>> mutations = decodeChangeFeedCacheValue(res[idx].value);
 			while (!mutations.empty() && mutations.front().version < *begin) {
 				mutations.pop_front(1);
+			}
+			while (!mutations.empty() && mutations.back().version >= end) {
+				mutations.pop_back();
+				foundEnd = true;
 			}
 			if (!mutations.empty()) {
 				*begin = mutations.back().version;
@@ -10662,8 +10668,8 @@ ACTOR Future<Void> getChangeFeedStreamFromDisk(Reference<DatabaseContext> db,
 			idx++;
 		}
 
-		if (!res.more) {
-			return Void();
+		if (foundEnd || !res.more) {
+			return foundEnd;
 		}
 	}
 }
@@ -10876,6 +10882,7 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 	state Optional<ChangeFeedCacheRange> cacheRange;
 	state Reference<ChangeFeedCacheData> data;
 	state Error err = success();
+	state Version originalBegin = begin;
 	results->endVersion = end;
 	db->usedAnyChangeFeeds = true;
 	try {
@@ -10893,7 +10900,13 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 					return Void();
 				}
 				if (cacheData->version <= begin) {
-					wait(getChangeFeedStreamFromDisk(db, results, rangeID, &begin, end, range, prefix));
+					bool foundEnd = wait(getChangeFeedStreamFromDisk(db, results, rangeID, &begin, end, range, prefix));
+					if (foundEnd) {
+						results->mutations.sendError(end_of_stream());
+						results->refresh.sendError(change_feed_cancelled());
+						results->streams.clear();
+						results->storageData.clear();
+						return Void();
 				}
 			}
 			if (end == MAX_VERSION) {
@@ -10910,6 +10923,9 @@ ACTOR Future<Void> durableChangeFeedMonitor(Reference<DatabaseContext> db,
 					data = db->changeFeedCaches[cacheRange.get()];
 					if (!data->active && data->version <= begin) {
 						data->active = true;
+						if (originalBegin > data->latest) {
+							data->version = originalBegin;
+						}
 					} else {
 						data = Reference<ChangeFeedCacheData>();
 					}
