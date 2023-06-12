@@ -2213,12 +2213,13 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		wait(data->getQueryDelay());
 		state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
-		TraceEvent("GetValueQRecv", data->thisServerID);
-		sampleRequestVersions(data, req.version, now());
-
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
 		data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+		// Track request version recv time right before we need to wait for the version
+		TraceEvent("GetValueQRecv", data->thisServerID);
+		sampleRequestVersions(data, req.version, now());
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -4308,12 +4309,13 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
-	TraceEvent("GetKeyValuesQRecv", data->thisServerID);
-	sampleRequestVersions(data, req.version, now());
-
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+	// Track request version recv time right before we need to wait for the version
+	TraceEvent("GetKeyValuesQRecv", data->thisServerID);
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5486,12 +5488,13 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
-	TraceEvent("GetMappedKeyValuesQRecv", data->thisServerID);
-	sampleRequestVersions(data, req.version, now());
-
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+	// Track request version recv time right before we need to wait for the version
+	TraceEvent("GetMappedKeyValuesQRecv", data->thisServerID);
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5903,12 +5906,13 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	wait(data->getQueryDelay());
 	state PriorityMultiLock::Lock readLock = wait(data->getReadLock(req.options));
 
-	TraceEvent("GetKeyQRecv", data->thisServerID);
-	sampleRequestVersions(data, req.version, now());
-
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+	// Track request version recv time right before we need to wait for the version
+	TraceEvent("GetKeyQRecv", data->thisServerID);
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
@@ -9359,6 +9363,8 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detail("Version", cursor->popped());
 			throw worker_removed();
 		}
+
+		// Track tlog sync version recv time right before we update local version
 		sampleTlogUpdateVersions(data, cursor->getMaxKnownVersion(), now());
 
 		++data->counters.updateBatches;
@@ -11328,6 +11334,16 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 		}
 	}
 }
+
+// ACTOR Future<Void> syncSafeDelayWindow(StorageServer* self, FutureStream<double> safeDelayWindowFeed) {
+// 	loop {
+// 		choose {
+// 			when(Version version = waitNext(safeDelayWindowFeed)) {
+// 				// TODO: broadcast new delay window to tlog
+// 			}
+// 		}
+// 	}
+// }
 
 // ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
 //                                            FutureStream<StorageServer::EmptyVersionQueueEntry> tlogIn,
