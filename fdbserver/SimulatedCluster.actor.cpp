@@ -2748,7 +2748,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	CODE_PROBE(true, "Simulation start");
 
 	state Optional<TenantName> defaultTenant;
-	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
+	state Standalone<VectorRef<TenantNameRef>> extraTenants;
 	state Optional<TenantMode> tenantMode;
 
 	try {
@@ -2800,22 +2800,20 @@ ACTOR void setupAndRun(std::string dataFolder,
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
 		}
-		if (!rebooting) {
-			if (defaultTenant.present() && allowDefaultTenant) {
-				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-			}
-			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
-				int numTenants = deterministicRandom()->randomInt(1, 6);
-				for (int i = 0; i < numTenants; ++i) {
-					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
-					                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
-				}
+
+		if (!rebooting && allowCreatingTenants && tenantMode != TenantMode::DISABLED &&
+		    deterministicRandom()->coinflip()) {
+			int numTenants = deterministicRandom()->randomInt(1, 6);
+			for (int i = 0; i < numTenants; ++i) {
+				extraTenants.push_back_deep(extraTenants.arena(), TenantNameRef(format("SimulatedExtraTenant%04d", i)));
 			}
 		}
+
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
 		    .detail("TenantMode", tenantMode.get().toString())
-		    .detail("TotalTenants", tenantsToCreate.size());
+		    .detail("TotalTenants", extraTenants.size() + (defaultTenant.present() ? 1 : 0));
+
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
@@ -2846,7 +2844,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
 		                                  defaultTenant,
-		                                  tenantsToCreate,
+		                                  extraTenants,
 		                                  rebooting);
 		wait(testConfig.longRunningTest ? runTestsF
 		                                : timeoutError(runTestsF,

@@ -126,18 +126,17 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 enum test_location_t { TEST_HERE, TEST_ON_SERVERS, TEST_ON_TESTERS };
 enum test_type_t { TEST_TYPE_FROM_FILE, TEST_TYPE_CONSISTENCY_CHECK, TEST_TYPE_UNIT_TESTS };
 
-ACTOR Future<Void> runTests(
-    Reference<IClusterConnectionRecord> connRecord,
-    test_type_t whatToRun,
-    test_location_t whereToRun,
-    int minTestersExpected,
-    std::string fileName = std::string(),
-    StringRef startingConfiguration = StringRef(),
-    LocalityData locality = LocalityData(),
-    UnitTestParameters testOptions = UnitTestParameters(),
-    Optional<TenantName> defaultTenant = Optional<TenantName>(),
-    Standalone<VectorRef<TenantNameRef>> tenantsToCreate = Standalone<VectorRef<TenantNameRef>>(),
-    bool restartingTest = false);
+ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
+                            test_type_t whatToRun,
+                            test_location_t whereToRun,
+                            int minTestersExpected,
+                            std::string fileName = std::string(),
+                            StringRef startingConfiguration = StringRef(),
+                            LocalityData locality = LocalityData(),
+                            UnitTestParameters testOptions = UnitTestParameters(),
+                            Optional<TenantName> defaultTenant = Optional<TenantName>(),
+                            Standalone<VectorRef<TenantNameRef>> extraTenants = Standalone<VectorRef<TenantNameRef>>(),
+                            bool restartingTest = false);
 
 #include "flow/unactorcompiler.h"
 #endif
