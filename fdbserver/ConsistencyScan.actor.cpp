@@ -136,7 +136,7 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 			++memState->stats.databasePollErrors;
 		}
 
-		wait(delay(1.0));
+		wait(delay(5.0));
 	}
 }
 
