@@ -69,7 +69,7 @@ struct RestoreClusterImpl {
 	std::vector<std::string>& messages;
 
 	// Unique ID generated for this restore. Used to avoid concurrent restores
-	UID restoreId = deterministicRandom()->randomUniqueID();
+	Versionstamp restoreId;
 
 	// Loaded from the management cluster
 	Optional<int64_t> lastManagementClusterTenantId;
@@ -101,7 +101,7 @@ struct RestoreClusterImpl {
 	ACTOR template <class Transaction>
 	static Future<Void> checkRestoreId(RestoreClusterImpl* self, Transaction tr) {
 		if (!self->restoreDryRun) {
-			Optional<UID> activeRestoreId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
+			Optional<Versionstamp> activeRestoreId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 			if (!activeRestoreId.present() || activeRestoreId.get() != self->restoreId) {
 				CODE_PROBE(true, "Conflicting restore detected");
 				throw conflicting_restore();
@@ -114,7 +114,7 @@ struct RestoreClusterImpl {
 	// Returns true if the restore ID was erased
 	ACTOR template <class Transaction>
 	static Future<bool> eraseRestoreId(RestoreClusterImpl* self, Transaction tr) {
-		Optional<UID> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
+		Optional<Versionstamp> transactionId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 		if (!transactionId.present()) {
 			CODE_PROBE(true, "Erasing non-existent restore ID");
 			return false;
@@ -203,7 +203,8 @@ struct RestoreClusterImpl {
 	}
 
 	// Store the cluster entry for the restored cluster
-	ACTOR static Future<Void> registerRestoringClusterInManagementCluster(RestoreClusterImpl* self,
+	ACTOR static Future<Future<Versionstamp>> registerRestoringClusterInManagementCluster(
+	    RestoreClusterImpl* self,
 	                                                                      Reference<typename DB::TransactionT> tr) {
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
@@ -214,7 +215,7 @@ struct RestoreClusterImpl {
 			throw cluster_already_exists();
 		} else if (!self->restoreDryRun) {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-			metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+			metadata::activeRestoreIds().setVersionstamp(tr, self->clusterName, Versionstamp(), 1);
 
 			if (!dataClusterMetadata.present()) {
 				self->dataClusterId = deterministicRandom()->randomUniqueID();
@@ -233,9 +234,14 @@ struct RestoreClusterImpl {
 			    .detail("Capacity", clusterEntry.capacity)
 			    .detail("Version", tr->getCommittedVersion())
 			    .detail("ConnectionString", self->connectionString.toString());
+
+			ThreadFuture<Value> versionstampFuture = tr->getVersionstamp();
+			return holdWhile(versionstampFuture, map(safeThreadFutureToFuture(versionstampFuture), [](Value value) {
+				                 return Versionstamp(value);
+			                 }));
 		}
 
-		return Void();
+		return Future<Versionstamp>(Versionstamp());
 	}
 
 	// If adding a data cluster to a restored management cluster, write a metacluster registration entry
@@ -264,7 +270,7 @@ struct RestoreClusterImpl {
 
 				wait(lastTenantIdFuture);
 
-				MetaclusterRegistrationEntry dataClusterEntry =
+				state MetaclusterRegistrationEntry dataClusterEntry =
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->dataClusterId);
 
@@ -281,9 +287,16 @@ struct RestoreClusterImpl {
 				}
 
 				if (!self->restoreDryRun) {
+					Versionstamp maxRestoreId =
+					    wait(metadata::maxRestoreId().getD(tr, Snapshot::False, Versionstamp()));
+					if (self->restoreId < maxRestoreId) {
+						throw conflicting_restore();
+					}
+
 					metadata::metaclusterRegistration().set(tr, dataClusterEntry);
 					metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 					metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+					metadata::maxRestoreId().set(tr, self->restoreId);
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
 				}
 
@@ -296,9 +309,10 @@ struct RestoreClusterImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> markClusterRestoring(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<Future<Versionstamp>> markClusterRestoring(RestoreClusterImpl* self,
+	                                                               Reference<typename DB::TransactionT> tr) {
 		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+		metadata::activeRestoreIds().setVersionstamp(tr, self->clusterName, Versionstamp(), 1);
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::RESTORING;
@@ -318,7 +332,10 @@ struct RestoreClusterImpl {
 		wait(store(self->lastManagementClusterTenantId, metadata::management::tenantMetadata().lastTenantId.get(tr)));
 
 		TraceEvent("MarkedDataClusterRestoring").detail("Name", self->clusterName);
-		return Void();
+		ThreadFuture<Value> versionstampFuture = tr->getVersionstamp();
+		return holdWhile(versionstampFuture, map(safeThreadFutureToFuture(versionstampFuture), [](Value value) {
+			                 return Versionstamp(value);
+		                 }));
 	}
 
 	Future<Void> markClusterAsReady(Reference<typename DB::TransactionT> tr) {
@@ -971,6 +988,24 @@ struct RestoreClusterImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> updateDataClusterMetadata(RestoreClusterImpl* self, Reference<ITransaction> tr) {
+		Versionstamp maxRestoreId = wait(metadata::maxRestoreId().getD(tr, Snapshot::False, Versionstamp()));
+		if (self->restoreId < maxRestoreId) {
+			throw conflicting_restore();
+		}
+
+		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
+		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
+		metadata::maxRestoreId().set(tr, self->restoreId);
+		if (self->lastManagementClusterTenantId.present()) {
+			TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
+		} else {
+			TenantMetadata::lastTenantId().clear(tr);
+		}
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> runDataClusterRestore(RestoreClusterImpl* self) {
 		CODE_PROBE(self->restoreDryRun, "Data cluster restore dry-run");
 		CODE_PROBE(self->forceJoin, "Data cluster restore force join");
@@ -987,8 +1022,10 @@ struct RestoreClusterImpl {
 		// set state to restoring
 		if (!self->restoreDryRun) {
 			try {
-				wait(self->ctx.runManagementTransaction(
+				Future<Versionstamp> versionstampFuture = wait(self->ctx.runManagementTransaction(
 				    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterRestoring(self, tr); }));
+
+				wait(store(self->restoreId, versionstampFuture));
 			} catch (Error& e) {
 				// If the transaction retries after success or if we are trying a second time to restore the cluster, it
 				// will throw an error indicating that the restore has already started
@@ -1000,16 +1037,8 @@ struct RestoreClusterImpl {
 
 		// Set the restore ID in the data cluster and update the last tenant ID to match the management cluster
 		if (!self->restoreDryRun) {
-			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
-				metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
-				metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-				if (self->lastManagementClusterTenantId.present()) {
-					TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
-				} else {
-					TenantMetadata::lastTenantId().clear(tr);
-				}
-				return Future<Void>(Void());
-			}));
+			wait(self->ctx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return updateDataClusterMetadata(self, tr); }));
 		}
 
 		// get all the tenants in the metacluster
@@ -1048,9 +1077,14 @@ struct RestoreClusterImpl {
 		CODE_PROBE(self->forceReuseTenantIdPrefix, "Management cluster restore force reuse tenant ID prefix");
 
 		// Record the data cluster in the management cluster
+		Future<Versionstamp> versionstampFuture =
 		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return registerRestoringClusterInManagementCluster(self, tr);
 		}));
+
+		if (!self->restoreDryRun) {
+			wait(store(self->restoreId, versionstampFuture));
+		}
 
 		// Write a metacluster registration entry in the data cluster
 		wait(writeDataClusterRegistration(self));

@@ -30,8 +30,13 @@ KeyBackedSet<UID>& registrationTombstones() {
 	return instance;
 }
 
-KeyBackedMap<ClusterName, UID>& activeRestoreIds() {
-	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
+KeyBackedMap<ClusterName, Versionstamp>& activeRestoreIds() {
+	static KeyBackedMap<ClusterName, Versionstamp> instance("\xff/metacluster/activeRestoreIds"_sr);
+	return instance;
+}
+
+KeyBackedProperty<Versionstamp> maxRestoreId() {
+	static KeyBackedProperty<Versionstamp> instance("\xff/metacluster/maxRestoreId"_sr);
 	return instance;
 }
 

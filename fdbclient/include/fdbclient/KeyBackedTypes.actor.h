@@ -37,6 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
+#include "fdbclient/TupleVersionstamp.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
@@ -121,6 +122,42 @@ inline Standalone<StringRef> TupleCodec<UID>::pack(UID const& val) {
 template <>
 inline UID TupleCodec<UID>::unpack(Standalone<StringRef> const& val) {
 	return BinaryReader::fromStringRef<UID>(TupleCodec<Standalone<StringRef>>::unpack(val), Unversioned());
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp const& val) {
+	return Tuple::makeTuple(val).pack();
+}
+template <>
+inline TupleVersionstamp TupleCodec<TupleVersionstamp>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getVersionstamp(0);
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<Versionstamp>::pack(Versionstamp const& val) {
+	try {
+		return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val));
+	} catch (Error& e) {
+		fmt::print("Pack error: {}\n", e.what());
+		throw;
+	} catch (std::exception& e) {
+		fmt::print("Pack std::exception: {}\n", e.what());
+		throw;
+	}
+}
+template <>
+inline Versionstamp TupleCodec<Versionstamp>::unpack(Standalone<StringRef> const& val) {
+	try {
+		TupleVersionstamp vs = TupleCodec<TupleVersionstamp>::unpack(val);
+		ASSERT(vs.getUserVersion() == 0);
+		return Versionstamp(vs.getVersion(), vs.getBatchNumber());
+	} catch (Error& e) {
+		fmt::print("Unpack error: {} {}\n", e.what(), printable(val));
+		throw;
+	} catch (std::exception& e) {
+		fmt::print("Unpack std::exception: {}\n", e.what());
+		throw;
+	}
 }
 
 // This is backward compatible with TupleCodec<Standalone<StringRef>>
@@ -772,6 +809,16 @@ public:
 		Key k = packKey(key);
 		Value v = packValue(val);
 		tr->atomicOp(k, v, type);
+		if (trigger.present()) {
+			trigger->update(tr);
+		}
+	}
+
+	template <class Transaction>
+	void setVersionstamp(Transaction tr, KeyType const& key, ValueType const& val, int offset = 0) {
+		Key k = packKey(key);
+		Value v = packValue(val).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4));
+		tr->atomicOp(k, v, MutationRef::SetVersionstampedValue);
 		if (trigger.present()) {
 			trigger->update(tr);
 		}

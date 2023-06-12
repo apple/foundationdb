@@ -104,7 +104,7 @@ Future<Optional<std::string>> createMetacluster(Reference<DB> db,
 			}
 
 			metadata::metaclusterRegistration().set(
-			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get(), MetaclusterVersion::V1));
+			    tr, MetaclusterRegistrationEntry(name, metaclusterUid.get(), MetaclusterVersion::V2));
 
 			TenantMetadata::tenantIdPrefix().set(tr, tenantIdPrefix);
 

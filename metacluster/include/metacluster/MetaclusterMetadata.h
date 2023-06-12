@@ -35,7 +35,8 @@ namespace metacluster::metadata {
 
 // Metadata used on all clusters in a metacluster
 KeyBackedSet<UID>& registrationTombstones();
-KeyBackedMap<ClusterName, UID>& activeRestoreIds();
+KeyBackedMap<ClusterName, Versionstamp>& activeRestoreIds();
+KeyBackedProperty<Versionstamp> maxRestoreId();
 
 // Metadata used only on the management cluster
 namespace management {
