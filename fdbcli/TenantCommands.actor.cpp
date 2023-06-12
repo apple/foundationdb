@@ -89,6 +89,7 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, i
 				           value.present() ? value.get().toString().c_str() : "null");
 				return {};
 			}
+			configParams[param] = value;
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
 			return {};

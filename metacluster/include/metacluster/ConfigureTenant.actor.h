@@ -281,27 +281,47 @@ struct ConfigureTenantImpl {
 		return Void();
 	}
 
+	// Currently used only via resetTenantStateToReady triggered by fdbcli
+	ACTOR static Future<Void> forceMarkManagementTenantAsReady(ConfigureTenantImpl* self,
+	                                                           Reference<typename DB::TransactionT> tr) {
+		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
+
+		if (!tenantEntry.present()) {
+			CODE_PROBE(true, "Configure tenant state for non-existent tenant");
+			throw tenant_not_found();
+		}
+
+		ASSERT(self->targetTenantState.present());
+		ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState);
+		if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
+			TraceEvent(SevError, "TenantStateNotError").detail("Tenant", self->tenantName);
+			throw invalid_tenant_state();
+		}
+		self->updatedEntry = tenantEntry.get();
+		self->updatedEntry.tenantState = self->targetTenantState.get();
+		metadata::management::tenantMetadata().tenantMap.set(tr, self->updatedEntry.id, self->updatedEntry);
+		metadata::management::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
+
+		return Void();
+	}
+
 	ACTOR static Future<Void> run(ConfigureTenantImpl* self) {
 		// Check whether we are setting tenant state and other properties together.
 		// If so, throw
-		if (self->configurationParameters.size() > 1) {
-			for (const auto& [configKey, configValue] : self->configurationParameters) {
-				if (configKey.compare("tenant_state"_sr) == 0) {
+		state std::map<Standalone<StringRef>, Optional<Value>> parameters = self->configurationParameters;
+		for (const auto& [configKey, configValue] : parameters) {
+			if (configKey == "tenant_state"_sr) {
+				if (self->configurationParameters.size() > 1) {
+					CODE_PROBE(true, "SettingTenantStateWithOtherConfigs", probe::decoration::rare);
 					TraceEvent(SevError, "ConfigureTenantStateWithOtherProperties").detail("Tenant", self->tenantName);
 					throw invalid_tenant_configuration();
+				} else {
+					self->targetTenantState = metacluster::TenantState::READY;
+					wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+						return forceMarkManagementTenantAsReady(self, tr);
+					}));
+					return Void();
 				}
-			}
-		} else if (self->configurationParameters.size() == 1) {
-			auto configParamIter = self->configurationParameters.begin();
-			const auto& theConfigKey = configParamIter->first;
-			if (theConfigKey.compare("tenant_state"_sr) == 0) {
-				const auto& configValue = configParamIter->second;
-				if (!configValue.present() ||
-				    configValue.get().compare(metacluster::tenantStateToString(metacluster::TenantState::READY)) != 0) {
-					TraceEvent(SevError, "MustSetTenantStateToReady").detail("Tenant", self->tenantName);
-					throw invalid_tenant_configuration();
-				}
-				self->targetTenantState = metacluster::TenantState::READY;
 			}
 		}
 
