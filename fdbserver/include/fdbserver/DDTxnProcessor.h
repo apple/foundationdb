@@ -315,7 +315,7 @@ public:
 
 	Future<SourceServers> getSourceServersForRange(const KeyRangeRef range) override;
 
-	Future<Optional<Value>> readRebalanceDDIgnoreKey() const override { return Optional<Value>(); }
+	Future<ValueReadResult> readRebalanceDDIgnoreKey() const override { return ValueReadResult(); }
 
 	Future<Void> waitForAllDataRemoved(
 	    const UID& serverID,

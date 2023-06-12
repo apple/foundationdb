@@ -604,11 +604,6 @@ public:
 				wait(yield(TaskPriority::DataDistribution));
 			}
 		}
-
-		// Trigger background cleanup for datamove tombstones
-		if (!self->txnProcessor->isMocked()) {
-			self->addActor.send(self->removeDataMoveTombstoneBackground(self));
-		}
 		return Void();
 	}
 
