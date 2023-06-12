@@ -304,72 +304,6 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> DLTransaction::getBlobGranuleRa
 	});
 }
 
-ReadRangeApiResult DLTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                   Version beginVersion,
-                                                   Optional<Version> readVersion,
-                                                   ReadBlobGranuleContext granuleContext) {
-	return ReadRangeApiResult::createError(unsupported_operation());
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> DLTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	if (!api->transactionReadBlobGranulesStart) {
-		return unsupported_operation();
-	}
-
-	int64_t rv = readVersion.present() ? readVersion.get() : latestVersion;
-
-	FdbCApi::FDBFuture* f = api->transactionReadBlobGranulesStart(tr,
-	                                                              keyRange.begin.begin(),
-	                                                              keyRange.begin.size(),
-	                                                              keyRange.end.begin(),
-	                                                              keyRange.end.size(),
-	                                                              beginVersion,
-	                                                              rv,
-	                                                              readVersionOut);
-
-	return ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>>(
-	    (ThreadSingleAssignmentVar<Standalone<VectorRef<BlobGranuleChunkRef>>>*)(f));
-};
-
-ReadRangeApiResult DLTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	if (!api->transactionReadBlobGranulesFinish) {
-		return ReadRangeApiResult::createError(unsupported_operation());
-	}
-
-	// convert back to fdb future for API
-	FdbCApi::FDBFuture* f = (FdbCApi::FDBFuture*)(startFuture.extractPtr());
-
-	// FIXME: better way to convert here?
-	FdbCApi::FDBReadBlobGranuleContext context;
-	context.userContext = granuleContext.userContext;
-	context.start_load_f = granuleContext.start_load_f;
-	context.get_load_f = granuleContext.get_load_f;
-	context.free_load_f = granuleContext.free_load_f;
-	context.debugNoMaterialize = granuleContext.debugNoMaterialize;
-	context.granuleParallelism = granuleContext.granuleParallelism;
-
-	FdbCApi::FDBResult* r = api->transactionReadBlobGranulesFinish(tr,
-	                                                               f,
-	                                                               keyRange.begin.begin(),
-	                                                               keyRange.begin.size(),
-	                                                               keyRange.end.begin(),
-	                                                               keyRange.end.size(),
-	                                                               beginVersion,
-	                                                               readVersion,
-	                                                               &context);
-
-	return (ReadRangeApiResult)ApiResult::fromPtr(r);
-};
-
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
 DLTransaction::summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) {
 	if (!api->transactionSummarizeBlobGranules) {
@@ -1209,18 +1143,6 @@ void DLApi::init() {
 	                   fdbCPath,
 	                   "fdb_transaction_get_blob_granule_ranges",
 	                   headerVersion >= 710);
-	loadClientFunction(
-	    &api->transactionReadBlobGranules, lib, fdbCPath, "fdb_transaction_read_blob_granules", headerVersion >= 710);
-	loadClientFunction(&api->transactionReadBlobGranulesStart,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_read_blob_granules_start",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
-	loadClientFunction(&api->transactionReadBlobGranulesFinish,
-	                   lib,
-	                   fdbCPath,
-	                   "fdb_transaction_read_blob_granules_finish",
-	                   headerVersion >= ApiVersion::withBlobRangeApi().version());
 	loadClientFunction(&api->transactionSummarizeBlobGranules,
 	                   lib,
 	                   fdbCPath,
@@ -1628,52 +1550,6 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> MultiVersionTransaction::getBlo
     const KeyRangeRef& keyRange,
     int rangeLimit) {
 	return executeOperation(&ITransaction::getBlobGranuleRanges, keyRange, std::forward<int>(rangeLimit));
-}
-
-ReadRangeApiResult MultiVersionTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                             Version beginVersion,
-                                                             Optional<Version> readVersion,
-                                                             ReadBlobGranuleContext granuleContext) {
-	// FIXME: prevent from calling this from another main thread?
-	auto tr = getTransaction();
-	if (tr.transaction) {
-		Version readVersionOut;
-		auto f = tr.transaction->readBlobGranulesStart(keyRange, beginVersion, readVersion, &readVersionOut);
-		auto abortableF = abortableFuture(f, tr.onChange);
-		abortableF.blockUntilReadyCheckOnMainThread();
-		if (abortableF.isError()) {
-			return ReadRangeApiResult::createError(abortableF.getError());
-		}
-		if (granuleContext.debugNoMaterialize) {
-			return ReadRangeApiResult::createError(blob_granule_not_materialized());
-		}
-		return tr.transaction->readBlobGranulesFinish(
-		    abortableF, keyRange, beginVersion, readVersionOut, granuleContext);
-	} else {
-		return abortableTimeoutResult<FDBReadRangeResult>(tr.onChange);
-	}
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> MultiVersionTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	return executeOperation(&ITransaction::readBlobGranulesStart,
-	                        keyRange,
-	                        std::forward<Version>(beginVersion),
-	                        std::forward<Optional<Version>>(readVersion),
-	                        std::forward<Version*>(readVersionOut));
-}
-
-ReadRangeApiResult MultiVersionTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	// can't call this directly
-	return ReadRangeApiResult::createError(unsupported_operation());
 }
 
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> MultiVersionTransaction::summarizeBlobGranules(

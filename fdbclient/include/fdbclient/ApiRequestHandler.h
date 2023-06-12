@@ -12,11 +12,9 @@
 #include "fdbclient/ApiRequest.h"
 #include "fdbclient/ISingleThreadTransaction.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/BlobGranuleCommon.h"
 
 Future<ApiResult> handleApiRequest(ISingleThreadTransaction* tr, ApiRequest req);
 
 ReadRangeApiResult createReadRangeApiResult(RangeResult rangeResult);
-ReadBGMutationsApiResult createBGMutationsApiResult(Standalone<VectorRef<GranuleMutationRef>> mutationsResult);
 
 #endif

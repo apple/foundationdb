@@ -83,24 +83,6 @@ public:
 	virtual ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                              int rowLimit) = 0;
 
-	virtual ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
-	                                            Version beginVersion,
-	                                            Optional<Version> readVersion,
-	                                            ReadBlobGranuleContext granuleContext) = 0;
-
-	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Optional<Version> readVersion,
-	    Version* readVersionOut) = 0;
-
-	virtual ReadRangeApiResult readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) = 0;
-
 	virtual ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>>
 	summarizeBlobGranules(const KeyRangeRef& keyRange, Optional<Version> summaryVersion, int rangeLimit) = 0;
 

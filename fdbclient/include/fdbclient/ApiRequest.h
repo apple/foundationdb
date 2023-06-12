@@ -84,6 +84,12 @@ public:
 		return *reinterpret_cast<Arena*>(&resRef.getPtr()->header->allocator.handle);
 	}
 
+	const Arena& arena() const {
+		ASSERT(resRef.isValid());
+		static_assert(sizeof(Arena) == sizeof(void*));
+		return *reinterpret_cast<Arena*>(&resRef.getPtr()->header->allocator.handle);
+	}
+
 	bool isError() const { return resRef->header->result_type == FDBApiResult_Error; }
 
 	Error getError() const {
@@ -93,7 +99,7 @@ public:
 			return Error(((FDBErrorResult*)getPtr())->error);
 	}
 
-	FDBResult* getData() {
+	FDBResult* getData() const {
 		if (isError()) {
 			throw Error(((FDBErrorResult*)getPtr())->error);
 		} else {
@@ -133,8 +139,8 @@ public:
 	explicit TypedApiResult(const ApiResult& r) : ApiResult(r) {}
 	explicit TypedApiResult(ApiResult&& r) : ApiResult(r) {}
 
-	ResultType* getPtr() { return reinterpret_cast<ResultType*>(ApiResult::getPtr()); }
-	ResultType* getData() { return reinterpret_cast<ResultType*>(ApiResult::getData()); }
+	ResultType* getPtr() const { return reinterpret_cast<ResultType*>(ApiResult::getPtr()); }
+	ResultType* getData() const { return reinterpret_cast<ResultType*>(ApiResult::getData()); }
 
 	static TypedApiResult<ResultType> create(FDBApiResultType resType) {
 		Arena arena(sizeof(ResultType) + sizeof(FDBResultHeader));
@@ -155,5 +161,6 @@ public:
 
 using ReadRangeApiResult = TypedApiResult<FDBReadRangeResult>;
 using ReadBGMutationsApiResult = TypedApiResult<FDBReadBGMutationsResult>;
+using ReadBGDescriptionsApiResult = TypedApiResult<FDBReadBGDescriptionResult>;
 
 #endif

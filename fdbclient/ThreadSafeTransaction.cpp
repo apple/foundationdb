@@ -537,48 +537,6 @@ ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> ThreadSafeTransaction::getBlobG
 	});
 }
 
-ReadRangeApiResult ThreadSafeTransaction::readBlobGranules(const KeyRangeRef& keyRange,
-                                                           Version beginVersion,
-                                                           Optional<Version> readVersion,
-                                                           ReadBlobGranuleContext granule_context) {
-	// This should not be called directly, bypassMultiversionApi should not be set
-	return ReadRangeApiResult::createError(unsupported_operation());
-}
-
-ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> ThreadSafeTransaction::readBlobGranulesStart(
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Optional<Version> readVersion,
-    Version* readVersionOut) {
-	ISingleThreadTransaction* tr = this->tr;
-	KeyRange r = keyRange;
-
-	return onMainThread(
-	    [tr, r, beginVersion, readVersion, readVersionOut]() -> Future<Standalone<VectorRef<BlobGranuleChunkRef>>> {
-		    tr->checkDeferredError();
-		    return tr->readBlobGranules(r, beginVersion, readVersion, readVersionOut);
-	    });
-}
-
-ReadRangeApiResult ThreadSafeTransaction::readBlobGranulesFinish(
-    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-    const KeyRangeRef& keyRange,
-    Version beginVersion,
-    Version readVersion,
-    ReadBlobGranuleContext granuleContext) {
-	// do this work off of fdb network threads for performance!
-	Standalone<VectorRef<BlobGranuleChunkRef>> files = startFuture.get();
-	GranuleMaterializeStats stats;
-	auto res = loadAndMaterializeBlobGranules(files, keyRange, beginVersion, readVersion, granuleContext, stats);
-	if (!res.isError()) {
-		ISingleThreadTransaction* tr = this->tr;
-		onMainThreadVoid([tr, stats]() { tr->addGranuleMaterializeStats(stats); });
-		return createReadRangeApiResult(res.get());
-	} else {
-		return ReadRangeApiResult::createError(res.getError());
-	}
-}
-
 ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> ThreadSafeTransaction::summarizeBlobGranules(
     const KeyRangeRef& keyRange,
     Optional<Version> summaryVersion,

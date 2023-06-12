@@ -50,13 +50,6 @@ ACTOR Future<Value> serializeChunkedDeltaFile(Standalone<StringRef> fileNameRef,
                                               Optional<CompressionFilter> compressFilter,
                                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx);
 
-ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
-                                                    const KeyRangeRef& keyRange,
-                                                    Version beginVersion,
-                                                    Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext,
-                                                    GranuleMaterializeStats& stats);
-
 // TODO: add future
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,

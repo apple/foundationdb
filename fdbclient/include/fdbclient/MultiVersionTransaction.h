@@ -100,32 +100,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	} FDBGranuleSummary;
 #pragma pack(pop)
 
-	typedef struct readgranulecontext {
-		// User context to pass along to functions
-		void* userContext;
-
-		// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-		int64_t (*start_load_f)(const char* filename,
-		                        int filenameLength,
-		                        int64_t offset,
-		                        int64_t length,
-		                        int64_t fullFileLength,
-		                        void* context);
-
-		// Returns data for the load. Pass the loadId returned by start_load_f
-		uint8_t* (*get_load_f)(int64_t loadId, void* context);
-
-		// Frees data from load. Pass the loadId returned by start_load_f
-		void (*free_load_f)(int64_t loadId, void* context);
-
-		// set this to true for testing if you don't want to read the granule files, just
-		// do the request to the blob workers
-		fdb_bool_t debugNoMaterialize;
-
-		// number of granules to load in parallel (default 1)
-		int granuleParallelism;
-	} FDBReadBlobGranuleContext;
-
 	typedef void (*FDBCallback)(FDBFuture* future, void* callback_parameter);
 
 	// Network
@@ -371,33 +345,6 @@ struct FdbCApi : public ThreadSafeReferenceCounted<FdbCApi> {
 	                                              int end_key_name_length,
 	                                              int rangeLimit);
 
-	FDBResult* (*transactionReadBlobGranules)(FDBTransaction* tr,
-	                                          uint8_t const* begin_key_name,
-	                                          int begin_key_name_length,
-	                                          uint8_t const* end_key_name,
-	                                          int end_key_name_length,
-	                                          int64_t beginVersion,
-	                                          int64_t readVersion);
-
-	FDBFuture* (*transactionReadBlobGranulesStart)(FDBTransaction* tr,
-	                                               uint8_t const* begin_key_name,
-	                                               int begin_key_name_length,
-	                                               uint8_t const* end_key_name,
-	                                               int end_key_name_length,
-	                                               int64_t beginVersion,
-	                                               int64_t readVersion,
-	                                               int64_t* readVersionOut);
-
-	FDBResult* (*transactionReadBlobGranulesFinish)(FDBTransaction* tr,
-	                                                FDBFuture* startFuture,
-	                                                uint8_t const* begin_key_name,
-	                                                int begin_key_name_length,
-	                                                uint8_t const* end_key_name,
-	                                                int end_key_name_length,
-	                                                int64_t beginVersion,
-	                                                int64_t readVersion,
-	                                                FDBReadBlobGranuleContext* granule_context);
-
 	FDBFuture* (*transactionSummarizeBlobGranules)(FDBTransaction* tr,
 	                                               uint8_t const* begin_key_name,
 	                                               int begin_key_name_length,
@@ -506,22 +453,6 @@ public:
 	                                                                int64_t chunkSize) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
-
-	ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
-	                                    Version beginVersion,
-	                                    Optional<Version> readVersion,
-	                                    ReadBlobGranuleContext granule_context) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ReadRangeApiResult readBlobGranulesFinish(ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	                                          const KeyRangeRef& keyRange,
-	                                          Version beginVersion,
-	                                          Version readVersion,
-	                                          ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
@@ -753,22 +684,6 @@ public:
 	                                                                int64_t chunkSize) override;
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
-
-	ReadRangeApiResult readBlobGranules(const KeyRangeRef& keyRange,
-	                                    Version beginVersion,
-	                                    Optional<Version> readVersion,
-	                                    ReadBlobGranuleContext granule_context) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ReadRangeApiResult readBlobGranulesFinish(ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	                                          const KeyRangeRef& keyRange,
-	                                          Version beginVersion,
-	                                          Version readVersion,
-	                                          ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
