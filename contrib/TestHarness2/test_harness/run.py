@@ -503,15 +503,21 @@ class TestRun:
         self.summary.was_killed = did_kill
         self.summary.valgrind_out_file = valgrind_file
         self.summary.error_out = err_out
+        self.summary.summarize(self.temp_path, " ".join(command))
         if not self.summary.is_negative_test and not self.summary.ok():
             logtool_result = self._run_joshua_logtool()
-            if logtool_result["exit_code"] != 0:
-                child = SummaryTree("JoshuaLogTool")
-                child.attributes["ExitCode"] = str(logtool_result["exit_code"])
-                child.attributes["StdOut"] = logtool_result["stdout"]
-                child.attributes["StdErr"] = logtool_result["stderr"]
-                self.summary.out.append(child)
-        self.summary.summarize(self.temp_path, " ".join(command))
+            child = SummaryTree("JoshuaLogTool")
+            child.attributes["ExitCode"] = str(logtool_result["exit_code"])
+            child.attributes["StdOut"] = logtool_result["stdout"]
+            child.attributes["StdErr"] = logtool_result["stderr"]
+            self.summary.out.append(child)
+        else:
+            child = SummaryTree("JoshuaLogTool")
+            child.attributes["IsNegative"] = str(self.summary.is_negative_test)
+            child.attributes["IsOk"] = str(self.summary.ok())
+            child.attributes["HasError"] = str(self.summary.error)
+            child.attributes["JoshuaLogToolIgnored"] = str(True)
+            self.summary.out.append(child)
 
         return self.summary.ok()
 

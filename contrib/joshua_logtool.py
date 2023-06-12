@@ -17,7 +17,7 @@ import tempfile
 import fdb
 import joshua.joshua_model as joshua
 
-from typing import List
+from typing import List, Union
 
 # Defined in SimulatedCluster.actor.cpp:SimulationConfig::setStorageEngine
 ROCKSDB_TRACEEVENT_STRING = ["RocksDBNonDeterminism", "ShardedRocksDBNonDeterminism"]
@@ -44,7 +44,7 @@ def _is_rocksdb_test(log_files: List[pathlib.Path]) -> bool:
     return False
 
 
-def _extract_ensemble_id(work_directory: str) -> str:
+def _extract_ensemble_id(work_directory: str) -> Union[str, None]:
     match = ENSEMBLE_ID_REGEXP.search(work_directory)
     if not match:
         return None
@@ -134,6 +134,9 @@ def _setup_args():
     parser.add_argument(
         "--cluster-file", type=str, default=None, help="Joshua FDB cluster file"
     )
+    parser.add_argument(
+        "--debug", action="store_true", default=False, help="Add debug logging"
+    )
 
     subparsers = parser.add_subparsers(help="Possible actions", dest="action")
 
@@ -181,7 +184,10 @@ def _setup_args():
 def _main():
     args = _setup_args()
 
-    logging.basicConfig(level=logging.INFO)
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
 
     logger.debug(f"Using cluster file {args.cluster_file}")
     joshua.open(args.cluster_file)
