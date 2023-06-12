@@ -475,6 +475,10 @@ bool TCTeamInfo::hasHealthyAvailableSpace(double minRatio) const {
 	       allServersHaveHealthyAvailableSpace();
 }
 
+bool TCTeamInfo::hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const {
+	return getLoadBytes(true, inflightPenalty) <= thresholdBytes;
+}
+
 bool TCTeamInfo::isOptimal() const {
 	for (const auto& server : servers) {
 		if (server->getLastKnownClass().machineClassFitness(ProcessClass::Storage) > ProcessClass::UnsetFit) {

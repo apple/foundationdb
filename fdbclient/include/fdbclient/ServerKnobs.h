@@ -192,7 +192,11 @@ public:
 	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
 	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
 	// has available space ratio < pivotAvailableSpaceRatio.
-	double AVAILABLE_SPACE_PIVOT_RATIO;
+
+	// double AVAILABLE_SPACE_PIVOT_RATIO;
+	// TODO@muzhi: comment
+	double LOAD_BYTES_PIVOT_RATIO;
+
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
