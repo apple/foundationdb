@@ -100,6 +100,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	int64_t tenantIdPrefix = -1;
 	std::set<int64_t> usedPrefixes;
 	double testDuration;
+	bool useExistingMetacluster;
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), metaclusterCreated(deterministicRandom()->coinflip()) {
@@ -108,6 +109,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		maxTenantGroups = deterministicRandom()->randomInt(
 		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		useExistingMetacluster = getOption(options, "useExistingMetacluster"_sr, false);
 		allowTenantIdPrefixReuse = deterministicRandom()->coinflip();
 		MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites = true;
 	}
@@ -134,7 +136,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			if (g_network->isSimulated() && BUGGIFY) {
+			if (!useExistingMetacluster && g_network->isSimulated() && BUGGIFY) {
 				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
 				    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
 			}
@@ -146,28 +148,94 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterManagementWorkload* self) {
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 
-		if (self->metaclusterCreated) {
-			self->tenantIdPrefix = self->generateTenantIdPrefix().get();
-			self->usedPrefixes.insert(self->tenantIdPrefix);
+		if (!self->useExistingMetacluster) {
+			if (self->metaclusterCreated) {
+				self->tenantIdPrefix = self->generateTenantIdPrefix().get();
+				self->usedPrefixes.insert(self->tenantIdPrefix);
+			}
+
+			metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
+			    cx,
+			    self->tenantIdPrefix,
+			    Optional<metacluster::DataClusterEntry>(),
+			    metacluster::util::SkipMetaclusterCreation(!self->metaclusterCreated)));
+
+			self->managementDb = simMetacluster.managementDb;
+			for (auto const& [name, db] : simMetacluster.dataDbs) {
+				self->dataDbIndex.push_back(name);
+				self->dataDbs[name] = makeReference<DataClusterData>(db);
+			}
+
+			if (self->metaclusterCreated) {
+				Optional<MetaclusterRegistrationEntry> registration =
+				    wait(metacluster::metadata::metaclusterRegistration().get(self->managementDb));
+				ASSERT(registration.present());
+				self->managementVersion = registration.get().version;
+			}
+		} else {
+			metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
+			    cx, {}, {}, metacluster::util::SkipMetaclusterCreation::True));
+			self->managementDb = simMetacluster.managementDb;
+			wait(loadExistingMetacluster(self));
 		}
 
-		metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
-		    cx,
-		    self->tenantIdPrefix,
-		    Optional<metacluster::DataClusterEntry>(),
-		    metacluster::util::SkipMetaclusterCreation(!self->metaclusterCreated)));
+		return Void();
+	}
 
-		self->managementDb = simMetacluster.managementDb;
-		for (auto const& [name, db] : simMetacluster.dataDbs) {
+	ACTOR static Future<Void> loadExistingMetacluster(MetaclusterManagementWorkload* self) {
+		state metacluster::util::MetaclusterData<IDatabase> metaclusterData(self->managementDb);
+		wait(metaclusterData.load());
+
+		self->metaclusterCreated = true;
+		self->managementVersion = metaclusterData.managementMetadata.metaclusterRegistration.get().version;
+		self->tenantIdPrefix = metaclusterData.managementMetadata.tenantIdPrefix.get();
+		self->usedPrefixes.insert(self->tenantIdPrefix);
+
+		for (auto const& [name, metadata] : metaclusterData.managementMetadata.dataClusters) {
+			metacluster::util::MetaclusterData<IDatabase>::DataClusterData dataClusterMetadata =
+			    metaclusterData.dataClusterMetadata[name];
+
 			self->dataDbIndex.push_back(name);
-			self->dataDbs[name] = makeReference<DataClusterData>(db);
+			Reference<DataClusterData> dataDb = makeReference<DataClusterData>(
+			    Database::createSimulatedExtraDatabase(metadata.connectionString.toString()));
+			self->dataDbs[name] = dataDb;
+
+			dataDb->registered = true;
+			dataDb->detached = false;
+			dataDb->tenantGroupCapacity = metadata.entry.capacity.numTenantGroups;
+			dataDb->version = dataClusterMetadata.metaclusterRegistration.get().version;
+			dataDb->autoTenantAssignment = metadata.entry.autoTenantAssignment;
+
+			self->totalTenantGroupCapacity +=
+			    std::max(metadata.entry.capacity.numTenantGroups, metadata.entry.allocated.numTenantGroups);
 		}
 
-		if (self->metaclusterCreated) {
-			Optional<MetaclusterRegistrationEntry> registration =
-			    wait(metacluster::metadata::metaclusterRegistration().get(self->managementDb));
-			ASSERT(registration.present());
-			self->managementVersion = registration.get().version;
+		for (auto const& [id, entry] : metaclusterData.managementMetadata.tenantData.tenantMap) {
+			Reference<TenantTestData> tenantData =
+			    makeReference<TenantTestData>(entry.assignedCluster, entry.tenantGroup);
+			self->createdTenants[entry.tenantName] = tenantData;
+
+			Reference<DataClusterData> dataDb = self->dataDbs[entry.assignedCluster];
+			dataDb->tenants[entry.tenantName] = tenantData;
+
+			tenantData->lockId = entry.tenantLockId;
+			tenantData->lockState = entry.tenantLockState;
+
+			if (!entry.tenantGroup.present()) {
+				self->ungroupedTenants.insert(entry.tenantName);
+				dataDb->ungroupedTenants.insert(entry.tenantName);
+			} else {
+				auto itr = self->tenantGroups.find(entry.tenantGroup.get());
+				if (itr == self->tenantGroups.end()) {
+					itr =
+					    self->tenantGroups
+					        .try_emplace(entry.tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
+					        .first;
+				}
+				auto tenantGroup = itr->second;
+				tenantGroup->tenants.insert(entry.tenantName);
+				dataDb->tenantGroups[entry.tenantGroup.get()] = tenantGroup;
+			}
 		}
 
 		return Void();
