@@ -85,7 +85,7 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, i
 			if (!value.present() ||
 			    value.compare(metacluster::tenantStateToString(metacluster::TenantState::READY)) != 0) {
 				fmt::print(stderr,
-				           "ERROR: only support setting tenant state back to READY, but `%s' given.\n",
+				           "ERROR: only support setting tenant state back to `ready', but `{}' given.\n",
 				           value.present() ? value.get().toString().c_str() : "null");
 				return {};
 			}
