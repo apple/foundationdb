@@ -806,7 +806,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// getSourceServers
 	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
-		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
+		if (EXPENSIVE_VALIDATION) {
+			ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
+		}
 		RelocateData& rrs = queueMapItr->value();
 
 		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.erase(rrs) > 0)) {
