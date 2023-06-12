@@ -2155,6 +2155,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;
