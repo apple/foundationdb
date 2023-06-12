@@ -243,7 +243,7 @@ ACTOR Future<std::vector<BlobWorkerInterface>> getBlobWorkers(Database cx,
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult blobWorkersList = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!blobWorkersList.more && blobWorkersList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<BlobWorkerInterface> blobWorkers;
@@ -272,7 +272,7 @@ ACTOR Future<std::vector<std::pair<UID, UID>>> getBlobWorkerAffinity(Database cx
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult blobWorkerAffinity = wait(tr.getRange(blobWorkerAffinityKeys, CLIENT_KNOBS->TOO_MANY));
 
 			std::vector<std::pair<UID, UID>> affinities;
 			affinities.reserve(blobWorkerAffinity.size());
@@ -299,7 +299,7 @@ ACTOR Future<std::vector<StorageServerInterface>> getStorageServers(Database cx,
 		tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			std::vector<StorageServerInterface> servers;

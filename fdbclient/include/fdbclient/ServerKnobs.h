@@ -196,11 +196,19 @@ public:
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
+	// DD won't move out a shard from its source team, if the utilization of source team meets two criterias:
+	// 1. The available space ratio is above strict pivot space ratio, where using DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO
+	// to calculate pivot space ratio.
+	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU.
+	double DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO;
+	double DD_STRICT_CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;
 	// The constant interval DD update pivot values for team selection. It should be >=
 	// min(STORAGE_METRICS_POLLING_DELAY,DETAILED_METRIC_UPDATE_RATE)  otherwise the pivot won't change;
 	double DD_TEAM_PIVOT_UPDATE_DELAY;
+	// DD would re-evaluate the CPU and AvailableSpace stats of source team when relocating a shard
+	bool DD_REEVALUATION_ENABLED;
 
 	bool SHARD_ENCODE_LOCATION_METADATA; // If true, location metadata will contain shard ID.
 	bool ENABLE_DD_PHYSICAL_SHARD; // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true.
@@ -227,6 +235,9 @@ public:
 	    SHARD_SPLIT_BYTES_PER_KSEC; // When splitting a shard, it is split into pieces with less than this bandwidth
 	int64_t SHARD_MAX_READ_OPS_PER_KSEC; // When the read operations count is larger than this threshold, a range will
 	                                     // be considered hot
+	// When the sampled read operations changes more than this threshold, the
+	// shard metrics will update immediately
+	int64_t SHARD_READ_OPS_CHANGE_THRESHOLD;
 
 	double SHARD_MAX_READ_DENSITY_RATIO;
 	int64_t SHARD_READ_HOT_BANDWIDTH_MIN_PER_KSECONDS;
@@ -1131,11 +1142,15 @@ public:
 	double BLOB_MANIFEST_BACKUP_INTERVAL;
 	double BLOB_MIGRATOR_CHECK_INTERVAL;
 	int BLOB_MANIFEST_RW_ROWS;
+	int BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
+	int BLOB_MANIFEST_RETRY_INTERVAL;
 	int BLOB_MIGRATOR_ERROR_RETRIES;
 	int BLOB_MIGRATOR_PREPARE_TIMEOUT;
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
+	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
 
 	// Blob metadata
 	int64_t BLOB_METADATA_CACHE_TTL;

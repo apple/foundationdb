@@ -112,10 +112,10 @@ ACTOR Future<Void> pollDatabaseSize(Reference<ConsistencyScanMemoryState> memSta
 
 ACTOR Future<std::vector<StorageServerInterface>> loadShardInterfaces(Reference<ConsistencyScanMemoryState> memState,
                                                                       Reference<ReadYourWritesTransaction> tr,
-                                                                      Future<RangeResult> readShardBoundaries) {
-	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+                                                                      Future<RangeReadResult> readShardBoundaries) {
+	state RangeReadResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-	state RangeResult shardBoundaries = wait(readShardBoundaries);
+	state RangeReadResult shardBoundaries = wait(readShardBoundaries);
 	ASSERT(shardBoundaries.size() == 2);
 
 	state std::vector<UID> sourceStorageServers;
@@ -550,7 +550,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					systemDB->setOptions(tr);
 
 					// The shard boundaries for the shard that lastEndKey is in
-					state RangeResult shardBoundaries;
+					state RangeReadResult shardBoundaries;
 					state std::vector<StorageServerInterface> storageServerInterfaces;
 					// The consistency scan config update version
 					state Optional<Versionstamp> csVersion;
@@ -564,7 +564,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					GetRangeLimits limits;
 					limits.minRows = 2;
 					limits.rows = 2;
-					Future<RangeResult> readShardBoundaries =
+					Future<RangeReadResult> readShardBoundaries =
 					    tr->getRange(lastLessOrEqual(statsCurrentRound.lastEndKey.withPrefix(keyServersPrefix)),
 					                 firstGreaterThan(allKeys.end.withPrefix(keyServersPrefix)),
 					                 limits,
@@ -1394,7 +1394,7 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		state int bytesReadInRange = 0;
 
-		RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 		decodeKeyServersValue(UIDtoTagMap, keyLocations[shard].value, sourceStorageServers, destStorageServers, false);
 

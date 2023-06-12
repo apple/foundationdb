@@ -237,7 +237,7 @@ private:
 				// incompleted migrations
 				state KeyRange currentKeys = normalKeys;
 				state Key begin = normalKeys.begin;
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				state std::vector<UID> src;
 				state std::vector<UID> dest;
 				state UID srcId;
@@ -472,10 +472,11 @@ private:
 					beginVersion = *std::min_element(self->mlogRestoreBeginVersions_.begin(),
 					                                 self->mlogRestoreBeginVersions_.end());
 				}
+				BlobGranuleRestoreConfig().beginVersion().set(tr, beginVersion);
+
 				Value versionEncoded = BinaryWriter::toValue(beginVersion, Unversioned());
 				Key prefix = uidPrefixKey(applyMutationsKeyVersionMapRange.begin, uid);
 				wait(krmSetRange(tr, prefix, allKeys, versionEncoded));
-
 				wait(tr->commit());
 				break;
 			} catch (Error& e) {
@@ -485,7 +486,7 @@ private:
 
 		// Update applyMutationsKeyVersionMap
 		state int i;
-		state int stepSize = CLIENT_KNOBS->RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
+		state int stepSize = SERVER_KNOBS->BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 		for (i = 0; i < self->mlogRestoreRanges_.size(); i += stepSize) {
 			int end = std::min(i + stepSize, self->mlogRestoreRanges_.size());
 			wait(preloadApplyMutationsKeyVersionMap(

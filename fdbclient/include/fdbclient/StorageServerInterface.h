@@ -286,7 +286,8 @@ struct GetValueReply : public LoadBalancedReply {
 	ReadMetrics readMetrics;
 
 	GetValueReply() : cached(false) {}
-	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
+	GetValueReply(Optional<Value> value, bool cached, ReadMetrics readMetrics)
+	  : value(value), cached(cached), readMetrics(readMetrics) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -501,7 +502,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
 	GetKeyValuesStreamReply(GetKeyValuesReply r)
-	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
+	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached), readMetrics(r.readMetrics) {}
 
 	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
 
@@ -563,7 +564,8 @@ struct GetKeyReply : public LoadBalancedReply {
 	ReadMetrics readMetrics;
 
 	GetKeyReply() : cached(false) {}
-	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
+	GetKeyReply(KeySelector sel, bool cached, ReadMetrics readMetrics)
+	  : sel(sel), cached(cached), readMetrics(readMetrics) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

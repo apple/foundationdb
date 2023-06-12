@@ -83,9 +83,9 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 		for (; i < boundaries.size() - 1; ++i) {
 			KeyRangeRef currentShard = KeyRangeRef(boundaries[i], boundaries[i + 1]);
 			// std::cout << currentShard.toString() << "\n";
-			std::vector<RangeResult> ranges = wait(runRYWTransaction(
-			    cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeResult>> {
-				    std::vector<Future<RangeResult>> f;
+			std::vector<RangeReadResult> ranges = wait(runRYWTransaction(
+			    cx, [currentShard](Reference<ReadYourWritesTransaction> tr) -> Future<std::vector<RangeReadResult>> {
+				    std::vector<Future<RangeReadResult>> f;
 				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::False));
 				    f.push_back(tr->getRange(currentShard, 1, Snapshot::False, Reverse::True));
 				    return getAll(f);
@@ -106,8 +106,8 @@ struct SkewedReadWriteWorkload : ReadWriteCommon {
 			// read in transaction to ensure two key ranges are transactionally consistent
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state Future<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> rangeF = tr->getRange(serverKeysRange, CLIENT_KNOBS->TOO_MANY);
 				wait(store(serverList, serverListF));
 				wait(store(range, rangeF));
 				break;

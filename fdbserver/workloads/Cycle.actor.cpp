@@ -305,9 +305,9 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				try {
 					self->setAuthToken(tr);
 					state Version v = wait(tr.getReadVersion());
-					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
-					                                    firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
-					                                    self->nodeCount + 1));
+					RangeReadResult data = wait(tr.getRange(firstGreaterOrEqual(doubleToTestKey(0.0, self->keyPrefix)),
+					                                        firstGreaterOrEqual(doubleToTestKey(1.0, self->keyPrefix)),
+					                                        self->nodeCount + 1));
 					ok = self->cycleCheckData(data, v) && ok;
 					break;
 				} catch (Error& e) {

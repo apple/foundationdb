@@ -114,7 +114,7 @@ struct InventoryTestWorkload : TestWorkload {
 		state Transaction tr(cx);
 		loop {
 			try {
-				RangeResult data = wait(tr.getRange(
+				RangeReadResult data = wait(tr.getRange(
 				    firstGreaterOrEqual(doubleToTestKey(0)), firstGreaterOrEqual(doubleToTestKey(1)), self->nProducts));
 
 				std::map<Key, int> actualResults;

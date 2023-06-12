@@ -216,6 +216,7 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
+	ReadMetrics readMetrics;
 
 	bool operator==(KeyBackedRangeResult const& other) const { return results == other.results && more == other.more; }
 	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
@@ -556,13 +557,13 @@ public:
 			Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
 			Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-			typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+			typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 			    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
 			return holdWhile(
 			    getRangeFuture,
 			    map(safeThreadFutureToFuture(getRangeFuture),
-			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+			        [prefix = subspace.begin, valueCodec = valueCodec](RangeReadResult const& kvs) -> RangeResultType {
 				        RangeResultType rangeResult;
 				        for (int i = 0; i < kvs.size(); ++i) {
 					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
@@ -570,6 +571,7 @@ public:
 					        rangeResult.results.push_back(PairType(key, val));
 				        }
 				        rangeResult.more = kvs.more;
+				        rangeResult.readMetrics = kvs.getReadMetrics();
 				        return rangeResult;
 			        }));
 		}
@@ -589,7 +591,7 @@ public:
 
 		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
 		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
@@ -598,7 +600,8 @@ public:
 		// and continue with the next request here.
 		state RangeResultType rangeResult;
 		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			rangeResult.readMetrics.combine(kvs.getReadMetrics());
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -691,10 +694,10 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
 		if (kvs.empty()) {
 			return Optional<KVType>();
 		}
@@ -867,17 +870,18 @@ public:
 		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
 		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
 		return holdWhile(getRangeFuture,
 		                 map(safeThreadFutureToFuture(getRangeFuture),
-		                     [prefix = subspace.begin](RangeResult const& kvs) -> RangeResultType {
+		                     [prefix = subspace.begin](RangeReadResult const& kvs) -> RangeResultType {
 			                     RangeResultType rangeResult;
 			                     for (auto const& kv : kvs) {
 				                     rangeResult.results.push_back(Codec::unpack(kv.key.removePrefix(prefix)));
 			                     }
 			                     rangeResult.more = kvs.more;
+			                     rangeResult.readMetrics = kvs.getReadMetrics();
 			                     return rangeResult;
 		                     }));
 	}
@@ -896,7 +900,7 @@ public:
 
 		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
 		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
@@ -905,7 +909,8 @@ public:
 		// and continue with the next request here.
 		state RangeResultType rangeResult;
 		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			rangeResult.readMetrics.combine(kvs.getReadMetrics());
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -996,10 +1001,10 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
 		if (kvs.empty()) {
 			return Optional<ValueType>();
 		}
