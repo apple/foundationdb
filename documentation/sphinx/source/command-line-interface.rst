@@ -156,6 +156,8 @@ The syntax is
 
 The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan``.
 
+For more details, see :ref:`consistency-scan`.
+
 consistencycheck
 ----------------
 
