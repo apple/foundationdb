@@ -287,7 +287,7 @@ struct ConfigureTenantImpl {
 		if (self->configurationParameters.size() > 1) {
 			for (const auto& [configKey, configValue] : self->configurationParameters) {
 				if (configKey.compare("tenant_state"_sr) == 0) {
-					TraceEvent(SevError, "SetStateWithOtherProperties").detail("Tenant", self->tenantName);
+					TraceEvent(SevError, "ConfigureTenantStateWithOtherProperties").detail("Tenant", self->tenantName);
 					throw invalid_tenant_configuration();
 				}
 			}
