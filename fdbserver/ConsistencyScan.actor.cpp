@@ -928,8 +928,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 							// we also don't want to alternate bursting for 5 seconds and then sleeping for many seconds
 							// As a compromise, only sleep for some tunable percentage of the target here, and sleep the
 							// rest at the end
-							int sleepBytes = (int)(totalReadBytesFromStorageServers *
-							                       SERVER_KNOBS->CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO);
+							double ratio = SERVER_KNOBS->CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO;
+							ratio = std::max(0.0, std::min(1.0, ratio));
+							int sleepBytes = (int)(totalReadBytesFromStorageServers * ratio);
 							totalReadBytesFromStorageServers -= sleepBytes;
 							wait(readRateControl->getAllowance(sleepBytes));
 						}
