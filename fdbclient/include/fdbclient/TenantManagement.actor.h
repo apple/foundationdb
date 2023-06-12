@@ -193,10 +193,10 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 		return std::make_pair(Optional<TenantMapEntry>(), false);
 	}
 
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+	state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(tenantEntry.prefix), 1);
 
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+	RangeReadResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		CODE_PROBE(hasTombstone, "Tenant creation conflict with existing data", probe::decoration::rare);
 		throw tenant_prefix_allocator_conflict();
@@ -375,10 +375,10 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 	if (tenantEntry.present()) {
-		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 
-		RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+		RangeReadResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 		if (!contents.empty()) {
 			CODE_PROBE(true, "Attempt deletion of non-empty tenant");
 			throw tenant_not_empty();

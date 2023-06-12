@@ -42,7 +42,9 @@ class CommitQuorum {
 
 	void updateResult() {
 		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
-			result.send(Void());
+			// Calling send could delete this
+			auto local = this->result;
+			local.send(Void());
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			// Rollforwards could cause a version that didn't have quorum to
 			// commit, so send commit_unknown_result instead of commit_failed.
@@ -321,7 +323,7 @@ class PaxosConfigTransactionImpl {
 		}
 	}
 
-	ACTOR static Future<RangeResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
+	ACTOR static Future<RangeReadResult> getConfigClasses(PaxosConfigTransactionImpl* self) {
 		loop {
 			try {
 				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
@@ -340,7 +342,7 @@ class PaxosConfigTransactionImpl {
 				    basicLoadBalance(configNodes,
 				                     &ConfigTransactionInterface::getClasses,
 				                     ConfigTransactionGetConfigClassesRequest{ self->coordinatorsHash, generation }));
-				RangeResult result;
+				RangeReadResult result;
 				result.reserve(result.arena(), reply.configClasses.size());
 				for (const auto& configClass : reply.configClasses) {
 					result.push_back_deep(result.arena(), KeyValueRef(configClass, ""_sr));
@@ -355,7 +357,7 @@ class PaxosConfigTransactionImpl {
 		}
 	}
 
-	ACTOR static Future<RangeResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
+	ACTOR static Future<RangeReadResult> getKnobs(PaxosConfigTransactionImpl* self, Optional<Key> configClass) {
 		loop {
 			try {
 				state ConfigGeneration generation = wait(self->getGenerationQuorum.getGeneration());
@@ -374,7 +376,7 @@ class PaxosConfigTransactionImpl {
 				    configNodes,
 				    &ConfigTransactionInterface::getKnobs,
 				    ConfigTransactionGetKnobsRequest{ self->coordinatorsHash, generation, configClass }));
-				RangeResult result;
+				RangeReadResult result;
 				result.reserve(result.arena(), reply.knobNames.size());
 				for (const auto& knobName : reply.knobNames) {
 					result.push_back_deep(result.arena(), KeyValueRef(knobName, ""_sr));
@@ -459,7 +461,7 @@ public:
 
 	Future<ValueReadResult> get(Key const& key) { return get(this, key); }
 
-	Future<RangeResult> getRange(KeyRangeRef keys) {
+	Future<RangeReadResult> getRange(KeyRangeRef keys) {
 		if (keys == configClassKeys) {
 			return getConfigClasses(this);
 		} else if (keys == globalConfigKnobKeys) {
@@ -534,22 +536,22 @@ Future<ValueReadResult> PaxosConfigTransaction::get(Key const& key, Snapshot) {
 	return impl->get(key);
 }
 
-Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
-                                                     KeySelector const& end,
-                                                     int limit,
-                                                     Snapshot snapshot,
-                                                     Reverse reverse) {
+Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector const& begin,
+                                                         KeySelector const& end,
+                                                         int limit,
+                                                         Snapshot snapshot,
+                                                         Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}
 	return impl->getRange(KeyRangeRef(begin.getKey(), end.getKey()));
 }
 
-Future<RangeResult> PaxosConfigTransaction::getRange(KeySelector begin,
-                                                     KeySelector end,
-                                                     GetRangeLimits limits,
-                                                     Snapshot snapshot,
-                                                     Reverse reverse) {
+Future<RangeReadResult> PaxosConfigTransaction::getRange(KeySelector begin,
+                                                         KeySelector end,
+                                                         GetRangeLimits limits,
+                                                         Snapshot snapshot,
+                                                         Reverse reverse) {
 	if (reverse) {
 		throw client_invalid_operation();
 	}

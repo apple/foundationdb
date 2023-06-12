@@ -21,7 +21,7 @@ public:
 					tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 					tagsWithQuota.clear();
-					state RangeResult tagQuotas = wait(tr->getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult tagQuotas = wait(tr->getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
 					state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::TagQuotaValue>>
 					    tenantGroupQuotas = wait(TenantMetadata::throughputQuota().getRange(
 					        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));

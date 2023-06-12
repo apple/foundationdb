@@ -105,6 +105,7 @@ pipeline {
                                     string(name: 'DOCKER_PATH', value: "contrib/build_image/centos7"),
                                     string(name: 'DOCKER_FILENAME', value: "Dockerfile"),
                                     string(name: 'IMAGE_TEMPLATE', value: "frostdb/devel"),
+                                    string(name: 'DOCKER_ARGS', value: "--target devel"),
                                     booleanParam(name: 'LATEST', value: "${isLatest}"),
                                     booleanParam(name: 'DRYRUN', value: "${dryrun}")
                                 ],

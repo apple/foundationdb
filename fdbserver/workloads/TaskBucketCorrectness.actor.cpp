@@ -314,7 +314,8 @@ struct TaskBucketCorrectnessWorkload : TestWorkload {
 			data.insert(format("task_%d", i));
 		}
 
-		RangeResult values = wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult values =
+		    wait(tr->getRange(KeyRangeRef("Hello_\x00"_sr, "Hello_\xff"_sr), CLIENT_KNOBS->TOO_MANY));
 		if (values.size() != data.size()) {
 			TraceEvent(SevError, "CheckSayHello")
 			    .detail("CountNotMatchIs", values.size())

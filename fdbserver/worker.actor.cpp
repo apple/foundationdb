@@ -1585,7 +1585,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
+		wait(delay(SERVER_KNOBS->ROLE_REFRESH_LOGGING_INTERVAL));
 		TraceEvent("Role", roleId).detail("Transition", "Refresh").detail("As", role.roleName);
 	}
 }
@@ -2156,6 +2156,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.granuleStatusStreamRequest);
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
+					DUMPTOKEN(recruited.mutationStreamRequest);
 
 					IKeyValueStore* data = openKVStore(s.storeType,
 					                                   s.filename,
@@ -2610,6 +2611,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
+					DUMPTOKEN(recruited.getHealthStatus);
 
 					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(

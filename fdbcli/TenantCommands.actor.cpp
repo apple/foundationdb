@@ -437,9 +437,9 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					}
 				} else {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<RangeResult> kvsFuture =
+					state ThreadFuture<RangeReadResult> kvsFuture =
 					    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
-					RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+					RangeReadResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
 					for (auto tenant : tenants) {
 						TenantName tName = tenant.key.removePrefix(tenantMapSpecialKeyRange.begin);
 						json_spirit::mValue jsonObject;

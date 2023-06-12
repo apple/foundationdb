@@ -76,7 +76,8 @@ public:
 
 	// Order of this enum has to match initializer of counterSets.
 	enum UsageType : int {
-		TLOG = 0,
+		ALL = 0,
+		TLOG,
 		TLOG_POST_RESOLUTION,
 		KV_MEMORY,
 		KV_REDWOOD,
@@ -87,7 +88,9 @@ public:
 		MAX,
 	};
 
-	struct CounterSet {
+	static const std::unordered_map<int, std::string> usageTypeNames;
+
+	struct CounterSet : public ReferenceCounted<CounterSet> {
 		Counter encryptCPUTimeNS;
 		Counter decryptCPUTimeNS;
 		LatencySample getCipherKeysLatency;
@@ -98,7 +101,12 @@ public:
 
 	static CounterSet& counters(UsageType t) {
 		ASSERT(t < UsageType::MAX);
-		return getInstance()->counterSets[int(t)];
+		auto& counterSets = getInstance()->counterSets;
+		int index = FLOW_KNOBS->ENCRYPT_KEY_CACHE_ENABLE_DETAIL_LOGGING ? (int)t : (int)UsageType::ALL;
+		if (!counterSets[index].isValid()) {
+			counterSets[index] = makeReference<CounterSet>(getInstance()->cc, usageTypeNames.at(index));
+		}
+		return *counterSets[index];
 	}
 
 private:
@@ -114,10 +122,8 @@ public:
 	Counter latestCipherKeyCacheHit;
 	Counter latestCipherKeyCacheMiss;
 	Counter latestCipherKeyCacheNeedsRefresh;
-	LatencySample getCipherKeysLatency;
-	LatencySample getLatestCipherKeysLatency;
 	LatencySample getBlobMetadataLatency;
-	std::array<CounterSet, int(UsageType::MAX)> counterSets;
+	std::array<Reference<CounterSet>, int(UsageType::MAX)> counterSets;
 };
 
 std::string toString(BlobCipherMetrics::UsageType type);

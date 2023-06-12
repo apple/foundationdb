@@ -64,6 +64,8 @@ struct BlobGranuleRestoreConfig : public KeyBackedClass {
 	KeyBackedProperty<std::string> error() { return subspace.pack(__FUNCTION__sr); }
 	KeyBackedMap<BlobRestorePhase, int64_t> phaseStartTs() { return subspace.pack(__FUNCTION__sr); };
 	KeyBackedProperty<UID> lock() { return subspace.pack(__FUNCTION__sr); }
+	// Begin version to apply mutation logs
+	KeyBackedProperty<Version> beginVersion() { return subspace.pack(__FUNCTION__sr); }
 };
 
 #endif

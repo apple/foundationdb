@@ -369,10 +369,10 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// tenant check that conflict ranges stay the same after commit
 		// and depending on if RYW is disabled
 		{
-			state RangeResult readresult1;
-			state RangeResult readresult2;
-			state RangeResult writeResult1;
-			state RangeResult writeResult2;
+			state RangeReadResult readresult1;
+			state RangeReadResult readresult2;
+			state RangeReadResult writeResult1;
+			state RangeReadResult writeResult2;
 			try {
 				if (disableRyw) {
 					defaultTx1->setOption(FDBTransactionOptions::READ_YOUR_WRITES_DISABLE);
@@ -420,11 +420,11 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 						continue;
 					}
 					// Read conflict ranges of defaultTx1 and check for "foo" with no tenant prefix
-					state RangeResult readConflictRange =
+					state RangeReadResult readConflictRange =
 					    wait(defaultTx1->getRange(readConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-					state RangeResult writeConflictRange =
+					state RangeReadResult writeConflictRange =
 					    wait(defaultTx1->getRange(writeConflictRangeKeysRange, CLIENT_KNOBS->TOO_MANY));
-					state RangeResult conflictKeys =
+					state RangeReadResult conflictKeys =
 					    wait(defaultTx1->getRange(conflictingKeysRange, CLIENT_KNOBS->TOO_MANY));
 
 					// size is 2 because singleKeyRange includes the key after
@@ -496,7 +496,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_RELAXED);
 			const KeyRef startKey = "\xff\xff/transactio"_sr;
 			const KeyRef endKey = "\xff\xff/transaction1"_sr;
-			RangeResult result =
+			RangeReadResult result =
 			    wait(tx->getRange(KeyRangeRef(startKey, endKey), GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			// The whole transaction module should be empty
 			ASSERT(!result.size());
@@ -548,7 +548,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = "\xff\xff/cluster_file_path"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(keyAfter(key), false, 2);
-			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeReadResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -560,7 +560,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			const KeyRef key = "\xff\xff/transaction/a_to_be_the_first"_sr;
 			KeySelector begin = KeySelectorRef(key, false, 0);
 			KeySelector end = KeySelectorRef(key, false, 2);
-			RangeResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
+			RangeReadResult result = wait(tx->getRange(begin, end, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(result.readToBegin && !result.readThroughEnd);
 			tx->reset();
 		} catch (Error& e) {
@@ -607,7 +607,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 			const KeySelector startKeySelector = KeySelectorRef("\xff\xff/test"_sr, true, -200);
 			const KeySelector endKeySelector = KeySelectorRef("test"_sr, true, -10);
-			RangeResult result =
+			RangeReadResult result =
 			    wait(tx->getRange(startKeySelector, endKeySelector, GetRangeLimits(CLIENT_KNOBS->TOO_MANY)));
 			ASSERT(false);
 		} catch (Error& e) {
@@ -619,7 +619,7 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		// test case when registered range is the same as the underlying module
 		try {
 			tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-			state RangeResult result =
+			state RangeReadResult result =
 			    wait(tx->getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
 			                      CLIENT_KNOBS->TOO_MANY));
 			// Note: there's possibility we get zero workers
@@ -984,13 +984,13 @@ struct SpecialKeySpaceCorrectnessWorkload : TestWorkload {
 		loop {
 			try {
 				// maintenance
-				RangeResult maintenanceKVs = wait(
+				RangeReadResult maintenanceKVs = wait(
 				    tx->getRange(SpecialKeySpace::getManagementApiCommandRange("maintenance"), CLIENT_KNOBS->TOO_MANY));
 				// By default, no maintenance is going on
 				ASSERT(!maintenanceKVs.more && !maintenanceKVs.size());
 				// datadistribution
-				RangeResult ddKVs = wait(tx->getRange(SpecialKeySpace::getManagementApiCommandRange("datadistribution"),
-				                                      CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult ddKVs = wait(tx->getRange(
+				    SpecialKeySpace::getManagementApiCommandRange("datadistribution"), CLIENT_KNOBS->TOO_MANY));
 				// By default, data_distribution/mode := "-1"
 				ASSERT(!ddKVs.more && ddKVs.size() == 1);
 				ASSERT(ddKVs[0].key ==

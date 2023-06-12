@@ -117,6 +117,8 @@ def metacluster_register(
         raise Exception(err)
 
 
+# Returns the tenant_id_prefix since it is randomly generated
+# and we want to validate it in the status test
 @enable_logging()
 def setup_metacluster(
     logger, management_cluster, data_clusters, max_tenant_groups_per_cluster
@@ -140,6 +142,7 @@ def setup_metacluster(
         )
         cluster_names_to_files[name] = cf
     assert len(cluster_names_to_files) == len(data_clusters) + 1
+    return tenant_id_prefix
 
 
 def metacluster_status(cluster_file):
@@ -428,7 +431,7 @@ def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
     num_clusters = len(cluster_files)
     logger.debug("Setting up a metacluster")
     auto_assignment = ["enabled"] * (num_clusters - 1)
-    setup_metacluster(
+    tenant_id_prefix = setup_metacluster(
         [cluster_files[0], management_cluster_name],
         list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
         max_tenant_groups_per_cluster=max_tenant_groups_per_cluster,
@@ -438,9 +441,12 @@ def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
 number of data clusters: {}
   tenant group capacity: {}
   allocated tenant groups: 0
+  tenant id prefix: {}
 """
     expected = expected.format(
-        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+        num_clusters - 1,
+        (num_clusters - 1) * max_tenant_groups_per_cluster,
+        tenant_id_prefix,
     ).strip()
     output = metacluster_status(cluster_files[0])
     assert expected == output

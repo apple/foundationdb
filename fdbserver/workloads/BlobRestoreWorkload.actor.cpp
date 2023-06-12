@@ -228,7 +228,7 @@ struct BlobRestoreWorkload : TestWorkload {
 					tr.setOption(FDBTransactionOptions::RAW_ACCESS);
 					GetRangeLimits limits(self->readBatchSize_);
 					limits.minRows = 0;
-					state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					state RangeReadResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : result) {
 						rows.push_back_deep(rows.arena(), KeyValueRef(row.key, row.value));
 					}

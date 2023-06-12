@@ -62,6 +62,8 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 					config.enabled = false;
 				} else if (next == "restart") {
 					config.minStartVersion = tr->getReadVersion().get();
+				} else if (next == "clearstats") {
+					wait(cs.clearStats(tr));
 				} else if (next == "maxRate") {
 					error = args.empty();
 					if (!error) {
@@ -100,7 +102,7 @@ CommandFactory consistencyScanFactory(
     "consistencyscan",
     CommandHelp(
         // TODO:  Expose/document additional configuration options
-        "consistencyscan [on|off] [restart] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]",
+        "consistencyscan [on|off] [restart] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]",
         "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans "
         "shard replicas for consistency.",
         "`on' enables the scan.\n\n"
@@ -110,6 +112,8 @@ CommandFactory consistencyScanFactory(
         "`maxRate <BYTES_PER_SECOND>' sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.\n\n"
         "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed "
         "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n\n"
+        "`clearstats` will clear all of the stats for the consistency scan but otherwise leave the configuration as "
+        "is. This can be used to clear errors or reset stat counts, for example."
         "The consistency scan role publishes its configuration and metrics in Status JSON under the path "
         "`.cluster.consistency_scan'\n"
         // TODO:  Syntax hint generator
