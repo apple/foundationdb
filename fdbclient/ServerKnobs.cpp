@@ -484,9 +484,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init (ROCKSDB_CF_METRICS_DELAY,                            900.0 );
 	init (ROCKSDB_MAX_LOG_FILE_SIZE,                         10485760 ); // 10MB.
 	init (ROCKSDB_KEEP_LOG_FILE_NUM,                             200 ); // Keeps 2GB log per storage server.
-    init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    false ); if (isSimulated) ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN = deterministicRandom()->coinflip(); 
-    init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 false ); if (isSimulated) ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN = deterministicRandom()->coinflip();
-
+	init (ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN,                    false ); if (isSimulated) ROCKSDB_SKIP_STATS_UPDATE_ON_OPEN = deterministicRandom()->coinflip(); 
+	init (ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN,                 false ); if (isSimulated) ROCKSDB_SKIP_FILE_SIZE_CHECK_ON_OPEN = deterministicRandom()->coinflip();
+	init (SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO,                 0.01 ); if (isSimulated) SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO = deterministicRandom()->random01(); 
+	init (SHARD_METADATA_SCAN_BYTES_LIMIT,                    10485760 ); // 10MB
 
 	// Leader election
 	bool longLeaderElection = randomize && BUGGIFY;
