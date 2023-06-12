@@ -3424,10 +3424,10 @@ void DDTeamCollection::updateTeamEligibility(const double inflightPenalty) {
 }
 
 void DDTeamCollection::updateTeamPivots(const double inflightPenalty) {
-	std::vector<double> teamAverageCPU;
-	std::vector<double> teamAvailableSpace;
-	std::vector<int64_t> teamLoadBytes;
 	if (now() - teamPivots.lastPivotsUpdate >= SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
+		std::vector<double> teamAverageCPU;
+		std::vector<double> teamAvailableSpace;
+		std::vector<int64_t> teamLoadBytes;
 		for (int i = 0; i < teams.size(); i++) {
 			if (teams[i]->isHealthy()) {
 				teamAverageCPU.emplace_back(teams[i]->getAverageCPU());

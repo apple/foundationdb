@@ -659,9 +659,9 @@ protected:
 
 	void updateTeamPivots(const double inflightPenalty);
 
-	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
 	void updateLoadBytesPivot(std::vector<int64_t>& teamLoadBytes);
 
+	// get the median available space ratio from every healthy team and update the median pivot value
 	void updateMedianAvailableSpacePivot(std::vector<double>& teamAvailableSpace);
 
 	void updateCpuPivot(std::vector<double>& teamAverageCPU);
