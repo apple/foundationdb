@@ -138,13 +138,17 @@ This command controls a native data consistency scan role that is automatically 
 
 The syntax is
 
-``consistencyscan [on|off] [restart] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
+``consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
 
 * ``on`` enables the scan.
 
 * ``off`` disables the scan but keeps the current cycle's progress so it will resume later if enabled again.
 
 * ``restart`` will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when it is re-enabled.
+
+* ``stats`` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to expose the stats which are also in status json.
+
+* ``clearstats`` will clear all of the stats for the consistency scan but otherwise leave the configuration as is. This can be used to clear errors or reset stat counts, for example.
 
 * ``maxRate <BYTES_PER_SECOND>`` sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.
 

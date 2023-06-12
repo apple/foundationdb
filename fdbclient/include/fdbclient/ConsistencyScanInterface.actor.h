@@ -241,6 +241,8 @@ struct ConsistencyScanState : public KeyBackedClass {
 			           startTime,
 			           endVersion,
 			           endTime,
+			           lastProgressVersion,
+			           lastProgressTime,
 			           complete,
 			           logicalBytesScanned,
 			           replicatedBytesRead,
