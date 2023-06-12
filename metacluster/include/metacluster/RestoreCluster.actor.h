@@ -888,7 +888,7 @@ struct RestoreClusterImpl {
 		return tenantIdPrefix;
 	}
 
-	ACTOR static Future<Void> addTenantsToManagementCluster(RestoreClusterImpl* self) {
+	ACTOR static Future<int64_t> addTenantsToManagementCluster(RestoreClusterImpl* self) {
 		state std::unordered_map<int64_t, TenantMapEntry>::iterator itr;
 		state std::vector<TenantMapEntry> tenantBatch;
 		state int64_t tenantsToAdd = 0;
@@ -942,16 +942,29 @@ struct RestoreClusterImpl {
 			                printable(self->clusterName)));
 		}
 
-		return Void();
+		return tenantIdPrefix;
 	}
 
-	ACTOR static Future<Void> finalizeDataClusterAfterRepopulate(RestoreClusterImpl* self, Reference<ITransaction> tr) {
+	ACTOR static Future<Void> finalizeDataClusterAfterRepopulate(RestoreClusterImpl* self,
+	                                                             Reference<ITransaction> tr,
+	                                                             int64_t tenantIdPrefix) {
 		bool erased = wait(eraseRestoreId(self, tr));
 		if (erased) {
 			if (self->newLastDataClusterTenantId.present()) {
 				TenantMetadata::lastTenantId().set(tr, self->newLastDataClusterTenantId.get());
 			} else {
 				TenantMetadata::lastTenantId().clear(tr);
+			}
+
+			Optional<TenantTombstoneCleanupData> tombstoneCleanupData =
+			    wait(TenantMetadata::tombstoneCleanupData().get(tr));
+
+			// If our tombstones are for a different tenant prefix, we need to erase them
+			if (tombstoneCleanupData.present() &&
+			    TenantAPI::getTenantIdPrefix(tombstoneCleanupData->nextTombstoneEraseId) != tenantIdPrefix) {
+				CODE_PROBE(true, "Remove tombstone cleanup data during restore");
+				TenantMetadata::tenantTombstones().clear(tr);
+				TenantMetadata::tombstoneCleanupData().clear(tr);
 			}
 		}
 
@@ -1061,12 +1074,13 @@ struct RestoreClusterImpl {
 		    RunOnDisconnectedCluster(self->restoreDryRun)));
 
 		// Add all tenants from the data cluster to the management cluster
-		wait(addTenantsToManagementCluster(self));
+		int64_t tenantIdPrefix = wait(addTenantsToManagementCluster(self));
 
 		if (!self->restoreDryRun) {
 			// Remove the active restore ID from the data cluster
-			wait(self->ctx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return finalizeDataClusterAfterRepopulate(self, tr); }));
+			wait(self->ctx.runDataClusterTransaction([self = self, tenantIdPrefix](Reference<ITransaction> tr) {
+				return finalizeDataClusterAfterRepopulate(self, tr, tenantIdPrefix);
+			}));
 
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
