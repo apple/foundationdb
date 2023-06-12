@@ -1227,20 +1227,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				dceFutures.emplace_back(metacluster::getCluster(self->managementDb, tenantEntry.assignedCluster));
 			}
 			wait(waitForAll(dceFutures));
-			int i = 0;
-			for (const auto f : dceFutures) {
-				ASSERT(f.isReady() || f.isError());
-				if (f.isReady()) {
-					TraceEvent("YanqinClusterState")
-					    .detail("Cluster", clusterNames[i])
-					    .detail("State", f.get().entry.clusterState);
-				} else if (f.isError()) {
-					TraceEvent("YanqinClusterStateError")
-					    .detail("Cluster", clusterNames[i])
-					    .detail("Error", f.getError().what());
-				}
-				++i;
-			}
 
 			std::vector<Future<Void>> resetErrorFutures;
 			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {

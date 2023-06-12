@@ -67,7 +67,6 @@ struct RegisterClusterImpl {
 			// If we happen to have any orphaned restore IDs from a previous time this cluster was in a metacluster,
 			// erase them now.
 			metadata::activeRestoreIds().erase(tr, self->clusterName);
-			TraceEvent("YanqinRegisterInMgmt").detail("Erase", "erase").detail("ClusterName", self->clusterName);
 
 			metadata::management::dataClusters().set(tr, self->clusterName, self->clusterEntry);
 			metadata::management::dataClusterConnectionRecords().set(tr, self->clusterName, self->connectionString);
@@ -162,15 +161,7 @@ struct RegisterClusterImpl {
 				// erase them now.
 				metadata::activeRestoreIds().clear(tr);
 
-				TraceEvent("YanqinConfigureDataCluster0")
-				    .detail("Clear", "clear")
-				    .detail("ClusterName", self->clusterName);
-
 				wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-
-				TraceEvent("YanqinConfigureDataCluster")
-				    .detail("Clear", "clear")
-				    .detail("ClusterName", self->clusterName);
 
 				TraceEvent("ConfiguredDataCluster")
 				    .detail("ClusterName", self->clusterName)

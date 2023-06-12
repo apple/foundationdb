@@ -78,7 +78,6 @@ struct MetaclusterOperationContext {
 				throw cluster_removed();
 			} else if (clusterState == DataClusterState::RESTORING) {
 				CODE_PROBE(true, "Run metacluster transaction on restoring cluster");
-				TraceEvent("YanqinUnexpected").detail("ClusterName", dataClusterMetadata.get().entry.id);
 				throw cluster_restoring();
 			}
 
@@ -234,7 +233,6 @@ struct MetaclusterOperationContext {
 					KeyBackedRangeResult<std::pair<ClusterName, UID>> activeRestoreId = wait(activeRestoreIdFuture);
 					if (!activeRestoreId.results.empty()) {
 						CODE_PROBE(true, "Run data cluster transaction on restoring data cluster");
-						TraceEvent("YanqinError2").detail("Cluster", activeRestoreId.results[0].first);
 						throw cluster_restoring();
 					}
 				}

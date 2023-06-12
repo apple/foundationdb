@@ -104,13 +104,6 @@ struct RestoreClusterImpl {
 			Optional<UID> activeRestoreId = wait(metadata::activeRestoreIds().get(tr, self->clusterName));
 			if (!activeRestoreId.present() || activeRestoreId.get() != self->restoreId) {
 				CODE_PROBE(true, "Conflicting restore detected");
-				if (self->restoreId.first() == 0x1df8c24c514ed435) {
-					TraceEvent("YanqinCheckRestoreId")
-					    .detail("CLusterName", self->clusterName)
-					    .detail("Active", activeRestoreId)
-					    .detail("Current", self->restoreId)
-					    .backtrace();
-				}
 				throw conflicting_restore();
 			}
 		}
@@ -131,10 +124,6 @@ struct RestoreClusterImpl {
 		} else {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			metadata::activeRestoreIds().erase(tr, self->clusterName);
-			TraceEvent("YanqinEraseId")
-			    .detail("Erase", "erase")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId);
 		}
 
 		return true;
@@ -226,10 +215,6 @@ struct RestoreClusterImpl {
 		} else if (!self->restoreDryRun) {
 			metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 			metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-			TraceEvent("YanqinRegisterRestoring")
-			    .detail("Set", "set")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId);
 
 			if (!dataClusterMetadata.present()) {
 				self->dataClusterId = deterministicRandom()->randomUniqueID();
@@ -299,15 +284,7 @@ struct RestoreClusterImpl {
 					metadata::metaclusterRegistration().set(tr, dataClusterEntry);
 					metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 					metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-					TraceEvent("YanqinWriteDCEntry0")
-					    .detail("Set", "set")
-					    .detail("ClusterName", self->clusterName)
-					    .detail("RestoreId", self->restoreId);
 					wait(buggifiedCommit(tr, BUGGIFY_WITH_PROB(0.1)));
-					TraceEvent("YanqinWriteDCEntry")
-					    .detail("Set", "set")
-					    .detail("ClusterName", self->clusterName)
-					    .detail("RestoreId", self->restoreId);
 				}
 
 				break;
@@ -322,10 +299,6 @@ struct RestoreClusterImpl {
 	ACTOR static Future<Void> markClusterRestoring(RestoreClusterImpl* self, Reference<typename DB::TransactionT> tr) {
 		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-		TraceEvent("YanqinMarkRestoring")
-		    .detail("Set", "set")
-		    .detail("ClusterName", self->clusterName)
-		    .detail("RestoreId", self->restoreId);
 		if (self->ctx.dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING) {
 			DataClusterEntry updatedEntry = self->ctx.dataClusterMetadata.get().entry;
 			updatedEntry.clusterState = DataClusterState::RESTORING;
@@ -410,29 +383,14 @@ struct RestoreClusterImpl {
 	ACTOR static Future<Optional<int64_t>> getTenantsFromManagementCluster(RestoreClusterImpl* self,
 	                                                                       Reference<typename DB::TransactionT> tr,
 	                                                                       int64_t initialTenantId) {
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("YanqinGetTenantsFromMgmt0")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId);
-		}
 		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 		    wait(metadata::management::tenantMetadata().tenantMap.getRange(
 		        tr, initialTenantId, {}, BUGGIFY ? 1 : CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("YanqinGetTenantsFromMgmt")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId);
-		}
 		for (auto const& t : tenants.results) {
 			self->mgmtClusterTenantMap.emplace(t.first, t.second);
 			if (self->clusterName == t.second.assignedCluster) {
 				self->mgmtClusterTenantSetForCurrentDataCluster.emplace(t.first);
 			}
-		}
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("YanqinGetTenantsFromMgmt2")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId);
 		}
 
 		return tenants.more ? Optional<int64_t>(tenants.results.rbegin()->first + 1) : Optional<int64_t>();
@@ -1019,12 +977,6 @@ struct RestoreClusterImpl {
 				wait(self->ctx.runManagementTransaction(
 				    [self = self](Reference<typename DB::TransactionT> tr) { return markClusterRestoring(self, tr); }));
 			} catch (Error& e) {
-				if (self->restoreId.first() == 0x1df8c24c514ed435) {
-					TraceEvent("YanqinMarkClusterRegisterError")
-					    .error(e)
-					    .detail("ClusterName", self->clusterName)
-					    .detail("RestoreId", self->restoreId);
-				}
 				// If the transaction retries after success or if we are trying a second time to restore the cluster, it
 				// will throw an error indicating that the restore has already started
 				if (e.code() != error_code_cluster_restoring) {
@@ -1038,10 +990,6 @@ struct RestoreClusterImpl {
 			wait(self->ctx.runDataClusterTransaction([self = self](Reference<ITransaction> tr) {
 				metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 				metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
-				TraceEvent("YanqinRunDataClusterRestoreOnDataCluster")
-				    .detail("Set", "set")
-				    .detail("ClusterName", self->clusterName)
-				    .detail("RestoreId", self->restoreId);
 				if (self->lastManagementClusterTenantId.present()) {
 					TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
 				} else {
@@ -1049,23 +997,10 @@ struct RestoreClusterImpl {
 				}
 				return Future<Void>(Void());
 			}));
-			TraceEvent("YanqinAfterRunDataClusterTxn")
-			    .detail("ClusterName", self->clusterName)
-			    .detail("RestoreId", self->restoreId)
-			    .detail("Equal", self->restoreId.first() == 0x1df8c24c514ed435);
 		}
 
-		try {
-			// get all the tenants in the metacluster
-			wait(getAllTenantsFromManagementCluster(self));
-		} catch (Error& err) {
-			TraceEvent("YanqinThrow").error(err).detail("ClusterName", self->clusterName).backtrace();
-			throw err;
-		}
-
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("Yanqin1").detail("ClusterName", self->clusterName);
-		}
+		// get all the tenants in the metacluster
+		wait(getAllTenantsFromManagementCluster(self));
 
 		// get all the tenant information from the newly registered data cluster
 		wait(self->runRestoreDataClusterTransaction(
@@ -1073,34 +1008,16 @@ struct RestoreClusterImpl {
 		    RunOnDisconnectedCluster::False,
 		    RunOnMismatchedCluster(self->restoreDryRun && self->forceJoin)));
 
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("Yanqin2").detail("ClusterName", self->clusterName);
-		}
-
 		// Fix any differences between the data cluster and the management cluster
 		wait(reconcileTenants(self));
 
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("Yanqin3").detail("ClusterName", self->clusterName);
-		}
-
 		// Mark tenants that are missing from the data cluster in an error state on the management cluster
 		wait(processMissingTenants(self));
-
-		if (self->restoreId.first() == 0x1df8c24c514ed435) {
-			TraceEvent("Yanqin4").detail("Dry", self->restoreDryRun).detail("ClusterName", self->clusterName);
-		}
 
 		if (!self->restoreDryRun) {
 			// Remove the active restore ID from the data cluster
 			wait(self->ctx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return success(eraseRestoreId(self, tr)); }));
-
-			if (self->restoreId.first() == 0x1df8c24c514ed435 || self->restoreId.first() == 0x1d127c4e73f85763) {
-				TraceEvent("Yanqin5OnDataCluster")
-				    .detail("ClusterName", self->clusterName)
-				    .detail("RestoreId", self->restoreId);
-			}
 
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
