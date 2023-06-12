@@ -1164,6 +1164,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		// restore should be present after the restore. All tenants in the management cluster should be unchanged except
 		// for those tenants that were created after the backup and lost during the restore, which will be marked in an
 		// error state.
+		state std::map<int64_t, metacluster::MetaclusterTenantMapEntry> tenantsInErrorState;
 		for (auto const& [tenantId, tenantEntry] : self->managementTenantsBeforeRestore) {
 			auto itr = tenantMap.find(tenantId);
 			ASSERT(itr != tenantMap.end());
@@ -1173,6 +1174,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				ASSERT(self->dataDbs[itr->second.assignedCluster].restored);
 				postRecoveryEntry.tenantState = tenantEntry.tenantState;
 				postRecoveryEntry.error.clear();
+				tenantsInErrorState.emplace(tenantId, postRecoveryEntry);
 			}
 
 			ASSERT(tenantEntry == postRecoveryEntry);
@@ -1182,7 +1184,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 			ASSERT_EQ(self->managementTenantsBeforeRestore.size(), tenantMap.size());
 		}
 
-		state std::map<int64_t, metacluster::MetaclusterTenantMapEntry> tenantsInErrorState;
 		for (auto const& [tenantId, tenantData] : self->createdTenants) {
 			auto tenantItr = tenantMap.find(tenantId);
 			if (tenantItr == tenantMap.end()) {
@@ -1204,12 +1205,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				} else {
 					ASSERT_EQ(tenantItr->second.tenantState, metacluster::TenantState::READY);
 				}
-
-				if (tenantItr->second.tenantState == metacluster::TenantState::ERROR) {
-					// This can happen only if the tenant is present on the management cluster
-					// but missing on the data clusters.
-					tenantsInErrorState.emplace(tenantId, tenantItr->second);
-				}
 			}
 		}
 
@@ -1225,6 +1220,28 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		if (!tenantsInErrorState.empty()) {
 			CODE_PROBE(true, "One or more tenants in ERROR state");
+			state std::vector<Future<metacluster::DataClusterMetadata>> dceFutures;
+			state std::vector<ClusterName> clusterNames;
+			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {
+				clusterNames.emplace_back(tenantEntry.assignedCluster);
+				dceFutures.emplace_back(metacluster::getCluster(self->managementDb, tenantEntry.assignedCluster));
+			}
+			wait(waitForAll(dceFutures));
+			int i = 0;
+			for (const auto f : dceFutures) {
+				ASSERT(f.isReady() || f.isError());
+				if (f.isReady()) {
+					TraceEvent("YanqinClusterState")
+					    .detail("Cluster", clusterNames[i])
+					    .detail("State", f.get().entry.clusterState);
+				} else if (f.isError()) {
+					TraceEvent("YanqinClusterStateError")
+					    .detail("Cluster", clusterNames[i])
+					    .detail("Error", f.getError().what());
+				}
+				++i;
+			}
+
 			std::vector<Future<Void>> resetErrorFutures;
 			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {
 				resetErrorFutures.emplace_back(

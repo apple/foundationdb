@@ -98,6 +98,7 @@ struct RemoveClusterImpl {
 			updatedEntry.capacity.numTenantGroups = 0;
 
 			metadata::activeRestoreIds().erase(tr, self->clusterName);
+			TraceEvent("YanqinRemoveCluster").detail("Erase", "erase").detail("ClusterName", self->clusterName);
 
 			updateClusterMetadata(tr,
 			                      self->ctx.clusterName.get(),
@@ -129,6 +130,7 @@ struct RemoveClusterImpl {
 			// Delete metacluster related metadata
 			metadata::metaclusterRegistration().clear(tr);
 			metadata::activeRestoreIds().clear(tr);
+			TraceEvent("YanqinUpdateDataCluster").detail("Clear", "clear").detail("ClusterName", self->clusterName);
 			TenantMetadata::tenantTombstones().clear(tr);
 			TenantMetadata::tombstoneCleanupData().clear(tr);
 
