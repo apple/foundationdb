@@ -724,6 +724,11 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
 
+					// Pre validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+						bool consistent = wait(auditKeyServersAndServerKeys(tr, currentKeys));
+					}
+
 					state RangeResult old = wait(krmGetRanges(tr,
 					                                          keyServersPrefix,
 					                                          currentKeys,
@@ -1020,6 +1025,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					endKey = keyServers.end()[-1].key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
+					// Pre validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+						bool consistent = wait(auditKeyServersAndServerKeys(&tr, currentKeys));
+					}
+
 					// printf("  finishMoveKeys( '%s'-'%s' ): read keyServers at %lld\n", keys.begin.toString().c_str(),
 					// keys.end.toString().c_str(), tr.getReadVersion().get());
 
@@ -1300,11 +1310,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 		throw;
 	}
 	return Void();
-}
-
-ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange range) {
-	state bool res = true;
-	return res;
 }
 
 // keyServer: map from keys to destination servers.

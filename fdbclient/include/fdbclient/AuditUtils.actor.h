@@ -66,6 +66,8 @@ struct AuditGetKeyServersRes {
 	    readBytes(readBytes) {}
 };
 
+ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange rangeToCompare);
+ACTOR Future<bool> auditKeyServersAndServerKeys(Reference<ReadYourWritesTransaction> tr, KeyRange rangeToCompare);
 ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
 ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
 bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges);
