@@ -24,14 +24,11 @@
 #include <limits>
 #include <type_traits>
 #include <unordered_map>
-#include <utility>
 
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/StorageServerInterface.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
-#include "flow/flow.h"
 #include "flow/network.h"
 #include "fmt/format.h"
 #include "fdbclient/Audit.h"
@@ -2218,7 +2215,6 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
 
 		// Track request version recv time right before we need to wait for the version
-		TraceEvent("GetValueQRecv", data->thisServerID);
 		sampleRequestVersions(data, req.version, now());
 
 		if (req.options.present() && req.options.get().debugID.present())
@@ -4314,7 +4310,6 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
 
 	// Track request version recv time right before we need to wait for the version
-	TraceEvent("GetKeyValuesQRecv", data->thisServerID);
 	sampleRequestVersions(data, req.version, now());
 
 	try {
@@ -5493,7 +5488,6 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
 
 	// Track request version recv time right before we need to wait for the version
-	TraceEvent("GetMappedKeyValuesQRecv", data->thisServerID);
 	sampleRequestVersions(data, req.version, now());
 
 	try {
@@ -5696,7 +5690,6 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
 
-	TraceEvent("GetKeyValuesStreamQ", data->thisServerID);
 	sampleRequestVersions(data, req.version, now());
 
 	try {
@@ -5911,7 +5904,6 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
 
 	// Track request version recv time right before we need to wait for the version
-	TraceEvent("GetKeyQRecv", data->thisServerID);
 	sampleRequestVersions(data, req.version, now());
 
 	try {
@@ -11336,56 +11328,6 @@ ACTOR Future<Void> checkBehind(StorageServer* self) {
 	}
 }
 
-// ACTOR Future<Void> syncSafeDelayWindow(StorageServer* self, FutureStream<double> safeDelayWindowFeed) {
-// 	loop {
-// 		choose {
-// 			when(Version version = waitNext(safeDelayWindowFeed)) {
-// 				// TODO: broadcast new delay window to tlog
-// 			}
-// 		}
-// 	}
-// }
-
-// ACTOR Future<Void> updateVersionStatistics(StorageServer* self,
-//                                            FutureStream<StorageServer::EmptyVersionQueueEntry> tlogIn,
-//                                            FutureStream<StorageServer::EmptyVersionQueueEntry> ssIn) {
-// 	state std::deque<StorageServer::EmptyVersionQueueEntry> versionQueue;
-// 	loop {
-// 		choose {
-// 			when(StorageServer::EmptyVersionQueueEntry tlogSample = waitNext(tlogIn)) {
-// 				TraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", now());
-// 				// If queue piles up it means that there's not enough reads, so the queue is useless in this time
-// 				// window anyway, we do a cheap clear() and let it build up again
-// 				if (versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_QUEUE_MAX_LENGTH)
-// 					versionQueue.clear();
-// 				versionQueue.emplace_back(std::move(tlogSample));
-// 				TraceEvent("VersionQueueStats", self->thisServerID).detail("Size", versionQueue.size());
-// 			}
-// 			when(StorageServer::EmptyVersionQueueEntry sample = waitNext(ssIn)) {
-// 				TraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", now());
-// 				if (sample.version != 0) { // FIXME: is there an invalid version construct? better to use that default
-// 					state bool popped = false;
-// 					// OPTIM: use lowerbound() instead, could be faster for longer queues
-// 					// OPTIM: specify implementation struct for deque
-// 					while (!versionQueue.empty() && versionQueue.front().version <= sample.version) {
-// 						versionQueue.pop_front();
-// 						popped = true;
-// 					}
-// 					// NOTE: This current approach does not incur skew in histogram, but miss logging data from
-// 					// 1. decreasing version number received at SS
-// 					// 2. increasing version number received at SS that does not cause queue pop
-// 					if (!versionQueue.empty() && popped) {
-// 						double emptyVersionSafeDelay = sample.timestamp - versionQueue.front().timestamp;
-// 						TraceEvent("EmptyVersionSafeDelay", self->thisServerID)
-// 						    .detail("Timestamp", emptyVersionSafeDelay);
-// 						// self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
-// 					}
-// 				}
-// 			}
-// 		}
-// 	}
-// }
-
 ACTOR Future<Void> serveGetValueRequests(StorageServer* self, FutureStream<GetValueRequest> getValue) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) = TransactionLineage::Operation::GetValue;
 	loop {
@@ -11764,7 +11706,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 					    delay(std::max(CLIENT_KNOBS->NO_RECENT_UPDATES_DURATION - (now() - self->lastUpdate), 0.1));
 				}
 			}
-			when(wait(dbInfoChange)) { // trigger on topology change, dbInfoChange essentially broadcasts
+			when(wait(dbInfoChange)) {
 				CODE_PROBE(self->logSystem, "shardServer dbInfo changed");
 				dbInfoChange = self->db->onChange();
 				if (self->db->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS) {
