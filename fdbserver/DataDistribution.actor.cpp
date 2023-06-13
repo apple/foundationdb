@@ -114,12 +114,9 @@ struct DDAuditSchedule {
 	DDAuditSchedule() = default;
 	DDAuditSchedule(AuditStorageScheduleState scheduleState) : coreState(scheduleState) {}
 
-	inline void setTrigger(Future<Void> actor) { trigger = actor; }
-	inline Future<Void> getTrigger() { return trigger; }
 	inline void cancel() { cancelled.send(Void()); }
 
 	AuditStorageScheduleState coreState;
-	Future<Void> trigger;
 	Promise<Void> cancelled;
 };
 
@@ -811,8 +808,7 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
                                           std::shared_ptr<DDAudit> audit,
                                           StorageServerInterface ssi,
                                           AuditStorageRequest req);
-ACTOR Future<Void> auditStoragePeriodicTrigger(Reference<DataDistributor> self,
-                                               std::shared_ptr<DDAuditSchedule> auditScheduleState);
+ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self, AuditStorageScheduleState auditScheduleState);
 
 void cancelAllAuditsInAuditMap(Reference<DataDistributor> self) {
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId).detail("Ops", "cancelAllAuditsInAuditMap");
@@ -827,12 +823,8 @@ void cancelAllAuditsInAuditMap(Reference<DataDistributor> self) {
 }
 
 void resumeAuditStorageSchedule(Reference<DataDistributor> self) {
-	for (auto auditScheduleState : self->initData->auditScheduleStates) {
-		std::shared_ptr<DDAuditSchedule> auditSchedule =
-		    std::make_shared<DDAuditSchedule>(DDAuditSchedule(auditScheduleState));
-		self->auditSchedules[auditScheduleState.getType()] = auditSchedule;
-		self->auditSchedules[auditScheduleState.getType()]->setTrigger(
-		    auditStoragePeriodicTrigger(self, auditSchedule));
+	for (auto auditScheduleState : self->initData->auditScheduleStates) { // make a copy
+		self->addActor.send(auditStorageSchedule(self, auditScheduleState));
 	}
 	return;
 }
@@ -1828,14 +1820,24 @@ ACTOR Future<Void> ddGetMetrics(GetDataDistributorMetricsRequest req,
 	return Void();
 }
 
-ACTOR Future<Void> auditStoragePeriodicTrigger(Reference<DataDistributor> self,
-                                               std::shared_ptr<DDAuditSchedule> auditSchedule) {
+ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self, AuditStorageScheduleState auditScheduleState) {
 	state MoveKeyLockInfo lockInfo;
 	lockInfo.myOwner = self->lock.myOwner;
 	lockInfo.prevOwner = self->lock.prevOwner;
 	lockInfo.prevWrite = self->lock.prevWrite;
 	state PromiseStream<Void> triggerAuditStorage;
+	state std::shared_ptr<DDAuditSchedule> auditSchedule;
 	try {
+		// Overwrite any existing schedule with the same type
+		wait(persistAuditScheduleState(
+			self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
+		if (self->auditSchedules.contains(auditScheduleState.getType())) {
+			self->auditSchedules[auditScheduleState.getType()]->cancel(); // make sure the existing one gets cancelled
+			self->auditSchedules.erase(auditScheduleState.getType());
+		}
+		auditSchedule = std::make_shared<DDAuditSchedule>(DDAuditSchedule(auditScheduleState));
+		self->auditSchedules[auditScheduleState.getType()] = auditSchedule;
+
 		loop choose {
 			when(wait(delay(SERVER_KNOBS->AUDIT_SCHEDULE_PERIOD_CHECK_INTERVAL_SEC))) { // persist timer every 300 sec
 				auditSchedule->coreState.remainWaitHours -=
@@ -1875,48 +1877,6 @@ ACTOR Future<Void> auditStoragePeriodicTrigger(Reference<DataDistributor> self,
 		throw e;
 	}
 
-	return Void();
-}
-
-ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self, TriggerAuditRequest req) {
-	state MoveKeyLockInfo lockInfo;
-	lockInfo.myOwner = self->lock.myOwner;
-	lockInfo.prevOwner = self->lock.prevOwner;
-	lockInfo.prevWrite = self->lock.prevWrite;
-	state AuditStorageScheduleState auditScheduleState(req); // only place to create a new state
-	state int retryCount = 0;
-	state std::shared_ptr<DDAuditSchedule> auditSchedule;
-	loop {
-		try {
-			// Overwrite any existing schedule with the same type
-			wait(persistAuditScheduleState(
-			    self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
-			if (self->auditSchedules.contains(req.getType())) {
-				self->auditSchedules[req.getType()]->cancel(); // make sure the existing one gets cancelled
-				self->auditSchedules.erase(req.getType());
-			}
-			auditSchedule = std::make_shared<DDAuditSchedule>(DDAuditSchedule(auditScheduleState));
-			auditSchedule->setTrigger(auditStoragePeriodicTrigger(self, auditSchedule));
-			self->auditSchedules[req.getType()] = auditSchedule;
-			req.reply.send(UID());
-			break;
-		} catch (Error& e) {
-			if (e.code() == error_code_actor_cancelled) {
-				throw e;
-			}
-			TraceEvent(SevInfo, "AuditStorageScheduleError", self->ddId)
-			    .errorUnsuppressed(e)
-			    .detail("RetryCount", retryCount)
-			    .detail("AuditType", req.getType())
-			    .detail("AuditRange", req.range);
-			if (retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
-				retryCount++;
-			} else {
-				req.reply.sendError(audit_storage_schedule_failed());
-				break;
-			}
-		}
-	}
 	return Void();
 }
 
@@ -2910,7 +2870,9 @@ ACTOR Future<Void> dataDistributor_impl(DataDistributorInterface di,
 					ASSERT(req.id.isValid());
 					actors.add(cancelAuditStorage(self, req));
 				} else if (!req.cancel && req.periodic) {
-					actors.add(auditStorageSchedule(self, req));
+					AuditStorageScheduleState auditScheduleState(req); // only place to create a new state
+					actors.add(auditStorageSchedule(self, auditScheduleState));
+					req.reply.send(UID());
 				} else if (req.cancel && req.periodic) {
 					actors.add(cancelAuditStorageSchedule(self, req));
 				} else {
