@@ -724,7 +724,7 @@ struct PhysicalShard {
 				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 				this->isInitialized.store(true);
 			} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
-				refreshReadIteratorPool();
+				this->readIterPool->update();
 			}
 		}
 
