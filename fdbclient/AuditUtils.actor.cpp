@@ -791,16 +791,18 @@ ACTOR Future<bool> updateAuditScheduleState(Database cx,
 			AuditStorageScheduleState persistScheduleState = decodeAuditStorageScheduleState(res.get());
 			if (auditScheduleState.id != persistScheduleState.id) {
 				return false;
+			} else if (auditScheduleState.cancelled) {
+				return false;
 			}
 			tr.set(auditStorageScheduleKey(auditScheduleState.getType()),
 			       auditStorageScheduleStateValue(auditScheduleState));
 			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilPersistAuditSchedule")
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditSchedule")
 			    .detail("AuditScheduleType", auditScheduleState.getType())
 			    .detail("AuditScheduleKey", auditStorageScheduleKey(auditScheduleState.getType()));
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilPersistAuditScheduleError")
+			TraceEvent(SevDebug, "AuditUtilUpdateAuditScheduleError")
 			    .errorUnsuppressed(e)
 			    .detail("AuditScheduleType", auditScheduleState.getType())
 			    .detail("AuditScheduleKey", auditStorageScheduleKey(auditScheduleState.getType()));
@@ -811,7 +813,7 @@ ACTOR Future<bool> updateAuditScheduleState(Database cx,
 	return true;
 }
 
-ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled) {
+ACTOR Future<Void> cancelAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled) {
 	state Transaction tr(cx);
 
 	loop {
@@ -820,14 +822,30 @@ ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, Mov
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			wait(checkMoveKeysLock(&tr, lock, ddEnabled, true));
-			tr.clear(auditStorageScheduleKey(auditType));
+			Optional<Value> res = wait(tr.get(auditStorageScheduleKey(auditType)));
+			if (!res.present()) {
+				TraceEvent(SevDebug, "AuditUtilCancelAuditScheduleAlreadyCancelled")
+				    .detail("AuditScheduleType", auditType)
+				    .detail("AuditScheduleKey", auditStorageScheduleKey(auditType));
+				break; // already cancelled
+			}
+			AuditStorageScheduleState auditScheduleState = decodeAuditStorageScheduleState(res.get());
+			if (auditScheduleState.cancelled) {
+				TraceEvent(SevDebug, "AuditUtilCancelAuditScheduleAlreadyCancelled2")
+				    .detail("AuditScheduleType", auditType)
+				    .detail("AuditScheduleKey", auditStorageScheduleKey(auditType));
+				break; // already cancelled
+			}
+			auditScheduleState.cancelled = true;
+			tr.set(auditStorageScheduleKey(auditScheduleState.getType()),
+			       auditStorageScheduleStateValue(auditScheduleState));
 			wait(tr.commit());
-			TraceEvent(SevDebug, "AuditUtilClearAuditSchedule")
+			TraceEvent(SevDebug, "AuditUtilCancelAuditSchedule")
 			    .detail("AuditScheduleType", auditType)
 			    .detail("AuditScheduleKey", auditStorageScheduleKey(auditType));
 			break;
 		} catch (Error& e) {
-			TraceEvent(SevDebug, "AuditUtilClearAuditScheduleError")
+			TraceEvent(SevDebug, "AuditUtilCancelAuditScheduleError")
 			    .errorUnsuppressed(e)
 			    .detail("AuditScheduleType", auditType)
 			    .detail("AuditScheduleKey", auditStorageScheduleKey(auditType));

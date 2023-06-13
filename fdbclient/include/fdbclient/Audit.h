@@ -156,14 +156,14 @@ struct AuditStorageScheduleState {
 
 	AuditStorageScheduleState(TriggerAuditRequest req)
 	  : id(deterministicRandom()->randomUniqueID()), type(static_cast<uint8_t>(req.getType())), range(req.range),
-	    periodHours(req.periodHours), remainWaitHours(req.periodHours) {}
+	    periodHours(req.periodHours), remainWaitHours(req.periodHours), cancelled(false) {}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, id, type, range, periodHours, remainWaitHours);
+		serializer(ar, id, type, range, periodHours, remainWaitHours, cancelled);
 	}
 
 	std::string toString() const {
@@ -178,6 +178,7 @@ struct AuditStorageScheduleState {
 	KeyRange range;
 	double periodHours;
 	double remainWaitHours;
+	bool cancelled;
 };
 
 #endif

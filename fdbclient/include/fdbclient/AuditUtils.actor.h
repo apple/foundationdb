@@ -73,7 +73,7 @@ ACTOR Future<Void> persistAuditScheduleState(Database cx,
                                              AuditStorageScheduleState auditScheduleState,
                                              MoveKeyLockInfo lock,
                                              bool ddEnabled);
-ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled);
+ACTOR Future<Void> cancelAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled);
 ACTOR Future<bool> updateAuditScheduleState(Database cx,
                                             AuditStorageScheduleState auditScheduleState,
                                             MoveKeyLockInfo lock,
