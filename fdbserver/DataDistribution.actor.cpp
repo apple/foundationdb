@@ -1830,7 +1830,7 @@ ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self, AuditSt
 	try {
 		// Overwrite any existing schedule with the same type
 		wait(persistAuditScheduleState(
-			self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
+		    self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
 		if (self->auditSchedules.contains(auditScheduleState.getType())) {
 			self->auditSchedules[auditScheduleState.getType()]->cancel(); // make sure the existing one gets cancelled
 			self->auditSchedules.erase(auditScheduleState.getType());
