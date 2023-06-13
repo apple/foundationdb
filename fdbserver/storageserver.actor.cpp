@@ -997,7 +997,7 @@ public:
 	std::unordered_map<UID, std::shared_ptr<MoveInShard>> moveInShards;
 
 	bool shardAware; // True if the storage server is aware of the physical shards.
-	Future<Void> auditSSShardInfoActor;
+	std::unordered_map<AuditType, std::pair<UID, ActorCollection>> auditTasks;
 
 	// Histograms
 	struct FetchKeysHistograms {
@@ -1380,9 +1380,6 @@ public:
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
 
-		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
-		Counter bytesInput;
 		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
 		// counted as 2 Bytes.
 		Counter logicalBytesInput;
@@ -1471,8 +1468,7 @@ public:
 		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
-		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
@@ -1641,7 +1637,11 @@ public:
 	    serveAuditStorageParallelismLock(SERVER_KNOBS->SERVE_AUDIT_STORAGE_PARALLELISM),
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
-	    lastDurableVersionEBrake(0), maxQueryQueue(0), transactionTagCounter(ssi.id()),
+	    lastDurableVersionEBrake(0), maxQueryQueue(0),
+	    transactionTagCounter(ssi.id(),
+	                          /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
+	                          /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
+	                              CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
@@ -1914,6 +1914,10 @@ public:
 		StorageBytes sb = storage.getStorageBytes();
 		metrics.getStorageMetrics(req, sb, counters.bytesInput.getRate(), versionLag, lastUpdate);
 	}
+
+	void getSplitMetrics(const SplitMetricsRequest& req) override { this->metrics.splitMetrics(req); }
+
+	void getHotRangeMetrics(const ReadHotSubRangeRequest& req) override { this->metrics.getReadHotRanges(req); }
 
 	// Used for recording shard assignment history for auditStorage
 	std::vector<std::pair<Version, KeyRange>> shardAssignmentHistory;
@@ -4466,6 +4470,60 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 	return KeyRangeRef(begin, end);
 }
 
+void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
+	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
+	    g_simulator->consistencyScanInjectedCorruptionType.present() ||
+	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+		return;
+	}
+
+	CODE_PROBE(true, "consistency check injecting corruption");
+
+	// FIXME: code probe for each type?
+
+	if (true /*deterministicRandom()->random01() < 0.3*/) {
+		// flip more flag
+		reply.more = !reply.more;
+		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+	} else {
+		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
+		ASSERT(false);
+		// make deep copy of request, since some of the underlying memory can reference storage engine data directly
+		GetKeyValuesReply copy = reply;
+		reply = GetKeyValuesReply();
+		reply.more = copy.more;
+		reply.cached = copy.cached;
+		reply.version = copy.version;
+		reply.data.append_deep(reply.arena, copy.data.begin(), copy.data.size());
+
+		if (reply.data.empty()) {
+			// add row to empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(
+			    reply.arena,
+			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
+			// change value in non-empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			reply.data.pop_back();
+		} else {
+			// chop off last byte of first value
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+
+			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
+		}
+	}
+
+	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
+	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("Version", req.version)
+	    .detail("Count", reply.data.size());
+}
+
 ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
@@ -4583,6 +4641,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, none);
+			}
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
@@ -4635,6 +4697,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, r);
+			}
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -4895,8 +4960,10 @@ Key constructMappedKey(KeyValueRef* keyValue, std::vector<Optional<Tuple>>& vec,
 ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
                                               AuditStorageState auditState,
                                               Version version,
-                                              StorageServerInterface remoteServer) {
+                                              StorageServerInterface remoteServer,
+                                              UID ddId) {
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerBegin", data->thisServerID)
+	    .detail("AuditType", auditState.getType())
 	    .detail("AuditID", auditState.id)
 	    .detail("Range", auditState.range)
 	    .detail("Version", version)
@@ -4907,6 +4974,10 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	state int validatedKeys = 0;
 	state std::string error;
 	state int64_t cumulatedValidatedKeysNum = 0;
+	state Reference<IRateControl> rateLimiter =
+	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	state int64_t remoteReadBytes = 0;
+
 	loop {
 		try {
 			std::vector<Future<ErrorOr<GetKeyValuesReply>>> fs;
@@ -4952,6 +5023,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			}
 
 			const GetKeyValuesReply &remote = reps[0].get(), local = reps[1].get();
+			remoteReadBytes = remote.data.expectedSize();
 			Key lastKey = range.begin;
 			auditState.range = range;
 
@@ -5025,11 +5097,18 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 				range = KeyRangeRef(keyAfter(lastKey), range.end);
 				auditState.range = KeyRangeRef(originBegin, range.begin);
 				auditState.setPhase(AuditPhase::Complete);
+				ASSERT(ddId.isValid());
+				auditState.ddId = ddId; // used to compare req.ddId with existing persisted ddId
 				wait(persistAuditStateByRange(data->cx, auditState));
 			}
+
+			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
+
 		} catch (Error& e) {
 			TraceEvent(SevWarn, "ValidateRangeAgainstServerFailed", data->thisServerID)
 			    .errorUnsuppressed(e)
+			    .detail("AuditType", auditState.getType())
+			    .detail("AuditId", auditState.id)
 			    .detail("RemoteServer", remoteServer.toString())
 			    .detail("Range", range)
 			    .detail("Version", version);
@@ -5039,16 +5118,22 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 
 	if (!error.empty()) {
 		TraceEvent(SevError, "ValidateRangeAgainstServerError", data->thisServerID)
+		    .detail("AuditType", auditState.getType())
+		    .detail("AuditId", auditState.id)
 		    .detail("Range", range)
 		    .detail("Version", version)
 		    .detail("ErrorMessage", error)
 		    .detail("RemoteServer", remoteServer.toString());
 		auditState.setPhase(AuditPhase::Error);
+		ASSERT(ddId.isValid());
+		auditState.ddId = ddId; // used to compare req.ddId with existing persisted ddId
 		wait(persistAuditStateByRange(data->cx, auditState));
 		throw audit_storage_error();
 	}
 
 	TraceEvent(SevInfo, "ValidateRangeAgainstServerEnd", data->thisServerID)
+	    .detail("AuditType", auditState.getType())
+	    .detail("AuditId", auditState.id)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("ValidatedKeys", validatedKeys)
@@ -5057,7 +5142,10 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 	return Void();
 }
 
-ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState auditState, std::vector<UID> candidates) {
+ACTOR Future<Void> validateRangeShard(StorageServer* data,
+                                      AuditStorageState auditState,
+                                      std::vector<UID> candidates,
+                                      UID ddId) {
 	TraceEvent(SevDebug, "ServeValidateRangeShardBegin", data->thisServerID)
 	    .detail("Range", auditState.range)
 	    .detail("Servers", describe(candidates));
@@ -5118,7 +5206,7 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState aud
 	}
 
 	if (remoteServer != nullptr) {
-		wait(validateRangeAgainstServer(data, auditState, version, *remoteServer));
+		wait(validateRangeAgainstServer(data, auditState, version, *remoteServer, ddId));
 	} else {
 		TraceEvent(SevWarn, "ServeValidateRangeShardRemoteNotFound", data->thisServerID)
 		    .detail("Range", auditState.range)
@@ -5131,7 +5219,8 @@ ACTOR Future<Void> validateRangeShard(StorageServer* data, AuditStorageState aud
 
 ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
                                                AuditStorageState auditState,
-                                               std::vector<UID> targetServers) {
+                                               std::vector<UID> targetServers,
+                                               UID ddId) {
 	TraceEvent(SevDebug, "ValidateRangeAgainstServersBegin", data->thisServerID)
 	    .detail("AuditID", auditState.id)
 	    .detail("Range", auditState.range)
@@ -5168,7 +5257,7 @@ ACTOR Future<Void> validateRangeAgainstServers(StorageServer* data,
 			    .detail("Range", auditState.range);
 			throw audit_storage_failed();
 		}
-		fs.push_back(validateRangeAgainstServer(data, auditState, version, decodeServerListValue(v.get())));
+		fs.push_back(validateRangeAgainstServer(data, auditState, version, decodeServerListValue(v.get()), ddId));
 	}
 
 	wait(waitForAll(fs));
@@ -5328,9 +5417,15 @@ struct AuditGetServerKeysRes {
 	Version readAtVersion;
 	UID serverId;
 	std::vector<KeyRange> ownRanges;
+	int64_t readBytes;
 	AuditGetServerKeysRes() = default;
-	AuditGetServerKeysRes(KeyRange completeRange, Version readAtVersion, UID serverId, std::vector<KeyRange> ownRanges)
-	  : completeRange(completeRange), readAtVersion(readAtVersion), serverId(serverId), ownRanges(ownRanges) {}
+	AuditGetServerKeysRes(KeyRange completeRange,
+	                      Version readAtVersion,
+	                      UID serverId,
+	                      std::vector<KeyRange> ownRanges,
+	                      int64_t readBytes)
+	  : completeRange(completeRange), readAtVersion(readAtVersion), serverId(serverId), ownRanges(ownRanges),
+	    readBytes(readBytes) {}
 };
 
 // Given an input server, get ranges within the input range via the input transaction
@@ -5378,7 +5473,7 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 		    .detail("ReadAtVersion", readAtVersion)
 		    .detail("CompleteRange", completeRange)
 		    .detail("ResultSize", ownRanges.size());
-		res = AuditGetServerKeysRes(completeRange, readAtVersion, serverID, ownRanges);
+		res = AuditGetServerKeysRes(completeRange, readAtVersion, serverID, ownRanges, readResult.logicalSize());
 
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditStorageGetThisServerKeysError", serverID)
@@ -5393,12 +5488,15 @@ ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID
 struct AuditGetKeyServersRes {
 	KeyRange completeRange;
 	Version readAtVersion;
+	int64_t readBytes;
 	std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
 	AuditGetKeyServersRes() = default;
 	AuditGetKeyServersRes(KeyRange completeRange,
 	                      Version readAtVersion,
-	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap)
-	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap) {}
+	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap,
+	                      int64_t readBytes)
+	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap),
+	    readBytes(readBytes) {}
 };
 
 // Given an input server, get ranges within the input range via the input transaction
@@ -5458,7 +5556,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 		    .detail("AtVersion", readAtVersion)
 		    .detail("ShardsInAnonymousPhysicalShardCount", shardsInAnonymousPhysicalShardCount)
 		    .detail("TotalShardsCount", totalShardsCount);
-		res = AuditGetKeyServersRes(completeRange, readAtVersion, serverOwnRanges);
+		res = AuditGetKeyServersRes(completeRange, readAtVersion, serverOwnRanges, readResult.logicalSize());
 
 	} catch (Error& e) {
 		TraceEvent(SevDebug, "AuditStorageGetThisServerKeysFromKeyServersError", auditServerId)
@@ -5498,11 +5596,11 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 	state Key rangeToReadBegin = req.range.begin;
 	state KeyRangeRef rangeToRead;
 	state int retryCount = 0;
-	state int storageAutoProceedCount = 0;
-	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
-	// by itself without being notified by DD
 	state int64_t cumulatedValidatedLocalShardsNum = 0;
 	state int64_t cumulatedValidatedServerKeysNum = 0;
+	state Reference<IRateControl> rateLimiter =
+	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	state int64_t remoteReadBytes = 0;
 
 	try {
 		while (true) {
@@ -5534,12 +5632,14 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 			serverKeyCompleteRange = serverKeyRes.completeRange;
 			serverKeyReadAtVersion = serverKeyRes.readAtVersion;
 			ownRangesSeenByServerKey = serverKeyRes.ownRanges;
+			remoteReadBytes = serverKeyRes.readBytes;
 			// We want to do transactional read at a version newer than data->version
 			while (serverKeyReadAtVersion < localShardInfoReadAtVersion) {
 				if (retryCount >= SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX) {
 					failureReason = "Read serverKeys retry count exceeds the max";
 					throw audit_storage_failed();
 				}
+				wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
 				retryCount++;
 				wait(delay(0.5));
 				tr.reset();
@@ -5548,6 +5648,7 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				serverKeyCompleteRange = serverKeyRes.completeRange;
 				serverKeyReadAtVersion = serverKeyRes.readAtVersion;
 				ownRangesSeenByServerKey = serverKeyRes.ownRanges;
+				remoteReadBytes = serverKeyRes.readBytes;
 			} // retry until serverKeyReadAtVersion is as larger as localShardInfoReadAtVersion
 			ASSERT(serverKeyReadAtVersion >= localShardInfoReadAtVersion);
 			try {
@@ -5647,6 +5748,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				    .detail("AuditServer", data->thisServerID);
 				res.range = claimRange;
 				res.setPhase(AuditPhase::Error);
+				ASSERT(req.ddId.isValid());
+				res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 				wait(persistAuditStateByServer(data->cx, res));
 				req.reply.sendError(audit_storage_error());
 				break;
@@ -5654,6 +5757,8 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				// Expand persisted complete range
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
+				ASSERT(req.ddId.isValid());
+				res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 				wait(persistAuditStateByServer(data->cx, res));
 				TraceEvent(SevInfo, "AuditStorageSsShardDone", data->thisServerID)
 				    .detail("AuditId", req.id)
@@ -5661,33 +5766,34 @@ ACTOR Future<Void> auditStorageStorageServerShardQ(StorageServer* data, AuditSto
 				    .detail("AuditServer", data->thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
-					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
-						throw audit_storage_failed();
-					}
 					rangeToReadBegin = claimRange.end;
-					storageAutoProceedCount++;
 				} else { // complete
 					req.reply.send(res);
 					break;
 				}
 			}
+
+			wait(rateLimiter->getAllowance(remoteReadBytes)); // RateKeeping
 		}
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageSsShardFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID)
 		    .detail("Reason", failureReason);
-
 		// Make sure the history collection is not open due to this audit
 		data->stopTrackShardAssignment();
 		TraceEvent(SevVerbose, "ShardAssignmentHistoryRecordStopWhenError", data->thisServerID)
 		    .detail("AuditID", req.id);
 
-		req.reply.sendError(audit_storage_failed());
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else {
+			req.reply.sendError(audit_storage_failed());
 		}
 	}
 
@@ -5722,11 +5828,11 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 	state Transaction tr(data->cx);
 	state Key rangeToReadBegin = req.range.begin;
 	state KeyRangeRef rangeToRead;
-	state int storageAutoProceedCount = 0;
-	// storageAutoProceedCount is guard to make sure that audit at SS does not run too long
-	// by itself without being notified by DD
 	state int64_t cumulatedValidatedServerKeysNum = 0;
 	state int64_t cumulatedValidatedKeyServersNum = 0;
+	state Reference<IRateControl> rateLimiter =
+	    Reference<IRateControl>(new SpeedLimit(CLIENT_KNOBS->CONSISTENCY_CHECK_RATE_LIMIT_MAX, 1));
+	state int64_t remoteReadBytes = 0;
 
 	try {
 		while (true) {
@@ -5737,6 +5843,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			mapFromKeyServers.clear();
 			serverKeyResMap.clear();
 			mapFromKeyServersRaw.clear();
+			remoteReadBytes = 0;
 
 			rangeToRead = KeyRangeRef(rangeToReadBegin, req.range.end);
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
@@ -5745,6 +5852,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			completeRangeByKeyServer = keyServerRes.completeRange;
 			readAtVersion = keyServerRes.readAtVersion;
 			mapFromKeyServersRaw = keyServerRes.rangeOwnershipMap;
+			remoteReadBytes += keyServerRes.readBytes;
 			// Use ssid of mapFromKeyServersRaw to read ServerKeys
 			for (auto& [ssid, _] : mapFromKeyServersRaw) {
 				actors.push_back(store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, &tr, rangeToRead)));
@@ -5764,6 +5872,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				ASSERT(!overlappingRange.empty());
 				claimRange = overlappingRange;
 				ASSERT(readAtVersion == serverKeyRes.readAtVersion);
+				remoteReadBytes += serverKeyRes.readBytes;
 			}
 			// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
 			int64_t numValidatedServerKeys = 0;
@@ -5884,6 +5993,8 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				    .detail("ClaimRange", claimRange);
 				res.range = claimRange;
 				res.setPhase(AuditPhase::Error);
+				ASSERT(req.ddId.isValid());
+				res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 				wait(persistAuditStateByRange(data->cx, res));
 				req.reply.sendError(audit_storage_error());
 				break;
@@ -5891,6 +6002,8 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				// Expand persisted complete range
 				res.range = Standalone(KeyRangeRef(req.range.begin, claimRange.end));
 				res.setPhase(AuditPhase::Complete);
+				ASSERT(req.ddId.isValid());
+				res.ddId = req.ddId; // used to compare req.ddId with existing persisted ddId
 				wait(persistAuditStateByRange(data->cx, res));
 				TraceEvent(SevInfo, "AuditStorageShardLocMetadataDone", data->thisServerID)
 				    .detail("AuditId", req.id)
@@ -5899,27 +6012,28 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 				    .detail("AuditServerId", data->thisServerID)
 				    .detail("CompleteRange", res.range);
 				if (claimRange.end < rangeToRead.end) {
-					if (storageAutoProceedCount > SERVER_KNOBS->SS_AUDIT_AUTO_PROCEED_COUNT_MAX) {
-						throw audit_storage_failed();
-					}
 					rangeToReadBegin = claimRange.end;
-					storageAutoProceedCount++;
 				} else { // complete
 					req.reply.send(res);
 					break;
 				}
 			}
+			wait(rateLimiter->getAllowance(remoteReadBytes)); // Rate Keeping
 		}
 
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("AuditId", req.id)
 		    .detail("AuditRange", req.range)
 		    .detail("AuditServer", data->thisServerID);
-		req.reply.sendError(audit_storage_failed());
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else {
+			req.reply.sendError(audit_storage_failed());
 		}
 	}
 
@@ -5965,7 +6079,8 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 						fs.push_back(validateRangeShard(
 						    data,
 						    AuditStorageState(res.id, KeyRangeRef(shards[i].key, shards[i + 1].key), res.getType()),
-						    src));
+						    src,
+						    req.ddId));
 						begin = shards[i + 1].key;
 					}
 				} catch (Error& e) {
@@ -5973,26 +6088,28 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 				}
 			}
 		} else {
-			fs.push_back(validateRangeAgainstServers(data, res, req.targetServers));
+			fs.push_back(validateRangeAgainstServers(data, res, req.targetServers, req.ddId));
 		}
 
 		wait(waitForAll(fs));
 		res.setPhase(AuditPhase::Complete);
 		req.reply.send(res);
 	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return Void(); // sliently exit
+		}
 		TraceEvent(SevInfo, "SSAuditStorageError", data->thisServerID)
 		    .errorUnsuppressed(e)
 		    .detail("RequestID", req.id)
 		    .detail("Range", req.range)
 		    .detail("AuditType", req.type)
 		    .detail("TargetServers", describe(req.targetServers));
-		if (e.code() != error_code_audit_storage_error) {
-			req.reply.sendError(audit_storage_failed());
-		} else {
+		if (e.code() == error_code_audit_storage_cancelled) {
+			req.reply.sendError(audit_storage_cancelled());
+		} else if (e.code() == error_code_audit_storage_error) {
 			req.reply.sendError(audit_storage_error());
-		}
-		if (e.code() == error_code_actor_cancelled) {
-			throw e;
+		} else {
+			req.reply.sendError(audit_storage_failed());
 		}
 	}
 
@@ -8462,7 +8579,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
 	// knob
 	state ReadOptions readOptions = ReadOptions(
-	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
+	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -9414,7 +9531,7 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 	data->addMutationToMutationLog(
 	    mLV, MutationRef(MutationRef::ClearRange, persistUpdatesRange.begin, persistUpdatesRange.end));
 
-	bool clearRecord = true;
+	state bool clearRecord = true;
 	if (moveInShard->failed()) {
 		for (const auto& mir : moveInShard->ranges()) {
 			auto existingShards = data->shards.intersectingRanges(mir);
@@ -9431,6 +9548,10 @@ ACTOR Future<Void> cleanUpMoveInShard(StorageServer* data, Version version, Move
 		data->addMutationToMutationLog(mLV, MutationRef(MutationRef::ClearRange, persistKey, keyAfter(persistKey)));
 	}
 	wait(data->durableVersion.whenAtLeast(mLV.version + 1));
+
+	if (clearRecord) {
+		data->moveInShards.erase(moveInShard->id());
+	}
 
 	return Void();
 }
@@ -10087,7 +10208,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
                                         EnablePhysicalShardMove enablePSM) {
 	ASSERT(!keys.empty());
 	const Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
-	TraceEvent(sevDm, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
+	TraceEvent(SevInfo, "ChangeServerKeysWithPhysicalShards", data->thisServerID)
 	    .detail("DataMoveID", dataMoveId)
 	    .detail("Range", keys)
 	    .detail("NowAssigned", nowAssigned)
@@ -12453,6 +12574,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 	if (!fFormat.get().present()) {
 		// The DB was never initialized
 		TraceEvent("DBNeverInitialized", data->thisServerID).log();
+		TraceEvent("KVSRemoved", data->thisServerID).detail("Reason", "DBNeverInitialized");
 		storage->dispose();
 		data->thisServerID = UID();
 		data->sk = Key();
@@ -12880,7 +13002,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 		wait(delay(0)); // prevent iterator invalidation of functions sending changes
 	}
-
+	// fmt::print("PopWaitMetricsMap {}\n", req.keys.toString());
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
 		auto& x = i->value();
@@ -13494,7 +13616,7 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->busiestWriteTagContext.lastUpdateTime = req.postTime;
 				TraceEvent("BusiestWriteTag", self->thisServerID)
 				    .detail("Elapsed", req.elapsed)
-				    .detail("Tag", printable(req.busiestTag))
+				    .detail("Tag", req.busiestTag)
 				    .detail("TagOps", req.opsSum)
 				    .detail("TagCost", req.costSum)
 				    .detail("TotalCost", req.totalWriteCosts)
@@ -13507,20 +13629,45 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 				self->actors.add(fetchCheckpointKeyValuesQ(self, req));
 			}
 			when(AuditStorageRequest req = waitNext(ssi.auditStorage.getFuture())) {
-				// A SS can run one ValidateStorageServerShard at a time
-				// We do not have this limitation on other audit types
-				if (req.getType() == AuditType::ValidateStorageServerShard) {
-					if (self->auditSSShardInfoActor.isValid() && !self->auditSSShardInfoActor.isReady()) {
-						TraceEvent(SevWarn, "ExistRunningAuditStorageForServerShard")
-						    .detail("NewAuditId", req.id)
-						    .detail("NewAuditType", req.getType());
-						self->auditSSShardInfoActor.cancel();
-					} // New audit immediately starts and existing one gets cancelled
-					self->auditSSShardInfoActor = auditStorageStorageServerShardQ(self, req);
+				// Check existing audit task states
+				if (self->auditTasks.contains(req.getType())) {
+					if (req.id != self->auditTasks[req.getType()].first) {
+						// Any task of past audit must be ready
+						if (!self->auditTasks[req.getType()].second.getResult().isReady()) {
+							req.reply.sendError(audit_storage_exceeded_request_limit());
+							TraceEvent(SevWarnAlways, "ExistSSAuditWithDifferentId") // unexpected
+							    .detail("NewAuditId", req.id)
+							    .detail("NewAuditType", req.getType());
+							continue;
+						}
+					} else if (req.getType() == AuditType::ValidateStorageServerShard &&
+					           !self->auditTasks[req.getType()].second.getResult().isReady()) {
+						// Only one ValidateStorageServerShard is allowed to run at a time
+						TraceEvent(SevWarn, "ExistSSAuditForServerShardWithSameId")
+						    .detail("AuditId", req.id)
+						    .detail("AuditType", req.getType());
+						// Make sure the history collection is not open for the old audit
+						self->stopTrackShardAssignment();
+						self->auditTasks[req.getType()].second.clear(true);
+					}
+				}
+				// Prepare for the new audit task
+				if (!self->auditTasks.contains(req.getType()) ||
+				    self->auditTasks[req.getType()].second.getResult().isReady()) {
+					ASSERT(req.id.isValid());
+					self->auditTasks[req.getType()] = std::make_pair(req.id, ActorCollection(true));
+				}
+				// Start the new audit task
+				if (req.getType() == AuditType::ValidateHA) {
+					self->auditTasks[req.getType()].second.add(auditStorageQ(self, req));
+				} else if (req.getType() == AuditType::ValidateReplica) {
+					self->auditTasks[req.getType()].second.add(auditStorageQ(self, req));
 				} else if (req.getType() == AuditType::ValidateLocationMetadata) {
-					self->actors.add(auditStorageLocationMetadataQ(self, req));
+					self->auditTasks[req.getType()].second.add(auditStorageLocationMetadataQ(self, req));
+				} else if (req.getType() == AuditType::ValidateStorageServerShard) {
+					self->auditTasks[req.getType()].second.add(auditStorageStorageServerShardQ(self, req));
 				} else {
-					self->actors.add(auditStorageQ(self, req));
+					req.reply.sendError(not_implemented());
 				}
 			}
 			when(wait(updateProcessStatsTimer)) {
@@ -13546,6 +13693,7 @@ bool storageServerTerminated(StorageServer& self, IKeyValueStore* persistentData
 	} else if (e.code() == error_code_worker_removed || e.code() == error_code_recruitment_failed) {
 		// SOMEDAY: could close instead of dispose if tss in quarantine gets removed so it could still be
 		// investigated?
+		TraceEvent("KVSRemoved", self.thisServerID).detail("Reason", e.name());
 		persistentData->dispose();
 	} else {
 		persistentData->close();
@@ -13882,6 +14030,8 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
 		// we want that actor to complete before we terminate and that memory goes out of scope
 
 		self.ssLock->halt();
+
+		self.moveInShards.clear();
 
 		state Error err = e;
 		if (storageServerTerminated(self, persistentData, err)) {

@@ -2215,6 +2215,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			Optional<Value> old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;
@@ -2677,6 +2678,39 @@ ACTOR Future<UID> auditStorage(Reference<IClusterConnectionRecord> clusterFile,
 		    .errorUnsuppressed(e)
 		    .detail("AuditType", type)
 		    .detail("Range", range)
+		    .detail("AuditID", auditId);
+		throw e;
+	}
+
+	return auditId;
+}
+
+ACTOR Future<UID> cancelAuditStorage(Reference<IClusterConnectionRecord> clusterFile,
+                                     AuditType type,
+                                     UID auditId,
+                                     double timeoutSeconds) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(clusterFile, clusterInterface);
+	TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageTrigger")
+	    .detail("AuditType", type)
+	    .detail("AuditId", auditId);
+	try {
+		while (!clusterInterface->get().present()) {
+			wait(clusterInterface->onChange());
+		}
+		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageBegin")
+		    .detail("AuditType", type)
+		    .detail("AuditId", auditId);
+		TriggerAuditRequest req(type, auditId);
+		UID auditId_ = wait(timeoutError(clusterInterface->get().get().triggerAudit.getReply(req), timeoutSeconds));
+		ASSERT(auditId_ == auditId);
+		TraceEvent(SevVerbose, "ManagementAPICancelAuditStorageEnd")
+		    .detail("AuditType", type)
+		    .detail("AuditID", auditId);
+	} catch (Error& e) {
+		TraceEvent(SevInfo, "ManagementAPICancelAuditStorageError")
+		    .errorUnsuppressed(e)
+		    .detail("AuditType", type)
 		    .detail("AuditID", auditId);
 		throw e;
 	}

@@ -418,8 +418,8 @@ function(prepare_binding_test_files build_directory target_name target_dependenc
       COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/bindings/go/bin/_stacktester ${build_directory}/tests/go/build/bin/_stacktester
       COMMAND ${CMAKE_COMMAND} -E make_directory ${build_directory}/tests/go/src/fdb/
       COMMAND ${CMAKE_COMMAND} -E copy
-        ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
-        ${build_directory}/tests/go/src/fdb/ # DEST
+      ${CMAKE_BINARY_DIR}/bindings/go/src/github.com/apple/foundationdb/bindings/go/src/fdb/generated.go # SRC
+      ${build_directory}/tests/go/src/fdb/ # DEST
       COMMENT "Copy generated.go for bindingtester")
   endif()
 

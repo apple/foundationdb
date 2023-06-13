@@ -24,8 +24,11 @@
 #include "flow/Arena.h"
 #include "flow/Platform.h"
 #include "flow/Trace.h"
+#include "flow/swift.h"
+#include "flow/swift_concurrency_hooks.h"
 #include <algorithm>
 #include <memory>
+#include <string_view>
 #ifndef BOOST_SYSTEM_NO_LIB
 #define BOOST_SYSTEM_NO_LIB
 #endif
@@ -114,7 +117,6 @@ DESCR struct SlowTask {
 
 namespace N2 { // No indent, it's the whole file
 
-class Net2;
 class Peer;
 class Connection;
 
@@ -171,6 +173,7 @@ public:
 	double timer_monotonic() override { return ::timer_monotonic(); };
 	Future<Void> delay(double seconds, TaskPriority taskId) override;
 	Future<Void> orderedDelay(double seconds, TaskPriority taskId) override;
+	void _swiftEnqueue(void* task) override;
 	Future<class Void> yield(TaskPriority taskID) override;
 	bool check_yield(TaskPriority taskId) override;
 	TaskPriority getCurrentTask() const override { return currentTaskID; }
@@ -259,11 +262,21 @@ public:
 
 	struct PromiseTask final : public FastAllocated<PromiseTask> {
 		Promise<Void> promise;
+		swift::Job* _Nullable swiftJob = nullptr;
 		PromiseTask() {}
 		explicit PromiseTask(Promise<Void>&& promise) noexcept : promise(std::move(promise)) {}
+		explicit PromiseTask(swift::Job* swiftJob) : swiftJob(swiftJob) {}
 
 		void operator()() {
+#ifdef WITH_SWIFT
+			if (auto job = swiftJob) {
+				swift_job_run(job, ExecutorRef::generic());
+			} else {
+				promise.send(Void());
+			}
+#else
 			promise.send(Void());
+#endif
 			delete this;
 		}
 	};
@@ -342,14 +355,20 @@ class BindPromise {
 	Promise<Void> p;
 	std::variant<const char*, AuditedEvent> errContext;
 	UID errID;
+	NetworkAddress peerAddr;
 
 public:
 	BindPromise(const char* errContext, UID errID) : errContext(errContext), errID(errID) {}
 	BindPromise(AuditedEvent auditedEvent, UID errID) : errContext(auditedEvent), errID(errID) {}
-	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID) {}
-	BindPromise(BindPromise&& r) noexcept : p(std::move(r.p)), errContext(r.errContext), errID(r.errID) {}
+	BindPromise(BindPromise const& r) : p(r.p), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
+	BindPromise(BindPromise&& r) noexcept
+	  : p(std::move(r.p)), errContext(r.errContext), errID(r.errID), peerAddr(r.peerAddr) {}
 
 	Future<Void> getFuture() const { return p.getFuture(); }
+
+	NetworkAddress getPeerAddr() const { return peerAddr; }
+
+	void setPeerAddr(const NetworkAddress& addr) { peerAddr = addr; }
 
 	void operator()(const boost::system::error_code& error, size_t bytesWritten = 0) {
 		try {
@@ -368,6 +387,10 @@ public:
 					// error codes should never go that high.
 					if (error.value() >= (1 << 24L)) {
 						evt.detail("WhichMeans", TLSPolicy::ErrorString(error));
+					}
+
+					if (peerAddr.isValid()) {
+						evt.detail("PeerAddr", peerAddr);
 					}
 				}
 
@@ -790,6 +813,14 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 		Handshake(ssl_socket& socket, ssl_socket::handshake_type type) : socket(socket), type(type) {}
 		double getTimeEstimate() const override { return 0.001; }
 
+		std::string getPeerAddress() const {
+			std::ostringstream o;
+			boost::system::error_code ec;
+			auto addr = socket.lowest_layer().remote_endpoint(ec);
+			o << (!ec.failed() ? addr.address().to_string() : std::string_view("0.0.0.0"));
+			return std::move(o).str();
+		}
+
 		ThreadReturnPromise<Void> done;
 		ssl_socket& socket;
 		ssl_socket::handshake_type type;
@@ -809,6 +840,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 				TraceEvent(SevWarn,
 				           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeError"_audit
 				                                                        : "N2_AcceptHandshakeError"_audit)
+				    .detail("PeerAddr", h.getPeerAddress())
 				    .detail("ErrorCode", h.err.value())
 				    .detail("ErrorMsg", h.err.message().c_str())
 				    .detail("BackgroundThread", true);
@@ -820,6 +852,7 @@ struct SSLHandshakerThread final : IThreadPoolReceiver {
 			TraceEvent(SevWarn,
 			           h.type == ssl_socket::handshake_type::client ? "N2_ConnectHandshakeUnknownError"_audit
 			                                                        : "N2_AcceptHandshakeUnknownError"_audit)
+			    .detail("PeerAddr", h.getPeerAddress())
 			    .detail("BackgroundThread", true);
 			h.done.sendError(connection_failed());
 		}
@@ -910,7 +943,8 @@ public:
 				N2::g_net2->sslHandshakerPool->post(handshake);
 			} else {
 				// Otherwise use flow network thread
-				BindPromise p("N2_AcceptHandshakeError"_audit, UID());
+				BindPromise p("N2_AcceptHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::server, std::move(p));
 			}
@@ -993,6 +1027,7 @@ public:
 			} else {
 				// Otherwise use flow network thread
 				BindPromise p("N2_ConnectHandshakeError"_audit, self->id);
+				p.setPeerAddr(self->getPeerAddress());
 				onHandshook = p.getFuture();
 				self->ssl_sock.async_handshake(boost::asio::ssl::stream_base::client, std::move(p));
 			}
@@ -1419,7 +1454,6 @@ ActorLineageSet& Net2::getActorLineageSet() {
 void Net2::run() {
 	TraceEvent::setNetworkThread();
 	TraceEvent("Net2Running").log();
-
 	thread_network = this;
 
 	unsigned int tasksSinceReact = 0;
@@ -1749,6 +1783,7 @@ Future<class Void> Net2::yield(TaskPriority taskID) {
 	return Void();
 }
 
+// TODO: can we wrap our swift task and insert it in here?
 Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 	if (seconds >= 4e12) // Intervals that overflow an int64_t in microseconds (more than 100,000 years) are treated
 	                     // as infinite
@@ -1767,6 +1802,15 @@ Future<Void> Net2::delay(double seconds, TaskPriority taskId) {
 Future<Void> Net2::orderedDelay(double seconds, TaskPriority taskId) {
 	// The regular delay already provides the required ordering property
 	return delay(seconds, taskId);
+}
+
+void Net2::_swiftEnqueue(void* _job) {
+#ifdef WITH_SWIFT
+	swift::Job* job = (swift::Job*)_job;
+	TaskPriority priority = swift_priority_to_net2(job->getPriority());
+	PromiseTask* t = new PromiseTask(job);
+	taskQueue.addReady(priority, t);
+#endif
 }
 
 void Net2::onMainThread(Promise<Void>&& signal, TaskPriority taskID) {

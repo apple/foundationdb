@@ -22,9 +22,11 @@
 #define FDBCLIENT_FDBTYPES_H
 
 #include <algorithm>
+#include <array>
 #include <cinttypes>
 #include <set>
 #include <string>
+#include <variant>
 #include <vector>
 #include <unordered_set>
 #include <boost/functional/hash.hpp>
@@ -829,7 +831,7 @@ struct RangeResultRef : VectorRef<KeyValueRef> {
 		serializer(ar, ((VectorRef<KeyValueRef>&)*this), more, readThrough, readToBegin, readThroughEnd);
 	}
 
-	int logicalSize() const {
+	int64_t logicalSize() const {
 		return VectorRef<KeyValueRef>::expectedSize() - VectorRef<KeyValueRef>::size() * sizeof(KeyValueRef);
 	}
 

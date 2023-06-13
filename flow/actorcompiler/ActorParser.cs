@@ -338,7 +338,7 @@ namespace actorcompiler
                 {
                     throw new Exception("Internal error: Invalid source line (0)");
                 }
-                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "TEST_CASE")
+                if (tokens[i].Value == "ACTOR" || tokens[i].Value == "SWIFT_ACTOR" || tokens[i].Value == "TEST_CASE")
                 {
                     int end;
                     var actor = ParseActor(i, out end);
@@ -1045,7 +1045,7 @@ namespace actorcompiler
             actor.isForwardDeclaration = toSemicolon.Length < heading.Length;
             if (actor.isForwardDeclaration) {
                 heading = toSemicolon;
-                if (head_token.Value == "ACTOR") {
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR") {
                     ParseActorHeading(actor, heading);
                 } else {
                     head_token.Assert("ACTOR expected!", t => false);
@@ -1055,7 +1055,7 @@ namespace actorcompiler
                 var body = range(heading.End+1, tokens.Length)
                     .TakeWhile(t => t.BraceDepth > toks.First().BraceDepth);
 
-                if (head_token.Value == "ACTOR")
+                if (head_token.Value == "ACTOR" || head_token.Value == "SWIFT_ACTOR")
                 {
                     ParseActorHeading(actor, heading);
                 }

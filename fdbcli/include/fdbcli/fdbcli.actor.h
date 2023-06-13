@@ -48,6 +48,7 @@ constexpr char msgMetaclusterKey[] = "metacluster";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
 constexpr char msgErrorKey[] = "error";
 
 struct CommandHelp {
@@ -203,6 +204,7 @@ ACTOR Future<UID> auditStorageCommandActor(Reference<IClusterConnectionRecord> c
                                            std::vector<StringRef> tokens);
 // Retrieve audit storage status
 ACTOR Future<bool> getAuditStatusCommandActor(Database cx, std::vector<StringRef> tokens);
+ACTOR Future<bool> locationMetadataCommandActor(Database cx, std::vector<StringRef> tokens);
 // force_recovery_with_data_loss command
 ACTOR Future<bool> forceRecoveryWithDataLossCommandActor(Reference<IDatabase> db, std::vector<StringRef> tokens);
 // include command
@@ -289,6 +291,10 @@ ACTOR Future<bool> idempotencyIdsCommandActor(Database cx, std::vector<StringRef
 
 // rangeconfig command
 ACTOR Future<bool> rangeConfigCommandActor(Database cx, std::vector<StringRef> tokens);
+
+// debug commands: getlocation, getall
+ACTOR Future<bool> getLocationCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
+ACTOR Future<bool> getallCommandActor(Database cx, std::vector<StringRef> tokens, Version version);
 
 } // namespace fdb_cli
 

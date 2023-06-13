@@ -31,6 +31,7 @@
 #include <map>
 #include <set>
 #include <type_traits>
+#include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/ITrace.h"
@@ -38,6 +39,8 @@
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
+
+FDB_BOOLEAN_PARAM(InitializeTraceMetrics);
 
 inline int fastrand() {
 	static int g_seed = 0;
@@ -262,7 +265,7 @@ inline constexpr AuditedEvent operator""_audit(const char* eventType, size_t len
 // This class is not intended to be used directly. Instead, this type is returned from most calls on trace events
 // (e.g. detail). This is done to disallow calling suppression functions anywhere but first in a chained sequence of
 // trace event function calls.
-struct BaseTraceEvent {
+struct SWIFT_CXX_IMPORT_OWNED BaseTraceEvent {
 	BaseTraceEvent(BaseTraceEvent&& ev);
 	BaseTraceEvent& operator=(BaseTraceEvent&& ev);
 
@@ -459,7 +462,7 @@ protected:
 
 // The TraceEvent class provides the implementation for BaseTraceEvent. The only functions that should be implemented
 // here are those that must be called first in a trace event call sequence, such as the suppression functions.
-struct TraceEvent : public BaseTraceEvent {
+struct SWIFT_CXX_IMPORT_OWNED TraceEvent : public BaseTraceEvent {
 	TraceEvent() {}
 	TraceEvent(const char* type, UID id = UID()); // Assumes SevInfo severity
 	TraceEvent(Severity, const char* type, UID id = UID());
@@ -476,6 +479,16 @@ struct TraceEvent : public BaseTraceEvent {
 
 	BaseTraceEvent& sample(double sampleRate, bool logSampleRate = true);
 	BaseTraceEvent& suppressFor(double duration, bool logSuppressedEventCount = true);
+
+	// Exposed for Swift which cannot use std::enable_if
+	template <class T>
+	void addDetail(std::string key, const T& value) {
+		if (enabled && init()) {
+			auto s = Traceable<T>::toString(value);
+			addMetric(key.c_str(), value, s);
+			detailImpl(std::move(key), std::move(s), false);
+		}
+	}
 };
 
 class StringRef;
@@ -532,6 +545,9 @@ struct NetworkAddress;
 template <class T>
 class Optional;
 
+using OptionalStdString = Optional<std::string>;
+using OptionalInt64 = Optional<int64_t>;
+
 void openTraceFile(const Optional<NetworkAddress>& na,
                    uint64_t rollsize,
                    uint64_t maxLogsSize,
@@ -539,8 +555,8 @@ void openTraceFile(const Optional<NetworkAddress>& na,
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
                    std::string identifier = "",
-                   std::string tracePartialFileSuffix = "");
-void initTraceEventMetrics();
+                   std::string tracePartialFileSuffix = "",
+                   InitializeTraceMetrics initializeTraceMetrics = InitializeTraceMetrics::False);
 void closeTraceFile();
 bool traceFileIsOpen();
 void flushTraceFileVoid();

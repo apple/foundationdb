@@ -25,7 +25,7 @@ Package fdb provides an interface to FoundationDB databases (version 2.0 or high
 
 To build and run programs using this package, you must have an installed copy of
 the FoundationDB client libraries (version 2.0.0 or later), available for Linux,
-Windows and OS X at https://www.foundationdb.org/download/.
+Windows and OS X at https://github.com/apple/foundationdb/releases
 
 This documentation specifically applies to the FoundationDB Go binding. For more
 extensive guidance to programming with FoundationDB, as well as API

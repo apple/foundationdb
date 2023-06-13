@@ -525,7 +525,7 @@ struct GetBlobGranuleLocationsRequest {
 	}
 };
 
-struct GetRawCommittedVersionReply {
+struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionReply {
 	constexpr static FileIdentifier file_identifier = 1314732;
 	Optional<UID> debugID;
 	Version version;
@@ -544,7 +544,7 @@ struct GetRawCommittedVersionReply {
 	}
 };
 
-struct GetRawCommittedVersionRequest {
+struct SWIFT_CXX_IMPORT_OWNED GetRawCommittedVersionRequest {
 	constexpr static FileIdentifier file_identifier = 12954034;
 	SpanContext spanContext;
 	Optional<UID> debugID;
@@ -563,7 +563,7 @@ struct GetRawCommittedVersionRequest {
 	}
 };
 
-struct GetStorageServerRejoinInfoReply {
+struct SWIFT_CXX_IMPORT_OWNED GetStorageServerRejoinInfoReply {
 	constexpr static FileIdentifier file_identifier = 9469225;
 	Version version;
 	Tag tag;

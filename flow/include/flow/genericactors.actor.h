@@ -24,6 +24,7 @@
 // version.
 #include "flow/FastRef.h"
 #include "flow/network.h"
+#include "flow/swift_support.h"
 #include <utility>
 #include <functional>
 #include <unordered_set>
@@ -749,8 +750,17 @@ private:
 	V value;
 };
 
+// FIXME(swift): Remove once https://github.com/apple/swift/issues/61620 is fixed.
+#define SWIFT_CXX_REF_ASYNCVAR                                                                                         \
+	__attribute__((swift_attr("import_as_ref"))) __attribute__((swift_attr("retain:immortal")))                        \
+	__attribute__((swift_attr("release:immortal")))
+// // TODO(swift): https://github.com/apple/swift/issues/62456 can't support retain/release funcs that are templates
+// themselfes
+//    __attribute__((swift_attr("retain:addref_AsyncVar")))   \
+//    __attribute__((swift_attr("release:delref_AsyncVar")))
+
 template <class V>
-class AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
+class SWIFT_CXX_REF_ASYNCVAR AsyncVar : NonCopyable, public ReferenceCounted<AsyncVar<V>> {
 public:
 	AsyncVar() : value() {}
 	AsyncVar(V const& v) : value(v) {}
@@ -761,6 +771,7 @@ public:
 	}
 
 	V const& get() const { return value; }
+	V getCopy() const __attribute__((swift_attr("import_unsafe"))) { return value; }
 	Future<Void> onChange() const { return nextChange.getFuture(); }
 	void set(V const& v) {
 		if (v != value)
@@ -1326,6 +1337,15 @@ Future<Void> recurring(Func what, double interval, TaskPriority taskID = TaskPri
 	}
 }
 
+ACTOR template <class Func>
+Future<Void> checkUntil(double checkInterval, Func f, TaskPriority taskID = TaskPriority::DefaultDelay) {
+	loop {
+		wait(delay(checkInterval, taskID));
+		if (f())
+			return Void();
+	}
+}
+
 // Invoke actorFunc() forever in a loop
 // At least wait<interval> between two actor functor invocations
 ACTOR template <class F>
@@ -1338,7 +1358,8 @@ Future<Void> recurringAsync(
                                 // value AND/OR actor functor taking longer than expected to return, could cause actor
                                 // functor to run with no-delay
     double initialDelay, // Initial delay interval
-    TaskPriority taskID = TaskPriority::DefaultDelay) {
+    TaskPriority taskID = TaskPriority::DefaultDelay,
+    bool jittered = false) {
 
 	wait(delay(initialDelay));
 
@@ -1350,12 +1371,20 @@ Future<Void> recurringAsync(
 		if (absoluteIntervalDelay) {
 			wait(val);
 			// Ensure subsequent actorFunc executions observe client supplied delay interval.
-			wait(delay(interval));
+			if (jittered) {
+				wait(delayJittered(interval));
+			} else {
+				wait(delay(interval));
+			}
 		} else {
 			// Guarantee at-least client supplied interval delay; two possible scenarios:
 			// 1. The actorFunc executions finishes before 'interval' delay
 			// 2. The actorFunc executions takes > 'interval' delay.
-			wait(val && delay(interval));
+			if (jittered) {
+				wait(val && delayJittered(interval));
+			} else {
+				wait(val && delay(interval));
+			}
 		}
 	}
 }

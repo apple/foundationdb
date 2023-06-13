@@ -187,6 +187,9 @@ struct CommonStorageCounters {
 	Counter finishedQueries, bytesQueried;
 
 	// write ops
+	// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
+	// and cleared from the memory, we do not subtract it but add it to bytesDurable.
+	Counter bytesInput;
 	// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
 	// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
 	// and the lengths of both parameters.
@@ -222,6 +225,10 @@ public:
 
 	virtual void getStorageMetrics(const GetStorageMetricsRequest& req) = 0;
 
+	virtual void getSplitMetrics(const SplitMetricsRequest& req) = 0;
+
+	virtual void getHotRangeMetrics(const ReadHotSubRangeRequest& req) = 0;
+
 	// NOTE: also need to have this function but template can't be a virtual so...
 	// template <class Reply>
 	// void sendErrorWithPenalty(const ReplyPromise<Reply>& promise, const Error& err, double penalty);
@@ -245,14 +252,14 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 					CODE_PROBE(true, "splitMetrics immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {
-					self->metrics.splitMetrics(req);
+					self->getSplitMetrics(req);
 				}
 			}
 			when(GetStorageMetricsRequest req = waitNext(ssi.getStorageMetrics.getFuture())) {
 				self->getStorageMetrics(req);
 			}
 			when(ReadHotSubRangeRequest req = waitNext(ssi.getReadHotRanges.getFuture())) {
-				self->metrics.getReadHotRanges(req);
+				self->getHotRangeMetrics(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
 				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||

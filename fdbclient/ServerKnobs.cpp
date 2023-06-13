@@ -180,8 +180,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 
 	init( SHARD_ENCODE_LOCATION_METADATA,                      false ); if( randomize && BUGGIFY )  SHARD_ENCODE_LOCATION_METADATA = true;
 	init( ENABLE_DD_PHYSICAL_SHARD,                            false ); // EXPERIMENTAL; If true, SHARD_ENCODE_LOCATION_METADATA must be true; When true, optimization of data move between DCs is disabled
-	init( ENABLE_DD_PHYSICAL_SHARD_MOVE,                       false ); if( isSimulated )  ENABLE_DD_PHYSICAL_SHARD_MOVE = deterministicRandom()->coinflip();
-	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.5 );
+	init( DD_PHYSICAL_SHARD_MOVE_PROBABILITY,                    0.0 ); if( isSimulated )   DD_PHYSICAL_SHARD_MOVE_PROBABILITY = 0.5;
 	init( MAX_PHYSICAL_SHARD_BYTES,                         10000000 ); // 10 MB; for ENABLE_DD_PHYSICAL_SHARD; smaller leads to larger number of physicalShard per storage server
  	init( PHYSICAL_SHARD_METRICS_DELAY,                        300.0 ); // 300 seconds; for ENABLE_DD_PHYSICAL_SHARD
 	init( ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME,            600.0 ); if( randomize && BUGGIFY )  ANONYMOUS_PHYSICAL_SHARD_TRANSITION_TIME = 0.0; // 600 seconds; for ENABLE_DD_PHYSICAL_SHARD
@@ -436,7 +435,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ROCKSDB_MEMTABLE_PREFIX_BLOOM_SIZE_RATIO,              0.1 );
 	init( ROCKSDB_BLOOM_BITS_PER_KEY,                             10 );
 	init( ROCKSDB_BLOOM_WHOLE_KEY_FILTERING,                   false );
-	init( ROCKSDB_MAX_AUTO_READAHEAD_SIZE,                         0 );
+	init( ROCKSDB_MAX_AUTO_READAHEAD_SIZE,                     65536 );
 	// If rocksdb block cache size is 0, the default 8MB is used.
 	int64_t blockCacheSize = isSimulated ? 16 * 1024 * 1024 : 2147483648 /* 2GB */;
 	init( ROCKSDB_BLOCK_CACHE_SIZE,                   blockCacheSize );
@@ -755,6 +754,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( TARGET_BYTES_PER_STORAGE_SERVER,                    1000e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER = 3000e3;
 	init( SPRING_BYTES_STORAGE_SERVER,                         100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER = 300e3;
 	init( AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES,               800e6 ); if( smallStorageTarget ) AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES = 2500e3;
+	init( AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER,       200e6 ); if( smallStorageTarget ) AUTO_TAG_THROTTLE_SPRING_BYTES_STORAGE_SERVER = 500e3;
 	init( TARGET_BYTES_PER_STORAGE_SERVER_BATCH,               750e6 ); if( smallStorageTarget ) TARGET_BYTES_PER_STORAGE_SERVER_BATCH = 1500e3;
 	init( SPRING_BYTES_STORAGE_SERVER_BATCH,                   100e6 ); if( smallStorageTarget ) SPRING_BYTES_STORAGE_SERVER_BATCH = 150e3;
 	init( STORAGE_HARD_LIMIT_BYTES,                           1500e6 ); if( smallStorageTarget ) STORAGE_HARD_LIMIT_BYTES = 4500e3;
@@ -829,23 +829,20 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( AUTO_TAG_THROTTLE_UPDATE_FREQUENCY,                   10.0 ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLE_UPDATE_FREQUENCY = 0.5;
 	init( TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL,                30.0 ); if(randomize && BUGGIFY) TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL = 1.0;
 	init( AUTO_TAG_THROTTLING_ENABLED,                          true ); if(randomize && BUGGIFY) AUTO_TAG_THROTTLING_ENABLED = false;
-	init( SS_THROTTLE_TAGS_TRACKED,                                1 ); if(randomize && BUGGIFY) SS_THROTTLE_TAGS_TRACKED = deterministicRandom()->randomInt(1, 10);
+	init( SS_THROTTLE_TAGS_TRACKED,                                5 ); if(randomize && BUGGIFY) SS_THROTTLE_TAGS_TRACKED = deterministicRandom()->randomInt(1, 10);
 	init( GLOBAL_TAG_THROTTLING,                                true ); if(isSimulated) GLOBAL_TAG_THROTTLING = deterministicRandom()->coinflip();
 	init( ENFORCE_TAG_THROTTLING_ON_PROXIES,   GLOBAL_TAG_THROTTLING );
 	init( GLOBAL_TAG_THROTTLING_MIN_RATE,                        1.0 );
-	// 60 seconds was chosen as a default value to ensure that
-	// the global tag throttler does not react too drastically to
-	// changes in workload. To make the global tag throttler more reactive,
-	// lower this knob. To make global tag throttler more smooth, raise this knob.
-	// Setting this knob lower than TAG_MEASUREMENT_INTERVAL can cause erratic
-	// behaviour and is not recommended.
-	init( GLOBAL_TAG_THROTTLING_FOLDING_TIME,                   60.0 );
 	init( GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED,                 10 );
 	init( GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER,              240.0 );
 	init( GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,         60.0 );
-	init( GLOBAL_TAG_THROTTLING_MIN_TPS,                         1.0 );
 	init( GLOBAL_TAG_THROTTLING_TRACE_INTERVAL,                  5.0 );
 	init( GLOBAL_TAG_THROTTLING_REPORT_ONLY,                   false );
+
+	init( GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME,        10.0 );
+	init( GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,   2.0 );
+	init( GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME,   10.0 );
+	init( GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME,               10.0 );
 
 	//Storage Metrics
 	init( STORAGE_METRICS_AVERAGE_INTERVAL,                    120.0 );
@@ -877,10 +874,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( FETCH_KEYS_LOWER_PRIORITY,                               0 );
 	init( SERVE_FETCH_CHECKPOINT_PARALLELISM,                      4 );
 	init( SERVE_AUDIT_STORAGE_PARALLELISM,                         1 );
-	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = 1;
-	init( AUDIT_RETRY_COUNT_MAX,                                 100 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
-	init( SS_AUDIT_AUTO_PROCEED_COUNT_MAX,                         5 );
-	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        50 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
+	init( PERSIST_FINISH_AUDIT_COUNT,                             10 ); if ( isSimulated ) PERSIST_FINISH_AUDIT_COUNT = deterministicRandom()->randomInt(1, PERSIST_FINISH_AUDIT_COUNT+1);
+	init( AUDIT_RETRY_COUNT_MAX,                                1000 ); if ( isSimulated ) AUDIT_RETRY_COUNT_MAX = 10;
+	init( CONCURRENT_AUDIT_TASK_COUNT_MAX,                        10 ); if ( isSimulated ) CONCURRENT_AUDIT_TASK_COUNT_MAX = deterministicRandom()->randomInt(1, CONCURRENT_AUDIT_TASK_COUNT_MAX+1);
 	init( BUGGIFY_BLOCK_BYTES,                                 10000 );
 	init( STORAGE_RECOVERY_VERSION_LAG_LIMIT,				2 * MAX_READ_TRANSACTION_LIFE_VERSIONS );
 	init( STORAGE_COMMIT_BYTES,                             10000000 ); if( randomize && BUGGIFY ) STORAGE_COMMIT_BYTES = 2000000;
@@ -920,7 +916,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( WAIT_METRICS_WRONG_SHARD_CHANCE,   isSimulated ? 1.0 : 0.1 );
 	init( MIN_TAG_READ_PAGES_RATE,                               100 ); if( randomize && BUGGIFY ) MIN_TAG_READ_PAGES_RATE = 0;
 	init( MIN_TAG_WRITE_PAGES_RATE,                              100 ); if( randomize && BUGGIFY ) MIN_TAG_WRITE_PAGES_RATE = 0;
-	init( TAG_MEASUREMENT_INTERVAL,                        30.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 4.0;
+	init( TAG_MEASUREMENT_INTERVAL,                              5.0 ); if( randomize && BUGGIFY ) TAG_MEASUREMENT_INTERVAL = 10.0;
 	init( PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS,                    true ); if( randomize && BUGGIFY ) PREFIX_COMPRESS_KVS_MEM_SNAPSHOTS = false;
 	init( REPORT_DD_METRICS,                                    true );
 	init( DD_METRICS_REPORT_INTERVAL,                           30.0 );
@@ -1159,14 +1155,17 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( BLOB_MANAGER_STATUS_EXP_BACKOFF_EXPONENT,              1.5 );
 	init( BLOB_MANAGER_CONCURRENT_MERGE_CHECKS,                   64 ); if( randomize && BUGGIFY ) BLOB_MANAGER_CONCURRENT_MERGE_CHECKS = 1 << deterministicRandom()->randomInt(0, 7);
 	init( BLOB_MANIFEST_BACKUP,                                false );
-	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 300.0 );
+	init( BLOB_MANIFEST_BACKUP_INTERVAL,  isSimulated ?  5.0 : 600.0 );
 	init( BLOB_MIGRATOR_CHECK_INTERVAL,     isSimulated ?  1.0 : 5.0 );
 	init( BLOB_MANIFEST_RW_ROWS,            isSimulated ?  10 : 1000 );
+	init( BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION,  isSimulated ?  30 : 10000 );
+	init( BLOB_MANIFEST_RETRY_INTERVAL,        isSimulated ?  1 : 30 );
 	init( BLOB_MIGRATOR_ERROR_RETRIES,                            20 );
 	init( BLOB_MIGRATOR_PREPARE_TIMEOUT,                       120.0 );
 	init( BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE, isSimulated ? 10000 : 10000000 );
 	init( BLOB_RESTORE_MANIFEST_RETENTION_MAX,                     10 );
-	init( BLOB_RESTORE_MLOGS_RETENTION_SECS,  isSimulated ?  120 : 3600 * 24 * 14 );
+	init( BLOB_RESTORE_MLOGS_RETENTION_SECS,  isSimulated ?  180 : 3600 * 24 * 14 );
+	init( BLOB_GRANULES_FLUSH_BATCH_SIZE,       isSimulated ?  2 : 64 );
 
 	init( BGCC_TIMEOUT,                   isSimulated ? 10.0 : 120.0 );
 	init( BGCC_MIN_INTERVAL,                isSimulated ? 1.0 : 10.0 );
@@ -1200,6 +1199,14 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION,               1);
 	init( REST_KMS_CURRENT_CIPHER_REQUEST_VERSION,                  1);
 	init( REST_KMS_MAX_CIPHER_REQUEST_VERSION,                      1);
+
+	init( CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO,                0.5 ); if( randomize && BUGGIFY ) CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO = deterministicRandom()->random01();
+
+
+	init( FLOW_WITH_SWIFT,                                       false);
+#ifndef WITH_SWIFT
+  ASSERT(!FLOW_WITH_SWIFT); // cannot enable FLOW_WITH_SWIFT server knob without compiling Swift
+#endif
 
 	// Drop in-memory state associated with an idempotency id after this many seconds. Once dropped, this id cannot be
 	// expired proactively, but will eventually get cleaned up by the idempotency id cleaner.

@@ -1706,6 +1706,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state int retries = 0;
 	state DataMoveMetaData dataMove;
 	state bool complete = false;
+	state bool cancelDataMove = false;
 	state Severity sevDm = static_cast<Severity>(SERVER_KNOBS->PHYSICAL_SHARD_MOVE_LOG_SEVERITY);
 
 	wait(finishMoveKeysParallelismLock->take(TaskPriority::DataDistributionLaunch));
@@ -1743,6 +1744,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					TraceEvent(sevDm, "FinishMoveShardsFoundDataMove", relocationIntervalId)
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMove", dataMove.toString());
+					if (cancelDataMove) {
+						dataMove.setPhase(DataMoveMetaData::Deleting);
+						tr.set(dataMoveKeyFor(dataMoveId), dataMoveValue(dataMove));
+						wait(tr.commit());
+						throw movekeys_conflict();
+					}
 					destServers.insert(destServers.end(), dataMove.dest.begin(), dataMove.dest.end());
 					std::sort(destServers.begin(), destServers.end());
 					if (dataMove.getPhase() == DataMoveMetaData::Deleting) {
@@ -1788,15 +1795,16 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					    .detail("Dest", describe(dest));
 					allServers.insert(src.begin(), src.end());
 					allServers.insert(dest.begin(), dest.end());
-					if (!destId.isValid()) {
-						TraceEvent(SevError, "FinishMoveShardsInvalidDestID", relocationIntervalId)
-						    .detail("DataMoveID", dataMoveId);
-						continue;
-					} else {
-						ASSERT(destId == dataMoveId);
-						std::sort(dest.begin(), dest.end());
-						ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
+					if (destId != dataMoveId) {
+						TraceEvent(SevWarnAlways, "FinishMoveShardsInconsistentIDs", relocationIntervalId)
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("ExistingShardID", destId);
+						cancelDataMove = true;
+						throw retry();
 					}
+
+					std::sort(dest.begin(), dest.end());
+					ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
 
 					std::set<UID> srcSet;
 					for (int s = 0; s < src.size(); s++) {
@@ -1980,12 +1988,13 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				    .errorUnsuppressed(error)
 				    .detail("DataMoveID", dataMoveId);
 				if (error.code() == error_code_retry) {
+					++retries;
 					wait(delay(1));
+				} else if (error.code() == error_code_actor_cancelled) {
+					throw;
 				} else {
-					if (error.code() == error_code_actor_cancelled)
-						throw;
 					state Error err = error;
-					wait(tr.onError(error));
+					wait(tr.onError(err));
 					retries++;
 					if (retries % 10 == 0) {
 						TraceEvent(retries == 20 ? SevWarnAlways : SevWarn,
