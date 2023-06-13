@@ -95,16 +95,19 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state std::unordered_set<UID> excludes;
 		state std::unordered_set<UID> includes;
 		state int teamSize = 1;
+		state KeyRangeRef currentRange = KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr);
 		wait(store(teamA,
 		           self->moveShard(self,
 		                           cx,
 		                           newDataMoveId(deterministicRandom()->randomUInt64(),
 		                                         AssignEmptyRange::False,
 		                                         EnablePhysicalShardMove::True),
-		                           KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr),
+		                           currentRange,
 		                           teamSize,
 		                           includes,
 		                           excludes)));
+		TraceEvent(SevDebug, "TestMovedRange1").detail("Range", currentRange).detail("Team", describe(teamA));
+
 		excludes.insert(teamA.begin(), teamA.end());
 
 		state uint64_t sh0 = deterministicRandom()->randomUInt64();
@@ -112,29 +115,28 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		state uint64_t sh2 = deterministicRandom()->randomUInt64();
 
 		// Move range [TestKeyA, TestKeyB) to sh0.
+		currentRange = KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr);
 		wait(store(teamA,
 		           self->moveShard(self,
 		                           cx,
 		                           newDataMoveId(sh0, AssignEmptyRange::False, EnablePhysicalShardMove::True),
-		                           KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr),
+		                           currentRange,
 		                           teamSize,
 		                           includes,
 		                           excludes)));
-		TraceEvent(SevDebug, "TestMovedRange").detail("Range", KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
+		TraceEvent(SevDebug, "TestMovedRange2").detail("Range", currentRange).detail("Team", describe(teamA));
 
 		state std::vector<KeyRange> checkpointRanges;
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyAC"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
+		TraceEvent(SevDebug, "TestCheckpointRestored1");
 
 		// Move range [TestKeyD, TestKeyF) to sh0;
 		includes.insert(teamA.begin(), teamA.end());
-		state std::vector<UID> teamE = wait(self->moveShard(self,
-		                                                    cx,
-		                                                    UID(sh0, deterministicRandom()->randomUInt64()),
-		                                                    KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr),
-		                                                    teamSize,
-		                                                    includes,
-		                                                    excludes));
+		currentRange = KeyRangeRef("TestKeyD"_sr, "TestKeyF"_sr);
+		state std::vector<UID> teamE = wait(self->moveShard(
+		    self, cx, UID(sh0, deterministicRandom()->randomUInt64()), currentRange, teamSize, includes, excludes));
+		TraceEvent(SevDebug, "TestMovedRange3").detail("Range", currentRange).detail("Team", describe(teamE));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamE.begin()));
 
 		state int teamIdx = 0;
@@ -153,16 +155,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		checkpointRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		checkpointRanges.push_back(KeyRangeRef("TestKeyD"_sr, "TestKeyE"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, checkpointRanges, CheckpointAsKeyValues::True, &kvs));
+		TraceEvent(SevDebug, "TestCheckpointRestored2");
 
 		// Move range [TestKeyB, TestKeyC) to sh1, on the same server.
+		currentRange = KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr);
 		includes.insert(teamA.begin(), teamA.end());
-		state std::vector<UID> teamB = wait(self->moveShard(self,
-		                                                    cx,
-		                                                    UID(sh1, deterministicRandom()->randomUInt64()),
-		                                                    KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr),
-		                                                    teamSize,
-		                                                    includes,
-		                                                    excludes));
+		state std::vector<UID> teamB = wait(self->moveShard(
+		    self, cx, UID(sh1, deterministicRandom()->randomUInt64()), currentRange, teamSize, includes, excludes));
+		TraceEvent(SevDebug, "TestMovedRange4").detail("Range", currentRange).detail("Team", describe(teamB));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamB.begin()));
 
 		teamIdx = 0;
@@ -182,14 +182,12 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		restoreRanges.push_back(KeyRangeRef("TestKeyA"_sr, "TestKeyB"_sr));
 		restoreRanges.push_back(KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr));
 		wait(self->checkpointRestore(self, cx, checkpointRanges, restoreRanges, CheckpointAsKeyValues::True, &kvs));
+		TraceEvent(SevDebug, "TestCheckpointRestored3");
 
-		state std::vector<UID> teamC = wait(self->moveShard(self,
-		                                                    cx,
-		                                                    UID(sh2, deterministicRandom()->randomUInt64()),
-		                                                    KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr),
-		                                                    teamSize,
-		                                                    includes,
-		                                                    excludes));
+		currentRange = KeyRangeRef("TestKeyB"_sr, "TestKeyC"_sr);
+		state std::vector<UID> teamC = wait(self->moveShard(
+		    self, cx, UID(sh2, deterministicRandom()->randomUInt64()), currentRange, teamSize, includes, excludes));
+		TraceEvent(SevDebug, "TestMovedRange5").detail("Range", currentRange).detail("Team", describe(teamC));
 		ASSERT(std::equal(teamA.begin(), teamA.end(), teamC.begin()));
 
 		for (teamIdx = 0; teamIdx < teamA.size(); ++teamIdx) {
@@ -202,13 +200,14 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			TraceEvent("TestStorageServerShards", teamA[teamIdx]).detail("Shards", describe(shards));
 		}
 
-		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
-		TraceEvent("TestValueVerified").log();
-
 		{
 			int _ = wait(setDDMode(cx, 1));
 			(void)_;
 		}
+
+		wait(self->validateData(self, cx, KeyRangeRef("TestKeyA"_sr, "TestKeyF"_sr), &kvs));
+		TraceEvent("TestValueVerified").log();
+
 		return Void();
 	}
 
@@ -438,6 +437,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 		loop {
 			debugID = deterministicRandom()->randomUniqueID();
 			try {
+				TraceEvent("TestValidateDataBegin").detail("DebugID", debugID);
 				tr.debugTransaction(debugID);
 				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
