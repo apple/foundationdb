@@ -25,6 +25,7 @@
 #include "flow/Error.h"
 #include "flow/Util.h"
 #include "fdbrpc/FailureMonitor.h"
+#include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
@@ -1301,6 +1302,11 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 	return Void();
 }
 
+ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange range) {
+	state bool res = true;
+	return res;
+}
+
 // keyServer: map from keys to destination servers.
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
 // complete(already has), ""().
@@ -1424,6 +1430,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				state std::vector<Future<Void>> actors;
 
 				if (!currentKeys.empty()) {
+					// Pre validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+						bool consistent = wait(auditKeyServersAndServerKeys(&tr, currentKeys));
+					}
+
 					const int rowLimit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
 					const int byteLimit = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 					state RangeResult old = wait(krmGetRanges(&tr, keyServersPrefix, currentKeys, rowLimit, byteLimit));
@@ -1778,6 +1789,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				ASSERT(!keyServers.empty());
 				range = KeyRangeRef(range.begin, keyServers.back().key);
 				ASSERT(!range.empty());
+
+				// Pre validate consistency of update of keyServers and serverKeys
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+					bool consistent = wait(auditKeyServersAndServerKeys(&tr, range));
+				}
 
 				for (int currentIndex = 0; currentIndex < keyServers.size() - 1; ++currentIndex) {
 					std::vector<UID> src;
@@ -2656,6 +2672,11 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					throw retry_clean_up_datamove_tombstone_added();
 				}
 
+				// Pre validate consistency of update of keyServers and serverKeys
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+					bool consistent = wait(auditKeyServersAndServerKeys(&tr, range));
+				}
+
 				dataMove.setPhase(DataMoveMetaData::Deleting);
 
 				state RangeResult currentShards = wait(krmGetRanges(&tr,
@@ -2736,7 +2757,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				}
 
 				std::vector<Future<Void>> actors;
-				for (const auto& uid : oldDests) { // Is it safe to delay 10 sec to cleanup serverKeys and keyservers?
+				for (const auto& uid : oldDests) {
 					actors.push_back(unassignServerKeys(&tr, uid, range, physicalShardMap[uid], dataMoveId));
 				}
 				wait(waitForAll(actors));
