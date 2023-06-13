@@ -31,7 +31,8 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             bool checkIntegrity,
                             bool openRemotely,
                             Reference<AsyncVar<ServerDBInfo> const> db,
-                            Optional<EncryptionAtRestMode> encryptionMode) {
+                            Optional<EncryptionAtRestMode> encryptionMode,
+                            int64_t pageCacheBytes) {
 	// Only Redwood support encryption currently.
 	if (encryptionMode.present() && encryptionMode.get().isEncryptionEnabled() &&
 	    storeType != KeyValueStoreType::SSD_REDWOOD_V1) {
@@ -51,7 +52,7 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
 	case KeyValueStoreType::MEMORY:
 		return keyValueStoreMemory(filename, logID, memoryLimit);
 	case KeyValueStoreType::SSD_REDWOOD_V1:
-		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode);
+		return keyValueStoreRedwoodV1(filename, logID, db, encryptionMode, pageCacheBytes);
 	case KeyValueStoreType::SSD_ROCKSDB_V1:
 		return keyValueStoreRocksDB(filename, logID, storeType);
 	case KeyValueStoreType::SSD_SHARDED_ROCKSDB:

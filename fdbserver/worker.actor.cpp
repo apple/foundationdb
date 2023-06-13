@@ -2271,8 +2271,16 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
 
-					IKeyValueStore* data =
-					    openKVStore(s.storeType, s.filename, recruited.id(), memoryLimit, false, false, false, dbInfo);
+					IKeyValueStore* data = openKVStore(s.storeType,
+					                                   s.filename,
+					                                   recruited.id(),
+					                                   memoryLimit,
+					                                   false,
+					                                   false,
+					                                   false,
+					                                   dbInfo,
+					                                   Optional<EncryptionAtRestMode>(),
+					                                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 					filesClosed.add(data->onClosed());
 
 					Promise<Void> recovery;
@@ -2943,7 +2951,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						                   false,
 						                   false,
 						                   dbInfo,
-						                   req.encryptMode);
+						                   req.encryptMode,
+						                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 						filesClosed.add(data->onClosed());
 					}
 

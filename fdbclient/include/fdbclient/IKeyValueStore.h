@@ -152,7 +152,8 @@ extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
 extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                               UID logID,
                                               Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                                              Optional<EncryptionAtRestMode> encryptionMode = {});
+                                              Optional<EncryptionAtRestMode> encryptionMode = {},
+                                              int64_t pageCacheBytes = 0);
 extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
                                             UID logID,
                                             KeyValueStoreType storeType,
@@ -192,7 +193,8 @@ IKeyValueStore* openKVStore(KeyValueStoreType storeType,
                             bool checkIntegrity = false,
                             bool openRemotely = false,
                             Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                            Optional<EncryptionAtRestMode> encryptionMode = {});
+                            Optional<EncryptionAtRestMode> encryptionMode = {},
+                            int64_t pageCacheBytes = 0);
 
 void GenerateIOLogChecksumFile(std::string filename);
 Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
