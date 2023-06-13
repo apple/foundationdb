@@ -568,14 +568,14 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
-        test.check_healthy_status(False)
+        test.check_healthy_status(True)
         test.check_available_clients([PREV_RELEASE_VERSION, CURRENT_VERSION])
         test.check_current_client(PREV_RELEASE_VERSION)
 
     def test_external_client_unsupported_api(self):
         # Leaving an unsupported API version
         test = ClientConfigTest(self)
-        test.create_external_lib_path(PREV_RELEASE_VERSION)
+        test.create_external_lib_path(PREV2_RELEASE_VERSION) # Require 7.1 for the test to work
         test.expected_error = 2204  # API function missing
         test.exec()
 
@@ -734,7 +734,8 @@ class ClientTracingTests(unittest.TestCase):
         # Test that no trace files are created with a default configuration
         # when an a client fails to initialize
         test = self.test
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION])
+        # Requires including 7.1 for the test to work.
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
         test.expected_error = 2204  # API function missing
@@ -769,7 +770,8 @@ class ClientTracingTests(unittest.TestCase):
         # Test trace files created with trace_initialize_on_setup option
         # when an a client fails to initialize
         test = self.test
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION])
+        # Requires including 7.1 for the test to work.
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
         test.trace_initialize_on_setup = True
