@@ -277,7 +277,11 @@ struct ConfigureTenantImpl {
 
 		ASSERT(self->targetTenantState.present());
 		ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState.get());
-		if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
+		if (tenantEntry.get().tenantState == metacluster::TenantState::READY) {
+			// We may reach here due to retry after getting `commit_unknown_result`.
+			// No work to do, just return
+			return Void();
+		} else if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
 			TraceEvent(SevError, "TenantStateNotError")
 			    .detail("Tenant", self->tenantName)
 			    .detail("State", tenantEntry.get().tenantState);
