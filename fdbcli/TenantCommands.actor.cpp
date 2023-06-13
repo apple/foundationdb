@@ -352,11 +352,22 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 		fmt::print(usageMessage);
 		return false;
 	}
-	TenantGroupName tenantGroup = tokens[3];
-	ClusterName srcCluster = tokens[4];
-	ClusterName dstCluster = tokens[5];
-	state UID runID = deterministicRandom()->randomUniqueID();
-	wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster, runID));
+	state TenantGroupName tenantGroup = tokens[3];
+	state ClusterName srcCluster = tokens[4];
+	state ClusterName dstCluster = tokens[5];
+	if (srcCluster == dstCluster) {
+		fmt::print(usageMessage);
+		return false;
+	}
+	try {
+		wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	} catch (Error& e) {
+		if (e.code() == error_code_invalid_tenant_move) {
+			// Trace to client logs, print to stdout/stderr, or both?
+			return false;
+		}
+		throw e;
+	}
 
 	return true;
 }
@@ -1052,6 +1063,8 @@ Future<bool> tenantCommand(Reference<IDatabase> db, std::vector<StringRef> token
 		return tenantLockCommand(db, tokens);
 	} else if (tokencmp(tokens[1], "unlock")) {
 		return tenantLockCommand(db, tokens);
+	} else if (tokencmp(tokens[1], "move")) {
+		return tenantMoveCommand(db, tokens);
 	} else {
 		printUsage(tokens[0]);
 		return true;

@@ -46,6 +46,27 @@ struct ConnectionStringCodec {
 	}
 };
 
+struct MoveIdentifier {
+	UID runId;
+	ClusterName srcCluster;
+	ClusterName dstCluster;
+
+	bool operator==(const MoveIdentifier& mi) const {
+		return runId == mi.runId && srcCluster == mi.srcCluster && dstCluster == mi.dstCluster;
+	}
+
+	Tuple pack() const { return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster); }
+	static MoveIdentifier unpack(Tuple const& tuple) {
+		MoveIdentifier mi;
+		int i = 0;
+		auto sr = tuple.getString(i++);
+		mi.runId = UID::fromString(sr.toString());
+		mi.srcCluster = tuple.getString(i++);
+		mi.dstCluster = tuple.getString(i++);
+		return mi;
+	}
+};
+
 TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata();
 
 // A map from cluster name to the metadata associated with a cluster
@@ -72,8 +93,8 @@ namespace move {
 // UID is not supported by Tuple.h
 // use UID::toString() and static UID::fromString instead
 
-// emergency_movement/move(tenantGroup) = RunID
-KeyBackedMap<TenantGroupName, std::string>& emergencyMovements();
+// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster)
+KeyBackedMap<TenantGroupName, MoveIdentifier>& emergencyMovements();
 
 // emergency_movement/version(tenantGroup, RunID) = Version
 KeyBackedMap<std::pair<TenantGroupName, std::string>, Version>& movementVersions();

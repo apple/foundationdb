@@ -71,8 +71,8 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex() {
 }
 
 namespace move {
-KeyBackedMap<TenantGroupName, std::string>& emergencyMovements() {
-	static KeyBackedMap<TenantGroupName, std::string> instance("emergency_movement/move/"_sr);
+KeyBackedMap<TenantGroupName, MoveIdentifier>& emergencyMovements() {
+	static KeyBackedMap<TenantGroupName, MoveIdentifier> instance("emergency_movement/move/"_sr);
 	return instance;
 }
 

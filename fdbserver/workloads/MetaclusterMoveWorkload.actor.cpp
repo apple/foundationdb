@@ -18,6 +18,7 @@
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterConsistency.actor.h"
 #include "metacluster/MetaclusterData.actor.h"
+#include "metacluster/MetaclusterMetadata.h"
 #include "metacluster/MetaclusterMove.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -63,9 +64,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int maxTenantGroups;
 	int tenantGroupCapacity;
 
-	ClusterName sourceCluster;
-	ClusterName destinationCluster;
-	UID runID;
+	metacluster::metadata::management::MoveIdentifier moveId;
 
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 
@@ -179,17 +178,15 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> startMove(MetaclusterMoveWorkload* self) {
-		self->sourceCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
-		self->destinationCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
-		self->runID = deterministicRandom()->randomUniqueID();
-		while (self->sourceCluster == self->destinationCluster) {
-			self->destinationCluster = deterministicRandom()->randomChoice(self->dataDbIndex);
+	ACTOR static Future<Void> startMove(MetaclusterMoveWorkload* self,
+	                                    TenantGroupName tenantGroup,
+	                                    ClusterName srcCluster,
+	                                    ClusterName dstCluster) {
+		try {
+			wait(metacluster::startTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster));
+		} catch (Error& e) {
+			/**/
 		}
-
-		Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup(self->sourceCluster);
-		wait(metacluster::startTenantMovement(
-		    self->managementDb, tenantGroup.get(), self->sourceCluster, self->destinationCluster, self->runID));
 		return Void();
 	}
 
@@ -231,6 +228,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
+	ACTOR static Future<Void> copyTenantData(Database cx, MetaclusterMoveWorkload* self) {
+		wait(delay(1.0));
+		return Void();
+	}
+
 	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
 		state ClusterName srcCluster = self->chooseClusterName();
 		state ClusterName dstCluster = self->chooseClusterName();
@@ -241,6 +243,37 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			optionalTenantGroup = self->chooseTenantGroup(srcCluster);
 		}
 		state TenantGroupName tenantGroup = optionalTenantGroup.get();
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		loop {
+			try {
+				wait(startMove(self, tenantGroup, srcCluster, dstCluster));
+				// If start completes successfully, the move identifier should be written
+				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				Optional<metacluster::metadata::management::MoveIdentifier> optionalMi =
+				    wait(metacluster::metadata::management::move::emergencyMovements().get(tr, tenantGroup));
+				ASSERT(optionalMi.present());
+				self->moveId = optionalMi.get();
+				wait(copyTenantData(cx, self));
+				wait(metacluster::switchTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster));
+				wait(metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster));
+				break;
+			} catch (Error& e) {
+				state Error err(e);
+				TraceEvent("MetaclusterMoveWorkloadError").error(err);
+				if (err.code() == error_code_invalid_tenant_move) {
+					if (srcCluster == dstCluster) {
+						TraceEvent("MetaclusterMoveWorkloadSameSrcDst")
+						    .detail("TenantGroup", tenantGroup)
+						    .detail("ClusterName", srcCluster);
+						// Change dst cluster since src is linked to the tenant group
+						dstCluster = self->chooseClusterName();
+					}
+					wait(safeThreadFutureToFuture(tr->onError(err)));
+					continue;
+				}
+				throw err;
+			}
+		}
 
 		return Void();
 	}
