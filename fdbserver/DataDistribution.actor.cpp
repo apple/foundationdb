@@ -115,7 +115,9 @@ struct DDAuditSchedule {
 	DDAuditSchedule(AuditStorageScheduleState scheduleState) : coreState(scheduleState) {}
 
 	void cancel() {
-		cancelled.send(Void());
+		if (cancelled.canBeSet()) {
+			cancelled.send(Void());
+		}
 		coreState.cancelled = true;
 	}
 
@@ -1846,7 +1848,7 @@ ACTOR Future<Void> auditStorageSchedule(Reference<DataDistributor> self,
 
 	try {
 		if (req.present()) { // new schedule
-			wait(persistAuditScheduleState(
+			wait(persistNewAuditScheduleState(
 			    self->txnProcessor->context(), auditScheduleState, lockInfo, self->context->isDDEnabled()));
 		}
 		if (self->auditSchedules.contains(auditScheduleState.getType())) {

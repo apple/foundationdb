@@ -741,10 +741,10 @@ ACTOR Future<std::vector<AuditStorageState>> getAuditStateByServer(Database cx,
 	return res;
 }
 
-ACTOR Future<Void> persistAuditScheduleState(Database cx,
-                                             AuditStorageScheduleState auditScheduleState,
-                                             MoveKeyLockInfo lock,
-                                             bool ddEnabled) {
+ACTOR Future<Void> persistNewAuditScheduleState(Database cx,
+                                                AuditStorageScheduleState auditScheduleState,
+                                                MoveKeyLockInfo lock,
+                                                bool ddEnabled) {
 	state Transaction tr(cx);
 
 	loop {
