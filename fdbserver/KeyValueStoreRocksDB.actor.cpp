@@ -63,6 +63,7 @@
 
 #endif // SSD_ROCKSDB_EXPERIMENTAL
 
+#include "fdbserver/Knobs.h"
 #include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/RocksDBCheckpointUtils.actor.h"
 
