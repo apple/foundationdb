@@ -1983,7 +1983,7 @@ void updateProcessStats(StorageServer* self) {
 // FIXME: probably not a good idea to put in the Queries region
 // Is this region stuff some code locality optimization that I need to adhear to?
 inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
-	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_SAMPLE_INTERVAL) {
+	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
 		TraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
 		bool popped = false;
 		// OPTIM: use lowerbound() instead, could be faster for longer queues
@@ -1995,7 +1995,7 @@ inline void sampleRequestVersions(StorageServer* self, const Version& version, c
 		// NOTE: This current approach does not incur skew in histogram, but miss logging data from
 		// 1. decreasing version number received at SS
 		// 2. increasing version number received at SS that does not cause queue pop
-		if (!self->versionQueue.empty() && popped) {
+		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
 			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
 			TraceEvent("EmptyVersionSafeDelay", self->thisServerID).detail("Timestamp", emptyVersionSafeDelay);
 			// self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
@@ -9265,10 +9265,10 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version, const double& timestamp) {
-	TraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", now());
+	TraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
 	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
 	// window anyway, we do a cheap clear() and let it build up again
-	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_QUEUE_MAX_LENGTH)
+	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH)
 		self->versionQueue.clear();
 	self->versionQueue.emplace_back(version, timestamp);
 	TraceEvent("VersionQueueStats", self->thisServerID).detail("Size", self->versionQueue.size());
@@ -9365,6 +9365,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 		}
 
 		// Track tlog sync version recv time right before we update local version
+		// log tlog identifier
 		sampleTlogUpdateVersions(data, cursor->getMaxKnownVersion(), now());
 
 		++data->counters.updateBatches;
