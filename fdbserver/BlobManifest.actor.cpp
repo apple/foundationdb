@@ -673,11 +673,7 @@ public:
 					if (!rows.more) {
 						break;
 					}
-					if (rows.readThrough.present()) {
-						begin = firstGreaterOrEqual(rows.readThrough.get());
-					} else {
-						begin = firstGreaterThan(rows.end()[-1].key);
-					}
+					begin = rows.nextBeginKeySelector();
 				}
 
 				// check each granule range
@@ -972,11 +968,7 @@ private:
 			if (!results.more) {
 				break;
 			}
-			if (results.readThrough.present()) {
-				begin = firstGreaterOrEqual(results.readThrough.get());
-			} else {
-				begin = firstGreaterThan(results.end()[-1].key);
-			}
+			begin = results.nextBeginKeySelector();
 		}
 		return files;
 	}
