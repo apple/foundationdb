@@ -336,8 +336,6 @@ struct ValidateStorage : TestWorkload {
 		return Void();
 	}
 
-	ACTOR Future<Void> validateData(ValidateStorage* self, Database cx, KeyRange range) {
-		TraceEvent("TestValidateStorageBegin").detail("Range", range);
 	void testStringToAuditPhaseFunctionality() {
 		AuditPhase phase = AuditPhase::Invalid;
 		std::string inputStr = "RUNNING";

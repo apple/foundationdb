@@ -5915,7 +5915,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 			// Compare: check if mapFromKeyServers === mapFromServerKeys
 			// 1. check mapFromKeyServers => mapFromServerKeys
 			for (auto& [ssid, keyServerRanges] : mapFromKeyServers) {
-				if (!.contains(ssid)) {
+				if (!mapFromServerKeys.contains(ssid)) {
 					std::string error = format("KeyServers and serverKeys mismatch: Some key in range(%s, %s) exists "
 					                           "on Server(%s) in KeyServers but not ServerKeys",
 					                           claimRange.toString().c_str(),
