@@ -74,6 +74,10 @@ ACTOR Future<Void> persistAuditScheduleState(Database cx,
                                              MoveKeyLockInfo lock,
                                              bool ddEnabled);
 ACTOR Future<Void> clearAuditScheduleState(Database cx, AuditType auditType, MoveKeyLockInfo lock, bool ddEnabled);
+ACTOR Future<bool> updateAuditScheduleState(Database cx,
+                                            AuditStorageScheduleState auditScheduleState,
+                                            MoveKeyLockInfo lock,
+                                            bool ddEnabled);
 ACTOR Future<std::vector<AuditStorageScheduleState>> getAuditSchedules(Database cx);
 #include "flow/unactorcompiler.h"
 #endif

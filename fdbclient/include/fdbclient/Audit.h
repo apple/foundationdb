@@ -124,7 +124,7 @@ struct TriggerAuditRequest {
 	TriggerAuditRequest(AuditType type, KeyRange range)
 	  : type(static_cast<uint8_t>(type)), range(range), cancel(false), periodic(false) {}
 
-	TriggerAuditRequest(AuditType type, KeyRange range, int periodHours)
+	TriggerAuditRequest(AuditType type, KeyRange range, double periodHours)
 	  : type(static_cast<uint8_t>(type)), range(range), cancel(false), periodHours(periodHours), periodic(true) {}
 
 	TriggerAuditRequest(AuditType type) : type(static_cast<uint8_t>(type)), cancel(true), periodic(true) {}
@@ -155,27 +155,29 @@ struct AuditStorageScheduleState {
 	AuditStorageScheduleState() = default;
 
 	AuditStorageScheduleState(TriggerAuditRequest req)
-	  : type(static_cast<uint8_t>(req.getType())), range(req.range), periodHours(req.periodHours) {}
+	  : id(deterministicRandom()->randomUniqueID()), type(static_cast<uint8_t>(req.getType())), range(req.range),
+	    periodHours(req.periodHours), remainWaitHours(req.periodHours) {}
 
 	inline void setType(AuditType type) { this->type = static_cast<uint8_t>(this->type); }
 	inline AuditType getType() const { return static_cast<AuditType>(this->type); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, type, range, periodHours);
+		serializer(ar, id, type, range, periodHours, remainWaitHours);
 	}
 
 	std::string toString() const {
-		std::string res = "AuditStorageScheduleState: "
-		                  "[Range]: " +
-		                  Traceable<KeyRangeRef>::toString(range) + ", [Type]: " + std::to_string(type) +
-		                  ", [PeriodHours]: " + std::to_string(periodHours);
+		std::string res = "AuditStorageScheduleState: [ID]: " + id.toString() +
+		                  ", [Range]: " + Traceable<KeyRangeRef>::toString(range) +
+		                  ", [Type]: " + std::to_string(type) + ", [PeriodHours]: " + std::to_string(periodHours);
 		return res;
 	}
 
+	UID id;
 	uint8_t type;
 	KeyRange range;
 	double periodHours;
+	double remainWaitHours;
 };
 
 #endif

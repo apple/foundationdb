@@ -188,12 +188,15 @@ struct ValidateStorage : TestWorkload {
 		// Check no audit is in Running or Error phase
 		// Check the number of existing persisted audits is no more than PERSIST_FINISH_AUDIT_COUNT
 		state Transaction tr(cx);
+		state int retryCount = 0;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				RangeResult res = wait(tr.getRange(auditKeyRange(type), GetRangeLimits()));
 				ASSERT(!res.more);
+				state int runningAuditCount = 0;
+				state int finishAuditCount = 0;
 				for (int i = 0; i < res.size(); ++i) {
 					AuditStorageState existingAuditState = decodeAuditStorageState(res[i].value);
 					TraceEvent("TestAuditStorageCheckPersistStateExists")
@@ -205,8 +208,21 @@ struct ValidateStorage : TestWorkload {
 					ASSERT(existingAuditState.getPhase() == AuditPhase::Complete ||
 					       existingAuditState.getPhase() == AuditPhase::Failed ||
 					       existingAuditState.getPhase() == AuditPhase::Running);
+					if (existingAuditState.id >= auditId) {
+						continue;
+					}
+					if (existingAuditState.getPhase() == AuditPhase::Failed ||
+					    existingAuditState.getPhase() == AuditPhase::Complete) {
+						finishAuditCount++;
+					} else if (existingAuditState.getPhase() == AuditPhase::Running) {
+						runningAuditCount++;
+					}
 				}
-				if (res.size() > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
+				if (finishAuditCount > SERVER_KNOBS->PERSIST_FINISH_AUDIT_COUNT + 1) {
+					TraceEvent(SevError, "TestAuditStoragePersistFinishAuditTooMany");
+					break;
+				}
+				if (runningAuditCount >= 1) {
 					TraceEvent("TestAuditStorageCheckPersistStateWaitClean")
 					    .detail("ExistCount", res.size())
 					    .detail("Context", context)
@@ -214,7 +230,16 @@ struct ValidateStorage : TestWorkload {
 					    .detail("AuditType", type);
 					wait(delay(30));
 					tr.reset();
-					continue;
+					if (retryCount > 10) {
+						TraceEvent(SevError, "TestAuditStorageExistsZombieAudit")
+						    .detail("Context", context)
+						    .detail("AuditID", auditId)
+						    .detail("AuditType", type);
+						break;
+					} else {
+						retryCount++;
+						continue;
+					}
 				}
 				break;
 			} catch (Error& e) {
@@ -651,6 +676,7 @@ struct ValidateStorage : TestWorkload {
 		    cx, AuditType::ValidateReplica, "TestAuditStorageScheduleAndCancellation"));
 		state UID auditId2 = wait(
 		    self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditStorageScheduleAndCancellation"));
+		TraceEvent("TestAuditStorageScheduleAndCancellation").detail("Phase", 1);
 		state std::vector<Future<Void>> fs;
 		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 10.0 / 3600));
 		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 300.0 / 3600));
@@ -666,14 +692,24 @@ struct ValidateStorage : TestWorkload {
 		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateStorageServerShard));
 		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateStorageServerShard));
 		wait(waitForAll(fs));
+		TraceEvent("TestAuditStorageScheduleAndCancellation").detail("Phase", 2);
 		fs.clear();
 		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateHA, 10.0 / 3600));
 		fs.push_back(self->triggerAuditScheduleStorageForType(cx, AuditType::ValidateReplica, 400.0 / 3600));
 		wait(waitForAll(fs));
+		TraceEvent("TestAuditStorageScheduleAndCancellation").detail("Phase", 3);
 		state UID auditId3 = wait(self->triggerAuditStorageForType(
 		    cx, AuditType::ValidateReplica, "TestAuditStorageScheduleAndCancellation"));
 		state UID auditId4 = wait(
 		    self->triggerAuditStorageForType(cx, AuditType::ValidateHA, "TestAuditStorageScheduleAndCancellation"));
+		TraceEvent("TestAuditStorageScheduleAndCancellation").detail("Phase", 4);
+		fs.clear();
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateHA));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateReplica));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateLocationMetadata));
+		fs.push_back(self->cancelAuditScheduleStorageForType(cx, AuditType::ValidateStorageServerShard));
+		wait(waitForAll(fs));
+		TraceEvent("TestAuditStorageScheduleAndCancellation").detail("Phase", 5);
 		fs.clear();
 		fs.push_back(self->checkAuditStorageInternalState(
 		    cx, AuditType::ValidateHA, auditId2, "TestAuditStorageScheduleAndCancellation"));
