@@ -160,17 +160,7 @@ struct ConfigureTenantImpl {
 			throw tenant_not_found();
 		}
 
-		if (self->targetTenantState.present()) {
-			ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState);
-			if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
-				TraceEvent(SevError, "TenantStateNotError").detail("Tenant", self->tenantName);
-				throw invalid_tenant_state();
-			}
-			self->updatedEntry = tenantEntry.get();
-			self->updatedEntry.tenantState = self->targetTenantState.get();
-			wait(self->ctx.setCluster(tr, tenantEntry.get().assignedCluster));
-			return true;
-		}
+		ASSERT(!self->targetTenantState.present());
 
 		if (tenantEntry.get().tenantState != TenantState::READY &&
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) {
@@ -262,17 +252,11 @@ struct ConfigureTenantImpl {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry =
 		    wait(tryGetTenantTransaction(tr, self->updatedEntry.id));
 
-		if (!tenantEntry.present() ||
-		    (tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION &&
-		     !self->targetTenantState.present()) ||
+		if (!tenantEntry.present() || (tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) ||
 		    tenantEntry.get().configurationSequenceNum > self->updatedEntry.configurationSequenceNum) {
 			CODE_PROBE(!tenantEntry.present(), "Tenant removed while configuring on management cluster");
 			CODE_PROBE(tenantEntry.present(), "Tenant configuration already applied on management cluster");
 			return Void();
-		}
-
-		if (self->targetTenantState.present()) {
-			ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState.get());
 		}
 
 		tenantEntry.get().tenantState = TenantState::READY;
@@ -292,9 +276,11 @@ struct ConfigureTenantImpl {
 		}
 
 		ASSERT(self->targetTenantState.present());
-		ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState);
+		ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState.get());
 		if (tenantEntry.get().tenantState != metacluster::TenantState::ERROR) {
-			TraceEvent(SevError, "TenantStateNotError").detail("Tenant", self->tenantName);
+			TraceEvent(SevError, "TenantStateNotError")
+			    .detail("Tenant", self->tenantName)
+			    .detail("State", tenantEntry.get().tenantState);
 			throw invalid_tenant_state();
 		}
 		self->updatedEntry = tenantEntry.get();

@@ -1220,14 +1220,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 		if (!tenantsInErrorState.empty()) {
 			CODE_PROBE(true, "One or more tenants in ERROR state");
-			state std::vector<Future<metacluster::DataClusterMetadata>> dceFutures;
-			state std::vector<ClusterName> clusterNames;
-			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {
-				clusterNames.emplace_back(tenantEntry.assignedCluster);
-				dceFutures.emplace_back(metacluster::getCluster(self->managementDb, tenantEntry.assignedCluster));
-			}
-			wait(waitForAll(dceFutures));
-
 			std::vector<Future<Void>> resetErrorFutures;
 			for (const auto& [tenantId, tenantEntry] : tenantsInErrorState) {
 				resetErrorFutures.emplace_back(
