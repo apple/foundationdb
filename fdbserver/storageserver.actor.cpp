@@ -870,7 +870,6 @@ public:
 	Reference<Histogram> readRangeBytesReturnedHistogram;
 	Reference<Histogram> readRangeBytesLimitHistogram;
 	Reference<Histogram> readRangeKVPairsReturnedHistogram;
-	Reference<Histogram> emptyVersionSafeDelayHistogram;
 
 	// watch map operations
 	Reference<ServerWatchMetadata> getWatchMetadata(KeyRef key, int64_t tenantId) const;
@@ -1474,9 +1473,6 @@ public:
 	    readRangeKVPairsReturnedHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
 	                                                              Histogram::Unit::bytes)),
-	    emptyVersionSafeDelayHistogram(Histogram::getHistogram(STORAGESERVER_HISTOGRAM_GROUP,
-	                                                           SS_EMPTY_VERSION_SAFE_DELAY_HISTOGRAM,
-	                                                           Histogram::Unit::milliseconds)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
 	    lastVersionSampleTime(0), storage(this, storage), shardChangeCounter(0), lastTLogVersion(0),
 	    lastVersionWithData(0), restoredVersion(0), prevVersion(0),
@@ -1976,31 +1972,6 @@ void updateProcessStats(StorageServer* self) {
 #pragma region Queries
 #endif
 
-// Lightweight blocking function that sends version samples to actor responsible for maintaining version statistics
-// FIXME: probably not a good idea to put in the Queries region
-// Is this region stuff some code locality optimization that I need to adhear to?
-inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
-	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
-		TraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
-		bool popped = false;
-		// OPTIM: use lowerbound() instead, could be faster for longer queues
-		// OPTIM: specify implementation struct for deque
-		while (!self->versionQueue.empty() && self->versionQueue.front().version <= version) {
-			self->versionQueue.pop_front();
-			popped = true;
-		}
-		// NOTE: This current approach does not incur skew in histogram, but miss logging data from
-		// 1. decreasing version number received at SS
-		// 2. increasing version number received at SS that does not cause queue pop
-		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
-			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
-			TraceEvent("EmptyVersionSafeDelay", self->thisServerID).detail("Timestamp", emptyVersionSafeDelay);
-			// self->emptyVersionSafeDelayHistogram->sampleSeconds(emptyVersionSafeDelay);
-		}
-		self->lastVersionSampleTime = timestamp;
-	}
-}
-
 ACTOR Future<Version> waitForVersionActor(StorageServer* data, Version version, SpanContext spanContext) {
 	state Span span("SS:WaitForVersion"_loc, spanContext);
 	choose {
@@ -2187,6 +2158,25 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 		res.push_back(t.value()->toStorageServerShard());
 	}
 	return res;
+}
+
+// Lightweight blocking function that updates requested version to version queue for statistics
+inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
+	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
+		TraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
+		bool popped = false;
+		while (!self->versionQueue.empty() && self->versionQueue.front().version <= version) {
+			self->versionQueue.pop_front();
+			popped = true;
+		}
+
+		// NOTE: This current approach collects pessimistic statistics
+		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
+			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
+			TraceEvent("EmptyVersionSafeDelay", self->thisServerID).detail("Timestamp", emptyVersionSafeDelay);
+		}
+		self->lastVersionSampleTime = timestamp;
+	}
 }
 
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
