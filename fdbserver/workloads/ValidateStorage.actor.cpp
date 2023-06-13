@@ -264,8 +264,6 @@ struct ValidateStorage : TestWorkload {
 		TraceEvent("TestAuditStorageFunctionalityDone");
 
 		wait(self->injectInconsistency(self, cx));
-		wait(self->testAuditStorageForType(self, cx, AuditType::ValidateLocationMetadata));
-		TraceEvent("TestValidateShardKeyServersDone");
 
 		wait(self->testAuditStorageIDGenerator(self, cx));
 		TraceEvent("TestAuditStorageIDGeneratorDone");
@@ -333,6 +331,28 @@ struct ValidateStorage : TestWorkload {
 
 		TraceEvent("TestInjectInconsistencyDone");
 
+		try {
+			UID ignored = wait(
+			    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestInjectedCorruption"));
+		} catch (Error& e) {
+			TraceEvent("AuditFailed").error(e);
+			ASSERT(e.code() == error_code_audit_storage_error);
+		}
+
+		tr.reset();
+		loop {
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			try {
+				tr.clear(keyServersKey("TestKeyF"_sr));
+				wait(tr.commit());
+				break;
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+
+		TraceEvent("TestValidateShardKeyServersDone");
 		return Void();
 	}
 
