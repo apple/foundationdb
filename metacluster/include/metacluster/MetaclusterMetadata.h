@@ -46,16 +46,31 @@ struct ConnectionStringCodec {
 	}
 };
 
+// This enum class can be used to track the state of the data movement
+// The state written to the cluster will be the last fully completed
+// step of the movement
+enum class MoveStep {
+	START_METADATA = 0,
+	START_LOCK = 1,
+	START_CREATE = 2,
+	SWITCH_HYBRID = 3,
+	SWITCH_METADATA = 4,
+	FINISH_UNLOCK = 5
+};
+
 struct MoveIdentifier {
 	UID runId;
 	ClusterName srcCluster;
 	ClusterName dstCluster;
+	MoveStep step;
 
 	bool operator==(const MoveIdentifier& mi) const {
-		return runId == mi.runId && srcCluster == mi.srcCluster && dstCluster == mi.dstCluster;
+		return runId == mi.runId && srcCluster == mi.srcCluster && dstCluster == mi.dstCluster && step == mi.step;
 	}
 
-	Tuple pack() const { return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster); }
+	Tuple pack() const {
+		return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(step));
+	}
 	static MoveIdentifier unpack(Tuple const& tuple) {
 		MoveIdentifier mi;
 		int i = 0;
@@ -63,6 +78,8 @@ struct MoveIdentifier {
 		mi.runId = UID::fromString(sr.toString());
 		mi.srcCluster = tuple.getString(i++);
 		mi.dstCluster = tuple.getString(i++);
+		auto step = tuple.getInt(i++);
+		mi.step = MoveStep(step);
 		return mi;
 	}
 };
@@ -93,7 +110,7 @@ namespace move {
 // UID is not supported by Tuple.h
 // use UID::toString() and static UID::fromString instead
 
-// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster)
+// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster, moveStep)
 KeyBackedMap<TenantGroupName, MoveIdentifier>& emergencyMovements();
 
 // emergency_movement/version(tenantGroup, RunID) = Version
