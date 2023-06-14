@@ -37,7 +37,7 @@ enum class MetaclusterVersion {
 	// likely we will stop supporting versions older than that.
 	MIN_SUPPORTED = 1,
 
-	// The initial version used for metacluster metadata.
+	// The initial version used for metacluster metadata
 	V1 = 1,
 
 	// This is the largest version of metacluster metadata understood by this version of FDB. It should be increased any

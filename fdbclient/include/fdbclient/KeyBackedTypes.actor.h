@@ -135,29 +135,13 @@ inline TupleVersionstamp TupleCodec<TupleVersionstamp>::unpack(Standalone<String
 
 template <>
 inline Standalone<StringRef> TupleCodec<Versionstamp>::pack(Versionstamp const& val) {
-	try {
-		return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val.version, val.batchNumber));
-	} catch (Error& e) {
-		fmt::print("Pack error: {}\n", e.what());
-		throw;
-	} catch (std::exception& e) {
-		fmt::print("Pack std::exception: {}\n", e.what());
-		throw;
-	}
+	return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val.version, val.batchNumber));
 }
 template <>
 inline Versionstamp TupleCodec<Versionstamp>::unpack(Standalone<StringRef> const& val) {
-	try {
-		TupleVersionstamp vs = TupleCodec<TupleVersionstamp>::unpack(val);
-		ASSERT(vs.getUserVersion() == 0);
-		return Versionstamp(vs.getVersion(), vs.getBatchNumber());
-	} catch (Error& e) {
-		fmt::print("Unpack error: {} {}\n", e.what(), printable(val));
-		throw;
-	} catch (std::exception& e) {
-		fmt::print("Unpack std::exception: {}\n", e.what());
-		throw;
-	}
+	TupleVersionstamp vs = TupleCodec<TupleVersionstamp>::unpack(val);
+	ASSERT(vs.getUserVersion() == 0);
+	return Versionstamp(vs.getVersion(), vs.getBatchNumber());
 }
 
 // This is backward compatible with TupleCodec<Standalone<StringRef>>
