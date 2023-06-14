@@ -70,9 +70,9 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex() {
 	return instance;
 }
 
-namespace move {
-KeyBackedMap<TenantGroupName, MoveIdentifier>& emergencyMovements() {
-	static KeyBackedMap<TenantGroupName, MoveIdentifier> instance("emergency_movement/move/"_sr);
+namespace emergency_movement {
+KeyBackedMap<TenantGroupName, MovementRecord>& emergencyMovements() {
+	static KeyBackedMap<TenantGroupName, MovementRecord> instance("emergency_movement/move/"_sr);
 	return instance;
 }
 
@@ -92,7 +92,7 @@ KeyBackedMap<Tuple, Key>& splitPointsMap() {
 	return instance;
 }
 
-}; // namespace move
+}; // namespace emergency_movement
 
 TenantMetadataSpecification<MetaclusterTenantTypes>& tenantMetadata() {
 	static TenantMetadataSpecification<MetaclusterTenantTypes> instance(""_sr);

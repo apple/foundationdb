@@ -379,7 +379,8 @@ ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
-	wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	state std::vector<std::string> messages;
+	wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
 
 	return true;
 }
@@ -443,19 +444,6 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 		return false;
 	}
 	return result;
-	// switch (step) {
-	// case "start"_sr:
-	// 	return tenantMoveStartCommand(db, tokens);
-	// case "switch"_sr:
-	// 	return tenantMoveSwitchCommand(db, tokens);
-	// case "finish"_sr:
-	// 	return tenantMoveFinishCommand(db, tokens);
-	// case "abort"_sr:
-	// 	return tenantMoveAbortCommand(db, tokens);
-	// default:
-	// 	fmt::print("Usage: tenant move <start/switch/finish/abort> <TENANT_GROUP>\n\n");
-	// 	return false;
-	// }
 }
 
 void tenantListOutputJson(std::map<TenantName, int64_t> tenants) {

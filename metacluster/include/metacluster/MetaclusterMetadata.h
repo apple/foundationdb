@@ -49,7 +49,7 @@ struct ConnectionStringCodec {
 // This enum class can be used to track the state of the data movement
 // The state written to the cluster will be the last fully completed
 // step of the movement
-enum class MoveStep {
+enum class MovementState {
 	START_METADATA = 0,
 	START_LOCK = 1,
 	START_CREATE = 2,
@@ -58,29 +58,32 @@ enum class MoveStep {
 	FINISH_UNLOCK = 5
 };
 
-struct MoveIdentifier {
+struct MovementRecord {
 	UID runId;
 	ClusterName srcCluster;
 	ClusterName dstCluster;
-	MoveStep step;
+	MovementState mState;
+	Version version;
 
-	bool operator==(const MoveIdentifier& mi) const {
-		return runId == mi.runId && srcCluster == mi.srcCluster && dstCluster == mi.dstCluster && step == mi.step;
+	bool operator==(const MovementRecord& mr) const {
+		return runId == mr.runId && srcCluster == mr.srcCluster && dstCluster == mr.dstCluster && mState == mr.mState &&
+		       version == mr.version;
 	}
 
 	Tuple pack() const {
-		return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(step));
+		return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(mState), version);
 	}
-	static MoveIdentifier unpack(Tuple const& tuple) {
-		MoveIdentifier mi;
+	static MovementRecord unpack(Tuple const& tuple) {
+		MovementRecord mr;
 		int i = 0;
 		auto sr = tuple.getString(i++);
-		mi.runId = UID::fromString(sr.toString());
-		mi.srcCluster = tuple.getString(i++);
-		mi.dstCluster = tuple.getString(i++);
-		auto step = tuple.getInt(i++);
-		mi.step = MoveStep(step);
-		return mi;
+		mr.runId = UID::fromString(sr.toString());
+		mr.srcCluster = tuple.getString(i++);
+		mr.dstCluster = tuple.getString(i++);
+		auto state = tuple.getInt(i++);
+		mr.mState = MovementState(state);
+		mr.version = tuple.getInt(i++);
+		return mr;
 	}
 };
 
@@ -106,15 +109,12 @@ KeyBackedSet<Tuple>& clusterTenantIndex();
 // A set of (cluster, tenant group name) tuples ordered by cluster
 KeyBackedSet<Tuple>& clusterTenantGroupIndex();
 
-namespace move {
+namespace emergency_movement {
 // UID is not supported by Tuple.h
 // use UID::toString() and static UID::fromString instead
 
-// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster, moveStep)
-KeyBackedMap<TenantGroupName, MoveIdentifier>& emergencyMovements();
-
-// emergency_movement/version(tenantGroup, RunID) = Version
-KeyBackedMap<std::pair<TenantGroupName, std::string>, Version>& movementVersions();
+// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster, moveStep, version)
+KeyBackedMap<TenantGroupName, MovementRecord>& emergencyMovements();
 
 // emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
 KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue();
@@ -122,7 +122,7 @@ KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>
 // emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
 KeyBackedMap<Tuple, Key>& splitPointsMap();
 
-}; // namespace move
+}; // namespace emergency_movement
 
 } // namespace management
 

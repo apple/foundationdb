@@ -3,11 +3,6 @@ allowDefaultTenant = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
 extraDatabaseCount = 3
-tenantModes = ['optional', 'required']
-config = 'triple'
-generateFearless = false
-processesPerMachine = 1
-machineCount = 5
 
 [[test]]
 testTitle = 'MetaclusterMoveTest'
