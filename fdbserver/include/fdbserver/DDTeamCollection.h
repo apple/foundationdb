@@ -284,9 +284,10 @@ protected:
 	// team pivot values
 	struct {
 		double lastPivotValuesUpdate = 0.0;
-
 		double pivotAvailableSpaceRatio = 0.0;
 		double pivotCPU = 100.0;
+		double strictPivotAvailableSpaceRatio = 0.0;
+		double strictPivotCPU = 100.0;
 		double minTeamAvgCPU = std::numeric_limits<double>::max();
 	} teamPivots;
 
@@ -328,6 +329,10 @@ protected:
 	// Returns a server team from given "servers", empty team if not found.
 	// When "wantHealthy" is true, only return if the team is healthy.
 	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
+
+	// Evaluate the CPU and AvailableSpace of source team to determine if a shard can
+	// remain on the source team rather than being moved to a new destination team.
+	Optional<Reference<IDataDistributionTeam>> evaluateSourceTeam(const std::vector<UID>& servers);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 

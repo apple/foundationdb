@@ -36,7 +36,7 @@ ACTOR Future<std::pair<RangeResult, Version>> readFromFDB(Database cx, KeyRange 
 		// use no-cache as this is either used for test validation, or the blob granule consistency check
 		tr.setOption(FDBTransactionOptions::READ_SERVER_SIDE_CACHE_DISABLE);
 		try {
-			state RangeResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult r = wait(tr.getRange(currentRange, CLIENT_KNOBS->TOO_MANY));
 			Version grv = wait(tr.getReadVersion());
 			// need consistent version snapshot of range
 			if (first) {
@@ -501,7 +501,7 @@ struct feed_cmp_f {
 };
 
 ACTOR Future<std::vector<std::pair<Key, KeyRange>>> getActiveFeeds(Transaction* tr) {
-	RangeResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
+	RangeReadResult feedResult = wait(tr->getRange(changeFeedKeys, CLIENT_KNOBS->BG_TOO_MANY_GRANULES));
 	ASSERT(!feedResult.more);
 	std::vector<std::pair<Key, KeyRange>> results;
 	for (auto& it : feedResult) {
@@ -529,7 +529,7 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 	}
 	// big extra timeout just because simulation can take a while to quiesce
 
-	state double checkTimeoutSpeedupSim = 50.0 + 2 * SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
+	state double checkTimeoutSpeedupSim = 100.0 + 2 * SERVER_KNOBS->BLOB_WORKER_FORCE_FLUSH_CLEANUP_DELAY;
 	state double checkTimeoutOnceStable = 250.0 + checkTimeoutSpeedupSim;
 	state Optional<double> stableTimestamp;
 	state Optional<double> speedUpSimTimestamp;
@@ -545,19 +545,25 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 
 			// TODO REMOVE
 			if (debug) {
-				fmt::print("{0} granules and {1} active feeds found\n", granules.size(), activeFeeds.size());
+				fmt::print("{0} granules and {1} active feeds found @ {2}\n",
+				           granules.size(),
+				           activeFeeds.size(),
+				           tr.getReadVersion().get());
 			}
 
 			bool allPresent = granules.size() == activeFeeds.size();
 			/*if (!allPresent) {
-			    fmt::print("Granules:\n");
+			    fmt::print("Got feeds and granules @ {0}\n", tr.getReadVersion().get());
+			    fmt::print("Granules ({0}):\n", granules.size());
 			    for (auto& it : granules) {
 			        fmt::print("  [{0} - {1})\n", it.begin.printable(), it.end.printable());
 			    }
-			    fmt::print("Feeds:\n");
+			    fmt::print("Feeds ({0}):\n", activeFeeds.size());
 			    for (auto& it : activeFeeds) {
-			        fmt::print("  {0}: [{1} - {2})\n", it.first.printable(), it.second.begin.printable(),
-			it.second.end.printable());
+			        fmt::print("  {0}: [{1} - {2})\n",
+			                   it.first.printable(),
+			                   it.second.begin.printable(),
+			                   it.second.end.printable());
 			    }
 			}*/
 			for (int i = 0; allPresent && i < granules.size(); i++) {
@@ -600,6 +606,8 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 			}
 
 			wait(delay(2.0));
+			// reset transaction to get higher read version
+			tr.reset();
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

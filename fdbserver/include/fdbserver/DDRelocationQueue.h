@@ -318,6 +318,10 @@ public:
 	MovingWindow<int64_t> relocationCompleteWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
 	MovingWindow<int64_t> relocationCancelWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
 
+	int64_t relocateTotalCount;
+
+	int64_t relocateToSourceCount;
+
 	DDQueue() = default;
 
 	void startRelocation(int priority, int healthPriority);

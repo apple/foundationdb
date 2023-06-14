@@ -26,8 +26,8 @@ class StorageQueueInfo {
 
 	UID ratekeeperID;
 	Smoother smoothFreeSpace, smoothTotalSpace;
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothDurableVersion, smoothLatestVersion;
+	HoltLinearSmoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	HoltLinearSmoother smoothDurableVersion, smoothLatestVersion;
 
 public:
 	bool valid;
@@ -60,7 +60,7 @@ public:
 
 // Stores statistics for an individual tlog that are relevant for ratekeeper throttling
 class TLogQueueInfo {
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	HoltLinearSmoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 

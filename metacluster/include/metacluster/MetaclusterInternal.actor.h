@@ -47,7 +47,7 @@ ACTOR template <class Transaction>
 Future<Void> managementClusterCheckEmpty(Transaction tr) {
 	state Future<KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>>> tenantsFuture =
 	    TenantMetadata::tenantMap().getRange(tr, {}, {}, 1);
-	state typename transaction_future_type<Transaction, RangeResult>::type dbContentsFuture =
+	state typename transaction_future_type<Transaction, RangeReadResult>::type dbContentsFuture =
 	    tr->getRange(normalKeys, 1);
 
 	KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants = wait(tenantsFuture);
@@ -56,7 +56,7 @@ Future<Void> managementClusterCheckEmpty(Transaction tr) {
 		throw cluster_not_empty();
 	}
 
-	RangeResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
+	RangeReadResult dbContents = wait(safeThreadFutureToFuture(dbContentsFuture));
 	if (!dbContents.empty()) {
 		CODE_PROBE(true, "Metacluster emptiness check has data");
 		throw cluster_not_empty();

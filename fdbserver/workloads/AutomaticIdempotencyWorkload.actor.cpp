@@ -113,7 +113,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	ACTOR static Future<Void> logIdempotencyIds(AutomaticIdempotencyWorkload* self,
 	                                            Reference<ReadYourWritesTransaction> tr) {
 		tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-		RangeResult result = wait(tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult result = wait(tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		for (const auto& [k, v] : result) {
 			Version commitVersion;
@@ -140,7 +140,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	// Check that each transaction committed exactly once.
 	ACTOR static Future<Void> testIdempotency(AutomaticIdempotencyWorkload* self,
 	                                          Reference<ReadYourWritesTransaction> tr) {
-		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		std::unordered_set<Value> ids;
 		// Make sure they're all unique - ie no transaction committed twice
@@ -172,7 +172,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 	ACTOR static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
 		state ReadYourWritesTransaction tr(db);
-		state RangeResult result;
+		state RangeReadResult result;
 		state Key key;
 		state Version commitVersion;
 		loop {
@@ -287,7 +287,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 
 	ACTOR static Future<std::vector<int64_t>> getCreatedTimes(AutomaticIdempotencyWorkload* self,
 	                                                          Reference<ReadYourWritesTransaction> tr) {
-		RangeResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
+		RangeReadResult result = wait(tr->getRange(prefixRange(self->keyPrefix), CLIENT_KNOBS->TOO_MANY));
 		ASSERT(!result.more);
 		std::vector<int64_t> createdTimes;
 		for (const auto& [k, v] : result) {

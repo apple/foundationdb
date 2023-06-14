@@ -47,31 +47,31 @@ public:
 	// until the ThreadFuture's ThreadSingleAssignmentVar has its memory released or it is destroyed.
 	virtual ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) = 0;
 	virtual ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                           const KeySelectorRef& end,
-	                                           int limit,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                           const KeySelectorRef& end,
-	                                           GetRangeLimits limits,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
-	                                           int limit,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
-	                                           GetRangeLimits limits,
-	                                           bool snapshot = false,
-	                                           bool reverse = false) = 0;
-	virtual ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                                       const KeySelectorRef& end,
-	                                                       const StringRef& mapper,
-	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
-	                                                       bool snapshot = false,
-	                                                       bool reverse = false) = 0;
+	virtual ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
+	                                               const KeySelectorRef& end,
+	                                               int limit,
+	                                               bool snapshot = false,
+	                                               bool reverse = false) = 0;
+	virtual ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
+	                                               const KeySelectorRef& end,
+	                                               GetRangeLimits limits,
+	                                               bool snapshot = false,
+	                                               bool reverse = false) = 0;
+	virtual ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
+	                                               int limit,
+	                                               bool snapshot = false,
+	                                               bool reverse = false) = 0;
+	virtual ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
+	                                               GetRangeLimits limits,
+	                                               bool snapshot = false,
+	                                               bool reverse = false) = 0;
+	virtual ThreadFuture<MappedRangeReadResult> getMappedRange(const KeySelectorRef& begin,
+	                                                           const KeySelectorRef& end,
+	                                                           const StringRef& mapper,
+	                                                           GetRangeLimits limits,
+	                                                           int matchIndex = MATCH_INDEX_ALL,
+	                                                           bool snapshot = false,
+	                                                           bool reverse = false) = 0;
 	virtual ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) = 0;
 	virtual ThreadFuture<Standalone<StringRef>> getVersionstamp() = 0;
 

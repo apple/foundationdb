@@ -622,7 +622,6 @@ public:
 			if (worker_details.degraded) {
 				fitness = std::max(fitness, ProcessClass::GoodFit);
 			}
-
 			fitness_workers[std::make_tuple(fitness, id_used[worker_process_id], worker_details.degraded, inCCDC)]
 			    .push_back(worker_details);
 		}
@@ -637,7 +636,7 @@ public:
 			auto fitness = std::get<0>(workerIter->first);
 			auto used = std::get<1>(workerIter->first);
 			if (fitness > requiredFitness || used > requiredUsed) {
-				if (logServerSet->size() >= required && logServerSet->validate(policy)) {
+				if ((required < 0 || logServerSet->size() >= required) && logServerSet->validate(policy)) {
 					bCompleted = true;
 					break;
 				}

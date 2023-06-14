@@ -209,6 +209,8 @@ struct ConsistencyScanState : public KeyBackedClass {
 		double startTime = 0;
 		Version endVersion = 0;
 		double endTime = 0;
+		Version lastProgressVersion = 0;
+		double lastProgressTime = 0;
 
 		// Whether the scan finished, useful for history round stats.
 		bool complete = false;
@@ -239,6 +241,8 @@ struct ConsistencyScanState : public KeyBackedClass {
 			           startTime,
 			           endVersion,
 			           endTime,
+			           lastProgressVersion,
+			           lastProgressTime,
 			           complete,
 			           logicalBytesScanned,
 			           replicatedBytesRead,
@@ -260,6 +264,12 @@ struct ConsistencyScanState : public KeyBackedClass {
 			if (endTime != 0) {
 				doc["end_timestamp"] = endTime;
 				doc["end_datetime"] = epochsToGMTString(endTime);
+			}
+
+			doc["last_progress_version"] = lastProgressVersion;
+			if (lastProgressTime != 0) {
+				doc["last_progress_timestamp"] = lastProgressTime;
+				doc["last_progress_datetime"] = epochsToGMTString(lastProgressTime);
 			}
 
 			doc["logical_bytes_scanned"] = logicalBytesScanned;
@@ -301,6 +311,22 @@ struct ConsistencyScanState : public KeyBackedClass {
 
 	// History of scan round stats stored by their start version
 	StatsHistoryMap roundStatsHistory() { return { subspace.pack(__FUNCTION__sr), IncludeVersion() }; }
+
+	ACTOR static Future<Void> clearStatsActor(ConsistencyScanState* self, Reference<ReadYourWritesTransaction> tr) {
+		// read the keyspaces so the transaction conflicts on write (key-backed properties don't expose conflict ranges,
+		// and the extra work here is negligible because this is a rare manual command so performance is not a huge
+		// concern)
+		wait(success(self->currentRoundStats().getD(tr)) && success(self->lifetimeStats().getD(tr)) &&
+		     success(self->roundStatsHistory().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::False)));
+
+		// update each of the stats keyspaces to empty
+		self->currentRoundStats().set(tr, ConsistencyScanState::RoundStats());
+		self->lifetimeStats().set(tr, ConsistencyScanState::LifetimeStats());
+		self->roundStatsHistory().erase(tr, 0, MAX_VERSION);
+		return Void();
+	}
+
+	Future<Void> clearStats(Reference<ReadYourWritesTransaction> tr) { return clearStatsActor(this, tr); }
 };
 
 /////////////////////

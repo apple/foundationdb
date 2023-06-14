@@ -166,7 +166,7 @@ struct SSCheckpointRestoreWorkload : TestWorkload {
 		// Compare the keyrange between the original database and the one restored from checkpoint.
 		// For now, it should have been a single key.
 		tr.reset();
-		state RangeResult res;
+		state RangeReadResult res;
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);

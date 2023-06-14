@@ -141,9 +141,13 @@ public:
 	static double now() { return ::now(); }
 	explicit HoltLinearSmoother(double eDataFoldingTime, double eTrendFoldingTime)
 	  : HoltLinearSmootherImpl<HoltLinearSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
+	explicit HoltLinearSmoother(double eFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearSmoother>(eFoldingTime, eFoldingTime) {}
 };
 class HoltLinearTimerSmoother : public HoltLinearSmootherImpl<HoltLinearTimerSmoother> {
 	static double now() { return timer(); }
 	explicit HoltLinearTimerSmoother(double eDataFoldingTime, double eTrendFoldingTime)
 	  : HoltLinearSmootherImpl<HoltLinearTimerSmoother>(eDataFoldingTime, eTrendFoldingTime) {}
+	explicit HoltLinearTimerSmoother(double eFoldingTime)
+	  : HoltLinearSmootherImpl<HoltLinearTimerSmoother>(eFoldingTime, eFoldingTime) {}
 };
