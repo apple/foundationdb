@@ -152,7 +152,7 @@ if __name__ == "__main__":
     write_header(args.ensemble_id)
     try:
         print_errors(args.ensemble_id)
-    except ModuleNotFoundError:
+    except Exception:
         child = SummaryTree("JoshuaNotFound")
         child.attributes["Severity"] = "30"
         child.attributes[
