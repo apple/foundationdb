@@ -90,12 +90,6 @@ void removeTrailingChar(std::string& str, char c) {
 	}
 }
 
-constexpr double LAST_5MIN_PENALTY_WEIGHT = 1.0;
-constexpr double LAST_15MIN_PENALTY_WEIGHT = 0.90;
-constexpr double LAST_30MIN_PENALTY_WEIGHT = 0.50;
-constexpr double LAST_HOUR_PENALTY_WEIGHT = 0.25;
-constexpr double MORE_THAN_HOUR_PENALTY = 0.05;
-
 } // namespace
 
 template <class Params>
@@ -777,7 +771,10 @@ Future<T> kmsRequestImpl(
 					TraceEvent("RESTKmsRequestImpl", ctx->uid)
 					    .detail("Pass", pass)
 					    .detail("RequestID", requestID)
-					    .detail("FullUrl", kmsEncryptionFullUrl);
+					    .detail("FullUrl", kmsEncryptionFullUrl)
+					    .detail("StartIdx", start)
+					    .detail("CurIdx", idx)
+					    .detail("LastKmsUrlDiscoverTS", ctx->lastKmsUrlDiscoverTS);
 				}
 
 				Reference<HTTP::IncomingResponse> resp = wait(ctx->restClient.doPost(
