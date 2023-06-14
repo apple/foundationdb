@@ -5627,10 +5627,12 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			// When tenants are required, we disable raw flat map requests entirely.
 			// If tenants are optional, we check whether the range intersects a tenant and fail if it does.
 			if (data->db->get().client.tenantMode == TenantMode::REQUIRED) {
+				TraceEvent("NoTenantName2").backtrace();
 				throw tenant_name_required();
 			}
 
 			if (rangeIntersectsAnyTenant(data->tenantMap, KeyRangeRef(begin, end), req.version)) {
+				TraceEvent("NoTenantName2").backtrace();
 				throw tenant_name_required();
 			}
 		}

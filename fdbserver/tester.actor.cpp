@@ -380,7 +380,8 @@ Future<bool> CompoundWorkload::check(Database const& cx) {
 			    TraceEvent("WorkloadCheckStatus")
 			        .detail("Name", workloadName)
 			        .detail("Remaining", *wCount)
-			        .detail("Phase", "End");
+			        .detail("Phase", "End")
+					.detail("Success", ret);
 			    return ret;
 		    },
 		    workload.check(cx));
@@ -1183,10 +1184,12 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx,
 		for (int i = 0; i < checks.size(); i++) {
 			if (checks[i].get().get().value)
 				success++;
-			else
+			else {
 				failure++;
+			}
 		}
 		TraceEvent("TestCheckComplete").detail("WorkloadTitle", spec.title);
+		ASSERT(failure == 0);
 	}
 
 	if (spec.phases & TestWorkload::METRICS) {
