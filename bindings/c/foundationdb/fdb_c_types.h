@@ -114,24 +114,6 @@ typedef struct FDBBGEncryptionKey_ {
 	FDBKey base_key;
 } FDBBGEncryptionKey;
 
-typedef struct FDBBGEncryptionCtx_ {
-	FDBBGEncryptionKey* textKey;
-	uint32_t textKCV;
-	FDBBGEncryptionKey* headerKey;
-	uint32_t headerKCV;
-	FDBKey iv;
-} FDBBGEncryptionCtx;
-
-typedef struct FDBBGFilePointer_ {
-	const uint8_t* filename_ptr;
-	int filename_length;
-	int64_t file_offset;
-	int64_t file_length;
-	int64_t full_file_length;
-	int64_t file_version;
-	FDBBGEncryptionCtx* encryption_ctx;
-} FDBBGFilePointer;
-
 typedef enum { FDB_BG_MUTATION_TYPE_SET_VALUE = 0, FDB_BG_MUTATION_TYPE_CLEAR_RANGE = 1 } FDBBGMutationType;
 
 typedef struct FDBBGMutation_ {
@@ -143,15 +125,72 @@ typedef struct FDBBGMutation_ {
 	int param2_length;
 } FDBBGMutation;
 
-typedef struct FDBBGFileDescription_ {
+/* ---------------------------------------------------------------------------------
+ *	Legacy blob granule API structures, to be deprecated in the next major release
+ */
+
+typedef struct FDBBGEncryptionCtxV1_ {
+	fdb_bool_t present;
+	FDBBGEncryptionKey textKey;
+	uint32_t textKCV;
+	FDBBGEncryptionKey headerKey;
+	uint32_t headerKCV;
+	FDBKey iv;
+} FDBBGEncryptionCtxV1;
+
+typedef struct FDBBGFilePointerV1_ {
+	const uint8_t* filename_ptr;
+	int filename_length;
+	int64_t file_offset;
+	int64_t file_length;
+	int64_t full_file_length;
+	int64_t file_version;
+	FDBBGEncryptionCtxV1 encryption_ctx;
+} FDBBGFilePointerV1;
+
+typedef struct FDBBGFileDescriptionV1_ {
 	FDBKeyRange key_range;
-	FDBBGFilePointer* snapshot_file_pointer;
+	fdb_bool_t snapshot_present;
+	FDBBGFilePointerV1 snapshot_file_pointer;
 	int delta_file_count;
-	FDBBGFilePointer** delta_files;
+	FDBBGFilePointerV1* delta_files;
+	int memory_mutation_count;
+	FDBBGMutation* memory_mutations;
+	FDBBGTenantPrefix tenant_prefix;
+} FDBBGFileDescriptionV1;
+
+/* ---------------------------------------------------------------------------------
+ *	New blob granule API structures
+ *  (Changed to referecence extensible data structures by pointers)
+ */
+
+typedef struct FDBBGEncryptionCtxV2_ {
+	FDBBGEncryptionKey* textKey;
+	uint32_t textKCV;
+	FDBBGEncryptionKey* headerKey;
+	uint32_t headerKCV;
+	FDBKey iv;
+} FDBBGEncryptionCtxV2;
+
+typedef struct FDBBGFilePointerV2_ {
+	const uint8_t* filename_ptr;
+	int filename_length;
+	int64_t file_offset;
+	int64_t file_length;
+	int64_t full_file_length;
+	int64_t file_version;
+	FDBBGEncryptionCtxV2* encryption_ctx;
+} FDBBGFilePointerV2;
+
+typedef struct FDBBGFileDescriptionV2_ {
+	FDBKeyRange key_range;
+	FDBBGFilePointerV2* snapshot_file_pointer;
+	int delta_file_count;
+	FDBBGFilePointerV2** delta_files;
 	int memory_mutation_count;
 	FDBBGMutation** memory_mutations;
 	FDBBGTenantPrefix tenant_prefix;
-} FDBBGFileDescription;
+} FDBBGFileDescriptionV2;
 
 #pragma pack(pop)
 

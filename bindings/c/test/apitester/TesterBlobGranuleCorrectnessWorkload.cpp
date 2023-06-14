@@ -56,6 +56,7 @@ private:
 		OP_GET_BLOB_RANGES,
 		OP_VERIFY,
 		OP_READ_DESC,
+		OP_READ_DESC_V1,
 		OP_FLUSH,
 		OP_LAST = OP_FLUSH
 	};
@@ -309,9 +310,44 @@ private:
 		    /* failOnError = */ false);
 	}
 
+	template <class T>
+	T* pointer_to(T& x) {
+		return &x;
+	}
+
+	template <class T>
+	T* pointer_to(T* x) {
+		return x;
+	}
+
+	template <class GranuleFilePointerRefT>
+	fdb::ReadRangeResult parseSnapshotFile(fdb::Transaction tx,
+	                                       fdb::BytesRef snapshotData,
+	                                       const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	                                       const GranuleFilePointerRefT* snapshotFile);
+
+	template <>
+	fdb::ReadRangeResult parseSnapshotFile<fdb::GranuleFilePointerRef>(
+	    fdb::Transaction tx,
+	    fdb::BytesRef snapshotData,
+	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	    const fdb::GranuleFilePointerRef* snapshotFile) {
+		return tx.parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
+	}
+
+	template <>
+	fdb::ReadRangeResult parseSnapshotFile<fdb::GranuleFilePointerRefV1>(
+	    fdb::Transaction tx,
+	    fdb::BytesRef snapshotData,
+	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	    const fdb::GranuleFilePointerRefV1* snapshotFile) {
+		return tx.parseSnapshotFileV1(snapshotData, tenantPrefix, &snapshotFile->encryption_ctx);
+	}
+
+	template <class GranuleFilePointerRefT>
 	void validateSnapshotData(std::shared_ptr<ITransactionContext> ctx,
 	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
-	                          const fdb::GranuleFilePointerRef* snapshotFile,
+	                          const GranuleFilePointerRefT* snapshotFile,
 	                          const fdb::KeyRangeRef& keyRange,
 	                          const fdb::native::FDBBGTenantPrefix* tenantPrefix,
 	                          int64_t& prevFileVersion) {
@@ -329,8 +365,7 @@ private:
 		                                            snapshotFile->full_file_length,
 		                                            bgCtx.userContext);
 		fdb::BytesRef snapshotData(bgCtx.get_load_f(snapshotLoadId, bgCtx.userContext), snapshotFile->file_length);
-		fdb::ReadRangeResult snapshotRes =
-		    ctx->tx().parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
+		fdb::ReadRangeResult snapshotRes = parseSnapshotFile(ctx->tx(), snapshotData, tenantPrefix, snapshotFile);
 		auto out = fdb::ReadRangeResult::KeyValueRefArray{};
 		fdb::Error err = snapshotRes.getKeyValueArrayNothrow(out);
 		ASSERT(err.code() == error_code_success);
@@ -348,9 +383,34 @@ private:
 		}
 	}
 
+	template <class GranuleFilePointerRefT>
+	fdb::ReadBGMutationsResult parseDeltaFile(fdb::Transaction tx,
+	                                          fdb::BytesRef deltaData,
+	                                          const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	                                          const GranuleFilePointerRefT* deltaFile);
+
+	template <>
+	fdb::ReadBGMutationsResult parseDeltaFile<fdb::GranuleFilePointerRef>(
+	    fdb::Transaction tx,
+	    fdb::BytesRef deltaData,
+	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	    const fdb::GranuleFilePointerRef* deltaFile) {
+		return tx.parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
+	}
+
+	template <>
+	fdb::ReadBGMutationsResult parseDeltaFile<fdb::GranuleFilePointerRefV1>(
+	    fdb::Transaction tx,
+	    fdb::BytesRef deltaData,
+	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+	    const fdb::GranuleFilePointerRefV1* deltaFile) {
+		return tx.parseDeltaFileV1(deltaData, tenantPrefix, &deltaFile->encryption_ctx);
+	}
+
+	template <class GranuleFilePointerRefT>
 	void validateDeltaData(std::shared_ptr<ITransactionContext> ctx,
 	                       fdb::native::FDBReadBlobGranuleContext& bgCtx,
-	                       const fdb::GranuleFilePointerRef* deltaFile,
+	                       const GranuleFilePointerRefT* deltaFile,
 	                       const fdb::KeyRangeRef& keyRange,
 	                       const fdb::native::FDBBGTenantPrefix* tenantPrefix,
 	                       int64_t& lastDFMaxVersion,
@@ -371,8 +431,7 @@ private:
 
 		fdb::BytesRef deltaData(bgCtx.get_load_f(deltaLoadId, bgCtx.userContext), deltaFile->file_length);
 
-		fdb::ReadBGMutationsResult deltaRes =
-		    ctx->tx().parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
+		fdb::ReadBGMutationsResult deltaRes = parseDeltaFile(ctx->tx(), deltaData, tenantPrefix, deltaFile);
 		fdb::VectorRef<fdb::GranuleMutationRef> mutations;
 		fdb::Error err = deltaRes.getGranuleMutationArrayNothrow(mutations);
 		ASSERT(err.code() == error_code_success);
@@ -403,9 +462,10 @@ private:
 		// TODO have delta mutations update map
 	}
 
+	template <class GranuleDescriptionRefT>
 	void validateBGDescriptionData(std::shared_ptr<ITransactionContext> ctx,
 	                               fdb::native::FDBReadBlobGranuleContext& bgCtx,
-	                               fdb::GranuleDescriptionRef* desc,
+	                               GranuleDescriptionRefT* desc,
 	                               fdb::KeyRange keyRange,
 	                               std::optional<int> tenantId,
 	                               int64_t readVersion) {
@@ -425,19 +485,24 @@ private:
 		int64_t lastDFMaxVersion = 0;
 		auto deltaFiles = desc->deltaFiles();
 		for (int i = 0; i < deltaFiles.size(); i++) {
-			validateDeltaData(
-			    ctx, bgCtx, deltaFiles[i], desc->keyRange(), &desc->tenant_prefix, lastDFMaxVersion, prevFileVersion);
+			validateDeltaData(ctx,
+			                  bgCtx,
+			                  pointer_to(deltaFiles[i]),
+			                  desc->keyRange(),
+			                  &desc->tenant_prefix,
+			                  lastDFMaxVersion,
+			                  prevFileVersion);
 		}
 
 		// validate memory mutations
 		auto memoryMutations = desc->memoryMutations();
 		if (memoryMutations.size()) {
-			ASSERT(memoryMutations.front()->version > lastDFMaxVersion);
-			ASSERT(memoryMutations.front()->version > prevFileVersion);
+			ASSERT(pointer_to(memoryMutations.front())->version > lastDFMaxVersion);
+			ASSERT(pointer_to(memoryMutations.front())->version > prevFileVersion);
 		}
 		int64_t lastVersion = prevFileVersion;
 		for (int i = 0; i < memoryMutations.size(); i++) {
-			fdb::GranuleMutationRef* m = memoryMutations[i];
+			fdb::GranuleMutationRef* m = pointer_to(memoryMutations[i]);
 			ASSERT(m->type == 0 || m->type == 1);
 			ASSERT(m->version > 0);
 			ASSERT(m->version >= lastVersion);
@@ -458,8 +523,9 @@ private:
 		// TODO: validate map against data store
 	}
 
+	template <class GranuleDescriptionRefT>
 	void validateBlobGranuleDescriptions(std::shared_ptr<ITransactionContext> ctx,
-	                                     fdb::VectorRef<fdb::GranuleDescriptionRef*> results,
+	                                     const fdb::VectorRef<GranuleDescriptionRefT>& results,
 	                                     fdb::KeyRange keyRange,
 	                                     std::optional<int> tenantId,
 	                                     int64_t readVersion) {
@@ -467,25 +533,25 @@ private:
 		if (tenantId) {
 			// all should have the same tenant prefix
 			for (int i = 0; i < results.size(); i++) {
-				ASSERT(results[i]->tenant_prefix.present);
+				ASSERT(pointer_to(results[i])->tenant_prefix.present);
 			}
-			fdb::ByteString tenantPrefix =
-			    fdb::ByteString(results[0]->tenant_prefix.prefix.key, results[0]->tenant_prefix.prefix.key_length);
+			fdb::ByteString tenantPrefix = fdb::ByteString(pointer_to(results[0])->tenant_prefix.prefix.key,
+			                                               pointer_to(results[0])->tenant_prefix.prefix.key_length);
 			for (int i = 1; i < results.size(); i++) {
-				ASSERT(fdb::ByteString(results[0]->tenant_prefix.prefix.key,
-				                       results[0]->tenant_prefix.prefix.key_length) == tenantPrefix);
+				ASSERT(fdb::ByteString(pointer_to(results[i])->tenant_prefix.prefix.key,
+				                       pointer_to(results[i])->tenant_prefix.prefix.key_length) == tenantPrefix);
 			}
 		}
-		ASSERT(results.front()->beginKey() <= keyRange.beginKey);
-		ASSERT(keyRange.endKey <= results.back()->endKey());
+		ASSERT(pointer_to(results.front())->beginKey() <= keyRange.beginKey);
+		ASSERT(keyRange.endKey <= pointer_to(results.back())->endKey());
 		for (int i = 0; i < results.size() - 1; i++) {
-			ASSERT(results[i]->endKey() == results[i + 1]->beginKey());
+			ASSERT(pointer_to(results[i])->endKey() == pointer_to(results[i + 1])->beginKey());
 		}
 
 		TesterGranuleContext testerContext(ctx->getBGBasePath());
 		fdb::native::FDBReadBlobGranuleContext bgCtx = createGranuleContext(&testerContext);
 		for (int i = 0; i < results.size(); i++) {
-			validateBGDescriptionData(ctx, bgCtx, results[i], keyRange, tenantId, readVersion);
+			validateBGDescriptionData(ctx, bgCtx, pointer_to(results[i]), keyRange, tenantId, readVersion);
 		}
 	}
 
@@ -517,6 +583,37 @@ private:
 			            fmt::format("complete @ {0} with {1} granules",
 			                        results->data()->read_version,
 			                        results->descs().size()));
+			    schedule(cont);
+		    },
+		    getTenant(tenantId));
+	}
+
+	void randomReadDescriptionV1(TTaskFct cont, std::optional<int> tenantId) {
+		fdb::KeyRange keyRange = randomNonEmptyKeyRange();
+		auto results = std::make_shared<fdb::ReadBlobGranulesDescriptionResultV1>();
+		auto readVersionOut = std::make_shared<int64_t>();
+
+		debugOp("ReadDesc", keyRange, tenantId, "starting");
+
+		execTransaction(
+		    [this, keyRange, tenantId, results, readVersionOut](auto ctx) {
+			    ctx->tx().setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
+			    int64_t* rvo = (int64_t*)readVersionOut.get();
+			    auto f = ctx->tx().readBlobGranulesDescriptionV1(keyRange.beginKey, keyRange.endKey, 0, -2, rvo);
+			    ctx->continueAfter(
+			        f,
+			        [this, ctx, keyRange, tenantId, results, readVersionOut, f]() {
+				        *results = f.get();
+				        this->validateBlobGranuleDescriptions(ctx, *results, keyRange, tenantId, *readVersionOut);
+				        ctx->done();
+			        },
+			        true);
+		    },
+		    [this, keyRange, tenantId, results, readVersionOut, cont]() {
+			    debugOp("ReadDesc",
+			            keyRange,
+			            tenantId,
+			            fmt::format("complete @ {0} with {1} granules", *readVersionOut, results->size()));
 			    schedule(cont);
 		    },
 		    getTenant(tenantId));
@@ -584,6 +681,9 @@ private:
 			break;
 		case OP_READ_DESC:
 			randomReadDescription(cont, tenantId);
+			break;
+		case OP_READ_DESC_V1:
+			randomReadDescriptionV1(cont, tenantId);
 			break;
 		case OP_FLUSH:
 			randomFlushOp(cont, tenantId);

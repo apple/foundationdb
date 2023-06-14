@@ -124,7 +124,7 @@ struct GranuleSummary {
 
 // fdb_future_readbg_get_descriptions
 
-struct GranuleFilePointerRef : public native::FDBBGFilePointer {
+struct GranuleFilePointerRef : public native::FDBBGFilePointerV2 {
 	GranuleFilePointerRef(const GranuleFilePointerRef&) = delete;
 	BytesRef filename() const noexcept { return BytesRef(filename_ptr, filename_length); }
 };
@@ -134,7 +134,7 @@ struct GranuleMutationRef : public native::FDBBGMutation {
 	ByteString param2() const noexcept { return ByteString(param2_ptr, param2_length); }
 };
 
-struct GranuleDescriptionRef : native::FDBBGFileDescription {
+struct GranuleDescriptionRef : native::FDBBGFileDescriptionV2 {
 	GranuleDescriptionRef(const GranuleDescriptionRef&) = delete;
 	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
 	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
@@ -145,6 +145,27 @@ struct GranuleDescriptionRef : native::FDBBGFileDescription {
 	}
 	VectorRef<GranuleMutationRef*> memoryMutations() const noexcept {
 		return VectorRef<GranuleMutationRef*>((GranuleMutationRef**)memory_mutations, memory_mutation_count);
+	}
+};
+
+struct GranuleFilePointerRefV1 : public native::FDBBGFilePointerV1 {
+	GranuleFilePointerRefV1(const GranuleFilePointerRefV1&) = delete;
+	BytesRef filename() const noexcept { return BytesRef(filename_ptr, filename_length); }
+};
+
+struct GranuleDescriptionRefV1 : native::FDBBGFileDescriptionV1 {
+	GranuleDescriptionRefV1(const GranuleDescriptionRefV1&) = delete;
+	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
+	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(key_range.end_key, key_range.end_key_length); }
+	GranuleFilePointerRefV1* snapshotFile() const noexcept {
+		return snapshot_present ? (GranuleFilePointerRefV1*)&snapshot_file_pointer : nullptr;
+	}
+	VectorRef<GranuleFilePointerRefV1> deltaFiles() const noexcept {
+		return VectorRef<GranuleFilePointerRefV1>((GranuleFilePointerRefV1*)delta_files, delta_file_count);
+	}
+	VectorRef<GranuleMutationRef> memoryMutations() const noexcept {
+		return VectorRef<GranuleMutationRef>((GranuleMutationRef*)memory_mutations, memory_mutation_count);
 	}
 };
 
@@ -278,6 +299,8 @@ public:
 	}
 };
 
+using ReadBlobGranulesDescriptionResultV1 = VectorRef<GranuleDescriptionRefV1>;
+
 class ReadRangeResult : public Result<native::FDBReadRangeResult, ReadRangeResult> {
 public:
 	using KeyValueRefArray = std::tuple<KeyValueRef const*, int, bool>;
@@ -407,6 +430,17 @@ struct GranuleSummaryRefArray {
 		auto& [out_summaries, out_count] = out;
 		auto err = native::fdb_future_get_granule_summary_array(
 		    f, reinterpret_cast<const native::FDBGranuleSummary**>(&out_summaries), &out_count);
+		return Error(err);
+	}
+};
+
+struct ReadBlobGranulesDescriptionResultV1 {
+	using Type = fdb::ReadBlobGranulesDescriptionResultV1;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		native::FDBBGFileDescriptionV1* descs;
+		int desc_cnt;
+		auto err = native::fdb_future_readbg_get_descriptions_v1(f, &descs, &desc_cnt);
+		out = Type((GranuleDescriptionRefV1*)descs, desc_cnt);
 		return Error(err);
 	}
 };
@@ -792,21 +826,51 @@ public:
 	                                                                                       KeyRef end,
 	                                                                                       int64_t beginVersion,
 	                                                                                       int64_t readVersion) {
-		return native::fdb_transaction_read_blob_granules_description(
+		return native::fdb_transaction_read_blob_granules_description_v2(
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), beginVersion, readVersion);
+	}
+
+	TypedFuture<future_var::ReadBlobGranulesDescriptionResultV1> readBlobGranulesDescriptionV1(
+	    KeyRef begin,
+	    KeyRef end,
+	    int64_t beginVersion,
+	    int64_t readVersion,
+	    int64_t* readVersionOut) {
+		return native::fdb_transaction_read_blob_granules_description_v1(tr.get(),
+		                                                                 begin.data(),
+		                                                                 intSize(begin),
+		                                                                 end.data(),
+		                                                                 intSize(end),
+		                                                                 beginVersion,
+		                                                                 readVersion,
+		                                                                 readVersionOut);
 	}
 
 	ReadRangeResult parseSnapshotFile(BytesRef fileData,
 	                                  native::FDBBGTenantPrefix const* tenantPrefix,
-	                                  native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_readbg_parse_snapshot_file(
+	                                  native::FDBBGEncryptionCtxV2 const* encryptionCtx) {
+		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_readbg_parse_snapshot_file_v2(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	}
+
+	ReadRangeResult parseSnapshotFileV1(BytesRef fileData,
+	                                    native::FDBBGTenantPrefix const* tenantPrefix,
+	                                    native::FDBBGEncryptionCtxV1 const* encryptionCtx) {
+		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_readbg_parse_snapshot_file_v1(
 		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
 	}
 
 	ReadBGMutationsResult parseDeltaFile(BytesRef fileData,
 	                                     native::FDBBGTenantPrefix const* tenantPrefix,
-	                                     native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return ReadBGMutationsResult::create((native::FDBReadBGMutationsResult*)native::fdb_readbg_parse_delta_file(
+	                                     native::FDBBGEncryptionCtxV2 const* encryptionCtx) {
+		return ReadBGMutationsResult::create((native::FDBReadBGMutationsResult*)native::fdb_readbg_parse_delta_file_v2(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	}
+
+	ReadBGMutationsResult parseDeltaFileV1(BytesRef fileData,
+	                                       native::FDBBGTenantPrefix const* tenantPrefix,
+	                                       native::FDBBGEncryptionCtxV1 const* encryptionCtx) {
+		return ReadBGMutationsResult::create((native::FDBReadBGMutationsResult*)native::fdb_readbg_parse_delta_file_v1(
 		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
 	}
 

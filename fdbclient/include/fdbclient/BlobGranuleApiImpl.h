@@ -12,13 +12,21 @@
 #include "fdbclient/ApiRequest.h"
 #include "fdbclient/ISingleThreadTransaction.h"
 
-ReadRangeApiResult parseBlobGranulesSnapshotFile(StringRef fileName,
-                                                 FDBBGTenantPrefix const* tenant_prefix,
-                                                 FDBBGEncryptionCtx const* encryption_ctx);
+ReadRangeApiResult parseBlobGranulesSnapshotFileV1(StringRef fileName,
+                                                   FDBBGTenantPrefix const* tenant_prefix,
+                                                   FDBBGEncryptionCtxV1 const* encryption_ctx);
 
-ReadBGMutationsApiResult parseBlobGranulesDeltaFile(StringRef fileName,
-                                                    FDBBGTenantPrefix const* tenant_prefix,
-                                                    FDBBGEncryptionCtx const* encryption_ctx);
+ReadRangeApiResult parseBlobGranulesSnapshotFileV2(StringRef fileName,
+                                                   FDBBGTenantPrefix const* tenant_prefix,
+                                                   FDBBGEncryptionCtxV2 const* encryption_ctx);
+
+ReadBGMutationsApiResult parseBlobGranulesDeltaFileV1(StringRef fileName,
+                                                      FDBBGTenantPrefix const* tenant_prefix,
+                                                      FDBBGEncryptionCtxV1 const* encryption_ctx);
+
+ReadBGMutationsApiResult parseBlobGranulesDeltaFileV2(StringRef fileName,
+                                                      FDBBGTenantPrefix const* tenant_prefix,
+                                                      FDBBGEncryptionCtxV2 const* encryption_ctx);
 
 ReadRangeApiResult loadAndMaterializeBlobGranules(const ReadBGDescriptionsApiResult& blobGranuleDescr,
                                                   const KeyRangeRef& keyRange,
@@ -26,5 +34,14 @@ ReadRangeApiResult loadAndMaterializeBlobGranules(const ReadBGDescriptionsApiRes
                                                   const FDBReadBlobGranuleContext* granuleContext);
 
 Future<ApiResult> readBlobGranuleDescriptions(ISingleThreadTransaction* tr, ApiRequest req);
+
+struct ReadBGDescriptionsApiResultV1 {
+	Arena arena;
+	FDBBGFileDescriptionV1* desc_arr;
+	int desc_count;
+	ReadBGDescriptionsApiResult input;
+};
+
+ReadBGDescriptionsApiResultV1 convertBlobGranulesDescriptionsToV1(ReadBGDescriptionsApiResult input) noexcept;
 
 #endif

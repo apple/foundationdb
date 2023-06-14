@@ -25,7 +25,7 @@ void nativeToApiBGEncryptionKey(FDBBGEncryptionKey* dest, const BlobGranuleCiphe
 	dest->base_key.key_length = source.baseCipher.size();
 }
 
-void nativeToApiBGEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCipherKeysCtx& source, Arena& ar) {
+void nativeToApiBGEncryptionKeyCtx(FDBBGEncryptionCtxV2* dest, const BlobGranuleCipherKeysCtx& source, Arena& ar) {
 	dest->textKey = new (ar) FDBBGEncryptionKey();
 	nativeToApiBGEncryptionKey(dest->textKey, source.textCipherKey);
 	dest->textKCV = source.textCipherKey.baseCipherKCV;
@@ -36,7 +36,7 @@ void nativeToApiBGEncryptionKeyCtx(FDBBGEncryptionCtx* dest, const BlobGranuleCi
 	dest->iv.key_length = source.ivRef.size();
 }
 
-void nativeToApiBGFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& source, Arena& ar) {
+void nativeToApiBGFilePointer(FDBBGFilePointerV2* dest, const BlobFilePointerRef& source, Arena& ar) {
 	dest->filename_ptr = source.filename.begin();
 	dest->filename_length = source.filename.size();
 	dest->file_offset = source.offset;
@@ -47,7 +47,7 @@ void nativeToApiBGFilePointer(FDBBGFilePointer* dest, const BlobFilePointerRef& 
 	// handle encryption
 	dest->encryption_ctx = nullptr;
 	if (source.cipherKeysCtx.present()) {
-		dest->encryption_ctx = new (ar) FDBBGEncryptionCtx();
+		dest->encryption_ctx = new (ar) FDBBGEncryptionCtxV2();
 		nativeToApiBGEncryptionKeyCtx(dest->encryption_ctx, source.cipherKeysCtx.get(), ar);
 	}
 }
@@ -105,7 +105,7 @@ void nativeToApiBGMutations(FDBBGMutation*** mutationsOut,
 	}
 }
 
-void nativeToApiBGFileDescription(FDBBGFileDescription* dest, const BlobGranuleChunkRef& source, Arena& ar) {
+void nativeToApiBGFileDescription(FDBBGFileDescriptionV2* dest, const BlobGranuleChunkRef& source, Arena& ar) {
 	// set key range
 	removeTenantPrefix(
 	    &dest->key_range.begin_key, &dest->key_range.begin_key_length, source.keyRange.begin, source.tenantPrefix);
@@ -124,16 +124,16 @@ void nativeToApiBGFileDescription(FDBBGFileDescription* dest, const BlobGranuleC
 	// snapshot file
 	dest->snapshot_file_pointer = nullptr;
 	if (source.snapshotFile.present()) {
-		dest->snapshot_file_pointer = new (ar) FDBBGFilePointer();
+		dest->snapshot_file_pointer = new (ar) FDBBGFilePointerV2();
 		nativeToApiBGFilePointer(dest->snapshot_file_pointer, source.snapshotFile.get(), ar);
 	}
 
 	// delta files
 	dest->delta_file_count = source.deltaFiles.size();
 	if (source.deltaFiles.size()) {
-		dest->delta_files = new (ar) FDBBGFilePointer*[source.deltaFiles.size()];
+		dest->delta_files = new (ar) FDBBGFilePointerV2*[source.deltaFiles.size()];
 		for (int d = 0; d < source.deltaFiles.size(); d++) {
-			dest->delta_files[d] = new (ar) FDBBGFilePointer();
+			dest->delta_files[d] = new (ar) FDBBGFilePointerV2();
 			nativeToApiBGFilePointer(dest->delta_files[d], source.deltaFiles[d], ar);
 		}
 	}
@@ -160,7 +160,16 @@ void apiToNativeBGEncryptionKey(BlobGranuleCipherKey& dest, FDBBGEncryptionKey c
 	dest.baseCipher = StringRef(source->base_key.key, source->base_key.key_length);
 }
 
-void apiToNativeBGEncryptionKeyCtx(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEncryptionCtx const* source) {
+void apiToNativeBGEncryptionKeyCtxV1(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEncryptionCtxV1 const* source) {
+	if (source) {
+		dest = BlobGranuleCipherKeysCtx();
+		apiToNativeBGEncryptionKey(dest.get().textCipherKey, &source->textKey);
+		apiToNativeBGEncryptionKey(dest.get().headerCipherKey, &source->headerKey);
+		dest.get().ivRef = StringRef(source->iv.key, source->iv.key_length);
+	}
+}
+
+void apiToNativeBGEncryptionKeyCtxV2(Optional<BlobGranuleCipherKeysCtx>& dest, FDBBGEncryptionCtxV2 const* source) {
 	if (source) {
 		dest = BlobGranuleCipherKeysCtx();
 		apiToNativeBGEncryptionKey(dest.get().textCipherKey, source->textKey);
@@ -169,14 +178,14 @@ void apiToNativeBGEncryptionKeyCtx(Optional<BlobGranuleCipherKeysCtx>& dest, FDB
 	}
 }
 
-void apiToNativeBGFilePointer(BlobFilePointerRef& dest, const FDBBGFilePointer* source) {
+void apiToNativeBGFilePointer(BlobFilePointerRef& dest, const FDBBGFilePointerV2* source) {
 	dest.filename = StringRef(source->filename_ptr, source->filename_length);
 	dest.offset = source->file_offset;
 	dest.length = source->file_length;
 	dest.fullFileLength = source->full_file_length;
 	dest.fileVersion = source->file_version;
 
-	apiToNativeBGEncryptionKeyCtx(dest.cipherKeysCtx, source->encryption_ctx);
+	apiToNativeBGEncryptionKeyCtxV2(dest.cipherKeysCtx, source->encryption_ctx);
 }
 
 KeyRef applyTenantPrefix(const KeyRef& key, const Optional<KeyRef>& tenantPrefix, Arena& ar) {
@@ -242,7 +251,10 @@ void apiToNativeBGMutations(GranuleDeltas& deltas,
 	ASSERT(beginIdx == mutationCount);
 }
 
-void apiToNativeBGFileDescription(BlobGranuleChunkRef& dest, FDBBGFileDescription* source, Version version, Arena& ar) {
+void apiToNativeBGFileDescription(BlobGranuleChunkRef& dest,
+                                  FDBBGFileDescriptionV2* source,
+                                  Version version,
+                                  Arena& ar) {
 	apiToNativeBGTenantPrefix(dest.tenantPrefix, &source->tenant_prefix);
 
 	dest.keyRange = KeyRangeRef(
@@ -270,7 +282,7 @@ void apiToNativeBGFileDescription(BlobGranuleChunkRef& dest, FDBBGFileDescriptio
 	dest.includedVersion = version;
 }
 
-Standalone<VectorRef<BlobGranuleChunkRef>> apiToNativeBGFileDescriptions(FDBBGFileDescription** desc_arr,
+Standalone<VectorRef<BlobGranuleChunkRef>> apiToNativeBGFileDescriptions(FDBBGFileDescriptionV2** desc_arr,
                                                                          int desc_count,
                                                                          Version version,
                                                                          const Arena& srcAr) {
@@ -432,10 +444,10 @@ ACTOR Future<ApiResult> readBlobGranuleDescriptionsImpl(ISingleThreadTransaction
 	resp->desc_count = chunks.size();
 	resp->read_version = readVersionOut;
 
-	resp->desc_arr = new (arena) FDBBGFileDescription*[chunks.size()];
+	resp->desc_arr = new (arena) FDBBGFileDescriptionV2*[chunks.size()];
 	for (int chunkIdx = 0; chunkIdx < chunks.size(); chunkIdx++) {
 		const BlobGranuleChunkRef& chunk = chunks[chunkIdx];
-		resp->desc_arr[chunkIdx] = new (arena) FDBBGFileDescription();
+		resp->desc_arr[chunkIdx] = new (arena) FDBBGFileDescriptionV2();
 		nativeToApiBGFileDescription(resp->desc_arr[chunkIdx], chunk, arena);
 	}
 	return res;
@@ -443,24 +455,46 @@ ACTOR Future<ApiResult> readBlobGranuleDescriptionsImpl(ISingleThreadTransaction
 
 } // namespace
 
-ReadRangeApiResult parseBlobGranulesSnapshotFile(StringRef fileName,
-                                                 FDBBGTenantPrefix const* tenant_prefix,
-                                                 FDBBGEncryptionCtx const* encryption_ctx) {
+ReadRangeApiResult parseBlobGranulesSnapshotFileV1(StringRef fileName,
+                                                   FDBBGTenantPrefix const* tenant_prefix,
+                                                   FDBBGEncryptionCtxV1 const* encryption_ctx) {
 	Optional<KeyRef> tenantPrefix;
 	Optional<BlobGranuleCipherKeysCtx> encryptionCtx;
 	apiToNativeBGTenantPrefix(tenantPrefix, tenant_prefix);
-	apiToNativeBGEncryptionKeyCtx(encryptionCtx, encryption_ctx);
+	apiToNativeBGEncryptionKeyCtxV1(encryptionCtx, encryption_ctx);
 	auto parsedData = bgReadSnapshotFile(fileName, tenantPrefix, encryptionCtx);
 	return createReadRangeApiResult(parsedData);
 }
 
-ReadBGMutationsApiResult parseBlobGranulesDeltaFile(StringRef fileName,
-                                                    FDBBGTenantPrefix const* tenant_prefix,
-                                                    FDBBGEncryptionCtx const* encryption_ctx) {
+ReadBGMutationsApiResult parseBlobGranulesDeltaFileV1(StringRef fileName,
+                                                      FDBBGTenantPrefix const* tenant_prefix,
+                                                      FDBBGEncryptionCtxV1 const* encryption_ctx) {
 	Optional<KeyRef> tenantPrefix;
 	Optional<BlobGranuleCipherKeysCtx> encryptionCtx;
 	apiToNativeBGTenantPrefix(tenantPrefix, tenant_prefix);
-	apiToNativeBGEncryptionKeyCtx(encryptionCtx, encryption_ctx);
+	apiToNativeBGEncryptionKeyCtxV1(encryptionCtx, encryption_ctx);
+	auto parsedData = bgReadDeltaFile(fileName, tenantPrefix, encryptionCtx);
+	return createBGMutationsApiResult(parsedData);
+}
+
+ReadRangeApiResult parseBlobGranulesSnapshotFileV2(StringRef fileName,
+                                                   FDBBGTenantPrefix const* tenant_prefix,
+                                                   FDBBGEncryptionCtxV2 const* encryption_ctx) {
+	Optional<KeyRef> tenantPrefix;
+	Optional<BlobGranuleCipherKeysCtx> encryptionCtx;
+	apiToNativeBGTenantPrefix(tenantPrefix, tenant_prefix);
+	apiToNativeBGEncryptionKeyCtxV2(encryptionCtx, encryption_ctx);
+	auto parsedData = bgReadSnapshotFile(fileName, tenantPrefix, encryptionCtx);
+	return createReadRangeApiResult(parsedData);
+}
+
+ReadBGMutationsApiResult parseBlobGranulesDeltaFileV2(StringRef fileName,
+                                                      FDBBGTenantPrefix const* tenant_prefix,
+                                                      FDBBGEncryptionCtxV2 const* encryption_ctx) {
+	Optional<KeyRef> tenantPrefix;
+	Optional<BlobGranuleCipherKeysCtx> encryptionCtx;
+	apiToNativeBGTenantPrefix(tenantPrefix, tenant_prefix);
+	apiToNativeBGEncryptionKeyCtxV2(encryptionCtx, encryption_ctx);
 	auto parsedData = bgReadDeltaFile(fileName, tenantPrefix, encryptionCtx);
 	return createBGMutationsApiResult(parsedData);
 }
@@ -481,4 +515,66 @@ ReadRangeApiResult loadAndMaterializeBlobGranules(const ReadBGDescriptionsApiRes
 
 Future<ApiResult> readBlobGranuleDescriptions(ISingleThreadTransaction* tr, ApiRequest req) {
 	return readBlobGranuleDescriptionsImpl(tr, req);
+}
+
+/* -------------------------------------------------------------------------------------------
+ * Conversion to previous version of Blob Granule API structures
+ */
+
+namespace {
+
+void convertBGFilePointerToV1(FDBBGFilePointerV1* dest, const FDBBGFilePointerV2* source, Arena& ar) {
+	dest->filename_ptr = source->filename_ptr;
+	dest->filename_length = source->filename_length;
+	dest->file_offset = source->file_offset;
+	dest->file_length = source->file_length;
+	dest->full_file_length = source->full_file_length;
+	dest->file_version = source->file_version;
+	dest->encryption_ctx.present = (source->encryption_ctx != nullptr);
+	if (dest->encryption_ctx.present) {
+		dest->encryption_ctx.textKey = *source->encryption_ctx->textKey;
+		dest->encryption_ctx.textKCV = source->encryption_ctx->textKCV;
+		dest->encryption_ctx.headerKey = *source->encryption_ctx->headerKey;
+		dest->encryption_ctx.headerKCV = source->encryption_ctx->headerKCV;
+		dest->encryption_ctx.iv = source->encryption_ctx->iv;
+	}
+}
+
+void convertBGFileDescriptionToV1(FDBBGFileDescriptionV1* dest, const FDBBGFileDescriptionV2* source, Arena& ar) {
+	dest->key_range = source->key_range;
+	dest->tenant_prefix = source->tenant_prefix;
+	dest->snapshot_present = (source->snapshot_file_pointer != nullptr);
+	if (dest->snapshot_present) {
+		convertBGFilePointerToV1(&dest->snapshot_file_pointer, source->snapshot_file_pointer, ar);
+	}
+	dest->delta_file_count = source->delta_file_count;
+	if (source->delta_file_count > 0) {
+		dest->delta_files = new (ar) FDBBGFilePointerV1[source->delta_file_count];
+		for (int i = 0; i < source->delta_file_count; i++) {
+			convertBGFilePointerToV1(&dest->delta_files[i], source->delta_files[i], ar);
+		}
+	}
+	dest->memory_mutation_count = source->memory_mutation_count;
+	if (source->memory_mutation_count > 0) {
+		dest->memory_mutations = new (ar) FDBBGMutation[source->memory_mutation_count];
+		for (int i = 0; i < source->memory_mutation_count; i++) {
+			dest->memory_mutations[i] = *source->memory_mutations[i];
+		}
+	}
+}
+
+} // namespace
+
+ReadBGDescriptionsApiResultV1 convertBlobGranulesDescriptionsToV1(ReadBGDescriptionsApiResult input) noexcept {
+	ReadBGDescriptionsApiResultV1 res;
+	res.input = input;
+	auto source = input.getPtr();
+	res.desc_count = source->desc_count;
+	if (source->desc_count > 0) {
+		res.desc_arr = new (res.arena) FDBBGFileDescriptionV1[source->desc_count];
+		for (int i = 0; i < source->desc_count; i++) {
+			convertBGFileDescriptionToV1(&res.desc_arr[i], source->desc_arr[i], res.arena);
+		}
+	}
+	return res;
 }

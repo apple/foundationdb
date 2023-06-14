@@ -44,7 +44,7 @@ typedef struct FDBErrorResult_ {
 
 typedef struct FDBReadBGDescriptionResult_ {
 	FDBResultHeader* header;
-	FDBBGFileDescription** desc_arr;
+	FDBBGFileDescriptionV2** desc_arr;
 	int desc_count;
 	int64_t read_version;
 } FDBReadBGDescriptionResult;

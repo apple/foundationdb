@@ -419,9 +419,9 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_get_read_busyness(FDBFuture* f,
 	                 *range_busyness = readMetrics.getRangeBusyness(););
 }
 
-extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f,
-                                                                    FDBBGFileDescription*** out,
-                                                                    int* desc_count) {
+extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions_v2(FDBFuture* f,
+                                                                       FDBBGFileDescriptionV2*** out_descs,
+                                                                       int* out_count) {
 
 	FDBResult* result;
 	fdb_error_t err = fdb_future_get_result(f, &result);
@@ -429,27 +429,55 @@ extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions(FDBFuture* f
 		return err;
 	}
 	FDBReadBGDescriptionResult* data = (FDBReadBGDescriptionResult*)result;
-	*out = data->desc_arr;
-	*desc_count = data->desc_count;
+	*out_descs = data->desc_arr;
+	*out_count = data->desc_count;
 	// Reference count was increased by fdb_future_get_result
 	ApiResult::release(result);
 	return 0;
 }
 
-extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_snapshot_file(const uint8_t* file_data,
-                                                               int file_len,
-                                                               FDBBGTenantPrefix const* tenant_prefix,
-                                                               FDBBGEncryptionCtx const* encryption_ctx) {
+extern "C" DLLEXPORT fdb_error_t fdb_future_readbg_get_descriptions_v1(FDBFuture* f,
+                                                                       FDBBGFileDescriptionV1** out_descs,
+                                                                       int* out_count) {
+	CATCH_AND_RETURN(ReadBGDescriptionsApiResultV1 res = TSAV(ReadBGDescriptionsApiResultV1, f)->get();
+	                 *out_descs = res.desc_arr;
+	                 *out_count = res.desc_count;);
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_snapshot_file_v2(const uint8_t* file_data,
+                                                                  int file_len,
+                                                                  FDBBGTenantPrefix const* tenant_prefix,
+                                                                  FDBBGEncryptionCtxV2 const* encryption_ctx) {
 	RETURN_RESULT_ON_ERROR(
-	    return parseBlobGranulesSnapshotFile(StringRef(file_data, file_len), tenant_prefix, encryption_ctx)
+	    return parseBlobGranulesSnapshotFileV2(StringRef(file_data, file_len), tenant_prefix, encryption_ctx)
 	        .extractPtr(););
 }
-extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_delta_file(const uint8_t* file_data,
-                                                            int file_len,
-                                                            FDBBGTenantPrefix const* tenant_prefix,
-                                                            FDBBGEncryptionCtx const* encryption_ctx) {
+
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_snapshot_file_v1(const uint8_t* file_data,
+                                                                  int file_len,
+                                                                  FDBBGTenantPrefix const* tenant_prefix,
+                                                                  FDBBGEncryptionCtxV1 const* encryption_ctx) {
 	RETURN_RESULT_ON_ERROR(
-	    return parseBlobGranulesDeltaFile(StringRef(file_data, file_len), tenant_prefix, encryption_ctx).extractPtr(););
+	    return parseBlobGranulesSnapshotFileV1(StringRef(file_data, file_len), tenant_prefix, encryption_ctx)
+	        .extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_delta_file_v2(const uint8_t* file_data,
+                                                               int file_len,
+                                                               FDBBGTenantPrefix const* tenant_prefix,
+                                                               FDBBGEncryptionCtxV2 const* encryption_ctx) {
+	RETURN_RESULT_ON_ERROR(
+	    return parseBlobGranulesDeltaFileV2(StringRef(file_data, file_len), tenant_prefix, encryption_ctx)
+	        .extractPtr(););
+}
+
+extern "C" DLLEXPORT FDBResult* fdb_readbg_parse_delta_file_v1(const uint8_t* file_data,
+                                                               int file_len,
+                                                               FDBBGTenantPrefix const* tenant_prefix,
+                                                               FDBBGEncryptionCtxV1 const* encryption_ctx) {
+	RETURN_RESULT_ON_ERROR(
+	    return parseBlobGranulesDeltaFileV1(StringRef(file_data, file_len), tenant_prefix, encryption_ctx)
+	        .extractPtr(););
 }
 
 extern "C" DLLEXPORT void fdb_result_destroy(FDBResult* r) {
@@ -1199,7 +1227,7 @@ extern "C" DLLEXPORT FDBResult* fdb_transaction_read_blob_granules(FDBTransactio
                                                                    int64_t beginVersion,
                                                                    int64_t readVersion,
                                                                    FDBReadBlobGranuleContext granule_context) {
-	FDBFuture* f = fdb_transaction_read_blob_granules_description(
+	FDBFuture* f = fdb_transaction_read_blob_granules_description_v2(
 	    tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, beginVersion, readVersion);
 	fdb_error_t err = fdb_future_block_until_ready(f);
 	if (err) {
@@ -1239,13 +1267,13 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_summarize_blob_granules(FDBTrans
 	    return (FDBFuture*)(TXN(tr)->summarizeBlobGranules(range, sv, rangeLimit).extractPtr()););
 }
 
-extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(FDBTransaction* tr,
-                                                                               uint8_t const* begin_key_name,
-                                                                               int begin_key_name_length,
-                                                                               uint8_t const* end_key_name,
-                                                                               int end_key_name_length,
-                                                                               int64_t begin_version,
-                                                                               int64_t read_version) {
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v2(FDBTransaction* tr,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t begin_version,
+                                                                                  int64_t read_version) {
 	FDBReadBGDescriptionRequest* request =
 	    createApiRequest<FDBReadBGDescriptionRequest>(tr, FDBApiRequest_ReadBGDescription);
 	request->read_version = read_version;
@@ -1257,6 +1285,29 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description(F
 	FDBFuture* future = executeApiRequest<FDBReadBGDescriptionRequest>(tr, request);
 	releaseApiRequest(request);
 	return future;
+}
+
+extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v1(FDBTransaction* tr,
+                                                                                  uint8_t const* begin_key_name,
+                                                                                  int begin_key_name_length,
+                                                                                  uint8_t const* end_key_name,
+                                                                                  int end_key_name_length,
+                                                                                  int64_t begin_version,
+                                                                                  int64_t read_version,
+                                                                                  int64_t* read_version_out) {
+	FDBFuture* f = fdb_transaction_read_blob_granules_description_v2(
+	    tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, begin_version, read_version);
+	return (FDBFuture*)mapThreadFuture<ReadBGDescriptionsApiResult, ReadBGDescriptionsApiResultV1>(
+	           ThreadFuture<ReadBGDescriptionsApiResult>(TSAV(ReadBGDescriptionsApiResult, f)),
+	           [read_version_out](ErrorOr<ReadBGDescriptionsApiResult> input) {
+		           if (input.isError()) {
+			           return ErrorOr<ReadBGDescriptionsApiResultV1>(input.getError());
+		           } else {
+			           *read_version_out = input.get().getPtr()->read_version;
+			           return ErrorOr<ReadBGDescriptionsApiResultV1>(convertBlobGranulesDescriptionsToV1(input.get()));
+		           }
+	           })
+	    .extractPtr();
 }
 
 #include "fdb_c_function_pointers.g.h"
@@ -1347,11 +1398,11 @@ extern "C" DLLEXPORT FDBAllocatorIfc* fdb_get_allocator_interface() {
 }
 
 extern "C" DLLEXPORT FDBFuture* fdb_transaction_exec_async(FDBTransaction* tx, FDBRequest* request) {
-	return (FDBFuture*)(((ITransaction*)(tx))->execAsyncRequest(ApiRequest::addRef(request)).extractPtr());
+	return (FDBFuture*)((TXN(tx))->execAsyncRequest(ApiRequest::addRef(request)).extractPtr());
 }
 
 extern "C" DLLEXPORT fdb_error_t fdb_future_get_result(FDBFuture* f, FDBResult** result) {
-	CATCH_AND_RETURN(*result = ((ThreadSingleAssignmentVar<ApiResult>*)(f))->get().extractPtr(););
+	CATCH_AND_RETURN(*result = (TSAV(ApiResult, f))->get().extractPtr(););
 }
 
 #if defined(__APPLE__)

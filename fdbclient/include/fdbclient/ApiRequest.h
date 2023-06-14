@@ -136,6 +136,7 @@ protected:
 template <class ResultType>
 class TypedApiResult : public ApiResult {
 public:
+	TypedApiResult() {}
 	explicit TypedApiResult(const ApiResult& r) : ApiResult(r) {}
 	explicit TypedApiResult(ApiResult&& r) : ApiResult(r) {}
 
