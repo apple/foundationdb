@@ -68,7 +68,7 @@ function(compile_boost)
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
                        link=static
-                       cflags=--target=x86_64-unknown-linux-gnu
+                       cflags=--target=x86_64-unknown-linux-gnu  # Bug with b2 4.9.4 and clang: https://github.com/bfgroup/b2/issues/183
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
