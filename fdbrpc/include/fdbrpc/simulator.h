@@ -389,6 +389,7 @@ public:
 	// Inject corruption only in consistency scan reads to ensure scan finds it.
 	enum SimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
 	Optional<SimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
+	Optional<UID> consistencyScanInjectedCorruptionDestination;
 	Optional<bool> doInjectConsistencyScanCorruption;
 	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
 	Optional<UID> consistencyScanCorruptor;
