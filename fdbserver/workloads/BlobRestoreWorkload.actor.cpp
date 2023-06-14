@@ -29,6 +29,7 @@
 #include "fdbclient/SystemData.h"
 #include "fdbclient/BlobGranuleReader.actor.h"
 #include "fdbclient/BlobRestoreCommon.h"
+#include "fdbserver/BlobGranuleValidation.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -196,7 +197,12 @@ struct BlobRestoreWorkload : TestWorkload {
 			auto controller = makeReference<BlobRestoreController>(self->extraDb_, normalKeys);
 			state BlobRestorePhase phase = wait(BlobRestoreController::currentPhase(controller));
 			if (phase == BlobRestorePhase::DONE) {
+				// Check if src and dest db are consistent
 				wait(verify(cx, self));
+
+				// Check if we can flush ranges after restore
+				wait(killBlobWorkers(self->extraDb_));
+				wait(flushBlobRanges(self->extraDb_, self, {}));
 				return Void();
 			}
 			// TODO need to define more specific error handling
@@ -327,26 +333,42 @@ struct BlobRestoreWorkload : TestWorkload {
 		return true;
 	}
 
-	ACTOR static Future<Void> flushSrcDbToBlob(Database cx, BlobRestoreWorkload* self) {
+	ACTOR static Future<Void> flushBlobRanges(Database cx, BlobRestoreWorkload* self, Optional<Version> version) {
 		state Standalone<VectorRef<KeyRangeRef>> ranges =
 		    wait(cx->listBlobbifiedRanges(normalKeys, CLIENT_KNOBS->TOO_MANY));
-		try {
-			for (auto& r : ranges) {
-				bool flush = wait(cx->flushBlobRange(r, false, self->restoreTargetVersion_));
-				if (!flush) {
-					fmt::print("Cannot flush to version {} \n", self->restoreTargetVersion_);
+		loop {
+			try {
+				for (auto& r : ranges) {
+					state KeyRange range = r;
+					loop {
+						Version v = wait(cx->verifyBlobRange(range, {}, {}, UseRawAccess::True));
+						if (v != invalidVersion) {
+							fmt::print("Validated blob range {} at {}\n", range.toString(), v);
+							break;
+						}
+						wait(delay(2.0));
+					}
+
+					bool flush = wait(cx->flushBlobRange(range, false, version));
+					if (!flush) {
+						fmt::print("Cannot flush to version {} \n", version.present() ? version.get() : -1);
+						throw internal_error();
+					}
+				}
+				return Void();
+			} catch (Error& e) {
+				if (e.code() != error_code_tag_throttled) {
+					fmt::print("Cannot flush blob ranges {}\n", e.what());
 					throw internal_error();
 				}
+				wait(delay(2));
 			}
-			return Void();
-		} catch (Error& e) {
-			throw internal_error();
 		}
 	}
 
 	ACTOR static Future<Void> verify(Database cx, BlobRestoreWorkload* self) {
 		// flush src db
-		wait(flushSrcDbToBlob(cx, self));
+		wait(flushBlobRanges(cx, self, self->restoreTargetVersion_));
 
 		// restore src. data before restore
 		state Standalone<VectorRef<KeyValueRef>> src = wait(readFromBlob(cx, self->restoreTargetVersion_, self));
