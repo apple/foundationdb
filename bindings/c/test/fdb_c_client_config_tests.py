@@ -575,8 +575,8 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
     def test_external_client_unsupported_api(self):
         # Leaving an unsupported API version
         test = ClientConfigTest(self)
-        test.create_external_lib_path(PREV2_RELEASE_VERSION) # Require 7.1 for the test to work
-        test.expected_error = 2204  # API function missing
+        test.create_external_lib_path(PREV_RELEASE_VERSION)
+        test.expected_error = 2203  # api_version_not_supported
         test.exec()
 
     def test_external_client_unsupported_api_ignore(self):
@@ -734,11 +734,10 @@ class ClientTracingTests(unittest.TestCase):
         # Test that no trace files are created with a default configuration
         # when an a client fails to initialize
         test = self.test
-        # Requires including 7.1 for the test to work.
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION])
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
-        test.expected_error = 2204  # API function missing
+        test.expected_error = 2203  # api_version_not_supported
 
         self.exec_test()
         self.assertEqual(0, len(self.trace_files))
@@ -770,12 +769,11 @@ class ClientTracingTests(unittest.TestCase):
         # Test trace files created with trace_initialize_on_setup option
         # when an a client fails to initialize
         test = self.test
-        # Requires including 7.1 for the test to work.
-        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION])
+        test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION])
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
         test.trace_initialize_on_setup = True
-        test.expected_error = 2204  # API function missing
+        test.expected_error = 2203  # api_version_not_supported
 
         self.exec_test()
         self.assertEqual(1, len(self.trace_files))
