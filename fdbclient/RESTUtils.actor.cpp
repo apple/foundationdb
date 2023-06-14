@@ -263,6 +263,10 @@ void RESTUrl::parseUrl(const std::string& fullUrl) {
 	}
 }
 
+double continuousTimeDecay(double initialValue, double decayRate, double time) {
+	return initialValue * exp(-decayRate * time);
+}
+
 // Only used to link unit tests
 void forceLinkRESTUtilsTests() {}
 

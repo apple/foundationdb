@@ -107,7 +107,7 @@ struct KmsUrlCtx {
 	uint64_t nFailedResponses;
 	uint64_t nResponseParseFailures;
 	double unresponsivenessPenalty;
-	int64_t unresponsivenessPenaltyTS;
+	double unresponsivenessPenaltyTS;
 
 	KmsUrlCtx()
 	  : url(""), nRequests(0), nFailedResponses(0), nResponseParseFailures(0), unresponsivenessPenalty(0.0),
@@ -142,8 +142,32 @@ struct KmsUrlCtx {
 	}
 };
 
+// Current implementation is designed to favor the most-preferable KMS for all outbound requests allowing leveraging KMS
+// implemented caching if supported
+//
+// TODO: Implement load-balancing requests to available KMS servers maintaining prioritized KMS server list based on
+// observed errors/connection failures/timeouts etc.
+
 template <class Params>
 struct KmsUrlStore {
+	void sort() {
+		std::sort(kmsUrls.begin(), kmsUrls.end(), [](const KmsUrlCtx<Params>& l, const KmsUrlCtx<Params>& r) {
+			// Sort the available URLs based on following rules:
+			// 1. URL with higher unresponsiveness-penalty are least preferred
+			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-respones are
+			// less preferrred
+			// 3. Lastly, URLs with more malformed response messages are less preferred
+
+			if (l.unresponsivenessPenalty != r.unresponsivenessPenalty) {
+				return l.unresponsivenessPenalty < r.unresponsivenessPenalty;
+			}
+			if (l.nFailedResponses != r.nFailedResponses) {
+				return l.nFailedResponses < r.nFailedResponses;
+			}
+			return l.nResponseParseFailures < r.nResponseParseFailures;
+		});
+	}
+
 	void penalize(const KmsUrlCtx<Params>& toPenalize, const typename KmsUrlCtx<Params>::PenaltyType type) {
 		bool found = false;
 		for (KmsUrlCtx<Params>& urlCtx : kmsUrls) {
@@ -171,21 +195,7 @@ struct KmsUrlStore {
 		}
 
 		// Reshuffle the URLs
-		std::sort(kmsUrls.begin(), kmsUrls.end(), [](const KmsUrlCtx<Params>& l, const KmsUrlCtx<Params>& r) {
-			// Sort the available URLs based on following rules:
-			// 1. URL will higher unresponsiveness-penalty are least preferred
-			// 2. Among URLs with same unresponsiveness-penalty weight, URLs with more number of failed-respones are
-			// less preferrred
-			// 3. Lastly, URLs with more malformed response messages are less preferred
-
-			if (l.unresponsivenessPenalty != r.unresponsivenessPenalty) {
-				return l.unresponsivenessPenalty < r.unresponsivenessPenalty;
-			}
-			if (l.nFailedResponses != r.nFailedResponses) {
-				return l.nFailedResponses < r.nFailedResponses;
-			}
-			return l.nResponseParseFailures < r.nResponseParseFailures;
-		});
+		sort();
 
 		if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
 			std::string details;
@@ -207,18 +217,7 @@ FDB_BOOLEAN_PARAM(IsCipherType);
 // the penalty weight deteorates (matches real world outage OR server overload scenario)
 
 struct KmsUrlPenaltyParams {
-	static double penalty(int64_t timeSinceLastPenalty) {
-		if (timeSinceLastPenalty <= 5) {
-			return LAST_5MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 5 && timeSinceLastPenalty <= 15) {
-			return LAST_15MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 15 && timeSinceLastPenalty <= 30) {
-			return LAST_30MIN_PENALTY_WEIGHT;
-		} else if (timeSinceLastPenalty > 30 && timeSinceLastPenalty <= 60) {
-			return LAST_HOUR_PENALTY_WEIGHT;
-		}
-		return MORE_THAN_HOUR_PENALTY;
-	}
+	static double penalty(int64_t timeSinceLastPenalty) { return continuousTimeDecay(1.0, 0.1, timeSinceLastPenalty); }
 };
 
 struct RESTKmsConnectorCtx : public ReferenceCounted<RESTKmsConnectorCtx> {
@@ -304,6 +303,9 @@ void extractKmsUrls(Reference<RESTKmsConnectorCtx> ctx,
 		}
 	}
 
+	// Reshuffle URLs to re-arrange them in appropriate priority
+	ctx->kmsUrlStore.sort();
+
 	// Update Kms URLs refresh timestamp
 	ctx->lastKmsUrlsRefreshTs = now();
 }
@@ -361,6 +363,9 @@ ACTOR Future<Void> parseDiscoverKmsUrlFile(Reference<RESTKmsConnectorCtx> ctx, s
 			ctx->kmsUrlStore.kmsUrls.emplace_back(urlCtx);
 		}
 	}
+
+	// Reshuffle URLs to re-arrange them in appropriate priority
+	ctx->kmsUrlStore.sort();
 
 	return Void();
 }
@@ -760,7 +765,7 @@ Future<T> kmsRequestImpl(
 	state KmsUrlCtx<KmsUrlPenaltyParams>* urlCtx;
 	loop {
 		state int idx = 0;
-		state int64_t start = now();
+		state double start = now();
 
 		pass++;
 		while (idx < ctx->kmsUrlStore.kmsUrls.size()) {
@@ -791,9 +796,9 @@ Future<T> kmsRequestImpl(
 				ctx->kmsUrlStore.penalize(*urlCtx, KmsUrlCtx<KmsUrlPenaltyParams>::PenaltyType::TIMEOUT);
 				// Keep re-trying if KMS request time-out OR is server unreachable; otherwise, bubble up the error
 				if (!isKmsNotReachable(e.code())) {
-					TraceEvent(SevDebug, "KmsRequestFailedUnreachable", ctx->uid)
-					    .error(e)
-					    .detail("RequestID", requestID);
+					if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+						TraceEvent("KmsRequestFailedUnreachable", ctx->uid).error(e).detail("RequestID", requestID);
+					}
 					throw e;
 				}
 				TraceEvent(SevDebug, "KmsRequestError", ctx->uid).error(e).detail("RequestID", requestID);
