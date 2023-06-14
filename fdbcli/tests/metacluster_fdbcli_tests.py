@@ -704,12 +704,8 @@ def configure_tenants_test_disableConfigureTenantState(logger, cluster_files):
         cluster_files[0], "tenant2", tenant_state="ready", tenant_group="group1"
     )
     assert err == "ERROR: Tenant configuration is invalid (2140)"
-    # Can only set a tenant in ERROR state
     out, err = configure_tenant(cluster_files[0], "tenant2", tenant_state="ready")
-    assert (
-        err
-        == "ERROR: Operation cannot be applied to tenant in its current state (2143)"
-    )
+    assert len(err) == 0
     clear_all_tenants(cluster_files[0])
     logger.debug("Tenants cleared")
 
