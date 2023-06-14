@@ -7,12 +7,12 @@ TupleVersionstamp::TupleVersionstamp(StringRef str) {
 	data = str;
 }
 
-TupleVersionstamp::TupleVersionstamp(Versionstamp versionstamp) {
+TupleVersionstamp::TupleVersionstamp(int64_t version, uint16_t batchNumber, uint16_t userVersion) {
 	data = makeString(VERSIONSTAMP_TUPLE_SIZE);
 	uint8_t* buf = mutateString(data);
-	*reinterpret_cast<Version*>(buf) = bigEndian64(versionstamp.version);
-	*reinterpret_cast<uint16_t*>(buf + sizeof(Version)) = bigEndian16(versionstamp.batchNumber);
-	*reinterpret_cast<uint16_t*>(buf + sizeof(Version) + sizeof(uint16_t)) = 0;
+	*reinterpret_cast<int64_t*>(buf) = bigEndian64(version);
+	*reinterpret_cast<uint16_t*>(buf + sizeof(int64_t)) = bigEndian16(batchNumber);
+	*reinterpret_cast<uint16_t*>(buf + sizeof(int64_t) + sizeof(uint16_t)) = bigEndian16(userVersion);
 }
 
 int16_t TupleVersionstamp::getBatchNumber() const {

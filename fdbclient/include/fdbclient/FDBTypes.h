@@ -1854,6 +1854,8 @@ struct Versionstamp {
 		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
 	}
 
+	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		int64_t beVersion;
@@ -1885,7 +1887,7 @@ inline void load(Ar& ar, Versionstamp& value) {
 
 template <>
 struct Traceable<Versionstamp> : std::true_type {
-	static std::string toString(const Versionstamp& v) { return fmt::format("{}.{}", v.version, v.batchNumber); }
+	static std::string toString(const Versionstamp& v) { return v.toString(); }
 };
 
 #endif

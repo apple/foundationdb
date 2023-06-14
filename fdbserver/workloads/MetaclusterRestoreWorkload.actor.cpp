@@ -179,6 +179,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
+			metacluster::metadata::RestoreId::simAllowUidRestoreId = false;
 			return _setup(cx, this);
 		} else {
 			return Void();

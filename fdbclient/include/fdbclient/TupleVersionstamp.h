@@ -23,7 +23,6 @@
 
 #pragma once
 
-#include "fdbclient/FDBTypes.h"
 #include "flow/Arena.h"
 
 const size_t VERSIONSTAMP_TUPLE_SIZE = 12;
@@ -34,7 +33,7 @@ struct TupleVersionstamp {
 
 	TupleVersionstamp() : data(DEFAULT_VERSIONSTAMP) {}
 	TupleVersionstamp(StringRef);
-	TupleVersionstamp(Versionstamp);
+	TupleVersionstamp(int64_t version, uint16_t batchNumber, uint16_t userVersion = 0);
 
 	int64_t getVersion() const;
 	int16_t getBatchNumber() const;

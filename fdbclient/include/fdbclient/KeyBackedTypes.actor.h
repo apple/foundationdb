@@ -136,7 +136,7 @@ inline TupleVersionstamp TupleCodec<TupleVersionstamp>::unpack(Standalone<String
 template <>
 inline Standalone<StringRef> TupleCodec<Versionstamp>::pack(Versionstamp const& val) {
 	try {
-		return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val));
+		return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val.version, val.batchNumber));
 	} catch (Error& e) {
 		fmt::print("Pack error: {}\n", e.what());
 		throw;

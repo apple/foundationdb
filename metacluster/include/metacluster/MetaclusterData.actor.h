@@ -36,6 +36,7 @@
 #include "flow/BooleanParam.h"
 
 #include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterMetadata.h"
 #include "metacluster/MetaclusterUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -49,7 +50,7 @@ public:
 		std::map<ClusterName, DataClusterMetadata> dataClusters;
 		KeyBackedRangeResult<std::pair<ClusterName, int64_t>> clusterTenantCounts;
 		KeyBackedRangeResult<UID> registrationTombstones;
-		KeyBackedRangeResult<std::pair<ClusterName, Versionstamp>> activeRestoreIds;
+		KeyBackedRangeResult<std::pair<ClusterName, metadata::RestoreId>> activeRestoreIds;
 		Optional<Versionstamp> maxRestoreId;
 
 		std::map<ClusterName, int64_t> clusterAllocatedMap;
@@ -90,7 +91,7 @@ public:
 	struct DataClusterData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
 		KeyBackedRangeResult<UID> registrationTombstones;
-		KeyBackedRangeResult<std::pair<ClusterName, Versionstamp>> activeRestoreIds;
+		KeyBackedRangeResult<std::pair<ClusterName, metadata::RestoreId>> activeRestoreIds;
 		Optional<Versionstamp> maxRestoreId;
 		TenantData<DB, StandardTenantTypes> tenantData;
 

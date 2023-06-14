@@ -35,18 +35,14 @@ enum class MetaclusterVersion {
 	// This is the smallest version of metacluster metadata understood by this version of FDB. It should be updated any
 	// time support for older versions is dropped. Our contract is that we will support at least one older version, but
 	// likely we will stop supporting versions older than that.
-	MIN_SUPPORTED = 2,
+	MIN_SUPPORTED = 1,
 
 	// The initial version used for metacluster metadata.
-	// This was only included in 71.3.0 and is not compatible with future versions.
 	V1 = 1,
-
-	// Changes active restore IDs to use versionstamps
-	V2 = 2,
 
 	// This is the largest version of metacluster metadata understood by this version of FDB. It should be increased any
 	// time an FDB version adds a new metacluster version.
-	MAX_SUPPORTED = 2,
+	MAX_SUPPORTED = 1,
 
 	// Larger than any legal version; used for testing
 	END
