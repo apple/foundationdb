@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // KeyValueStoreCompressTestData wraps an existing IKeyValueStore and
@@ -53,11 +53,7 @@ struct KeyValueStoreCompressTestData final : IKeyValueStore {
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		store->set(KeyValueRef(keyValue.key, pack(keyValue.value)), arena);
 	}
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = nullptr) override {
-		store->clear(range, storageMetrics, arena);
-	}
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override { store->clear(range, arena); }
 	Future<Void> commit(bool sequential = false) override { return store->commit(sequential); }
 
 	Future<Optional<Value>> readValue(KeyRef key, Optional<ReadOptions> options) override {
