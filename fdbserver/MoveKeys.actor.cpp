@@ -643,6 +643,77 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 	}
 }
 
+ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange rangeToCompare) {
+	state std::vector<Future<Void>> actors;
+	state AuditGetKeyServersRes keyServerRes;
+	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
+	state Key rangeToReadBegin = rangeToCompare.begin;
+	state KeyRangeRef rangeToRead;
+	state int iterationCount = 0;
+	state double beginTime = now();
+	// Note that since krmReadRange may not return the value of the entire range at a time
+	// Given req.range, a part of the range is returned, thus, only a part of the range is
+	// able to be compared --- comparedRes.comparedRange
+	// Given comparedRes.comparedRange, rangeToRead is decided for reading the remaining range
+	// At beginning, rangeToRead is req.range
+
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+	try {
+		while (true) {
+			actors.clear();
+			serverKeyResMap.clear();
+
+			// Read KeyServers and ServerKeys
+			rangeToRead = KeyRangeRef(rangeToReadBegin, rangeToCompare.end);
+			wait(store(keyServerRes, getShardMapFromKeyServers(UID(), tr, rangeToRead)));
+			// Use ssid of keyServerRes.rangeOwnershipMap to read ServerKeys
+			for (auto& [ssid, _] : keyServerRes.rangeOwnershipMap) {
+				actors.push_back(store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, tr, rangeToRead)));
+			}
+			wait(waitForAll(actors));
+
+			// Compare if keyServerRes === serverKeyResMap at comparedRes.claimRange
+			// req.range is used for logging errors
+			CompareKSandSKRes comparedRes =
+			    compareKeyServersAndServerKeys(rangeToCompare, keyServerRes, serverKeyResMap);
+
+			// Return result
+			if (!comparedRes.errors.empty()) {
+				TraceEvent(SevError, "RTAuditStorageShardLocMetadataError")
+				    .detail("AuditRange", rangeToCompare)
+				    .detail("NumErrors", comparedRes.errors.size())
+				    .detail("Version", keyServerRes.readAtVersion)
+				    .detail("ErrorRange", comparedRes.comparedRange);
+				return false;
+			} else {
+				if (comparedRes.comparedRange.end < rangeToCompare.end) {
+					rangeToReadBegin = comparedRes.comparedRange.end;
+					iterationCount++;
+				} else { // complete
+					TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataDone")
+					    .detail("AuditRange", rangeToCompare)
+					    .detail("Version", keyServerRes.readAtVersion)
+					    .detail("IterationCount", iterationCount)
+					    .detail("TimeCost", now() - beginTime);
+					break;
+				}
+			}
+		}
+
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			// TODO logging
+			return true; // sliently exit
+		}
+		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
+		    .errorUnsuppressed(e)
+		    .detail("AuditRange", rangeToCompare);
+	}
+
+	return true;
+}
+
 // keyServer: map from keys to destination servers
 // serverKeys: two-dimension map: [servers][keys], value is the servers' state of having the keys: active(not-have),
 // complete(already has), ""(). Set keyServers[keys].dest = servers. Set serverKeys[servers][keys] = active for each
@@ -726,7 +797,8 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 
 					// Pre validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						bool consistent = wait(auditKeyServersAndServerKeys(tr, currentKeys));
+						// bool consistent = wait(auditKeyServersAndServerKeys(tr, currentKeys));
+						// TODO
 					}
 
 					state RangeResult old = wait(krmGetRanges(tr,

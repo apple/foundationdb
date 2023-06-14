@@ -66,14 +66,28 @@ struct AuditGetKeyServersRes {
 	    readBytes(readBytes) {}
 };
 
-ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange rangeToCompare);
-ACTOR Future<bool> auditKeyServersAndServerKeys(Reference<ReadYourWritesTransaction> tr, KeyRange rangeToCompare);
+struct CompareKSandSKRes {
+	std::vector<std::string> errors;
+	int64_t numValidatedKeyServers;
+	int64_t numValidatedServerKeys;
+	KeyRange comparedRange;
+	CompareKSandSKRes() = default;
+	CompareKSandSKRes(int64_t numValidatedKeyServers,
+	                  int64_t numValidatedServerKeys,
+	                  KeyRange comparedRange,
+	                  std::vector<std::string> errors)
+	  : numValidatedKeyServers(numValidatedKeyServers), numValidatedServerKeys(numValidatedServerKeys),
+	    comparedRange(comparedRange), errors(errors) {}
+};
+
 ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
 ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
-bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges);
-bool noEmptyRangeInRanges(std::vector<KeyRange> ranges);
 std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges);
 Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB);
+CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
+                                                 AuditGetKeyServersRes keyServerRes,
+                                                 std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap);
+
 ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
