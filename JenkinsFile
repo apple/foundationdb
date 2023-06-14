@@ -234,7 +234,7 @@ void trigger_job(jobName, profile) {
             }
         }
 
-        if (if buildCount > 0 && failureCount == 0) {
+        if (buildCount > 0 && failureCount == 0) {
             jobConclusion = "success"
         }
 
