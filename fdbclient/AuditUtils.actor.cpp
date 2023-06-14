@@ -32,11 +32,10 @@
 // Check if any pair of ranges are exclusive with each other
 // This is not a part in consistency check of audit metadata
 // This is used for checking the validity of inputs to rangesSame()
-bool elementsAreExclusiveWithEachOther(std::vector<KeyRange> ranges) {
+bool rangesNotOverlapping(std::vector<KeyRange> ranges) {
 	ASSERT(std::is_sorted(ranges.begin(), ranges.end(), KeyRangeRef::ArbitraryOrder()));
 	for (int i = 0; i < ranges.size() - 1; ++i) {
 		if (ranges[i].end > ranges[i + 1].begin) {
-			TraceEvent(SevError, "ElementsAreNotExclusiveWithEachOther").detail("Ranges", describe(ranges));
 			return false;
 		}
 	}
@@ -100,8 +99,8 @@ Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA
 	std::sort(rangesB.begin(), rangesB.end(), [](KeyRange a, KeyRange b) { return a.begin < b.begin; });
 	TraceEvent(SevVerbose, "RangesSameAfterSort").detail("RangesA", rangesA).detail("Rangesb", rangesB);
 	if (g_network->isSimulated()) {
-		ASSERT(elementsAreExclusiveWithEachOther(rangesA));
-		ASSERT(elementsAreExclusiveWithEachOther(rangesB));
+		ASSERT(rangesNotOverlapping(rangesA));
+		ASSERT(rangesNotOverlapping(rangesB));
 	}
 	if (rangesA.front().begin != rangesB.front().begin) { // rangeList heads mismatch
 		return std::make_pair(rangesA.front(), rangesB.front());

@@ -669,7 +669,8 @@ ACTOR Future<bool> auditKeyServersAndServerKeys(Transaction* tr, KeyRange rangeT
 			wait(store(keyServerRes, getShardMapFromKeyServers(UID(), tr, rangeToRead)));
 			// Use ssid of keyServerRes.rangeOwnershipMap to read ServerKeys
 			for (auto& [ssid, _] : keyServerRes.rangeOwnershipMap) {
-				actors.push_back(store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, tr, rangeToRead)));
+				actors.push_back(store(serverKeyResMap[ssid],
+				                       getThisServerKeysFromServerKeys(ssid, tr, keyServerRes.completeRange)));
 			}
 			wait(waitForAll(actors));
 
