@@ -87,6 +87,13 @@ std::unordered_map<std::string, int> RESTClient::getKnobs() const {
 	return knobs.get();
 }
 
+bool isErrorRetryable(const Error& e) {
+	// Server if unreachable or timing out requests, bubble the error to the caller to decide continue using the same
+	// server OR attempt connecting to a different server instance
+
+	return e.code() != error_code_timed_out && e.code() != error_code_connection_failed;
+}
+
 ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTClient> client,
                                                                std::string verb,
                                                                HTTP::Headers headers,
@@ -170,12 +177,15 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		// Otherwise, this request is considered failed.  Update failure count.
 		statsPtr->requests_failed++;
 
-		// All errors in err are potentially retryable as well as certain HTTP response codes...
+		// All errors in err are potentially (except 'timed_out' and/or 'connection_failed') retryable as well as
+		// certain HTTP response codes...
 		bool retryable =
-		    err.present() || r->code == HTTP::HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR ||
-		    r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY || r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY ||
-		    r->code == HTTP::HTTP_STATUS_CODE_SERVICE_UNAVAILABLE ||
-		    r->code == HTTP::HTTP_STATUS_CODE_TOO_MANY_REQUESTS || r->code == HTTP::HTTP_STATUS_CODE_TIMEOUT;
+		    (err.present() && isErrorRetryable(err.get())) ||
+		    (r.isValid() &&
+		     (r->code == HTTP::HTTP_STATUS_CODE_INTERNAL_SERVER_ERROR ||
+		      r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY || r->code == HTTP::HTTP_STATUS_CODE_BAD_GATEWAY ||
+		      r->code == HTTP::HTTP_STATUS_CODE_SERVICE_UNAVAILABLE ||
+		      r->code == HTTP::HTTP_STATUS_CODE_TOO_MANY_REQUESTS || r->code == HTTP::HTTP_STATUS_CODE_TIMEOUT));
 
 		// But only if our previous attempt was not the last allowable try.
 		retryable = retryable && (thisTry < maxTries);
