@@ -4473,12 +4473,30 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
 	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
 	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
-	    g_simulator->consistencyScanInjectedCorruptionType.present() ||
 	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
 		return;
 	}
 
+	UID destination = req.reply.getEndpoint().token;
+
+	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
+	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
+	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
+	// covers it
+	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+		return;
+	}
+
 	CODE_PROBE(true, "consistency check injecting corruption");
+	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	           "consistency check re-injecting corruption after retransmit",
+	           probe::decoration::rare);
+
+	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	// FIXME: reinject same type of corruption once we enable other types
 
 	// FIXME: code probe for each type?
 
