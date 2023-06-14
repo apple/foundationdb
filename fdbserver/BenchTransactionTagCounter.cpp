@@ -5,24 +5,26 @@
 #include "flow/IRandom.h"
 
 static void bench_addRequest(benchmark::State& state) {
-
-	TransactionTagCounter counter(UID(), 2, 0);
+	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;
-	for (int i = 0; i < state.range(0); ++i)
+	for (int i = 0; i < state.range(0); ++i) {
 		tenantGroups.push_back(arena, StringRef(arena, deterministicRandom()->randomAlphaNumeric(10)));
+	}
 
 	for (auto _ : state) {
 		counter.addRequest(
 		    {}, deterministicRandom()->randomChoice(tenantGroups), 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	}
+
+	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
 BENCHMARK(bench_addRequest)->RangeMultiplier(2)->Range(8 << 4, 8 << 14);
 
 static void bench_startNewInterval(benchmark::State& state) {
-	TransactionTagCounter counter(UID(), state.range(0), 0);
+	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/state.range(0), /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;
@@ -38,7 +40,8 @@ static void bench_startNewInterval(benchmark::State& state) {
 
 		counter.startNewInterval();
 	}
-	state.SetItemsProcessed(static_cast<long>(state.iterations()));
+
+	state.SetItemsProcessed(static_cast<long>(state.range(1) * state.iterations()));
 }
 
 BENCHMARK(bench_startNewInterval)

@@ -5,11 +5,10 @@
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 
-static void bench_grv(benchmark::State& state) {
+static void bench_grvProxyTagThrottler(benchmark::State& state) {
 	GrvProxyTagThrottler throttler(5.0);
 
 	std::vector<GetReadVersionRequest> reqs;
-
 	Arena arena;
 
 	for (int i = 0; i < state.range(0); ++i) {
@@ -23,7 +22,6 @@ static void bench_grv(benchmark::State& state) {
 	}
 
 	for (auto _ : state) {
-
 		state.PauseTiming();
 		for (const auto& req : reqs) {
 			throttler.addRequest(req);
@@ -34,8 +32,10 @@ static void bench_grv(benchmark::State& state) {
 
 		state.ResumeTiming();
 
-		throttler.releaseTransactions(0.01, outBatchPriority, outDefaultPriority);
+		throttler.releaseTransactions(/*elapsed=*/0.01, outBatchPriority, outDefaultPriority);
 	}
+
+	state.SetItemsProcessed(state.range(0) * static_cast<long>(state.iterations()));
 }
 
-BENCHMARK(bench_grv)->RangeMultiplier(10)->Range(1, 100000);
+BENCHMARK(bench_grvProxyTagThrottler)->RangeMultiplier(10)->Range(1, 100000);
