@@ -81,7 +81,6 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, i
 		} else if (tokencmp(param, "assigned_cluster")) {
 			configParams[param] = value;
 		} else if (tokencmp(param, "tenant_state")) {
-			// TODO: we may eventually disable configuring tenant state like this because it is hacky.
 			if (!value.present() ||
 			    value.compare(metacluster::tenantStateToString(metacluster::TenantState::READY)) != 0) {
 				fmt::print(stderr,

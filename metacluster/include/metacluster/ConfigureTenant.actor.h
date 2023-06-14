@@ -54,8 +54,6 @@ struct ConfigureTenantImpl {
 	// Parameters set in updateManagementCluster
 	MetaclusterTenantMapEntry updatedEntry;
 
-	Optional<metacluster::TenantState> targetTenantState;
-
 	ConfigureTenantImpl(Reference<DB> managementDb,
 	                    TenantName tenantName,
 	                    std::map<Standalone<StringRef>, Optional<Value>> configurationParameters,
@@ -160,8 +158,6 @@ struct ConfigureTenantImpl {
 			throw tenant_not_found();
 		}
 
-		ASSERT(!self->targetTenantState.present());
-
 		if (tenantEntry.get().tenantState != TenantState::READY &&
 		    tenantEntry.get().tenantState != TenantState::UPDATING_CONFIGURATION) {
 			CODE_PROBE(true, "Configure tenant in invalid state");
@@ -265,7 +261,6 @@ struct ConfigureTenantImpl {
 		return Void();
 	}
 
-	// Currently used only via resetTenantStateToReady triggered by fdbcli
 	ACTOR static Future<Void> forceMarkManagementTenantAsReady(ConfigureTenantImpl* self,
 	                                                           Reference<typename DB::TransactionT> tr) {
 		state Optional<MetaclusterTenantMapEntry> tenantEntry = wait(tryGetTenantTransaction(tr, self->tenantName));
@@ -275,8 +270,6 @@ struct ConfigureTenantImpl {
 			throw tenant_not_found();
 		}
 
-		ASSERT(self->targetTenantState.present());
-		ASSERT_EQ(metacluster::TenantState::READY, self->targetTenantState.get());
 		if (tenantEntry.get().tenantState == metacluster::TenantState::READY) {
 			// We may reach here due to retry after getting `commit_unknown_result`.
 			// No work to do, just return
@@ -288,7 +281,7 @@ struct ConfigureTenantImpl {
 			throw invalid_tenant_state();
 		}
 		self->updatedEntry = tenantEntry.get();
-		self->updatedEntry.tenantState = self->targetTenantState.get();
+		self->updatedEntry.tenantState = metacluster::TenantState::READY;
 		metadata::management::tenantMetadata().tenantMap.set(tr, self->updatedEntry.id, self->updatedEntry);
 		metadata::management::tenantMetadata().lastTenantModification.setVersionstamp(tr, Versionstamp(), 0);
 
@@ -306,7 +299,6 @@ struct ConfigureTenantImpl {
 					TraceEvent(SevError, "ConfigureTenantStateWithOtherProperties").detail("Tenant", self->tenantName);
 					throw invalid_tenant_configuration();
 				} else {
-					self->targetTenantState = metacluster::TenantState::READY;
 					wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 						return forceMarkManagementTenantAsReady(self, tr);
 					}));
