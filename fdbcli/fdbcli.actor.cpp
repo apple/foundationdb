@@ -625,8 +625,8 @@ void initHelp() {
 	                "possibly with the exception of certain metacluster commands.");
 	helpMap["usemanagementcluster"] =
 	    CommandHelp("usemanagementcluster",
-	                "opens connection to the management cluster in the metacluster",
-	                "This command opens connections to the management cluster, and reset tenant to default."
+	                "connect to the management cluster in the metacluster",
+	                "This command switch the connection to the management cluster, and reset tenant to default."
 	                "User must first connect to a management cluster in order to use this command. ");
 }
 
@@ -734,46 +734,39 @@ Future<T> makeInterruptable(Future<T> f) {
 	}
 }
 
-ACTOR Future<std::tuple<DatabaseConnections, Optional<DatabaseConnections>, Optional<ClusterName>, bool>>
-useClusterCommand(Database localDb,
-                  Reference<IDatabase> db,
-                  Reference<IDatabase> configDb,
-                  ClusterName clusterName,
-                  ClusterType clusterType,
-                  Optional<DatabaseConnections> mgmtDatabase,
-                  Optional<ClusterName> mgmtClusterName,
-                  StringRef newClusterNameStr,
-                  int apiVersion) {
+ACTOR Future<std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool>> useClusterCommand(
+    DatabaseConnections currentDatabase,
+    ClusterType clusterType,
+    Optional<DatabaseConnections> mgmtDatabase,
+    StringRef newClusterNameStr,
+    int apiVersion) {
 
-	ASSERT(!tokencmp(newClusterNameStr, clusterName.toString().c_str()));
+	ASSERT(!tokencmp(newClusterNameStr, currentDatabase.clusterName.toString().c_str()));
 
 	if (!mgmtDatabase.present()) {
-		ASSERT(!mgmtClusterName.present());
 		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 			fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
-			return std::make_tuple(std::make_tuple(localDb, db, configDb), mgmtDatabase, mgmtClusterName, false);
+			return std::make_tuple(currentDatabase, mgmtDatabase, false);
 		} else {
-			mgmtDatabase = std::make_tuple(localDb, db, configDb);
-			mgmtClusterName = clusterName;
+			mgmtDatabase = currentDatabase;
 		}
 	}
 
 	ASSERT(mgmtDatabase.present());
-	ASSERT(mgmtClusterName.present());
-	if (tokencmp(newClusterNameStr, mgmtClusterName.get().toString().c_str())) {
-		std::tie(localDb, db, configDb) = mgmtDatabase.get();
+	if (tokencmp(newClusterNameStr, mgmtDatabase->clusterName.toString().c_str())) {
+		currentDatabase = mgmtDatabase.get();
 	} else {
-		Reference<IDatabase> mgmtDb = std::get<1>(mgmtDatabase.get());
-		metacluster::DataClusterMetadata clusterMetadata = wait(metacluster::getCluster(mgmtDb, newClusterNameStr));
+		metacluster::DataClusterMetadata clusterMetadata =
+		    wait(metacluster::getCluster(mgmtDatabase->db, newClusterNameStr));
 		ClusterConnectionString connectionString = clusterMetadata.connectionString;
 		Reference<IClusterConnectionRecord> connectionRecord =
 		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-		localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
-		db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-		configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-		configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
+		currentDatabase.localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
+		currentDatabase.db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		currentDatabase.configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+		currentDatabase.configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
 	}
-	return std::make_tuple(std::make_tuple(localDb, db, configDb), mgmtDatabase, mgmtClusterName, true);
+	return std::make_tuple(currentDatabase, mgmtDatabase, true);
 }
 
 ACTOR Future<Void> commitTransaction(Reference<ITransaction> tr) {
@@ -1157,7 +1150,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 	state bool isCommitDesc = false;
 
 	state Optional<DatabaseConnections> mgmtDatabase;
-	state Optional<ClusterName> mgmtClusterName;
 	state Database localDb;
 	state Reference<IDatabase> db;
 	state Reference<IDatabase> configDb;
@@ -2265,22 +2257,19 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
 							is_error = true;
 						} else {
-							std::tuple<DatabaseConnections, Optional<DatabaseConnections>, Optional<ClusterName>, bool>
-							    _result = wait(makeInterruptable(useClusterCommand(localDb,
-							                                                       db,
-							                                                       configDb,
-							                                                       clusterName,
-							                                                       clusterType,
-							                                                       mgmtDatabase,
-							                                                       mgmtClusterName,
-							                                                       newClusterNameStr,
-							                                                       opt.apiVersion)));
-							if (!std::get<3>(_result))
+							state DatabaseConnections currentDatabase =
+							    DatabaseConnections(localDb, db, configDb, clusterName);
+							std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool> _result =
+							    wait(makeInterruptable(useClusterCommand(
+							        currentDatabase, clusterType, mgmtDatabase, newClusterNameStr, opt.apiVersion)));
+							if (!std::get<2>(_result))
 								is_error = true;
 							else {
-								std::tie(localDb, db, configDb) = std::get<0>(_result);
+								currentDatabase = std::get<0>(_result);
+								localDb = currentDatabase.localDb;
+								db = currentDatabase.db;
+								configDb = currentDatabase.configDb;
 								mgmtDatabase = std::get<1>(_result);
-								mgmtClusterName = std::get<2>(_result);
 								tenant = Reference<ITenant>();
 								tenantName = Optional<Standalone<StringRef>>();
 								tenantEntry = Optional<TenantMapEntry>();
@@ -2311,23 +2300,24 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								is_error = true;
 								continue;
 							} else {
-								mgmtDatabase = std::make_tuple(localDb, db, configDb);
-								mgmtClusterName = clusterName;
+								mgmtDatabase = DatabaseConnections(localDb, db, configDb, registrationEntry->name);
 							}
 						}
 						ASSERT(mgmtDatabase.present());
-						ASSERT(mgmtClusterName.present());
-						if (tokencmp(mgmtClusterName.get(), clusterName.toString().c_str())) {
+						if (tokencmp(mgmtDatabase->clusterName, registrationEntry->name.toString().c_str())) {
 							fmt::print("Using the current cluster, no changes made.\n");
 						} else if (intrans) {
 							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
 							is_error = true;
 						} else {
-							std::tie(localDb, db, configDb) = mgmtDatabase.get();
+							localDb = mgmtDatabase->localDb;
+							db = mgmtDatabase->db;
+							configDb = mgmtDatabase->configDb;
 							tenant = Reference<ITenant>();
 							tenantName = Optional<Standalone<StringRef>>();
 							tenantEntry = Optional<TenantMapEntry>();
-							fmt::print("Using management cluster {}, tenant reset to default.\n", mgmtClusterName);
+							fmt::print("Using management cluster {}, tenant reset to default.\n",
+							           mgmtDatabase->clusterName);
 						}
 					}
 					continue;

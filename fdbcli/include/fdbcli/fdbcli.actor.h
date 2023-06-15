@@ -50,7 +50,18 @@ constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
 constexpr char msgErrorKey[] = "error";
 
-using DatabaseConnections = std::tuple<Database, Reference<IDatabase>, Reference<IDatabase>>;
+struct DatabaseConnections {
+	Database localDb;
+	Reference<IDatabase> db;
+	Reference<IDatabase> configDb;
+	ClusterName clusterName;
+	DatabaseConnections() {}
+	DatabaseConnections(Database localDb,
+	                    Reference<IDatabase> db,
+	                    Reference<IDatabase> configDb,
+	                    ClusterName clusterName)
+	  : localDb(localDb), db(db), configDb(configDb), clusterName(clusterName) {}
+};
 
 struct CommandHelp {
 	std::string usage;
