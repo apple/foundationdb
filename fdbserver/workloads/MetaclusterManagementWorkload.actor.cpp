@@ -36,6 +36,7 @@
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterConsistency.actor.h"
@@ -270,6 +271,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		return managementValid && dataValid;
 	}
 
+	ACTOR static Future<Void> waitForFullyRecovered(MetaclusterManagementWorkload* self) {
+		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+			wait(self->dbInfo->onChange());
+		}
+
+		return Void();
+	}
+
 	ACTOR template <class DB>
 	static Future<Void> setMetaclusterVersion(Reference<DB> db, MetaclusterVersion version) {
 		state Reference<typename DB::TransactionT> tr = db->createTransaction();
@@ -337,6 +346,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(registrationEntry.present());
 
 				self->managementVersion = registrationEntry.get().version;
+				wait(waitForFullyRecovered(self));
 			} else {
 				ASSERT(self->metaclusterCreated);
 			}
@@ -1648,6 +1658,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			if (self->metaclusterCreated) {
 				self->managementVersion = newVersion;
 				wait(self->setMetaclusterVersion(self->managementDb, self->managementVersion));
+				wait(waitForFullyRecovered(self));
 			}
 		} else {
 			ClusterName clusterName = self->chooseClusterName();
