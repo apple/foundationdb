@@ -4215,6 +4215,11 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 		           req.managerSeqno);
 	}
 
+	TraceEvent("GranuleOpenStart", bwData->id)
+	    .detail("Granule", req.keyRange)
+	    .detail("Epoch", req.managerEpoch)
+	    .detail("Seqno", req.managerSeqno);
+
 	loop {
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
