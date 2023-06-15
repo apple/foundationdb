@@ -2882,8 +2882,18 @@ public:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				Optional<Value> serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
+				// The storage server is removed
+				if (!serverInterfaceValue.present()) {
+					TraceEvent("UpdateStorageMetadataNoOp", self->getDistributorId())
+					    .detail("Server", server->getId())
+					    .detail("IsTss", isTss)
+					    .detail("Reason", "Absent server list item");
+					return Void();
+				}
 				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
+				// TODO: change to ASSERT(metadata.present()) in a release version only supports upgrade from 71.3
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
 				}
