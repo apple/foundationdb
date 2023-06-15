@@ -64,6 +64,11 @@ struct AuditGetKeyServersRes {
 	                      int64_t readBytes)
 	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap),
 	    readBytes(readBytes) {}
+	AuditGetKeyServersRes(KeyRange completeRange,
+	                      Version readAtVersion,
+	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap)
+	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap), readBytes(0) {
+	}
 };
 
 struct CompareKSandSKRes {

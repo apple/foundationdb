@@ -644,6 +644,57 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 }
 
 ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
+                                                          AuditGetKeyServersRes keyServerRes,
+                                                          std::string context) {
+	state KeyRange rangeToCompare = keyServerRes.completeRange;
+	if (rangeToCompare.empty()) {
+		TraceEvent(SevWarn, "RTAuditStorageShardLocMetadataEmptyInputRange").detail("AuditRange", rangeToCompare);
+		return true;
+	}
+	state std::vector<Future<Void>> actors;
+	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
+	state Key rangeToReadBegin = rangeToCompare.begin;
+	state KeyRangeRef rangeToRead;
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	try {
+		// Read ServerKeys
+		for (auto& [ssid, _] : keyServerRes.rangeOwnershipMap) {
+			actors.push_back(store(serverKeyResMap[ssid], getThisServerKeysFromServerKeys(ssid, tr, rangeToCompare)));
+		}
+		wait(waitForAll(actors));
+		// Compare if keyServerRes === serverKeyResMap at rangeToCompare
+		// rangeToCompare is used for logging errors
+		CompareKSandSKRes comparedRes = compareKeyServersAndServerKeys(rangeToCompare, keyServerRes, serverKeyResMap);
+		ASSERT(comparedRes.comparedRange == rangeToCompare);
+		// Check result
+		if (!comparedRes.errors.empty()) {
+			TraceEvent(SevError, "RTAuditStorageShardLocMetadataError")
+			    .detail("Context", context)
+			    .detail("AuditRange", rangeToCompare)
+			    .detail("NumErrors", comparedRes.errors.size())
+			    .detail("Version", keyServerRes.readAtVersion)
+			    .detail("ErrorRange", comparedRes.comparedRange);
+			return false;
+		} else {
+			TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataDone")
+			    .detail("Context", context)
+			    .detail("AuditRange", rangeToCompare)
+			    .detail("Version", keyServerRes.readAtVersion);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			// TODO logging
+			return true; // sliently exit
+		}
+		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
+		    .errorUnsuppressed(e)
+		    .detail("Context", context)
+		    .detail("AuditRange", rangeToCompare);
+	}
+	return true;
+}
+
+ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
                                                           KeyRange rangeToCompare,
                                                           std::string context) {
 	if (rangeToCompare.empty()) {
@@ -1516,12 +1567,6 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				state std::vector<Future<Void>> actors;
 
 				if (!currentKeys.empty()) {
-					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						bool consistent =
-						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "startMoveShards_precheck"));
-					}
-
 					const int rowLimit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
 					const int byteLimit = SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT;
 					state RangeResult old = wait(krmGetRanges(&tr, keyServersPrefix, currentKeys, rowLimit, byteLimit));
@@ -1551,6 +1596,22 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("SrcID", srcId)
 						    .detail("DestID", destId)
 						    .detail("ReadVersion", tr.getReadVersion().get());
+
+						// Pre validate consistency of update of keyServers and serverKeys
+						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+							Future<Version> getGrvF = tr.getReadVersion();
+							ASSERT(getGrvF.isReady());
+							std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
+							for (auto& ssid : src) {
+								rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(rangeIntersectKeys)));
+							}
+							for (auto& ssid : dest) {
+								rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(rangeIntersectKeys)));
+							}
+							AuditGetKeyServersRes keyServerRes(rangeIntersectKeys, getGrvF.get(), rangeOwnershipMap);
+							bool consistent = wait(
+							    auditKeyServersAndServerKeysInRealTime(&tr, keyServerRes, "startMoveShards_precheck"));
+						}
 
 						if (destId.isValid()) {
 							TraceEvent(SevWarn, "StartMoveShardsDestIDExist", relocationIntervalId)
@@ -1886,17 +1947,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				range = KeyRangeRef(range.begin, keyServers.back().key);
 				ASSERT(!range.empty());
 
-				// Pre validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-					bool consistent =
-					    wait(auditKeyServersAndServerKeysInRealTime(&tr, range, "finishMoveShards_precheck"));
-				}
-
-				for (int currentIndex = 0; currentIndex < keyServers.size() - 1; ++currentIndex) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId;
-					UID destId;
+				state int currentIndex = 0;
+				for (; currentIndex < keyServers.size() - 1; ++currentIndex) {
+					state std::vector<UID> src;
+					state std::vector<UID> dest;
+					state UID srcId;
+					state UID destId;
 					decodeKeyServersValue(UIDtoTagMap, keyServers[currentIndex].value, src, dest, srcId, destId);
 					const KeyRange currentRange =
 					    KeyRangeRef(keyServers[currentIndex].key, keyServers[currentIndex + 1].key);
@@ -1916,8 +1972,27 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						throw retry();
 					}
 
+					// Pre validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+						Future<Version> getGrvF = tr.getReadVersion();
+						ASSERT(getGrvF.isReady());
+						std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
+						for (auto& ssid : src) {
+							rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(currentRange)));
+						}
+						for (auto& ssid : dest) {
+							rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(currentRange)));
+						}
+						AuditGetKeyServersRes keyServerRes(currentRange, getGrvF.get(), rangeOwnershipMap);
+						bool consistent = wait(
+						    auditKeyServersAndServerKeysInRealTime(&tr, keyServerRes, "finishMoveShards_precheck"));
+					}
+
 					std::sort(dest.begin(), dest.end());
-					ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin()));
+					ASSERT(std::equal(destServers.begin(),
+					                  destServers.end(),
+					                  dest.begin(),
+					                  dest.end())); // Do we want to change this?
 
 					std::set<UID> srcSet;
 					for (int s = 0; s < src.size(); s++) {
