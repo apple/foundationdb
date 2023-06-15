@@ -814,6 +814,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// Get all existing shards overlapping keys (exclude any that have been processed in a previous
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
+
 					state RangeResult old = wait(krmGetRanges(tr,
 					                                          keyServersPrefix,
 					                                          currentKeys,
@@ -1364,7 +1365,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						break;
 					}
 					tr.reset();
-
 				} catch (Error& error) {
 					if (error.code() == error_code_actor_cancelled)
 						throw;
