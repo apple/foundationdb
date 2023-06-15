@@ -135,7 +135,7 @@ struct SimpleAtomicAddWorkload : TestWorkload {
 					memcpy(&actualValueInt, actualValue.get().begin(), actualValue.get().size());
 				}
 				bool correct = (actualValueInt >= expectedMinValue && actualValueInt <= expectedMaxValue);
-				TraceEvent("SAACheck")
+				TraceEvent(correct ? SevInfo : SevError, "SAACheck")
 				    .detail("InitialValue", self->initialize ? self->initialValue : 0)
 				    .detail("AddValue", self->addValue)
 				    .detail("PotentialIterations", self->potentialIterations)
