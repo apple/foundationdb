@@ -1238,6 +1238,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					ASSERT_EQ(metacluster::TenantState::READY, tenantEntry.tenantState);
 				}
 			}
+
+			// Delete the former ERROR tenants so that the cluster is in a consistent state for subsequent testing
+			std::vector<Future<Void>> deleteFutures;
+			for (TenantName const& tenantName : tenantsInErrorState) {
+				deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, tenantName));
+			}
+
+			wait(waitForAll(deleteFutures));
 		}
 
 		return Void();
@@ -1264,20 +1272,6 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		wait(waitForAll(dataClusterChecks));
 		wait(checkTenants(self));
 
-		KeyBackedRangeResult<std::pair<int64_t, metacluster::MetaclusterTenantMapEntry>> tenants =
-		    wait(metacluster::metadata::management::tenantMetadata().tenantMap.getRange(
-		        self->managementDb, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1));
-
-		ASSERT(tenants.results.size() <= CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
-
-		std::vector<Future<Void>> deleteFutures;
-		for (auto const& [id, entry] : tenants.results) {
-			if (entry.tenantState == metacluster::TenantState::ERROR) {
-				deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, id));
-			}
-		}
-
-		wait(waitForAll(deleteFutures));
 		return true;
 	}
 
