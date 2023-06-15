@@ -221,7 +221,7 @@ struct RestoreClusterImpl {
 	// Store the cluster entry for the restored cluster
 	ACTOR static Future<metadata::RestoreId> registerRestoringClusterInManagementCluster(
 	    RestoreClusterImpl* self,
-	                                                                      Reference<typename DB::TransactionT> tr) {
+	    Reference<typename DB::TransactionT> tr) {
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (dataClusterMetadata.present() &&
 		    (dataClusterMetadata.get().entry.clusterState != DataClusterState::RESTORING ||
@@ -324,7 +324,7 @@ struct RestoreClusterImpl {
 	}
 
 	ACTOR static Future<metadata::RestoreId> markClusterRestoring(RestoreClusterImpl* self,
-	                                                               Reference<typename DB::TransactionT> tr) {
+	                                                              Reference<typename DB::TransactionT> tr) {
 		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 		state metadata::RestoreId restoreId =
 		    metadata::RestoreId::createRestoreId(tr, metadata::activeRestoreIds(), self->clusterName);
@@ -1085,9 +1085,9 @@ struct RestoreClusterImpl {
 
 		// Record the data cluster in the management cluster
 		state metadata::RestoreId restoreId =
-		wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			return registerRestoringClusterInManagementCluster(self, tr);
-		}));
+		    wait(self->ctx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return registerRestoringClusterInManagementCluster(self, tr);
+		    }));
 
 		if (!self->restoreDryRun) {
 			wait(restoreId.onSet());
