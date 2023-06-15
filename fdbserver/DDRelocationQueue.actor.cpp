@@ -1038,11 +1038,10 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 					if (SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD) {
 						rrs.dataMoveId = UID();
 					} else {
-						const bool enabled =
-						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
-						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
-						                               AssignEmptyRange::False,
-						                               EnablePhysicalShardMove(enabled));
+						rrs.dataMoveId =
+						    newDataMoveId(deterministicRandom()->randomUInt64(),
+						                  AssignEmptyRange::False,
+						                  EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
 						TraceEvent(SevInfo, "NewDataMoveWithRandomDestID")
 						    .detail("DataMoveID", rrs.dataMoveId.toString())
 						    .detail("Range", rrs.keys)
@@ -1582,10 +1581,9 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 					} else {
 						self->moveCreateNewPhysicalShard++;
 					}
-					const bool enabled =
-					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
-					rd.dataMoveId = newDataMoveId(
-					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
+					rd.dataMoveId = newDataMoveId(physicalShardIDCandidate,
+					                              AssignEmptyRange::False,
+					                              EnablePhysicalShardMove(SERVER_KNOBS->ENABLE_DD_PHYSICAL_SHARD_MOVE));
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
 					    .detail("DataMoveID", rd.dataMoveId.toString())
 					    .detail("Reason", rd.reason.toString())
