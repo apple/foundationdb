@@ -1641,7 +1641,7 @@ std::string TraceEventFields::getValue(std::string key) const {
 		}
 		ev.detail("FieldName", key);
 
-		throw attribute_not_found();
+		throw attribute_not_found_error(key);
 	}
 }
 

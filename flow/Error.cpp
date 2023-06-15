@@ -34,8 +34,6 @@ std::set<int> debugErrorSet = std::set<int>{ error_code_platform_error };
 #define SHOULD_LOG_ERROR(x) (debugErrorSet.count(x) > 0)
 #endif
 
-#include <iostream>
-
 Error Error::fromUnvalidatedCode(int code) {
 	if (code < 0 || code > 30000) {
 		Error e = Error::fromCode(error_code_unknown_error);
@@ -178,6 +176,13 @@ Error Error::asInjectedFault() const {
 	Error e = *this;
 	e.flags |= FLAG_INJECTED_FAULT;
 	return e;
+}
+
+AttributeNotFoundError::AttributeNotFoundError(const std::string& missingAttribute_)
+  : Error(error_code_attribute_not_found), missingAttribute(missingAttribute_) {}
+
+const std::string& AttributeNotFoundError::getMissingAttribute() const {
+	return missingAttribute;
 }
 
 ErrorCodeTable::ErrorCodeTable() {
