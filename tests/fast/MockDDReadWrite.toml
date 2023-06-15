@@ -1,8 +1,29 @@
+[configuration]
+testClass = 'MockDD'
+
+[[knobs]]
+enable_dd_physical_shard = false
+shard_encode_location_metadata = false
+dd_tenant_awareness_enabled = false
+storage_quota_enabled = false
+
 [[test]]
-testTitle = 'MockDDReadWrite'
+testTitle = 'MockDDTracker'
 useDB = false
 
-[[test.workload]]
-testName = 'MockDDTrackerShardEvaluator'
-keySpaceCount = 1000
-testDuration = 50.0
+    [[test.workload]]
+    testName = 'MockDDTrackerShardEvaluator'
+    keySpaceCount = 1000
+    testDuration = 50.0
+    checkMinShardCount = 2
+
+
+[[test]]
+testTitle = 'MockDDReadWriteTest'
+useDB = false
+
+    [[test.workload]]
+    testName = 'MockDDReadWrite'
+    keySpaceCount = 1000
+    testDuration = 500.0
+    simpleConfig = true

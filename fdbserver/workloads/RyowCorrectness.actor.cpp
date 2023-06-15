@@ -240,11 +240,11 @@ struct RyowCorrectnessWorkload : ApiWorkload {
 							self->pushKVPair(results, op.beginKey, val);
 					} else if (op.type == Operation::GET_RANGE) {
 						KeyRangeRef range(op.beginKey, op.endKey);
-						RangeResult result = wait(transaction->getRange(range, op.limit, op.reverse));
+						RangeReadResult result = wait(transaction->getRange(range, op.limit, op.reverse));
 						if (!dontUpdateResults)
 							results.push_back(result);
 					} else if (op.type == Operation::GET_RANGE_SELECTOR) {
-						RangeResult result =
+						RangeReadResult result =
 						    wait(transaction->getRange(op.beginSelector, op.endSelector, op.limit, op.reverse));
 						if (!dontUpdateResults)
 							results.push_back(result);

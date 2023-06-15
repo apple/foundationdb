@@ -298,9 +298,10 @@ ACTOR Future<Void> globalConfigRefresh(GrvProxyData* grvProxyData, Version* cach
 		try {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			state Future<ValueReadResult> globalConfigVersionFuture = tr->get(globalConfigVersionKey);
-			state Future<RangeResult> tmpCachedDataFuture = tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeReadResult> tmpCachedDataFuture =
+			    tr->getRange(globalConfigDataKeys, CLIENT_KNOBS->TOO_MANY);
 			state ValueReadResult globalConfigVersion = wait(globalConfigVersionFuture);
-			RangeResult tmpCachedData = wait(tmpCachedDataFuture);
+			RangeReadResult tmpCachedData = wait(tmpCachedDataFuture);
 			*cachedData = tmpCachedData;
 			if (globalConfigVersion.present()) {
 				Version parsedVersion;

@@ -386,7 +386,6 @@ struct RestoreClusterImpl {
 		state KeyBackedRangeResult<std::pair<int64_t, MetaclusterTenantMapEntry>> tenants =
 		    wait(metadata::management::tenantMetadata().tenantMap.getRange(
 		        tr, initialTenantId, {}, BUGGIFY ? 1 : CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
-
 		for (auto const& t : tenants.results) {
 			self->mgmtClusterTenantMap.emplace(t.first, t.second);
 			if (self->clusterName == t.second.assignedCluster) {
@@ -1023,7 +1022,9 @@ struct RestoreClusterImpl {
 			// set restored cluster to ready state
 			wait(self->ctx.runManagementTransaction(
 			    [self = self](Reference<typename DB::TransactionT> tr) { return self->markClusterAsReady(tr); }));
-			TraceEvent("MetaclusterRepopulatedFromDataCluster").detail("Name", self->clusterName);
+			TraceEvent("MetaclusterRepopulatedFromDataCluster")
+			    .detail("Name", self->clusterName)
+			    .detail("RestoreId", self->restoreId);
 		}
 
 		return Void();

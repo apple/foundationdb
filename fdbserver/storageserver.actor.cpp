@@ -1234,9 +1234,6 @@ public:
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
 
-		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
-		Counter bytesInput;
 		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
 		// counted as 2 Bytes.
 		Counter logicalBytesInput;
@@ -1322,8 +1319,7 @@ public:
 		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
-		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
@@ -2160,6 +2156,12 @@ std::vector<StorageServerShard> StorageServer::getStorageServerShards(KeyRangeRe
 	return res;
 }
 
+ReadMetrics getReadMetrics() {
+	// For now, return 0.0 for range busyness. Eventually, this will be determined by looking at how much is
+	// attributable to the ranges associated with the read, which will be added as parameters to this function.
+	return ReadMetrics::fromFloats(g_network->networkInfo.metrics.lastRunLoopBusyness, 0.0);
+}
+
 // Lightweight blocking function that updates requested version to version queue for statistics
 inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
 	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
@@ -2301,7 +2303,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// if (cached)
 		//	TraceEvent(SevDebug, "SSGetValueCached").detail("Key", req.key);
 
-		GetValueReply reply(v, cached);
+		GetValueReply reply(v, cached, getReadMetrics());
 		reply.penalty = data->getPenalty();
 		req.reply.send(reply);
 	} catch (Error& e) {
@@ -4274,6 +4276,78 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 	return KeyRangeRef(begin, end);
 }
 
+void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
+	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
+	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
+	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
+		return;
+	}
+
+	UID destination = req.reply.getEndpoint().token;
+
+	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
+	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
+	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
+	// covers it
+	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+		return;
+	}
+
+	CODE_PROBE(true, "consistency check injecting corruption");
+	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	           "consistency check re-injecting corruption after retransmit",
+	           probe::decoration::rare);
+
+	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	// FIXME: reinject same type of corruption once we enable other types
+
+	// FIXME: code probe for each type?
+
+	if (true /*deterministicRandom()->random01() < 0.3*/) {
+		// flip more flag
+		reply.more = !reply.more;
+		g_simulator->consistencyScanInjectedCorruptionType = ISimulator::SimConsistencyScanCorruptionType::FlipMoreFlag;
+	} else {
+		// FIXME: weird memory issues when messing with actual response data, enable and figure out later
+		ASSERT(false);
+		// make deep copy of request, since some of the underlying memory can reference storage engine data directly
+		GetKeyValuesReply copy = reply;
+		reply = GetKeyValuesReply();
+		reply.more = copy.more;
+		reply.cached = copy.cached;
+		reply.version = copy.version;
+		reply.data.append_deep(reply.arena, copy.data.begin(), copy.data.size());
+
+		if (reply.data.empty()) {
+			// add row to empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::AddToEmpty;
+			reply.data.push_back_deep(
+			    reply.arena,
+			    KeyValueRef(g_simulator->consistencyScanCorruptRequestKey.get(), "consistencyCheckCorruptValue"_sr));
+		} else if (deterministicRandom()->coinflip() || reply.data.back().value.empty()) {
+			// change value in non-empty response
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::RemoveLastRow;
+			reply.data.pop_back();
+		} else {
+			// chop off last byte of first value
+			g_simulator->consistencyScanInjectedCorruptionType =
+			    ISimulator::SimConsistencyScanCorruptionType::ChangeFirstValue;
+
+			reply.data[0].value = reply.data[0].value.substr(0, reply.data[0].value.size() - 1);
+		}
+	}
+
+	TraceEvent(SevWarnAlways, "InjectedConsistencyScanCorruption", thisServerID)
+	    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
+	    .detail("Version", req.version)
+	    .detail("Count", reply.data.size());
+}
+
 ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 // Throws a wrong_shard_server if the keys in the request or result depend on data outside this server OR if a large
 // selector offset prevents all data from being read in one range read
@@ -4392,10 +4466,15 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
 			                                     std::max<KeyRef>(req.begin.getKey(), req.end.getKey())));
+
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, none);
+			}
 			req.reply.send(none);
 		} else {
 			state int remainingLimitBytes = req.limitBytes;
@@ -4448,6 +4527,10 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 			}
 
 			r.penalty = data->getPenalty();
+			r.readMetrics = getReadMetrics();
+			if (g_network->isSimulated()) {
+				maybeInjectConsistencyScanCorruption(data->thisServerID, req, r);
+			}
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -4553,10 +4636,10 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		}
 		// TODO: is DefaultPromiseEndpoint the best priority for this?
 		tr.trState->taskID = TaskPriority::DefaultPromiseEndpoint;
-		Future<RangeResult> rangeResultFuture =
+		Future<RangeReadResult> rangeResultFuture =
 		    tr.getRange(prefixRange(prefix), GetRangeLimits::ROW_LIMIT_UNLIMITED, Snapshot::True);
 		// TODO: async in case it needs to read from other servers.
-		RangeResult rangeResult = wait(rangeResultFuture);
+		RangeReadResult rangeResult = wait(rangeResultFuture);
 		a->dependsOn(rangeResult.arena());
 		getRange.result = rangeResult;
 		const double duration = g_network->timer() - getValuesStart;
@@ -5005,7 +5088,7 @@ ACTOR Future<Void> auditStorageQ(StorageServer* data, AuditStorageRequest req) {
 					                                             SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 					ASSERT(!shards.empty());
 
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (int i = 0; i < shards.size() - 1; ++i) {
@@ -5577,6 +5660,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			none.version = version;
 			none.more = false;
 			none.penalty = data->getPenalty();
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
@@ -5629,6 +5713,7 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 			}
 
 			r.penalty = data->getPenalty();
+			r.readMetrics = getReadMetrics();
 			req.reply.send(r);
 
 			resultSize = req.limitBytes - remainingLimitBytes;
@@ -5763,6 +5848,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 			GetKeyValuesStreamReply none;
 			none.version = version;
 			none.more = false;
+			none.readMetrics = getReadMetrics();
 
 			data->checkChangeCounter(changeCounter,
 			                         KeyRangeRef(std::min<KeyRef>(req.begin.getKey(), req.end.getKey()),
@@ -5801,6 +5887,7 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 				                                      req.tenantInfo.prefix));
 				readLock.release();
 				GetKeyValuesStreamReply r(_r);
+				r.readMetrics = getReadMetrics();
 
 				if (req.options.present() && req.options.get().debugID.present())
 					g_traceBatch.addEvent("TransactionDebug",
@@ -5947,7 +6034,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 		//	TraceEvent(SevDebug, "SSGetKeyCached").detail("Key", k).detail("Begin",
 		// shard.begin).detail("End", shard.end);
 
-		GetKeyReply reply(updated, cached);
+		GetKeyReply reply(updated, cached, getReadMetrics());
 		reply.penalty = data->getPenalty();
 
 		req.reply.send(reply);
@@ -6622,7 +6709,7 @@ public:
 	}
 };
 
-ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+ACTOR Future<Void> tryGetRange(PromiseStream<RangeReadResult> results, Transaction* tr, KeyRange keys) {
 	if (SERVER_KNOBS->FETCH_USING_STREAMING) {
 		wait(tr->getRangeStream(results, keys, GetRangeLimits(), Snapshot::True));
 		return Void();
@@ -6635,7 +6722,7 @@ ACTOR Future<Void> tryGetRange(PromiseStream<RangeResult> results, Transaction* 
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, SERVER_KNOBS->FETCH_BLOCK_BYTES);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			state RangeReadResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			results.send(rep);
 
 			if (!rep.more) {
@@ -6698,7 +6785,7 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranuleChunks(T
 }
 
 // Read keys from blob storage
-ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
+ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeReadResult> results,
                                        Transaction* tr,
                                        Database cx,
                                        KeyRange keys,
@@ -6728,7 +6815,7 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 				rows.more = true;
 				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
 			}
-			results.send(rows);
+			results.send(RangeReadResult(std::move(rows)));
 		}
 
 		if (chunks.size() == 0) {
@@ -7503,7 +7590,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 	// Set read options to use non-caching reads and set Fetch type unless low priority data fetching is disabled by a
 	// knob
 	state ReadOptions readOptions = ReadOptions(
-	    fetchKeysID, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
+	    {}, SERVER_KNOBS->FETCH_KEYS_LOWER_PRIORITY ? ReadType::FETCH : ReadType::NORMAL, CacheResult::False);
 
 	// need to set this at the very start of the fetch, to handle any private change feed destroy mutations we get for
 	// this key range, that apply to change feeds we don't know about yet because their metadata hasn't been fetched yet
@@ -7653,7 +7740,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 				shard->updates.pop_front();
 			tr.setVersion(fetchVersion);
 
-			state PromiseStream<RangeResult> results;
+			state PromiseStream<RangeReadResult> results;
 			state Future<Void> hold;
 			state KeyRef rangeEnd;
 			if (isFullRestore) {
@@ -7684,7 +7771,7 @@ ACTOR Future<Void> fetchKeys(StorageServer* data, AddingShard* shard) {
 					while (data->fetchKeysBudgetUsed.get()) {
 						wait(data->fetchKeysBudgetUsed.onChange());
 					}
-					state RangeResult this_block = waitNext(results.getFuture());
+					state RangeReadResult this_block = waitNext(results.getFuture());
 
 					state int expectedBlockSize =
 					    (int)this_block.expectedSize() + (8 - (int)sizeof(KeyValueRef)) * this_block.size();
@@ -8301,7 +8388,7 @@ void changeServerKeys(StorageServer* data,
 	for (auto it = existingShards.begin(); it != existingShards.end(); ++it) {
 		if (nowAssigned != it->value()->assigned()) {
 			isDifferent = true;
-			TraceEvent("CSKRangeDifferent", data->thisServerID)
+			TraceEvent(SevDebug, "CSKRangeDifferent", data->thisServerID)
 			    .detail("KeyBegin", it->range().begin)
 			    .detail("KeyEnd", it->range().end);
 			break;
@@ -11168,7 +11255,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 		wait(delay(0)); // prevent iterator invalidation of functions sending changes
 	}
-
+	// fmt::print("PopWaitMetricsMap {}\n", req.keys.toString());
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
 		auto& x = i->value();
@@ -11230,6 +11317,7 @@ ACTOR Future<Void> waitMetricsTenantAware_internal(StorageServer* self, WaitMetr
 }
 
 Future<Void> StorageServer::waitMetricsTenantAware(const WaitMetricsRequest& req) {
+	++counters.waitMetrics;
 	return waitMetricsTenantAware_internal(this, req);
 }
 

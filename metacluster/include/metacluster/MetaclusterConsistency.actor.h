@@ -60,9 +60,10 @@ private:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state typename transaction_future_type<typename DB::TransactionT, RangeResult>::type
+				state typename transaction_future_type<typename DB::TransactionT, RangeReadResult>::type
 				    systemTenantSubspaceKeysFuture = tr->getRange(prefixRange(TenantMetadata::subspace()), 2);
-				RangeResult systemTenantSubspaceKeys = wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
+				RangeReadResult systemTenantSubspaceKeys =
+				    wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
 
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
 				ASSERT(systemTenantSubspaceKeys.size() == 1);

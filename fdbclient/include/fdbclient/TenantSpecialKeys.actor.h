@@ -68,7 +68,7 @@ private:
 
 	ACTOR static Future<Void> getTenantList(ReadYourWritesTransaction* ryw,
 	                                        KeyRangeRef kr,
-	                                        RangeResult* results,
+	                                        RangeReadResult* results,
 	                                        GetRangeLimits limitsHint) {
 		std::vector<std::pair<TenantName, TenantMapEntry>> tenants =
 		    wait(TenantAPI::listTenantMetadataTransaction(&ryw->getTransaction(), kr.begin, kr.end, limitsHint.rows));
@@ -83,10 +83,11 @@ private:
 		return Void();
 	}
 
-	ACTOR static Future<RangeResult> getTenantRange(ReadYourWritesTransaction* ryw,
-	                                                KeyRangeRef kr,
-	                                                GetRangeLimits limitsHint) {
-		state RangeResult results;
+	ACTOR static Future<RangeReadResult> getTenantRange(ReadYourWritesTransaction* ryw,
+	                                                    KeyRangeRef kr,
+	                                                    GetRangeLimits limitsHint) {
+		// READ_METRICS_FIXME
+		state RangeReadResult results;
 
 		kr = kr.removePrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin)
 		         .removePrefix(TenantRangeImpl::submoduleRange.begin);
@@ -269,9 +270,9 @@ public:
 
 	explicit TenantRangeImpl(KeyRangeRef kr) : SpecialKeyRangeRWImpl(kr) {}
 
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override {
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint) const override {
 		return getTenantRange(ryw, kr, limitsHint);
 	}
 

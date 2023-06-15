@@ -108,12 +108,14 @@ ACTOR Future<ForcedPurgeState> getForcePurgedState(Transaction* tr, KeyRange key
 struct GranuleTenantData : NonCopyable, ReferenceCounted<GranuleTenantData> {
 	TenantMapEntry entry;
 	Reference<BlobConnectionProvider> bstore;
+	bool startedLoadingBStore = false;
 	Promise<Void> bstoreLoaded;
 
 	GranuleTenantData() {}
 	GranuleTenantData(TenantMapEntry entry) : entry(entry) {}
 
 	void updateBStore(const BlobMetadataDetailsRef& metadata) {
+		ASSERT(startedLoadingBStore);
 		if (bstoreLoaded.canBeSet()) {
 			// new
 			bstore = BlobConnectionProvider::newBlobConnectionProvider(metadata);

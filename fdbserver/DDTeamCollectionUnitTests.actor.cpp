@@ -24,6 +24,7 @@
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 #include <climits>
+#include <unordered_set>
 
 class DDTeamCollectionUnitTest {
 public:
@@ -639,6 +640,7 @@ public:
 		                             PreferLowerReadUtil::False,
 		                             forReadBalance);
 
+		// Case 1:
 		wait(collection->getTeam(req) && collection->getTeam(reqHigh));
 		auto [resTeam, resTeamSrcFound] = req.reply.getFuture().get();
 		auto [resTeamHigh, resTeamHighSrcFound] = reqHigh.reply.getFuture().get();
@@ -651,12 +653,12 @@ public:
 		auto servers = resTeam.get()->getServerIDs(), serversHigh = resTeamHigh.get()->getServerIDs();
 		const std::set<UID> selectedServers(servers.begin(), servers.end()),
 		    selectedServersHigh(serversHigh.begin(), serversHigh.end());
-		// for (auto id : selectedServers)
-		// 	std::cout << id.toString() << std::endl;
 		ASSERT(expectedServers == selectedServers);
 		ASSERT(expectedServersHigh == selectedServersHigh);
 
-		resTeam.get()->addReadInFlightToTeam(50);
+		// Case 2: resTeam1 = {2, 0}
+		resTeam.get()->addReadInFlightToTeam(
+		    50, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
 		req.reply.reset();
 		wait(collection->getTeam(req));
 		auto [resTeam1, resTeam1Found] = req.reply.getFuture().get();
@@ -664,6 +666,49 @@ public:
 		auto servers1 = resTeam1.get()->getServerIDs();
 		const std::set<UID> selectedServers1(servers1.begin(), servers1.end());
 		ASSERT(expectedServers1 == selectedServers1);
+
+		// Case 3: resTeam2 = {2, 0}
+		resTeam1.get()->addReadInFlightToTeam(
+		    100, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam2, resTeam2Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers2{ UID(2, 0) };
+		auto servers2 = resTeam2.get()->getServerIDs();
+		const std::set<UID> selectedServers2(servers2.begin(), servers2.end());
+		ASSERT(expectedServers2 == selectedServers2);
+
+		// Case 4: resTeam3 = {4, 0}
+		resTeam2.get()->addReadInFlightToTeam(50, std::unordered_set<UID>{ UID(1, 0), UID(3, 0) });
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam3, resTeam3Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers3{ UID(4, 0) };
+		auto servers3 = resTeam3.get()->getServerIDs();
+		const std::set<UID> selectedServers3(servers3.begin(), servers3.end());
+		ASSERT(expectedServers3 == selectedServers3);
+
+		// Case 5: resTeam4 = {2, 0}
+		resTeam3.get()->addDataInFlightToTeam(
+		    600 * 1024 * 1024, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam4, resTeam4Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers4{ UID(2, 0) };
+		auto servers4 = resTeam4.get()->getServerIDs();
+		const std::set<UID> selectedServers4(servers4.begin(), servers4.end());
+		ASSERT(expectedServers4 == selectedServers4);
+
+		// Case 5: resTeam5 = {2, 0}
+		resTeam4.get()->addDataInFlightToTeam(
+		    600 * 1024 * 1024, std::unordered_set<UID>(req.completeSources.begin(), req.completeSources.end()));
+		req.reply.reset();
+		wait(collection->getTeam(req));
+		auto [resTeam5, resTeam5Found] = req.reply.getFuture().get();
+		std::set<UID> expectedServers5{ UID(2, 0) };
+		auto servers5 = resTeam5.get()->getServerIDs();
+		const std::set<UID> selectedServers5(servers5.begin(), servers5.end());
+		ASSERT(expectedServers5 == selectedServers5);
 
 		return Void();
 	}
@@ -881,6 +926,122 @@ public:
 		}
 		return Void();
 	}
+
+	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED=true, we would evaluate the cpu and available space of
+	// source team when we are relocating a shard. If both are better than pivot values, we would return the source team
+	// as new destination team.
+	ACTOR static Future<Void> GetTeam_EvaluateSourceTeam() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 4;
+		state int teamSize = 1;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		collection->teamPivots.lastPivotValuesUpdate = -100;
+
+		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
+		GetStorageMetricsReply high_s_high_r;
+		high_s_high_r.capacity.bytes = capacity;
+		high_s_high_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_high_r.load.bytes = loadBytes;
+		high_s_high_r.load.opsReadPerKSecond = 7000 * 1000;
+
+		GetStorageMetricsReply high_s_low_r;
+		high_s_low_r.capacity.bytes = capacity;
+		high_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_low_r.load.bytes = loadBytes;
+		high_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		GetStorageMetricsReply low_s_low_r;
+		low_s_low_r.capacity.bytes = capacity;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 2;
+		low_s_low_r.load.bytes = loadBytes;
+		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_reevaluation_enabled",
+		                                                          KnobValueRef::create(bool{ true }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.6 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.5 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("available_space_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.5 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.9 }));
+
+		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
+		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;
+		mid_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 40;
+		high_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
+
+		// high available space, low cpu, high read (in pool)
+		collection->addTeam(std::set<UID>({ UID(1, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(1, 0)]->setMetrics(high_s_high_r);
+		collection->server_info[UID(1, 0)]->setStorageStats(low_cpu);
+		// high available space, mid cpu, low read (in pool)
+		collection->addTeam(std::set<UID>({ UID(2, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(2, 0)]->setMetrics(high_s_low_r);
+		collection->server_info[UID(2, 0)]->setStorageStats(mid_cpu);
+		// low available space, low cpu, low read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(3, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(3, 0)]->setStorageStats(low_cpu);
+		collection->server_info[UID(3, 0)]->setMetrics(low_s_low_r);
+		// high available space, high cpu, high read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(4, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(4, 0)]->setMetrics(high_s_high_r);
+		collection->server_info[UID(4, 0)]->setStorageStats(high_cpu);
+
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		// Case 1: Return source team even if it asks for TeamSelect::WANT_TRUE_BEST
+		TeamSelect sourceSelect(TeamSelect::WANT_TRUE_BEST);
+		sourceSelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest sourceReq(sourceSelect,
+		                               PreferLowerDiskUtil::True,
+		                               TeamMustHaveShards::False,
+		                               PreferLowerReadUtil::True,
+		                               ForReadBalance::True);
+		sourceReq.src = std::vector{ UID(1, 0) };
+
+		wait(collection->getTeam(sourceReq));
+		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
+		fmt::print("StrictPivotRatio: {}, teamStrictPivotCPU: {}, strictPivotAvailableSpaceRatio: {}\n",
+		           SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO,
+		           collection->teamPivots.strictPivotCPU,
+		           collection->teamPivots.strictPivotAvailableSpaceRatio);
+		ASSERT(sourceTeam.present());
+		ASSERT_EQ(sourceTeam.get()->getServerIDs(), std::vector<UID>{ UID(1, 0) });
+
+		// CASE 2: Don't return source team because its CPU is beyond pivot values
+		TeamSelect bestSelect(TeamSelect::WANT_TRUE_BEST);
+		bestSelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest bestReq(bestSelect,
+		                             PreferLowerDiskUtil::True,
+		                             TeamMustHaveShards::False,
+		                             PreferLowerReadUtil::True,
+		                             ForReadBalance::True);
+		bestReq.src = std::vector{ UID(4, 0) };
+		wait(collection->getTeam(bestReq));
+		const auto [bestTeam, found2] = bestReq.reply.getFuture().get();
+		ASSERT(bestTeam.present());
+		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
+
+		// CASE 3: Don't return source team because its available space is below pivot values
+		TeamSelect anySelect(TeamSelect::ANY);
+		anySelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest anyReq(anySelect,
+		                            PreferLowerDiskUtil::True,
+		                            TeamMustHaveShards::False,
+		                            PreferLowerReadUtil::True,
+		                            ForReadBalance::True);
+		anyReq.src = std::vector{ UID(3, 0) };
+		wait(collection->getTeam(anyReq));
+		const auto [anyTeam, found3] = anyReq.reply.getFuture().get();
+		ASSERT(anyTeam.present());
+		ASSERT_NE(anyTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
+
+		return Void();
+	}
 };
 
 TEST_CASE("/DataDistribution/AddTeamsBestOf/UseMachineID") {
@@ -965,5 +1126,10 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 
 TEST_CASE("/DataDistribution/GetTeam/CutOffByCpu") {
 	wait(DDTeamCollectionUnitTest::GetTeam_CutOffByCpu());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/EvaluateSourceTeam") {
+	wait(DDTeamCollectionUnitTest::GetTeam_EvaluateSourceTeam());
 	return Void();
 }

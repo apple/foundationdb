@@ -429,7 +429,7 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
+					RangeReadResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
 					for (int r = 0; r < results.size(); r++) {
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
