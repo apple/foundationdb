@@ -653,8 +653,6 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
 	}
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
-	state Key rangeToReadBegin = rangeToCompare.begin;
-	state KeyRangeRef rangeToRead;
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 	try {
 		// Read ServerKeys
