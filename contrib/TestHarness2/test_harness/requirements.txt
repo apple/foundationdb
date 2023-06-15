@@ -1,0 +1,3 @@
+boto3==1.26.151
+foundationdb==6.3.23
+lxml==4.9.2
