@@ -34,6 +34,7 @@
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbserver/CoroFlow.h"
+#include "fdbserver/FDBRocksDBVersion.h"
 #include "fdbserver/Knobs.h"
 #include "flow/IThreadPool.h"
 #include "flow/ThreadHelper.actor.h"
@@ -43,9 +44,11 @@
 #include "flow/actorcompiler.h" // has to be last include
 
 #ifdef SSD_ROCKSDB_EXPERIMENTAL
-// Enforcing rocksdb version to be 7.10.2
-static_assert((ROCKSDB_MAJOR == 7 && ROCKSDB_MINOR == 10 && ROCKSDB_PATCH == 2),
-              "Unsupported rocksdb version. Update the rocksdb to 7.10.2 version");
+
+// Enforcing rocksdb version.
+static_assert((ROCKSDB_MAJOR == FDB_ROCKSDB_MAJOR && ROCKSDB_MINOR == FDB_ROCKSDB_MINOR &&
+               ROCKSDB_PATCH == FDB_ROCKSDB_PATCH),
+              "Unsupported rocksdb version.");
 
 namespace {
 
