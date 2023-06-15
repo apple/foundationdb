@@ -623,6 +623,11 @@ void initHelp() {
 	                "This command opens connections to a cluster by cluster name. "
 	                "When a cluster is chosen, any commands run in that fdbcli would be sent directly to that cluster, "
 	                "possibly with the exception of certain metacluster commands.");
+	helpMap["usemanagementcluster"] =
+	    CommandHelp("usemanagementcluster",
+	                "opens connection to the management cluster in the metacluster",
+	                "This command opens connections to the management cluster, and reset tenant to default."
+	                "User must first connect to a management cluster in order to use this command. ");
 }
 
 void printVersion() {
@@ -2281,6 +2286,48 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 								tenantEntry = Optional<TenantMapEntry>();
 								fmt::print("cluster changed to {}, tenant reset to default.\n", newClusterNameStr);
 							}
+						}
+					}
+					continue;
+				}
+
+				if (tokencmp(tokens[0], "usemanagementcluster")) {
+					if (tokens.size() != 1) {
+						printUsage(tokens[0]);
+						is_error = true;
+					} else {
+						Optional<MetaclusterRegistrationEntry> registrationEntry =
+						    wait(metacluster::metadata::metaclusterRegistration().get(db));
+						if (!registrationEntry.present()) {
+							fprintf(stderr, "ERROR: This cluster is not part of a metacluster\n");
+							is_error = true;
+							continue;
+						}
+						ASSERT(registrationEntry.present());
+						ClusterName clusterName = registrationEntry->name;
+						if (!mgmtDatabase.present()) {
+							if (registrationEntry->clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+								fprintf(stderr, "ERROR: No management cluster information");
+								is_error = true;
+								continue;
+							} else {
+								mgmtDatabase = std::make_tuple(localDb, db, configDb);
+								mgmtClusterName = clusterName;
+							}
+						}
+						ASSERT(mgmtDatabase.present());
+						ASSERT(mgmtClusterName.present());
+						if (tokencmp(mgmtClusterName.get(), clusterName.toString().c_str())) {
+							fmt::print("Using the current cluster, no changes made.\n");
+						} else if (intrans) {
+							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
+							is_error = true;
+						} else {
+							std::tie(localDb, db, configDb) = mgmtDatabase.get();
+							tenant = Reference<ITenant>();
+							tenantName = Optional<Standalone<StringRef>>();
+							tenantEntry = Optional<TenantMapEntry>();
+							fmt::print("Using management cluster {}, tenant reset to default.\n", mgmtClusterName);
 						}
 					}
 					continue;

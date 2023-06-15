@@ -573,6 +573,57 @@ def usecluster_test(logger, cluster_files):
 
 
 @enable_logging()
+def usemanagementcluster_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+
+    _, _, err = run_fdbcli_command(cluster_files[0], "usemanagementcluster")
+    assert err == "ERROR: This cluster is not part of a metacluster"
+
+    logger.debug("Setting up a metacluster")
+    num_clusters = len(cluster_files)
+    max_tenant_groups_per_cluster = 1
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster,
+    )
+
+    _, output, err = run_fdbcli_command(cluster_files[0], "usemanagementcluster")
+    assert output == "Using the current cluster, no changes made."
+
+    _, output, err = run_fdbcli_command(cluster_files[1], "usemanagementcluster")
+    assert err == "ERROR: No management cluster information"
+
+    subcmds = [
+        "usecluster {};".format(data_cluster_names[0]),
+        "metacluster status;",
+        "usemanagementcluster;",
+        "metacluster status",
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    lines = output.split("\n")
+    logger.debug(output)
+    assert lines[5] == "Using management cluster {}, tenant reset to default.".format(
+        management_cluster_name
+    )
+    expected = """
+  number of data clusters: {}
+  tenant group capacity: {}
+  allocated tenant groups: 0
+"""
+    expected = expected.format(
+        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+    ).strip()
+    assert "\n".join([lines[7], lines[8], lines[9]]).strip() == expected
+
+    cleanup_after_test(cluster_files[0], data_cluster_names)
+
+
+@enable_logging()
 def create_tenants_test(logger, cluster_files):
     logger.debug("Verifying no cluster is part of a metacluster")
     for cf in cluster_files:
@@ -782,6 +833,8 @@ def test_main(logger):
     logger.debug("Tests start")
 
     usecluster_test(cluster_files)
+
+    usemanagementcluster_test(cluster_files)
 
     register_and_configure_data_clusters_test(cluster_files)
 
