@@ -23,11 +23,12 @@
 #include "fdbclient/Knobs.h"
 #include "fdbclient/Notified.h"
 #include "fdbclient/SystemData.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/DeltaTree.h"
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"
@@ -133,7 +134,7 @@ public:
 		}
 	}
 
-	void clear(KeyRangeRef range, const StorageServerMetrics* storageMetrics, const Arena* arena) override {
+	void clear(KeyRangeRef range, const Arena* arena) override {
 		// A commit that occurs with no available space returns Never, so we can throw out all modifications
 		if (getAvailableSize() <= 0)
 			return;

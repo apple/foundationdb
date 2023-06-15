@@ -37,7 +37,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbserver/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -390,9 +390,7 @@ struct RemoteIKeyValueStore : public IKeyValueStore {
 	void set(KeyValueRef keyValue, const Arena* arena = nullptr) override {
 		interf.set.send(IKVSSetRequest{ keyValue, ReplyPromise<Void>() });
 	}
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = nullptr) override {
+	void clear(KeyRangeRef range, const Arena* arena = nullptr) override {
 		interf.clear.send(IKVSClearRequest{ range, ReplyPromise<Void>() });
 	}
 
