@@ -724,7 +724,7 @@ struct PhysicalShard {
 				readIterPool = std::make_shared<ReadIteratorPool>(db, cf, id);
 				this->isInitialized.store(true);
 			} else if (SERVER_KNOBS->ROCKSDB_READ_RANGE_REUSE_ITERATORS) {
-				refreshReadIteratorPool();
+				this->readIterPool->update();
 			}
 		}
 
@@ -2224,6 +2224,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		try {
 			wait(res);
 		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled) {
+				throw;
+			}
 			for (const KeyRange& range : ranges) {
 				self->shardManager.removeRange(range);
 			}
