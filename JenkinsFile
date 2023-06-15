@@ -198,14 +198,16 @@ void trigger_job(jobName, profile) {
         def logContent = Jenkins.getInstance().getItemByFullName("FDB_BuildAndTest/FDB_Precommit").getBuildByNumber(j.number).logFile.text
         def logLines = logContent.split("\n")
         def testCount = 0
+        def buildCount = 0
         def details = []
-        def jobConclusion = "success"
+        def jobConclusion = "failure"
         def failureCount = 0
         def summary = ""
 
         //Parsing line "2023-04-03 14:31:28  Build job run status:FAILURE http://job_url_link" to get build_info
         for (line in logLines) {
             if (line.contains("Build job run status:")) {
+                buildCount += 1
                 build_details = line.split("Build job run status:")
                 build_info = build_details[1].split(" ")
                 if (build_info[0] != "SUCCESS") {
@@ -229,13 +231,17 @@ void trigger_job(jobName, profile) {
 
                 summary += " Test " + Integer.toString(testCount) + ": Status: " + build_info[0] +
                            " Test Job URL : " + build_info[1] + " ,"
-
-                if (labels.contains("bypass_test_failures")) {
-                    jobConclusion = "success"
-                }
-
             }
         }
+
+        if (buildCount > 0 && failureCount == 0) {
+            jobConclusion = "success"
+        }
+
+        if (labels.contains("bypass_test_failures")) {
+            jobConclusion = "success"
+        }
+
         title = "Failure count : " + Integer.toString(failureCount)
         createCheck(jobName, title, summary, "completed", jobConclusion);
 
