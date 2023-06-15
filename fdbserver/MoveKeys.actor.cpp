@@ -814,13 +814,6 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// Get all existing shards overlapping keys (exclude any that have been processed in a previous
 					// iteration of the outer loop)
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-
-					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						// bool consistent = wait(auditKeyServersAndServerKeysInRealTime(tr, currentKeys));
-						// TODO
-					}
-
 					state RangeResult old = wait(krmGetRanges(tr,
 					                                          keyServersPrefix,
 					                                          currentKeys,
@@ -1117,12 +1110,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					endKey = keyServers.end()[-1].key;
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
-					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						bool consistent =
-						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "finishMoveKeys_precheck"));
-					}
-
 					// printf("  finishMoveKeys( '%s'-'%s' ): read keyServers at %lld\n", keys.begin.toString().c_str(),
 					// keys.end.toString().c_str(), tr.getReadVersion().get());
 
@@ -1374,14 +1361,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						wait(tr.commit());
 
 						begin = endKey;
-
-						// Post validate consistency of update of keyServers and serverKeys
-						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-							tr.reset();
-							bool consistent = wait(
-							    auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "finishMoveKeys_postcheck"));
-						}
-
 						break;
 					}
 					tr.reset();
