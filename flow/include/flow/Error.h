@@ -84,9 +84,7 @@ extern const std::set<int> transactionRetryableErrors;
 
 #undef ERROR
 #define ERROR(name, number, description)                                                                               \
-	inline Error name() {                                                                                              \
-		return Error(number);                                                                                          \
-	};                                                                                                                 \
+	inline Error name() { return Error(number); };                                                                     \
 	enum { error_code_##name = number };
 
 #include "error_definitions.h"
