@@ -967,6 +967,7 @@ struct RestoreClusterImpl {
 	ACTOR static Future<Void> finalizeDataClusterAfterRepopulate(RestoreClusterImpl* self, Reference<ITransaction> tr) {
 		bool erased = wait(eraseRestoreId(self, tr));
 		if (erased) {
+			TenantMetadata::tenantIdPrefix().set(tr, self->tenantIdPrefix);
 			if (self->newLastDataClusterTenantId.present()) {
 				TenantMetadata::lastTenantId().set(tr, self->newLastDataClusterTenantId.get());
 			} else {
@@ -997,6 +998,7 @@ struct RestoreClusterImpl {
 		metadata::activeRestoreIds().addReadConflictKey(tr, self->clusterName);
 		metadata::activeRestoreIds().set(tr, self->clusterName, self->restoreId);
 		metadata::maxRestoreId().set(tr, self->restoreId.versionstamp);
+		TenantMetadata::tenantIdPrefix().set(tr, self->tenantIdPrefix);
 		if (self->lastManagementClusterTenantId.present()) {
 			TenantMetadata::lastTenantId().set(tr, self->lastManagementClusterTenantId.get());
 		} else {

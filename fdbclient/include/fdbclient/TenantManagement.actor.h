@@ -318,15 +318,14 @@ Future<Void> markTenantTombstones(Transaction tr, int64_t tenantId) {
 	// In data clusters, we store a tombstone
 	state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
 	    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
-	state Future<Optional<int64_t>> lastTenantIdFuture = TenantMetadata::lastTenantId().get(tr);
+	state Future<int64_t> tenantIdPrefixFuture = TenantMetadata::tenantIdPrefix().getD(tr, Snapshot::False, 0);
 	state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
 	state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
 
 	// If the tenant being deleted has a different tenant ID prefix than the current cluster, then it won't conflict
 	// with any tenant creations. In that case, we do not need to create a tombstone.
-	Optional<int64_t> lastTenantId = wait(lastTenantIdFuture);
-	if (!lastTenantId.present() ||
-	    TenantAPI::getTenantIdPrefix(lastTenantId.get()) != TenantAPI::getTenantIdPrefix(tenantId)) {
+	int64_t tenantIdPrefix = wait(tenantIdPrefixFuture);
+	if (tenantIdPrefix != TenantAPI::getTenantIdPrefix(tenantId)) {
 		CODE_PROBE(true, "Skipping tenant tombstone for tenant with different prefix");
 		return Void();
 	}
