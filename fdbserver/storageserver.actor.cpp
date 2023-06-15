@@ -12366,6 +12366,8 @@ static void versionedMapBound(benchmark::State& benchState) {
 	StorageServer::VersionedData data;
 	Arena arena;
 	ValueOrClearToRef value = ValueOrClearToRef::value(StringRef("fixed_value"));
+	// only insert half of the keys, so when we bench search (lower_bound/upper_bound), it could test the cases that
+	// the key exist and non-exist
 	RandomKeySetGenerator keyGen(dataSize * 2, "10..20/a..z");
 	int64_t i = 0;
 	for (auto& key : keyGen.keys) {
