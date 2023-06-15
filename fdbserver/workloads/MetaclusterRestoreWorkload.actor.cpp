@@ -1164,6 +1164,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		// restore should be present after the restore. All tenants in the management cluster should be unchanged except
 		// for those tenants that were created after the backup and lost during the restore, which will be marked in an
 		// error state.
+		state std::set<TenantName> tenantsInErrorState;
 		for (auto const& [tenantId, tenantEntry] : self->managementTenantsBeforeRestore) {
 			auto itr = tenantMap.find(tenantId);
 			ASSERT(itr != tenantMap.end());
@@ -1173,6 +1174,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				ASSERT(self->dataDbs[itr->second.assignedCluster].restored);
 				postRecoveryEntry.tenantState = tenantEntry.tenantState;
 				postRecoveryEntry.error.clear();
+				tenantsInErrorState.emplace(itr->second.tenantName);
 			}
 
 			ASSERT(tenantEntry == postRecoveryEntry);
@@ -1213,6 +1215,27 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 				ASSERT(self->deletedTenants.count(tenantId));
 				ASSERT(self->recoverManagementCluster);
 				ASSERT(self->recoverDataClusters);
+			}
+		}
+
+		if (!tenantsInErrorState.empty()) {
+			CODE_PROBE(true, "One or more tenants in ERROR state");
+			std::vector<Future<Void>> resetErrorFutures;
+			for (const auto& tenantName : tenantsInErrorState) {
+				resetErrorFutures.emplace_back(metacluster::resetTenantStateToReady(self->managementDb, tenantName));
+			}
+			wait(waitForAll(resetErrorFutures));
+			KeyBackedRangeResult<std::pair<int64_t, metacluster::MetaclusterTenantMapEntry>> _tenants =
+			    wait(runTransaction(self->managementDb, [](Reference<ITransaction> tr) {
+				    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+				    return metacluster::metadata::management::tenantMetadata().tenantMap.getRange(
+				        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1);
+			    }));
+			for (const auto& [tenantId, tenantEntry] : _tenants.results) {
+				ASSERT(tenantEntry.tenantState != metacluster::TenantState::ERROR);
+				if (tenantsInErrorState.contains(tenantEntry.tenantName)) {
+					ASSERT_EQ(metacluster::TenantState::READY, tenantEntry.tenantState);
+				}
 			}
 		}
 
