@@ -2049,7 +2049,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
-			TraceEvent("AddedStorageServerSystemKey").detail("ServerID", server.id());
+			TraceEvent("AddedStorageServerSystemKey")
+			    .detail("ServerID", server.id())
+			    .detail("CommitVersion", tr->getCommittedVersion());
 
 			return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {
@@ -2202,7 +2204,10 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				wait(tr->commit());
-				TraceEvent("RemoveStorageServer").detail("State", "Success").detail("ServerID", serverID);
+				TraceEvent("RemoveStorageServer")
+				    .detail("State", "Success")
+				    .detail("ServerID", serverID)
+				    .detail("CommitVersion", tr->getCommittedVersion());
 				return Void();
 			}
 		} catch (Error& e) {
