@@ -191,24 +191,37 @@ struct AuthzSecurityWorkload : TestWorkload {
 		if (errors)
 			TraceEvent(SevError, "TestFailure").detail("Reason", "There were client errors.");
 		clients.clear();
-		bool success = errors == 0 && crossTenantGetPositive.getValue() > 0 && crossTenantGetNegative.getValue() > 0 &&
-		               crossTenantCommitPositive.getValue() > 0 && crossTenantCommitNegative.getValue() > 0 &&
-		               publicNonTenantRequestPositive.getValue() > 0 && tLogReadNegative.getValue() > 0 &&
-		               keyLocationLeakNegative.getValue() > 0;
-		if (checkBlobGranules) {
-			success &= bgLocationLeakNegative.getValue() > 0 && crossTenantBGLocPositive.getValue() > 0 &&
-			           crossTenantBGLocNegative.getValue() > 0 && crossTenantBGReqPositive.getValue() > 0 &&
-			           crossTenantBGStreamNegative.getValue() > 0 && crossTenantBGStreamPositive.getValue() > 0 &&
-			           crossTenantBGReqNegative.getValue() > 0 && crossTenantBGReadPositive.getValue() > 0 &&
-			           crossTenantBGReadNegative.getValue() > 0 && crossTenantGetGranulesPositive.getValue() > 0 &&
-			           crossTenantGetGranulesNegative.getValue() > 0;
-		}
-		if (checkBlobManagement) {
-			success &= blobbifyNegative.getValue() > 0 && unblobbifyNegative.getValue() > 0 &&
-			           listBlobNegative.getValue() > 0 && verifyBlobNegative.getValue() > 0 &&
-			           flushBlobNegative.getValue() > 0 && purgeBlobNegative.getValue() > 0;
-		}
-		return success;
+
+		// code probes for each type to make sure we have coverage
+		CODE_PROBE(crossTenantGetPositive.getValue(), "AuthzSecurity crossTenantGetPositive >0");
+		CODE_PROBE(crossTenantGetNegative.getValue(), "AuthzSecurity crossTenantGetNegative >0");
+		CODE_PROBE(crossTenantCommitPositive.getValue(), "AuthzSecurity crossTenantCommitPositive > 0");
+		CODE_PROBE(crossTenantCommitNegative.getValue(), "AuthzSecurity crossTenantCommitNegative > 0");
+		CODE_PROBE(publicNonTenantRequestPositive.getValue(), "AuthzSecurity publicNonTenantRequestPositive > 0");
+		CODE_PROBE(tLogReadNegative.getValue(), "AuthzSecurity tLogReadNegative > 0");
+		CODE_PROBE(keyLocationLeakNegative.getValue(), "AuthzSecurity keyLocationLeakNegative > 0");
+
+		CODE_PROBE(bgLocationLeakNegative.getValue(), "AuthzSecurity bgLocationLeakNegative > 0");
+		CODE_PROBE(crossTenantBGLocPositive.getValue(), "AuthzSecurity crossTenantBGLocPositive > 0");
+		CODE_PROBE(crossTenantBGLocNegative.getValue(), "AuthzSecurity crossTenantBGLocNegative > 0");
+		CODE_PROBE(crossTenantBGReqPositive.getValue(), "AuthzSecurity crossTenantBGReqPositive > 0");
+		CODE_PROBE(crossTenantBGStreamNegative.getValue(), "AuthzSecurity crossTenantBGStreamNegative > 0");
+		CODE_PROBE(crossTenantBGStreamPositive.getValue(), "AuthzSecurity crossTenantBGStreamPositive > 0");
+		CODE_PROBE(crossTenantBGReqNegative.getValue(), "AuthzSecurity crossTenantBGReqNegative > 0");
+		CODE_PROBE(crossTenantBGReadPositive.getValue(), "AuthzSecurity crossTenantBGReadPositive > 0");
+		CODE_PROBE(crossTenantBGReadNegative.getValue(), "AuthzSecurity crossTenantBGReadNegative > 0");
+		CODE_PROBE(crossTenantGetGranulesPositive.getValue(), "AuthzSecurity crossTenantGetGranulesPositive > 0");
+		CODE_PROBE(crossTenantGetGranulesNegative.getValue(), "AuthzSecurity crossTenantGetGranulesNegative > 0");
+
+
+		CODE_PROBE(blobbifyNegative.getValue(), "AuthzSecurity blobbifyNegative > 0");
+		CODE_PROBE(unblobbifyNegative.getValue(), "AuthzSecurity unblobbifyNegative > 0");
+		CODE_PROBE(listBlobNegative.getValue(), "AuthzSecurity listBlobNegative > 0");
+		CODE_PROBE(verifyBlobNegative.getValue(), "AuthzSecurity verifyBlobNegative > 0");
+		CODE_PROBE(flushBlobNegative.getValue(), "AuthzSecurity flushBlobNegative > 0");
+		CODE_PROBE(purgeBlobNegative.getValue(), "AuthzSecurity purgeBlobNegative > 0");
+
+		return errors == 0;
 	}
 
 	void getMetrics(std::vector<PerfMetric>& m) override {
