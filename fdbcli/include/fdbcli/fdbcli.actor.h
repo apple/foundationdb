@@ -55,7 +55,7 @@ struct DatabaseConnections {
 	Reference<IDatabase> db;
 	Reference<IDatabase> configDb;
 	ClusterName clusterName;
-	DatabaseConnections() {}
+	DatabaseConnections() = default;
 	DatabaseConnections(Database localDb,
 	                    Reference<IDatabase> db,
 	                    Reference<IDatabase> configDb,

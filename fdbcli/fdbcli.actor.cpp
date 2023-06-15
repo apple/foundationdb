@@ -2296,7 +2296,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						ClusterName clusterName = registrationEntry->name;
 						if (!mgmtDatabase.present()) {
 							if (registrationEntry->clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-								fprintf(stderr, "ERROR: No management cluster information");
+								fprintf(stderr, "ERROR: No management cluster information\n");
 								is_error = true;
 								continue;
 							} else {
