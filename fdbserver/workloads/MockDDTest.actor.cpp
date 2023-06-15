@@ -53,7 +53,7 @@ void MockDDTestWorkload::populateRandomStrategy() {
 		for (int j = 0; j < kCount; ++j) {
 			Key k = doubleToTestKey(i + deterministicRandom()->random01());
 			auto vSize = deterministicRandom()->randomInt(minByteSize, maxByteSize + 1);
-			mgs->set(k, vSize, true);
+			sharedMgs->set(k, vSize, true);
 			mockDbSize += vSize + k.size();
 		}
 	}
@@ -66,7 +66,7 @@ void MockDDTestWorkload::populateLinearStrategy() {
 		int kCount = std::ceil((linearStride * i + linearStartSize) * 1.0 / pSize);
 		for (int j = 0; j < kCount; ++j) {
 			Key k = doubleToTestKey(i + deterministicRandom()->random01());
-			mgs->set(k, minByteSize, true);
+			sharedMgs->set(k, minByteSize, true);
 		}
 		mockDbSize += pSize * kCount;
 	}
@@ -77,7 +77,7 @@ void MockDDTestWorkload::populateFixedStrategy() {
 	for (int i = 0; i < keySpaceCount; ++i) {
 		for (int j = 0; j < minSpaceKeyCount; ++j) {
 			Key k = doubleToTestKey(i + deterministicRandom()->random01());
-			mgs->set(k, minByteSize, true);
+			sharedMgs->set(k, minByteSize, true);
 		}
 	}
 	mockDbSize = keySpaceCount * minSpaceKeyCount * pSize;
@@ -94,7 +94,7 @@ void MockDDTestWorkload::populateMgs() {
 		populateRandomStrategy();
 	}
 	uint64_t totalSize = 0;
-	for (auto& server : mgs->allServers) {
+	for (auto& server : sharedMgs->allServers) {
 		totalSize = server.second->sumRangeSize(allKeys);
 	}
 	TraceEvent("PopulateMockGlobalState")
@@ -112,15 +112,14 @@ Future<Void> MockDDTestWorkload::setup(Database const& cx) {
 	testConfig.simpleConfig = simpleConfig;
 	testConfig.minimumReplication = 1;
 	testConfig.logAntiQuorum = 0;
+	testConfig.singleRegion = true;
 	BasicSimulationConfig dbConfig = generateBasicSimulationConfig(testConfig);
 
-	// initialize mgs
-	mgs = std::make_shared<MockGlobalState>();
-	mgs->maxByteSize = maxByteSize;
-	mgs->minByteSize = minByteSize;
-	mgs->initializeClusterLayout(dbConfig);
-	mgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
-	mock = makeReference<DDMockTxnProcessor>(mgs);
-
+	// initialize sharedMgs
+	sharedMgs = std::make_shared<MockGlobalState>();
+	sharedMgs->maxByteSize = maxByteSize;
+	sharedMgs->minByteSize = minByteSize;
+	sharedMgs->initializeClusterLayout(dbConfig);
+	sharedMgs->initializeAsEmptyDatabaseMGS(dbConfig.db);
 	return Void();
 }
