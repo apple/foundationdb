@@ -644,6 +644,11 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 }
 
 ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRange rangeToCompare) {
+	if (rangeToCompare.empty()) {
+		TraceEvent(SevWarn, "RTAuditStorageShardLocMetadataEmptyInputRange").detail("AuditRange", rangeToCompare);
+		return true;
+	}
+
 	state std::vector<Future<Void>> actors;
 	state AuditGetKeyServersRes keyServerRes;
 	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
@@ -1373,11 +1378,6 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					}
 					tr.reset();
 
-					// Post validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
-					}
-
 				} catch (Error& error) {
 					if (error.code() == error_code_actor_cancelled)
 						throw;
@@ -1702,8 +1702,10 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 
 				// Post validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-					tr.reset(); // Can I reset tr there?
-					bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+					if (!currentKeys.empty()) {
+						tr.reset(); // Can I reset tr there?
+						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+					}
 				}
 
 				dataMove = DataMoveMetaData();
@@ -2781,11 +2783,6 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					wait(tr.commit());
 					TraceEvent(sevDm, "CleanUpDataMovePlaceHolder", dataMoveId).detail("DataMoveID", dataMoveId);
 					throw retry_clean_up_datamove_tombstone_added();
-				}
-
-				// Pre validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-					bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, range));
 				}
 
 				dataMove.setPhase(DataMoveMetaData::Deleting);

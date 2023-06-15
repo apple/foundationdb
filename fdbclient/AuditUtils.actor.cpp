@@ -272,7 +272,6 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
                                                  AuditGetKeyServersRes keyServerRes,
                                                  std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap) {
-
 	std::vector<std::string> errors;
 	std::unordered_map<UID, std::vector<KeyRange>> mapFromKeyServers;
 	std::unordered_map<UID, std::vector<KeyRange>> mapFromServerKeys;
@@ -282,14 +281,15 @@ CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
 	// Decide claimRange and check readAtVersion
 	KeyRange claimRange = keyServerRes.completeRange;
 	for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
+		TraceEvent(SevVerbose, "RTAuditStorageShardLocMetadataGetClaimRange")
+		    .detail("RangeToCompare", rangeToCompare)
+		    .detail("ServerId", ssid)
+		    .detail("ServerKeyCompleteRange", serverKeyRes.completeRange)
+		    .detail("CurrentClaimRange", claimRange);
 		claimRange = claimRange & serverKeyRes.completeRange;
 		ASSERT(serverKeyRes.completeRange.begin == claimRange.begin);
 		ASSERT(!claimRange.empty());
 		ASSERT(keyServerRes.readAtVersion == serverKeyRes.readAtVersion);
-		TraceEvent(SevVerbose, "AuditStorageShardLocMetadataGetClaimRange")
-		    .detail("ServerId", ssid)
-		    .detail("ServerKeyCompleteRange", serverKeyRes.completeRange)
-		    .detail("CurrentClaimRange", claimRange);
 	}
 	// Use claimRange to get mapFromServerKeys and mapFromKeyServers to compare
 	for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
@@ -298,7 +298,7 @@ CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
 			if (overlappingRange.empty()) {
 				continue;
 			}
-			TraceEvent(SevVerbose, "AuditStorageShardLocMetadataAddToServerKeyMap")
+			TraceEvent(SevVerbose, "RTAuditStorageShardLocMetadataAddToServerKeyMap")
 			    .detail("RawRange", range)
 			    .detail("ClaimRange", claimRange)
 			    .detail("Range", overlappingRange)
@@ -314,7 +314,7 @@ CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
 			if (overlappingRange.empty()) {
 				continue;
 			}
-			TraceEvent(SevVerbose, "AuditStorageShardLocMetadataAddToKeyServerMap")
+			TraceEvent(SevVerbose, "RTAuditStorageShardLocMetadataAddToKeyServerMap")
 			    .detail("RawRange", range)
 			    .detail("ClaimRange", claimRange)
 			    .detail("Range", overlappingRange)
