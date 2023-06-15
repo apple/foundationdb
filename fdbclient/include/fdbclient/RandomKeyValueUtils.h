@@ -221,10 +221,13 @@ struct RandomStringSetGeneratorBase : IKeyGenerator {
 		ASSERT(indexGenerator.max > 0);
 		std::set<Key> uniqueKeys;
 		int inserts = 0;
+		// for smaller indexGenerator.max, give it more insert try, as it may not find enough unique keys with 3 * max.
+		// It adds roughly log * 100. For example, even for max is 1, it will try at least 100 times.
+		const uint maxInsertTry = 3 * indexGenerator.max + (((sizeof(uint) * 8) - clz(indexGenerator.max)) * 100);
 		while (uniqueKeys.size() < indexGenerator.max) {
 			auto k = keyGen.next();
 			uniqueKeys.insert(k);
-			if (++inserts > 3 * indexGenerator.max) {
+			if (++inserts > maxInsertTry) {
 				// StringGenerator cardinality is too low, unable to find enough unique keys.
 				ASSERT(false);
 			}
