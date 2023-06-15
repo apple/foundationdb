@@ -643,7 +643,9 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 	}
 }
 
-ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRange rangeToCompare) {
+ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
+                                                          KeyRange rangeToCompare,
+                                                          std::string context) {
 	if (rangeToCompare.empty()) {
 		TraceEvent(SevWarn, "RTAuditStorageShardLocMetadataEmptyInputRange").detail("AuditRange", rangeToCompare);
 		return true;
@@ -687,6 +689,7 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRa
 			// Return result
 			if (!comparedRes.errors.empty()) {
 				TraceEvent(SevError, "RTAuditStorageShardLocMetadataError")
+				    .detail("Context", context)
 				    .detail("AuditRange", rangeToCompare)
 				    .detail("NumErrors", comparedRes.errors.size())
 				    .detail("Version", keyServerRes.readAtVersion)
@@ -698,6 +701,7 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRa
 					iterationCount++;
 					if (now() - beginTime > 0.5) {
 						TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataFailed")
+						    .detail("Context", context)
 						    .detail("AuditRange", rangeToCompare)
 						    .detail("Version", keyServerRes.readAtVersion)
 						    .detail("IterationCount", iterationCount)
@@ -706,6 +710,7 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRa
 					}
 				} else { // complete
 					TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataDone")
+					    .detail("Context", context)
 					    .detail("AuditRange", rangeToCompare)
 					    .detail("Version", keyServerRes.readAtVersion)
 					    .detail("IterationCount", iterationCount)
@@ -722,6 +727,7 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr, KeyRa
 		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
 		    .errorUnsuppressed(e)
+		    .detail("Context", context)
 		    .detail("AuditRange", rangeToCompare);
 	}
 
@@ -1113,7 +1119,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 
 					// Pre validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+						bool consistent =
+						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "finishMoveKeys_precheck"));
 					}
 
 					// printf("  finishMoveKeys( '%s'-'%s' ): read keyServers at %lld\n", keys.begin.toString().c_str(),
@@ -1371,7 +1378,8 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 						// Post validate consistency of update of keyServers and serverKeys
 						if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 							tr.reset();
-							bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+							bool consistent = wait(
+							    auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "finishMoveKeys_postcheck"));
 						}
 
 						break;
@@ -1531,7 +1539,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (!currentKeys.empty()) {
 					// Pre validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+						bool consistent =
+						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "startMoveShards_precheck"));
 					}
 
 					const int rowLimit = SERVER_KNOBS->MOVE_SHARD_KRM_ROW_LIMIT;
@@ -1704,7 +1713,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 					if (!currentKeys.empty()) {
 						tr.reset(); // Can I reset tr there?
-						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys));
+						bool consistent =
+						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "startMoveShards_postcheck"));
 					}
 				}
 
@@ -1899,7 +1909,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 				// Pre validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
-					bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, range));
+					bool consistent =
+					    wait(auditKeyServersAndServerKeysInRealTime(&tr, range, "finishMoveShards_precheck"));
 				}
 
 				for (int currentIndex = 0; currentIndex < keyServers.size() - 1; ++currentIndex) {
@@ -2103,7 +2114,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 						tr.reset(); // can I reset tr there?
-						bool consistent = wait(auditKeyServersAndServerKeysInRealTime(&tr, range));
+						bool consistent =
+						    wait(auditKeyServersAndServerKeysInRealTime(&tr, range, "finishMoveShards_postcheck"));
 					}
 
 					if (complete) {
