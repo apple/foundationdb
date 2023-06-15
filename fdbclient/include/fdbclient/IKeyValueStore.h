@@ -78,7 +78,9 @@ public:
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
 
 	// Replace the specified range, the default implementation ignores `blockRange` and writes the key one by one.
-	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) = 0;
+	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+		throw not_implemented();
+	}
 
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
