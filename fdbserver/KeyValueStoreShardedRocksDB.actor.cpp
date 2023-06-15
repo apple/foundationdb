@@ -974,6 +974,8 @@ public:
 			return status;
 		}
 
+		TraceEvent("ShardedRocksDBOpen").detail("Duraton", now() - start).detail("NumCFs", descriptors.size());
+
 		if (foundMetadata) {
 			TraceEvent(SevInfo, "ShardedRocksInitLoadPhysicalShards", this->logId)
 			    .detail("PhysicalShardCount", handles.size());
@@ -999,7 +1001,7 @@ public:
 				const int bytes = readRangeInDb(metadataShard.get(),
 				                                keyRange,
 				                                std::max(2, SERVER_KNOBS->ROCKSDB_READ_RANGE_ROW_LIMIT),
-				                                UINT16_MAX,
+				                                SERVER_KNOBS->SHARD_METADATA_SCAN_BYTES_LIMIT,
 				                                &metadata);
 				if (bytes <= 0) {
 					break;
@@ -1580,6 +1582,11 @@ public:
 	}
 
 	void validate() {
+		if (SERVER_KNOBS->SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO <= 0 ||
+		    deterministicRandom()->random01() > SERVER_KNOBS->SHARDED_ROCKSDB_VALIDATE_MAPPING_RATIO) {
+			return;
+		}
+
 		TraceEvent(SevVerbose, "ShardedRocksValidateShardManager", this->logId);
 		for (auto s = dataShardMap.ranges().begin(); s != dataShardMap.ranges().end(); ++s) {
 			TraceEvent e(SevVerbose, "ShardedRocksValidateDataShardMap", this->logId);
@@ -1593,7 +1600,7 @@ public:
 			}
 			if (shard != nullptr) {
 				if (shard->range != static_cast<KeyRangeRef>(s->range())) {
-					TraceEvent(SevWarn, "ShardRangeMismatch").detail("Range", s->range());
+					TraceEvent(SevWarnAlways, "ShardRangeMismatch").detail("Range", s->range());
 				}
 
 				ASSERT(shard->range == static_cast<KeyRangeRef>(s->range()));
