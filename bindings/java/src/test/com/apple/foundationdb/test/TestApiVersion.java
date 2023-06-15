@@ -28,5 +28,5 @@ public class TestApiVersion {
     /**
      * The current API version to be used by the tests
      */
-	public static final int CURRENT = 730;
+	public static final int CURRENT = 740;
 }

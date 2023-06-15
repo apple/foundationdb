@@ -568,7 +568,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         test.api_version = api_version_from_str(PREV_RELEASE_VERSION)
         test.exec()
         test.check_initialization_state("created")
-        test.check_healthy_status(False)
+        test.check_healthy_status(True)
         test.check_available_clients([PREV_RELEASE_VERSION, CURRENT_VERSION])
         test.check_current_client(PREV_RELEASE_VERSION)
 
@@ -576,7 +576,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
         # Leaving an unsupported API version
         test = ClientConfigTest(self)
         test.create_external_lib_path(PREV_RELEASE_VERSION)
-        test.expected_error = 2204  # API function missing
+        test.expected_error = 2203  # api_version_not_supported
         test.exec()
 
     def test_external_client_unsupported_api_ignore(self):
@@ -737,7 +737,7 @@ class ClientTracingTests(unittest.TestCase):
         test.create_external_lib_dir([CURRENT_VERSION, PREV_RELEASE_VERSION])
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
-        test.expected_error = 2204  # API function missing
+        test.expected_error = 2203  # api_version_not_supported
 
         self.exec_test()
         self.assertEqual(0, len(self.trace_files))
@@ -773,7 +773,7 @@ class ClientTracingTests(unittest.TestCase):
         test.api_version = api_version_from_str(CURRENT_VERSION)
         test.disable_local_client = True
         test.trace_initialize_on_setup = True
-        test.expected_error = 2204  # API function missing
+        test.expected_error = 2203  # api_version_not_supported
 
         self.exec_test()
         self.assertEqual(1, len(self.trace_files))
