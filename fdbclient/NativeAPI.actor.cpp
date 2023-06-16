@@ -1364,7 +1364,7 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 	}
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<ValueReadResult> getJSON(Database db);
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
@@ -9561,7 +9561,7 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	if (!cx->getConnectionRecord())
 		return 0;
 	// fetch all workers' addresses and interfaces from CC
-	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
+	RangeReadResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// map worker network address to its interface
 	state std::map<Key, ClientWorkerInterface> workerInterfaces;
