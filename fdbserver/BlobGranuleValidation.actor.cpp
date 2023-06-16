@@ -383,16 +383,17 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 
 				// client req may not exactly align to granules - buggify this behavior
 				if (BUGGIFY_WITH_PROB(0.1)) {
-					if (deterministicRandom()->coinflip()) {
-						startKey = keyAfter(startKey);
-					}
 					// extend end (if there are granules in that space)
 					if (targetStart + targetRanges < granules.size() && deterministicRandom()->coinflip()) {
 						endKey = keyAfter(endKey);
 					}
+					if (deterministicRandom()->coinflip() && keyAfter(startKey) < endKey) {
+						startKey = keyAfter(startKey);
+					}
 				}
 
 				toFlush = KeyRangeRef(startKey, endKey);
+				ASSERT(!toFlush.empty());
 			}
 
 			break;
