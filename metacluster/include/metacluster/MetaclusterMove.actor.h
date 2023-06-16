@@ -391,10 +391,10 @@ struct SwitchTenantMovementImpl {
 		state KeyRef end = "\xff"_sr;
 		// what should limit be?
 		state int64_t limit = 100000;
-		state ThreadFuture<RangeResult> srcFuture;
-		state ThreadFuture<RangeResult> dstFuture;
-		state RangeResult srcRange;
-		state RangeResult dstRange;
+		state ThreadFuture<RangeReadResult> srcFuture;
+		state ThreadFuture<RangeReadResult> dstFuture;
+		state RangeReadResult srcRange;
+		state RangeReadResult dstRange;
 		loop {
 			srcFuture = srcTr->getRange(KeyRangeRef(begin, end), limit);
 			dstFuture = dstTr->getRange(KeyRangeRef(begin, end), limit);

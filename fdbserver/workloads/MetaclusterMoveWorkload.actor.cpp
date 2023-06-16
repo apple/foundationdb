@@ -357,7 +357,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			    makeReference<ReadYourWritesTransaction>(dstDb, makeReference<Tenant>(tId));
 			srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state RangeResult srcRange = wait(srcTr->getRange(normalKeys, 0));
+			state RangeReadResult srcRange = wait(srcTr->getRange(normalKeys, 0));
 			try {
 				for (const auto& [k, v] : srcRange) {
 					dstTr->set(k, v);
