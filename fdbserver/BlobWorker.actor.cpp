@@ -45,7 +45,7 @@
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/WaitFailure.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 
 #include "flow/Arena.h"
 #include "flow/CompressionUtils.h"

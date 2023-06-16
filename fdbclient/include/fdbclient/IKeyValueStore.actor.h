@@ -1,5 +1,5 @@
 /*
- * IKeyValueStore.h
+ * IKeyValueStore.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,16 +18,23 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_IKEYVALUESTORE_H
-#define FDBCLIENT_IKEYVALUESTORE_H
-#include "flow/Trace.h"
 #pragma once
 
+#if defined(NO_INTELLISENSE) && !defined(FDBCLIENT_IKEYVALUESTORE_ACTOR_G_H)
+#define FDBCLIENT_IKEYVALUESTORE_ACTOR_G_H
+#include "fdbclient/IKeyValueStore.actor.g.h"
+#elif !defined(FDBCLIENT_IKEYVALUESTORE_ACTOR_H)
+#define FDBCLIENT_IKEYVALUESTORE_ACTOR_H
+
+#include "flow/Trace.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/IClosable.h"
 #include "fdbclient/KeyRangeMap.h"
+#include "flow/flow.h"
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
@@ -43,6 +50,10 @@ struct CheckpointRequest {
 	                  const std::string& checkpointDir)
 	  : version(version), ranges(ranges), format(format), checkpointID(id), checkpointDir(checkpointDir) {}
 };
+
+ACTOR static Future<Void> replaceRange_impl(class IKeyValueStore* self,
+                                            KeyRange range,
+                                            Standalone<VectorRef<KeyValueRef>> data);
 
 class IKeyValueStore : public IClosable {
 public:
@@ -78,7 +89,9 @@ public:
 	virtual std::vector<std::string> removeRange(KeyRangeRef range) { return std::vector<std::string>(); }
 
 	// Replace the specified range, the default implementation ignores `blockRange` and writes the key one by one.
-	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data);
+	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
+	return replaceRange_impl(this, range, data);
+}
 
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
@@ -142,60 +155,25 @@ protected:
 	virtual ~IKeyValueStore() {}
 };
 
-extern IKeyValueStore* keyValueStoreSQLite(std::string const& filename,
-                                           UID logID,
-                                           KeyValueStoreType storeType,
-                                           bool checkChecksums = false,
-                                           bool checkIntegrity = false);
-extern IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
-                                              UID logID,
-                                              Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                                              Optional<EncryptionAtRestMode> encryptionMode = {},
-                                              int64_t pageCacheBytes = 0);
-extern IKeyValueStore* keyValueStoreRocksDB(std::string const& path,
-                                            UID logID,
-                                            KeyValueStoreType storeType,
-                                            bool checkChecksums = false,
-                                            bool checkIntegrity = false);
-extern IKeyValueStore* keyValueStoreShardedRocksDB(std::string const& path,
-                                                   UID logID,
-                                                   KeyValueStoreType storeType,
-                                                   bool checkChecksums = false,
-                                                   bool checkIntegrity = false);
-extern IKeyValueStore* keyValueStoreMemory(std::string const& basename,
-                                           UID logID,
-                                           int64_t memoryLimit,
-                                           std::string ext = "fdq",
-                                           KeyValueStoreType storeType = KeyValueStoreType::MEMORY);
-extern IKeyValueStore* keyValueStoreLogSystem(class IDiskQueue* queue,
-                                              Reference<AsyncVar<struct ServerDBInfo> const> db,
-                                              UID logID,
-                                              int64_t memoryLimit,
-                                              bool disableSnapshot,
-                                              bool replaceContent,
-                                              bool exactRecovery,
-                                              bool enableEncryption);
+ACTOR static Future<Void> replaceRange_impl(IKeyValueStore* self,
+                                            KeyRange range,
+                                            Standalone<VectorRef<KeyValueRef>> data) {
+	state int sinceYield = 0;
+	state const KeyValueRef* kvItr = data.begin();
+	state KeyRangeRef rangeRef = range;
+	if (rangeRef.empty()) {
+		return Void();
+	}
+	self->clear(rangeRef);
+	for (; kvItr != data.end(); kvItr++) {
+		self->set(*kvItr);
+		if (++sinceYield > 1000) {
+			wait(yield());
+			sinceYield = 0;
+		}
+	}
+	return Void();
+}
 
-extern IKeyValueStore* openRemoteKVStore(KeyValueStoreType storeType,
-                                         std::string const& filename,
-                                         UID logID,
-                                         int64_t memoryLimit,
-                                         bool checkChecksums = false,
-                                         bool checkIntegrity = false);
-
-IKeyValueStore* openKVStore(KeyValueStoreType storeType,
-                            std::string const& filename,
-                            UID logID,
-                            int64_t memoryLimit,
-                            bool checkChecksums = false,
-                            bool checkIntegrity = false,
-                            bool openRemotely = false,
-                            Reference<AsyncVar<struct ServerDBInfo> const> db = {},
-                            Optional<EncryptionAtRestMode> encryptionMode = {},
-                            int64_t pageCacheBytes = 0);
-
-void GenerateIOLogChecksumFile(std::string filename);
-Future<Void> KVFileCheck(std::string const& filename, bool const& integrity);
-Future<Void> KVFileDump(std::string const& filename);
-
+#include "flow/unactorcompiler.h"
 #endif
