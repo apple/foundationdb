@@ -87,6 +87,9 @@ public:
 
 	Future<Void> testRawFinishMovement(MoveKeysParams& params,
 	                                   const std::map<UID, StorageServerInterface>& tssMapping) {
+		for (auto& id : params.destinationTeam) {
+			mgs->allServers.at(id)->setShardStatus(params.keys.get(), MockShardStatus::FETCHED);
+		}
 		return rawFinishMovement(params, tssMapping);
 	}
 };
@@ -111,8 +114,6 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	bool enabled;
 	bool testStartOnly;
 	double testDuration;
-	double meanDelay = 0.05;
-	double maxKeyspace = 0.1;
 	DDSharedContext ddContext;
 
 	std::shared_ptr<DDTxnProcessorTester> real;
@@ -120,13 +121,14 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	std::shared_ptr<DDMockTxnProcessorTester> mock;
 
 	Reference<InitialDataDistribution> realInitDD;
-	std::set<Key> boundaries;
+	std::vector<Key> boundaries;
+
+	// counters
+	int testRawStart = 0, testAll = 0, testRawFinish = 0;
 
 	IDDTxnProcessorApiWorkload(WorkloadContext const& wcx) : TestWorkload(wcx), ddContext(UID()) {
 		enabled = !clientId && g_network->isSimulated(); // only do this on the "first" client
 		testDuration = getOption(options, "testDuration"_sr, 10.0);
-		meanDelay = getOption(options, "meanDelay"_sr, meanDelay);
-		maxKeyspace = getOption(options, "maxKeyspace"_sr, maxKeyspace);
 		testStartOnly = getOption(options, "testStartOnly"_sr, false);
 	}
 
@@ -136,7 +138,9 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 	// This workload is not compatible with RandomMoveKeys workload because they will race in changing the DD mode.
 	// Other workload injections may make no sense because this workload only use the DB at beginning to reading the
 	// real world key-server mappings. It's not harmful to leave other workload injection enabled for now, though.
-	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.insert("RandomMoveKeys"); }
+	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override {
+		out.insert({ "RandomMoveKeys", "Attrition" });
+	}
 
 	ACTOR static Future<Void> readRealInitialDataDistribution(IDDTxnProcessorApiWorkload* self) {
 		loop {
@@ -164,35 +168,27 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	// according to boundaries, generate valid ranges for moveKeys operation
 	KeyRange getRandomKeys() const {
+		int choice = deterministicRandom()->randomInt(0, 3);
 		// merge or split operations
 		Key begin, end;
-		if (deterministicRandom()->coinflip()) {
+		if (choice == 0) {
 			// pure move
-			if (boundaries.size() == 2) {
-				begin = *boundaries.begin();
-				end = *boundaries.rbegin();
-			} else {
-				// merge shard
-				int a = deterministicRandom()->randomInt(0, boundaries.size() - 1);
-				int b = deterministicRandom()->randomInt(a + 1, boundaries.size());
-				auto it = boundaries.begin();
-				std::advance(it, a);
-				begin = *it;
-				std::advance(it, b - a);
-				end = *it;
-			}
+			int idx = deterministicRandom()->randomInt(0, boundaries.size() - 1);
+			begin = boundaries[idx];
+			end = boundaries[idx + 1];
+		} else if (choice == 1) {
+			// merge shard
+			int a = deterministicRandom()->randomInt(0, boundaries.size() - 1);
+			int b = deterministicRandom()->randomInt(a + 1, boundaries.size());
+			begin = boundaries[a];
+			end = boundaries[b];
 		} else {
 			// split
-			double start = deterministicRandom()->random01() * this->maxKeyspace;
+			double start = deterministicRandom()->random01();
 			begin = doubleToTestKey(start);
-			auto it = boundaries.upper_bound(begin);
+			auto it = std::upper_bound(boundaries.begin(), boundaries.end(), begin);
 			ASSERT(it != boundaries.end()); // allKeys.end is larger than any random keys here
-
-			double len = deterministicRandom()->random01() * (1 - maxKeyspace);
-			end = doubleToTestKey(start + len);
-			if (end > *it || deterministicRandom()->coinflip()) {
-				end = *it;
-			}
+			end = *it;
 		}
 
 		return KeyRangeRef(begin, end);
@@ -214,9 +210,11 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 
 	void updateBoundaries() {
 		boundaries.clear();
+		std::set<Key> tempBoundaries;
 		for (auto& shard : realInitDD->shards) {
-			boundaries.insert(boundaries.end(), shard.key);
+			tempBoundaries.insert(tempBoundaries.end(), shard.key);
 		}
+		boundaries = std::vector<Key>(tempBoundaries.begin(), tempBoundaries.end());
 	}
 
 	ACTOR Future<Void> _setup(Database cx, IDDTxnProcessorApiWorkload* self) {
@@ -285,31 +283,39 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		state FlowLock fl2(1);
 		state std::map<UID, StorageServerInterface> emptyTssMapping;
 		state Reference<InitialDataDistribution> mockInitData;
-		state MoveKeysParams params = wait(generateMoveKeysParams(self));
-		params.startMoveKeysParallelismLock = &fl1;
-		params.finishMoveKeysParallelismLock = &fl2;
-		params.relocationIntervalId = relocateShardInterval.pairID;
+		state MoveKeysParams realParams = wait(generateMoveKeysParams(self));
+		realParams.startMoveKeysParallelismLock = &fl1;
+		realParams.finishMoveKeysParallelismLock = &fl2;
+		realParams.relocationIntervalId = relocateShardInterval.pairID;
 		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID)
-		    .detail("Key", params.keys)
-		    .detail("Dest", params.destinationTeam);
+		    .detail("Key", realParams.keys)
+		    .detail("Dest", realParams.destinationTeam);
+
+		state MoveKeysParams mockParams = realParams;
+		mockParams.dataMovementComplete = Promise<Void>();
 
 		loop {
-			params.dataMovementComplete.reset();
-			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
+			realParams.dataMovementComplete.reset();
+			mockParams.dataMovementComplete.reset();
+
+			wait(store(realParams.lock, self->real->takeMoveKeysLock(UID())));
 			try {
 				// test start
-				wait(self->mock->testRawStartMovement(params, emptyTssMapping));
-				wait(self->real->testRawStartMovement(params, emptyTssMapping));
+				wait(self->mock->testRawStartMovement(mockParams, emptyTssMapping));
+				wait(self->real->testRawStartMovement(realParams, emptyTssMapping));
 
-				self->verifyServerKeyDest(params);
+				self->verifyServerKeyDest(realParams);
 				// test finish or started but cancelled movement
 				if (self->testStartOnly || deterministicRandom()->coinflip()) {
 					CODE_PROBE(true, "RawMovementApi partial started");
+					self->testRawStart++;
 					break;
 				}
 
-				wait(self->mock->testRawFinishMovement(params, emptyTssMapping));
-				wait(self->real->testRawFinishMovement(params, emptyTssMapping));
+				// The real transaction should finish first because mock transaction will always success.
+				wait(self->real->testRawFinishMovement(realParams, emptyTssMapping));
+				wait(self->mock->testRawFinishMovement(mockParams, emptyTssMapping));
+				self->testRawFinish++;
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_movekeys_conflict)
@@ -379,20 +385,25 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		state FlowLock fl2(1);
 		state std::map<UID, StorageServerInterface> emptyTssMapping;
 		state Reference<InitialDataDistribution> mockInitData;
-		state MoveKeysParams params = wait(generateMoveKeysParams(self));
-		params.startMoveKeysParallelismLock = &fl1;
-		params.finishMoveKeysParallelismLock = &fl2;
-		params.relocationIntervalId = relocateShardInterval.pairID;
+		state MoveKeysParams realParams = wait(generateMoveKeysParams(self));
+		realParams.startMoveKeysParallelismLock = &fl1;
+		realParams.finishMoveKeysParallelismLock = &fl2;
+		realParams.relocationIntervalId = relocateShardInterval.pairID;
 		TraceEvent(SevDebug, relocateShardInterval.begin(), relocateShardInterval.pairID)
-		    .detail("Key", params.keys)
-		    .detail("Dest", params.destinationTeam);
+		    .detail("Key", realParams.keys)
+		    .detail("Dest", realParams.destinationTeam);
+
+		state MoveKeysParams mockParams = realParams;
+		mockParams.dataMovementComplete = Promise<Void>();
 
 		loop {
-			params.dataMovementComplete.reset();
-			wait(store(params.lock, self->real->takeMoveKeysLock(UID())));
+			realParams.dataMovementComplete.reset();
+			mockParams.dataMovementComplete.reset();
+			wait(store(realParams.lock, self->real->takeMoveKeysLock(UID())));
 			try {
-				wait(self->mock->moveKeys(params));
-				wait(self->real->moveKeys(params));
+				wait(self->mock->moveKeys(mockParams));
+				wait(self->real->moveKeys(realParams));
+				self->testAll++;
 				break;
 			} catch (Error& e) {
 				if (e.code() != error_code_movekeys_conflict)
@@ -439,7 +450,11 @@ struct IDDTxnProcessorApiWorkload : TestWorkload {
 		return tag(delay(testDuration / 2), true);
 	} // Give the database time to recover from our damage
 
-	void getMetrics(std::vector<PerfMetric>& m) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.emplace_back("TestRawStart", testRawStart, Averaged::False);
+		m.emplace_back("TestRawFinish", testRawFinish, Averaged::False);
+		m.emplace_back("TestRawAll", testAll, Averaged::False);
+	}
 };
 
 WorkloadFactory<IDDTxnProcessorApiWorkload> IDDTxnProcessorApiWorkload;
