@@ -215,7 +215,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 
 	req.options = readOptions;
 
-	DisabledTraceEvent("ConsistencyCheck_ReadDataStart")
+	DisabledTraceEvent("ConsistencyCheck_ReadDataStart", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Servers", storageServerInterfaces->size());
@@ -237,10 +237,10 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	    storageServerInterfaces->size() > 1 && g_network->isSimulated() && consistencyCheckStartVersion.present() &&
 	    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption &&
 	    g_simulator->consistencyScanCorruptRequestKey.present() && g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get() == myId &&
+	    g_simulator->consistencyScanCorruptor.get().first == myId &&
 	    range.contains(g_simulator->consistencyScanCorruptRequestKey.get());
 	if (expectInjected) {
-		TraceEvent(SevWarnAlways, "ConsistencyScanExpectingInjectedCorruption")
+		TraceEvent(SevWarnAlways, "ConsistencyScanExpectingInjectedCorruption", myId)
 		    .detail("StorageServers", storageServerInterfaces->size())
 		    .detail("ScanState", g_simulator->consistencyScanState)
 		    .detail("CorruptKey", g_simulator->consistencyScanCorruptRequestKey.get())
@@ -258,14 +258,14 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 		// Compare the results with other storage servers
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
 			state GetKeyValuesReply current = rangeResult.get();
-			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream")
+			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
 			    .detail("DataSize", current.data.size())
 			    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id());
 			*totalReadAmount += current.data.expectedSize();
 			// If we haven't encountered a valid storage server yet, then mark this as the baseline
 			// to compare against
 			if (!firstValidServer->present()) {
-				DisabledTraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
+				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
 				*firstValidServer = j;
 				// Compare this shard against the first
 			} else {
@@ -439,7 +439,8 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 					}
 
 					TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
-					           "ConsistencyCheck_DataInconsistent")
+					           "ConsistencyCheck_DataInconsistent",
+					           myId)
 					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
 					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
 					            (*storageServerInterfaces)[firstValidServer->get()].id())
@@ -462,7 +463,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 						foundInjected = true;
 						CODE_PROBE(true, "consistency check detected injected corruption");
 						// we found the injected corruption, clear the state
-						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption")
+						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
 						    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
 						    .detail("Version", req.version);
 						g_simulator->updateConsistencyScanState(
@@ -490,7 +491,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	if (expectInjected && !foundInjected) {
 		if (allSucceeded) {
 			// should for sure have found it
-			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption");
+			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
 			CODE_PROBE(true,
 			           "consistency check potentially missed injected corruption due to failures",
@@ -501,7 +502,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 		}
 	}
 
-	DisabledTraceEvent("ConsistencyCheck_ReadDataDone")
+	DisabledTraceEvent("ConsistencyCheck_ReadDataDone", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("FirstValidServer", firstValidServer->present() ? firstValidServer->get() : -1);
@@ -793,7 +794,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 									}
 								}
 								g_simulator->consistencyScanCorruptRequestKey = corruptKey;
-								g_simulator->consistencyScanCorruptor = memState->csId;
+								std::pair<UID, NetworkAddress> meCorruptor = { memState->csId,
+									                                           g_network->getLocalAddress() };
+								g_simulator->consistencyScanCorruptor = meCorruptor;
 								g_simulator->updateConsistencyScanState(
 								    ISimulator::SimConsistencyScanState::Enabled,
 								    ISimulator::SimConsistencyScanState::Enabled_InjectCorruption);
@@ -987,7 +990,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					//            json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON())));
 					break;
 				} catch (Error& e) {
-					TraceEvent("ConsistencyScan_ScanLoopError", memState->csId).error(e);
+					TraceEvent("ConsistencyScan_ScanLoopError", memState->csId).errorUnsuppressed(e);
 					if (e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server ||
 					    e.code() == error_code_all_alternatives_failed || e.code() == error_code_process_behind) {
 						// sleep for a bit extra
@@ -1108,7 +1111,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 		return;
 	}
 	if (g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get() == memState->csId) {
+	    g_simulator->consistencyScanCorruptor.get().first == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
 		CODE_PROBE(
 		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
@@ -1131,6 +1134,18 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	if (g_network->isSimulated()) {
 		actors.add(sometimesRandomlyClearStatsInSim(db, memState));
 		// TODO:  Reconfigure cs.rangeConfig() randomly
+
+		// Check if previous consistency scan was terminated without getting actor_cancelled in the middle of a
+		// corruption injection
+		if (g_simulator->consistencyScanCorruptor.present() &&
+		    csInterf.id() != g_simulator->consistencyScanCorruptor.get().first &&
+		    g_simulator->getProcessByAddress(g_simulator->consistencyScanCorruptor.get().second)->failed &&
+		    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption) {
+			TraceEvent("ConsistencyScan_ResetCorruptionOnPreviousScanDeath");
+			// noop if state isn't already Enabled_InjectCorruption
+			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
+			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+		}
 	}
 
 	loop {

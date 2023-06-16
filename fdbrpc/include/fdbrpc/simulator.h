@@ -392,7 +392,7 @@ public:
 	Optional<UID> consistencyScanInjectedCorruptionDestination;
 	Optional<bool> doInjectConsistencyScanCorruption;
 	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
-	Optional<UID> consistencyScanCorruptor;
+	Optional<std::pair<UID, NetworkAddress>> consistencyScanCorruptor;
 
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
