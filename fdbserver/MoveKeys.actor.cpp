@@ -374,6 +374,154 @@ ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> f
 	return Optional<UID>(uid);
 }
 
+FDB_BOOLEAN_PARAM(ShardAssigned);
+
+ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
+                                           KeyRange keyServerRange,
+                                           UID ssid,
+                                           ShardAssigned shardAssigned,
+                                           std::string context) {
+	if (keyServerRange.empty()) {
+		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", keyServerRange);
+		return true;
+	}
+	state std::vector<std::string> errors;
+	state AuditGetServerKeysRes serverKeysRes;
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+	try {
+		wait(store(serverKeysRes, getThisServerKeysFromServerKeys(ssid, tr, keyServerRange)));
+		ASSERT(serverKeysRes.completeRange == keyServerRange);
+		std::vector<KeyRange> keyServerRangesToCompare = { keyServerRange };
+		Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
+		    rangesSame(keyServerRangesToCompare, serverKeysRes.ownRanges);
+		if (anyMismatch.present()) { // mismatch detected
+			KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
+			KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
+			std::string error = format("Location metadata mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+			                           ssid.toString().c_str(),
+			                           mismatchedRangeByKeyServer.toString().c_str(),
+			                           mismatchedRangeByServerKey.toString().c_str());
+			errors.push_back(error);
+			TraceEvent(SevError, "ValidateRangeAssignmentError")
+			    .detail("AuditRange", keyServerRange)
+			    .detail("ErrorMessage", error)
+			    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
+			    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
+		}
+		// Check result
+		if (!errors.empty()) {
+			TraceEvent(SevError, "ValidateRangeAssignmentError")
+			    .detail("Context", context)
+			    .detail("AuditRange", keyServerRange)
+			    .detail("NumErrors", errors.size());
+			return false;
+		} else {
+			TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
+			    .detail("Context", context)
+			    .detail("AuditRange", keyServerRange);
+		}
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return true; // sliently exit
+		}
+		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
+		    .errorUnsuppressed(e)
+		    .detail("Context", context)
+		    .detail("AuditRange", keyServerRange);
+		throw audit_storage_failed();
+	}
+	return true;
+}
+
+ACTOR Future<bool> validateLocationMetadata(Transaction* tr, KeyRange rangeToCompare, std::string context) {
+	if (rangeToCompare.empty()) {
+		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", rangeToCompare);
+		return true;
+	}
+
+	state std::vector<Future<Void>> actors;
+	state AuditGetKeyServersRes keyServerRes;
+	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
+	state Key rangeToReadBegin = rangeToCompare.begin;
+	state KeyRangeRef rangeToRead;
+	state int iterationCount = 1;
+	state double beginTime = now();
+	// Note that since krmReadRange may not return the value of the entire range at a time
+	// Given req.range, a part of the range is returned, thus, only a part of the range is
+	// able to be compared --- comparedRes.comparedRange
+	// Given comparedRes.comparedRange, rangeToRead is decided for reading the remaining range
+	// At beginning, rangeToRead is req.range
+
+	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+
+	try {
+		while (true) {
+			actors.clear();
+			serverKeyResMap.clear();
+
+			// Read KeyServers and ServerKeys
+			rangeToRead = KeyRangeRef(rangeToReadBegin, rangeToCompare.end);
+			wait(store(keyServerRes, getShardMapFromKeyServers(UID(), tr, rangeToRead)));
+			// Use ssid of keyServerRes.rangeOwnershipMap to read ServerKeys
+			for (auto& [ssid, _] : keyServerRes.rangeOwnershipMap) {
+				actors.push_back(store(serverKeyResMap[ssid],
+				                       getThisServerKeysFromServerKeys(ssid, tr, keyServerRes.completeRange)));
+			}
+			wait(waitForAll(actors));
+
+			// Compare if keyServerRes === serverKeyResMap at comparedRes.claimRange
+			// req.range is used for logging errors
+			CompareKSandSKRes comparedRes =
+			    compareKeyServersAndServerKeys(rangeToCompare, keyServerRes, serverKeyResMap);
+
+			// Return result
+			if (!comparedRes.errors.empty()) {
+				TraceEvent(SevError, "ValidateRangeAssignmentError")
+				    .detail("Context", context)
+				    .detail("AuditRange", rangeToCompare)
+				    .detail("NumErrors", comparedRes.errors.size())
+				    .detail("Version", keyServerRes.readAtVersion)
+				    .detail("ErrorRange", comparedRes.comparedRange);
+				return false;
+			} else {
+				if (comparedRes.comparedRange.end < rangeToCompare.end) {
+					rangeToReadBegin = comparedRes.comparedRange.end;
+					iterationCount++;
+					if (now() - beginTime > 0.5) {
+						TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
+						    .detail("Context", context)
+						    .detail("AuditRange", rangeToCompare)
+						    .detail("Version", keyServerRes.readAtVersion)
+						    .detail("IterationCount", iterationCount)
+						    .detail("TimeCost", now() - beginTime);
+						throw timed_out();
+					}
+				} else { // complete
+					TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
+					    .detail("Context", context)
+					    .detail("AuditRange", rangeToCompare)
+					    .detail("Version", keyServerRes.readAtVersion)
+					    .detail("IterationCount", iterationCount)
+					    .detail("TimeCost", now() - beginTime);
+					break;
+				}
+			}
+		}
+
+	} catch (Error& e) {
+		if (e.code() == error_code_actor_cancelled) {
+			return true; // sliently exit
+		}
+		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
+		    .errorUnsuppressed(e)
+		    .detail("Context", context)
+		    .detail("AuditRange", rangeToCompare);
+		throw audit_storage_failed();
+	}
+
+	return true;
+}
+
 // Cleans up dest servers of a single shard, and unassigns the keyrange from the dest servers if necessary.
 ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               KeyRange keys,
@@ -383,6 +531,8 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
                                               const DDEnabledState* ddEnabledState) {
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
+
+	state int auditStorageFailedCount = 0;
 
 	loop {
 		state Transaction tr(occ);
@@ -406,13 +556,35 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				throw operation_cancelled();
 			}
 
-			std::vector<UID> src;
-			std::vector<UID> dest;
-			UID srcId, destId;
+			state std::vector<UID> src;
+			state std::vector<UID> dest;
+			state UID srcId;
+			state UID destId;
 			decodeKeyServersValue(UIDtoTagMap, currentShards[0].value, src, dest, srcId, destId);
 
 			if (dest.empty() || destId != anonymousShardId) {
 				return Void();
+			}
+
+			// Pre validate consistency of update of keyServers and serverKeys
+			if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
+			    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+				state std::vector<Future<Void>> validationActors;
+				state std::unordered_map<UID, bool> validationResult;
+				for (auto& ssid : src) {
+					validationActors.push_back(
+					    store(validationResult[ssid],
+					          validateRangeAssignment(
+					              &tr, keys, ssid, ShardAssigned::True, "cleanUpSingleShardDataMove_precheck")));
+				}
+				for (auto& ssid : dest) {
+					validationActors.push_back(
+					    store(validationResult[ssid],
+					          validateRangeAssignment(
+					              &tr, keys, ssid, ShardAssigned::False, "cleanUpSingleShardDataMove_precheck")));
+				}
+				wait(waitForAll(validationActors));
+				auditStorageFailedCount = 0;
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -438,9 +610,24 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			wait(tr.commit());
 
+			// Post validate consistency of update of keyServers and serverKeys
+			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
+			    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+				tr.reset(); // Can I reset tr there?
+				bool consistent = wait(validateLocationMetadata(&tr, keys, "startMoveShards_postcheck"));
+				auditStorageFailedCount = 0;
+			}
+
 			break;
 		} catch (Error& e) {
 			state Error err = e;
+			if (err.code() == error_code_audit_storage_failed) {
+				TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
+				    .error(err)
+				    .detail("Range", keys);
+				continue;
+			}
+
 			wait(tr.onError(e));
 
 			TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
@@ -641,148 +828,6 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 		wait(delay(duration));
 		TraceEvent(SevWarnAlways, context).detail("Duration", now() - startTime).detail("Servers", describe(servers));
 	}
-}
-
-ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRange, UID ssid, std::string context) {
-	if (keyServerRange.empty()) {
-		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", keyServerRange);
-		return true;
-	}
-	state std::vector<std::string> errors;
-	state AuditGetServerKeysRes serverKeysRes;
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	try {
-		wait(store(serverKeysRes, getThisServerKeysFromServerKeys(ssid, tr, keyServerRange)));
-		ASSERT(serverKeysRes.completeRange == keyServerRange);
-		std::vector<KeyRange> keyServerRangesToCompare = { keyServerRange };
-		Optional<std::pair<KeyRange, KeyRange>> anyMismatch =
-		    rangesSame(keyServerRangesToCompare, serverKeysRes.ownRanges);
-		if (anyMismatch.present()) { // mismatch detected
-			KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
-			KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-			std::string error = format("Location metadata mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
-			                           ssid.toString().c_str(),
-			                           mismatchedRangeByKeyServer.toString().c_str(),
-			                           mismatchedRangeByServerKey.toString().c_str());
-			errors.push_back(error);
-			TraceEvent(SevError, "ValidateRangeAssignmentError")
-			    .detail("AuditRange", keyServerRange)
-			    .detail("ErrorMessage", error)
-			    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
-			    .detail("MismatchedRangeByServerKey", mismatchedRangeByServerKey);
-		}
-		// Check result
-		if (!errors.empty()) {
-			TraceEvent(SevError, "ValidateRangeAssignmentError")
-			    .detail("Context", context)
-			    .detail("AuditRange", keyServerRange)
-			    .detail("NumErrors", errors.size());
-			return false;
-		} else {
-			TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
-			    .detail("Context", context)
-			    .detail("AuditRange", keyServerRange);
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			return true; // sliently exit
-		}
-		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
-		    .errorUnsuppressed(e)
-		    .detail("Context", context)
-		    .detail("AuditRange", keyServerRange);
-		throw audit_storage_failed();
-	}
-	return true;
-}
-
-ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToCompare, std::string context) {
-	if (rangeToCompare.empty()) {
-		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", rangeToCompare);
-		return true;
-	}
-
-	state std::vector<Future<Void>> actors;
-	state AuditGetKeyServersRes keyServerRes;
-	state std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap;
-	state Key rangeToReadBegin = rangeToCompare.begin;
-	state KeyRangeRef rangeToRead;
-	state int iterationCount = 1;
-	state double beginTime = now();
-	// Note that since krmReadRange may not return the value of the entire range at a time
-	// Given req.range, a part of the range is returned, thus, only a part of the range is
-	// able to be compared --- comparedRes.comparedRange
-	// Given comparedRes.comparedRange, rangeToRead is decided for reading the remaining range
-	// At beginning, rangeToRead is req.range
-
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-	try {
-		while (true) {
-			actors.clear();
-			serverKeyResMap.clear();
-
-			// Read KeyServers and ServerKeys
-			rangeToRead = KeyRangeRef(rangeToReadBegin, rangeToCompare.end);
-			wait(store(keyServerRes, getShardMapFromKeyServers(UID(), tr, rangeToRead)));
-			// Use ssid of keyServerRes.rangeOwnershipMap to read ServerKeys
-			for (auto& [ssid, _] : keyServerRes.rangeOwnershipMap) {
-				actors.push_back(store(serverKeyResMap[ssid],
-				                       getThisServerKeysFromServerKeys(ssid, tr, keyServerRes.completeRange)));
-			}
-			wait(waitForAll(actors));
-
-			// Compare if keyServerRes === serverKeyResMap at comparedRes.claimRange
-			// req.range is used for logging errors
-			CompareKSandSKRes comparedRes =
-			    compareKeyServersAndServerKeys(rangeToCompare, keyServerRes, serverKeyResMap);
-
-			// Return result
-			if (!comparedRes.errors.empty()) {
-				TraceEvent(SevError, "ValidateRangeAssignmentError")
-				    .detail("Context", context)
-				    .detail("AuditRange", rangeToCompare)
-				    .detail("NumErrors", comparedRes.errors.size())
-				    .detail("Version", keyServerRes.readAtVersion)
-				    .detail("ErrorRange", comparedRes.comparedRange);
-				return false;
-			} else {
-				if (comparedRes.comparedRange.end < rangeToCompare.end) {
-					rangeToReadBegin = comparedRes.comparedRange.end;
-					iterationCount++;
-					if (now() - beginTime > 0.5) {
-						TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
-						    .detail("Context", context)
-						    .detail("AuditRange", rangeToCompare)
-						    .detail("Version", keyServerRes.readAtVersion)
-						    .detail("IterationCount", iterationCount)
-						    .detail("TimeCost", now() - beginTime);
-						throw timed_out();
-					}
-				} else { // complete
-					TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
-					    .detail("Context", context)
-					    .detail("AuditRange", rangeToCompare)
-					    .detail("Version", keyServerRes.readAtVersion)
-					    .detail("IterationCount", iterationCount)
-					    .detail("TimeCost", now() - beginTime);
-					break;
-				}
-			}
-		}
-
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled) {
-			return true; // sliently exit
-		}
-		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
-		    .errorUnsuppressed(e)
-		    .detail("Context", context)
-		    .detail("AuditRange", rangeToCompare);
-		throw audit_storage_failed();
-	}
-
-	return true;
 }
 
 // keyServer: map from keys to destination servers
@@ -1604,16 +1649,20 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							state std::vector<Future<Void>> validationActors;
 							state std::unordered_map<UID, bool> validationResult;
 							for (auto& ssid : src) {
-								validationActors.push_back(
-								    store(validationResult[ssid],
-								          validateRangeAssignment(
-								              &tr, rangeIntersectKeys, ssid, "startMoveShards_precheck")));
+								validationActors.push_back(store(validationResult[ssid],
+								                                 validateRangeAssignment(&tr,
+								                                                         rangeIntersectKeys,
+								                                                         ssid,
+								                                                         ShardAssigned::True,
+								                                                         "startMoveShards_precheck")));
 							}
 							for (auto& ssid : dest) {
-								validationActors.push_back(
-								    store(validationResult[ssid],
-								          validateRangeAssignment(
-								              &tr, rangeIntersectKeys, ssid, "startMoveShards_precheck")));
+								validationActors.push_back(store(validationResult[ssid],
+								                                 validateRangeAssignment(&tr,
+								                                                         rangeIntersectKeys,
+								                                                         ssid,
+								                                                         ShardAssigned::False,
+								                                                         "startMoveShards_precheck")));
 							}
 							wait(waitForAll(validationActors));
 							auditStorageFailedCount = 0;
@@ -1760,7 +1809,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 					if (!currentKeys.empty()) {
 						tr.reset(); // Can I reset tr there?
-						bool consistent = wait(validateRangeAssignment(&tr, currentKeys, "startMoveShards_postcheck"));
+						bool consistent = wait(validateLocationMetadata(&tr, currentKeys, "startMoveShards_postcheck"));
 						auditStorageFailedCount = 0;
 					}
 				}
@@ -1989,14 +2038,18 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						state std::vector<Future<Void>> validationActors;
 						state std::unordered_map<UID, bool> validationResult;
 						for (auto& ssid : src) {
+							// Note that some ss of src will not actually unassign a shard since the ss is included in
+							// dest However, here, we regard this case as unassign at first and then assign again
 							validationActors.push_back(
 							    store(validationResult[ssid],
-							          validateRangeAssignment(&tr, currentRange, ssid, "finishMoveShards_precheck")));
+							          validateRangeAssignment(
+							              &tr, currentRange, ssid, ShardAssigned::False, "finishMoveShards_precheck")));
 						}
 						for (auto& ssid : dest) {
 							validationActors.push_back(
 							    store(validationResult[ssid],
-							          validateRangeAssignment(&tr, currentRange, ssid, "finishMoveShards_precheck")));
+							          validateRangeAssignment(
+							              &tr, currentRange, ssid, ShardAssigned::True, "finishMoveShards_precheck")));
 						}
 						wait(waitForAll(validationActors));
 						auditStorageFailedCount = 0;
@@ -2183,7 +2236,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
 					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 						tr.reset(); // can I reset tr there?
-						bool consistent = wait(validateRangeAssignment(&tr, range, "finishMoveShards_postcheck"));
+						bool consistent = wait(validateLocationMetadata(&tr, range, "finishMoveShards_postcheck"));
 						auditStorageFailedCount = 0;
 					}
 
@@ -2901,16 +2954,20 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 						state std::vector<Future<Void>> validationActors;
 						state std::unordered_map<UID, bool> validationResult;
 						for (auto& ssid : src) {
-							validationActors.push_back(
-							    store(validationResult[ssid],
-							          validateRangeAssignment(
-							              &tr, rangeIntersectKeys, ssid, "cleanUpDataMoveCore_precheck")));
+							validationActors.push_back(store(validationResult[ssid],
+							                                 validateRangeAssignment(&tr,
+							                                                         rangeIntersectKeys,
+							                                                         ssid,
+							                                                         ShardAssigned::True,
+							                                                         "cleanUpDataMoveCore_precheck")));
 						}
 						for (auto& ssid : dest) {
-							validationActors.push_back(
-							    store(validationResult[ssid],
-							          validateRangeAssignment(
-							              &tr, rangeIntersectKeys, ssid, "cleanUpDataMoveCore_precheck")));
+							validationActors.push_back(store(validationResult[ssid],
+							                                 validateRangeAssignment(&tr,
+							                                                         rangeIntersectKeys,
+							                                                         ssid,
+							                                                         ShardAssigned::False,
+							                                                         "cleanUpDataMoveCore_precheck")));
 						}
 						wait(waitForAll(validationActors));
 						auditStorageFailedCount = 0;
@@ -2988,7 +3045,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
 				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 					tr.reset(); // can I reset tr there?
-					bool consistent = wait(validateRangeAssignment(&tr, range, "cleanUpDataMoveCore_postcheck"));
+					bool consistent = wait(validateLocationMetadata(&tr, range, "cleanUpDataMoveCore_postcheck"));
 					auditStorageFailedCount = 0;
 				}
 
