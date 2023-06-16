@@ -343,7 +343,7 @@ CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
 		if (anyMismatch.present()) { // mismatch detected
 			KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 			KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
-			std::string error = format("Storage server shard info mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+			std::string error = format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
 			                           ssid.toString().c_str(),
 			                           mismatchedRangeByKeyServer.toString().c_str(),
 			                           mismatchedRangeByServerKey.toString().c_str());
