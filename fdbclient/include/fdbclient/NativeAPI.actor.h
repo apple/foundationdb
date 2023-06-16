@@ -683,6 +683,8 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
     StorageMetrics estimated,
     Optional<int> minSplitBytes);
 
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord);
+
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr);
