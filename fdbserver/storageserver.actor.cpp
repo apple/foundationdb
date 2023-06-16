@@ -25,8 +25,10 @@
 #include <type_traits>
 #include <unordered_map>
 
+#include "benchmark/benchmark.h"
 #include "fdbclient/BlobCipher.h"
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/RandomKeyValueUtils.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/ApiVersion.h"
 #include "flow/network.h"
@@ -1216,9 +1218,6 @@ public:
 		Counter getMappedRangeBytesQueried, finishedGetMappedRangeSecondaryQueries, getMappedRangeQueries,
 		    finishedGetMappedRangeQueries;
 
-		// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
-		// and cleared from the memory, we do not subtract it but add it to bytesDurable.
-		Counter bytesInput;
 		// Bytes pulled from TLogs, it counts the size of the key value pairs, e.g., key-value pair ("a", "b") is
 		// counted as 2 Bytes.
 		Counter logicalBytesInput;
@@ -1304,8 +1303,7 @@ public:
 		    watchQueries("WatchQueries", cc), emptyQueries("EmptyQueries", cc), feedRowsQueried("FeedRowsQueried", cc),
 		    feedBytesQueried("FeedBytesQueried", cc), feedStreamQueries("FeedStreamQueries", cc),
 		    rejectedFeedStreamQueries("RejectedFeedStreamQueries", cc), feedVersionQueries("FeedVersionQueries", cc),
-		    bytesInput("BytesInput", cc), logicalBytesInput("LogicalBytesInput", cc),
-		    logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
+		    logicalBytesInput("LogicalBytesInput", cc), logicalBytesMoveInOverhead("LogicalBytesMoveInOverhead", cc),
 		    kvCommitLogicalBytes("KVCommitLogicalBytes", cc), kvClearRanges("KVClearRanges", cc),
 		    kvClearSingleKey("KVClearSingleKey", cc), kvSystemClearRanges("KVSystemClearRanges", cc),
 		    bytesDurable("BytesDurable", cc), feedBytesFetched("FeedBytesFetched", cc),
@@ -4240,12 +4238,30 @@ KeyRange getShardKeyRange(StorageServer* data, const KeySelectorRef& sel)
 void maybeInjectConsistencyScanCorruption(UID thisServerID, GetKeyValuesRequest const& req, GetKeyValuesReply& reply) {
 	if (g_simulator->consistencyScanState != ISimulator::SimConsistencyScanState::Enabled_InjectCorruption ||
 	    !req.options.present() || !req.options.get().consistencyCheckStartVersion.present() ||
-	    g_simulator->consistencyScanInjectedCorruptionType.present() ||
 	    !g_simulator->consistencyScanCorruptRequestKey.present()) {
 		return;
 	}
 
+	UID destination = req.reply.getEndpoint().token;
+
+	ASSERT(g_simulator->consistencyScanInjectedCorruptionType.present() ==
+	       g_simulator->consistencyScanInjectedCorruptionDestination.present());
+	// if we already injected a corruption, reinject it if this request was a retransmit of the same one we corrupted
+	// could also check that this storage sent the corruption but the reply endpoints should be globally unique so this
+	// covers it
+	if (g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	    (g_simulator->consistencyScanInjectedCorruptionDestination.get() != destination)) {
+		return;
+	}
+
 	CODE_PROBE(true, "consistency check injecting corruption");
+	CODE_PROBE(g_simulator->consistencyScanInjectedCorruptionDestination.present() &&
+	               g_simulator->consistencyScanInjectedCorruptionDestination.get() == destination,
+	           "consistency check re-injecting corruption after retransmit",
+	           probe::decoration::rare);
+
+	g_simulator->consistencyScanInjectedCorruptionDestination = destination;
+	// FIXME: reinject same type of corruption once we enable other types
 
 	// FIXME: code probe for each type?
 
@@ -11174,7 +11190,7 @@ ACTOR Future<Void> waitMetrics(StorageServerMetrics* self, WaitMetricsRequest re
 
 		wait(delay(0)); // prevent iterator invalidation of functions sending changes
 	}
-
+	// fmt::print("PopWaitMetricsMap {}\n", req.keys.toString());
 	auto rs = self->waitMetricsMap.modify(req.keys);
 	for (auto i = rs.begin(); i != rs.end(); ++i) {
 		auto& x = i->value();
@@ -12357,3 +12373,37 @@ void versionedMapTest() {
 	printf("%d distinct after %d insertions\n", count, 1000 * 1000);
 	printf("Memory used: %f MB\n", (after - before) / 1e6);
 }
+
+static void versionedMapBound(benchmark::State& benchState) {
+	bool isLowerBound = benchState.range(0);
+	int64_t dataSize = benchState.range(1);
+	StorageServer::VersionedData data;
+	Arena arena;
+	ValueOrClearToRef value = ValueOrClearToRef::value(StringRef("fixed_value"));
+	// only insert half of the keys, so when we bench search (lower_bound/upper_bound), it could test the cases that
+	// the key exist and non-exist
+	RandomKeySetGenerator keyGen(dataSize * 2, "10..20/a..z");
+	int64_t i = 0;
+	for (auto& key : keyGen.keys) {
+		if (i++ % 2) {
+			data.insert(key, value);
+		}
+	}
+
+	for (auto _ : benchState) {
+		auto it = isLowerBound ? data.at(data.getLatestVersion()).lower_bound(keyGen.next())
+		                       : data.at(data.getLatestVersion()).upper_bound(keyGen.next());
+		benchmark::DoNotOptimize(it);
+	}
+}
+
+static void versionedMapBoundArguments(benchmark::internal::Benchmark* b) {
+	for (bool isLowerBound : { false, true }) {
+		for (int64_t dataSize : { 1e3, 1e5 }) {
+			b->Args({ isLowerBound, dataSize });
+		}
+	}
+	b->ArgNames({ "isLowerBound", "dataSize" });
+}
+
+BENCHMARK(versionedMapBound)->Iterations(1e6)->Apply(versionedMapBoundArguments);

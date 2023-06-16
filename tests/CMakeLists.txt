@@ -184,12 +184,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/MockDDTrackerWorkload.toml)
+
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)
   add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -231,12 +229,20 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
