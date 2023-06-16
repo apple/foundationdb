@@ -36,7 +36,6 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-
 struct CheckpointRequest {
 	const Version version; // The FDB version at which the checkpoint is created.
 	const std::vector<KeyRange> ranges; // Keyranges this checkpoint must contain.
