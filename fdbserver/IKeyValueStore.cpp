@@ -1,5 +1,5 @@
 /*
- * IKeyValueStore.actor.cpp
+ * IKeyValueStore.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -19,7 +19,7 @@
  */
 
 #include "fdbserver/ServerDBInfo.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/flow.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

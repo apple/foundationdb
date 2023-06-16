@@ -59,7 +59,7 @@
 #include "fdbserver/CoroFlow.h"
 #include "fdbserver/DataDistribution.actor.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/NetworkTest.h"
 #include "fdbserver/RemoteIKeyValueStore.actor.h"
