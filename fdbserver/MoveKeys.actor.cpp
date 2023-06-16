@@ -681,13 +681,13 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			// TODO logging
 			return true; // sliently exit
 		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
 		    .detail("AuditRange", rangeToCompare);
+		throw audit_storage_failed();
 	}
 	return true;
 }
@@ -771,13 +771,13 @@ ACTOR Future<bool> auditKeyServersAndServerKeysInRealTime(Transaction* tr,
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
-			// TODO logging
 			return true; // sliently exit
 		}
 		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
 		    .detail("AuditRange", rangeToCompare);
+		throw audit_storage_failed();
 	}
 
 	return true;
@@ -1475,6 +1475,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	ASSERT(ranges.size() == 1);
 	state KeyRangeRef keys = ranges[0];
 	state bool cancelDataMove = false;
+	state int auditStorageFailedCount = 0;
 	try {
 		loop {
 			state Key begin = keys.begin;
@@ -1596,7 +1597,8 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("ReadVersion", tr.getReadVersion().get());
 
 						// Pre validate consistency of update of keyServers and serverKeys
-						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
+						    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 							Future<Version> getGrvF = tr.getReadVersion();
 							ASSERT(getGrvF.isReady());
 							std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
@@ -1609,6 +1611,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							AuditGetKeyServersRes keyServerRes(rangeIntersectKeys, getGrvF.get(), rangeOwnershipMap);
 							bool consistent = wait(
 							    auditKeyServersAndServerKeysInRealTime(&tr, keyServerRes, "startMoveShards_precheck"));
+							auditStorageFailedCount = 0;
 						}
 
 						if (destId.isValid()) {
@@ -1748,11 +1751,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DataMove", dataMove.toString());
 
 				// Post validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
+				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 					if (!currentKeys.empty()) {
 						tr.reset(); // Can I reset tr there?
 						bool consistent =
 						    wait(auditKeyServersAndServerKeysInRealTime(&tr, currentKeys, "startMoveShards_postcheck"));
+						auditStorageFailedCount = 0;
 					}
 				}
 
@@ -1761,7 +1766,10 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					break;
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_retry) {
+				if (e.code() == error_code_audit_storage_failed) {
+					auditStorageFailedCount++;
+					wait(delay(1));
+				} else if (e.code() == error_code_retry) {
 					wait(delay(1));
 				} else {
 					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
@@ -1880,6 +1888,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state std::unordered_set<UID> tssToIgnore;
 	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
 	state int waitForTSSCounter = 2;
+	state int auditStorageFailedCount = 0;
 
 	ASSERT(!destinationTeam.empty());
 
@@ -1971,7 +1980,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					}
 
 					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK) {
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
+					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 						Future<Version> getGrvF = tr.getReadVersion();
 						ASSERT(getGrvF.isReady());
 						std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
@@ -1984,6 +1994,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 						AuditGetKeyServersRes keyServerRes(currentRange, getGrvF.get(), rangeOwnershipMap);
 						bool consistent = wait(
 						    auditKeyServersAndServerKeysInRealTime(&tr, keyServerRes, "finishMoveShards_precheck"));
+						auditStorageFailedCount = 0;
 					}
 
 					std::sort(dest.begin(), dest.end());
@@ -2164,10 +2175,12 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(tr.commit());
 
 					// Post validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
+					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 						tr.reset(); // can I reset tr there?
 						bool consistent =
 						    wait(auditKeyServersAndServerKeysInRealTime(&tr, range, "finishMoveShards_postcheck"));
+						auditStorageFailedCount = 0;
 					}
 
 					if (complete) {
@@ -2180,7 +2193,11 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
 				    .errorUnsuppressed(error)
 				    .detail("DataMoveID", dataMoveId);
-				if (error.code() == error_code_retry) {
+				if (error.code() == error_code_audit_storage_failed) {
+					++auditStorageFailedCount;
+					++retries;
+					wait(delay(1));
+				} else if (error.code() == error_code_retry) {
 					++retries;
 					wait(delay(1));
 				} else if (error.code() == error_code_actor_cancelled) {
@@ -2800,6 +2817,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 	TraceEvent(sevDm, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 	state Error lastError;
+	state int auditStorageFailedCount = 0;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
@@ -2866,11 +2884,30 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
 				state int i = 0;
 				for (; i < currentShards.size() - 1; ++i) {
-					KeyRangeRef rangeIntersectKeys(currentShards[i].key, currentShards[i + 1].key);
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcId, destId;
+					state KeyRangeRef rangeIntersectKeys(currentShards[i].key, currentShards[i + 1].key);
+					state std::vector<UID> src;
+					state std::vector<UID> dest;
+					state UID srcId;
+					state UID destId;
 					decodeKeyServersValue(UIDtoTagMap, currentShards[i].value, src, dest, srcId, destId);
+
+					// Pre validate consistency of update of keyServers and serverKeys
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
+					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+						Future<Version> getGrvF = tr.getReadVersion();
+						ASSERT(getGrvF.isReady());
+						std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
+						for (auto& ssid : src) {
+							rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(rangeIntersectKeys)));
+						}
+						for (auto& ssid : dest) {
+							rangeOwnershipMap[ssid].push_back(Standalone(KeyRangeRef(rangeIntersectKeys)));
+						}
+						AuditGetKeyServersRes keyServerRes(rangeIntersectKeys, getGrvF.get(), rangeOwnershipMap);
+						bool consistent = wait(
+						    auditKeyServersAndServerKeysInRealTime(&tr, keyServerRes, "cleanUpDataMoveCore_precheck"));
+						auditStorageFailedCount = 0;
+					}
 
 					for (const auto& uid : src) {
 						physicalShardMap[uid].push_back(Shard(rangeIntersectKeys, srcId));
@@ -2939,10 +2976,27 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				TraceEvent(sevDm, "CleanUpDataMoveCommitted", dataMoveId)
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Range", range);
+
+				// Post validate consistency of update of keyServers and serverKeys
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
+				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+					tr.reset(); // can I reset tr there?
+					bool consistent =
+					    wait(auditKeyServersAndServerKeysInRealTime(&tr, range, "cleanUpDataMoveCore_postcheck"));
+					auditStorageFailedCount = 0;
+				}
+
 				if (complete) {
 					break;
 				}
 			} catch (Error& e) {
+				if (e.code() == error_code_audit_storage_failed) {
+					auditStorageFailedCount++;
+					TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
+					    .error(lastError)
+					    .detail("DataMoveRange", range.toString());
+					continue;
+				}
 				lastError = e;
 				wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
 				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
