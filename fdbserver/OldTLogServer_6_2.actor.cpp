@@ -29,7 +29,7 @@
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbserver/IDiskQueue.h"

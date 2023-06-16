@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"

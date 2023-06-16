@@ -24,7 +24,7 @@
 #include "fmt/format.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/ActorCollection.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 

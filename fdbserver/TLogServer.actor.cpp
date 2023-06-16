@@ -30,7 +30,7 @@
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/TLogInterface.h"
 #include "fdbserver/Knobs.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/MutationTracking.h"
 #include "flow/ActorCollection.h"
 #include "fdbrpc/FailureMonitor.h"

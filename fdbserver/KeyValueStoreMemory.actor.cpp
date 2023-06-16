@@ -28,7 +28,7 @@
 #include "fdbclient/GetEncryptCipherKeys.h"
 #include "fdbserver/IDiskQueue.h"
 #include "fdbserver/IKeyValueContainer.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/RadixTree.h"
 #include "flow/ActorCollection.h"
 #include "flow/EncryptUtils.h"

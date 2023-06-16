@@ -37,7 +37,7 @@
 #include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbserver/FDBExecHelper.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.

@@ -28,7 +28,7 @@
 #include "fdbrpc/Stats.h"
 #include "fdbserver/ApplyMetadataMutation.h"
 #include "fdbserver/ConflictSet.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/LogSystem.h"
 #include "fdbserver/LogSystemDiskQueueAdapter.h"

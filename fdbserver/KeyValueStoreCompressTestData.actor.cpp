@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "flow/actorcompiler.h" // has to be last include
 
 // KeyValueStoreCompressTestData wraps an existing IKeyValueStore and

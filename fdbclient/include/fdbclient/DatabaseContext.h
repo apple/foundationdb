@@ -38,7 +38,7 @@
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
 #include "fdbclient/VersionVector.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"

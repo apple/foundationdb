@@ -51,7 +51,7 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbserver/RoleLineage.actor.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/TesterInterface.actor.h" // for poisson()
 #include "fdbserver/IDiskQueue.h"
