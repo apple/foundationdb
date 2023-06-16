@@ -414,6 +414,7 @@ public:
 	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
 	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
 	std::set<IPAddress> httpServerIps;
+	int nextHTTPPort = 5000;
 	bool httpProtected = false;
 
 	flowGlobalType global(int id) const final;
