@@ -645,7 +645,7 @@ ACTOR Future<Void> logWarningAfter(const char* context, double duration, std::ve
 
 ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRange, UID ssid, std::string context) {
 	if (keyServerRange.empty()) {
-		TraceEvent(SevWarn, "RTAuditStorageShardLocMetadataEmptyInputRange").detail("AuditRange", keyServerRange);
+		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", keyServerRange);
 		return true;
 	}
 	state std::vector<std::string> errors;
@@ -665,7 +665,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRa
 			                           mismatchedRangeByKeyServer.toString().c_str(),
 			                           mismatchedRangeByServerKey.toString().c_str());
 			errors.push_back(error);
-			TraceEvent(SevError, "RTAuditStorageShardLocationMetadataError")
+			TraceEvent(SevError, "ValidateRangeAssignmentError")
 			    .detail("AuditRange", keyServerRange)
 			    .detail("ErrorMessage", error)
 			    .detail("MismatchedRangeByKeyServer", mismatchedRangeByKeyServer)
@@ -673,13 +673,13 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRa
 		}
 		// Check result
 		if (!errors.empty()) {
-			TraceEvent(SevError, "RTAuditStorageShardLocMetadataError")
+			TraceEvent(SevError, "ValidateRangeAssignmentError")
 			    .detail("Context", context)
 			    .detail("AuditRange", keyServerRange)
 			    .detail("NumErrors", errors.size());
 			return false;
 		} else {
-			TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataDone")
+			TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
 			    .detail("Context", context)
 			    .detail("AuditRange", keyServerRange);
 		}
@@ -687,7 +687,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRa
 		if (e.code() == error_code_actor_cancelled) {
 			return true; // sliently exit
 		}
-		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
+		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
 		    .detail("AuditRange", keyServerRange);
@@ -698,7 +698,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange keyServerRa
 
 ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToCompare, std::string context) {
 	if (rangeToCompare.empty()) {
-		TraceEvent(SevWarn, "RTAuditStorageShardLocMetadataEmptyInputRange").detail("AuditRange", rangeToCompare);
+		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", rangeToCompare);
 		return true;
 	}
 
@@ -739,7 +739,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToComp
 
 			// Return result
 			if (!comparedRes.errors.empty()) {
-				TraceEvent(SevError, "RTAuditStorageShardLocMetadataError")
+				TraceEvent(SevError, "ValidateRangeAssignmentError")
 				    .detail("Context", context)
 				    .detail("AuditRange", rangeToCompare)
 				    .detail("NumErrors", comparedRes.errors.size())
@@ -751,7 +751,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToComp
 					rangeToReadBegin = comparedRes.comparedRange.end;
 					iterationCount++;
 					if (now() - beginTime > 0.5) {
-						TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataFailed")
+						TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
 						    .detail("Context", context)
 						    .detail("AuditRange", rangeToCompare)
 						    .detail("Version", keyServerRes.readAtVersion)
@@ -760,7 +760,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToComp
 						throw timed_out();
 					}
 				} else { // complete
-					TraceEvent(SevInfo, "RTAuditStorageShardLocMetadataDone")
+					TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
 					    .detail("Context", context)
 					    .detail("AuditRange", rangeToCompare)
 					    .detail("Version", keyServerRes.readAtVersion)
@@ -775,7 +775,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange rangeToComp
 		if (e.code() == error_code_actor_cancelled) {
 			return true; // sliently exit
 		}
-		TraceEvent(SevInfo, "AuditStorageShardLocMetadataFailed")
+		TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
 		    .errorUnsuppressed(e)
 		    .detail("Context", context)
 		    .detail("AuditRange", rangeToCompare);
