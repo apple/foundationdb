@@ -171,13 +171,16 @@ static Reference<PTree<T>> update(Reference<PTree<T>> const& node,
 template <class T, class X>
 bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
 	PTree<T>* n = p.getPtr();
+	[[maybe_unused]] int loopDepth = 0;
 	while (n) {
+		loopDepth++;
 		int cmp = compare(x, n->data);
 		bool less = cmp < 0;
 		if (cmp == 0)
 			return true;
 		n = n->child(!less, at).getPtr();
 	}
+	FDB_TRACE_PROBE(ptree_contains, loopDepth);
 	return false;
 }
 
@@ -186,7 +189,9 @@ bool contains(const Reference<PTree<T>>& p, Version at, const X& x) {
 template <class T, class X>
 void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
 	PTree<T>* n = p.getPtr();
+	[[maybe_unused]] int loopDepth = 0;
 	while (n) {
+		loopDepth++;
 		int cmp = compare(x, n->data);
 		bool less = cmp < 0;
 		f.push_for_bound(n, less);
@@ -195,17 +200,21 @@ void lower_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFing
 		n = n->child(!less, at).getPtr();
 	}
 	f.trim_to_bound();
+	FDB_TRACE_PROBE(ptree_lower_bound, loopDepth);
 	return;
 }
 
 template <class T, class X>
 void upper_bound(const Reference<PTree<T>>& p, Version at, const X& x, PTreeFinger<T>& f) {
 	PTree<T>* n = p.getPtr();
+	[[maybe_unused]] int loopDepth = 0;
 	while (n) {
+		loopDepth++;
 		bool less = x < n->data;
 		f.push_for_bound(n, less);
 		n = n->child(!less, at).getPtr();
 	}
+	FDB_TRACE_PROBE(ptree_upper_bound, loopDepth);
 	f.trim_to_bound();
 	return;
 }
