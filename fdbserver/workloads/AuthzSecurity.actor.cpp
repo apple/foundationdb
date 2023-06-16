@@ -130,6 +130,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testSetValueWithoutAuthToken(this, cx); });
 
 		if (checkBlobGranules) {
 			testFunctions.push_back([this](Database cx) { return testBlobGranuleLocationLeakDisallowed(this, cx); });
@@ -936,6 +937,24 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    success(cx->purgeBlobGranules(normalKeys, 1, self->tenant, deterministicRandom()->coinflip())),
 		    &self->purgeBlobNegative));
 		return Void();
+	}
+
+	ACTOR static Future<Void> testSetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+		state Transaction tr(cx, self->tenant);
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		loop {
+			try {
+				// Call set without auth token. This should fail and the callstack should
+				// jump to the exception block
+				tr.set(key, value);
+				wait(tr.commit());
+				ASSERT(false);
+			} catch (Error& e) {
+				ASSERT(e.code() == error_code_permission_denied);
+			}
+			return Void();
+		} 
 	}
 
 	ACTOR static Future<Void> runTestClient(AuthzSecurityWorkload* self, Database cx) {
