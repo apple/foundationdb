@@ -777,7 +777,6 @@ const Value blobWorkerAffinityValue(UID const& id);
 UID decodeBlobWorkerAffinityValue(ValueRef const& value);
 
 extern const Key blobManifestVersionKey;
-extern const Key blobGranulesLastFlushKey;
 
 extern const KeyRangeRef idempotencyIdKeys;
 extern const KeyRef idempotencyIdsExpiredVersion;
