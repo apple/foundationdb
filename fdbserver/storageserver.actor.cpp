@@ -2175,10 +2175,9 @@ inline void sampleRequestVersions(StorageServer* self, const Version& version, c
 		// NOTE: This current approach collects pessimistic statistics
 		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
 			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
-			TraceEvent("EmptyVersionSafeDelay", self->thisServerID).detail("Duration", emptyVersionSafeDelay);
-			TraceEvent("VersionQueueStats", self->thisServerID)
+			TraceEvent("EmptyVersionDelayWindow", self->thisServerID)
 			    .detail("QueueSize", self->versionQueue.size())
-			    .detail("QueueTimewindow", self->versionQueue.back().timestamp - self->versionQueue.front().timestamp);
+			    .detail("DelayWindow", emptyVersionSafeDelay);
 		}
 		self->lastVersionSampleTime = timestamp;
 	}
@@ -9340,8 +9339,11 @@ inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version
 	DisabledTraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
 	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
 	// window anyway, we do a cheap clear() and let it build up again
-	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH)
+	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH) {
 		self->versionQueue.clear();
+		TraceEvent("VersionQueueTlogCleared", self->thisServerID)
+		    .detail("QueueTimewindow", self->versionQueue.back().timestamp - self->versionQueue.front().timestamp);
+	}
 	self->versionQueue.emplace_back(version, timestamp);
 }
 
