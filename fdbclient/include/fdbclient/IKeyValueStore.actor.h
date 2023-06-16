@@ -90,8 +90,8 @@ public:
 
 	// Replace the specified range, the default implementation ignores `blockRange` and writes the key one by one.
 	virtual Future<Void> replaceRange(KeyRange range, Standalone<VectorRef<KeyValueRef>> data) {
-	return replaceRange_impl(this, range, data);
-}
+		return replaceRange_impl(this, range, data);
+	}
 
 	// Persists key range and physical shard mapping.
 	virtual void persistRangeMapping(KeyRangeRef range, bool isAdd) {}
