@@ -1364,7 +1364,6 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 	}
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<ValueReadResult> getJSON(Database db);
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
@@ -9554,6 +9553,31 @@ ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientW
 	}
 }
 
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
+
+	loop {
+		choose {
+			when(std::vector<ClientWorkerInterface> workers =
+			         wait(clusterInterface->get().present()
+			                  ? brokenPromiseToNever(
+			                        clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))
+			                  : Never())) {
+				RangeReadResult result;
+				for (auto& it : workers) {
+					result.push_back_deep(
+					    result.arena(),
+					    KeyValueRef(it.address().toString(), BinaryWriter::toValue(it, IncludeVersion())));
+				}
+
+				return result;
+			}
+			when(wait(clusterInterface->onChange())) {}
+		}
+	}
+}
+
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
@@ -9561,7 +9585,7 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	if (!cx->getConnectionRecord())
 		return 0;
 	// fetch all workers' addresses and interfaces from CC
-	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
+	RangeReadResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// map worker network address to its interface
 	state std::map<Key, ClientWorkerInterface> workerInterfaces;
