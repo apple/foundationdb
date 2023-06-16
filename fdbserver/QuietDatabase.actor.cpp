@@ -948,6 +948,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 
 	if (waitForCompletion) {
 		TraceEvent("ConsistencyScan_SimDisableWaiting").log();
+		printf("Waiting for consistency scan to complete...\n");
 		loop {
 			bool waitForCorruption = g_simulator->doInjectConsistencyScanCorruption.present() &&
 			                         g_simulator->doInjectConsistencyScanCorruption.get();
@@ -987,6 +988,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 				config.enabled = false;
 			} else {
 				TraceEvent("ConsistencyScan_SimDisableAlreadyDisabled").log();
+				printf("Consistency scan already complete.\n");
 				return Void();
 			}
 
@@ -1007,6 +1009,7 @@ ACTOR Future<Void> disableConsistencyScanInSim(Database db, bool waitForCompleti
 	                                        ISimulator::SimConsistencyScanState::DisabledEnd);
 	CODE_PROBE(true, "Consistency Scan disabled in simulation");
 	TraceEvent("ConsistencyScan_SimDisabled").log();
+	printf("Consistency scan complete.\n");
 	return Void();
 }
 
