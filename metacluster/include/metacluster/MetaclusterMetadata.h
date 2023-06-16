@@ -63,15 +63,17 @@ struct MovementRecord {
 	ClusterName srcCluster;
 	ClusterName dstCluster;
 	MovementState mState;
-	Version version;
+	Version version = -1;
+	bool aborting = false;
 
 	bool operator==(const MovementRecord& mr) const {
 		return runId == mr.runId && srcCluster == mr.srcCluster && dstCluster == mr.dstCluster && mState == mr.mState &&
-		       version == mr.version;
+		       version == mr.version && aborting == mr.aborting;
 	}
 
 	Tuple pack() const {
-		return Tuple::makeTuple(runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(mState), version);
+		return Tuple::makeTuple(
+		    runId.toString(), srcCluster, dstCluster, static_cast<int64_t>(mState), version, aborting);
 	}
 	static MovementRecord unpack(Tuple const& tuple) {
 		MovementRecord mr;
@@ -83,6 +85,7 @@ struct MovementRecord {
 		auto state = tuple.getInt(i++);
 		mr.mState = MovementState(state);
 		mr.version = tuple.getInt(i++);
+		mr.aborting = tuple.getBool(i++);
 		return mr;
 	}
 };

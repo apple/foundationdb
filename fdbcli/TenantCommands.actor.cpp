@@ -372,7 +372,7 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 		wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster));
 	} catch (Error& e) {
 		if (e.code() == error_code_invalid_tenant_move) {
-			// Trace to client logs, print to stdout/stderr, or both?
+			fmt::print(stderr, "ERROR: {}\n", e.what());
 			return false;
 		}
 		throw e;
@@ -380,6 +380,7 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 
 	return true;
 }
+
 ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
 		fmt::print(usageMessage);
@@ -393,6 +394,7 @@ ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<
 
 	return true;
 }
+
 ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
 		fmt::print(usageMessage);
@@ -405,6 +407,7 @@ ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<
 
 	return true;
 }
+
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
 		fmt::print(usageMessage);
@@ -422,21 +425,6 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	if (tokens.size() < 6) {
 		fmt::print(usageMessage);
 		return false;
-	}
-	state Reference<ITransaction> tr = db->createTransaction();
-
-	loop {
-		try {
-			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-			state ClusterType clusterType = wait(TenantAPI::getClusterType(tr));
-			if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
-				fmt::print(stderr, "ERROR: Tenant movement should only be run on a management cluster.");
-				return false;
-			}
-			break;
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
-		}
 	}
 	StringRef step = tokens[2];
 	state bool result = false;
