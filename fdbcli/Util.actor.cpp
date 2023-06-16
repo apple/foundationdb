@@ -96,9 +96,9 @@ ACTOR Future<Void> getWorkerInterfaces(Reference<ITransaction> tr,
 		tr->set(workerInterfacesVerifyOptionSpecialKey, ValueRef());
 	}
 	// Hold the reference to the standalone's memory
-	state ThreadFuture<RangeResult> kvsFuture = tr->getRange(
+	state ThreadFuture<RangeReadResult> kvsFuture = tr->getRange(
 	    KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr), CLIENT_KNOBS->TOO_MANY);
-	state RangeResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
+	state RangeReadResult kvs = wait(safeThreadFutureToFuture(kvsFuture));
 	ASSERT(!kvs.more);
 	if (verify) {
 		// remove the option if set
@@ -115,8 +115,8 @@ ACTOR Future<bool> getWorkers(Reference<IDatabase> db, std::vector<ProcessData>*
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state ThreadFuture<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-			state ThreadFuture<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+			state ThreadFuture<RangeReadResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+			state ThreadFuture<RangeReadResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
 			wait(success(safeThreadFutureToFuture(processClasses)) && success(safeThreadFutureToFuture(processData)));
 			ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
@@ -162,7 +162,7 @@ ACTOR Future<Void> getStorageServerInterfaces(Reference<IDatabase> db,
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			state ThreadFuture<RangeResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+			state ThreadFuture<RangeReadResult> serverListF = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 			wait(success(safeThreadFutureToFuture(serverListF)));
 			ASSERT(!serverListF.get().more);
 			ASSERT_LT(serverListF.get().size(), CLIENT_KNOBS->TOO_MANY);

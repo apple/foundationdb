@@ -33,7 +33,7 @@ ACTOR static Future<std::vector<AuditStorageState>> getLatestAuditStatesImpl(Tra
 	loop {
 		auditStates.clear();
 		try {
-			RangeResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
+			RangeReadResult res = wait(tr->getRange(auditKeyRange(type), num, Snapshot::False, Reverse::True));
 			for (int i = 0; i < res.size(); ++i) {
 				auditStates.push_back(decodeAuditStorageState(res[i].value));
 			}

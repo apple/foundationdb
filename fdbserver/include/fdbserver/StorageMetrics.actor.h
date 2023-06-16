@@ -186,6 +186,9 @@ struct CommonStorageCounters {
 	Counter finishedQueries, bytesQueried;
 
 	// write ops
+	// Bytes of the mutations that have been added to the memory of the storage server. When the data is durable
+	// and cleared from the memory, we do not subtract it but add it to bytesDurable.
+	Counter bytesInput;
 	// Like bytesInput but without MVCC accounting. The size is counted as how much it takes when serialized. It
 	// is basically the size of both parameters of the mutation and a 12 bytes overhead that keeps mutation type
 	// and the lengths of both parameters.
@@ -261,7 +264,9 @@ Future<Void> serveStorageMetricsRequests(ServiceType* self, StorageServerInterfa
 				self->getHotRangeMetrics(req);
 			}
 			when(SplitRangeRequest req = waitNext(ssi.getRangeSplitPoints.getFuture())) {
-				if (!self->isReadable(req.keys)) {
+				if ((!req.tenantInfo.hasTenant() && !self->isReadable(req.keys)) ||
+				    (req.tenantInfo.hasTenant() &&
+				     !self->isReadable(req.keys.withPrefix(req.tenantInfo.prefix.get())))) {
 					CODE_PROBE(true, "getSplitPoints immediate wrong_shard_server()");
 					self->sendErrorWithPenalty(req.reply, wrong_shard_server(), self->getPenalty());
 				} else {

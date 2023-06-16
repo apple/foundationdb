@@ -6,8 +6,9 @@ import json
 import re
 import sys
 import test_harness.fdb
-
 from typing import List, Tuple, OrderedDict
+
+from test_harness.joshua import print_errors
 from test_harness.summarize import SummaryTree, Coverage
 from test_harness.config import config
 from xml.sax.saxutils import quoteattr
@@ -150,10 +151,8 @@ if __name__ == "__main__":
     config.output_format = args.output_format
     write_header(args.ensemble_id)
     try:
-        import test_harness.joshua
-
-        test_harness.joshua.print_errors(args.ensemble_id)
-    except ModuleNotFoundError:
+        print_errors(args.ensemble_id)
+    except Exception:
         child = SummaryTree("JoshuaNotFound")
         child.attributes["Severity"] = "30"
         child.attributes[

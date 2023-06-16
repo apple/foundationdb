@@ -20,9 +20,11 @@
 
 #include <cinttypes>
 #include "fdbclient/BlobGranuleCommon.h"
+#include "fdbclient/EncryptKeyProxyInterface.h"
 #include "fdbclient/json_spirit/json_spirit_value.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
 #include "fdbserver/BlobManagerInterface.h"
+#include "flow/genericactors.actor.h"
 #include "fmt/format.h"
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BlobWorkerInterface.h"
@@ -1529,9 +1531,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<RangeResult> existingDestUidValues =
+				state Future<RangeReadResult> existingDestUidValues =
 				    tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
 				wait((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
 
 				std::set<LogRangeAndUID> loggingRanges;
@@ -1656,7 +1658,7 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
 		try {
 			choose {
-				when(RangeResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
+				when(RangeReadResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
 					DatabaseConfiguration configuration;
 					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
@@ -1988,7 +1990,7 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			servers.reserve(serverList.size());
@@ -2444,8 +2446,15 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		bool backupEnabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
+		state BlobGranuleBackupConfig config;
+		bool backupEnabled = wait(config.enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
 		statusObj["blob_granules_backup_enabled"] = backupEnabled;
+		if (backupEnabled) {
+			std::string manifestUrl = wait(config.manifestUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_manifest_url"] = manifestUrl;
+			std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_mlogs_url"] = mlogsUrl;
+		}
 		// Blob manager status
 		if (managerIntf.present()) {
 			Optional<TraceEventFields> fields = wait(timeoutError(
@@ -2517,6 +2526,8 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 					statusObj["blob_full_restore_start_ts"] = startTs;
 					std::string error = wait(config.error().getD(&tr));
 					statusObj["blob_full_restore_error"] = error;
+					Version targetVersion = wait(config.targetVersion().getD(&tr));
+					statusObj["blob_full_restore_version"] = targetVersion;
 				}
 				break;
 			} catch (Error& e) {
@@ -2813,10 +2824,10 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 
 				std::string jsonPrefix = layerStatusMetaPrefixRange.begin.toString() + "json/";
-				RangeResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
+				RangeReadResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
 				// TODO:  Also fetch other linked subtrees of meta keys
 
-				state std::vector<Future<RangeResult>> docFutures;
+				state std::vector<Future<RangeReadResult>> docFutures;
 				state int i;
 				for (i = 0; i < jsonLayers.size(); ++i)
 					docFutures.push_back(
@@ -2826,7 +2837,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 
 				for (i = 0; i < docFutures.size(); ++i) {
-					state RangeResult docs = wait(docFutures[i]);
+					state RangeReadResult docs = wait(docFutures[i]);
 					state int j;
 					for (j = 0; j < docs.size(); ++j) {
 						state json_spirit::mValue doc;
@@ -2924,7 +2935,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeReadResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<ValueReadResult> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 
@@ -2969,6 +2980,24 @@ ACTOR Future<std::pair<Optional<StorageWiggleMetrics>, Optional<StorageWiggleMet
 		}
 	}
 }
+
+ACTOR Future<KMSHealthStatus> getKMSHealthStatus(Reference<const AsyncVar<ServerDBInfo>> db) {
+	try {
+		if (!db->get().client.encryptKeyProxy.present()) {
+			return KMSHealthStatus{ false, false, now() };
+		}
+		KMSHealthStatus reply = wait(timeoutError(
+		    db->get().client.encryptKeyProxy.get().getHealthStatus.getReply(EncryptKeyProxyHealthStatusRequest()),
+		    FLOW_KNOBS->EKP_HEALTH_CHECK_REQUEST_TIMEOUT));
+		return reply;
+	} catch (Error& e) {
+		if (e.code() != error_code_timed_out) {
+			throw;
+		}
+		return KMSHealthStatus{ false, false, now() };
+	}
+}
+
 // read storageWigglerStats through Read-only tx, then convert it to JSON field
 ACTOR Future<JsonBuilderObject> storageWigglerStatsFetcher(Optional<DataDistributorInterface> ddWorker,
                                                            DatabaseConfiguration conf,
@@ -3044,6 +3073,22 @@ ACTOR Future<StatusReply> clusterGetStatus(
 	state WorkerDetails csWorker; // ConsistencyScan worker
 
 	try {
+
+		state JsonBuilderObject statusObj;
+
+		// Get EKP Health
+		if (db->get().client.encryptKeyProxy.present()) {
+			KMSHealthStatus status = wait(getKMSHealthStatus(db));
+			JsonBuilderObject _statusObj;
+			_statusObj["ekp_is_healthy"] = status.canConnectToEKP;
+			statusObj["encryption_at_rest"] = _statusObj;
+			statusObj["kms_is_healthy"] = status.canConnectToKms;
+			// TODO: In this scenario we should see if we can fetch any status fields that don't depend on encryption
+			if (!status.canConnectToKms || !status.canConnectToEKP) {
+				return StatusReply(statusObj.getJson());
+			}
+		}
+
 		// Get the master Worker interface
 		Optional<WorkerDetails> _mWorker = getWorker(workers, db->get().master.address());
 		if (_mWorker.present()) {
@@ -3172,7 +3217,6 @@ ACTOR Future<StatusReply> clusterGetStatus(
 		state WorkerEvents programStarts =
 		    workerEventsVec[5].present() ? workerEventsVec[5].get().first : WorkerEvents();
 
-		state JsonBuilderObject statusObj;
 		if (db->get().recoveryCount > 0) {
 			statusObj["generation"] = db->get().recoveryCount;
 		}

@@ -892,7 +892,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
             "skippedRanges" : 0,
             "start_datetime" : "1970-01-01 00:00:00.000 +0000",
             "start_timestamp" : 0,
-            "start_version" : 0
+            "start_version" : 0,
+            "last_progress_datetime" : "1970-01-01 00:00:00.000 +0000",
+            "last_progress_timestamp" : 0,
+            "last_progress_version" : 0
          },
          "lifetime_stats" : {
             "errors" : 0,
@@ -912,7 +915,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
                "skippedRanges" : 0,
                "start_datetime" : "1970-01-01 00:00:00.000 +0000",
                "start_timestamp" : 0,
-               "start_version" : 0
+               "start_version" : 0,
+               "last_progress_datetime" : "1970-01-01 00:00:00.000 +0000",
+               "last_progress_timestamp" : 0,
+               "last_progress_version" : 0
             }
          ]
       },
@@ -1017,6 +1023,10 @@ const KeyRef JSONSchemas::statusSchema = R"statusSchema(
          "data_cluster_name" : "data_cluster1",
          "data_cluster_id" : 12346,
          "num_data_clusters":10
+      },
+      "kms_is_healthy": true,
+      "encryption_at_rest": {
+         "ekp_is_healthy": true
       },
       "tenants":{
          "num_tenants":0,

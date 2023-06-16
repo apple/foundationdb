@@ -41,7 +41,7 @@ ACTOR Future<Void> readTSSMappingRYW(Reference<ReadYourWritesTransaction> tr,
 }
 
 ACTOR Future<Void> readTSSMapping(Transaction* tr, std::map<UID, StorageServerInterface>* tssMapping) {
-	state RangeResult mappingList = wait(tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult mappingList = wait(tr->getRange(tssMappingKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!mappingList.more && mappingList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	for (auto& it : mappingList) {

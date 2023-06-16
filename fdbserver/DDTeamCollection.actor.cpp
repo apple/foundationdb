@@ -19,8 +19,11 @@
  */
 
 #include "fdbserver/DDTeamCollection.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbserver/ExclusionTracker.actor.h"
 #include "fdbserver/DataDistributionTeam.h"
+#include "fdbserver/Knobs.h"
+#include "flow/CodeProbe.h"
 #include "fdbserver/BlobMigratorInterface.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -238,6 +241,7 @@ public:
 			Optional<Reference<IDataDistributionTeam>> bestOption;
 			std::vector<Reference<TCTeamInfo>> randomTeams;
 
+			// Custom Replication
 			if (ddLargeTeamEnabled() && req.keys.present()) {
 				int customReplicas = self->configuration.storageTeamSize;
 				for (auto it : self->userRangeConfig->intersectingRanges(req.keys->begin, req.keys->end)) {
@@ -281,6 +285,26 @@ public:
 						    .detail("LargeTeamDiff", now() - firstFailureTime.get());
 						self->underReplication.insert(req.keys.get(), true);
 					}
+				}
+			}
+
+			// When relocating shards, DD would evaluate the CPU & AvailabeSpace of sourceTeam. If
+			// both of metrics are below pivot values, we would return the source team to dataDistributionRelocator
+			if (req.teamSelect.isForRelocateShard() && SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
+				auto sourceTeam = self->evaluateSourceTeam(req.src);
+				if (sourceTeam.present()) {
+					CODE_PROBE(true, "dd re-evaluation triggered");
+					TraceEvent(SevDebug, "GetTeamReturnSourceTeam", self->distributorId)
+					    .detail("Request", req.getDesc())
+					    .detail("Src", req.src)
+					    .detail("CompleteSources", req.completeSources)
+					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
+					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
+					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
+					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
+					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAvailableSpaceRatio);
+					req.reply.send(std::make_pair(sourceTeam, foundSrc));
+					return Void();
 				}
 			}
 
@@ -1094,6 +1118,8 @@ public:
 				state std::vector<Future<Void>> otherChanges;
 				std::vector<Promise<Void>> wakeUpTrackers;
 				for (const auto& i : self->server_and_tss_info) {
+					if (self->db->isMocked())
+						continue;
 					if (i.second.getPtr() != server &&
 					    i.second->getLastKnownInterface().address() == server->getLastKnownInterface().address()) {
 						auto& statusInfo = self->server_status.get(i.first);
@@ -1661,37 +1687,6 @@ public:
 		}
 
 		return Void(); // Don't ignore failures
-	}
-
-	ACTOR static Future<Void> waitForAllDataRemoved(DDTeamCollection const* self, UID serverID, Version addedVersion) {
-		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(self->dbContext());
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				Version ver = wait(tr->getReadVersion());
-
-				// we cannot remove a server immediately after adding it, because a perfectly timed cluster recovery
-				// could cause us to not store the mutations sent to the short lived storage server.
-				if (ver > addedVersion + SERVER_KNOBS->MAX_READ_TRANSACTION_LIFE_VERSIONS) {
-					bool canRemove = wait(canRemoveStorageServer(tr, serverID));
-					TraceEvent(SevVerbose, "WaitForAllDataRemoved")
-					    .detail("Server", serverID)
-					    .detail("CanRemove", canRemove)
-					    .detail("Shards", self->shardsAffectedByTeamFailure->getNumberOfShards(serverID));
-					ASSERT_GE(self->shardsAffectedByTeamFailure->getNumberOfShards(serverID), 0);
-					if (canRemove && self->shardsAffectedByTeamFailure->getNumberOfShards(serverID) == 0) {
-						return Void();
-					}
-				}
-
-				// Wait for any change to the serverKeys for this server
-				wait(delay(SERVER_KNOBS->ALL_DATA_REMOVED_DELAY, TaskPriority::DataDistribution));
-				tr->reset();
-			} catch (Error& e) {
-				wait(tr->onError(e));
-			}
-		}
 	}
 
 	ACTOR static Future<Void> machineTeamRemover(DDTeamCollection* self) {
@@ -2992,12 +2987,12 @@ public:
 
 			// The following actors (e.g. storageRecruiter) do not need to be assigned to a variable because
 			// they are always running.
-			self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
-			self->addActor.send(self->monitorStorageServerRecruitment());
-			self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 			self->addActor.send(self->monitorHealthyTeams());
 
 			if (!self->db->isMocked()) {
+				self->addActor.send(self->storageRecruiter(recruitStorage, *ddEnabledState));
+				self->addActor.send(self->monitorStorageServerRecruitment());
+				self->addActor.send(self->waitServerListChange(serverRemoved.getFuture(), *ddEnabledState));
 				self->addActor.send(self->trackExcludedServers());
 				self->addActor.send(self->waitHealthyZoneChange());
 				self->addActor.send(self->monitorPerpetualStorageWiggle());
@@ -3304,8 +3299,19 @@ void DDTeamCollection::updateAvailableSpacePivots() {
 		teamPivots.pivotAvailableSpaceRatio =
 		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
+
+		if (SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
+			size_t strictPivot =
+			    teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO);
+			std::nth_element(teamAvailableSpace.begin(),
+			                 teamAvailableSpace.begin() + strictPivot,
+			                 teamAvailableSpace.end(),
+			                 std::greater{});
+			teamPivots.strictPivotAvailableSpaceRatio = teamAvailableSpace[strictPivot];
+		}
 	} else {
 		teamPivots.pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
+		teamPivots.strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 	}
 
 	if (teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
@@ -3331,8 +3337,15 @@ void DDTeamCollection::updateCpuPivots() {
 		size_t pivot = teamAverageCPU.size() * SERVER_KNOBS->CPU_PIVOT_RATIO;
 		std::nth_element(teamAverageCPU.begin(), teamAverageCPU.begin() + pivot, teamAverageCPU.end());
 		teamPivots.pivotCPU = teamAverageCPU[pivot];
+
+		if (SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
+			size_t strictPivot = teamAverageCPU.size() * std::min(1.0, SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO);
+			std::nth_element(teamAverageCPU.begin(), teamAverageCPU.begin() + strictPivot, teamAverageCPU.end());
+			teamPivots.strictPivotCPU = teamAverageCPU[strictPivot];
+		}
 	} else {
 		teamPivots.pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
+		teamPivots.strictPivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
 	}
 
 	if (teamPivots.pivotCPU > SERVER_KNOBS->MAX_DEST_CPU_PERCENT) {
@@ -3350,6 +3363,12 @@ void DDTeamCollection::updateTeamEligibility() {
 			bool lowDiskUtil = team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
+
+			DisabledTraceEvent(SevDebug, "EligiblityTeamDebug")
+			    .detail("TeamId", team->getTeamID())
+			    .detail("CPU", team->getAverageCPU())
+			    .detail("AvailableSpace", team->getMinAvailableSpace())
+			    .detail("AvailableSpaceRatio", team->getMinAvailableSpaceRatio());
 
 			if (lowDiskUtil) {
 				lowDiskUtilTotal++;
@@ -3380,7 +3399,9 @@ void DDTeamCollection::updateTeamEligibility() {
 	    .detail("LowDiskUtilTeam", lowDiskUtilTotal)
 	    .detail("LowCPUTeam", lowCpuTotal)
 	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
-	    .detail("PivotCpuRatio", teamPivots.pivotCPU);
+	    .detail("PivotCpuRatio", teamPivots.pivotCPU)
+	    .detail("StrictPivotAvailableSpaceRatio", teamPivots.strictPivotAvailableSpaceRatio)
+	    .detail("StrictPivotCpuRatio", teamPivots.strictPivotCPU);
 }
 
 void DDTeamCollection::updateTeamPivotValues() {
@@ -3545,6 +3566,17 @@ Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers
 	return Optional<Reference<IDataDistributionTeam>>();
 }
 
+Optional<Reference<IDataDistributionTeam>> DDTeamCollection::evaluateSourceTeam(const std::vector<UID>& servers) {
+	auto sourceTeam = findTeamFromServers(servers, /* wantHealthy=*/true);
+	if (sourceTeam.present()) {
+		if (sourceTeam.get()->hasHealthyAvailableSpace(teamPivots.strictPivotAvailableSpaceRatio) &&
+		    sourceTeam.get()->hasLowerCpu(teamPivots.strictPivotCPU)) {
+			return sourceTeam;
+		}
+	}
+	return Optional<Reference<IDataDistributionTeam>>();
+}
+
 Future<Void> DDTeamCollection::logOnCompletion(Future<Void> signal) {
 	return DDTeamCollectionImpl::logOnCompletion(this, signal);
 }
@@ -3646,7 +3678,7 @@ Future<Void> DDTeamCollection::storageServerFailureTracker(TCServerInfo* server,
 }
 
 Future<Void> DDTeamCollection::waitForAllDataRemoved(UID serverID, Version addedVersion) const {
-	return DDTeamCollectionImpl::waitForAllDataRemoved(this, serverID, addedVersion);
+	return db->waitForAllDataRemoved(serverID, addedVersion, shardsAffectedByTeamFailure);
 }
 
 Future<Void> DDTeamCollection::machineTeamRemover() {
@@ -3808,6 +3840,8 @@ Future<Void> DDTeamCollection::readStorageWiggleMap() {
 }
 
 Future<Void> DDTeamCollection::updateStorageMetadata(TCServerInfo* server) {
+	if (db->isMocked())
+		return Never();
 	return DDTeamCollectionImpl::updateStorageMetadata(this, server);
 }
 
@@ -3867,6 +3901,8 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
 	teamPivots = { .lastPivotValuesUpdate = 0,
 		           .pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		           .pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
+		           .strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+		           .strictPivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
 		           .minTeamAvgCPU = std::numeric_limits<double>::max() };
 }
 

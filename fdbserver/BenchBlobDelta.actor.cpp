@@ -1,5 +1,5 @@
 /*
- * BenchBlobDeltaFiles.cpp
+ * BenchBlobDelta.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -24,10 +24,12 @@
 #include "flow/IRandom.h"
 #include "flow/DeterministicRandom.h"
 
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "flow/flow.h"
 #include <cstdlib>
 #include <stdexcept>
+
+#include "flow/actorcompiler.h" // This must be the last #include.
 
 // Pre-generated GranuleDelta size in bytes for benchmark.
 const static int PRE_GEN_TARGET_BYTES[] = { 128 * 1024, 512 * 1024, 1024 * 1024 };
@@ -141,36 +143,49 @@ private:
 static DeltaGenerator deltaGen; // Pre-generate deltas
 
 // Benchmark serialization without compression/encryption. The main CPU cost should be sortDeltasByKey
-static void bench_serialize_deltas(benchmark::State& state) {
-	int targetBytes = state.range(0);
-	int chunkSize = state.range(1);
+ACTOR static Future<Void> benchSerializeDeltasActor(benchmark::State* benchState) {
+	state int targetBytes = benchState->range(0);
+	state int chunkSize = benchState->range(1);
 
-	Standalone<GranuleDeltas> delta = deltaGen.getDelta(targetBytes);
-	KeyRange range = deltaGen.getRange();
+	state Standalone<GranuleDeltas> delta = deltaGen.getDelta(targetBytes);
+	state KeyRange range = deltaGen.getRange();
 
-	Standalone<StringRef> fileName = "testdelta"_sr; // unused
-	Optional<CompressionFilter> compressFilter; // unused. no compression
-	Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx; // unused. no encryption
+	state Standalone<StringRef> fileName = "testdelta"_sr; // unused
+	state Optional<CompressionFilter> compressFilter; // unused. no compression
+	state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx; // unused. no encryption
 
-	uint32_t serializedBytes = 0;
-	for (auto _ : state) {
-		Value serialized = serializeChunkedDeltaFile(fileName, delta, range, chunkSize, compressFilter, cipherKeysCtx);
+	state uint32_t serializedBytes = 0;
+	while (benchState->KeepRunning()) {
+		Value serialized =
+		    wait(serializeChunkedDeltaFile(fileName, &delta, range, chunkSize, compressFilter, cipherKeysCtx));
 		serializedBytes += serialized.size();
 	}
-	state.SetBytesProcessed(static_cast<long>(state.iterations()) * targetBytes);
-	state.counters["serialized_bytes"] = serializedBytes;
+	benchState->SetBytesProcessed(static_cast<long>(benchState->iterations()) * targetBytes);
+	benchState->counters["serialized_bytes"] = serializedBytes;
+
+	return Void();
+}
+
+static void bench_serialize_deltas(benchmark::State& benchState) {
+	onMainThread([&benchState]() { return benchSerializeDeltasActor(&benchState); }).blockUntilReady();
 }
 
 // Benchmark sorting deltas
-static void bench_sort_deltas(benchmark::State& state) {
-	int targetBytes = state.range(0);
-	Standalone<GranuleDeltas> delta = deltaGen.getDelta(targetBytes);
-	KeyRange range = deltaGen.getRange();
+ACTOR static Future<Void> benchSortDeltasActor(benchmark::State* benchState) {
+	state int targetBytes = benchState->range(0);
+	state Standalone<GranuleDeltas> delta = deltaGen.getDelta(targetBytes);
+	state KeyRange range = deltaGen.getRange();
 
-	for (auto _ : state) {
-		sortDeltasByKey(delta, range);
+	while (benchState->KeepRunning()) {
+		wait(sortDeltasByKey(&delta, range));
 	}
-	state.SetBytesProcessed(static_cast<long>(state.iterations()) * targetBytes);
+	benchState->SetBytesProcessed(static_cast<long>(benchState->iterations()) * targetBytes);
+
+	return Void();
+}
+
+static void bench_sort_deltas(benchmark::State& benchState) {
+	onMainThread([&benchState]() { return benchSortDeltasActor(&benchState); }).blockUntilReady();
 }
 
 // Benchmark serialization for granule deltas 128KB, 512KB and 1024KB. Chunk size 32KB

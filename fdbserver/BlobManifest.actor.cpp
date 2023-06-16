@@ -25,7 +25,7 @@
 #include "fdbclient/BackupAgent.actor.h"
 #include "fdbclient/BackupContainer.h"
 #include "fdbclient/BlobGranuleCommon.h"
-#include "fdbclient/BlobGranuleFiles.h"
+#include "fdbclient/BlobGranuleFiles.actor.h"
 #include "flow/Arena.h"
 #include "flow/FastRef.h"
 #include "flow/Trace.h"
@@ -244,6 +244,18 @@ public:
 		}
 	}
 
+	// Append rows to the splitter
+	void append(RangeResult rows) {
+		ASSERT(!closed_);
+		rows_.arena().dependsOn(rows.arena());
+		rows_.append(rows_.arena(), rows.begin(), rows.size());
+		totalRows_ += rows.size();
+		logicalSize_ += rows.expectedSize();
+		if (logicalSize_ > SERVER_KNOBS->BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE) {
+			flushNext();
+		}
+	}
+
 	int64_t totalBytes() { return totalBytes_; }
 
 	// Close the splitter. No more data should be added after
@@ -273,23 +285,37 @@ public:
 		return Void();
 	}
 
+	// takes memory ownership of rows for duration of serializing the snapshot and writes the file to blob storage
+	ACTOR static Future<Void> writeSegment(BlobManifestFileSplitter* self) {
+		// copy necessary fields at start of actor BEFORE waits
+		state std::string fname = self->fileName(self->segmentNo_);
+		state Standalone<StringRef> filename = StringRef(fname);
+		state Standalone<GranuleSnapshot> rows;
+		state Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = self->cipherKeysCtx_;
+
+		rows.reserve(rows.arena(), self->rows_.size());
+		rows.append_deep(rows.arena(), self->rows_.begin(), self->rows_.size());
+
+		Value bytes = wait(serializeChunkedSnapshot(
+		    filename, &rows, SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES, {}, cipherKeysCtx, false));
+		self->totalBytes_ += bytes.size();
+
+		// clear rows to reduce memory while writing file
+		rows = Standalone<GranuleSnapshot>();
+
+		wait(writeToFile(self, bytes, fname));
+
+		return Void();
+	}
+
 private:
 	// Write next segment
 	void flushNext() {
-		std::string fname = fileName(segmentNo_);
-		Optional<CompressionFilter> compressionFilter;
-		Value bytes = serializeChunkedSnapshot(StringRef(fname),
-		                                       rows_,
-		                                       SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_CHUNK_BYTES,
-		                                       compressionFilter,
-		                                       cipherKeysCtx_,
-		                                       false);
-		pendingFutures_.push_back(writeToFile(this, bytes, fname));
+		pendingFutures_.push_back(writeSegment(this));
 		TraceEvent("BlobManifestFile").detail("Rows", rows_.size()).detail("SegNo", segmentNo_);
 
 		rows_.clear();
 		segmentNo_++;
-		totalBytes_ += bytes.size();
 		logicalSize_ = 0;
 	}
 
@@ -410,15 +436,11 @@ private:
 		state Reference<BlobManifestFileSplitter> splitter =
 		    makeReference<BlobManifestFileSplitter>(self->blobConn_, self->epoch_, self->seqNo_, cipherKeysCtx);
 		state Transaction tr(self->db_);
+
 		loop {
-			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			try {
-				state std::vector<KeyRangeRef> ranges = {
+				std::vector<KeyRangeRef> ranges = {
 					blobGranuleMappingKeys, // Map granule to workers. Track the active granules
-					blobGranuleHistoryKeys, // Map granule to its parents and parent bundaries. for time-travel read
-					blobGranuleFileKeys, // Map a granule version to granule files. Track files for a granule
 					blobRangeKeys // Key ranges managed by blob
 				};
 				// tenant metadata
@@ -427,28 +449,16 @@ private:
 				}
 				// last updated version for table metadata
 				ranges.push_back(KeyRangeRef(metadataVersionKey, metadataVersionKeyEnd));
+				state Version readVersion = wait(dumpRanges(self, splitter, ranges));
 
-				for (auto& range : ranges) {
-					state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
-					limits.minRows = 0;
-					state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
-					state KeySelectorRef end = firstGreaterOrEqual(range.end);
-					loop {
-						state RangeResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
-						for (auto& row : result) {
-							splitter->append(KeyValueRef(row.key, row.value));
-						}
-						if (!result.more) {
-							break;
-						}
-						begin = result.nextBeginKeySelector();
-					}
-				}
-
-				// store the read vesion
-				Version readVersion = wait(tr.getReadVersion());
-				Value versionEncoded = BinaryWriter::toValue(readVersion, Unversioned());
-				splitter->append(KeyValueRef(blobManifestVersionKey, versionEncoded));
+				// blobGranuleHistoryKeys - Map granule to its parents and parent bundaries. for time-travel read
+				wait(dumpRange(self, splitter, blobGranuleHistoryKeys, [=](KeyValueRef row) {
+					return shouldDumpBlobGranuleHistoryKey(row, readVersion);
+				}));
+				// blobGranuleFileKeys - Map a granule version to granule files. Track files for a granule
+				wait(dumpRange(self, splitter, blobGranuleFileKeys, [=](KeyValueRef row) {
+					return shouldDumpBlobGranuleFileKey(row, readVersion);
+				}));
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
@@ -459,9 +469,136 @@ private:
 			} catch (Error& e) {
 				TraceEvent("BlobManfiestDumpError").error(e).log();
 				dprint("Manifest dumping error {}\n", e.what());
-				wait(tr.onError(e));
 				wait(BlobManifestFileSplitter::reset(splitter));
+				// wait to avoid spinning
+				wait(delay(SERVER_KNOBS->BLOB_MANIFEST_RETRY_INTERVAL));
 			}
+		}
+	}
+
+	// Read ranges and append to splitter. Assume the ranges can be processed within single transaction
+	ACTOR static Future<Version> dumpRanges(Reference<BlobManifestDumper> self,
+	                                        Reference<BlobManifestFileSplitter> splitter,
+	                                        std::vector<KeyRangeRef> ranges) {
+		state Transaction tr(self->db_);
+		try {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			for (auto range : ranges) {
+				try {
+					state PromiseStream<RangeReadResult> rows;
+					state Future<Void> stream = tr.getRangeStream(rows, range, GetRangeLimits(), Snapshot::True);
+					loop {
+						RangeReadResult result = waitNext(rows.getFuture());
+						splitter->append(result);
+					}
+				} catch (Error& e) {
+					if (e.code() == error_code_end_of_stream) {
+						continue; // done and move to next range
+					}
+					throw;
+				}
+			}
+			Version readVersion = wait(tr.getReadVersion());
+			Value versionEncoded = BinaryWriter::toValue(readVersion, Unversioned());
+			splitter->append(KeyValueRef(blobManifestVersionKey, versionEncoded));
+			return readVersion;
+		} catch (Error& e) {
+			state Error err = e;
+			// Cannnot simply retry on transaction errors. Need to cleanup files for partial dump
+			// so wait on error to avoid spinning read, and throw it to caller
+			wait(tr.onError(e));
+			throw err;
+		}
+	}
+
+	static bool shouldDumpBlobGranuleFileKey(KeyValueRef row, Version maxVersion) {
+		ASSERT(row.key.startsWith(blobGranuleFileKeys.begin));
+
+		UID gid;
+		uint8_t fileType;
+		Version version;
+		std::tie(gid, version, fileType) = decodeBlobGranuleFileKey(row.key);
+		if (version > maxVersion) {
+			CODE_PROBE(true, "Skip newer blob granule files for blob manifest");
+			dprint("Skip granule file {} {}\n", gid.toString(), version);
+			return false;
+		}
+		return true;
+	}
+
+	static bool shouldDumpBlobGranuleHistoryKey(KeyValueRef row, Version maxVersion) {
+		ASSERT(row.key.startsWith(blobGranuleHistoryKeys.begin));
+
+		std::pair<KeyRange, Version> decodedKey = decodeBlobGranuleHistoryKey(row.key);
+		if (decodedKey.second > maxVersion) {
+			CODE_PROBE(true, "Skip newer blob granule history for blob manifest");
+			dprint("Skip granule history {} {}\n", decodedKey.first.toString(), decodedKey.second);
+			return false;
+		}
+		return true;
+	}
+
+	// Start a transcation to read range and append to splitter. Number of rows are limited by maxRowsPerTransaction.
+	// It returns the last key that has been read.
+	ACTOR static Future<Key> dumpRange(Reference<BlobManifestDumper> self,
+	                                   Reference<BlobManifestFileSplitter> splitter,
+	                                   KeySelector begin,
+	                                   KeySelector end,
+	                                   std::function<bool(KeyValueRef)> shouldDumpFunc,
+	                                   int maxRowsPerTransaction) {
+		state Transaction tr(self->db_);
+		state int count = 0;
+		loop {
+			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			try {
+				state GetRangeLimits limits(SERVER_KNOBS->BLOB_MANIFEST_RW_ROWS);
+				limits.minRows = 0;
+				loop {
+					RangeReadResult result = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					for (auto& row : result) {
+						if (shouldDumpFunc(row)) {
+							splitter->append(row);
+						}
+					}
+
+					count += result.size();
+					if (!result.more) {
+						return end.getKey();
+					}
+					begin = result.nextBeginKeySelector();
+					if (count > maxRowsPerTransaction) {
+						return begin.getKey();
+					}
+				}
+			} catch (Error& e) {
+				// Cannnot simply retry on transaction errors. Need to cleanup files for partial dump
+				// so wait on error to avoid spinning read, and throw it to caller
+				state Error err = e;
+				wait(tr.onError(e));
+				throw err;
+			}
+		}
+	}
+
+	// Use multiple transactions to read the range and append to splitter. It's used for blobGranuleFileKeys
+	// and blobGranuleHistoryKeys. All rows with version greater than maxVersion will be skipped.
+	ACTOR static Future<Void> dumpRange(Reference<BlobManifestDumper> self,
+	                                    Reference<BlobManifestFileSplitter> splitter,
+	                                    KeyRange range,
+	                                    std::function<bool(KeyValueRef)> shouldDumpFunc) {
+		state KeySelectorRef begin = firstGreaterOrEqual(range.begin);
+		state KeySelectorRef end = firstGreaterOrEqual(range.end);
+		loop {
+			int limit = SERVER_KNOBS->BLOB_MANIFEST_MAX_ROWS_PER_TRANSACTION;
+			Key next = wait(dumpRange(self, splitter, begin, end, shouldDumpFunc, limit));
+			if (next >= range.end) {
+				return Void();
+			}
+			begin = firstGreaterThan(next);
 		}
 	}
 
@@ -537,7 +674,7 @@ public:
 				state KeySelectorRef begin = firstGreaterOrEqual(blobGranuleMappingKeys.begin);
 				state KeySelectorRef end = firstGreaterOrEqual(blobGranuleMappingKeys.end);
 				loop {
-					RangeResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
+					RangeReadResult rows = wait(tr.getRange(begin, end, limits, Snapshot::True));
 					for (auto& row : rows) {
 						blobRanges.push_back_deep(blobRanges.arena(), row.key);
 						blobRangesAssigned.push_back(blobRangesAssigned.arena(), !row.value.empty());
@@ -763,7 +900,7 @@ private:
 		loop {
 			try {
 				// reverse lookup so that the first row is the newest version
-				state RangeResult results = wait(
+				state RangeReadResult results = wait(
 				    tr->getRange(historyKeyRange, GetRangeLimits::BYTE_LIMIT_UNLIMITED, Snapshot::True, Reverse::True));
 				for (KeyValueRef row : results) {
 					state KeyRange keyRange;
@@ -819,7 +956,7 @@ private:
 		state KeySelectorRef begin = firstGreaterOrEqual(fileKeyRange.begin);
 		state KeySelectorRef end = firstGreaterOrEqual(fileKeyRange.end);
 		loop {
-			RangeResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			RangeReadResult results = wait(tr->getRange(begin, end, limits, Snapshot::True));
 			for (auto& row : results) {
 				UID gid;
 				Version version;

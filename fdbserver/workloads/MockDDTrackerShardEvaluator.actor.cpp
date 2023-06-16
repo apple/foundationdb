@@ -25,6 +25,7 @@ class MockDDTrackerShardEvaluatorWorkload : public MockDDTestWorkload {
 public:
 	static constexpr auto NAME = "MockDDTrackerShardEvaluator";
 	DDSharedContext ddcx;
+	Reference<DDMockTxnProcessor> mock;
 
 	PromiseStream<RelocateShard> output;
 	PromiseStream<GetMetricsRequest> getShardMetrics;
@@ -58,8 +59,9 @@ public:
 		if (!enabled)
 			return Void();
 		MockDDTestWorkload::setup(cx);
-		// populate mgs before run tracker
+		// populate sharedMgs before run tracker
 		populateMgs();
+		mock = makeReference<DDMockTxnProcessor>(sharedMgs);
 		return Void();
 	}
 
@@ -85,7 +87,7 @@ public:
 			return Void();
 
 		// start mock servers
-		actors.add(waitForAll(mgs->runAllMockServers()));
+		actors.add(waitForAll(sharedMgs->runAllMockServers()));
 
 		// start tracker
 		Reference<InitialDataDistribution> initData =

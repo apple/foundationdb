@@ -39,9 +39,9 @@ ACTOR Future<Void> printProcessClass(Reference<IDatabase> db) {
 		tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		try {
 			// Hold the reference to the memory
-			state ThreadFuture<RangeResult> classTypeFuture =
+			state ThreadFuture<RangeReadResult> classTypeFuture =
 			    tr->getRange(fdb_cli::processClassTypeSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
-			state ThreadFuture<RangeResult> classSourceFuture =
+			state ThreadFuture<RangeReadResult> classSourceFuture =
 			    tr->getRange(fdb_cli::processClassSourceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 			wait(success(safeThreadFutureToFuture(classSourceFuture)) &&
 			     success(safeThreadFutureToFuture(classTypeFuture)));

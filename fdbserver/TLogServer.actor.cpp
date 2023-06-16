@@ -563,7 +563,6 @@ struct LogData : NonCopyable, public ReferenceCounted<LogData> {
 	Counter emptyPeeks;
 	Counter nonEmptyPeeks;
 	std::map<Tag, LatencySample> blockingPeekLatencies;
-	std::map<Tag, LatencySample> peekVersionCounts;
 
 	UID logId;
 	ProtocolVersion protocolVersion;
@@ -1677,16 +1676,6 @@ void peekMessagesFromMemory(Reference<LogData> self,
 		++self->emptyPeeks;
 	} else {
 		++self->nonEmptyPeeks;
-
-		// TODO (version vector) check if this should be included in "status details" json
-		if (self->peekVersionCounts.find(tag) == self->peekVersionCounts.end()) {
-			UID ssID = deterministicRandom()->randomUniqueID();
-			std::string s = "PeekVersionCounts " + tag.toString();
-			self->peekVersionCounts.try_emplace(
-			    tag, s, ssID, SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL, SERVER_KNOBS->LATENCY_SKETCH_ACCURACY);
-		}
-		LatencySample& sample = self->peekVersionCounts.at(tag);
-		sample.addMeasurement(versionCount);
 	}
 }
 

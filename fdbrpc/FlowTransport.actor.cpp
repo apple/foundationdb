@@ -504,6 +504,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 
 ACTOR Future<Void> connectionMonitor(Reference<Peer> peer) {
 	state Endpoint remotePingEndpoint({ peer->destination }, Endpoint::wellKnownToken(WLTOKEN_PING_PACKET));
+	// set this to not immediately close the connection as idle if the peer already existed
+	peer->lastDataPacketSentTime = now();
 	loop {
 		if (!FlowTransport::isClient() && !peer->destination.isPublic() && peer->compatible) {
 			// Don't send ping messages to clients unless necessary. Instead monitor incoming client pings.
@@ -1878,7 +1880,8 @@ static ReliablePacket* sendPacket(TransportData* self,
 	if (len > FLOW_KNOBS->PACKET_LIMIT) {
 		TraceEvent(SevError, "PacketLimitExceeded")
 		    .detail("ToPeer", destination.getPrimaryAddress())
-		    .detail("Length", (int)len);
+		    .detail("Length", (int)len)
+		    .detail("Token", destination.token);
 		// throw platform_error();  // FIXME: How to recover from this situation?
 	} else if (len > FLOW_KNOBS->PACKET_WARNING) {
 		TraceEvent(SevWarn, "LargePacketSent")
