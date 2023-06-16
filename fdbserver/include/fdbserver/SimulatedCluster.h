@@ -35,6 +35,8 @@ public:
 	int logAntiQuorum = -1;
 	// Set true to simplify simulation configs for easier debugging
 	bool simpleConfig = false;
+	// set to true to force a single region config
+	bool singleRegion = false;
 	Optional<int> desiredTLogCount, commitProxyCount, grvProxyCount, resolverCount, storageEngineType, machineCount,
 	    coordinators;
 	// ASAN uses more memory, so adding too many machines can cause OOMs. Tests can set this if they need to lower
@@ -52,6 +54,5 @@ struct BasicSimulationConfig {
 	DatabaseConfiguration db;
 };
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig);
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig);
 #endif

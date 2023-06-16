@@ -652,10 +652,11 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 				    (statsCurrentRound.logicalBytesScanned == 0)
 				        ? 3
 				        : ((double)statsCurrentRound.replicatedBytesRead / statsCurrentRound.logicalBytesScanned);
-				configuredRate =
-				    std::min<int>(config.maxReadByteRate,
-				                  memState->databaseSize.get() * replicationFactor /
-				                      (config.targetRoundTimeSeconds > 0 ? config.targetRoundTimeSeconds : 1));
+				double bytesPerSecTarget = memState->databaseSize.get() * replicationFactor /
+				                           (config.targetRoundTimeSeconds > 0 ? config.targetRoundTimeSeconds : 1);
+				// avoid ubsan int conversion issue if misconfigured, also max of 100MB/s is reasonable anyway
+				bytesPerSecTarget = std::min(bytesPerSecTarget, 1e8);
+				configuredRate = std::min<int>(config.maxReadByteRate, bytesPerSecTarget);
 			}
 
 			configuredRate = std::max<int>(100e3, configuredRate);
@@ -842,6 +843,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 							state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
 							state Optional<int> firstValidServer;
 							memState->stats.requests += storageServerInterfaces.size();
+							state int64_t replicatedBytesReadThisLoop = 0;
 							int newErrors = wait(consistencyCheckReadData(memState->csId,
 							                                              db,
 							                                              targetRange,
@@ -849,7 +851,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 							                                              &storageServerInterfaces,
 							                                              &keyValueFutures,
 							                                              &firstValidServer,
-							                                              &replicatedBytesRead,
+							                                              &replicatedBytesReadThisLoop,
 							                                              statsCurrentRound.startVersion));
 							errors += newErrors;
 							memState->stats.inconsistencies += newErrors;
@@ -870,6 +872,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								ASSERT(firstValidServer.present());
 								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.get()].get().get();
 								logicalBytesRead += rangeResult.data.expectedSize();
+								replicatedBytesRead += replicatedBytesReadThisLoop;
 								if (!rangeResult.more) {
 									statsCurrentRound.lastEndKey = targetRange.end;
 									noMoreRecords = statsCurrentRound.lastEndKey == allKeys.end;
@@ -901,6 +904,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 										nextKey = storageNextKey;
 									}
 								}
+								replicatedBytesRead += replicatedBytesReadThisLoop;
 								statsCurrentRound.lastEndKey = nextKey;
 								if (nextKey == targetRange.end) {
 									noMoreRecords = nextKey == allKeys.end;
@@ -920,7 +924,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								}
 								// FIXME: increment failed request count if error present
 								ASSERT(failedRequest.get().code() != error_code_operation_cancelled);
-								totalReadBytesFromStorageServers += 100000;
+								// don't include replicated bytes this loop in metrics to avoid getting replication
+								// factor wrong, but make sure we stil throttle based on it
+								totalReadBytesFromStorageServers += replicatedBytesReadThisLoop + 100000;
 								break;
 							}
 
@@ -928,8 +934,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 							// we also don't want to alternate bursting for 5 seconds and then sleeping for many seconds
 							// As a compromise, only sleep for some tunable percentage of the target here, and sleep the
 							// rest at the end
-							int sleepBytes = (int)(totalReadBytesFromStorageServers *
-							                       SERVER_KNOBS->CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO);
+							double ratio = SERVER_KNOBS->CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO;
+							ratio = std::max(0.0, std::min(1.0, ratio));
+							int sleepBytes = (int)(totalReadBytesFromStorageServers * ratio);
 							totalReadBytesFromStorageServers -= sleepBytes;
 							wait(readRateControl->getAllowance(sleepBytes));
 						}

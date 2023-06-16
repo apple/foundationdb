@@ -30,6 +30,19 @@
 
 namespace fdb_cli {
 
+ACTOR Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
+	state ConsistencyScanState::LifetimeStats statsLifetime;
+	state ConsistencyScanState::RoundStats statsCurrentRound;
+	wait(store(statsLifetime, cs->lifetimeStats().getD(tr)) &&
+	     store(statsCurrentRound, cs->currentRoundStats().getD(tr)));
+	printf(
+	    "Current Round:\n%s\n",
+	    json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON()), json_spirit::pretty_print).c_str());
+	printf("Lifetime:\n%s\n",
+	       json_spirit::write_string(json_spirit::mValue(statsLifetime.toJSON()), json_spirit::pretty_print).c_str());
+	return Void();
+}
+
 ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> tokens) {
 	// Skip the command token so start at begin+1
 	state std::list<StringRef> args(tokens.begin() + 1, tokens.end());
@@ -62,6 +75,8 @@ ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRe
 					config.enabled = false;
 				} else if (next == "restart") {
 					config.minStartVersion = tr->getReadVersion().get();
+				} else if (next == "stats") {
+					wait(dumpStats(&cs, tr));
 				} else if (next == "clearstats") {
 					wait(cs.clearStats(tr));
 				} else if (next == "maxRate") {
@@ -102,7 +117,8 @@ CommandFactory consistencyScanFactory(
     "consistencyscan",
     CommandHelp(
         // TODO:  Expose/document additional configuration options
-        "consistencyscan [on|off] [restart] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]",
+        "consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval "
+        "<SECONDS>]",
         "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans "
         "shard replicas for consistency.",
         "`on' enables the scan.\n\n"
@@ -112,8 +128,10 @@ CommandFactory consistencyScanFactory(
         "`maxRate <BYTES_PER_SECOND>' sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.\n\n"
         "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed "
         "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n\n"
+        "`stats` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to "
+        "expose the stats which are also in status json.\n\n"
         "`clearstats` will clear all of the stats for the consistency scan but otherwise leave the configuration as "
-        "is. This can be used to clear errors or reset stat counts, for example."
+        "is. This can be used to clear errors or reset stat counts, for example.\n\n"
         "The consistency scan role publishes its configuration and metrics in Status JSON under the path "
         "`.cluster.consistency_scan'\n"
         // TODO:  Syntax hint generator

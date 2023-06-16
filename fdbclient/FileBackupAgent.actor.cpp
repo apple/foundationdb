@@ -3600,6 +3600,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 			tr->clear(blobGranuleHistoryKeys);
 			tr->clear(blobGranuleFileKeys);
 			tr->clear(blobGranuleMappingKeys);
+			tr->clear(blobGranuleLockKeys);
 			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
 			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
 		}

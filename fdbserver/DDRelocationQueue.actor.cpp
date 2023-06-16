@@ -147,10 +147,20 @@ bool RelocateData::isRestore() const {
 	return this->dataMove != nullptr;
 }
 
+// Note: C++ standard library uses the Compare operator, uniqueness is determined by !comp(a, b) && !comp(b, a).
+// So operator == and != is not used by std::set<RelocateData, std::greater<RelocateData>>
 bool RelocateData::operator>(const RelocateData& rhs) const {
-	return priority != rhs.priority
-	           ? priority > rhs.priority
-	           : (startTime != rhs.startTime ? startTime < rhs.startTime : randomId > rhs.randomId);
+	if (priority != rhs.priority) {
+		return priority > rhs.priority;
+	} else if (startTime != rhs.startTime) {
+		return startTime < rhs.startTime;
+	} else if (randomId != rhs.randomId) {
+		return randomId > rhs.randomId;
+	} else if (keys.begin != rhs.keys.begin) {
+		return keys.begin < rhs.keys.begin;
+	} else {
+		return keys.end < rhs.keys.end;
+	}
 }
 
 bool RelocateData::operator==(const RelocateData& rhs) const {
@@ -533,9 +543,8 @@ ACTOR Future<Void> getSourceServersForRange(DDQueue* self,
 }
 
 DDQueue::DDQueue(DDQueueInitParams const& params)
-  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), cx(params.db->context()),
-    txnProcessor(params.db), teamCollections(params.teamCollections),
-    shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
+  : IDDRelocationQueue(), distributorId(params.id), lock(params.lock), txnProcessor(params.db),
+    teamCollections(params.teamCollections), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     physicalShardCollection(params.physicalShardCollection), getAverageShardBytes(params.getAverageShardBytes),
     startMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
     finishMoveKeysParallelismLock(SERVER_KNOBS->DD_MOVE_KEYS_PARALLELISM),
@@ -804,11 +813,18 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 	// update fetchingSourcesQueue and the per-server queue based on truncated ranges after insertion, (re-)launch
 	// getSourceServers
 	auto queueMapItr = queueMap.rangeContaining(affectedQueuedItems[0].begin);
+
+	// Put off erasing elements from fetchingSourcesQueue
+	std::set<RelocateData, std::greater<RelocateData>> delayDelete;
 	for (int r = 0; r < affectedQueuedItems.size(); ++r, ++queueMapItr) {
 		// ASSERT(queueMapItr->value() == queueMap.rangeContaining(affectedQueuedItems[r].begin)->value());
 		RelocateData& rrs = queueMapItr->value();
 
-		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.erase(rrs) > 0)) {
+		if (rrs.src.size() == 0 && (rrs.keys == rd.keys || fetchingSourcesQueue.count(rrs) > 0)) {
+			if (rrs.keys != rd.keys) {
+				delayDelete.insert(rrs);
+			}
+
 			rrs.keys = affectedQueuedItems[r];
 			rrs.interval = TraceInterval("QueuedRelocation", rrs.randomId); // inherit the old randomId
 
@@ -867,6 +883,9 @@ void DDQueue::queueRelocation(RelocateShard rs, std::set<UID>& serversToLaunchFr
 		}
 	}
 
+	for (auto it : delayDelete) {
+		fetchingSourcesQueue.erase(it);
+	}
 	DebugRelocationTraceEvent("ReceivedRelocateShard", distributorId)
 	    .detail("KeyBegin", rd.keys.begin)
 	    .detail("KeyEnd", rd.keys.end)
@@ -1118,8 +1137,8 @@ void DDQueue::enqueueCancelledDataMove(UID dataMoveId, KeyRange range, const DDE
 	}
 
 	DDQueue::DDDataMove dataMove(dataMoveId);
-	dataMove.cancel =
-	    cleanUpDataMove(this->cx, dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
+	dataMove.cancel = cleanUpDataMove(
+	    txnProcessor->context(), dataMoveId, this->lock, &this->cleanUpDataMoveParallelismLock, range, ddEnabledState);
 	this->dataMoves.insert(range, dataMove);
 	TraceEvent(SevInfo, "DDEnqueuedCancelledDataMove", this->distributorId)
 	    .detail("DataMoveID", dataMoveId)
@@ -1151,8 +1170,12 @@ ACTOR Future<Void> cancelDataMove(class DDQueue* self, KeyRange range, const DDE
 		    .detail("DataMoveRange", keys)
 		    .detail("Range", range);
 		if (!it->value().cancel.isValid()) {
-			it->value().cancel = cleanUpDataMove(
-			    self->cx, it->value().id, self->lock, &self->cleanUpDataMoveParallelismLock, keys, ddEnabledState);
+			it->value().cancel = cleanUpDataMove(self->txnProcessor->context(),
+			                                     it->value().id,
+			                                     self->lock,
+			                                     &self->cleanUpDataMoveParallelismLock,
+			                                     keys,
+			                                     ddEnabledState);
 		}
 		cleanup.push_back(it->value().cancel);
 	}
