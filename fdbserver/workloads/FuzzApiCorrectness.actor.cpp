@@ -833,8 +833,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange0 : public BaseTest<TestGetRange0, RangeResult> {
-		typedef BaseTest<TestGetRange0, RangeResult> base_type;
+	struct TestGetRange0 : public BaseTest<TestGetRange0, RangeReadResult> {
+		typedef BaseTest<TestGetRange0, RangeReadResult> base_type;
 		KeySelector keysel1, keysel2;
 		int limit;
 
@@ -890,8 +890,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange1 : public BaseTest<TestGetRange1, RangeResult> {
-		typedef BaseTest<TestGetRange1, RangeResult> base_type;
+	struct TestGetRange1 : public BaseTest<TestGetRange1, RangeReadResult> {
+		typedef BaseTest<TestGetRange1, RangeReadResult> base_type;
 		KeySelector keysel1, keysel2;
 		GetRangeLimits limits;
 
@@ -940,8 +940,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange2 : public BaseTest<TestGetRange2, RangeResult> {
-		typedef BaseTest<TestGetRange2, RangeResult> base_type;
+	struct TestGetRange2 : public BaseTest<TestGetRange2, RangeReadResult> {
+		typedef BaseTest<TestGetRange2, RangeReadResult> base_type;
 		Key key1, key2;
 		int limit;
 
@@ -1007,8 +1007,8 @@ struct FuzzApiCorrectnessWorkload : TestWorkload {
 		}
 	};
 
-	struct TestGetRange3 : public BaseTest<TestGetRange3, RangeResult> {
-		typedef BaseTest<TestGetRange3, RangeResult> base_type;
+	struct TestGetRange3 : public BaseTest<TestGetRange3, RangeReadResult> {
+		typedef BaseTest<TestGetRange3, RangeReadResult> base_type;
 		Key key1, key2;
 		GetRangeLimits limits;
 

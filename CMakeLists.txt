@@ -174,10 +174,6 @@ set(SEED "0x${SEED_}" CACHE STRING "Random seed for testing")
 # components
 ################################################################################
 
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  include_directories(/usr/local/include)
-endif()
-
 include(CompileBoost)
 include(GetMsgpack)
 add_subdirectory(contrib)
@@ -186,11 +182,7 @@ add_subdirectory(fdbrpc)
 add_subdirectory(fdbclient)
 add_subdirectory(fdbserver)
 add_subdirectory(fdbcli)
-if(NOT WIN32)
-  add_subdirectory(fdbmonitor)
-else()
-  add_subdirectory(fdbservice)
-endif()
+add_subdirectory(fdbmonitor)
 add_subdirectory(fdbbackup)
 add_subdirectory(metacluster)
 add_subdirectory(tests)
@@ -201,15 +193,7 @@ if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
 
-if(WIN32)
-  add_subdirectory(packaging/msi)
-else()
-  include(CPack)
-endif()
-
-if(CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
-  add_link_options(-lexecinfo)
-endif()
+include(CPack)
 
 ################################################################################
 # process compile commands for IDE

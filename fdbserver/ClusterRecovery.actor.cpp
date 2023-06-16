@@ -86,12 +86,12 @@ ACTOR Future<Void> recruitNewMaster(ClusterControllerData* cluster,
 		// controller.
 		std::map<Optional<Standalone<StringRef>>, int> id_used;
 		id_used[cluster->clusterControllerProcessId]++;
-		masterWorker = Recruiter::getWorkerForRoleInDatacenter(cluster,
-		                                                       cluster->clusterControllerDcId,
-		                                                       ProcessClass::Master,
-		                                                       ProcessClass::NeverAssign,
-		                                                       db->config,
-		                                                       id_used);
+		masterWorker = cluster->recruiter.getWorkerForRoleInDatacenter(cluster,
+		                                                               cluster->clusterControllerDcId,
+		                                                               ProcessClass::Master,
+		                                                               ProcessClass::NeverAssign,
+		                                                               db->config,
+		                                                               id_used);
 		if ((masterWorker.worker.processClass.machineClassFitness(ProcessClass::Master) >
 		         SERVER_KNOBS->EXPECTED_MASTER_FITNESS ||
 		     masterWorker.worker.interf.locality.processId() == cluster->clusterControllerProcessId) &&
@@ -316,7 +316,7 @@ ACTOR Future<Void> configurationMonitor(Reference<ClusterRecoveryData> self, Dat
 		loop {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 				DatabaseConfiguration conf;
@@ -996,6 +996,147 @@ void updateConfigForForcedRecovery(Reference<ClusterRecoveryData> self,
 	initialConfChanges->push_back(regionCommit);
 }
 
+//
+// Find workers to perform roles for the transaction subsystem. Then, send
+// messages to those workers to recruit them. This function recruits workers
+// for the following roles:
+//
+//   * GRV proxies
+//   * Commit proxies
+//   * Resolvers
+//   * Transaction logs
+//   * Satellite transaction logs
+//   * Backup workers
+//   * Old log routers
+//
+// Recruitment for storage servers is performed separately. This function only
+// recruits roles necessary to perform a successful recovery.
+//
+ACTOR Future<std::vector<Standalone<CommitTransactionRef>>> recruitTransactionSubsystem(
+    Reference<ClusterRecoveryData> self,
+    std::vector<StorageServerInterface>* seedServers,
+    Reference<ILogSystem> oldLogSystem) {
+	if (!self->configuration.isValid()) {
+		RecoveryStatus::RecoveryStatus status;
+		if (self->configuration.initialized) {
+			TraceEvent(
+			    SevWarn,
+			    getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_INVALID_CONFIG_EVENT_NAME).c_str(),
+			    self->dbgid)
+			    .setMaxEventLength(11000)
+			    .setMaxFieldLength(10000)
+			    .detail("Conf", self->configuration.toString());
+			status = RecoveryStatus::configuration_invalid;
+		} else if (!self->cstate.prevDBState.tLogs.size()) {
+			status = RecoveryStatus::configuration_never_created;
+			self->neverCreated = true;
+		} else {
+			status = RecoveryStatus::configuration_missing;
+		}
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+		           self->dbgid)
+		    .detail("StatusCode", status)
+		    .detail("Status", RecoveryStatus::names[status])
+		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
+		return Never();
+	} else {
+		TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(),
+		           self->dbgid)
+		    .setMaxFieldLength(-1)
+		    .detail("StatusCode", RecoveryStatus::recruiting_transaction_servers)
+		    .detail("Status", RecoveryStatus::names[RecoveryStatus::recruiting_transaction_servers])
+		    .detail("Conf", self->configuration.toString())
+		    .detail("RequiredCommitProxies", 1)
+		    .detail("RequiredGrvProxies", 1)
+		    .detail("RequiredResolvers", 1)
+		    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
+		// The cluster's EncryptionAtRest status is now readable.
+		if (self->controllerData->encryptionAtRestMode.canBeSet()) {
+			self->controllerData->encryptionAtRestMode.send(Recruiter::getEncryptionAtRest(self->configuration));
+		}
+	}
+
+	// FIXME: we only need log routers for the same locality as the master
+	int maxLogRouters = self->cstate.prevDBState.logRouterTags;
+	for (auto& old : self->cstate.prevDBState.oldTLogData) {
+		maxLogRouters = std::max(maxLogRouters, old.logRouterTags);
+	}
+
+	// TODO(ljoswiak): Remove `RecruitmentInfo` struct, pass values directly to function
+	state RecruitmentInfo recruitmentInfo(self->configuration, self->lastEpochEnd == 0, maxLogRouters);
+	state WorkerRecruitment recruitment;
+
+	loop {
+		try {
+			recruitment = self->controllerData->recruiter.findWorkers(self->controllerData, recruitmentInfo, true);
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_operation_failed || e.code() == error_code_no_more_servers) {
+				// recruitment not good enough, try again
+				TraceEvent("RecruitFromConfigurationRetry", self->controllerData->id)
+				    .error(e)
+				    .detail("GoodRecruitmentTimeReady", self->controllerData->goodRecruitmentTime.isReady());
+			} else {
+				TraceEvent(SevError, "RecruitFromConfigurationError", self->controllerData->id).error(e);
+				throw;
+			}
+		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
+	}
+
+	std::string primaryDcIds, remoteDcIds;
+
+	self->primaryDcId.clear();
+	self->remoteDcIds.clear();
+	if (recruitment.dcId.present()) {
+		self->primaryDcId.push_back(recruitment.dcId);
+		if (!primaryDcIds.empty()) {
+			primaryDcIds += ',';
+		}
+		primaryDcIds += printable(recruitment.dcId);
+		if (self->configuration.regions.size() > 1) {
+			Key remoteDcId = recruitment.dcId.get() == self->configuration.regions[0].dcId
+			                     ? self->configuration.regions[1].dcId
+			                     : self->configuration.regions[0].dcId;
+			self->remoteDcIds.push_back(remoteDcId);
+			if (!remoteDcIds.empty()) {
+				remoteDcIds += ',';
+			}
+			remoteDcIds += printable(remoteDcId);
+		}
+	}
+	self->backupWorkers.swap(recruitment.backupWorkers);
+
+	TraceEvent(getRecoveryEventName(ClusterRecoveryEventType::CLUSTER_RECOVERY_STATE_EVENT_NAME).c_str(), self->dbgid)
+	    .detail("StatusCode", RecoveryStatus::initializing_transaction_servers)
+	    .detail("Status", RecoveryStatus::names[RecoveryStatus::initializing_transaction_servers])
+	    .detail("CommitProxies", recruitment.commitProxies.size())
+	    .detail("GrvProxies", recruitment.grvProxies.size())
+	    .detail("TLogs", recruitment.tLogs.size())
+	    .detail("Resolvers", recruitment.resolvers.size())
+	    .detail("SatelliteTLogs", recruitment.satelliteTLogs.size())
+	    .detail("OldLogRouters", recruitment.oldLogRouters.size())
+	    .detail("StorageServers", recruitment.storageServers.size())
+	    .detail("BackupWorkers", self->backupWorkers.size())
+	    .detail("PrimaryDcIds", primaryDcIds)
+	    .detail("RemoteDcIds", remoteDcIds)
+	    .trackLatest(self->clusterRecoveryStateEventHolder->trackingKey);
+
+	state std::vector<Standalone<CommitTransactionRef>> confChanges =
+	    wait(self->controllerData->recruiter.recruitWorkers(self, recruitment, seedServers, oldLogSystem));
+
+	// Update recovery related information to the newly elected sequencer (master) process.
+	wait(brokenPromiseToNever(
+	    self->masterInterface.updateRecoveryData.getReply(UpdateRecoveryDataRequest(self->recoveryTransactionVersion,
+	                                                                                self->lastEpochEnd,
+	                                                                                self->commitProxies,
+	                                                                                self->resolvers,
+	                                                                                self->versionEpoch,
+	                                                                                self->primaryLocality))));
+
+	return confChanges;
+}
+
 ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
                                Reference<ILogSystem> oldLogSystem,
                                std::vector<StorageServerInterface>* seedServers,
@@ -1030,7 +1171,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 	state std::map<Optional<Value>, int8_t> originalLocalityMap = self->dcId_locality;
 	state Future<std::vector<Standalone<CommitTransactionRef>>> recruitments =
-	    self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
+	    recruitTransactionSubsystem(self, seedServers, oldLogSystem);
 	state double provisionalDelay = SERVER_KNOBS->PROVISIONAL_START_DELAY;
 	loop {
 		state Future<Standalone<CommitTransactionRef>> provisional = provisionalMaster(self, delay(provisionalDelay));
@@ -1071,7 +1212,7 @@ ACTOR Future<Void> recoverFrom(Reference<ClusterRecoveryData> self,
 
 				if (self->configuration != oldConf) { // confChange does not trigger when including servers
 					self->dcId_locality = originalLocalityMap;
-					recruitments = self->controllerData->recruiter.recruitEverything(self, seedServers, oldLogSystem);
+					recruitments = recruitTransactionSubsystem(self, seedServers, oldLogSystem);
 				}
 			}
 		}

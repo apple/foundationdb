@@ -21,13 +21,8 @@ if(WITH_PYTHON)
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
-    if(WIN32)
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/@CTEST_CONFIGURATION_TYPE@/fdbserver.exe)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    else()
-      set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
-      set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
-    endif()
+    set(fdbserver_location ${CMAKE_BINARY_DIR}/bin/fdbserver)
+    set(OLD_FDBSERVER_BINARY ${fdbserver_location} CACHE FILEPATH "Old fdbserver binary" FORCE)
 
     message(WARNING "\
   No old fdbserver binary found - using ${fdbserver_location} \
@@ -141,7 +136,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/BlobCipherUnitTest.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
@@ -168,7 +162,8 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
-  add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml)
+  # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
+  add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
@@ -189,12 +184,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
-  add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/MockDDTrackerWorkload.toml)
+
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)
   add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -237,12 +230,20 @@ if(WITH_PYTHON)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
@@ -260,7 +261,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleWithDeadHall.toml)
   add_fdb_test(TEST_FILES rare/DataDistributionMetrics.toml)
   add_fdb_test(TEST_FILES rare/DcLag.toml)
-  add_fdb_test(TEST_FILES rare/FuzzTest.toml)
   add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
@@ -369,6 +369,9 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/CycleTestRestart-1.txt
     restarting/from_71.3.0/CycleTestRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/SnapCycleRestart-1.toml
     restarting/from_71.3.0/SnapCycleRestart-2.toml)
   add_fdb_test(
@@ -392,9 +395,12 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
-   add_fdb_test(
+  add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
     restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/BlobGranuleRestartCorrectness-1.toml
+    restarting/to_71.3.1/BlobGranuleRestartCorrectness-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/BlobGranuleRestartLarge-1.toml
     restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml)
@@ -500,7 +506,7 @@ if(WITH_PYTHON)
 
   verify_testing()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32)
+  if(NOT OPEN_FOR_IDE)
     create_correctness_package()
 
     if(USE_VALGRIND)
@@ -512,7 +518,7 @@ if(WITH_PYTHON)
     endif()
   endif()
 
-  if(NOT OPEN_FOR_IDE AND NOT WIN32 AND NOT USE_SANITIZER)
+  if(NOT OPEN_FOR_IDE AND NOT USE_SANITIZER)
     # setup venv for testing token-based authorization
     if(APPLE)
       set(ld_env_name "DYLD_LIBRARY_PATH")

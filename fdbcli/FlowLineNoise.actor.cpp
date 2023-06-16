@@ -34,12 +34,7 @@
 
 #include "flow/ThreadHelper.actor.h"
 
-#if __unixish__
-#define HAVE_LINENOISE 1
 #include "linenoise/linenoise.h"
-#else
-#define HAVE_LINENOISE 0
-#endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 struct LineNoiseReader final : IThreadPoolReceiver {
@@ -65,7 +60,6 @@ struct LineNoiseReader final : IThreadPoolReceiver {
 
 private:
 	Optional<std::string> read(std::string const& prompt) {
-#if HAVE_LINENOISE
 		errno = 0;
 		char* line = linenoise(prompt.c_str());
 		if (line) {
@@ -77,14 +71,6 @@ private:
 				return std::string();
 			return Optional<std::string>();
 		}
-#else
-		std::string line;
-		std::fputs(prompt.c_str(), stdout);
-		if (!std::getline(std::cin, line).eof()) {
-			return line;
-		} else
-			return Optional<std::string>();
-#endif
 	}
 };
 
@@ -95,7 +81,6 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
   : threadPool(createGenericThreadPool()) {
 	reader = new LineNoiseReader();
 
-#if HAVE_LINENOISE
 	// It should be OK to call these functions from this thread, since read() can't be called yet
 	// The callbacks passed to linenoise*() will be invoked from the thread pool, and use onMainThread() to safely
 	// invoke the callbacks we've been given
@@ -127,7 +112,6 @@ LineNoise::LineNoise(std::function<void(std::string const&, std::vector<std::str
 		return strdup(h.text.c_str());
 	});
 	linenoiseSetFreeHintsCallback(free);
-#endif
 
 	threadPool->addThread(reader, "fdb-linenoise");
 }
@@ -166,21 +150,15 @@ Future<Void> LineNoise::onKeyboardInterrupt() {
 }
 
 void LineNoise::historyAdd(std::string const& line) {
-#if HAVE_LINENOISE
 	linenoiseHistoryAdd(line.c_str());
-#endif
 }
 void LineNoise::historyLoad(std::string const& filename) {
-#if HAVE_LINENOISE
 	if (linenoiseHistoryLoad(filename.c_str()) != 0) {
 		throw io_error();
 	}
-#endif
 }
 void LineNoise::historySave(std::string const& filename) {
-#if HAVE_LINENOISE
 	if (linenoiseHistorySave(filename.c_str()) != 0) {
 		throw io_error();
 	}
-#endif
 }

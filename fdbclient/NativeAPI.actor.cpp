@@ -101,14 +101,7 @@
 #include <sanitizer/lsan_interface.h>
 #endif
 
-#ifdef WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#undef min
-#undef max
-#else
 #include <time.h>
-#endif
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 template class RequestStream<OpenDatabaseRequest, false>;
@@ -795,7 +788,7 @@ ACTOR static Future<Void> delExcessClntTxnEntriesActor(Transaction* tr, int64_t 
 			                            ? (txInfoSize - clientTxInfoSizeLimit)
 			                            : CLIENT_KNOBS->TRANSACTION_SIZE_LIMIT;
 			GetRangeLimits limit(GetRangeLimits::ROW_LIMIT_UNLIMITED, getRangeByteLimit);
-			RangeResult txEntries =
+			RangeReadResult txEntries =
 			    wait(tr->getRange(KeyRangeRef(clientLatencyName, strinc(clientLatencyName)), limit));
 			state int64_t numBytesToDel = 0;
 			KeyRef endKey;
@@ -1075,7 +1068,7 @@ ACTOR Future<Void> updateCachedRanges(DatabaseContext* self, std::map<UID, Stora
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 			try {
-				RangeResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult range = wait(tr.getRange(storageCacheKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!range.more);
 				std::vector<Reference<ReferencedInterface<StorageServerInterface>>> cacheInterfaces;
 				cacheInterfaces.reserve(cacheServers->size());
@@ -1153,7 +1146,7 @@ ACTOR Future<Void> monitorCacheList(DatabaseContext* self) {
 			// the cyclic reference to self.
 			wait(refreshTransaction(self, &tr));
 			try {
-				RangeResult cacheList = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult cacheList = wait(tr.getRange(storageCacheServerKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!cacheList.more);
 				bool hasChanges = false;
 				std::map<UID, StorageServerInterface> allCacheServers;
@@ -1375,12 +1368,12 @@ ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord
 ACTOR Future<ValueReadResult> getJSON(Database db);
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override {
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint) const override {
 		ASSERT(kr.contains(k));
 		return map(f(ryw), [k = k](ValueReadResult v) {
-			RangeResult result;
+			RangeReadResult result({}, v.getReadMetrics());
 			if (v.present()) {
 				result.push_back_deep(result.arena(), KeyValueRef(k, v.get()));
 			}
@@ -1407,13 +1400,13 @@ private:
 class HealthMetricsRangeImpl : public SpecialKeyRangeAsyncImpl {
 public:
 	explicit HealthMetricsRangeImpl(KeyRangeRef kr);
-	Future<RangeResult> getRange(ReadYourWritesTransaction* ryw,
-	                             KeyRangeRef kr,
-	                             GetRangeLimits limitsHint) const override;
+	Future<RangeReadResult> getRange(ReadYourWritesTransaction* ryw,
+	                                 KeyRangeRef kr,
+	                                 GetRangeLimits limitsHint) const override;
 };
 
-static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
-	RangeResult result;
+static RangeReadResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRangeRef kr) {
+	RangeReadResult result;
 	if (CLIENT_BUGGIFY)
 		return result;
 	if (kr.contains("\xff\xff/metrics/health/aggregate"_sr) && metrics.worstStorageDurabilityLag != 0) {
@@ -1480,7 +1473,7 @@ static RangeResult healthMetricsToKVPairs(const HealthMetrics& metrics, KeyRange
 	return result;
 }
 
-ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
+ACTOR static Future<RangeReadResult> healthMetricsGetRangeActor(ReadYourWritesTransaction* ryw, KeyRangeRef kr) {
 	HealthMetrics metrics = wait(ryw->getDatabase()->getHealthMetrics(
 	    /*detailed ("per process")*/ kr.intersects(
 	        KeyRangeRef("\xff\xff/metrics/health/storage/"_sr, "\xff\xff/metrics/health/storage0"_sr)) ||
@@ -1490,9 +1483,9 @@ ACTOR static Future<RangeResult> healthMetricsGetRangeActor(ReadYourWritesTransa
 
 HealthMetricsRangeImpl::HealthMetricsRangeImpl(KeyRangeRef kr) : SpecialKeyRangeAsyncImpl(kr) {}
 
-Future<RangeResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
-                                                     KeyRangeRef kr,
-                                                     GetRangeLimits limitsHint) const {
+Future<RangeReadResult> HealthMetricsRangeImpl::getRange(ReadYourWritesTransaction* ryw,
+                                                         KeyRangeRef kr,
+                                                         GetRangeLimits limitsHint) const {
 	return healthMetricsGetRangeActor(ryw, kr);
 }
 
@@ -2931,12 +2924,12 @@ Future<ValueReadResult> getValue(Reference<TransactionState> const& trState,
                                  UseTenant const& useTenant = UseTenant::True,
                                  TransactionRecordLogInfo const& recordLogInfo = TransactionRecordLogInfo::True);
 
-Future<RangeResult> getRange(Reference<TransactionState> const& trState,
-                             KeySelector const& begin,
-                             KeySelector const& end,
-                             GetRangeLimits const& limits,
-                             Reverse const& reverse,
-                             UseTenant const& useTenant);
+Future<RangeReadResult> getRange(Reference<TransactionState> const& trState,
+                                 KeySelector const& begin,
+                                 KeySelector const& end,
+                                 GetRangeLimits const& limits,
+                                 Reverse const& reverse,
+                                 UseTenant const& useTenant);
 
 ACTOR Future<Optional<StorageServerInterface>> fetchServerInterface(Reference<TransactionState> trState, UID id) {
 	ValueReadResult val =
@@ -4213,15 +4206,16 @@ void setMatchIndex(GetKeyValuesFamilyRequest& req, int matchIndex) {
 	}
 }
 
-ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
-                                        KeyRange keys,
-                                        Key mapper,
-                                        GetRangeLimits limits,
-                                        int matchIndex,
-                                        Reverse reverse,
-                                        UseTenant useTenant) {
-	state RangeResultFamily output;
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeReadResultFamily>
+Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
+                                            KeyRange keys,
+                                            ReadMetrics readMetrics,
+                                            Key mapper,
+                                            GetRangeLimits limits,
+                                            int matchIndex,
+                                            Reverse reverse,
+                                            UseTenant useTenant) {
+	state RangeReadResultFamily output({}, readMetrics);
 	// TODO - ljoswiak parent or link?
 	state Span span("NAPI:getExactRange"_loc, trState->spanContext);
 
@@ -4314,6 +4308,7 @@ Future<RangeResultFamily> getExactRange(Reference<TransactionState> trState,
 					                      "NativeAPI.getExactRange.After");
 				output.arena().dependsOn(rep.arena);
 				output.append(output.arena(), rep.data.begin(), rep.data.size());
+				output.getReadMetrics().combine(rep.readMetrics);
 
 				if (limits.hasRowLimit() && rep.data.size() > limits.rows) {
 					TraceEvent(SevError, "GetExactRangeTooManyRows")
@@ -4421,15 +4416,15 @@ Future<KeyReadResult> resolveKey(Reference<TransactionState> trState, KeySelecto
 	return getKey(trState, key, useTenant);
 }
 
-ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
-                                           KeySelector begin,
-                                           KeySelector end,
-                                           Key mapper,
-                                           GetRangeLimits limits,
-                                           int matchIndex,
-                                           Reverse reverse,
-                                           UseTenant useTenant) {
+ACTOR template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeReadResultFamily>
+Future<RangeReadResultFamily> getRangeFallback(Reference<TransactionState> trState,
+                                               KeySelector begin,
+                                               KeySelector end,
+                                               Key mapper,
+                                               GetRangeLimits limits,
+                                               int matchIndex,
+                                               Reverse reverse,
+                                               UseTenant useTenant) {
 	CODE_PROBE(trState->hasTenant() && useTenant, "NativeAPI getRangeFallback has tenant");
 	CODE_PROBE(!useTenant, "NativeAPI getRangeFallback ignoring tenant");
 
@@ -4439,17 +4434,21 @@ Future<RangeResultFamily> getRangeFallback(Reference<TransactionState> trState,
 	state KeyReadResult b = wait(fb);
 	state KeyReadResult e = wait(fe);
 
+	ReadMetrics readMetrics = b.getReadMetrics();
+	readMetrics.combine(e.getReadMetrics());
+
 	if (b >= e) {
-		return RangeResultFamily();
+		return RangeReadResultFamily({}, readMetrics);
 	}
 
 	// if e is allKeys.end, we have read through the end of the database/tenant
 	// if b is allKeys.begin, we have either read through the beginning of the database/tenant,
 	// or allKeys.begin exists in the database/tenant and will be part of the conflict range anyways
 
-	RangeResultFamily _r = wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
-	    trState, KeyRangeRef(b, e), mapper, limits, matchIndex, reverse, useTenant));
-	RangeResultFamily r = _r;
+	RangeReadResultFamily _r =
+	    wait(getExactRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeReadResultFamily>(
+	        trState, KeyRangeRef(b, e), readMetrics, mapper, limits, matchIndex, reverse, useTenant));
+	RangeReadResultFamily r = _r;
 
 	if (b == allKeys.begin && ((reverse && !r.more) || !reverse))
 		r.readToBegin = true;
@@ -4502,7 +4501,7 @@ int64_t inline getRangeResultFamilyBytes(MappedRangeResultRef result) {
 }
 
 // TODO: Client should add mapped keys to conflict ranges.
-template <class RangeResultFamily> // RangeResult or MappedRangeResult
+template <class RangeReadResultFamily> // RangeReadResult or MappedRangeReadResult
 void getRangeFinished(Reference<TransactionState> trState,
                       double startTime,
                       KeySelector begin,
@@ -4510,7 +4509,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       Snapshot snapshot,
                       Promise<std::pair<Key, Key>> conflictRange,
                       Reverse reverse,
-                      RangeResultFamily result) {
+                      RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
 	trState->totalCost += getReadOperationCost(bytes);
@@ -4563,23 +4562,22 @@ ACTOR template <class GetKeyValuesFamilyRequest, // GetKeyValuesRequest or GetMa
                 class GetKeyValuesFamilyReply, // GetKeyValuesReply or GetMappedKeyValuesReply (It would be nice if
                                                // we could use REPLY_TYPE(GetKeyValuesFamilyRequest) instead of specify
                                                // it as a separate template element)
-                class RangeResultFamily // RangeResult or MappedRangeResult
+                class RangeReadResultFamily // RangeReadResult or MappedRangeReadResult
                 >
-Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
-                                   KeySelector begin,
-                                   KeySelector end,
-                                   Key mapper,
-                                   GetRangeLimits limits,
-                                   Promise<std::pair<Key, Key>> conflictRange,
-                                   int matchIndex,
-                                   Snapshot snapshot,
-                                   Reverse reverse,
-                                   UseTenant useTenant = UseTenant::True) {
-	//	state using RangeResultRefFamily = typename RangeResultFamily::RefType;
+Future<RangeReadResultFamily> getRange(Reference<TransactionState> trState,
+                                       KeySelector begin,
+                                       KeySelector end,
+                                       Key mapper,
+                                       GetRangeLimits limits,
+                                       Promise<std::pair<Key, Key>> conflictRange,
+                                       int matchIndex,
+                                       Snapshot snapshot,
+                                       Reverse reverse,
+                                       UseTenant useTenant = UseTenant::True) {
 	state GetRangeLimits originalLimits(limits);
 	state KeySelector originalBegin = begin;
 	state KeySelector originalEnd = end;
-	state RangeResultFamily output;
+	state RangeReadResultFamily output;
 	state Span span("NAPI:getRange"_loc, trState->spanContext);
 	state Optional<UID> getRangeID = Optional<UID>();
 
@@ -4705,6 +4703,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					                     AtMostOnce::False,
 					                     trState->cx->enableLocalityLoadBalance ? &trState->cx->queueModel : nullptr));
 					rep = _rep;
+					output.getReadMetrics().combine(rep.readMetrics);
 					++trState->cx->transactionPhysicalReadsCompleted;
 				} catch (Error&) {
 					++trState->cx->transactionPhysicalReadsCompleted;
@@ -4744,9 +4743,13 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					bool readToBegin = output.readToBegin;
 					bool readThroughEnd = output.readThroughEnd;
 
+					using RangeResultFamily = typename RangeReadResultFamily::ResultType;
 					using RangeResultRefFamily = typename RangeResultFamily::RefType;
-					output = RangeResultFamily(
-					    RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more), rep.arena);
+					output = RangeReadResultFamily(
+					    RangeResultFamily(
+					        RangeResultRefFamily(rep.data, modifiedSelectors || limits.isReached() || rep.more),
+					        rep.arena),
+					    rep.readMetrics);
 					output.readToBegin = readToBegin;
 					output.readThroughEnd = readThroughEnd;
 
@@ -4755,7 +4758,7 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 						// Copy instead of resizing because TSS maybe be using output's arena for comparison. This only
 						// happens in simulation so it's fine
 						// disable it on prefetch, because boundary entries serve as continuations
-						RangeResultFamily copy;
+						RangeReadResultFamily copy({}, output.getReadMetrics());
 						int newSize =
 						    deterministicRandom()->randomInt(std::max(1, originalLimits.minRows), output.size());
 						for (int i = 0; i < newSize; i++) {
@@ -4808,8 +4811,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					CODE_PROBE(true, "!GetKeyValuesFamilyReply.more and modifiedSelectors in getRange");
 
 					if (!rep.data.size()) {
-						RangeResultFamily result = wait(
-						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
+						RangeReadResultFamily result = wait(
+						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeReadResultFamily>(
 						        trState,
 						        originalBegin,
 						        originalEnd,
@@ -4847,8 +4850,8 @@ Future<RangeResultFamily> getRange(Reference<TransactionState> trState,
 					                             Reverse{ reverse ? (end - 1).isBackward() : begin.isBackward() });
 
 					if (e.code() == error_code_wrong_shard_server) {
-						RangeResultFamily result = wait(
-						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
+						RangeReadResultFamily result = wait(
+						    getRangeFallback<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeReadResultFamily>(
 						        trState,
 						        originalBegin,
 						        originalEnd,
@@ -5057,7 +5060,7 @@ maybeDuplicateTSSStreamFragment(Request& req, QueueModel* model, RequestStream<R
 
 // Streams all of the KV pairs in a target key range into a ParallelStream fragment
 ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
-                                          ParallelStream<RangeResult>::Fragment* results,
+                                          ParallelStream<RangeReadResult>::Fragment* results,
                                           KeyRange keys,
                                           GetRangeLimits limits,
                                           Snapshot snapshot,
@@ -5201,7 +5204,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 						g_traceBatch.addEvent("TransactionDebug",
 						                      trState->readOptions.get().debugID.get().first(),
 						                      "NativeAPI.getExactRange.After");
-					RangeResult output(RangeResultRef(rep.data, rep.more), rep.arena);
+					RangeReadResult output(RangeResult(RangeResultRef(rep.data, rep.more), rep.arena), rep.readMetrics);
 
 					if (tssDuplicateStream.present() && !tssDuplicateStream.get().done()) {
 						// shallow copy the reply with an arena depends, and send it to the duplicate stream for TSS
@@ -5345,14 +5348,14 @@ static KeyRange intersect(KeyRangeRef lhs, KeyRangeRef rhs) {
 // Divides the requested key range into 1MB fragments, create range streams for each fragment, and merges the results so
 // the client get them in order
 ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
-                                  PromiseStream<RangeResult> _results,
+                                  PromiseStream<RangeReadResult> _results,
                                   KeySelector begin,
                                   KeySelector end,
                                   GetRangeLimits limits,
                                   Promise<std::pair<Key, Key>> conflictRange,
                                   Snapshot snapshot,
                                   Reverse reverse) {
-	state ParallelStream<RangeResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
+	state ParallelStream<RangeReadResult> results(_results, CLIENT_KNOBS->RANGESTREAM_BUFFERED_FRAGMENTS_LIMIT);
 
 	// FIXME: better handling to disable row limits
 	ASSERT(!limits.hasRowLimit());
@@ -5374,8 +5377,8 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 
 	if (!snapshot) {
 		// FIXME: this conflict range is too large, and should be updated continously as results are returned
-		conflictRange.send(std::make_pair(std::min(b, Key(begin.getKey(), begin.arena())),
-		                                  std::max(e, Key(end.getKey(), end.arena()))));
+		conflictRange.send(std::make_pair(std::min<Key>(b, Key(begin.getKey(), begin.arena())),
+		                                  std::max<Key>(e, Key(end.getKey(), end.arena()))));
 	}
 
 	if (b >= e) {
@@ -5414,7 +5417,7 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 			if (toSend[useIdx].empty()) {
 				continue;
 			}
-			ParallelStream<RangeResult>::Fragment* fragment = wait(results.createFragment());
+			ParallelStream<RangeReadResult>::Fragment* fragment = wait(results.createFragment());
 			outstandingRequests.push_back(
 			    getRangeStreamFragment(trState, fragment, toSend[useIdx], limits, snapshot, reverse, span.context));
 		}
@@ -5428,22 +5431,22 @@ ACTOR Future<Void> getRangeStream(Reference<TransactionState> trState,
 	return Void();
 }
 
-Future<RangeResult> getRange(Reference<TransactionState> const& trState,
-                             KeySelector const& begin,
-                             KeySelector const& end,
-                             GetRangeLimits const& limits,
-                             Reverse const& reverse,
-                             UseTenant const& useTenant) {
-	return getRange<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(trState,
-	                                                                     begin,
-	                                                                     end,
-	                                                                     ""_sr,
-	                                                                     limits,
-	                                                                     Promise<std::pair<Key, Key>>(),
-	                                                                     MATCH_INDEX_ALL,
-	                                                                     Snapshot::True,
-	                                                                     reverse,
-	                                                                     useTenant);
+Future<RangeReadResult> getRange(Reference<TransactionState> const& trState,
+                                 KeySelector const& begin,
+                                 KeySelector const& end,
+                                 GetRangeLimits const& limits,
+                                 Reverse const& reverse,
+                                 UseTenant const& useTenant) {
+	return getRange<GetKeyValuesRequest, GetKeyValuesReply, RangeReadResult>(trState,
+	                                                                         begin,
+	                                                                         end,
+	                                                                         ""_sr,
+	                                                                         limits,
+	                                                                         Promise<std::pair<Key, Key>>(),
+	                                                                         MATCH_INDEX_ALL,
+	                                                                         Snapshot::True,
+	                                                                         reverse,
+	                                                                         useTenant);
 }
 
 bool DatabaseContext::debugUseTags = false;
@@ -5724,16 +5727,16 @@ ACTOR Future<Standalone<VectorRef<const char*>>> getAddressesForKeyActor(Referen
 	// If key >= allKeys.end, then getRange will return a kv-pair with an empty value. This will result in our
 	// serverInterfaces vector being empty, which will cause us to return an empty addresses list.
 	state Key ksKey = keyServersKey(resolvedKey);
-	state RangeResult serverTagResult = wait(getRange(trState,
-	                                                  lastLessOrEqual(serverTagKeys.begin),
-	                                                  firstGreaterThan(serverTagKeys.end),
-	                                                  GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
-	                                                  Reverse::False,
-	                                                  UseTenant::False));
+	state RangeReadResult serverTagResult = wait(getRange(trState,
+	                                                      lastLessOrEqual(serverTagKeys.begin),
+	                                                      firstGreaterThan(serverTagKeys.end),
+	                                                      GetRangeLimits(CLIENT_KNOBS->TOO_MANY),
+	                                                      Reverse::False,
+	                                                      UseTenant::False));
 	ASSERT(!serverTagResult.more && serverTagResult.size() < CLIENT_KNOBS->TOO_MANY);
-	Future<RangeResult> futureServerUids = getRange(
+	Future<RangeReadResult> futureServerUids = getRange(
 	    trState, lastLessOrEqual(ksKey), firstGreaterThan(ksKey), GetRangeLimits(1), Reverse::False, UseTenant::False);
-	RangeResult serverUids = wait(futureServerUids);
+	RangeReadResult serverUids = wait(futureServerUids);
 
 	ASSERT(serverUids.size()); // every shard needs to have a team
 
@@ -5804,19 +5807,19 @@ void increaseCounterForRequest(Database cx) {
 	}
 }
 
-template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin,
-                                                        const KeySelector& end,
-                                                        const Key& mapper,
-                                                        GetRangeLimits limits,
-                                                        int matchIndex,
-                                                        Snapshot snapshot,
-                                                        Reverse reverse) {
+template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeReadResultFamily>
+Future<RangeReadResultFamily> Transaction::getRangeInternal(const KeySelector& begin,
+                                                            const KeySelector& end,
+                                                            const Key& mapper,
+                                                            GetRangeLimits limits,
+                                                            int matchIndex,
+                                                            Snapshot snapshot,
+                                                            Reverse reverse) {
 	++trState->cx->transactionLogicalReads;
 	increaseCounterForRequest<GetKeyValuesFamilyRequest>(trState->cx);
 
 	if (limits.isReached())
-		return RangeResultFamily();
+		return RangeReadResultFamily();
 
 	if (!limits.isValid())
 		return range_limits_invalid();
@@ -5837,7 +5840,7 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 
 	if (b.offset >= e.offset && b.getKey() >= e.getKey()) {
 		CODE_PROBE(true, "Native range inverted");
-		return RangeResultFamily();
+		return RangeReadResultFamily();
 	}
 
 	if (!snapshot && !std::is_same_v<GetKeyValuesFamilyRequest, GetKeyValuesRequest>) {
@@ -5851,41 +5854,41 @@ Future<RangeResultFamily> Transaction::getRangeInternal(const KeySelector& begin
 		extraConflictRanges.push_back(conflictRange.getFuture());
 	}
 
-	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeResultFamily>(
+	return ::getRange<GetKeyValuesFamilyRequest, GetKeyValuesFamilyReply, RangeReadResultFamily>(
 	    trState, b, e, mapper, limits, conflictRange, matchIndex, snapshot, reverse);
 }
 
-Future<RangeResult> Transaction::getRange(const KeySelector& begin,
-                                          const KeySelector& end,
-                                          GetRangeLimits limits,
-                                          Snapshot snapshot,
-                                          Reverse reverse) {
-	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeResult>(
+Future<RangeReadResult> Transaction::getRange(const KeySelector& begin,
+                                              const KeySelector& end,
+                                              GetRangeLimits limits,
+                                              Snapshot snapshot,
+                                              Reverse reverse) {
+	return getRangeInternal<GetKeyValuesRequest, GetKeyValuesReply, RangeReadResult>(
 	    begin, end, ""_sr, limits, MATCH_INDEX_ALL, snapshot, reverse);
 }
 
-Future<MappedRangeResult> Transaction::getMappedRange(const KeySelector& begin,
-                                                      const KeySelector& end,
-                                                      const Key& mapper,
-                                                      GetRangeLimits limits,
-                                                      int matchIndex,
-                                                      Snapshot snapshot,
-                                                      Reverse reverse) {
-	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeResult>(
+Future<MappedRangeReadResult> Transaction::getMappedRange(const KeySelector& begin,
+                                                          const KeySelector& end,
+                                                          const Key& mapper,
+                                                          GetRangeLimits limits,
+                                                          int matchIndex,
+                                                          Snapshot snapshot,
+                                                          Reverse reverse) {
+	return getRangeInternal<GetMappedKeyValuesRequest, GetMappedKeyValuesReply, MappedRangeReadResult>(
 	    begin, end, mapper, limits, matchIndex, snapshot, reverse);
 }
 
-Future<RangeResult> Transaction::getRange(const KeySelector& begin,
-                                          const KeySelector& end,
-                                          int limit,
-                                          Snapshot snapshot,
-                                          Reverse reverse) {
+Future<RangeReadResult> Transaction::getRange(const KeySelector& begin,
+                                              const KeySelector& end,
+                                              int limit,
+                                              Snapshot snapshot,
+                                              Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
 // A method for streaming data from the storage server that is more efficient than getRange when reading large amounts
 // of data
-Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(PromiseStream<RangeReadResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          GetRangeLimits limits,
@@ -5923,7 +5926,7 @@ Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
 	return forwardErrors(::getRangeStream(trState, results, b, e, limits, conflictRange, snapshot, reverse), results);
 }
 
-Future<Void> Transaction::getRangeStream(PromiseStream<RangeResult>& results,
+Future<Void> Transaction::getRangeStream(PromiseStream<RangeReadResult>& results,
                                          const KeySelector& begin,
                                          const KeySelector& end,
                                          int limit,
@@ -6277,7 +6280,7 @@ ACTOR void checkWrites(Reference<TransactionState> trState,
 			if (m.mutated) {
 				checkedRanges++;
 				if (m.cleared) {
-					RangeResult shouldBeEmpty = wait(tr.getRange(it->range(), 1));
+					RangeReadResult shouldBeEmpty = wait(tr.getRange(it->range(), 1));
 					if (shouldBeEmpty.size()) {
 						TraceEvent(SevError, "CheckWritesFailed")
 						    .detail("Class", "Clear")
@@ -6388,7 +6391,7 @@ ACTOR static Future<Optional<CommitResult>> determineCommitStatus(Reference<Tran
 			                    .withPrefix(idempotencyIdKeys.begin),
 			                BinaryWriter::toValue(bigEndian64(maxPossibleCommitVersion + 1), Unversioned())
 			                    .withPrefix(idempotencyIdKeys.begin));
-			RangeResult range = wait(tr.getRange(possibleRange, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult range = wait(tr.getRange(possibleRange, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!range.more);
 			for (const auto& kv : range) {
 				auto commitResult = kvContainsIdempotencyId(kv, idempotencyId);
@@ -8307,6 +8310,159 @@ struct BWLocationInfo : MultiInterface<ReferencedInterface<BlobWorkerInterface>>
 	explicit BWLocationInfo(const std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>>& v) : Locations(v) {}
 };
 
+ACTOR Future<Void> streamRemainingGranuleMutations(BlobWorkerInterface bwInterf,
+                                                   BlobGranuleFileReply* fileReply,
+                                                   Version readVersion,
+                                                   TenantInfo tenantInfo,
+                                                   int i) {
+	state bool retried = false;
+	state BlobGranuleMutationStreamRequest streamReq;
+	streamReq.keyRange = fileReply->chunks[i].keyRange;
+	streamReq.beginVersion = fileReply->chunks[i].includedVersion + 1;
+	streamReq.readVersion = readVersion;
+	streamReq.tenantInfo = tenantInfo;
+	streamReq.replyBatchSize = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
+	if (BUGGIFY_WITH_PROB(0.01)) {
+		streamReq.replyBatchSize = deterministicRandom()->randomSkewedUInt32(1, 2 * streamReq.replyBatchSize);
+	}
+
+	ASSERT(fileReply->chunks[i].includedVersion < readVersion);
+
+	if (BG_REQUEST_DEBUG) {
+		fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4}. Already have {5} mutations\n",
+		           streamReq.beginVersion,
+		           streamReq.readVersion,
+		           streamReq.keyRange.begin.printable(),
+		           streamReq.keyRange.end.printable(),
+		           bwInterf.id().shortString(),
+		           fileReply->chunks[i].newDeltas.size());
+	}
+
+	loop {
+		try {
+			resetReply(streamReq);
+			state ReplyPromiseStream<BlobGranuleMutationStreamReply> stream =
+			    bwInterf.mutationStreamRequest.getReplyStream(streamReq);
+			state Future<Void> onError = stream.onError();
+			loop {
+				choose {
+					when(BlobGranuleMutationStreamReply streamNext = waitNext(stream.getFuture())) {
+						ASSERT(!streamNext.newDeltas.empty());
+						ASSERT(streamNext.newDeltas.front().version >= streamReq.beginVersion);
+						ASSERT(streamNext.newDeltas.back().version <= streamReq.readVersion);
+
+						if (BG_REQUEST_DEBUG) {
+							fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4} got chunk "
+							           "{5} - {6} ({7})\n",
+							           streamReq.beginVersion,
+							           streamReq.readVersion,
+							           streamReq.keyRange.begin.printable(),
+							           streamReq.keyRange.end.printable(),
+							           bwInterf.id().shortString(),
+							           streamNext.newDeltas.front().version,
+							           streamNext.newDeltas.back().version,
+							           streamNext.newDeltas.size());
+						}
+
+						fileReply->arena.dependsOn(streamNext.arena);
+						fileReply->chunks[i].newDeltas.append(
+						    fileReply->arena, streamNext.newDeltas.begin(), streamNext.newDeltas.size());
+
+						fileReply->chunks[i].includedVersion = streamNext.newDeltas.back().version;
+						streamReq.beginVersion = fileReply->chunks[i].includedVersion + 1;
+					}
+					when(wait(onError)) {
+						// should throw
+						ASSERT(false);
+					}
+				}
+
+				// buggify inject wait delays so stream isn't always ready
+				if (BUGGIFY_WITH_PROB(0.01)) {
+					wait(delay(deterministicRandom()->random01()));
+				}
+			}
+		} catch (Error& e) {
+			if (BG_REQUEST_DEBUG) {
+				fmt::print("Streaming mutations {0} - {1} from granule [{2} - {3}) from BW {4} got error {5}\n",
+				           streamReq.beginVersion,
+				           streamReq.readVersion,
+				           streamReq.keyRange.begin.printable(),
+				           streamReq.keyRange.end.printable(),
+				           bwInterf.id().shortString(),
+				           e.name());
+			}
+			if (e.code() == error_code_end_of_stream) {
+				break;
+			}
+			// if stream request itself failed to connect and could be retried, do so in this loop
+			if (!retried &&
+			    (e.code() == error_code_connection_failed || e.code() == error_code_request_maybe_delivered)) {
+				wait(delayJittered(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				retried = true;
+			} else {
+				throw e;
+			}
+		}
+	}
+
+	fileReply->chunks[i].includedVersion = streamReq.readVersion;
+	return Void();
+}
+
+ACTOR Future<BlobGranuleFileReply> getFullGranuleFileReply(BlobGranuleFileRequest req, BlobWorkerInterface bwInterf) {
+	std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
+	v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(bwInterf));
+	state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
+	    makeReference<BWLocationInfo>(v);
+	loop {
+
+		req.reply.reset();
+
+		state BlobGranuleFileReply rep;
+		wait(store(rep,
+		           loadBalance(location,
+		                       &BlobWorkerInterface::blobGranuleFileRequest,
+		                       req,
+		                       TaskPriority::DefaultPromiseEndpoint,
+		                       AtMostOnce::False,
+		                       nullptr)));
+
+		ASSERT(!rep.chunks.empty());
+
+		if (req.summarize) {
+			return rep;
+		}
+
+		state std::vector<Future<Void>> streamFutures;
+		for (int i = 0; i < rep.chunks.size(); i++) {
+			if (rep.chunks[i].includedVersion < req.readVersion) {
+				CODE_PROBE(true, "streaming remaining granule mutations");
+				// launch a stream request
+				streamFutures.push_back(
+				    streamRemainingGranuleMutations(bwInterf, &rep, req.readVersion, req.tenantInfo, i));
+			}
+		}
+
+		try {
+			wait(waitForAll(streamFutures));
+			return rep;
+		} catch (Error& e) {
+			if (e.code() != error_code_blob_granule_mutation_stream_too_old) {
+				throw e;
+			}
+			// blob_granule_mutation_stream_too_old is expected if a delta file was flushed during the read and these
+			// mutations are no longer in memory, which means that we need to redo the request since the mutation range
+			// is no longer in memory
+
+			// explicitly cancel actors and wait for them to get cancelled so no weird races with still-running actors
+			// when we loop around again
+			streamFutures.clear();
+			wait(delay(0));
+		}
+	}
+}
+
 ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
     Transaction* self,
     KeyRange range,
@@ -8434,19 +8590,16 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 		req.canCollapseBegin = true; // TODO make this a parameter once we support it
 		req.summarize = summarize;
 
-		std::vector<Reference<ReferencedInterface<BlobWorkerInterface>>> v;
-		v.push_back(makeReference<ReferencedInterface<BlobWorkerInterface>>(bwInterf));
-		state Reference<MultiInterface<ReferencedInterface<BlobWorkerInterface>>> location =
-		    makeReference<BWLocationInfo>(v);
+		if (BUGGIFY_WITH_PROB(0.1)) {
+			req.granuleMutationBytesLimit = 0;
+		} else if (BUGGIFY_WITH_PROB(0.1)) {
+			req.granuleMutationBytesLimit = deterministicRandom()->randomSkewedUInt32(1, 1000000);
+		}
+
 		// use load balance with one option for now for retry and error handling
 		try {
 			choose {
-				when(BlobGranuleFileReply rep = wait(loadBalance(location,
-				                                                 &BlobWorkerInterface::blobGranuleFileRequest,
-				                                                 req,
-				                                                 TaskPriority::DefaultPromiseEndpoint,
-				                                                 AtMostOnce::False,
-				                                                 nullptr))) {
+				when(BlobGranuleFileReply rep = wait(getFullGranuleFileReply(req, bwInterf))) {
 					if (BG_REQUEST_DEBUG) {
 						fmt::print("Blob granule request for [{0} - {1}) @ {2} - {3} got reply from {4}:\n",
 						           granule.begin.printable(),
@@ -8512,9 +8665,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				}
 				// if we detect that this blob worker fails, cancel the request, as otherwise load balance will
 				// retry indefinitely with one option
-				when(wait(IFailureMonitor::failureMonitor().onStateEqual(
-				    location->get(0, &BlobWorkerInterface::blobGranuleFileRequest).getEndpoint(),
-				    FailureStatus(true)))) {
+				when(wait(IFailureMonitor::failureMonitor().onStateEqual(bwInterf.blobGranuleFileRequest.getEndpoint(),
+				                                                         FailureStatus(true)))) {
 					if (BG_REQUEST_DEBUG) {
 						fmt::print("readBlobGranules got BW {0} failed\n", bwInterf.id().toString());
 					}
@@ -8532,7 +8684,8 @@ ACTOR Future<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesActor(
 				           e.name());
 			}
 			// worker is up but didn't actually have granule, or connection failed
-			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed) {
+			if (e.code() == error_code_wrong_shard_server || e.code() == error_code_connection_failed ||
+			    e.code() == error_code_request_maybe_delivered) {
 				throw blob_granule_request_failed();
 			}
 			throw e;
@@ -9094,7 +9247,7 @@ static Future<Void> createCheckpointImpl(T tr,
 	ASSERT(actionId.present());
 	TraceEvent(SevDebug, "CreateCheckpointTransactionBegin").detail("Ranges", describe(ranges));
 
-	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 	state std::unordered_map<UID, std::vector<KeyRange>> rangeMap;
@@ -11361,7 +11514,7 @@ namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(
     Transaction* tr) {
 	state Future<std::vector<ProcessData>> workers = getWorkers(tr);
-	state Future<RangeResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeReadResult> serverList = tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY);
 	wait(success(workers) && success(serverList));
 	ASSERT(!serverList.get().more && serverList.get().size() < CLIENT_KNOBS->TOO_MANY);
 

@@ -151,10 +151,12 @@ std::vector<NetworkAddress> SimExternalConnection::resolveTCPEndpointBlocking(co
 		while (iter != end) {
 			auto endpoint = iter->endpoint();
 			auto addr = endpoint.address();
+			// register the endpoint as public so that if it does happen to be an fdb process, we can connect to it
+			// successfully
 			if (addr.is_v6()) {
-				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port());
+				addrs.emplace_back(IPAddress(addr.to_v6().to_bytes()), endpoint.port(), true, false);
 			} else {
-				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port());
+				addrs.emplace_back(addr.to_v4().to_ulong(), endpoint.port(), true, false);
 			}
 			++iter;
 		}

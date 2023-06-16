@@ -40,8 +40,8 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerIgnoringTags")
 			    .suppressFor(60.0)
 			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTenantGroup", printable(req.tenantGroup.get()))
-			    .detail("FirstTag", printable(req.tags.begin()->first));
+			    .detail("UsingTenantGroup", req.tenantGroup.get())
+			    .detail("FirstTag", req.tags.begin()->first);
 		}
 		return req.tenantGroup.get();
 	} else {
@@ -50,7 +50,7 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 			TraceEvent(SevWarnAlways, "GrvProxyTagThrottlerMultipleTags")
 			    .suppressFor(60.0)
 			    .detail("NumTags", req.tags.size())
-			    .detail("UsingTag", printable(tag));
+			    .detail("UsingTag", tag);
 		}
 		return tag;
 	}

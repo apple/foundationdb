@@ -24,7 +24,7 @@
 
 #include "flow/config.h"
 
-#if (defined(__linux__) || defined(__APPLE__) || defined(__FreeBSD__))
+#if (defined(__linux__) || defined(__APPLE__))
 #define __unixish__ 1
 #endif
 
@@ -51,7 +51,7 @@
 #include <unistd.h>
 #endif
 
-#if !(defined(_WIN32) || defined(__unixish__))
+#if !defined(__unixish__)
 #error Compiling on unknown platform
 #endif
 
@@ -65,10 +65,6 @@
 #endif
 #endif
 
-#if defined(_WIN32) && (_MSC_VER < 1600)
-#error Visual Studio 2010 required on this platform
-#endif
-
 #if defined(__APPLE__) &&                                                                                              \
     (!((__clang__ == 1) || ((__GNUC__ * 10000 + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__) > 40800)))
 #error Either Clang or GCC 4.8.0 or later required on this platform
@@ -76,29 +72,16 @@
 
 #if (__clang__ == 1)
 #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdivision-by-zero\"")
-#elif defined(_MSC_VER)
-#define DISABLE_ZERO_DIVISION_FLAG __pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #else
 #define DISABLE_ZERO_DIVISION_FLAG _Pragma("GCC diagnostic ignored \"-Wdiv-by-zero\"")
 #endif
 
 #if defined(__GNUG__)
 #define force_inline inline __attribute__((__always_inline__))
-#elif defined(_MSC_VER)
-#define force_inline __forceinline
 #else
 #error Missing force inline
 #endif
 
-/*
- * Visual Studio (.NET 2003 and beyond) has an __assume compiler
- * intrinsic to hint to the compiler that a given condition is true
- * and will remain true until the expression is altered. This can be
- * emulated on GCC and ignored elsewhere.
- *
- * http://en.chys.info/2010/07/counterpart-of-assume-in-gcc/
- */
-#ifndef _MSC_VER
 #if defined(__GNUG__)
 #define __assume(cond)                                                                                                 \
 	do {                                                                                                               \
@@ -108,9 +91,7 @@
 #else
 #define __assume(cond)
 #endif
-#endif
 
-#ifdef __unixish__
 #include <pthread.h>
 #define CRITICAL_SECTION pthread_mutex_t
 #define InitializeCriticalSection(m)                                                                                   \
@@ -124,7 +105,6 @@
 #define DeleteCriticalSection(m) pthread_mutex_destroy(m)
 #define EnterCriticalSection(m) pthread_mutex_lock(m)
 #define LeaveCriticalSection(m) pthread_mutex_unlock(m)
-#endif
 
 #if (defined(__GNUG__))
 #include <memory>
@@ -147,14 +127,6 @@ inline static T& makeDependent(T& value) {
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
-#include <process.h>
-#define THREAD_FUNC static void __cdecl
-#define THREAD_FUNC_RETURN void
-#define THREAD_HANDLE void*
-THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
-#define THREAD_RETURN return
-#elif defined(__unixish__)
 #define THREAD_FUNC static void*
 #define THREAD_FUNC_RETURN void*
 #define THREAD_HANDLE pthread_t
@@ -162,15 +134,8 @@ THREAD_HANDLE startThread(void(func)(void*), void* arg, int stackSize = 0, const
 // limit of 16 characters.
 THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, const char* name = nullptr);
 #define THREAD_RETURN return NULL
-#else
-#error How do I start a new thread on this platform?
-#endif
 
-#if defined(_WIN32)
-#define DYNAMIC_LIB_EXT ".dll"
-#elif defined(__linux)
-#define DYNAMIC_LIB_EXT ".so"
-#elif defined(__FreeBSD__)
+#if defined(__linux)
 #define DYNAMIC_LIB_EXT ".so"
 #elif defined(__APPLE__)
 #define DYNAMIC_LIB_EXT ".dylib"
@@ -178,13 +143,7 @@ THREAD_HANDLE startThread(void*(func)(void*), void* arg, int stackSize = 0, cons
 #error Port me
 #endif
 
-#if defined(_WIN32)
-#define ENV_VAR_PATH_SEPARATOR ';'
-#elif defined(__unixish__)
 #define ENV_VAR_PATH_SEPARATOR ':'
-#else
-#error Port me
-#endif
 
 void waitThread(THREAD_HANDLE thread);
 
@@ -399,9 +358,6 @@ std::vector<std::string> listDirectories(std::string const& directory);
 
 void findFilesRecursively(std::string const& path, std::vector<std::string>& out);
 
-// Tag the given file as "temporary", i.e. not really needing commits to disk
-void makeTemporary(const char* filename);
-
 void setCloseOnExec(int fd);
 
 // Logs an out of memory error and exits the program
@@ -478,8 +434,6 @@ inline static uint64_t timestampCounter() {
 	asm volatile("mrs %0, cntvct_el0" : "=r"(timer));
 	return timer;
 }
-#elif defined(_powerpc64_)
-#include <emmintrin.h>
 #elif defined(__linux__)
 #include <x86intrin.h>
 #define timestampCounter() __rdtsc()
@@ -498,54 +452,12 @@ inline static uint64_t timestampCounter() {
 #define timestampCounter() __rdtsc()
 #endif
 
-#ifdef __FreeBSD__
-#if !(__has_builtin(__rdtsc))
-inline static uint64_t __rdtsc() {
-	uint64_t lo, hi;
-	asm("rdtsc" : "=a"(lo), "=d"(hi));
-	return (lo | (hi << 32));
-}
-#endif
-#elif defined(__powerpc64__) || defined(__ppc64__)
-inline static uint64_t __rdtsc() {
-	uint64_t tb;
-	__asm__ volatile("mfspr %0, 268" : "=r"(tb));
-	return tb;
-}
-#endif
-
 #if defined(__linux__)
 #include <features.h>
 #endif
 #include <sys/stat.h>
 
-#ifdef _WIN32
-#include <intrin.h>
-inline static int32_t interlockedIncrement(volatile int32_t* a) {
-	return _InterlockedIncrement((long*)a);
-}
-inline static int64_t interlockedIncrement64(volatile int64_t* a) {
-	return _InterlockedIncrement64(a);
-}
-inline static int32_t interlockedDecrement(volatile int32_t* a) {
-	return _InterlockedDecrement((long*)a);
-}
-inline static int64_t interlockedDecrement64(volatile int64_t* a) {
-	return _InterlockedDecrement64(a);
-}
-inline static int32_t interlockedCompareExchange(volatile int32_t* a, int32_t b, int32_t c) {
-	return _InterlockedCompareExchange((long*)a, (long)b, (long)c);
-}
-inline static int64_t interlockedExchangeAdd64(volatile int64_t* a, int64_t b) {
-	return _InterlockedExchangeAdd64(a, b);
-}
-inline static int64_t interlockedExchange64(volatile int64_t* a, int64_t b) {
-	return _InterlockedExchange64(a, b);
-}
-inline static int64_t interlockedOr64(volatile int64_t* a, int64_t b) {
-	return _InterlockedOr64(a, b);
-}
-#elif defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
+#if defined(__GCC_HAVE_SYNC_COMPARE_AND_SWAP_8)
 #ifndef __aarch64__
 #include <xmmintrin.h>
 #endif
@@ -635,14 +547,7 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #endif
 
 // We only run on little-endian system, so conversion to/from bigEndian64 is always a byte swap
-#ifdef _MSC_VER
-#define bigEndian16(value) uint16_t(_byteswap_ushort(value))
-#define bigEndian32(value) uint32_t(_byteswap_ulong(value))
-#define bigEndian64(value) uint64_t(_byteswap_uint64(value))
-#define fromBigEndian16(value) uint16_t(_byteswap_ushort(value))
-#define fromBigEndian32(value) uint32_t(_byteswap_ulong(value))
-#define fromBigEndian64(value) uint64_t(_byteswap_uint64(value))
-#elif __GNUG__
+#if __GNUG__
 #define bigEndian16(value) uint16_t((value >> 8) | (value << 8))
 #define bigEndian32(value) uint32_t(__builtin_bswap32(value))
 #define bigEndian64(value) uint64_t(__builtin_bswap64(value))
@@ -657,21 +562,11 @@ inline static int64_t flowInterlockedAnd64(int64_t* p, int64_t a) {
 #define littleEndian32(value) uint32_t(value)
 #define littleEndian64(value) uint64_t(value)
 
-#if defined(_WIN32)
-inline static void flushOutputStreams() {
-	_flushall();
-}
-#elif defined(__unixish__)
 inline static void flushOutputStreams() {
 	fflush(nullptr);
 }
-#else
-#error Missing flush output stream
-#endif
 
-#if defined(_MSC_VER)
-#define DLLEXPORT __declspec(dllexport)
-#elif defined(__GNUG__)
+#if defined(__GNUG__)
 #undef DLLEXPORT
 #define DLLEXPORT __attribute__((visibility("default")))
 #else
@@ -679,10 +574,6 @@ inline static void flushOutputStreams() {
 #endif
 
 #define crashAndDie() std::abort()
-
-#ifdef _WIN32
-#define strcasecmp stricmp
-#endif
 
 #if defined(__GNUG__)
 #define DEFAULT_CONSTRUCTORS(X)                                                                                        \
@@ -692,18 +583,7 @@ inline static void flushOutputStreams() {
 #define DEFAULT_CONSTRUCTORS(X)
 #endif
 
-#if defined(_WIN32)
-#define strtoull(nptr, endptr, base) _strtoui64(nptr, endptr, base)
-#endif
-
-#if defined(_MSC_VER)
-inline static void* aligned_alloc(size_t alignment, size_t size) {
-	return _aligned_malloc(size, alignment);
-}
-inline static void aligned_free(void* ptr) {
-	_aligned_free(ptr);
-}
-#elif defined(__linux__)
+#if defined(__linux__)
 #include <malloc.h>
 inline static void aligned_free(void* ptr) {
 	free(ptr);
@@ -713,10 +593,6 @@ inline static void* aligned_alloc(size_t alignment, size_t size) {
 	return memalign(alignment, size);
 }
 #endif
-#elif defined(__FreeBSD__)
-inline static void aligned_free(void* ptr) {
-	free(ptr);
-}
 #elif defined(__APPLE__)
 #if !defined(HAS_ALIGNED_ALLOC)
 #include <cstdlib>
@@ -743,41 +619,10 @@ std::string exePath();
 // get the absolute path
 std::string getExecPath();
 
-#ifdef _WIN32
-inline static int ctzll(uint64_t value) {
-	unsigned long count = 0;
-	if (_BitScanForward64(&count, value)) {
-		return count;
-	}
-	return 64;
-}
-inline static int clzll(uint64_t value) {
-	unsigned long count = 0;
-	if (_BitScanReverse64(&count, value)) {
-		return 63 - count;
-	}
-	return 64;
-}
-inline static int ctz(uint32_t value) {
-	unsigned long count = 0;
-	if (_BitScanForward(&count, value)) {
-		return count;
-	}
-	return 64;
-}
-inline static int clz(uint32_t value) {
-	unsigned long count = 0;
-	if (_BitScanReverse(&count, value)) {
-		return 63 - count;
-	}
-	return 64;
-}
-#else
 #define ctzll __builtin_ctzll
 #define clzll __builtin_clzll
 #define ctz __builtin_ctz
 #define clz __builtin_clz
-#endif
 
 // These return 0 unless run on the network thread
 int64_t getNumProfilesDisabled();
@@ -792,11 +637,7 @@ int64_t getNumProfilesCaptured();
  * Multiply Defined Symbol (support for weak function declaration).
  */
 #ifndef MULTIPLY_DEFINED_SYMBOL
-#if defined(_MSC_VER)
-#define MULTIPLY_DEFINED_SYMBOL
-#else
 #define MULTIPLY_DEFINED_SYMBOL __attribute__((weak))
-#endif
 #endif
 
 // Logs a critical error message and exits the program

@@ -150,10 +150,10 @@ force_inline void prepareKeys(int op,
                               std::basic_string<Char>& key2,
                               Arguments const& args) {
 	const auto key1_num = nextKey(args);
-	genKey(key1.data(), KEY_PREFIX, args, key1_num);
+	genKey(key1.data(), args.key_prefix, args, key1_num);
 	if (args.txnspec.ops[op][OP_RANGE] > 0) {
 		const auto key2_num = std::min(key1_num + args.txnspec.ops[op][OP_RANGE] - 1, args.rows - 1);
-		genKey(key2.data(), KEY_PREFIX, args, key2_num);
+		genKey(key2.data(), args.key_prefix, args, key2_num);
 	}
 }
 

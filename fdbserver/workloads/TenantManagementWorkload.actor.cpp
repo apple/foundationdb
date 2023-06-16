@@ -1092,7 +1092,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 				// We only every store a single key in each tenant. Therefore we expect a range read of the entire
 				// tenant to return either 0 or 1 keys, depending on whether that key has been set.
-				state RangeResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
+				state RangeReadResult result = wait(tr.getRange(KeyRangeRef(""_sr, "\xff"_sr), 2));
 
 				// An empty tenant should have no data
 				if (tenantData.empty) {
@@ -1259,7 +1259,7 @@ struct TenantManagementWorkload : TestWorkload {
 
 		if (operationType == OperationType::SPECIAL_KEYS) {
 			KeyRange range = KeyRangeRef(beginTenant, endTenant).withPrefix(self->specialKeysTenantMapPrefix);
-			RangeResult results = wait(tr->getRange(range, limit));
+			RangeReadResult results = wait(tr->getRange(range, limit));
 			for (auto result : results) {
 				tenants.push_back(std::make_pair(result.key.removePrefix(self->specialKeysTenantMapPrefix),
 				                                 TenantManagementWorkload::jsonToTenantMapEntry(result.value)));

@@ -83,7 +83,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #endif
-#if defined(__linux__) || defined(__FreeBSD__)
+#if defined(__linux__)
 #ifdef USE_GPERFTOOLS
 #include "gperftools/profiler.h"
 #include "gperftools/heap-profiler.h"
@@ -239,8 +239,10 @@ ACTOR Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID 
 	}
 }
 
-ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
-	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+ACTOR Future<Void> handleIOErrors(Future<Void> actor,
+                                  Future<ErrorOr<Void>> storeError,
+                                  UID id,
+                                  Future<Void> onClosed = Void()) {
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
@@ -275,6 +277,11 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			throw e.getError();
 		}
 	}
+}
+
+Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
+	Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
@@ -1181,7 +1188,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 	}
 }
 
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+#if defined(__linux__) && defined(USE_GPERFTOOLS)
 // A set of threads that should be profiled
 std::set<std::thread::id> profiledThreads;
 
@@ -1193,7 +1200,7 @@ int filter_in_thread(void* arg) {
 
 // Enables the calling thread to be profiled
 void registerThreadForProfiling() {
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS)
+#if defined(__linux__) && defined(USE_GPERFTOOLS)
 	// Not sure if this is actually needed, but a call to backtrace was advised here:
 	// http://groups.google.com/group/google-perftools/browse_thread/thread/0dfd74532e038eb8/2686d9f24ac4365f?pli=1
 	profiledThreads.insert(std::this_thread::get_id());
@@ -1207,7 +1214,7 @@ void registerThreadForProfiling() {
 void updateCpuProfiler(ProfilerRequest req) {
 	switch (req.type) {
 	case ProfilerRequest::Type::GPROF:
-#if (defined(__linux__) || defined(__FreeBSD__)) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
+#if defined(__linux__) && defined(USE_GPERFTOOLS) && !defined(VALGRIND)
 		switch (req.action) {
 		case ProfilerRequest::Action::ENABLE: {
 			const char* path = (const char*)req.outputFile.begin();
@@ -1461,9 +1468,10 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
-		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
 
@@ -1585,7 +1593,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
+		wait(delay(SERVER_KNOBS->ROLE_REFRESH_LOGGING_INTERVAL));
 		TraceEvent("Role", roleId).detail("Transition", "Refresh").detail("As", role.roleName);
 	}
 }
@@ -2052,10 +2060,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+				Future<ErrorOr<Void>> storeError = errorOr(kv->getError());
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
-				f = handleIOErrors(f, kv, s.storeID, kvClosed);
+
+				f = handleIOErrors(f, storeError, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
 				                                  &storageCleaners,
 				                                  f,
@@ -2156,6 +2166,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.granuleStatusStreamRequest);
 					DUMPTOKEN(recruited.haltBlobWorker);
 					DUMPTOKEN(recruited.minBlobVersionRequest);
+					DUMPTOKEN(recruited.mutationStreamRequest);
 
 					IKeyValueStore* data = openKVStore(s.storeType,
 					                                   s.filename,
@@ -2610,6 +2621,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
+					DUMPTOKEN(recruited.getHealthStatus);
 
 					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
@@ -2778,6 +2790,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2786,7 +2799,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder);
-					s = handleIOErrors(s, data, recruited.id(), kvClosed);
+					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
 					                                  &storageCleaners,
@@ -3143,19 +3156,6 @@ static std::set<int> const& normalWorkerErrors() {
 		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
-}
-
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
-	try {
-		wait(f);
-		return Void();
-	} catch (Error& e) {
-		if (e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
-			return Never();
-		}
-		throw;
-	}
 }
 
 ACTOR Future<Void> printTimeout() {
@@ -3831,10 +3831,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
-			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
-			// their files
-			actors.push_back(
-			    fileNotFoundToNever(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface)));
+			actors.push_back(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

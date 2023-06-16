@@ -394,11 +394,13 @@ public:
 	                                     Version* end,
 	                                     Version targetVersion) {
 		auto i = logs.begin();
-		if (outLogs != nullptr)
+		if (outLogs != nullptr) {
 			outLogs->push_back(*i);
+			++i; // skip the first file
+		}
 
 		// Add logs to restorable logs set until continuity is broken OR we reach targetVersion
-		while (++i != logs.end()) {
+		while (i != logs.end()) {
 			if (i->beginVersion > *end || i->beginVersion > targetVersion)
 				break;
 
@@ -408,6 +410,7 @@ public:
 					outLogs->push_back(*i);
 				*end = i->endVersion;
 			}
+			++i;
 		}
 	}
 

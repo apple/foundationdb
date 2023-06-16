@@ -27,10 +27,6 @@
 #include <map>
 #include <unordered_map>
 #include <iomanip>
-#ifdef _WIN32
-#include <intrin.h>
-#pragma intrinsic(_BitScanReverse)
-#endif
 
 class Histogram;
 
@@ -107,17 +103,9 @@ public:
 	// This histogram buckets samples into powers of two.
 	inline void sample(uint32_t sample) {
 		size_t idx;
-#ifdef _WIN32
-		unsigned long index;
-		// _BitScanReverse sets index to the position of the first non-zero bit, so
-		// _BitScanReverse(sample) ~= log_2(sample).  _BitScanReverse returns false if
-		// sample is zero.
-		idx = _BitScanReverse(&index, sample) ? index : 0;
-#else
 		// __builtin_clz counts the leading zeros in its uint32_t argument.  So, 31-clz ~= log_2(sample).
 		// __builtin_clz(0) is undefined.
 		idx = sample ? (31 - __builtin_clz(sample)) : 0;
-#endif
 		ASSERT(idx < 32);
 		buckets[idx]++;
 	}

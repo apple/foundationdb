@@ -283,72 +283,70 @@ ACTOR Future<Void> clusterOpenDatabase(ClusterControllerData::DBInfo* db, OpenDa
 	return Void();
 }
 
-void checkOutstandingStorageRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingStorageRequests.size(); i++) {
-		auto& req = self->outstandingStorageRequests[i];
+ACTOR Future<Void> clusterRecruitStorage(ClusterControllerData* clusterControllerData, RecruitStorageRequest req) {
+	state double timeoutTime = now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT;
+	loop {
 		try {
-			if (req.second < now()) {
-				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingStorageRequests, i--);
-			} else {
-				if (!self->gotProcessClasses && !req.first.criticalRecruitment)
-					throw no_more_servers();
-
-				auto worker = self->getStorageWorker(req.first);
-				RecruitStorageReply rep;
-				rep.worker = worker.interf;
-				rep.processClass = worker.processClass;
-				req.first.reply.send(rep);
-				swapAndPop(&self->outstandingStorageRequests, i--);
+			if (timeoutTime < now()) {
+				req.reply.sendError(timed_out());
+				return Void();
+			} else if (!clusterControllerData->gotProcessClasses && !req.criticalRecruitment) {
+				throw no_more_servers();
 			}
+
+			auto worker = clusterControllerData->recruiter.findStorage(req, clusterControllerData->id_worker);
+
+			RecruitStorageReply rep;
+			rep.worker = worker.interf;
+			rep.processClass = worker.processClass;
+			req.reply.send(rep);
+			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
+				TraceEvent(SevWarn, "RecruitStorageNotAvailable", clusterControllerData->id)
 				    .errorUnsuppressed(e)
 				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i)
-				    .detail("IsCriticalRecruitment", req.first.criticalRecruitment);
+				    .detail("IsCriticalRecruitment", req.criticalRecruitment);
 			} else {
-				TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
-				throw;
+				TraceEvent(SevError, "RecruitStorageError", clusterControllerData->id).error(e);
+				throw; // Any other error will bring down the cluster controller
 			}
 		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_STORAGE_RECRUITMENT_DELAY));
 	}
 }
 
-// When workers aren't available at the time of request, the request
-// gets added to a list of outstanding reqs. Here, we try to resolve these
-// outstanding requests.
-void checkOutstandingBlobWorkerRequests(ClusterControllerData* self) {
-	for (int i = 0; i < self->outstandingBlobWorkerRequests.size(); i++) {
-		auto& req = self->outstandingBlobWorkerRequests[i];
+ACTOR Future<Void> clusterRecruitBlobWorker(ClusterControllerData* clusterControllerData,
+                                            RecruitBlobWorkerRequest req) {
+	state double timeoutTime = now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT;
+	loop {
 		try {
-			if (req.second < now()) {
-				req.first.reply.sendError(timed_out());
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
-			} else {
-				if (!self->gotProcessClasses)
-					throw no_more_servers();
-
-				auto worker = self->getBlobWorker(req.first);
-				RecruitBlobWorkerReply rep;
-				rep.worker = worker.interf;
-				rep.processClass = worker.processClass;
-				req.first.reply.send(rep);
-				// can remove it once we know the worker was found
-				swapAndPop(&self->outstandingBlobWorkerRequests, i--);
+			if (timeoutTime < now()) {
+				req.reply.sendError(timed_out());
+				return Void();
+			} else if (!clusterControllerData->gotProcessClasses) {
+				throw no_more_servers();
 			}
+
+			auto worker = clusterControllerData->recruiter.findBlobWorker(
+			    req, clusterControllerData->id_worker, clusterControllerData->clusterControllerDcId);
+
+			RecruitBlobWorkerReply rep;
+			rep.worker = worker.interf;
+			rep.processClass = worker.processClass;
+			req.reply.send(rep);
+			return Void();
 		} catch (Error& e) {
 			if (e.code() == error_code_no_more_servers) {
-				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id)
+				TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", clusterControllerData->id)
 				    .errorUnsuppressed(e)
-				    .suppressFor(1.0)
-				    .detail("OutstandingReq", i);
+				    .suppressFor(1.0);
 			} else {
-				TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
+				TraceEvent(SevError, "RecruitBlobWorkerError", clusterControllerData->id).error(e);
 				throw;
 			}
 		}
+		wait(lowPriorityDelay(SERVER_KNOBS->ATTEMPT_RECRUITMENT_DELAY));
 	}
 }
 
@@ -358,8 +356,9 @@ WorkerDetails findNewProcessForSingleton(ClusterControllerData* self,
                                          std::map<Optional<Standalone<StringRef>>, int>& id_used) {
 	// find new process in cluster for role
 	WorkerDetails newWorker =
-	    Recruiter::getWorkerForRoleInDatacenter(
-	        self, self->clusterControllerDcId, role, ProcessClass::NeverAssign, self->db.config, id_used, {}, true)
+	    self->recruiter
+	        .getWorkerForRoleInDatacenter(
+	            self, self->clusterControllerDcId, role, ProcessClass::NeverAssign, self->db.config, id_used, {}, true)
 	        .worker;
 
 	// check if master's process is actually better suited for role
@@ -646,12 +645,6 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 			}
 		}
 
-		self->recruiter.checkOutstandingRecruitmentRequests(self);
-		checkOutstandingStorageRequests(self);
-
-		if (self->db.blobGranulesEnabled.get()) {
-			checkOutstandingBlobWorkerRequests(self);
-		}
 		checkBetterSingletons(self);
 
 		self->checkRecoveryStalled();
@@ -667,30 +660,12 @@ ACTOR Future<Void> doCheckOutstandingRequests(ClusterControllerData* self) {
 	return Void();
 }
 
-ACTOR Future<Void> doCheckOutstandingRemoteRequests(ClusterControllerData* self) {
-	try {
-		wait(delay(SERVER_KNOBS->CHECK_OUTSTANDING_INTERVAL));
-		while (!self->goodRemoteRecruitmentTime.isReady()) {
-			wait(self->goodRemoteRecruitmentTime);
-		}
-
-		self->recruiter.checkOutstandingRemoteRecruitmentRequests(self);
-	} catch (Error& e) {
-		if (e.code() != error_code_no_more_servers) {
-			TraceEvent(SevError, "CheckOutstandingError").error(e);
-		}
-	}
-	return Void();
-}
-
 void checkOutstandingRequests(ClusterControllerData* self) {
-	if (self->outstandingRemoteRequestChecker.isReady()) {
-		self->outstandingRemoteRequestChecker = doCheckOutstandingRemoteRequests(self);
+	if (!self->outstandingRequestChecker.isReady()) {
+		return;
 	}
 
-	if (self->outstandingRequestChecker.isReady()) {
-		self->outstandingRequestChecker = doCheckOutstandingRequests(self);
-	}
+	self->outstandingRequestChecker = doCheckOutstandingRequests(self);
 }
 
 ACTOR Future<Void> rebootAndCheck(ClusterControllerData* cluster, Optional<Standalone<StringRef>> processID) {
@@ -789,50 +764,6 @@ ACTOR Future<std::vector<TLogInterface>> requireAll(std::vector<Future<Optional<
 		out.insert(out.end(), x.get().begin(), x.get().end());
 	}
 	return out;
-}
-
-void clusterRecruitStorage(ClusterControllerData* self, RecruitStorageRequest req) {
-	try {
-		if (!self->gotProcessClasses && !req.criticalRecruitment)
-			throw no_more_servers();
-		auto worker = self->getStorageWorker(req);
-		RecruitStorageReply rep;
-		rep.worker = worker.interf;
-		rep.processClass = worker.processClass;
-		req.reply.send(rep);
-	} catch (Error& e) {
-		if (e.code() == error_code_no_more_servers) {
-			self->outstandingStorageRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitStorageNotAvailable", self->id)
-			    .error(e)
-			    .detail("IsCriticalRecruitment", req.criticalRecruitment);
-		} else {
-			TraceEvent(SevError, "RecruitStorageError", self->id).error(e);
-			throw; // Any other error will bring down the cluster controller
-		}
-	}
-}
-
-// Trys to send a reply to req with a worker (process) that a blob worker can be recruited on
-// Otherwise, add the req to a list of outstanding reqs that will eventually be dealt with
-void clusterRecruitBlobWorker(ClusterControllerData* self, RecruitBlobWorkerRequest req) {
-	try {
-		if (!self->gotProcessClasses)
-			throw no_more_servers();
-		auto worker = self->getBlobWorker(req);
-		RecruitBlobWorkerReply rep;
-		rep.worker = worker.interf;
-		rep.processClass = worker.processClass;
-		req.reply.send(rep);
-	} catch (Error& e) {
-		if (e.code() == error_code_no_more_servers) {
-			self->outstandingBlobWorkerRequests.emplace_back(req, now() + SERVER_KNOBS->RECRUITMENT_TIMEOUT);
-			TraceEvent(SevWarn, "RecruitBlobWorkerNotAvailable", self->id).error(e);
-		} else {
-			TraceEvent(SevError, "RecruitBlobWorkerError", self->id).error(e);
-			throw; // Any other error will bring down the cluster controller
-		}
-	}
 }
 
 void clusterRegisterMaster(ClusterControllerData* self, RegisterMasterRequest const& req) {
@@ -1403,7 +1334,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			if (val.present())
 				break;
 
-			RangeResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult processClasses = wait(trVer.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 			trVer.clear(processClassKeys);
@@ -1428,7 +1359,7 @@ ACTOR Future<Void> monitorProcessClasses(ClusterControllerData* self) {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				RangeResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult processClasses = wait(tr.getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!processClasses.more && processClasses.size() < CLIENT_KNOBS->TOO_MANY);
 
 				if (processClasses != self->lastProcessClasses || !self->gotProcessClasses) {
@@ -1534,7 +1465,7 @@ ACTOR Future<Void> monitorGlobalConfig(ClusterControllerData::DBInfo* db) {
 					// Since the history keys end with versionstamps, they
 					// should be sorted correctly (versionstamps are stored in
 					// big-endian order).
-					RangeResult globalConfigHistory =
+					RangeReadResult globalConfigHistory =
 					    wait(tr.getRange(globalConfigHistoryKeys, CLIENT_KNOBS->TOO_MANY));
 					// If the global configuration version key has been set,
 					// the history should contain at least one item.
@@ -1942,12 +1873,12 @@ ACTOR Future<Void> startDataDistributor(ClusterControllerData* self, double wait
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> idUsed = self->getUsedIds();
-			WorkerFitnessInfo ddWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                     self->clusterControllerDcId,
-			                                                                     ProcessClass::DataDistributor,
-			                                                                     ProcessClass::NeverAssign,
-			                                                                     self->db.config,
-			                                                                     idUsed);
+			WorkerFitnessInfo ddWorker = self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                                          self->clusterControllerDcId,
+			                                                                          ProcessClass::DataDistributor,
+			                                                                          ProcessClass::NeverAssign,
+			                                                                          self->db.config,
+			                                                                          idUsed);
 			InitializeDataDistributorRequest req(deterministicRandom()->randomUniqueID());
 			state WorkerDetails worker = ddWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::DataDistributor)) {
@@ -2038,12 +1969,12 @@ ACTOR Future<Void> startRatekeeper(ClusterControllerData* self, double waitTime)
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo rkWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                     self->clusterControllerDcId,
-			                                                                     ProcessClass::Ratekeeper,
-			                                                                     ProcessClass::NeverAssign,
-			                                                                     self->db.config,
-			                                                                     id_used);
+			WorkerFitnessInfo rkWorker = self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                                          self->clusterControllerDcId,
+			                                                                          ProcessClass::Ratekeeper,
+			                                                                          ProcessClass::NeverAssign,
+			                                                                          self->db.config,
+			                                                                          id_used);
 			InitializeRatekeeperRequest req(deterministicRandom()->randomUniqueID());
 			state WorkerDetails worker = rkWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::Ratekeeper)) {
@@ -2128,12 +2059,12 @@ ACTOR Future<Void> startConsistencyScan(ClusterControllerData* self) {
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo csWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                     self->clusterControllerDcId,
-			                                                                     ProcessClass::ConsistencyScan,
-			                                                                     ProcessClass::NeverAssign,
-			                                                                     self->db.config,
-			                                                                     id_used);
+			WorkerFitnessInfo csWorker = self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                                          self->clusterControllerDcId,
+			                                                                          ProcessClass::ConsistencyScan,
+			                                                                          ProcessClass::NeverAssign,
+			                                                                          self->db.config,
+			                                                                          id_used);
 
 			InitializeConsistencyScanRequest req(deterministicRandom()->randomUniqueID());
 			state WorkerDetails worker = csWorker.worker;
@@ -2231,12 +2162,13 @@ ACTOR Future<Void> startEncryptKeyProxy(ClusterControllerData* self, EncryptionA
 			// on the same process as the CluserController.
 			state std::map<Optional<Standalone<StringRef>>, int> id_used;
 			Recruiter::updateKnownIds(self, &id_used);
-			state WorkerFitnessInfo ekpWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                            self->clusterControllerDcId,
-			                                                                            ProcessClass::EncryptKeyProxy,
-			                                                                            ProcessClass::NeverAssign,
-			                                                                            self->db.config,
-			                                                                            id_used);
+			state WorkerFitnessInfo ekpWorker =
+			    self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                 self->clusterControllerDcId,
+			                                                 ProcessClass::EncryptKeyProxy,
+			                                                 ProcessClass::NeverAssign,
+			                                                 self->db.config,
+			                                                 id_used);
 
 			InitializeEncryptKeyProxyRequest req(deterministicRandom()->randomUniqueID());
 			req.encryptMode = encryptMode;
@@ -2332,6 +2264,23 @@ ACTOR Future<int64_t> getNextBMEpoch(ClusterControllerData* self) {
 	}
 }
 
+ACTOR Future<Void> stopConsistencyScan(Database db) {
+	state ConsistencyScanState cs = ConsistencyScanState();
+	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
+	loop {
+		try {
+			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
+			state ConsistencyScanState::Config config = wait(ConsistencyScanState().config().getD(tr));
+			config.enabled = false;
+			cs.config().set(tr, config);
+			wait(tr->commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr->onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 	state Reference<BlobRestoreController> restoreController =
 	    makeReference<BlobRestoreController>(self->cx, normalKeys);
@@ -2357,7 +2306,9 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 				}
 			}
 			self->db.blobRestoreEnabled.set(phase > BlobRestorePhase::UNINIT && phase < BlobRestorePhase::DONE);
-
+			if (self->db.blobRestoreEnabled.get()) {
+				wait(stopConsistencyScan(self->cx));
+			}
 			wait(BlobRestoreController::onPhaseChange(restoreController, BlobRestorePhase::INIT));
 		} catch (Error& e) {
 			TraceEvent("WatchBlobRestoreCommand", self->id).error(e);
@@ -2386,12 +2337,13 @@ ACTOR Future<Void> startBlobMigrator(ClusterControllerData* self, double waitTim
 			}
 
 			std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			WorkerFitnessInfo blobMigratorWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                               self->clusterControllerDcId,
-			                                                                               ProcessClass::BlobMigrator,
-			                                                                               ProcessClass::NeverAssign,
-			                                                                               self->db.config,
-			                                                                               id_used);
+			WorkerFitnessInfo blobMigratorWorker =
+			    self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                 self->clusterControllerDcId,
+			                                                 ProcessClass::BlobMigrator,
+			                                                 ProcessClass::NeverAssign,
+			                                                 self->db.config,
+			                                                 id_used);
 			InitializeBlobMigratorRequest req(BlobMigratorInterface::newId());
 			state WorkerDetails worker = blobMigratorWorker.worker;
 			if (self->onMasterIsBetter(worker, ProcessClass::BlobMigrator)) {
@@ -2485,12 +2437,12 @@ ACTOR Future<Void> startBlobManager(ClusterControllerData* self, double waitTime
 			}
 
 			state std::map<Optional<Standalone<StringRef>>, int> id_used = self->getUsedIds();
-			state WorkerFitnessInfo bmWorker = Recruiter::getWorkerForRoleInDatacenter(self,
-			                                                                           self->clusterControllerDcId,
-			                                                                           ProcessClass::BlobManager,
-			                                                                           ProcessClass::NeverAssign,
-			                                                                           self->db.config,
-			                                                                           id_used);
+			state WorkerFitnessInfo bmWorker = self->recruiter.getWorkerForRoleInDatacenter(self,
+			                                                                                self->clusterControllerDcId,
+			                                                                                ProcessClass::BlobManager,
+			                                                                                ProcessClass::NeverAssign,
+			                                                                                self->db.config,
+			                                                                                id_used);
 
 			int64_t nextEpoch = wait(getNextBMEpoch(self));
 			if (!self->masterProcessId.present() ||
@@ -2912,10 +2864,10 @@ ACTOR Future<Void> clusterControllerCore(ClusterControllerFullInterface interf,
 			self.addActor.send(clusterOpenDatabase(&self.db, req));
 		}
 		when(RecruitStorageRequest req = waitNext(interf.recruitStorage.getFuture())) {
-			clusterRecruitStorage(&self, req);
+			self.addActor.send(clusterRecruitStorage(&self, req));
 		}
 		when(RecruitBlobWorkerRequest req = waitNext(interf.recruitBlobWorker.getFuture())) {
-			clusterRecruitBlobWorker(&self, req);
+			self.addActor.send(clusterRecruitBlobWorker(&self, req));
 		}
 		when(RegisterWorkerRequest req = waitNext(interf.registerWorker.getFuture())) {
 			++self.registerWorkerRequests;

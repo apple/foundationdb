@@ -66,9 +66,12 @@ struct NetworkMetrics {
 	};
 
 	std::unordered_map<TaskPriority, struct PriorityStats> activeTrackers;
-	double lastRunLoopBusyness; // network thread busyness (measured every 5s by default)
-	std::atomic<double>
-	    networkBusyness; // network thread busyness which is returned to the the client (measured every 1s by default)
+
+	// network thread busyness (measured every 5s by default)
+	double lastRunLoopBusyness;
+
+	// network thread busyness which is returned to the the client (measured every 1s by default)
+	std::atomic<double> networkBusyness;
 
 	// starvation trackers which keeps track of different task priorities
 	std::vector<struct PriorityStats> starvationTrackers;

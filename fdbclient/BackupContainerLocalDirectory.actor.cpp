@@ -158,15 +158,19 @@ BackupContainerLocalDirectory::BackupContainerLocalDirectory(const std::string& 
 	std::string absolutePath = abspath(path);
 
 	if (!g_network->isSimulated() && path != absolutePath) {
-		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
-		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
-		    .detail("URL", url)
-		    .detail("Path", path)
-		    .detail("AbsolutePath", absolutePath);
-		// throw io_error();
-		IBackupContainer::lastOpenError =
-		    format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
-		throw backup_invalid_url();
+		if (CLIENT_KNOBS->BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH) {
+			path = absolutePath;
+		} else {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory")
+			    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
+			    .detail("URL", url)
+			    .detail("Path", path)
+			    .detail("AbsolutePath", absolutePath);
+			// throw io_error();
+			IBackupContainer::lastOpenError =
+			    format("Backup path '%s' must be the absolute path '%s'", path.c_str(), absolutePath.c_str());
+			throw backup_invalid_url();
+		}
 	}
 
 	// Finalized path written to will be will be <path>/backup-<uid>
@@ -185,12 +189,19 @@ Future<std::vector<std::string>> BackupContainerLocalDirectory::listURLs(const s
 	// Remove trailing slashes on path
 	path.erase(path.find_last_not_of("\\/") + 1);
 
-	if (!g_network->isSimulated() && path != abspath(path)) {
-		TraceEvent(SevWarn, "BackupContainerLocalDirectory")
-		    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
-		    .detail("URL", url)
-		    .detail("Path", path);
-		throw io_error();
+	std::string absolutePath = abspath(path);
+
+	if (!g_network->isSimulated() && path != absolutePath) {
+		if (CLIENT_KNOBS->BACKUP_CONTAINER_LOCAL_ALLOW_RELATIVE_PATH) {
+			path = absolutePath;
+		} else {
+			TraceEvent(SevWarn, "BackupContainerLocalDirectory")
+			    .detail("Description", "Backup path must be absolute (e.g. file:///some/path)")
+			    .detail("URL", url)
+			    .detail("Path", path)
+			    .detail("AbsolutePath", absolutePath);
+			throw io_error();
+		}
 	}
 	std::vector<std::string> dirs = platform::listDirectories(path);
 	std::vector<std::string> results;
@@ -230,7 +241,6 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 	// so create a symbolic link to make each file opening appear to be unique.  This could also work in production
 	// but only if the source directory is writeable which shouldn't be required for a restore.
 	std::string fullPath = joinPath(m_path, path);
-#ifndef _WIN32
 	if (g_network->isSimulated()) {
 		if (!fileExists(fullPath)) {
 			throw file_not_found();
@@ -244,10 +254,9 @@ Future<Reference<IAsyncFile>> BackupContainerLocalDirectory::readFile(const std:
 		ASSERT(symlink(basename(path).c_str(), uniquePath.c_str()) == 0);
 		fullPath = uniquePath;
 	}
-// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
-// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
-// by the same process that failed the first task execution anyway, which is a very rare case.
-#endif
+	// Opening cached mode forces read/write mode at a lower level, overriding the readonly request.  So cached mode
+	// can't be used because backup files are read-only.  Cached mode can only help during restore task retries handled
+	// by the same process that failed the first task execution anyway, which is a very rare case.
 	Future<Reference<IAsyncFile>> f = IAsyncFileSystem::filesystem()->open(fullPath, flags, 0644);
 
 	if (g_network->isSimulated()) {

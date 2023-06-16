@@ -1,5 +1,5 @@
 /*
- * BlobGranuleFiles.h
+ * BlobGranuleFiles.actor.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -18,8 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef FDBCLIENT_BLOBGRANULEFILES_H
-#define FDBCLIENT_BLOBGRANULEFILES_H
+// When actually compiled (NO_INTELLISENSE), include the generated version of this file.  In intellisense use the source
+// version.
+#if defined(NO_INTELLISENSE) && !defined(BLOB_GRANULE_FILES_ACTOR_CLIENT_G_H)
+#define BLOB_GRANULE_FILES_ACTOR_CLIENT_G_H
+#include "fdbclient/BlobGranuleFiles.actor.g.h"
+#elif !defined(BLOB_GRANULE_FILES_ACTOR_CLIENT_H)
+#define BLOB_GRANULE_FILES_ACTOR_CLIENT_H
 
 // This file contains functions for readers who want to materialize blob granules from the underlying files
 
@@ -27,19 +32,23 @@
 #include "fdbclient/SystemData.h"
 #include "flow/CompressionUtils.h"
 
-Value serializeChunkedSnapshot(const Standalone<StringRef>& fileNameRef,
-                               const Standalone<GranuleSnapshot>& snapshot,
-                               int chunkSize,
-                               Optional<CompressionFilter> compressFilter,
-                               Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {},
-                               bool isSnapshotSorted = true);
+#include "flow/actorcompiler.h" // This must be the last #include.
 
-Value serializeChunkedDeltaFile(const Standalone<StringRef>& fileNameRef,
-                                const Standalone<GranuleDeltas>& deltas,
-                                const KeyRangeRef& fileRange,
-                                int chunkSize,
-                                Optional<CompressionFilter> compressFilter,
-                                Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx = {});
+// for performance reasons, the serializeChunked* actors do not copy/take ownership of the data to be serialized and
+// rely on the caller to keep it in scope
+ACTOR Future<Value> serializeChunkedSnapshot(Standalone<StringRef> fileNameRef,
+                                             Standalone<GranuleSnapshot> const* snapshot,
+                                             int chunkSize,
+                                             Optional<CompressionFilter> compressFilter,
+                                             Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx,
+                                             bool isSnapshotSorted);
+
+ACTOR Future<Value> serializeChunkedDeltaFile(Standalone<StringRef> fileNameRef,
+                                              Standalone<GranuleDeltas> const* deltas,
+                                              KeyRangeRef fileRange,
+                                              int chunkSize,
+                                              Optional<CompressionFilter> compressFilter,
+                                              Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx);
 
 ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
                                                     const KeyRangeRef& keyRange,
@@ -48,6 +57,7 @@ ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<B
                                                     ReadBlobGranuleContext granuleContext,
                                                     GranuleMaterializeStats& stats);
 
+// TODO: add future
 RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
                                    KeyRangeRef keyRange,
                                    Version beginVersion,
@@ -59,7 +69,7 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 std::string randomBGFilename(UID blobWorkerID, UID granuleID, Version version, std::string suffix);
 
 // For benchmark testing only. It should never be called in prod.
-void sortDeltasByKey(const Standalone<GranuleDeltas>& deltasByVersion, const KeyRangeRef& fileRange);
+ACTOR Future<Void> sortDeltasByKey(Standalone<GranuleDeltas> const* deltasByVersion, KeyRange fileRange);
 
 // just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file
 RangeResult bgReadSnapshotFile(const StringRef& data,

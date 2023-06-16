@@ -1703,7 +1703,7 @@ ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<Re
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	state Standalone<VectorRef<KeyRef>> results;
-	RangeResult values = wait(tr->getRange(
+	RangeReadResult values = wait(tr->getRange(
 	    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 	for (auto& s : values) {
@@ -3633,6 +3633,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 			tr->clear(blobGranuleHistoryKeys);
 			tr->clear(blobGranuleFileKeys);
 			tr->clear(blobGranuleMappingKeys);
+			tr->clear(blobGranuleLockKeys);
 			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
 			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
 		}
@@ -4916,7 +4917,17 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
 					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
 				} else {
-					TraceEvent("BlobGranuleRestoreResume").log();
+					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
+					beginVersion = version;
+					restore.beginVersion().set(tr, beginVersion);
+					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
+					wait(tr->commit());
+					if (restoreVersion <= beginVersion) {
+						TraceEvent("BlobGranuleRestoreDone")
+						    .detail("BeginVersion", beginVersion)
+						    .detail("Target", restoreVersion);
+						return Void();
+					}
 					break;
 				}
 			} catch (Error& e) {
@@ -5061,6 +5072,23 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		if (firstVersion == invalidVersion) {
+			// For blob granule restore, we can complete the restore job if no mutation log is needed
+			state bool isBlobGranuleRestore;
+			wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+			if (isBlobGranuleRestore) {
+				state Version beginVersion;
+				state Version restoreVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				// no need to apply mutations if target version is less than begin version
+				if (restoreVersion <= beginVersion) {
+					wait(
+					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
+					wait(taskBucket->finish(tr, task));
+					return Void();
+				}
+			}
+
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -5441,7 +5469,7 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1 || isDefaultBackup(normalizedRanges)) {
-			RangeResult existingDestUidValues = wait(
+			RangeReadResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			KeyRangeRef targetRange =
@@ -5558,7 +5586,7 @@ public:
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
 				                                .removePrefix(removePrefix)
 				                                .withPrefix(addPrefix);
-				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				RangeReadResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
 				if (existingRows.size() > 0) {
 					throw restore_destination_not_empty();
 				}
@@ -6235,7 +6263,8 @@ public:
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		if (!restoreSet.present()) {
+		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
+		if (!restoreSet.present() && !blobManifestUrl.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
@@ -6835,7 +6864,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)
 			    .detail("End", end);
-			RangeResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
@@ -6867,7 +6896,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (i = 0; i < restoreRanges.size(); ++i) {
-				RangeResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				for (auto kv : kvs) {
 					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
@@ -6934,7 +6963,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			for (int i = 0; i < emptyData.size(); ++i) {
 				TraceEvent(SevError, "ExpectEmptyData")
 				    .detail("Index", i)
@@ -6972,7 +7001,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 			for (int i = 0; i < allData.size(); ++i) {
 				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);
