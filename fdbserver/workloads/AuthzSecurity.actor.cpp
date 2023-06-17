@@ -130,6 +130,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testGetValueWithoutAuthToken(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testSetValueWithoutAuthToken(this, cx); });
 
 		if (checkBlobGranules) {
@@ -939,22 +940,41 @@ struct AuthzSecurityWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> testSetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+	ACTOR static Future<Void> checkGetOrSetValueWithoutAuthTokenNegative(AuthzSecurityWorkload* self,
+                                                                             Database cx,
+                                                                             bool isGet) {
 		state Transaction tr(cx, self->tenant);
 		state Key key = self->randomString();
 		state Value value = self->randomString();
 		loop {
 			try {
-				// Call set without auth token. This should fail and the callstack should
+				// Call get/set without auth token. This should fail and the callstack should
 				// jump to the exception block
-				tr.set(key, value);
+				if (isGet) {
+					tr.get(key);
+				} else {
+					tr.set(key, value);
+				}
 				wait(tr.commit());
 				ASSERT(false);
 			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
 				ASSERT(e.code() == error_code_permission_denied);
 			}
 			return Void();
 		} 
+	}
+
+	ACTOR static Future<Void> testGetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, false));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testSetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, false));
+		return Void();
 	}
 
 	ACTOR static Future<Void> runTestClient(AuthzSecurityWorkload* self, Database cx) {
