@@ -27,6 +27,7 @@
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbclient/AuditUtils.actor.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
+#include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
 #include "fdbserver/MoveKeys.actor.h"
 #include "fdbserver/Knobs.h"
@@ -584,6 +585,18 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 					              &tr, keys, ssid, ShardAssigned::False, "cleanUpSingleShardDataMove_precheck")));
 				}
 				wait(waitForAll(validationActors));
+				bool anyErrorDetected = false;
+				for (const auto& [ssid, consistent] : validationResult) {
+					if (!consistent) {
+						anyErrorDetected = true;
+						TraceEvent(SevError, "AuditStorageError")
+						    .detail("Context", "cleanUpSingleShardDataMove_precheck")
+						    .detail("WrongSS", ssid);
+					}
+				}
+				if (anyErrorDetected) {
+					throw audit_storage_error();
+				}
 				auditStorageFailedCount = 0;
 			}
 
@@ -614,7 +627,14 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
 			    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 				tr.reset(); // Can I reset tr there?
-				bool consistent = wait(validateLocationMetadata(&tr, keys, "startMoveShards_postcheck"));
+				bool consistent = wait(validateLocationMetadata(&tr, keys, "cleanUpSingleShardDataMove_postcheck"));
+				if (!consistent) {
+					TraceEvent(SevError, "AuditStorageError")
+					    .detail("Context", "cleanUpSingleShardDataMove_postcheck")
+					    .detail("Range", keys)
+					    .detail("DataMoveID", dataMoveId);
+					throw audit_storage_error();
+				}
 				auditStorageFailedCount = 0;
 			}
 
@@ -626,9 +646,12 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				    .error(err)
 				    .detail("Range", keys);
 				continue;
+			} else if (err.code() == error_code_audit_storage_error) {
+				int ignore = wait(setDDMode(occ, 0)); // error out then
+				throw audit_storage_error();
 			}
 
-			wait(tr.onError(e));
+			wait(tr.onError(err));
 
 			TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
 			    .error(err)
@@ -1665,6 +1688,18 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 								                                                         "startMoveShards_precheck")));
 							}
 							wait(waitForAll(validationActors));
+							bool anyErrorDetected = false;
+							for (const auto& [ssid, consistent] : validationResult) {
+								if (!consistent) {
+									anyErrorDetected = true;
+									TraceEvent(SevError, "AuditStorageError")
+									    .detail("Context", "startMoveShards_precheck")
+									    .detail("WrongSS", ssid);
+								}
+							}
+							if (anyErrorDetected) {
+								throw audit_storage_error();
+							}
 							auditStorageFailedCount = 0;
 						}
 
@@ -1810,6 +1845,13 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					if (!currentKeys.empty()) {
 						tr.reset(); // Can I reset tr there?
 						bool consistent = wait(validateLocationMetadata(&tr, currentKeys, "startMoveShards_postcheck"));
+						if (!consistent) {
+							TraceEvent(SevError, "AuditStorageError")
+							    .detail("Context", "startMoveShards_postcheck")
+							    .detail("Range", currentKeys)
+							    .detail("DataMoveID", dataMoveId);
+							throw audit_storage_error();
+						}
 						auditStorageFailedCount = 0;
 					}
 				}
@@ -1822,6 +1864,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (e.code() == error_code_audit_storage_failed) {
 					auditStorageFailedCount++;
 					wait(delay(1));
+				} else if (e.code() == error_code_audit_storage_error) {
+					int ignore = wait(setDDMode(occ, 0)); // error out then
+					throw audit_storage_error();
 				} else if (e.code() == error_code_retry) {
 					wait(delay(1));
 				} else {
@@ -2052,6 +2097,18 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 							              &tr, currentRange, ssid, ShardAssigned::True, "finishMoveShards_precheck")));
 						}
 						wait(waitForAll(validationActors));
+						bool anyErrorDetected = false;
+						for (const auto& [ssid, consistent] : validationResult) {
+							if (!consistent) {
+								anyErrorDetected = true;
+								TraceEvent(SevError, "AuditStorageError")
+								    .detail("Context", "finishMoveShards_precheck")
+								    .detail("WrongSS", ssid);
+							}
+						}
+						if (anyErrorDetected) {
+							throw audit_storage_error();
+						}
 						auditStorageFailedCount = 0;
 					}
 
@@ -2237,6 +2294,13 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 						tr.reset(); // can I reset tr there?
 						bool consistent = wait(validateLocationMetadata(&tr, range, "finishMoveShards_postcheck"));
+						if (!consistent) {
+							TraceEvent(SevError, "AuditStorageError")
+							    .detail("Context", "finishMoveShards_postcheck")
+							    .detail("Range", range)
+							    .detail("DataMoveID", dataMoveId);
+							throw audit_storage_error();
+						}
 						auditStorageFailedCount = 0;
 					}
 
@@ -2254,6 +2318,9 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					++auditStorageFailedCount;
 					++retries;
 					wait(delay(1));
+				} else if (err.code() == error_code_audit_storage_error) {
+					int ignore = wait(setDDMode(occ, 0)); // error out then
+					throw audit_storage_error();
 				} else if (error.code() == error_code_retry) {
 					++retries;
 					wait(delay(1));
@@ -2970,6 +3037,18 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 							                                                         "cleanUpDataMoveCore_precheck")));
 						}
 						wait(waitForAll(validationActors));
+						bool anyErrorDetected = false;
+						for (const auto& [ssid, consistent] : validationResult) {
+							if (!consistent) {
+								anyErrorDetected = true;
+								TraceEvent(SevError, "AuditStorageError")
+								    .detail("Context", "cleanUpDataMoveCore_precheck")
+								    .detail("WrongSS", ssid);
+							}
+						}
+						if (anyErrorDetected) {
+							throw audit_storage_error();
+						}
 						auditStorageFailedCount = 0;
 					}
 
@@ -3046,19 +3125,30 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
 					tr.reset(); // can I reset tr there?
 					bool consistent = wait(validateLocationMetadata(&tr, range, "cleanUpDataMoveCore_postcheck"));
+					if (!consistent) {
+						TraceEvent(SevError, "AuditStorageError")
+						    .detail("Context", "cleanUpDataMoveCore_postcheck")
+						    .detail("Range", range)
+						    .detail("DataMoveID", dataMoveId);
+						throw audit_storage_error();
+					}
 					auditStorageFailedCount = 0;
 				}
 
 				if (complete) {
 					break;
 				}
-			} catch (Error& e) {
+			} catch (Error& err) {
+				state Error e = err;
 				if (e.code() == error_code_audit_storage_failed) {
 					auditStorageFailedCount++;
 					TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 					    .error(lastError)
 					    .detail("DataMoveRange", range.toString());
 					continue;
+				} else if (e.code() == error_code_audit_storage_error) {
+					int ignore = wait(setDDMode(occ, 0)); // error out then
+					throw audit_storage_error();
 				}
 				lastError = e;
 				wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
