@@ -647,7 +647,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				    .detail("Range", keys);
 				continue;
 			} else if (err.code() == error_code_audit_storage_error) {
-				int ignore = wait(setDDMode(occ, 0)); // error out then
+				int _ = wait(setDDMode(occ, 0)); // error out then
 				throw audit_storage_error();
 			}
 
@@ -1865,7 +1865,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					auditStorageFailedCount++;
 					wait(delay(1));
 				} else if (e.code() == error_code_audit_storage_error) {
-					int ignore = wait(setDDMode(occ, 0)); // error out then
+					int _ = wait(setDDMode(occ, 0)); // error out then
 					throw audit_storage_error();
 				} else if (e.code() == error_code_retry) {
 					wait(delay(1));
@@ -2318,8 +2318,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					++auditStorageFailedCount;
 					++retries;
 					wait(delay(1));
-				} else if (err.code() == error_code_audit_storage_error) {
-					int ignore = wait(setDDMode(occ, 0)); // error out then
+				} else if (error.code() == error_code_audit_storage_error) {
+					int _ = wait(setDDMode(occ, 0)); // error out then
 					throw audit_storage_error();
 				} else if (error.code() == error_code_retry) {
 					++retries;
@@ -3147,7 +3147,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					    .detail("DataMoveRange", range.toString());
 					continue;
 				} else if (e.code() == error_code_audit_storage_error) {
-					int ignore = wait(setDDMode(occ, 0)); // error out then
+					int _ = wait(setDDMode(occ, 0)); // error out then
 					throw audit_storage_error();
 				}
 				lastError = e;
