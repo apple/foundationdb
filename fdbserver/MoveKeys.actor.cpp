@@ -645,6 +645,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 				TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
 				    .error(err)
 				    .detail("Range", keys);
+				auditStorageFailedCount++;
 				continue;
 			} else if (err.code() == error_code_audit_storage_error) {
 				int _ = wait(setDDMode(occ, 0)); // error out then
