@@ -321,7 +321,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
-		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
+		busiestWriteTags.emplace_back(ThrottlingId::fromTag(busiestTag), maxRate, maxBusyness);
 	}
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,

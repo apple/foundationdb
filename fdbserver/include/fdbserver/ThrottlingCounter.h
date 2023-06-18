@@ -1,5 +1,5 @@
 /*
- * TransactionTagCounter.h
+ * ThrottlingCounter.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,12 +25,12 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
 
-class TransactionTagCounter {
-	PImpl<class TransactionTagCounterImpl> impl;
+class ThrottlingCounter {
+	PImpl<class ThrottlingCounterImpl> impl;
 
 public:
-	TransactionTagCounter(UID thisServerID, int maxTagsTracked, double minRateTracked);
-	~TransactionTagCounter();
+	ThrottlingCounter(UID thisServerID, int maxTagsTracked, double minRateTracked);
+	~ThrottlingCounter();
 
 	// Update counters tracking the busyness of each tag in the current interval
 	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);

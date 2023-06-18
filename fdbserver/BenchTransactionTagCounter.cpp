@@ -1,11 +1,11 @@
 #include "benchmark/benchmark.h"
 
-#include "fdbserver/TransactionTagCounter.h"
+#include "fdbserver/ThrottlingCounter.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 
 static void bench_addRequest(benchmark::State& state) {
-	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/0);
+	ThrottlingCounter counter(UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;
@@ -24,7 +24,7 @@ static void bench_addRequest(benchmark::State& state) {
 BENCHMARK(bench_addRequest)->RangeMultiplier(2)->Range(8 << 4, 8 << 14);
 
 static void bench_startNewInterval(benchmark::State& state) {
-	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/state.range(0), /*minRateTracked=*/0);
+	ThrottlingCounter counter(UID(), /*maxTagsTracked=*/state.range(0), /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;

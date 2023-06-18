@@ -23,6 +23,7 @@
 
 #include "fdbclient/Knobs.h"
 #include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Smoother.h"
 
 class RkTagThrottleCollection : NonCopyable {
@@ -46,14 +47,14 @@ class RkTagThrottleCollection : NonCopyable {
 		Optional<double> updateAndGetClientRate(Optional<double> requestRate);
 	};
 
-	TransactionTagMap<RkTagThrottleData> autoThrottledTags;
-	TransactionTagMap<std::map<TransactionPriority, RkTagThrottleData>> manualThrottledTags;
-	TransactionTagMap<RkTagData> tagData;
+	ThrottlingIdMap<RkTagThrottleData> autoThrottledTags;
+	ThrottlingIdMap<std::map<TransactionPriority, RkTagThrottleData>> manualThrottledTags;
+	ThrottlingIdMap<RkTagData> tagData;
 	uint32_t busyReadTagCount = 0, busyWriteTagCount = 0;
 
-	void initializeTag(TransactionTag const& tag) { tagData.try_emplace(tag); }
+	void initializeTag(ThrottlingId const& tag) { tagData.try_emplace(tag); }
 	static double computeTargetTpsRate(double currentBusyness, double targetBusyness, double requestRate);
-	Optional<double> getRequestRate(TransactionTag const& tag);
+	Optional<double> getRequestRate(ThrottlingId const& tag);
 
 public:
 	RkTagThrottleCollection() = default;
@@ -63,24 +64,23 @@ public:
 	// Set or update an auto throttling limit for the specified tag and priority combination.
 	// Returns the TPS rate if the throttle is updated, otherwise returns an empty optional
 	Optional<double> autoThrottleTag(UID id,
-	                                 TransactionTag const& tag,
+	                                 ThrottlingId const& tag,
 	                                 double fractionalBusyness,
 	                                 Optional<double> tpsRate = Optional<double>(),
 	                                 Optional<double> expiration = Optional<double>());
 
 	// Set or update a manual tps rate limit for the specified tag and priority combination
 	void manualThrottleTag(UID id,
-	                       TransactionTag const& tag,
+	                       ThrottlingId const& tag,
 	                       TransactionPriority priority,
 	                       double tpsRate,
 	                       double expiration,
 	                       Optional<ClientTagThrottleLimits> const& oldLimits);
 
-	Optional<ClientTagThrottleLimits> getManualTagThrottleLimits(TransactionTag const& tag,
-	                                                             TransactionPriority priority);
+	Optional<ClientTagThrottleLimits> getManualTagThrottleLimits(ThrottlingId const& tag, TransactionPriority priority);
 
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates(bool autoThrottlingEnabled);
-	void addRequests(TransactionTag const& tag, int requests);
+	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates(bool autoThrottlingEnabled);
+	void addRequests(ThrottlingId const& tag, int requests);
 	int64_t autoThrottleCount() const { return autoThrottledTags.size(); }
 	int64_t manualThrottleCount() const;
 	void incrementBusyTagCount(TagThrottledReason);

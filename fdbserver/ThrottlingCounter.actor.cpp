@@ -1,5 +1,5 @@
 /*
- * TransactionTagCounter.actor.cpp
+ * ThrottlingCounter.actor.cpp
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -20,13 +20,13 @@
 
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/TransactionTagCounter.h"
+#include "fdbserver/ThrottlingCounter.h"
 #include "flow/Trace.h"
 #include "flow/actorcompiler.h"
 
-class TransactionTagCounterImpl {
+class ThrottlingCounterImpl {
 	UID thisServerID;
-	TransactionTagMap<double> intervalCosts;
+	ThrottlingIdMap<double> intervalCosts;
 	double intervalTotalCost = 0;
 	double intervalStart = 0;
 	int maxTagsTracked;
@@ -58,7 +58,7 @@ class TransactionTagCounterImpl {
 	}
 
 public:
-	TransactionTagCounterImpl(UID thisServerID, int maxTagsTracked, double minRateTracked)
+	ThrottlingCounterImpl(UID thisServerID, int maxTagsTracked, double minRateTracked)
 	  : thisServerID(thisServerID), maxTagsTracked(maxTagsTracked), minRateTracked(minRateTracked),
 	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
 
@@ -67,13 +67,13 @@ public:
 		intervalTotalCost += cost;
 		if (tags.present()) {
 			for (auto const& tag : tags.get()) {
-				CODE_PROBE(true, "Tracking transaction tag in TransactionTagCounter");
-				intervalCosts[TransactionTag(tag, tags.get().getArena())] += cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
+				CODE_PROBE(true, "Tracking transaction tag in ThrottlingCounter");
+				intervalCosts[ThrottlingIdRef::fromTag(tag)] += cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
 			}
 		}
 		if (tenantGroup.present()) {
-			CODE_PROBE(true, "Tracking tenant group in TransactionTagCounter");
-			intervalCosts[tenantGroup.get()] += cost;
+			CODE_PROBE(true, "Tracking tenant group in ThrottlingCounter");
+			intervalCosts[ThrottlingIdRef::fromTenantGroup(tenantGroup.get())] += cost;
 		}
 	}
 
@@ -95,14 +95,14 @@ public:
 					}
 				}
 				TraceEvent("BusiestReadTag", thisServerID)
-				    .detail("Tag", busiestTagInfo.tag)
+				    .detail("Tag", busiestTagInfo.throttlingId)
 				    .detail("TagCost", busiestTagInfo.rate)
 				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
 			}
 
 			for (const auto& tagInfo : previousBusiestTags) {
 				TraceEvent("BusyReadTag", thisServerID)
-				    .detail("Tag", tagInfo.tag)
+				    .detail("Tag", tagInfo.throttlingId)
 				    .detail("TagCost", tagInfo.rate)
 				    .detail("FractionalBusyness", tagInfo.fractionalBusyness);
 			}
@@ -116,36 +116,37 @@ public:
 	std::vector<BusyTagInfo> const& getBusiestTags() const { return previousBusiestTags; }
 };
 
-TransactionTagCounter::TransactionTagCounter(UID thisServerID, int maxTagsTracked, double minRateTracked)
-  : impl(PImpl<TransactionTagCounterImpl>::create(thisServerID, maxTagsTracked, minRateTracked)) {}
+ThrottlingCounter::ThrottlingCounter(UID thisServerID, int maxTagsTracked, double minRateTracked)
+  : impl(PImpl<ThrottlingCounterImpl>::create(thisServerID, maxTagsTracked, minRateTracked)) {}
 
-TransactionTagCounter::~TransactionTagCounter() = default;
+ThrottlingCounter::~ThrottlingCounter() = default;
 
-void TransactionTagCounter::addRequest(Optional<TagSet> const& tags,
-                                       Optional<TenantGroupName> const& tenantGroup,
-                                       int64_t bytes) {
+void ThrottlingCounter::addRequest(Optional<TagSet> const& tags,
+                                   Optional<TenantGroupName> const& tenantGroup,
+                                   int64_t bytes) {
 	return impl->addRequest(tags, tenantGroup, bytes);
 }
 
-void TransactionTagCounter::startNewInterval() {
+void ThrottlingCounter::startNewInterval() {
 	return impl->startNewInterval();
 }
 
-std::vector<BusyTagInfo> const& TransactionTagCounter::getBusiestTags() const {
+std::vector<BusyTagInfo> const& ThrottlingCounter::getBusiestTags() const {
 	return impl->getBusiestTags();
 }
 
 namespace {
 
-bool containsTag(std::vector<BusyTagInfo> const& busyTags, TransactionTagRef tag) {
-	return std::count_if(busyTags.begin(), busyTags.end(), [tag](auto const& tagInfo) { return tagInfo.tag == tag; }) ==
-	       1;
+bool containsTag(std::vector<BusyTagInfo> const& busyTags, ThrottlingId tag) {
+	return std::count_if(busyTags.begin(), busyTags.end(), [tag](auto const& tagInfo) {
+		       return tagInfo.throttlingId == tag;
+	       }) == 1;
 }
 
 } // namespace
 
-TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
-	state TransactionTagCounter counter(
+TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBeyondMaxTags") {
+	state ThrottlingCounter counter(
 	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);
@@ -158,15 +159,15 @@ TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBeyondMaxTags") {
 		counter.startNewInterval();
 		auto const busiestTags = counter.getBusiestTags();
 		ASSERT_EQ(busiestTags.size(), 2);
-		ASSERT(containsTag(busiestTags, "tenantGroupA"_sr));
-		ASSERT(!containsTag(busiestTags, "tenantGroupB"_sr));
-		ASSERT(containsTag(busiestTags, "tenantGroupC"_sr));
+		ASSERT(containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupA"_sr)));
+		ASSERT(!containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupB"_sr)));
+		ASSERT(containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupC"_sr)));
 	}
 	return Void();
 }
 
-TEST_CASE("/fdbserver/TransactionTagCounter/IgnoreBelowMinRate") {
-	state TransactionTagCounter counter(
+TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBelowMinRate") {
+	state ThrottlingCounter counter(
 	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	counter.startNewInterval();
 	ASSERT_EQ(counter.getBusiestTags().size(), 0);

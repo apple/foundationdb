@@ -90,7 +90,7 @@
 #include "fdbserver/SpanContextMessage.h"
 #include "fdbserver/StorageMetrics.actor.h"
 #include "fdbserver/TLogInterface.h"
-#include "fdbserver/TransactionTagCounter.h"
+#include "fdbserver/ThrottlingCounter.h"
 #include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
 #include "fdbserver/BlobGranuleServerCommon.actor.h"
@@ -1201,7 +1201,7 @@ public:
 		return val;
 	}
 
-	TransactionTagCounter transactionTagCounter;
+	ThrottlingCounter throttlingCounter;
 	BusiestWriteTagContext busiestWriteTagContext;
 
 	Optional<LatencyBandConfig> latencyBandConfig;
@@ -1470,10 +1470,10 @@ public:
 	    instanceID(deterministicRandom()->randomUniqueID().first()), shuttingDown(false), behind(false),
 	    versionBehind(false), debug_inApplyUpdate(false), debug_lastValidateTime(0), lastBytesInputEBrake(0),
 	    lastDurableVersionEBrake(0), maxQueryQueue(0),
-	    transactionTagCounter(ssi.id(),
-	                          /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
-	                          /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
-	                              CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
+	    throttlingCounter(ssi.id(),
+	                      /*maxTagsTracked=*/SERVER_KNOBS->SS_THROTTLE_TAGS_TRACKED,
+	                      /*minRateTracked=*/SERVER_KNOBS->MIN_TAG_READ_PAGES_RATE *
+	                          CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE),
 	    busiestWriteTagContext(ssi.id()), counters(this),
 	    storageServerSourceTLogIDEventHolder(
 	        makeReference<EventCacheHolder>(ssi.id().toString() + "/StorageServerSourceTLogID")),
@@ -2273,7 +2273,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
-	data->transactionTagCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
+	data->throttlingCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -4502,7 +4502,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
 	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -5996,7 +5996,7 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
 	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
-	data->transactionTagCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -6031,7 +6031,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
 
-	reply.busiestTags = self->transactionTagCounter.getBusiestTags();
+	reply.busiestTags = self->throttlingCounter.getBusiestTags();
 
 	req.reply.send(reply);
 }
@@ -11694,9 +11694,9 @@ ACTOR Future<Void> storageServerCore(StorageServer* self, StorageServerInterface
 	self->actors.add(reportStorageServerState(self));
 	self->actors.add(storageEngineConsistencyCheck(self));
 
-	self->transactionTagCounter.startNewInterval();
+	self->throttlingCounter.startNewInterval();
 	self->actors.add(
-	    recurring([&]() { self->transactionTagCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
+	    recurring([&]() { self->throttlingCounter.startNewInterval(); }, SERVER_KNOBS->TAG_MEASUREMENT_INTERVAL));
 
 	self->coreStarted.send(Void());
 
