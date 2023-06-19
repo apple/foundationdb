@@ -178,8 +178,8 @@ public:
 		return throttledTags.getClientRates(autoThrottlingEnabled);
 	}
 	int64_t autoThrottleCount() const { return throttledTags.autoThrottleCount(); }
-	uint32_t busyReadTagCount() const { return throttledTags.getBusyReadTagCount(); }
-	uint32_t busyWriteTagCount() const { return throttledTags.getBusyWriteTagCount(); }
+	uint32_t busyReadersCount() const { return throttledTags.getBusyReadTagCount(); }
+	uint32_t busyWritersCount() const { return throttledTags.getBusyWriteTagCount(); }
 	int64_t manualThrottleCount() const { return throttledTags.manualThrottleCount(); }
 	bool isAutoThrottlingEnabled() const { return autoThrottlingEnabled; }
 
@@ -227,11 +227,11 @@ PrioritizedThrottlingIdMap<ClientTagThrottleLimits> TagThrottler::getClientRates
 int64_t TagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();
 }
-uint32_t TagThrottler::busyReadTagCount() const {
-	return impl->busyReadTagCount();
+uint32_t TagThrottler::busyReadersCount() const {
+	return impl->busyReadersCount();
 }
-uint32_t TagThrottler::busyWriteTagCount() const {
-	return impl->busyWriteTagCount();
+uint32_t TagThrottler::busyWritersCount() const {
+	return impl->busyWritersCount();
 }
 int64_t TagThrottler::manualThrottleCount() const {
 	return impl->manualThrottleCount();

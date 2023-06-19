@@ -30,28 +30,28 @@ public:
 	// Poll the system keyspace looking for updates made through the tag throttling API
 	virtual Future<Void> monitorThrottlingChanges() = 0;
 
-	// Increment the number of known requests associated with the specified tag
+	// Increment the number of known requests associated with the specified throttling ID
 	virtual void addRequests(ThrottlingId, int count) = 0;
 
 	// This throttled tag change ID is used to coordinate updates with the GRV proxies
 	virtual uint64_t getThrottledTagChangeId() const = 0;
 
-	// For each tag and priority combination, return the throughput limit and expiration time
-	// Also, erase expired tags
+	// For each throttling ID and priority combination, return the throughput limit and expiration time
+	// Also, erase expired throttling IDs
 	virtual PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() = 0;
 
-	// For each tag and priority combination, return the throughput limit for the cluster
+	// For each throttling ID and priority combination, return the throughput limit for the cluster
 	// (to be shared across all GRV proxies)
 	virtual ThrottlingIdMap<double> getProxyRates(int numProxies) = 0;
 
 	virtual int64_t autoThrottleCount() const = 0;
-	virtual uint32_t busyReadTagCount() const = 0;
-	virtual uint32_t busyWriteTagCount() const = 0;
+	virtual uint32_t busyReadersCount() const = 0;
+	virtual uint32_t busyWritersCount() const = 0;
 	virtual int64_t manualThrottleCount() const = 0;
 	virtual bool isAutoThrottlingEnabled() const = 0;
 
-	// Based on the busiest read and write tags in the provided storage queue info, update
-	// tag throttling limits.
+	// Based on the busiest readers and writers in the provided storage queue info, update
+	// throttling limits.
 	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
 };
 
@@ -68,8 +68,8 @@ public:
 	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() override;
 	ThrottlingIdMap<double> getProxyRates(int numProxies) override { throw not_implemented(); }
 	int64_t autoThrottleCount() const override;
-	uint32_t busyReadTagCount() const override;
-	uint32_t busyWriteTagCount() const override;
+	uint32_t busyReadersCount() const override;
+	uint32_t busyWritersCount() const override;
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
@@ -87,8 +87,8 @@ public:
 	uint64_t getThrottledTagChangeId() const override;
 
 	int64_t autoThrottleCount() const override;
-	uint32_t busyReadTagCount() const override;
-	uint32_t busyWriteTagCount() const override;
+	uint32_t busyReadersCount() const override;
+	uint32_t busyWritersCount() const override;
 	int64_t manualThrottleCount() const override;
 	bool isAutoThrottlingEnabled() const override;
 
@@ -98,8 +98,8 @@ public:
 
 	// Testing only:
 public:
-	void removeExpiredTags();
-	uint32_t tagsTracked() const;
+	void removeExpiredThrottlingIds();
+	uint32_t throttlingIdsTracked() const;
 };
 
 class MockTagThrottler : public ITagThrottler {
@@ -109,8 +109,8 @@ public:
 	uint64_t getThrottledTagChangeId() const override { return 0; }
 
 	int64_t autoThrottleCount() const override { return 0; }
-	uint32_t busyReadTagCount() const override { return 0; }
-	uint32_t busyWriteTagCount() const override { return 0; }
+	uint32_t busyReadersCount() const override { return 0; }
+	uint32_t busyWritersCount() const override { return 0; }
 	int64_t manualThrottleCount() const override { return 0; }
 	bool isAutoThrottlingEnabled() const override { return 0; }
 

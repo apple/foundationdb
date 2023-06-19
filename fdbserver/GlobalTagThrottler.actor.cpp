@@ -116,8 +116,8 @@ class GlobalTagThrottlerImpl {
 		double getCost() const { return readCost.smoothTotal() + writeCost.smoothTotal(); }
 	};
 
-	// Track various statistics per tag, aggregated across all storage servers
-	class PerTagStatistics {
+	// Track various statistics per throttling ID, aggregated across all storage servers
+	class PerThrottlingIdStatistics {
 		HoltLinearSmoother transactionCounter;
 		Smoother perClientRate;
 		Smoother targetRate;
@@ -125,7 +125,7 @@ class GlobalTagThrottlerImpl {
 		double lastLogged;
 
 	public:
-		explicit PerTagStatistics()
+		explicit PerThrottlingIdStatistics()
 		  : transactionCounter(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME,
 		                       SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TRANSACTION_RATE_FOLDING_TIME),
 		    perClientRate(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME),
@@ -168,55 +168,55 @@ class GlobalTagThrottlerImpl {
 	UID id;
 	int maxFallingBehind{ 0 };
 	uint64_t throttledTagChangeId{ 0 };
-	uint32_t lastBusyTagCount{ 0 };
+	uint32_t lastBusyThrottlingIdCount{ 0 };
 
-	ThrottlingIdMap<PerTagStatistics> tagStatistics;
+	ThrottlingIdMap<PerThrottlingIdStatistics> throttlingStatistics;
 	std::unordered_map<UID, ThrottlingIdMap<ThroughputCounters>> throughput;
 
-	// Returns the cost rate for the given tag on the given storage server
-	Optional<double> getCurrentCost(UID storageServerId, ThrottlingId tag) const {
-		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!tagToThroughputCounters.present()) {
+	// Returns the cost rate for the given throttling ID on the given storage server
+	Optional<double> getCurrentCost(UID storageServerId, ThrottlingId throttlingId) const {
+		auto const throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
+		if (!throttlingIdToThroughputCounters.present()) {
 			return {};
 		}
-		auto const throughputCounter = tryGet(tagToThroughputCounters.get(), tag);
+		auto const throughputCounter = tryGet(throttlingIdToThroughputCounters.get(), throttlingId);
 		if (!throughputCounter.present()) {
 			return {};
 		}
 		return throughputCounter.get().getCost();
 	}
 
-	// Return the cost rate on the given storage server, summed across all tags
+	// Return the cost rate on the given storage server, summed across all throttling IDs
 	Optional<double> getCurrentCost(UID storageServerId) const {
-		auto tagToPerTagThroughput = tryGet(throughput, storageServerId);
-		if (!tagToPerTagThroughput.present()) {
+		auto throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
+		if (!throttlingIdToThroughputCounters.present()) {
 			return {};
 		}
 		double result = 0;
-		for (const auto& [tag, perTagThroughput] : tagToPerTagThroughput.get()) {
-			result += perTagThroughput.getCost();
+		for (const auto& [_, throughputCounters] : throttlingIdToThroughputCounters.get()) {
+			result += throughputCounters.getCost();
 		}
 		return result;
 	}
 
-	// Return the cost rate for the given tag, summed across all storage servers
-	double getCurrentCost(ThrottlingId tag) const {
+	// Return the cost rate for the given throttlingId, summed across all storage servers
+	double getCurrentCost(ThrottlingId throttlingId) const {
 		double result{ 0.0 };
-		for (const auto& [id, _] : throughput) {
-			result += getCurrentCost(id, tag).orDefault(0);
+		for (const auto& [ssId, _] : throughput) {
+			result += getCurrentCost(ssId, throttlingId).orDefault(0);
 		}
 
 		return result;
 	}
 
-	// For transactions with the provided tag, returns the average cost that gets associated with the provided storage
-	// server
-	Optional<double> getAverageTransactionCost(ThrottlingId tag, UID storageServerId) const {
-		auto const cost = getCurrentCost(storageServerId, tag);
+	// For transactions with the provided throttlingId, returns the average cost that gets associated with the provided
+	// storage server
+	Optional<double> getAverageTransactionCost(ThrottlingId throttlingId, UID storageServerId) const {
+		auto const cost = getCurrentCost(storageServerId, throttlingId);
 		if (!cost.present()) {
 			return {};
 		}
-		auto const stats = tryGet(tagStatistics, tag);
+		auto const stats = tryGet(throttlingStatistics, throttlingId);
 		if (!stats.present()) {
 			return {};
 		}
@@ -230,12 +230,12 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	// For transactions with the provided tag, returns the average cost of all transactions
+	// For transactions with the provided throttling ID, returns the average cost of all transactions
 	// accross the cluster. The minimum cost is one page. If the transaction rate is too low,
 	// return an empty Optional, because no accurate estimation can be made.
-	Optional<double> getAverageTransactionCost(ThrottlingId tag, TraceEvent& te) const {
-		auto const cost = getCurrentCost(tag);
-		auto const stats = tryGet(tagStatistics, tag);
+	Optional<double> getAverageTransactionCost(ThrottlingId throttlingId, TraceEvent& te) const {
+		auto const cost = getCurrentCost(throttlingId);
+		auto const stats = tryGet(throttlingStatistics, throttlingId);
 		if (!stats.present()) {
 			return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
 		}
@@ -249,39 +249,39 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	// Returns the list of all tags performing meaningful work on the given storage server
-	std::vector<ThrottlingId> getTagsAffectingStorageServer(UID storageServerId) const {
+	// Returns the list of all throttling IDs performing meaningful work on the given storage server
+	std::vector<ThrottlingId> getThrottlingIdsAffectingStorageServer(UID storageServerId) const {
 		std::vector<ThrottlingId> result;
-		auto const tagToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!tagToThroughputCounters.present()) {
+		auto const throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
+		if (!throttlingIdToThroughputCounters.present()) {
 			return {};
 		} else {
-			result.reserve(tagToThroughputCounters.get().size());
-			for (const auto& [t, _] : tagToThroughputCounters.get()) {
-				result.push_back(t);
+			result.reserve(throttlingIdToThroughputCounters.get().size());
+			for (const auto& [throttlingId, _] : throttlingIdToThroughputCounters.get()) {
+				result.push_back(throttlingId);
 			}
 		}
 		return result;
 	}
 
-	// Of all tags meaningfully performing workload on the given storage server,
-	// returns the ratio of total quota allocated to the specified tag
-	double getQuotaRatio(ThrottlingIdRef tag, UID storageServerId) const {
+	// Of all throttling IDs meaningfully performing workload on the given storage server,
+	// returns the ratio of total quota allocated to the specified throttling ID
+	double getQuotaRatio(ThrottlingIdRef throttlingId, UID storageServerId) const {
 		double sumQuota{ 0.0 };
-		double tagQuota{ 0.0 };
-		auto const tagsAffectingStorageServer = getTagsAffectingStorageServer(storageServerId);
-		for (const auto& t : tagsAffectingStorageServer) {
+		double throttlingIdQuota{ 0.0 };
+		auto const throttlingIdsAffectingStorageServer = getThrottlingIdsAffectingStorageServer(storageServerId);
+		for (const auto& t : throttlingIdsAffectingStorageServer) {
 			auto const tQuota = quotaCache->getTotalQuota(t);
 			sumQuota += tQuota.orDefault(0);
-			if (t == tag) {
-				tagQuota = tQuota.orDefault(0);
+			if (t == throttlingId) {
+				throttlingIdQuota = tQuota.orDefault(0);
 			}
 		}
-		if (tagQuota == 0.0) {
+		if (throttlingIdQuota == 0.0) {
 			return 0;
 		}
 		ASSERT_GT(sumQuota, 0.0);
-		return tagQuota / sumQuota;
+		return throttlingIdQuota / sumQuota;
 	}
 
 	Optional<double> getThrottlingRatio(UID storageServerId) const {
@@ -306,17 +306,17 @@ class GlobalTagThrottlerImpl {
 		return throttlingRatio.get() * currentCost.get();
 	}
 
-	// For a given storage server and tag combination, return the limiting transaction rate.
-	Optional<double> getLimitingTps(UID storageServerId, ThrottlingId tag) const {
-		auto const quotaRatio = getQuotaRatio(tag, storageServerId);
+	// For a given storage server and throttling ID combination, return the limiting transaction rate.
+	Optional<double> getLimitingTps(UID storageServerId, ThrottlingId throttlingId) const {
+		auto const quotaRatio = getQuotaRatio(throttlingId, storageServerId);
 		Optional<double> const limitingCost = getLimitingCost(storageServerId);
-		Optional<double> const averageTransactionCost = getAverageTransactionCost(tag, storageServerId);
+		Optional<double> const averageTransactionCost = getAverageTransactionCost(throttlingId, storageServerId);
 		if (!limitingCost.present() || !averageTransactionCost.present()) {
 			return {};
 		}
 
-		auto const limitingCostForTag = limitingCost.get() * quotaRatio;
-		return limitingCostForTag / averageTransactionCost.get();
+		auto const limitingCostForThrottlingId = limitingCost.get() * quotaRatio;
+		return limitingCostForThrottlingId / averageTransactionCost.get();
 	}
 
 	// Return the limiting transaction rate, aggregated across all storage servers.
@@ -324,12 +324,12 @@ class GlobalTagThrottlerImpl {
 	// ignored, because we do not non-workload related issues (e.g. slow disks)
 	// to affect tag throttling. If more than maxFallingBehind zones are at
 	// or near saturation, this indicates that throttling should take place.
-	Optional<double> getLimitingTps(ThrottlingId tag) const {
+	Optional<double> getLimitingTps(ThrottlingId throttlingId) const {
 		// TODO: The algorithm for ignoring the worst zones can be made more efficient
 		std::unordered_map<Optional<Standalone<StringRef>>, double> zoneIdToLimitingTps;
 		auto const& storageQueueInfo = metricsTracker->getStorageQueueInfo();
 		for (auto const& [id, ssInfo] : storageQueueInfo) {
-			auto const limitingTpsForSS = getLimitingTps(id, tag);
+			auto const limitingTpsForSS = getLimitingTps(id, throttlingId);
 			if (limitingTpsForSS.present()) {
 				auto it = zoneIdToLimitingTps.find(ssInfo.locality.zoneId());
 				if (it != zoneIdToLimitingTps.end()) {
@@ -352,11 +352,11 @@ class GlobalTagThrottlerImpl {
 		}
 	}
 
-	Optional<double> getTargetTps(ThrottlingId tag, bool& isBusy, TraceEvent& te) {
-		auto const limitingTps = getLimitingTps(tag);
-		auto const averageTransactionCost = getAverageTransactionCost(tag, te);
-		auto const totalQuota = quotaCache->getTotalQuota(tag);
-		auto const reservedQuota = quotaCache->getReservedQuota(tag);
+	Optional<double> getTargetTps(ThrottlingId throttlingId, bool& isBusy, TraceEvent& te) {
+		auto const limitingTps = getLimitingTps(throttlingId);
+		auto const averageTransactionCost = getAverageTransactionCost(throttlingId, te);
+		auto const totalQuota = quotaCache->getTotalQuota(throttlingId);
+		auto const reservedQuota = quotaCache->getReservedQuota(throttlingId);
 		if (!averageTransactionCost.present() || !totalQuota.present() || !reservedQuota.present()) {
 			return {};
 		}
@@ -366,7 +366,7 @@ class GlobalTagThrottlerImpl {
 
 		isBusy = limitingTps.present() && limitingTps.get() < desiredTps;
 
-		te.detail("Tag", tag)
+		te.detail("ThrottlingId", throttlingId)
 		    .detail("TargetTps", targetTps)
 		    .detail("AverageTransactionCost", averageTransactionCost)
 		    .detail("LimitingTps", limitingTps)
@@ -385,19 +385,20 @@ public:
 	                       UID id,
 	                       int maxFallingBehind)
 	  : metricsTracker(&metricsTracker), quotaCache(&quotaCache), id(id), maxFallingBehind(maxFallingBehind) {}
-	void addRequests(ThrottlingId tag, int count) {
-		auto it = tagStatistics.find(tag);
-		if (it == tagStatistics.end()) {
-			if (tagStatistics.size() == SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {
-				CODE_PROBE(true,
-				           "Global tag throttler ignoring transactions because maximum number of trackable tags has "
-				           "been reached");
+	void addRequests(ThrottlingId throttlingId, int count) {
+		auto it = throttlingStatistics.find(throttlingId);
+		if (it == throttlingStatistics.end()) {
+			if (throttlingStatistics.size() == SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {
+				CODE_PROBE(
+				    true,
+				    "Global tag throttler ignoring transactions because maximum number of trackable throttling IDs has "
+				    "been reached");
 				TraceEvent("GlobalTagThrottler_IgnoringRequests")
 				    .suppressFor(60.0)
-				    .detail("Tag", tag)
+				    .detail("ThrottlingId", throttlingId)
 				    .detail("Count", count);
 			} else {
-				tagStatistics[tag].addTransactions(static_cast<double>(count));
+				throttlingStatistics[throttlingId].addTransactions(static_cast<double>(count));
 			}
 		} else {
 			it->second.addTransactions(static_cast<double>(count));
@@ -407,9 +408,9 @@ public:
 
 	ThrottlingIdMap<double> getProxyRates(int numProxies) {
 		ThrottlingIdMap<double> result;
-		lastBusyTagCount = 0;
+		lastBusyThrottlingIdCount = 0;
 
-		for (auto& [tag, stats] : tagStatistics) {
+		for (auto& [throttlingId, stats] : throttlingStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			TraceEvent te("GlobalTagThrottler_GotRate", id);
 			bool const traceEnabled = stats.canLog();
@@ -417,14 +418,14 @@ public:
 				te.disable();
 			}
 			bool isBusy{ false };
-			auto const targetTps = getTargetTps(tag, isBusy, te);
+			auto const targetTps = getTargetTps(throttlingId, isBusy, te);
 			if (isBusy) {
-				++lastBusyTagCount;
+				++lastBusyThrottlingIdCount;
 			}
 			if (targetTps.present()) {
 				auto const smoothedTargetTps = stats.updateAndGetTargetLimit(targetTps.get());
 				te.detail("SmoothedTargetTps", smoothedTargetTps).detail("NumProxies", numProxies);
-				result[tag] = std::max(1.0, smoothedTargetTps / numProxies);
+				result[throttlingId] = std::max(1.0, smoothedTargetTps / numProxies);
 				if (traceEnabled) {
 					stats.updateLastLogged();
 				}
@@ -438,9 +439,9 @@ public:
 
 	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() {
 		PrioritizedThrottlingIdMap<ClientTagThrottleLimits> result;
-		lastBusyTagCount = 0;
+		lastBusyThrottlingIdCount = 0;
 
-		for (auto& [tag, stats] : tagStatistics) {
+		for (auto& [throttlingId, stats] : throttlingStatistics) {
 			// Currently there is no differentiation between batch priority and default priority transactions
 			bool isBusy{ false };
 			TraceEvent te("GlobalTagThrottler_GotClientRate", id);
@@ -448,15 +449,16 @@ public:
 			if (!traceEnabled) {
 				te.disable();
 			}
-			auto const targetTps = getTargetTps(tag, isBusy, te);
+			auto const targetTps = getTargetTps(throttlingId, isBusy, te);
 
 			if (isBusy) {
-				++lastBusyTagCount;
+				++lastBusyThrottlingIdCount;
 			}
 
 			if (targetTps.present()) {
 				auto const clientRate = stats.updateAndGetPerClientLimit(targetTps.get());
-				result[TransactionPriority::BATCH][tag] = result[TransactionPriority::DEFAULT][tag] = clientRate;
+				result[TransactionPriority::BATCH][throttlingId] = result[TransactionPriority::DEFAULT][throttlingId] =
+				    clientRate;
 				te.detail("ClientTps", clientRate.tpsRate);
 				if (traceEnabled) {
 					stats.updateLastLogged();
@@ -469,8 +471,8 @@ public:
 	}
 
 	int64_t autoThrottleCount() const { return quotaCache->size(); }
-	uint32_t busyReadTagCount() const { return lastBusyTagCount; }
-	uint32_t busyWriteTagCount() const { return lastBusyTagCount; }
+	uint32_t busyReadersCount() const { return lastBusyThrottlingIdCount; }
+	uint32_t busyWritersCount() const { return lastBusyThrottlingIdCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
@@ -478,13 +480,13 @@ public:
 		std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
 		for (const auto& busyReader : ss.busiestReaders) {
 			busyReaders.insert(busyReader.throttlingId);
-			if (tagStatistics.find(busyReader.throttlingId) != tagStatistics.end()) {
+			if (throttlingStatistics.find(busyReader.throttlingId) != throttlingStatistics.end()) {
 				throttlingIdToThroughputCounters[busyReader.throttlingId].updateCost(busyReader.rate, OpType::READ);
 			}
 		}
 		for (const auto& busyWriter : ss.busiestWriters) {
 			busyWriters.insert(busyWriter.throttlingId);
-			if (tagStatistics.find(busyWriter.throttlingId) != tagStatistics.end()) {
+			if (throttlingStatistics.find(busyWriter.throttlingId) != throttlingStatistics.end()) {
 				throttlingIdToThroughputCounters[busyWriter.throttlingId].updateCost(busyWriter.rate, OpType::WRITE);
 			}
 		}
@@ -500,25 +502,25 @@ public:
 		return Void();
 	}
 
-	void removeExpiredTags() {
-		for (auto it = tagStatistics.begin(); it != tagStatistics.end();) {
-			const auto& [tag, stats] = *it;
+	void removeExpiredThrottlingIds() {
+		for (auto it = throttlingStatistics.begin(); it != throttlingStatistics.end();) {
+			const auto& [throttlingId, stats] = *it;
 			if (!stats.recentTransactionsAdded()) {
-				for (auto& [ss, tagToCounters] : throughput) {
-					tagToCounters.erase(tag);
+				for (auto& [ss, throttlingIdToCounters] : throughput) {
+					throttlingIdToCounters.erase(throttlingId);
 				}
-				it = tagStatistics.erase(it);
+				it = throttlingStatistics.erase(it);
 			} else {
 				++it;
 			}
 		}
 	}
 
-	Future<Void> removeExpiredTagsActor() {
-		return recurring([this] { removeExpiredTags(); }, 5.0);
+	Future<Void> removeExpiredThrottlingIdsActor() {
+		return recurring([this] { removeExpiredThrottlingIds(); }, 5.0);
 	}
 
-	uint32_t tagsTracked() const { return tagStatistics.size(); }
+	uint32_t throttlingIdsTracked() const { return throttlingStatistics.size(); }
 };
 
 GlobalTagThrottler::GlobalTagThrottler(IRKMetricsTracker const& metricsTracker,
@@ -530,11 +532,11 @@ GlobalTagThrottler::GlobalTagThrottler(IRKMetricsTracker const& metricsTracker,
 GlobalTagThrottler::~GlobalTagThrottler() = default;
 
 Future<Void> GlobalTagThrottler::monitorThrottlingChanges() {
-	return impl->removeExpiredTagsActor();
+	return impl->removeExpiredThrottlingIdsActor();
 }
 
-void GlobalTagThrottler::addRequests(ThrottlingId tag, int count) {
-	return impl->addRequests(tag, count);
+void GlobalTagThrottler::addRequests(ThrottlingId throttlingId, int count) {
+	return impl->addRequests(throttlingId, count);
 }
 uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 	return impl->getThrottledTagChangeId();
@@ -548,11 +550,11 @@ ThrottlingIdMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 int64_t GlobalTagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();
 }
-uint32_t GlobalTagThrottler::busyReadTagCount() const {
-	return impl->busyReadTagCount();
+uint32_t GlobalTagThrottler::busyReadersCount() const {
+	return impl->busyReadersCount();
 }
-uint32_t GlobalTagThrottler::busyWriteTagCount() const {
-	return impl->busyWriteTagCount();
+uint32_t GlobalTagThrottler::busyWritersCount() const {
+	return impl->busyWritersCount();
 }
 int64_t GlobalTagThrottler::manualThrottleCount() const {
 	return impl->manualThrottleCount();
@@ -564,12 +566,12 @@ Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const&
 	return impl->tryUpdateAutoThrottling(ss);
 }
 
-uint32_t GlobalTagThrottler::tagsTracked() const {
-	return impl->tagsTracked();
+uint32_t GlobalTagThrottler::throttlingIdsTracked() const {
+	return impl->throttlingIdsTracked();
 }
 
-void GlobalTagThrottler::removeExpiredTags() {
-	return impl->removeExpiredTags();
+void GlobalTagThrottler::removeExpiredThrottlingIds() {
+	return impl->removeExpiredThrottlingIds();
 }
 
 namespace {
@@ -577,11 +579,11 @@ namespace {
 enum class LimitType { RESERVED, TOTAL };
 enum class OpType { READ, WRITE };
 
-Optional<double> getTPSLimit(GlobalTagThrottler& globalTagThrottler, ThrottlingId tag) {
+Optional<double> getTPSLimit(GlobalTagThrottler& globalTagThrottler, ThrottlingId throttlingId) {
 	auto clientRates = globalTagThrottler.getClientRates();
 	auto it1 = clientRates.find(TransactionPriority::DEFAULT);
 	if (it1 != clientRates.end()) {
-		auto it2 = it1->second.find(tag);
+		auto it2 = it1->second.find(throttlingId);
 		if (it2 != it1->second.end()) {
 			return it2->second.tpsRate;
 		}
@@ -610,12 +612,12 @@ class MockStorageServer {
 
 public:
 	explicit MockStorageServer(UID id, double capacity) : id(id), capacity(capacity) { ASSERT_GT(capacity, 0); }
-	void addReadCost(ThrottlingId tag, double cost) {
-		readCosts[tag] += cost;
+	void addReadCost(ThrottlingId throttlingId, double cost) {
+		readCosts[throttlingId] += cost;
 		totalReadCost += cost;
 	}
-	void addWriteCost(ThrottlingId tag, double cost) {
-		writeCosts[tag] += cost;
+	void addWriteCost(ThrottlingId throttlingId, double cost) {
+		writeCosts[throttlingId] += cost;
 		totalWriteCost += cost;
 	}
 
@@ -623,13 +625,13 @@ public:
 
 	StorageQueueInfo getStorageQueueInfo() const {
 		StorageQueueInfo result(id, LocalityData({}, Value(id.toString()), {}, {}));
-		for (const auto& [tag, readCost] : readCosts) {
+		for (const auto& [throttlingId, readCost] : readCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-			result.busiestReaders.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
+			result.busiestReaders.emplace_back(throttlingId, readCost.smoothRate(), fractionalBusyness);
 		}
-		for (const auto& [tag, writeCost] : writeCosts) {
+		for (const auto& [throttlingId, writeCost] : writeCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-			result.busiestWriters.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
+			result.busiestWriters.emplace_back(throttlingId, writeCost.smoothRate(), fractionalBusyness);
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
@@ -650,7 +652,10 @@ public:
 		}
 	}
 
-	void addCost(ThrottlingId tag, double pagesPerSecond, std::vector<int> const& storageServerIndices, OpType opType) {
+	void addCost(ThrottlingId throttlingId,
+	             double pagesPerSecond,
+	             std::vector<int> const& storageServerIndices,
+	             OpType opType) {
 		if (storageServerIndices.empty()) {
 			auto costPerSS = CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * (pagesPerSecond / storageServers.size());
 			if (opType == OpType::WRITE) {
@@ -658,9 +663,9 @@ public:
 			}
 			for (auto& storageServer : storageServers) {
 				if (opType == OpType::READ) {
-					storageServer.addReadCost(tag, costPerSS);
+					storageServer.addReadCost(throttlingId, costPerSS);
 				} else {
-					storageServer.addWriteCost(tag, costPerSS);
+					storageServer.addWriteCost(throttlingId, costPerSS);
 				}
 			}
 		} else {
@@ -668,9 +673,9 @@ public:
 			    CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE * (pagesPerSecond / storageServerIndices.size());
 			for (auto i : storageServerIndices) {
 				if (opType == OpType::READ) {
-					storageServers[i].addReadCost(tag, costPerSS);
+					storageServers[i].addReadCost(throttlingId, costPerSS);
 				} else {
-					storageServers[i].addWriteCost(tag, costPerSS);
+					storageServers[i].addWriteCost(throttlingId, costPerSS);
 				}
 			}
 		}
@@ -690,17 +695,17 @@ public:
 
 ACTOR Future<Void> runClient(GlobalTagThrottler* globalTagThrottler,
                              StorageServerCollection* storageServers,
-                             ThrottlingId tag,
+                             ThrottlingId throttlingId,
                              double tpsRate,
                              double costPerTransaction,
                              OpType opType,
                              std::vector<int> storageServerIndices = std::vector<int>()) {
 	loop {
-		auto tpsLimit = getTPSLimit(*globalTagThrottler, tag);
+		auto tpsLimit = getTPSLimit(*globalTagThrottler, throttlingId);
 		state double enforcedRate = tpsLimit.present() ? std::min<double>(tpsRate, tpsLimit.get()) : tpsRate;
 		wait(delay(1 / enforcedRate));
-		storageServers->addCost(tag, costPerTransaction, storageServerIndices, opType);
-		globalTagThrottler->addRequests(tag, 1);
+		storageServers->addCost(throttlingId, costPerTransaction, storageServerIndices, opType);
+		globalTagThrottler->addRequests(throttlingId, 1);
 	}
 }
 
@@ -733,32 +738,32 @@ bool isNear(Optional<double> a, Optional<double> b) {
 	}
 }
 
-bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId tag, Optional<double> expected) {
+bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId throttlingId, Optional<double> expected) {
 	Optional<double> rate;
 	auto targetRates = globalTagThrottler.getProxyRates(1);
-	auto it = targetRates.find(tag);
+	auto it = targetRates.find(throttlingId);
 	if (it != targetRates.end()) {
 		rate = it->second;
 	}
 	TraceEvent("GlobalTagThrottling_RateMonitor")
-	    .detail("Tag", tag)
+	    .detail("ThrottlingId", throttlingId)
 	    .detail("CurrentTPSRate", rate)
 	    .detail("ExpectedTPSRate", expected);
 	return isNear(rate, expected);
 }
 
-bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId tag, Optional<double> expected) {
+bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId throttlingId, Optional<double> expected) {
 	Optional<double> rate;
 	auto clientRates = globalTagThrottler.getClientRates();
 	auto it1 = clientRates.find(TransactionPriority::DEFAULT);
 	if (it1 != clientRates.end()) {
-		auto it2 = it1->second.find(tag);
+		auto it2 = it1->second.find(throttlingId);
 		if (it2 != it1->second.end()) {
 			rate = it2->second.tpsRate;
 		}
 	}
 	TraceEvent("GlobalTagThrottling_ClientRateMonitor")
-	    .detail("Tag", tag)
+	    .detail("ThrottlingId", throttlingId)
 	    .detail("CurrentTPSRate", rate)
 	    .detail("ExpectedTPSRate", expected);
 	return isNear(rate, expected);
@@ -997,7 +1002,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadTagCount() == 1;
+		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadersCount() == 1;
 	});
 	state Future<Void> updater = updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
@@ -1024,7 +1029,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, (50 / 6.0) / 3) && targetRateIsNear(gtt, testTag2, 2 * (50 / 6.0) / 3) &&
-		       gtt.busyReadTagCount() == 2;
+		       gtt.busyReadersCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -1051,7 +1056,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 50 / 6.0) &&
-		       gtt.busyReadTagCount() == 2;
+		       gtt.busyReadersCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -1079,7 +1084,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 100 / 6.0) &&
-		       gtt.busyReadTagCount() == 1;
+		       gtt.busyReadersCount() == 1;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -1124,13 +1129,13 @@ TEST_CASE("/GlobalTagThrottler/ExpireTags") {
 	wait(client && updater);
 	client.cancel();
 	updater.cancel();
-	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
-	globalTagThrottler.removeExpiredTags();
-	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
+	ASSERT_EQ(globalTagThrottler.throttlingIdsTracked(), 1);
+	globalTagThrottler.removeExpiredThrottlingIds();
+	ASSERT_EQ(globalTagThrottler.throttlingIdsTracked(), 1);
 	wait(delay(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_TAG_EXPIRE_AFTER + 1.0));
-	ASSERT_EQ(globalTagThrottler.tagsTracked(), 1);
-	globalTagThrottler.removeExpiredTags();
-	ASSERT_EQ(globalTagThrottler.tagsTracked(), 0);
+	ASSERT_EQ(globalTagThrottler.throttlingIdsTracked(), 1);
+	globalTagThrottler.removeExpiredThrottlingIds();
+	ASSERT_EQ(globalTagThrottler.throttlingIdsTracked(), 0);
 	return Void();
 }
 
@@ -1149,7 +1154,7 @@ TEST_CASE("/GlobalTagThrottler/TagLimit") {
 		    runClient(&globalTagThrottler, &storageServers, ThrottlingIdRef::fromTag(tag), 1.0, 6.0, OpType::READ));
 	}
 	wait(timeout(waitForAll(futures), 60.0, Void()));
-	ASSERT_EQ(globalTagThrottler.tagsTracked(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED);
+	ASSERT_EQ(globalTagThrottler.throttlingIdsTracked(), SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED);
 	return Void();
 }
 
