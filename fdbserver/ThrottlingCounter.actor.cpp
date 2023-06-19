@@ -138,10 +138,13 @@ std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestReaders() 
 
 namespace {
 
-bool containsTag(std::vector<BusyThrottlingIdInfo> const& busyTags, ThrottlingId tag) {
-	return std::count_if(busyTags.begin(), busyTags.end(), [tag](auto const& tagInfo) {
-		       return tagInfo.throttlingId == tag;
-	       }) == 1;
+bool containsTenantGroup(std::vector<BusyThrottlingIdInfo> const& busyReaders, TenantGroupNameRef tenantGroup) {
+	for (auto const& reader : busyReaders) {
+		if (!reader.throttlingId.isTag() && reader.throttlingId.getTenantGroup() == tenantGroup) {
+			return true;
+		}
+	}
+	return false;
 }
 
 } // namespace
@@ -160,9 +163,9 @@ TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBeyondMaxReaders") {
 		counter.startNewInterval();
 		auto const busiestReaders = counter.getBusiestReaders();
 		ASSERT_EQ(busiestReaders.size(), 2);
-		ASSERT(containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupA"_sr)));
-		ASSERT(!containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupB"_sr)));
-		ASSERT(containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupC"_sr)));
+		ASSERT(containsTenantGroup(busiestReaders, "tenantGroupA"_sr));
+		ASSERT(!containsTenantGroup(busiestReaders, "tenantGroupB"_sr));
+		ASSERT(containsTenantGroup(busiestReaders, "tenantGroupC"_sr));
 	}
 	return Void();
 }
