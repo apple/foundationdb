@@ -25,6 +25,9 @@
 #include "fdbclient/TagThrottle.actor.h"
 #include "fdbclient/Tenant.h"
 
+// Tracks the read throughput of different throttling ids, and periodically (triggered by a call
+// to startNewInterval) compute the top k busiest readers. The most recently calculated set of
+// k busy readers can be accessed through the getBusiestReaders method.
 class ThrottlingCounter {
 	PImpl<class ThrottlingCounterImpl> impl;
 
@@ -39,5 +42,5 @@ public:
 	void startNewInterval();
 
 	// Returns the set of busiest tags as of the end of the last interval
-	std::vector<BusyThrottlingIdInfo> const& getBusiestReaders() const;
+	std::vector<BusyThrottlingIdInfo> const& getBusiestReaders() const&;
 };

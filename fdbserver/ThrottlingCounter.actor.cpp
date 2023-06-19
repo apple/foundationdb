@@ -132,7 +132,7 @@ void ThrottlingCounter::startNewInterval() {
 	return impl->startNewInterval();
 }
 
-std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestReaders() const {
+std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestReaders() const& {
 	return impl->getBusiestReaders();
 }
 
