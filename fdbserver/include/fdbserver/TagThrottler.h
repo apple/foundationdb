@@ -102,7 +102,7 @@ public:
 	uint32_t throttlingIdsTracked() const;
 };
 
-class MockTagThrottler : public ITagThrottler {
+class StubTagThrottler : public ITagThrottler {
 public:
 	Future<Void> monitorThrottlingChanges() override { return Never(); }
 	void addRequests(ThrottlingId, int count) override {}
