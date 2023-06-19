@@ -32,11 +32,12 @@ class ThrottlingCounterImpl {
 	int maxTagsTracked;
 	double minRateTracked;
 
-	std::vector<BusyTagInfo> previousBusiestTags;
+	std::vector<BusyThrottlingIdInfo> previousBusiestTags;
 	Reference<EventCacheHolder> busiestReadTagEventHolder;
 
-	std::vector<BusyTagInfo> getBusiestTagsFromLastInterval(double elapsed) const {
-		std::priority_queue<BusyTagInfo, std::vector<BusyTagInfo>, std::greater<BusyTagInfo>> topKTags;
+	std::vector<BusyThrottlingIdInfo> getBusiestTagsFromLastInterval(double elapsed) const {
+		std::priority_queue<BusyThrottlingIdInfo, std::vector<BusyThrottlingIdInfo>, std::greater<BusyThrottlingIdInfo>>
+		    topKTags;
 		for (auto const& [tag, cost] : intervalCosts) {
 			auto const rate = cost / elapsed;
 			auto const fractionalBusyness = std::min(1.0, cost / intervalTotalCost);
@@ -49,7 +50,7 @@ class ThrottlingCounterImpl {
 				topKTags.emplace(tag, rate, fractionalBusyness);
 			}
 		}
-		std::vector<BusyTagInfo> result;
+		std::vector<BusyThrottlingIdInfo> result;
 		while (!topKTags.empty()) {
 			result.push_back(std::move(topKTags.top()));
 			topKTags.pop();
@@ -113,7 +114,7 @@ public:
 		intervalStart = now();
 	}
 
-	std::vector<BusyTagInfo> const& getBusiestTags() const { return previousBusiestTags; }
+	std::vector<BusyThrottlingIdInfo> const& getBusiestTags() const { return previousBusiestTags; }
 };
 
 ThrottlingCounter::ThrottlingCounter(UID thisServerID, int maxTagsTracked, double minRateTracked)
@@ -131,13 +132,13 @@ void ThrottlingCounter::startNewInterval() {
 	return impl->startNewInterval();
 }
 
-std::vector<BusyTagInfo> const& ThrottlingCounter::getBusiestTags() const {
+std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestTags() const {
 	return impl->getBusiestTags();
 }
 
 namespace {
 
-bool containsTag(std::vector<BusyTagInfo> const& busyTags, ThrottlingId tag) {
+bool containsTag(std::vector<BusyThrottlingIdInfo> const& busyTags, ThrottlingId tag) {
 	return std::count_if(busyTags.begin(), busyTags.end(), [tag](auto const& tagInfo) {
 		       return tagInfo.throttlingId == tag;
 	       }) == 1;

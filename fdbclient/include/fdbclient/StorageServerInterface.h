@@ -1182,18 +1182,18 @@ struct GetStorageMetricsRequest {
 };
 
 // Tracks the busyness of tags on individual storage servers.
-struct BusyTagInfo {
+struct BusyThrottlingIdInfo {
 	constexpr static FileIdentifier file_identifier = 4528694;
 	ThrottlingId throttlingId;
 	double rate{ 0.0 };
 	double fractionalBusyness{ 0.0 };
 
-	BusyTagInfo() = default;
-	BusyTagInfo(ThrottlingId const& throttlingId, double rate, double fractionalBusyness)
+	BusyThrottlingIdInfo() = default;
+	BusyThrottlingIdInfo(ThrottlingId const& throttlingId, double rate, double fractionalBusyness)
 	  : throttlingId(throttlingId), rate(rate), fractionalBusyness(fractionalBusyness) {}
 
-	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
-	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+	bool operator<(BusyThrottlingIdInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyThrottlingIdInfo const& rhs) const { return rate > rhs.rate; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1212,7 +1212,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage{ 0.0 };
 	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<BusyTagInfo> busiestTags;
+	std::vector<BusyThrottlingIdInfo> busiestTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
