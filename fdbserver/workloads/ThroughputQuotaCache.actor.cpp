@@ -50,13 +50,13 @@ class ThroughputQuotaCacheWorkload : public TestWorkload {
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				ThrottleApi::TagQuotaValue tagQuotaValue;
-				tagQuotaValue.reservedQuota = reservedQuota;
-				tagQuotaValue.totalQuota = totalQuota;
-				if (!tagQuotaValue.isValid()) {
+				ThrottleApi::ThroughputQuotaValue throughputQuotaValue;
+				throughputQuotaValue.reservedQuota = reservedQuota;
+				throughputQuotaValue.totalQuota = totalQuota;
+				if (!throughputQuotaValue.isValid()) {
 					throw invalid_throttle_quota_value();
 				}
-				TenantMetadata::throughputQuota().set(tr, tenantGroup, tagQuotaValue);
+				TenantMetadata::throughputQuota().set(tr, tenantGroup, throughputQuotaValue);
 				wait(tr->commit());
 				return Void();
 			} catch (Error& e) {

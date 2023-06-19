@@ -33,7 +33,7 @@ public:
 // Uses the system keyspace to populate a cache of per-tenant throughput quotas
 class RKThroughputQuotaCache : public IRKThroughputQuotaCache {
 	friend class RKThroughputQuotaCacheImpl;
-	ThrottlingIdMap<ThrottleApi::TagQuotaValue> quotas;
+	ThrottlingIdMap<ThrottleApi::ThroughputQuotaValue> quotas;
 	UID id;
 	Database db;
 
@@ -48,7 +48,7 @@ public:
 
 // Cache is updated by a test client that manually sets and removes quotas
 class MockRKThroughputQuotaCache : public IRKThroughputQuotaCache {
-	ThrottlingIdMap<ThrottleApi::TagQuotaValue> quotas;
+	ThrottlingIdMap<ThrottleApi::ThroughputQuotaValue> quotas;
 
 public:
 	~MockRKThroughputQuotaCache();
