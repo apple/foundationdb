@@ -39,5 +39,5 @@ public:
 	void startNewInterval();
 
 	// Returns the set of busiest tags as of the end of the last interval
-	std::vector<BusyThrottlingIdInfo> const& getBusiestTags() const;
+	std::vector<BusyThrottlingIdInfo> const& getBusiestReaders() const;
 };

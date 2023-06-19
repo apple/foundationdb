@@ -474,26 +474,26 @@ public:
 	int64_t manualThrottleCount() const { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-		auto& tagToThroughputCounters = throughput[ss.id];
-		std::unordered_set<ThrottlingId, HashThrottlingId> busyReadTags, busyWriteTags;
-		for (const auto& busyReadTag : ss.busiestReadTags) {
-			busyReadTags.insert(busyReadTag.throttlingId);
-			if (tagStatistics.find(busyReadTag.throttlingId) != tagStatistics.end()) {
-				tagToThroughputCounters[busyReadTag.throttlingId].updateCost(busyReadTag.rate, OpType::READ);
+		auto& throttlingIdToThroughputCounters = throughput[ss.id];
+		std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
+		for (const auto& busyReader : ss.busiestReaders) {
+			busyReaders.insert(busyReader.throttlingId);
+			if (tagStatistics.find(busyReader.throttlingId) != tagStatistics.end()) {
+				throttlingIdToThroughputCounters[busyReader.throttlingId].updateCost(busyReader.rate, OpType::READ);
 			}
 		}
-		for (const auto& busyWriteTag : ss.busiestWriteTags) {
-			busyWriteTags.insert(busyWriteTag.throttlingId);
-			if (tagStatistics.find(busyWriteTag.throttlingId) != tagStatistics.end()) {
-				tagToThroughputCounters[busyWriteTag.throttlingId].updateCost(busyWriteTag.rate, OpType::WRITE);
+		for (const auto& busyWriter : ss.busiestWriters) {
+			busyWriters.insert(busyWriter.throttlingId);
+			if (tagStatistics.find(busyWriter.throttlingId) != tagStatistics.end()) {
+				throttlingIdToThroughputCounters[busyWriter.throttlingId].updateCost(busyWriter.rate, OpType::WRITE);
 			}
 		}
 
-		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
-			if (!busyReadTags.count(tag)) {
+		for (auto& [throttlingId, throughputCounters] : throttlingIdToThroughputCounters) {
+			if (!busyReaders.count(throttlingId)) {
 				throughputCounters.updateCost(0.0, OpType::READ);
 			}
-			if (!busyWriteTags.count(tag)) {
+			if (!busyWriters.count(throttlingId)) {
 				throughputCounters.updateCost(0.0, OpType::WRITE);
 			}
 		}
@@ -625,11 +625,11 @@ public:
 		StorageQueueInfo result(id, LocalityData({}, Value(id.toString()), {}, {}));
 		for (const auto& [tag, readCost] : readCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-			result.busiestReadTags.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
+			result.busiestReaders.emplace_back(tag, readCost.smoothRate(), fractionalBusyness);
 		}
 		for (const auto& [tag, writeCost] : writeCosts) {
 			double fractionalBusyness{ 0.0 }; // unused for global tag throttling
-			result.busiestWriteTags.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
+			result.busiestWriters.emplace_back(tag, writeCost.smoothRate(), fractionalBusyness);
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *

@@ -1212,7 +1212,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage{ 0.0 };
 	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<BusyThrottlingIdInfo> busiestTags;
+	std::vector<BusyThrottlingIdInfo> busiestReaders;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1227,7 +1227,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTags);
+		           busiestReaders);
 	}
 };
 

@@ -6031,7 +6031,7 @@ void getQueuingMetrics(StorageServer* self, StorageQueuingMetricsRequest const& 
 	reply.diskUsage = self->diskUsage;
 	reply.durableVersion = self->durableVersion.get();
 
-	reply.busiestTags = self->throttlingCounter.getBusiestTags();
+	reply.busiestReaders = self->throttlingCounter.getBusiestReaders();
 
 	req.reply.send(reply);
 }

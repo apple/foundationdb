@@ -29,39 +29,39 @@ class ThrottlingCounterImpl {
 	ThrottlingIdMap<double> intervalCosts;
 	double intervalTotalCost = 0;
 	double intervalStart = 0;
-	int maxTagsTracked;
+	int maxReadersTracked;
 	double minRateTracked;
 
-	std::vector<BusyThrottlingIdInfo> previousBusiestTags;
-	Reference<EventCacheHolder> busiestReadTagEventHolder;
+	std::vector<BusyThrottlingIdInfo> previousBusiestReaders;
+	Reference<EventCacheHolder> busiestReaderEventHolder;
 
-	std::vector<BusyThrottlingIdInfo> getBusiestTagsFromLastInterval(double elapsed) const {
+	std::vector<BusyThrottlingIdInfo> getBusiestReadersFromLastInterval(double elapsed) const {
 		std::priority_queue<BusyThrottlingIdInfo, std::vector<BusyThrottlingIdInfo>, std::greater<BusyThrottlingIdInfo>>
-		    topKTags;
-		for (auto const& [tag, cost] : intervalCosts) {
+		    topKReaders;
+		for (auto const& [readerId, cost] : intervalCosts) {
 			auto const rate = cost / elapsed;
 			auto const fractionalBusyness = std::min(1.0, cost / intervalTotalCost);
 			if (rate < minRateTracked) {
 				continue;
-			} else if (topKTags.size() < maxTagsTracked) {
-				topKTags.emplace(tag, rate, fractionalBusyness);
-			} else if (topKTags.top().rate < rate) {
-				topKTags.pop();
-				topKTags.emplace(tag, rate, fractionalBusyness);
+			} else if (topKReaders.size() < maxReadersTracked) {
+				topKReaders.emplace(readerId, rate, fractionalBusyness);
+			} else if (topKReaders.top().rate < rate) {
+				topKReaders.pop();
+				topKReaders.emplace(readerId, rate, fractionalBusyness);
 			}
 		}
 		std::vector<BusyThrottlingIdInfo> result;
-		while (!topKTags.empty()) {
-			result.push_back(std::move(topKTags.top()));
-			topKTags.pop();
+		while (!topKReaders.empty()) {
+			result.push_back(std::move(topKReaders.top()));
+			topKReaders.pop();
 		}
 		return result;
 	}
 
 public:
-	ThrottlingCounterImpl(UID thisServerID, int maxTagsTracked, double minRateTracked)
-	  : thisServerID(thisServerID), maxTagsTracked(maxTagsTracked), minRateTracked(minRateTracked),
-	    busiestReadTagEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReadTag")) {}
+	ThrottlingCounterImpl(UID thisServerID, int maxReadersTracked, double minRateTracked)
+	  : thisServerID(thisServerID), maxReadersTracked(maxReadersTracked), minRateTracked(minRateTracked),
+	    busiestReaderEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReader")) {}
 
 	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
 		auto const cost = getReadOperationCost(bytes);
@@ -80,32 +80,32 @@ public:
 
 	void startNewInterval() {
 		double elapsed = now() - intervalStart;
-		previousBusiestTags.clear();
+		previousBusiestReaders.clear();
 		if (intervalStart > 0 && CLIENT_KNOBS->READ_TAG_SAMPLE_RATE > 0 && elapsed > 0) {
-			previousBusiestTags = getBusiestTagsFromLastInterval(elapsed);
+			previousBusiestReaders = getBusiestReadersFromLastInterval(elapsed);
 
 			// For status, report the busiest tag:
-			if (previousBusiestTags.empty()) {
-				TraceEvent("BusiestReadTag", thisServerID).detail("TagCost", 0.0);
+			if (previousBusiestReaders.empty()) {
+				TraceEvent("BusiestReader", thisServerID).detail("Cost", 0.0);
 			} else {
-				auto busiestTagInfo = previousBusiestTags[0];
-				for (int i = 1; i < previousBusiestTags.size(); ++i) {
-					auto const& tagInfo = previousBusiestTags[i];
-					if (tagInfo.rate > busiestTagInfo.rate) {
-						busiestTagInfo = tagInfo;
+				auto busiestReader = previousBusiestReaders[0];
+				for (int i = 1; i < previousBusiestReaders.size(); ++i) {
+					auto const& reader = previousBusiestReaders[i];
+					if (reader.rate > busiestReader.rate) {
+						busiestReader = reader;
 					}
 				}
-				TraceEvent("BusiestReadTag", thisServerID)
-				    .detail("Tag", busiestTagInfo.throttlingId)
-				    .detail("TagCost", busiestTagInfo.rate)
-				    .detail("FractionalBusyness", busiestTagInfo.fractionalBusyness);
+				TraceEvent("BusiestReader", thisServerID)
+				    .detail("ThrottlingId", busiestReader.throttlingId)
+				    .detail("Cost", busiestReader.rate)
+				    .detail("FractionalBusyness", busiestReader.fractionalBusyness);
 			}
 
-			for (const auto& tagInfo : previousBusiestTags) {
-				TraceEvent("BusyReadTag", thisServerID)
-				    .detail("Tag", tagInfo.throttlingId)
-				    .detail("TagCost", tagInfo.rate)
-				    .detail("FractionalBusyness", tagInfo.fractionalBusyness);
+			for (const auto& busyReader : previousBusiestReaders) {
+				TraceEvent("BusyReader", thisServerID)
+				    .detail("ThrottlingId", busyReader.throttlingId)
+				    .detail("Cost", busyReader.rate)
+				    .detail("FractionalBusyness", busyReader.fractionalBusyness);
 			}
 		}
 
@@ -114,11 +114,11 @@ public:
 		intervalStart = now();
 	}
 
-	std::vector<BusyThrottlingIdInfo> const& getBusiestTags() const { return previousBusiestTags; }
+	std::vector<BusyThrottlingIdInfo> const& getBusiestReaders() const { return previousBusiestReaders; }
 };
 
-ThrottlingCounter::ThrottlingCounter(UID thisServerID, int maxTagsTracked, double minRateTracked)
-  : impl(PImpl<ThrottlingCounterImpl>::create(thisServerID, maxTagsTracked, minRateTracked)) {}
+ThrottlingCounter::ThrottlingCounter(UID thisServerID, int maxReadersTracked, double minRateTracked)
+  : impl(PImpl<ThrottlingCounterImpl>::create(thisServerID, maxReadersTracked, minRateTracked)) {}
 
 ThrottlingCounter::~ThrottlingCounter() = default;
 
@@ -132,8 +132,8 @@ void ThrottlingCounter::startNewInterval() {
 	return impl->startNewInterval();
 }
 
-std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestTags() const {
-	return impl->getBusiestTags();
+std::vector<BusyThrottlingIdInfo> const& ThrottlingCounter::getBusiestReaders() const {
+	return impl->getBusiestReaders();
 }
 
 namespace {
@@ -146,11 +146,11 @@ bool containsTag(std::vector<BusyThrottlingIdInfo> const& busyTags, ThrottlingId
 
 } // namespace
 
-TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBeyondMaxTags") {
+TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBeyondMaxReaders") {
 	state ThrottlingCounter counter(
-	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	    UID(), /*maxReadersTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	counter.startNewInterval();
-	ASSERT_EQ(counter.getBusiestTags().size(), 0);
+	ASSERT_EQ(counter.getBusiestReaders().size(), 0);
 	{
 		wait(delay(1.0));
 		counter.addRequest({}, "tenantGroupA"_sr, 10 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
@@ -158,26 +158,26 @@ TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBeyondMaxTags") {
 		counter.addRequest({}, "tenantGroupB"_sr, 15 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 		counter.addRequest({}, "tenantGroupC"_sr, 20 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 		counter.startNewInterval();
-		auto const busiestTags = counter.getBusiestTags();
-		ASSERT_EQ(busiestTags.size(), 2);
-		ASSERT(containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupA"_sr)));
-		ASSERT(!containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupB"_sr)));
-		ASSERT(containsTag(busiestTags, ThrottlingIdRef::fromTenantGroup("tenantGroupC"_sr)));
+		auto const busiestReaders = counter.getBusiestReaders();
+		ASSERT_EQ(busiestReaders.size(), 2);
+		ASSERT(containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupA"_sr)));
+		ASSERT(!containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupB"_sr)));
+		ASSERT(containsTag(busiestReaders, ThrottlingIdRef::fromTenantGroup("tenantGroupC"_sr)));
 	}
 	return Void();
 }
 
 TEST_CASE("/fdbserver/ThrottlingCounter/IgnoreBelowMinRate") {
 	state ThrottlingCounter counter(
-	    UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
+	    UID(), /*maxReadersTracked=*/2, /*minRateTracked=*/10.0 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	counter.startNewInterval();
-	ASSERT_EQ(counter.getBusiestTags().size(), 0);
+	ASSERT_EQ(counter.getBusiestReaders().size(), 0);
 	{
 		wait(delay(1.0));
 		counter.addRequest({}, "tenantGroupA"_sr, 5 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 		counter.startNewInterval();
-		auto const busiestTags = counter.getBusiestTags();
-		ASSERT_EQ(busiestTags.size(), 0);
+		auto const busiestReaders = counter.getBusiestReaders();
+		ASSERT_EQ(busiestReaders.size(), 0);
 	}
 	return Void();
 }
