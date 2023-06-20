@@ -2166,7 +2166,7 @@ ReadMetrics getReadMetrics() {
 
 // Lightweight blocking function that updates requested version to version queue for statistics
 inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
-	if (!SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT)
+	if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT == ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::DISABLED)
 		return;
 	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL) {
 		DisabledTraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
@@ -9342,7 +9342,7 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version, const double& timestamp) {
-	if (!SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT)
+	if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT == ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::DISABLED)
 		return;
 	DisabledTraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
 	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
