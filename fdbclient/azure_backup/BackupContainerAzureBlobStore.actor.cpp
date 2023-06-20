@@ -60,6 +60,8 @@ public:
 		std::shared_ptr<AzureClient> client;
 
 	public:
+		virtual StringRef getClassName() override { return "BackupContainerAzureBlobStoreImpl::ReadFile"_sr; }
+
 		ReadFile(AsyncTaskThread& asyncTaskThread,
 		         const std::string& containerName,
 		         const std::string& blobName,
@@ -121,6 +123,8 @@ public:
 		static constexpr size_t bufferLimit = 1 << 20;
 
 	public:
+		virtual StringRef getClassName() override { return "BackupContainerAzureBlobStoreImpl::WriteFile"_sr; }
+
 		WriteFile(AsyncTaskThread& asyncTaskThread,
 		          const std::string& containerName,
 		          const std::string& blobName,

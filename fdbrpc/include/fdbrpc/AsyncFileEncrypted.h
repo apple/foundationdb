@@ -35,6 +35,8 @@ class AsyncFileEncrypted : public IAsyncFile, public ReferenceCounted<AsyncFileE
 public:
 	enum class Mode { APPEND_ONLY, READ_ONLY };
 
+	virtual StringRef getClassName() override { return "AsyncFileEncrypted"_sr; }
+
 private:
 	Reference<IAsyncFile> file;
 	StreamCipher::IV firstBlockIV;

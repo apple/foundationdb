@@ -12,8 +12,10 @@ if (FLOW_USE_ZSTD)
 endif()
 
 # Remove files with `main` defined so we can create a link test executable.
+list(REMOVE_ITEM FLOW_SRCS LinkTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS TLSTest.cpp)
 list(REMOVE_ITEM FLOW_SRCS MkCertCli.cpp)
+list(REMOVE_ITEM FLOW_SRCS acac.cpp)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
     list(APPEND FLOW_SRCS aarch64/memcmp.S aarch64/memcpy.S)
@@ -71,7 +73,14 @@ if(APPLE AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
 endif()
 
 foreach(ft flow flow_sampling flowlinktest)
-    target_include_directories(${ft} PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include" "${CMAKE_CURRENT_BINARY_DIR}/include")
+    target_include_directories(
+		${ft}
+		PUBLIC
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		"${CMAKE_CURRENT_BINARY_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/contrib/libb64/include"
+	)
+
     if (FLOW_USE_ZSTD)
         target_include_directories(${ft} PRIVATE SYSTEM ${ZSTD_LIB_INCLUDE_DIR})
     endif()
@@ -80,7 +89,7 @@ foreach(ft flow flow_sampling flowlinktest)
     endif()
 
     target_link_libraries(${ft} PRIVATE stacktrace)
-    target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32)
+    target_link_libraries(${ft} PUBLIC fmt::fmt SimpleOpt crc32 libb64)
     if(UNIX AND NOT APPLE)
         target_link_libraries(${ft} PRIVATE folly_memcpy)
         target_compile_definitions(${ft} PRIVATE WITH_FOLLY_MEMCPY)
@@ -105,12 +114,10 @@ foreach(ft flow flow_sampling flowlinktest)
     if(USE_VALGRIND)
         target_link_libraries(${ft} PUBLIC Valgrind)
     endif()
+
     target_link_libraries(${ft} PUBLIC OpenSSL::SSL)
     target_link_libraries(${ft} PUBLIC Threads::Threads ${CMAKE_DL_LIBS})
     target_link_libraries(${ft} PUBLIC boost_target)
-    if(USE_VALGRIND)
-        target_link_libraries(${ft} PUBLIC Valgrind)
-    endif()
 
     if(APPLE)
         find_library(IO_KIT IOKit)
@@ -118,6 +125,9 @@ foreach(ft flow flow_sampling flowlinktest)
         target_link_libraries(${ft} PRIVATE ${IO_KIT} ${CORE_FOUNDATION})
     endif()
 endforeach()
+
+add_executable(acac acac.cpp)
+target_link_libraries(acac PUBLIC flow boost_target_program_options)
 
 target_compile_definitions(flow_sampling PRIVATE -DENABLE_SAMPLING)
 if(WIN32)
@@ -232,3 +242,4 @@ if (WITH_SWIFT)
     add_dependencies(flow flow_swift)
     add_dependencies(flow_sampling flow_swift)
 endif() # WITH SWIFT
+

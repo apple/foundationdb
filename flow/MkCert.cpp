@@ -24,6 +24,7 @@
 #include "flow/MkCert.h"
 #include "flow/PKey.h"
 #include "flow/ScopeExit.h"
+#include "flow/Trace.h"
 
 #include <limits>
 #include <memory>

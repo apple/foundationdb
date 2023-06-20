@@ -44,6 +44,8 @@ public:
 	void addref() override { ReferenceCounted<AsyncFileChaos>::addref(); }
 	void delref() override { ReferenceCounted<AsyncFileChaos>::delref(); }
 
+	virtual StringRef getClassName() override { return "AsyncFileReadAheadCache"_sr; }
+
 	double getDelay() const {
 		double delayFor = 0.0;
 		if (!enabled)
