@@ -2168,7 +2168,7 @@ ReadMetrics getReadMetrics() {
 inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
 	if (!SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT)
 		return;
-	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
+	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL) {
 		DisabledTraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
 		bool popped = false;
 		while (!self->versionQueue.empty() && self->versionQueue.front().version <= version) {
@@ -2177,13 +2177,13 @@ inline void sampleRequestVersions(StorageServer* self, const Version& version, c
 		}
 
 		// NOTE: This current approach collects pessimistic statistics
-		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
-			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
+		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_LESS_SKEW_STAT || popped)) {
+			double emptyVersionSafeWait = timestamp - self->versionQueue.front().timestamp;
 			if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT ==
 			    ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::EMPTY_VERSION_WAIT_LOG_ONLY)
-				TraceEvent("EmptyVersionDelayWindow", self->thisServerID)
+				TraceEvent("EmptyVersionWaitWindow", self->thisServerID)
 				    .detail("QueueSize", self->versionQueue.size())
-				    .detail("DelayWindow", emptyVersionSafeDelay);
+				    .detail("WaitWindow", emptyVersionSafeWait);
 		}
 		self->lastVersionSampleTime = timestamp;
 	}
@@ -9347,7 +9347,7 @@ inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version
 	DisabledTraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
 	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
 	// window anyway, we do a cheap clear() and let it build up again
-	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH) {
+	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_QUEUE_MAX_LENGTH) {
 		TraceEvent("VersionQueueTlogCleared", self->thisServerID)
 		    .detail("QueueTimewindow", self->versionQueue.back().timestamp - self->versionQueue.front().timestamp);
 		self->versionQueue.clear();
