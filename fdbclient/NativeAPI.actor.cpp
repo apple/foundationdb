@@ -4350,6 +4350,7 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 						    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].range.end);
 				}
 
+				bool redoKeyLocationRequest = false;
 				if (!more || locations[shard].range.empty()) {
 					CODE_PROBE(true, "getExactrange (!more || locations[shard].first.empty())");
 					if (shard == locations.size() - 1) {
@@ -4361,10 +4362,9 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 							output.more = false;
 							return output;
 						}
-						CODE_PROBE(true, "Multiple requests of key locations");
 
 						keys = KeyRangeRef(begin, end);
-						break;
+						redoKeyLocationRequest = true;
 					}
 
 					++shard;
@@ -4378,6 +4378,10 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 					return output;
 				}
 
+				if (redoKeyLocationRequest) {
+					CODE_PROBE(true, "Multiple requests of key locations");
+					break;
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 					const KeyRangeRef& range = locations[shard].range;
