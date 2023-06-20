@@ -2891,6 +2891,12 @@ public:
 		state bool isTss = server->getLastKnownInterface().isTss();
 		// Update server's storeType, especially when it was created
 		wait(server->updateStoreType());
+		if (server->getStoreType() == KeyValueStoreType::SSD_SHARDED_ROCKSDB &&
+		    !SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA) {
+			TraceEvent(SevError, "PhysicalShardNotEnabledForShardedRocks", self->getDistributorId())
+			    .detail("StorageServer", server->getId());
+			throw internal_error();
+		}
 		state StorageMetadataType data(
 		    StorageMetadataType::currentTime(),
 		    server->getStoreType(),
