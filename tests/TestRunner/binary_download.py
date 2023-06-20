@@ -120,6 +120,10 @@ class FdbBinaryDownloader:
         os.rename(dest_file_tmp, dest_lib_file)
         assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
 
+    # Download client library of the given version
+    def download_client_library(self, version):
+        return self.download_old_binary(version, "libfdb_c.so", "libfdb_c.so", False)
+
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self, version):
         if is_local_build_version(version):
@@ -132,4 +136,4 @@ class FdbBinaryDownloader:
         self.download_old_binary(version, "fdbserver", "fdbserver", True)
         self.download_old_binary(version, "fdbmonitor", "fdbmonitor", True)
         self.download_old_binary(version, "fdbcli", "fdbcli", True)
-        self.download_old_binary(version, "libfdb_c.so", "libfdb_c.so", False)
+        self.download_client_library(version)

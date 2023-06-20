@@ -192,6 +192,7 @@ endif()
 if(WITH_DOCUMENTATION)
   add_subdirectory(documentation)
 endif()
+add_subdirectory(packaging/snowflake)
 
 include(CPack)
 
