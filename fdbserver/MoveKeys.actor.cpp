@@ -524,7 +524,7 @@ ACTOR Future<bool> validateLocationMetadata(Database occ, KeyRange rangeToCompar
 							    .detail("AuditRange", rangeToCompare)
 							    .detail("IterationCount", iterationCount)
 							    .detail("TimeCost", now() - beginTime);
-							throw audit_storage_failed();
+							throw timed_out();
 						}
 					} else { // complete
 						TraceEvent(SevInfo, "ValidateRangeAssignmentDone")
