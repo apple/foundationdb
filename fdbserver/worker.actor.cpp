@@ -239,8 +239,10 @@ ACTOR Future<Void> forwardError(PromiseStream<ErrorInfo> errors, Role role, UID 
 	}
 }
 
-ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
-	state Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+ACTOR Future<Void> handleIOErrors(Future<Void> actor,
+                                  Future<ErrorOr<Void>> storeError,
+                                  UID id,
+                                  Future<Void> onClosed = Void()) {
 	choose {
 		when(state ErrorOr<Void> e = wait(errorOr(actor))) {
 			if (e.isError() && e.getError().code() == error_code_please_reboot) {
@@ -275,6 +277,11 @@ ACTOR Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, 
 			throw e.getError();
 		}
 	}
+}
+
+Future<Void> handleIOErrors(Future<Void> actor, IClosable* store, UID id, Future<Void> onClosed = Void()) {
+	Future<ErrorOr<Void>> storeError = actor.isReady() ? Never() : errorOr(store->getError());
+	return handleIOErrors(actor, storeError, id, onClosed);
 }
 
 ACTOR Future<Void> workerHandleErrors(FutureStream<ErrorInfo> errors) {
@@ -1461,9 +1468,10 @@ ACTOR Future<Void> storageServerRollbackRebooter(std::set<std::pair<UID, KeyValu
 		DUMPTOKEN(recruited.changeFeedPop);
 		DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+		Future<ErrorOr<Void>> storeError = errorOr(store->getError());
 		prevStorageServer =
 		    storageServer(store, recruited, db, folder, Promise<Void>(), Reference<IClusterConnectionRecord>(nullptr));
-		prevStorageServer = handleIOErrors(prevStorageServer, store, id, store->onClosed());
+		prevStorageServer = handleIOErrors(prevStorageServer, storeError, id, store->onClosed());
 	}
 }
 
@@ -1778,6 +1786,20 @@ ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<
 	return Void();
 }
 
+ACTOR Future<Void> deleteStorageFile(KeyValueStoreType storeType,
+                                     std::string filename,
+                                     UID storeID,
+                                     int64_t memoryLimit,
+                                     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state IKeyValueStore* kvs = openKVStore(storeType, filename, storeID, memoryLimit, false, false, false, dbInfo, {});
+	wait(ready(kvs->init()));
+	TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
+	kvs->dispose();
+	CODE_PROBE(true, "Removed stale disk file");
+	TraceEvent("RemoveStorageDisk").detail("Filename", filename).detail("StoreID", storeID);
+	return Void();
+}
+
 ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                            std::unordered_map<UID, StorageDiskCleaner>* cleaners,
                                            UID storeID,
@@ -1807,12 +1829,7 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 			if (e.code() == error_code_worker_removed) {
 				// delete the files on disk
 				if (fileExists(cleaner.filename)) {
-					state IKeyValueStore* kvs = openKVStore(
-					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
-					wait(ready(kvs->init()));
-					kvs->dispose();
-					CODE_PROBE(true, "Removed stale disk file");
-					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
+					wait(deleteStorageFile(cleaner.storeType, cleaner.filename, storeID, memoryLimit, dbInfo));
 				}
 
 				// remove the cleaner
@@ -2052,10 +2069,12 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				DUMPTOKEN(recruited.changeFeedPop);
 				DUMPTOKEN(recruited.changeFeedVersionUpdate);
 
+				Future<ErrorOr<Void>> storeError = errorOr(kv->getError());
 				Promise<Void> recovery;
 				Future<Void> f = storageServer(kv, recruited, dbInfo, folder, recovery, connRecord);
 				recoveries.push_back(recovery.getFuture());
-				f = handleIOErrors(f, kv, s.storeID, kvClosed);
+
+				f = handleIOErrors(f, storeError, s.storeID, kvClosed);
 				f = storageServerRollbackRebooter(&runningStorages,
 				                                  &storageCleaners,
 				                                  f,
@@ -2137,7 +2156,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			} else if (s.storedComponent == DiskStore::BlobWorker) {
-				if (blobWorkerFuture.isReady()) {
+				if (blobWorkerFuture.isReady() && SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
@@ -2166,7 +2185,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                   false,
 					                                   false,
 					                                   dbInfo,
-					                                   EncryptionAtRestMode());
+					                                   Optional<EncryptionAtRestMode>(),
+					                                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 					filesClosed.add(data->onClosed());
 
 					Promise<Void> recovery;
@@ -2177,16 +2197,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 				} else {
 					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
-					IKeyValueStore* data = openKVStore(s.storeType,
-					                                   s.filename,
-					                                   UID(),
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   false,
-					                                   dbInfo,
-					                                   EncryptionAtRestMode());
-					data->dispose();
+					recoveries.push_back(deleteStorageFile(s.storeType, s.filename, s.storeID, memoryLimit, dbInfo));
 				}
 			}
 		}
@@ -2780,6 +2791,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					filesClosed.add(kvClosed);
 					ReplyPromise<InitializeStorageReply> storageReady = req.reply;
 					storageCache.set(req.reqId, storageReady.getFuture());
+					Future<ErrorOr<Void>> storeError = errorOr(data->getError());
 					Future<Void> s = storageServer(data,
 					                               recruited,
 					                               req.seedTag,
@@ -2788,7 +2800,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               storageReady,
 					                               dbInfo,
 					                               folder);
-					s = handleIOErrors(s, data, recruited.id(), kvClosed);
+					s = handleIOErrors(s, storeError, recruited.id(), kvClosed);
 					s = storageCache.removeOnReady(req.reqId, s);
 					s = storageServerRollbackRebooter(&runningStorages,
 					                                  &storageCleaners,
@@ -2846,7 +2858,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						                   false,
 						                   false,
 						                   dbInfo,
-						                   EncryptionAtRestMode());
+						                   req.encryptMode,
+						                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 						filesClosed.add(data->onClosed());
 					}
 
