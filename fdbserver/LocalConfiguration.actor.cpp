@@ -20,7 +20,7 @@
 
 #include "fdbclient/IKnobCollection.h"
 #include "fdbrpc/Stats.h"
-#include "fdbclient/IKeyValueStore.h"
+#include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/LocalConfiguration.h"
 #include "fdbserver/OnDemandStore.h"
 #include "flow/UnitTest.h"
