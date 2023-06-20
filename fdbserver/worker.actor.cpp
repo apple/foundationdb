@@ -1016,7 +1016,7 @@ TEST_CASE("/fdbserver/worker/addressIsRemoteLogRouter") {
 
 } // namespace
 
-// Returns true if the `peer` has enough data samples that should be checked by the health monitor.
+// Returns true if the `peer` has enough measurement samples that should be checked by the health monitor.
 bool shouldCheckPeer(Reference<Peer> peer) {
 	if (peer->connectFailedCount != 0) {
 		return true;
@@ -1049,8 +1049,7 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 	return false;
 }
 
-// Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers. If so,
-// report degraded and disconnected peers to the cluster controller.
+// Check if the current worker is a transaction worker, and is experiencing degraded or disconnected peers.
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const LocalityData& locality,
                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
@@ -1185,6 +1184,8 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 		// transport's health monitor. Note that all the closed peers stored here are caused by connection
 		// failure, but not normal connection close. Therefore, we report all such peers if they are also
 		// part of the transaction sub system.
+		// Note that we don't need to calculate recovered peer in this case since all the recently closed peers are
+		// considered permanently closed peers.
 		for (const auto& address : FlowTransport::transport().healthMonitor()->getRecentClosedPeers()) {
 			if (allPeers.find(address) != allPeers.end()) {
 				// We have checked this peer in the above for loop.
@@ -1238,6 +1239,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
 				if (g_network->isSimulated()) {
 					// Do invarant check only in simulation.
+					// Any recovered peer shouldn't appear as disconnected or degraded peer.
 					for (const auto& recoveredPeer : req.recoveredPeers) {
 						for (const auto& disconnectedPeer : req.disconnectedPeers) {
 							ASSERT(recoveredPeer != disconnectedPeer);
