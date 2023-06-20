@@ -348,7 +348,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					if (!consistencyScanStopped)
 						self->testFailure("Consistency scan active");
 
-					// FIXME: re-enable this check!
+					// FIXME: re-enable this check and the associated code probe!
 					// bool singleSingletons = self->checkSingleSingletons(self, configuration);
 					// if (!singleSingletons)
 					// 	self->testFailure("Cluster has multiple instances of a singleton!");
@@ -1718,7 +1718,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return true;
 		}
 
-		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons");
+		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons", probe::decoration::rare);
 
 		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
 

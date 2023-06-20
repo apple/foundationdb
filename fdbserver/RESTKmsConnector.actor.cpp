@@ -514,7 +514,7 @@ Standalone<VectorRef<BlobMetadataDetailsRef>> parseBlobMetadataResponse(Referenc
 				TraceEvent(SevWarn, "ParseBlobMetadataResponseMalformedLocation", ctx->uid)
 				    .detail("LocationIdPresent", isLocationIdPresent)
 				    .detail("PathPresent", isPathPresent);
-				CODE_PROBE(true, "REST BlobMetadata location malformed");
+				CODE_PROBE(true, "REST BlobMetadata location malformed", probe::decoration::rare);
 				throw rest_malformed_response();
 			}
 

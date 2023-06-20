@@ -700,7 +700,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 			return Optional<Error>();
 		} catch (Error& e) {
 			if (e.code() == error_code_end_of_stream) {
-				CODE_PROBE(true, "Authz blob granule stream request successful");
+				CODE_PROBE(true, "Authz blob granule stream request successful", probe::decoration::rare);
 				return Optional<Error>();
 			}
 			CODE_PROBE(e.code() == error_code_permission_denied,
