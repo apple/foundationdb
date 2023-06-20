@@ -2166,6 +2166,8 @@ ReadMetrics getReadMetrics() {
 
 // Lightweight blocking function that updates requested version to version queue for statistics
 inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
+	if (!SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT)
+		return;
 	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL) {
 		DisabledTraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
 		bool popped = false;
@@ -2177,9 +2179,11 @@ inline void sampleRequestVersions(StorageServer* self, const Version& version, c
 		// NOTE: This current approach collects pessimistic statistics
 		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT || popped)) {
 			double emptyVersionSafeDelay = timestamp - self->versionQueue.front().timestamp;
-			TraceEvent("EmptyVersionDelayWindow", self->thisServerID)
-			    .detail("QueueSize", self->versionQueue.size())
-			    .detail("DelayWindow", emptyVersionSafeDelay);
+			if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT ==
+			    ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::EMPTY_VERSION_WAIT_LOG_ONLY)
+				TraceEvent("EmptyVersionDelayWindow", self->thisServerID)
+				    .detail("QueueSize", self->versionQueue.size())
+				    .detail("DelayWindow", emptyVersionSafeDelay);
 		}
 		self->lastVersionSampleTime = timestamp;
 	}
@@ -9338,13 +9342,15 @@ ACTOR Future<Void> tssDelayForever() {
 }
 
 inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version, const double& timestamp) {
+	if (!SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT)
+		return;
 	DisabledTraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
 	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
 	// window anyway, we do a cheap clear() and let it build up again
 	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH) {
-		self->versionQueue.clear();
 		TraceEvent("VersionQueueTlogCleared", self->thisServerID)
 		    .detail("QueueTimewindow", self->versionQueue.back().timestamp - self->versionQueue.front().timestamp);
+		self->versionQueue.clear();
 	}
 	self->versionQueue.emplace_back(version, timestamp);
 }

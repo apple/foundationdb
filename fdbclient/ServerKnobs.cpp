@@ -116,7 +116,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                      false ); if ( randomize && BUGGIFY ) ENABLE_DETAILED_TLOG_POP_TRACE = true;
 	init( PEEK_BATCHING_EMPTY_MSG,                             false ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG = true;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.001 ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;
-	init( DYNAMIC_EMPTY_VERSION_WAIT,                          false );
+	init( DYNAMIC_EMPTY_VERSION_WAIT,    EMPTY_VERSION_WAIT_LOG_ONLY );
 	init( SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT,               false ); 
 	init( SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL,              0.001 ); 
 	init( SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH,              1000 ); 

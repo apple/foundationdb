@@ -111,7 +111,8 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
-	bool DYNAMIC_EMPTY_VERSION_WAIT; // Whether to enable dynamic empty version wait between storage servers and tlogs.
+	enum DYNAMIC_EMPTY_VERSION_WAIT_MODE { DISABLED, EMPTY_VERSION_WAIT_LOG_ONLY, EMPTY_VERSION_WAIT };
+	int DYNAMIC_EMPTY_VERSION_WAIT; // Whether to enable dynamic empty version wait between storage servers and tlogs.
 	bool SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT; // Whether to log non-queue-popping samples in empty version wait window
 	                                            // logging. Enabling this will result in less skewed logging but trace
 	                                            // many more lines.
