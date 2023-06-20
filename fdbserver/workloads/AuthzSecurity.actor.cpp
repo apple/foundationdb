@@ -951,15 +951,18 @@ struct AuthzSecurityWorkload : TestWorkload {
 				// Call get/set without auth token. This should fail and the callstack should
 				// jump to the exception block
 				if (isGet) {
-					tr.get(key);
+					wait(success(tr.get(key)));
 				} else {
 					tr.set(key, value);
+					wait(tr.commit());
 				}
-				wait(tr.commit());
 				ASSERT(false);
 			} catch (Error& e) {
 				if (e.code() == error_code_operation_cancelled) {
 					throw e;
+				}
+				if (e.code() != error_code_permission_denied) {
+					TraceEvent(SevError, "NoTokenTest").detail("Status code", e.code());
 				}
 				ASSERT(e.code() == error_code_permission_denied);
 			}
