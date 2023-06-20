@@ -2409,7 +2409,6 @@ ACTOR Future<Void> watchBlobRestoreCommand(ClusterControllerData* self) {
 					}
 				} else {
 					TraceEvent("SkipBlobRestoreInitCommand", self->id).log();
-					wait(BlobRestoreController::setError(restoreController, "Blob granules should be enabled first"));
 				}
 			}
 			self->db.blobRestoreEnabled.set(phase > BlobRestorePhase::UNINIT && phase < BlobRestorePhase::DONE);
