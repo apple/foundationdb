@@ -6801,7 +6801,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_permission_denied) {
 				// Part of the reason that this block exists is that negative unit tests can trip over these cases
 				// and result in SevError logs being emitted. Gating against these status codes also means their
-				// existences must get surfaced and logged somewhere else during production system.  
+				// existences must get surfaced and logged somewhere else during production system.
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)

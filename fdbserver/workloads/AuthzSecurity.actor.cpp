@@ -941,8 +941,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> checkGetOrSetValueWithoutAuthTokenNegative(AuthzSecurityWorkload* self,
-                                                                             Database cx,
-                                                                             bool isGet) {
+	                                                                     Database cx,
+	                                                                     bool isGet) {
 		state Transaction tr(cx, self->tenant);
 		state Key key = self->randomString();
 		state Value value = self->randomString();
@@ -967,7 +967,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 				ASSERT(e.code() == error_code_permission_denied);
 			}
 			return Void();
-		} 
+		}
 	}
 
 	ACTOR static Future<Void> testGetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
