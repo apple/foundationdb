@@ -5879,7 +5879,6 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 
 			// Decide claimRange and check readAtVersion
 			claimRange = completeRangeByKeyServer;
-			remoteReadBytes += keyServerRes.readBytes;
 			for (auto& [ssid, serverKeyRes] : serverKeyResMap) {
 				KeyRange serverKeyCompleteRange = serverKeyRes.completeRange;
 				TraceEvent(SevVerbose, "AuditStorageShardLocMetadataGetClaimRange")
@@ -5954,7 +5953,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
 					std::string error =
-					    format("Storage server shard info mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+					    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
 					           ssid.toString().c_str(),
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
