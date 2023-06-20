@@ -111,10 +111,18 @@ public:
 	double BLOCKING_PEEK_TIMEOUT;
 	bool PEEK_BATCHING_EMPTY_MSG;
 	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
-	bool SS_EMPTY_VERSION_DELAY_STREAMING;
-	bool SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT;
-	double SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL;
-	int SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH;
+	bool DYNAMIC_EMPTY_VERSION_WAIT; // Whether to enable dynamic empty version wait between storage servers and tlogs.
+	bool SS_EMPTY_VERSION_DELAY_LESS_SKEW_STAT; // Whether to log non-queue-popping samples in empty version wait window
+	                                            // logging. Enabling this will result in less skewed logging but trace
+	                                            // many more lines.
+	double SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL; // Interval of sampling incoming requests at each storage server for
+	                                               // empty version wait window logging. Sampling too frequently may
+	                                               // incur extra storage server CPU cost and latency penalty for reads.
+	int SS_EMPTY_VERSION_DELAY_QUEUE_MAX_LENGTH; // Max size limit of empty version wait window logging queue. Tlog
+	                                             // samples will be discarded once limit is reached. It is advised to
+	                                             // keep this window big enough to capture tlog sync time window of
+	                                             // multiple times the size of SS_EMPTY_VERSION_DELAY_SAMPLE_INTERVAL
+	                                             // for collected statistics to make sense.
 	double POP_FROM_LOG_DELAY;
 	double TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS;
 
