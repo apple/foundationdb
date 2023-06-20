@@ -116,10 +116,10 @@ namespace emergency_movement {
 // UID is not supported by Tuple.h
 // use UID::toString() and static UID::fromString instead
 
-// emergency_movement/move(tenantGroup) = (RunID, sourceCluster, destinationCluster, moveStep, version)
+// emergency_movement/move(tenantGroup) = (runId, sourceCluster, destinationCluster, moveStep, version, aborting)
 KeyBackedMap<TenantGroupName, MovementRecord>& emergencyMovements();
 
-// emergency_movement/queue(tenantGroup, RunID) = (tenantName, startKey)
+// emergency_movement/queue(tenantGroup, runId) = (tenantName, startKey)
 KeyBackedMap<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>& movementQueue();
 
 // emergency_movement/split_points(tenantGroup, runId, tenant, startKey) = endKey
