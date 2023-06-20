@@ -1160,7 +1160,6 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 
 	for (const auto& [address, peer] : allPeers) {
 		if (!shouldCheckPeer(peer)) {
-			req.recoveredPeers.push_back(address);
 			continue;
 		}
 
