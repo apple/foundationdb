@@ -968,7 +968,7 @@ struct AuthzSecurityWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> testGetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
-		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, false));
+		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, true));
 		return Void();
 	}
 
