@@ -30,9 +30,12 @@
 struct BlobGranuleBackupConfig : public KeyBackedClass {
 	BlobGranuleBackupConfig(KeyRef prefix = SystemKey("\xff\x02/bgbackup/"_sr)) : KeyBackedClass(prefix) {}
 
-	KeyBackedProperty<bool> enabled() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> enabled() { return { subspace.pack(__FUNCTION__sr), trigger, TupleCodec<bool>() }; }
 	KeyBackedProperty<std::string> manifestUrl() { return subspace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::string> mutationLogsUrl() { return subspace.pack(__FUNCTION__sr); }
+
+	KeyBackedProperty<int64_t> lastFlushTs() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> lastFlushVersion() { return subspace.pack(__FUNCTION__sr); }
 };
 
 // Defines blob restore state

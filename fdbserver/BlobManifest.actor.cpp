@@ -174,6 +174,9 @@ public:
 			// return the manifest if it's valid
 			BlobManifest manifest(result);
 			if (manifest.isValid()) {
+				TraceEvent("BlobRestoreManifest")
+				    .detail("FileName", firstFile.fileName)
+				    .detail("Count", manifest.totalSegments());
 				return manifest;
 			} else {
 				dprint("Skip corrupted manifest {} {}\n", firstFile.epoch, firstFile.seqNo);
@@ -462,12 +465,13 @@ private:
 
 				// last flush for in-memory data
 				wait(BlobManifestFileSplitter::close(splitter));
-				TraceEvent("BlobManfiestDump")
+				TraceEvent("BlobManifestDump")
 				    .detail("Size", splitter->totalBytes())
-				    .detail("Encrypted", self->encryptionEnabled_);
+				    .detail("Encrypted", self->encryptionEnabled_)
+				    .detail("Version", readVersion);
 				return splitter->totalBytes();
 			} catch (Error& e) {
-				TraceEvent("BlobManfiestDumpError").error(e).log();
+				TraceEvent("BlobManifestDumpError").error(e).log();
 				dprint("Manifest dumping error {}\n", e.what());
 				wait(BlobManifestFileSplitter::reset(splitter));
 				// wait to avoid spinning
@@ -485,6 +489,14 @@ private:
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+
+			state Version readVersion = wait(tr.getReadVersion());
+			int64_t lastFlushVersion = wait(BlobGranuleBackupConfig().lastFlushVersion().getD(&tr));
+			if (readVersion < lastFlushVersion) {
+				wait(delay(FLOW_KNOBS->PREVENT_FAST_SPIN_DELAY));
+				throw blob_granule_transaction_too_old();
+			}
+
 			for (auto range : ranges) {
 				try {
 					state PromiseStream<RangeReadResult> rows;
@@ -500,7 +512,7 @@ private:
 					throw;
 				}
 			}
-			Version readVersion = wait(tr.getReadVersion());
+
 			Value versionEncoded = BinaryWriter::toValue(readVersion, Unversioned());
 			splitter->append(KeyValueRef(blobManifestVersionKey, versionEncoded));
 			return readVersion;

@@ -207,7 +207,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			}
 			// TODO need to define more specific error handling
 			if (phase == BlobRestorePhase::ERROR) {
-				auto db = SystemDBWriteLockedNow(cx.getReference());
+				auto db = SystemDBWriteLockedNow(self->extraDb_.getReference());
 				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
 				fmt::print("Unexpected restore error code = {}\n", error);
 				return Void();
