@@ -36,63 +36,6 @@ struct MoveKeyLockInfo {
 	UID prevOwner, myOwner, prevWrite;
 };
 
-struct AuditGetServerKeysRes {
-	KeyRange completeRange;
-	Version readAtVersion;
-	UID serverId;
-	std::vector<KeyRange> ownRanges;
-	int64_t readBytes;
-	AuditGetServerKeysRes() = default;
-	AuditGetServerKeysRes(KeyRange completeRange,
-	                      Version readAtVersion,
-	                      UID serverId,
-	                      std::vector<KeyRange> ownRanges,
-	                      int64_t readBytes)
-	  : completeRange(completeRange), readAtVersion(readAtVersion), serverId(serverId), ownRanges(ownRanges),
-	    readBytes(readBytes) {}
-};
-
-struct AuditGetKeyServersRes {
-	KeyRange completeRange;
-	Version readAtVersion;
-	int64_t readBytes;
-	std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap;
-	AuditGetKeyServersRes() = default;
-	AuditGetKeyServersRes(KeyRange completeRange,
-	                      Version readAtVersion,
-	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap,
-	                      int64_t readBytes)
-	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap),
-	    readBytes(readBytes) {}
-	AuditGetKeyServersRes(KeyRange completeRange,
-	                      Version readAtVersion,
-	                      std::unordered_map<UID, std::vector<KeyRange>> rangeOwnershipMap)
-	  : completeRange(completeRange), readAtVersion(readAtVersion), rangeOwnershipMap(rangeOwnershipMap), readBytes(0) {
-	}
-};
-
-struct CompareKSandSKRes {
-	std::vector<std::string> errors;
-	int64_t numValidatedKeyServers;
-	int64_t numValidatedServerKeys;
-	KeyRange comparedRange;
-	CompareKSandSKRes() = default;
-	CompareKSandSKRes(int64_t numValidatedKeyServers,
-	                  int64_t numValidatedServerKeys,
-	                  KeyRange comparedRange,
-	                  std::vector<std::string> errors)
-	  : numValidatedKeyServers(numValidatedKeyServers), numValidatedServerKeys(numValidatedServerKeys),
-	    comparedRange(comparedRange), errors(errors) {}
-};
-
-ACTOR Future<AuditGetServerKeysRes> getThisServerKeysFromServerKeys(UID serverID, Transaction* tr, KeyRange range);
-ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId, Transaction* tr, KeyRange range);
-std::vector<KeyRange> coalesceRangeList(std::vector<KeyRange> ranges);
-Optional<std::pair<KeyRange, KeyRange>> rangesSame(std::vector<KeyRange> rangesA, std::vector<KeyRange> rangesB);
-CompareKSandSKRes compareKeyServersAndServerKeys(KeyRange rangeToCompare,
-                                                 AuditGetKeyServersRes keyServerRes,
-                                                 std::unordered_map<UID, AuditGetServerKeysRes> serverKeyResMap);
-
 ACTOR Future<Void> clearAuditMetadata(Database cx, AuditType auditType, UID auditId, bool clearProgressMetadata);
 ACTOR Future<Void> cancelAuditMetadata(Database cx, AuditType auditType, UID auditId);
 ACTOR Future<UID> persistNewAuditState(Database cx, AuditStorageState auditState, MoveKeyLockInfo lock, bool ddEnabled);
