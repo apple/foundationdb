@@ -10856,7 +10856,7 @@ void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
 		return;
 	}
 
-	CODE_PROBE(true, "coalescing change feed locations", probe::decoration::rare);
+	CODE_PROBE(true, "coalescing change feed locations");
 
 	// FIXME: there's technically a probability of "hash" collisions here, but it's extremely low. Could validate that
 	// two teams with the same xor are in fact the same, or fall back to not doing this if it gets a wrong shard server
