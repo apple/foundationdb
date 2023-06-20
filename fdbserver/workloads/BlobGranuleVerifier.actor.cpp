@@ -361,6 +361,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						}
 						self->timeTravelReads++;
 					} catch (Error& e) {
+						if (e.code() == error_code_actor_cancelled) {
+							throw;
+						}
 						fmt::print("Error TT: {0}\n", e.name());
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
