@@ -179,6 +179,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
+			metacluster::metadata::RestoreId::simAllowUidRestoreId = false;
 			return _setup(cx, this);
 		} else {
 			return Void();
@@ -1237,6 +1238,14 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 					ASSERT_EQ(metacluster::TenantState::READY, tenantEntry.tenantState);
 				}
 			}
+
+			// Delete the former ERROR tenants so that the cluster is in a consistent state for subsequent testing
+			std::vector<Future<Void>> deleteFutures;
+			for (TenantName const& tenantName : tenantsInErrorState) {
+				deleteFutures.push_back(metacluster::deleteTenant(self->managementDb, tenantName));
+			}
+
+			wait(waitForAll(deleteFutures));
 		}
 
 		return Void();
@@ -1262,6 +1271,7 @@ struct MetaclusterRestoreWorkload : TestWorkload {
 		}
 		wait(waitForAll(dataClusterChecks));
 		wait(checkTenants(self));
+
 		return true;
 	}
 

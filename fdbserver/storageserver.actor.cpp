@@ -944,6 +944,24 @@ public:
 	double cpuUsage;
 	double diskUsage;
 
+	// Maintain sampled statistics for received versions to dynamically postpone sync between storage server and tlog
+	struct EmptyVersionQueueEntry {
+		constexpr static FileIdentifier file_identifier = 15292781;
+		Version version;
+		double timestamp;
+
+		EmptyVersionQueueEntry() {}
+		explicit EmptyVersionQueueEntry(Version version, double timestamp) : version(version), timestamp(timestamp) {}
+
+		template <class Ar>
+		void serialize(Ar& ar) {
+			serializer(ar, version, timestamp);
+		}
+	};
+
+	std::deque<StorageServer::EmptyVersionQueueEntry> versionQueue;
+	double lastVersionSampleTime;
+
 	std::map<Version, Standalone<VerUpdateRef>> const& getMutationLog() const { return mutationLog; }
 	std::map<Version, Standalone<VerUpdateRef>>& getMutableMutationLog() { return mutationLog; }
 	VersionedData const& data() const { return versionedData; }
@@ -1454,12 +1472,12 @@ public:
 	                                                              SS_READ_RANGE_KV_PAIRS_RETURNED_HISTOGRAM,
 	                                                              Histogram::Unit::bytes)),
 	    tag(invalidTag), poppedAllAfter(std::numeric_limits<Version>::max()), cpuUsage(0.0), diskUsage(0.0),
-	    storage(this, storage), shardChangeCounter(0), lastTLogVersion(0), lastVersionWithData(0), restoredVersion(0),
-	    prevVersion(0), rebootAfterDurableVersion(std::numeric_limits<Version>::max()),
-	    primaryLocality(tagLocalityInvalid), knownCommittedVersion(0), versionLag(0), logProtocol(0),
-	    thisServerID(ssi.id()), tssInQuarantine(false), db(db), actors(false),
-	    byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0), numWatches(0),
-	    noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
+	    lastVersionSampleTime(0), storage(this, storage), shardChangeCounter(0), lastTLogVersion(0),
+	    lastVersionWithData(0), restoredVersion(0), prevVersion(0),
+	    rebootAfterDurableVersion(std::numeric_limits<Version>::max()), primaryLocality(tagLocalityInvalid),
+	    knownCommittedVersion(0), versionLag(0), logProtocol(0), thisServerID(ssi.id()), tssInQuarantine(false), db(db),
+	    actors(false), byteSampleClears(false, "\xff\xff\xff"_sr), durableInProgress(Void()), watchBytes(0),
+	    numWatches(0), noRecentUpdates(false), lastUpdate(now()), updateEagerReads(nullptr),
 	    fetchKeysParallelismLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM),
 	    fetchKeysParallelismChangeFeedLock(SERVER_KNOBS->FETCH_KEYS_PARALLELISM_CHANGE_FEED),
 	    fetchKeysBytesBudget(SERVER_KNOBS->STORAGE_FETCH_BYTES), fetchKeysBudgetUsed(false),
@@ -2146,6 +2164,31 @@ ReadMetrics getReadMetrics() {
 	return ReadMetrics::fromFloats(g_network->networkInfo.metrics.lastRunLoopBusyness, 0.0);
 }
 
+// Lightweight blocking function that updates requested version to version queue for statistics
+inline void sampleRequestVersions(StorageServer* self, const Version& version, const double& timestamp) {
+	if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT == ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::DISABLED)
+		return;
+	if (timestamp - self->lastVersionSampleTime > SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL) {
+		DisabledTraceEvent("EmptyVersionSSRecv", self->thisServerID).detail("Timestamp", timestamp);
+		bool popped = false;
+		while (!self->versionQueue.empty() && self->versionQueue.front().version <= version) {
+			self->versionQueue.pop_front();
+			popped = true;
+		}
+
+		// NOTE: This current approach collects pessimistic statistics
+		if (!self->versionQueue.empty() && (SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_LESS_SKEW_STAT || popped)) {
+			double emptyVersionSafeWait = timestamp - self->versionQueue.front().timestamp;
+			if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT ==
+			    ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::EMPTY_VERSION_WAIT_LOG_ONLY)
+				TraceEvent("EmptyVersionWaitWindow", self->thisServerID)
+				    .detail("QueueSize", self->versionQueue.size())
+				    .detail("WaitWindow", emptyVersionSafeWait);
+		}
+		self->lastVersionSampleTime = timestamp;
+	}
+}
+
 ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 	state int64_t resultSize = 0;
 	state Optional<TenantGroupName> tenantGroup;
@@ -2170,6 +2213,9 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 		// Track time from requestTime through now as read queueing wait time
 		state double queueWaitEnd = g_network->timer();
 		data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+		// Track request version recv time right before we need to wait for the version
+		sampleRequestVersions(data, req.version, now());
 
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent("GetValueDebug",
@@ -3285,7 +3331,7 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 		// the end
 		if ((reply.mutations.empty() || reply.mutations.back().version < lastMemoryVersion) &&
 		    remainingLimitBytes <= 0) {
-			CODE_PROBE(true, "Memory feed adding empty version after memory filtered", probe::decoration::rare);
+			CODE_PROBE(true, "Memory feed adding empty version after memory filtered");
 			reply.mutations.push_back(reply.arena, MutationsAndVersionRef(lastMemoryVersion, lastMemoryKnownCommitted));
 		}
 	}
@@ -4334,6 +4380,9 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+	// Track request version recv time right before we need to wait for the version
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5519,6 +5568,9 @@ ACTOR Future<Void> getMappedKeyValuesQ(StorageServer* data, GetMappedKeyValuesRe
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
 
+	// Track request version recv time right before we need to wait for the version
+	sampleRequestVersions(data, req.version, now());
+
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
 			g_traceBatch.addEvent(
@@ -5720,6 +5772,8 @@ ACTOR Future<Void> getKeyValuesStreamQ(StorageServer* data, GetKeyValuesStreamRe
 	// Active load balancing runs at a very high priority (to obtain accurate queue lengths)
 	// so we need to downgrade here
 	wait(delay(0, TaskPriority::DefaultEndpoint));
+
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		if (req.options.present() && req.options.get().debugID.present())
@@ -5933,6 +5987,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	// Track time from requestTime through now as read queueing wait time
 	state double queueWaitEnd = g_network->timer();
 	data->counters.readQueueWaitSample.addMeasurement(queueWaitEnd - req.requestTime());
+
+	// Track request version recv time right before we need to wait for the version
+	sampleRequestVersions(data, req.version, now());
 
 	try {
 		Version commitVersion = getLatestCommitVersion(req.ssLatestCommitVersions, data->tag);
@@ -9284,6 +9341,20 @@ ACTOR Future<Void> tssDelayForever() {
 	}
 }
 
+inline void sampleTlogUpdateVersions(StorageServer* self, const Version& version, const double& timestamp) {
+	if (SERVER_KNOBS->DYNAMIC_EMPTY_VERSION_WAIT == ServerKnobs::DYNAMIC_EMPTY_VERSION_WAIT_MODE::DISABLED)
+		return;
+	DisabledTraceEvent("EmptyVersionTlogRecv", self->thisServerID).detail("Timestamp", timestamp);
+	// If queue piles up it means that there's not enough reads, so the queue is useless in this time
+	// window anyway, we do a cheap clear() and let it build up again
+	if (self->versionQueue.size() >= SERVER_KNOBS->SS_EMPTY_VERSION_WAIT_QUEUE_MAX_LENGTH) {
+		TraceEvent("VersionQueueTlogCleared", self->thisServerID)
+		    .detail("QueueTimewindow", self->versionQueue.back().timestamp - self->versionQueue.front().timestamp);
+		self->versionQueue.clear();
+	}
+	self->versionQueue.emplace_back(version, timestamp);
+}
+
 ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 	state double updateStart = g_network->timer();
 	state double start;
@@ -9373,6 +9444,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			    .detail("Version", cursor->popped());
 			throw worker_removed();
 		}
+
+		// Track tlog sync version recv time right before we update local version
+		// log tlog identifier
+		sampleTlogUpdateVersions(data, cursor->getMaxKnownVersion(), now());
 
 		++data->counters.updateBatches;
 		data->lastTLogVersion = cursor->getMaxKnownVersion();
