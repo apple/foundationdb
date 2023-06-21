@@ -178,7 +178,6 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	// In order to make sure GetTeam has enough eligible destination team:
 	ASSERT_GT(LOAD_BYTES_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// For dd re-evaluatioin
-	init( DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO,                 0.5 ); if( randomize && BUGGIFY ) DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO = deterministicRandom()->random01() * 0.4 + 0.3;
 	init( DD_STRICT_CPU_PIVOT_RATIO,                             0.9 ); if( randomize && BUGGIFY ) DD_STRICT_CPU_PIVOT_RATIO = deterministicRandom()->random01() * 0.45 + 0.5;
 	init( DD_REEVALUATION_ENABLED,                              false); if( isSimulated ) DD_REEVALUATION_ENABLED = deterministicRandom()->coinflip();
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.

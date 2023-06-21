@@ -288,10 +288,10 @@ public:
 				}
 			}
 
-			// When relocating shards, DD would evaluate the CPU & AvailabeSpace of sourceTeam. If
+			// When relocating shards, DD would evaluate the CPU & LoadBytes of sourceTeam. If
 			// both of metrics are below pivot values, we would return the source team to dataDistributionRelocator
 			if (req.teamSelect.isForRelocateShard() && SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-				auto sourceTeam = self->evaluateSourceTeam(req.src);
+				auto sourceTeam = self->evaluateSourceTeam(req.src, req.inflightPenalty);
 				if (sourceTeam.present()) {
 					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevDebug, "GetTeamReturnSourceTeam", self->distributorId)
@@ -301,8 +301,8 @@ public:
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
 					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
 					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
-					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
-					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAvailableSpaceRatio);
+					    .detail("SourceTeamLoadBytes", sourceTeam.get()->getLoadBytes(true, req.inflightPenalty))
+					    .detail("PivotLoadBytes", self->teamPivots.pivotLoadBytes);
 					req.reply.send(std::make_pair(sourceTeam, foundSrc));
 					return Void();
 				}
@@ -3301,19 +3301,8 @@ void DDTeamCollection::updateMedianAvailableSpacePivot(std::vector<double>& team
 		teamPivots.pivotAvailableSpaceRatio =
 		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[medianPivot]));
-
-		if (SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-			size_t strictPivot =
-			    teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO);
-			std::nth_element(teamAvailableSpace.begin(),
-			                 teamAvailableSpace.begin() + strictPivot,
-			                 teamAvailableSpace.end(),
-			                 std::greater{});
-			teamPivots.strictPivotAvailableSpaceRatio = teamAvailableSpace[strictPivot];
-		}
 	} else {
 		teamPivots.pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
-		teamPivots.strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 	}
 
 	if (teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
@@ -3396,7 +3385,6 @@ void DDTeamCollection::updateTeamEligibility(const double inflightPenalty) {
 	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
 	    .detail("PivotCpuRatio", teamPivots.pivotCPU)
 	    .detail("PivotLoadBytes", teamPivots.pivotLoadBytes)
-	    .detail("StrictPivotAvailableSpaceRatio", teamPivots.strictPivotAvailableSpaceRatio)
 	    .detail("StrictPivotCpuRatio", teamPivots.strictPivotCPU);
 }
 
@@ -3574,10 +3562,12 @@ Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers
 	return Optional<Reference<IDataDistributionTeam>>();
 }
 
-Optional<Reference<IDataDistributionTeam>> DDTeamCollection::evaluateSourceTeam(const std::vector<UID>& servers) {
+Optional<Reference<IDataDistributionTeam>> DDTeamCollection::evaluateSourceTeam(const std::vector<UID>& servers,
+                                                                                const double inflightPenalty) {
 	auto sourceTeam = findTeamFromServers(servers, /* wantHealthy=*/true);
 	if (sourceTeam.present()) {
-		if (sourceTeam.get()->hasHealthyAvailableSpace(teamPivots.strictPivotAvailableSpaceRatio) &&
+		if (sourceTeam.get()->hasLowerLoadBytes(teamPivots.pivotLoadBytes, inflightPenalty) &&
+		    sourceTeam.get()->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio) &&
 		    sourceTeam.get()->hasLowerCpu(teamPivots.strictPivotCPU)) {
 			return sourceTeam;
 		}
@@ -3910,7 +3900,6 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
 		           .pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		           .pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
 		           .pivotLoadBytes = std::numeric_limits<int64_t>::max(),
-		           .strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		           .strictPivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
 		           .minTeamAvgCPU = std::numeric_limits<double>::max() };
 }

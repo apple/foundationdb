@@ -927,7 +927,7 @@ public:
 		return Void();
 	}
 
-	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED=true, we would evaluate the cpu and available space of
+	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED = true, we would evaluate the cpu and load bytes of
 	// source team when we are relocating a shard. If both are better than pivot values, we would return the source team
 	// as new destination team.
 	ACTOR static Future<Void> GetTeam_EvaluateSourceTeam() {
@@ -953,16 +953,14 @@ public:
 
 		GetStorageMetricsReply low_s_low_r;
 		low_s_low_r.capacity.bytes = capacity;
-		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 2;
-		low_s_low_r.load.bytes = loadBytes;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		low_s_low_r.load.bytes = loadBytes * 2;
 		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
 
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_reevaluation_enabled",
 		                                                          KnobValueRef::create(bool{ true }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.6 }));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
-		                                                          KnobValueRef::create(double{ 0.5 }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.9 }));
 
@@ -1003,10 +1001,6 @@ public:
 
 		wait(collection->getTeam(sourceReq));
 		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
-		fmt::print("StrictPivotRatio: {}, teamStrictPivotCPU: {}, strictPivotAvailableSpaceRatio: {}\n",
-		           SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO,
-		           collection->teamPivots.strictPivotCPU,
-		           collection->teamPivots.strictPivotAvailableSpaceRatio);
 		ASSERT(sourceTeam.present());
 		ASSERT_EQ(sourceTeam.get()->getServerIDs(), std::vector<UID>{ UID(1, 0) });
 
@@ -1024,7 +1018,7 @@ public:
 		ASSERT(bestTeam.present());
 		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
 
-		// CASE 3: Don't return source team because its available space is below pivot values
+		// CASE 3: Don't return source team because its load bytes is greater than pivot values
 		TeamSelect anySelect(TeamSelect::ANY);
 		anySelect.setForRelocateShard(ForRelocateShard::True);
 		state GetTeamRequest anyReq(anySelect,
