@@ -448,6 +448,9 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 				}
 				break;
 			} catch (Error& e) {
+				if (e.code() == error_code_actor_cancelled) {
+					throw e;
+				}
 				if (now() - startTime >= 0.5) {
 					TraceEvent(SevWarn, "AuditLocationMetadataPreCheckTimedOut")
 					    .detail("AuditRange", range)
