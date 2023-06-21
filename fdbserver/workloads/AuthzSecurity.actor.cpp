@@ -39,6 +39,7 @@
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 FDB_BOOLEAN_PARAM(PositiveTestcase);
+FDB_BOOLEAN_PARAM(TestGetMethod);
 
 bool checkGranuleLocations(ErrorOr<GetBlobGranuleLocationsReply> rep, TenantInfo tenant) {
 	if (rep.isError()) {
@@ -130,6 +131,8 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    [this](Database cx) { return testPublicNonTenantRequestsAllowedWithoutTokens(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testTLogReadDisallowed(this, cx); });
 		testFunctions.push_back([this](Database cx) { return testKeyLocationLeakDisallowed(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testGetValueWithoutAuthToken(this, cx); });
+		testFunctions.push_back([this](Database cx) { return testSetValueWithoutAuthToken(this, cx); });
 
 		if (checkBlobGranules) {
 			testFunctions.push_back([this](Database cx) { return testBlobGranuleLocationLeakDisallowed(this, cx); });
@@ -935,6 +938,49 @@ struct AuthzSecurityWorkload : TestWorkload {
 		    "PurgeBlob",
 		    success(cx->purgeBlobGranules(normalKeys, 1, self->tenant, deterministicRandom()->coinflip())),
 		    &self->purgeBlobNegative));
+		return Void();
+	}
+
+	ACTOR static Future<Void> checkGetOrSetValueWithoutAuthTokenNegative(AuthzSecurityWorkload* self,
+	                                                                     Database cx,
+	                                                                     TestGetMethod isGet) {
+		state Transaction tr(cx, self->tenant);
+		state Key key = self->randomString();
+		state Value value = self->randomString();
+		loop {
+			try {
+				// Call get/set without auth token. This should fail and the callstack should
+				// jump to the exception block
+				if (isGet) {
+					wait(success(tr.get(key)));
+				} else {
+					tr.set(key, value);
+					wait(tr.commit());
+				}
+				ASSERT(false);
+			} catch (Error& e) {
+				if (e.code() == error_code_operation_cancelled) {
+					throw e;
+				}
+				if (e.code() != error_code_permission_denied) {
+					TraceEvent(SevError, "AuthzSecurityClient")
+					    .error(e)
+					    .detail("Case", fmt::format("{} without token must fail", isGet ? "Read" : "Write"))
+					    .log();
+				}
+				ASSERT(e.code() == error_code_permission_denied);
+			}
+			return Void();
+		}
+	}
+
+	ACTOR static Future<Void> testGetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, TestGetMethod::True));
+		return Void();
+	}
+
+	ACTOR static Future<Void> testSetValueWithoutAuthToken(AuthzSecurityWorkload* self, Database cx) {
+		wait(checkGetOrSetValueWithoutAuthTokenNegative(self, cx, TestGetMethod::False));
 		return Void();
 	}
 
