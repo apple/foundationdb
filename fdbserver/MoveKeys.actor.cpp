@@ -427,7 +427,6 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 	}
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, bool> results;
-	state bool anyError = false;
 	TraceEvent(SevDebug, "AuditLocationMetadataPreCheckStart")
 	    .detail("Servers", describe(servers))
 	    .detail("Context", context)
@@ -435,22 +434,19 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 	try {
 		actors.clear();
 		results.clear();
-		for (auto& ssid : servers) {
+		for (const auto& ssid : servers) {
 			actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context)));
 		}
 		wait(waitForAllReadyThenThrow(actors));
 		for (const auto& [ssid, res] : results) {
 			if (!res)
-				anyError = true;
-		}
-		if (anyError) {
-			throw location_metadata_corruption();
+				throw location_metadata_corruption();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 			throw e;
 		} else {
-			TraceEvent(SevInfo, "AuditLocationMetadataPreCheckEmptyFailed")
+			TraceEvent(SevInfo, "AuditLocationMetadataPreCheckFailed")
 			    .errorUnsuppressed(e)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
@@ -472,73 +468,81 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	state RangeResult readResultKS;
 	state RangeResult UIDtoTagMap;
 	state Transaction tr(occ);
+	state int retryCount = 0;
 	TraceEvent(SevDebug, "AuditLocationMetadataPostCheckStart").detail("Context", context).detail("AuditRange", range);
-	try {
-		loop {
-			try {
-				actors.clear();
-				readResultKS.clear();
-				results.clear();
-				tr.trState->taskID = TaskPriority::MoveKeys;
-				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				// Read keyServers
-				actors.push_back(store(readResultKS,
-				                       krmGetRanges(&tr,
-				                                    keyServersPrefix,
-				                                    KeyRangeRef(rangeToReadBegin, range.end),
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
-				wait(waitForAll(actors));
-				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				TraceEvent(SevVerbose, "AuditLocationMetadataPostCheckReadDone")
-				    .detail("ResultSize", readResultKS.size());
-				// Read serverKeys
-				actors.clear();
-				state uint64_t resIdx = 0;
-				state int i = 0;
-				for (; i < readResultKS.size() - 1; ++i) {
-					std::vector<UID> src;
-					std::vector<UID> dest;
-					UID srcID;
-					UID destID;
-					decodeKeyServersValue(UIDtoTagMap, readResultKS[i].value, src, dest, srcID, destID);
-					std::vector<UID> servers(src.size() + dest.size());
-					std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-					KeyRange skToReadRange = Standalone(KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key));
-					for (auto& ssid : servers) {
-						actors.push_back(
-						    store(results[resIdx], validateRangeAssignment(&tr, skToReadRange, ssid, context)));
-						++resIdx;
+	loop {
+		try {
+			loop {
+				try {
+					actors.clear();
+					readResultKS.clear();
+					results.clear();
+					tr.trState->taskID = TaskPriority::MoveKeys;
+					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+					tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+					// Read keyServers
+					actors.push_back(store(readResultKS,
+					                       krmGetRanges(&tr,
+					                                    keyServersPrefix,
+					                                    KeyRangeRef(rangeToReadBegin, range.end),
+					                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+					                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+					actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
+					wait(waitForAll(actors));
+					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
+					TraceEvent(SevVerbose, "AuditLocationMetadataPostCheckReadDone")
+					    .detail("ResultSize", readResultKS.size());
+					// Read serverKeys
+					actors.clear();
+					state uint64_t resIdx = 0;
+					state int i = 0;
+					for (; i < readResultKS.size() - 1; ++i) {
+						std::vector<UID> src;
+						std::vector<UID> dest;
+						UID srcID;
+						UID destID;
+						decodeKeyServersValue(UIDtoTagMap, readResultKS[i].value, src, dest, srcID, destID);
+						std::vector<UID> servers(src.size() + dest.size());
+						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
+						for (const auto& ssid : servers) {
+							actors.push_back(store(
+							    results[resIdx],
+							    validateRangeAssignment(
+							        &tr, KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key), ssid, context)));
+							++resIdx;
+						}
 					}
+					wait(waitForAllReadyThenThrow(actors));
+					for (const auto& [idx, res] : results) {
+						anyError = anyError || !res;
+					}
+					if (readResultKS.back().key < range.end) {
+						rangeToReadBegin = readResultKS.back().key;
+						continue;
+					} else if (anyError) {
+						throw location_metadata_corruption();
+					} else {
+						break;
+					}
+				} catch (Error& e) {
+					wait(tr.onError(e));
+					retryCount++;
 				}
-				wait(waitForAllReadyThenThrow(actors));
-				for (const auto& [idx, res] : results) {
-					if (!res)
-						anyError = true;
-				}
-				if (readResultKS.back().key < range.end) {
-					rangeToReadBegin = readResultKS.back().key;
-					continue;
-				} else if (anyError) {
-					throw location_metadata_corruption();
-				} else {
-					break;
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
 			}
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
-			throw e;
-		} else {
-			TraceEvent(SevInfo, "AuditLocationMetadataPostCheckUnretriableError")
-			    .errorUnsuppressed(e)
-			    .detail("Context", context)
-			    .detail("AuditRange", range);
-			// Silently exit
+			break;
+		} catch (Error& e) {
+			if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
+				throw e;
+			} else if (retryCount > SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX) {
+				TraceEvent(SevInfo, "AuditLocationMetadataPostCheckFailed")
+				    .errorUnsuppressed(e)
+				    .detail("Context", context)
+				    .detail("AuditRange", range);
+				break;
+			} else {
+				wait(delay(0.5));
+				retryCount++;
+			}
 		}
 	}
 	return Void();
@@ -628,9 +632,13 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			if (err.code() == error_code_location_metadata_corruption) {
 				int _ = wait(setDDMode(occ, 0));
 				throw location_metadata_corruption();
+			} else if (err.code() == error_code_audit_storage_failed) {
+				runPreCheck = false;
+				wait(delay(0.05));
+			} else {
+				runPreCheck = false;
+				wait(tr.onError(err));
 			}
-			runPreCheck = false;
-			wait(tr.onError(err));
 
 			TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
 			    .error(err)
@@ -1804,6 +1812,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				if (e.code() == error_code_location_metadata_corruption) {
 					int _ = wait(setDDMode(occ, 0));
 					throw location_metadata_corruption();
+				} else if (e.code() == error_code_audit_storage_failed) {
+					runPreCheck = false;
+					wait(delay(1));
 				} else if (e.code() == error_code_retry) {
 					runPreCheck = false;
 					wait(delay(1));
@@ -2218,6 +2229,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				if (error.code() == error_code_location_metadata_corruption) {
 					int _ = wait(setDDMode(occ, 0));
 					throw location_metadata_corruption();
+				} else if (error.code() == error_code_audit_storage_failed) {
+					runPreCheck = false;
+					++retries;
+					wait(delay(1));
 				} else if (error.code() == error_code_retry) {
 					runPreCheck = false;
 					++retries;
@@ -3002,6 +3017,9 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				if (e.code() == error_code_location_metadata_corruption) {
 					int _ = wait(setDDMode(occ, 0));
 					throw location_metadata_corruption();
+				} else if (e.code() == error_code_audit_storage_failed) {
+					runPreCheck = false;
+					wait(delay(0.05));
 				} else {
 					runPreCheck = false;
 					lastError = e;
