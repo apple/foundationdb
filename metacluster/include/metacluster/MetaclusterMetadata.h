@@ -24,7 +24,7 @@
 
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBTypes.h"
-#include "fdbclient/json_spirit/json_spirit_value.h"
+#include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
 #include "fdbclient/MetaclusterRegistration.h"
 #include "flow/flat_buffers.h"
@@ -33,9 +33,62 @@
 
 namespace metacluster::metadata {
 
+class RestoreId {
+public:
+	static inline bool simAllowUidRestoreId = true;
+
+	UID uid;
+	Versionstamp versionstamp;
+
+	RestoreId() : RestoreId(UID()) {}
+
+	template <class Transaction>
+	static RestoreId createRestoreId(Transaction tr,
+	                                 KeyBackedMap<ClusterName, RestoreId>& restoreIdMap,
+	                                 ClusterName clusterName) {
+		if (g_network->isSimulated() && BUGGIFY && simAllowUidRestoreId) {
+			RestoreId restoreId = RestoreId(deterministicRandom()->randomUniqueID());
+			restoreIdMap.set(tr, clusterName, restoreId);
+			return restoreId;
+		} else {
+			RestoreId restoreId;
+			restoreIdMap.setVersionstamp(
+			    tr, clusterName, restoreId, restoreId.tuple.pack().size() - VERSIONSTAMP_TUPLE_SIZE);
+
+			typename transaction_future_type<Transaction, Value>::type f = tr->getVersionstamp();
+			restoreId.versionstampFuture =
+			    holdWhile(f, map(safeThreadFutureToFuture(f), [](Value value) { return Versionstamp(value); }));
+
+			return restoreId;
+		}
+	}
+
+	Tuple pack() const;
+	static RestoreId unpack(Tuple tuple);
+
+	bool replaces(Versionstamp const& versionstamp);
+
+	bool operator==(RestoreId const& other) const;
+	bool operator!=(RestoreId const& other) const;
+
+	Future<Void> onSet();
+
+	std::string toString() const;
+
+private:
+	Future<Versionstamp> versionstampFuture;
+	Tuple tuple;
+
+	void setTuple(Tuple tuple);
+
+	RestoreId(UID uid);
+	RestoreId(Tuple tuple);
+};
+
 // Metadata used on all clusters in a metacluster
 KeyBackedSet<UID>& registrationTombstones();
-KeyBackedMap<ClusterName, UID>& activeRestoreIds();
+KeyBackedMap<ClusterName, RestoreId>& activeRestoreIds();
+KeyBackedProperty<Versionstamp> maxRestoreId();
 
 // Metadata used only on the management cluster
 namespace management {
@@ -70,5 +123,10 @@ KeyBackedSet<Tuple>& clusterTenantGroupIndex();
 } // namespace management
 
 } // namespace metacluster::metadata
+
+template <>
+struct Traceable<metacluster::metadata::RestoreId> : std::true_type {
+	static std::string toString(metacluster::metadata::RestoreId const& value) { return value.toString(); }
+};
 
 #endif

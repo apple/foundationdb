@@ -607,7 +607,7 @@ public:
 			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
 		};
 		std::vector<int64_t> load_bytes{
-			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
+			50 * 1024 * 1024, 300 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 400 * 1024 * 1024
 		};
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
@@ -855,7 +855,7 @@ public:
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
 		                               ForReadBalance::True);
-		collection->teamPivots.lastPivotValuesUpdate = -100;
+		collection->teamPivots.lastPivotsUpdate = -100;
 
 		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
@@ -936,7 +936,7 @@ public:
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->teamPivots.lastPivotValuesUpdate = -100;
+		collection->teamPivots.lastPivotsUpdate = -100;
 
 		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
@@ -962,8 +962,6 @@ public:
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.6 }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
-		                                                          KnobValueRef::create(double{ 0.5 }));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("available_space_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.5 }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.9 }));
