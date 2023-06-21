@@ -113,6 +113,9 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 
 ACTOR Future<Void> forwardError(Future<int> input) {
 	int errorCode = wait(input);
+	if (errorCode == error_code_success) {
+		return Never();
+	}
 	throw Error::fromCode(errorCode);
 }
 
@@ -155,7 +158,7 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		errorPromise.send(int());
+		errorPromise.send(error_code_success);
 	}
 
 private:
