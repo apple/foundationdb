@@ -1444,6 +1444,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						                          PreferLowerDiskUtil::True,
 						                          TeamMustHaveShards::False,
 						                          PreferLowerReadUtil::True,
+						                          PreferWithinShardLimit::True,
 						                          ForReadBalance(rd.reason == RelocateReason::REBALANCE_READ),
 						                          inflightPenalty,
 						                          rd.keys);
@@ -2287,11 +2288,13 @@ ACTOR Future<Void> BgDDLoadRebalance(DDQueue* self, int teamCollectionIndex, Dat
 				                                       PreferLowerDiskUtil::False,
 				                                       TeamMustHaveShards::True,
 				                                       PreferLowerReadUtil::False,
+				                                       PreferWithinShardLimit::False,
 				                                       ForReadBalance(readRebalance));
 				GetTeamRequest destReq = GetTeamRequest(!mcMove ? TeamSelect::WANT_TRUE_BEST : TeamSelect::ANY,
 				                                        PreferLowerDiskUtil::True,
 				                                        TeamMustHaveShards::False,
 				                                        PreferLowerReadUtil::True,
+				                                        PreferWithinShardLimit::False,
 				                                        ForReadBalance(readRebalance));
 				state Future<SrcDestTeamPair> getTeamFuture =
 				    self->getSrcDestTeams(teamCollectionIndex, srcReq, destReq, ddPriority, &traceEvent);

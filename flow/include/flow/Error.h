@@ -89,6 +89,19 @@ extern const std::set<int> transactionRetryableErrors;
 
 #include "error_definitions.h"
 
+class AttributeNotFoundError : public Error {
+	std::string missingAttribute;
+
+public:
+	AttributeNotFoundError(const std::string&);
+
+	const std::string& getMissingAttribute() const;
+};
+
+inline AttributeNotFoundError attribute_not_found_error(const std::string& attribute) {
+	return AttributeNotFoundError(attribute);
+}
+
 // actor_cancelled has been renamed
 inline Error actor_cancelled() {
 	return Error(error_code_operation_cancelled);
