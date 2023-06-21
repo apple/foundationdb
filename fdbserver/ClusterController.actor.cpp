@@ -3117,6 +3117,18 @@ TEST_CASE("/fdbserver/clustercontroller/updateWorkerHealth") {
 		ASSERT_EQ(health.disconnectedPeers[badPeer3].lastRefreshTime, previousRefreshTime);
 	}
 
+	// Make badPeer1 a recovered peer, and CC should remove it from `workerAddress` bad peers.
+	{
+		wait(delay(0.001));
+		UpdateWorkerHealthRequest req;
+		req.address = workerAddress;
+		req.recoveredPeers.push_back(badPeer1);
+		data.updateWorkerHealth(req);
+		auto& health = data.workerHealth[workerAddress];
+		ASSERT(health.degradedPeers.find(badPeer1) == health.degradedPeers.end());
+		ASSERT(health.disconnectedPeers.find(badPeer1) == health.disconnectedPeers.end());
+	}
+
 	return Void();
 }
 
