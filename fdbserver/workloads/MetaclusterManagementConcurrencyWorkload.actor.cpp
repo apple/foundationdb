@@ -50,9 +50,11 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 	std::vector<ClusterName> dataDbIndex;
 
 	double testDuration;
+	bool createMetacluster;
 
 	MetaclusterManagementConcurrencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
 		testDuration = getOption(options, "testDuration"_sr, 90.0);
+		createMetacluster = getOption(options, "createMetacluster"_sr, true);
 	}
 
 	Future<Void> setup(Database const& cx) override { return _setup(cx, this); }
@@ -64,7 +66,7 @@ struct MetaclusterManagementConcurrencyWorkload : TestWorkload {
 		               deterministicRandom()->randomInt(TenantAPI::TENANT_ID_PREFIX_MIN_VALUE,
 		                                                TenantAPI::TENANT_ID_PREFIX_MAX_VALUE + 1),
 		               {},
-		               metacluster::util::SkipMetaclusterCreation(self->clientId != 0))));
+		               metacluster::util::SkipMetaclusterCreation(self->clientId != 0 || !self->createMetacluster))));
 
 		ASSERT_GT(self->simMetacluster.dataDbs.size(), 0);
 		for (auto const& [name, db] : self->simMetacluster.dataDbs) {

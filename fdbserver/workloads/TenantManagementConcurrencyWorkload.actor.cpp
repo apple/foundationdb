@@ -52,6 +52,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	double testDuration;
 	bool useMetacluster;
 	bool createMetacluster;
+	bool allowTenantLimitChanges;
 
 	Reference<IDatabase> managementDb;
 	Database standaloneDb;
@@ -61,6 +62,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
 		createMetacluster = getOption(options, "createMetacluster"_sr, true);
+		allowTenantLimitChanges = getOption(options, "allowTenantLimitChanges"_sr, true);
 
 		if (hasOption(options, "useMetacluster"_sr)) {
 			useMetacluster = getOption(options, "useMetacluster"_sr, false);
@@ -94,7 +96,7 @@ struct TenantManagementConcurrencyWorkload : TestWorkload {
 	};
 
 	Future<Void> setup(Database const& cx) override {
-		if (clientId == 0 && g_network->isSimulated() && BUGGIFY) {
+		if (allowTenantLimitChanges && clientId == 0 && g_network->isSimulated() && BUGGIFY) {
 			IKnobCollection::getMutableGlobalKnobCollection().setKnob(
 			    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
 		}
