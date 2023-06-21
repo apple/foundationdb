@@ -2205,14 +2205,15 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		struct ReadValueAction : TypedAction<Reader, ReadValueAction> {
 			Key key;
 			PhysicalShard* shard;
+			ReadType type;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValueAction(KeyRef key, PhysicalShard* shard, Optional<UID> debugID)
-			  : key(key), shard(shard), debugID(debugID), startTime(timer_monotonic()),
+			ReadValueAction(KeyRef key, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
+			  : key(key), shard(shard), type(type), debugID(debugID), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
 			}
@@ -2230,7 +2231,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				traceBatch = { TraceBatch{} };
 				traceBatch.get().addEvent("GetValueDebug", a.debugID.get().first(), "Reader.Before");
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValueTimeout) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readValueTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value request timedout")
 				    .detail("Method", "ReadValueAction")
@@ -2247,7 +2249,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			auto options = getReadOptions();
 
 			auto db = a.shard->db;
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValueTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -2287,14 +2289,16 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			Key key;
 			int maxLength;
 			PhysicalShard* shard;
+			ReadType type;
 			Optional<UID> debugID;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<Optional<Value>> result;
 
-			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, Optional<UID> debugID)
-			  : key(key), maxLength(maxLength), shard(shard), debugID(debugID), startTime(timer_monotonic()),
+			ReadValuePrefixAction(Key key, int maxLength, PhysicalShard* shard, ReadType type, Optional<UID> debugID)
+			  : key(key), maxLength(maxLength), shard(shard), type(type), debugID(debugID),
+			    startTime(timer_monotonic()),
 			    getHistograms((deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE)
 			                      ? true
 			                      : false){};
@@ -2314,7 +2318,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 				                          a.debugID.get().first(),
 				                          "Reader.Before"); //.detail("TaskID", g_network->getCurrentTask());
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readValuePrefixTimeout) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readValuePrefixTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksDBError")
 				    .detail("Error", "Read value prefix request timedout")
 				    .detail("Method", "ReadValuePrefixAction")
@@ -2331,7 +2336,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			rocksdb::PinnableSlice value;
 			auto options = getReadOptions();
 			auto db = a.shard->db;
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
+			if (shouldThrottle(a.type, a.key) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT) {
 				uint64_t deadlineMircos =
 				    db->GetEnv()->NowMicros() + (readValuePrefixTimeout - (timer_monotonic() - a.startTime)) * 1000000;
 				std::chrono::seconds deadlineSeconds(deadlineMircos / 1000000);
@@ -2374,12 +2379,13 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			KeyRange keys;
 			std::vector<std::pair<PhysicalShard*, KeyRange>> shardRanges;
 			int rowLimit, byteLimit;
+			ReadType type;
 			double startTime;
 			bool getHistograms;
 			bool logShardMemUsage;
 			ThreadReturnPromise<RangeResult> result;
-			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit)
-			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), startTime(timer_monotonic()),
+			ReadRangeAction(KeyRange keys, std::vector<DataShard*> shards, int rowLimit, int byteLimit, ReadType type)
+			  : keys(keys), rowLimit(rowLimit), byteLimit(byteLimit), type(type), startTime(timer_monotonic()),
 			    getHistograms(
 			        (deterministicRandom()->random01() < SERVER_KNOBS->ROCKSDB_HISTOGRAMS_SAMPLE_RATE) ? true : false) {
 				std::set<PhysicalShard*> usedShards;
@@ -2402,7 +2408,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			if (a.getHistograms) {
 				rocksDBMetrics->getReadRangeQueueWaitHistogram(threadIndex)->sampleSeconds(readBeginTime - a.startTime);
 			}
-			if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && readBeginTime - a.startTime > readRangeTimeout) {
+			if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+			    readBeginTime - a.startTime > readRangeTimeout) {
 				TraceEvent(SevWarn, "ShardedRocksKVSReadTimeout")
 				    .detail("Error", "Read range request timedout")
 				    .detail("Method", "ReadRangeAction")
@@ -2454,7 +2461,8 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 					break;
 				}
 
-				if (SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT && timer_monotonic() - a.startTime > readRangeTimeout) {
+				if (shouldThrottle(a.type, a.keys.begin) && SERVER_KNOBS->ROCKSDB_SET_READ_TIMEOUT &&
+				    timer_monotonic() - a.startTime > readRangeTimeout) {
 					TraceEvent(SevInfo, "ShardedRocksDBTimeout")
 					    .detail("Action", "ReadRange")
 					    .detail("ShardsRead", numShards)
@@ -2680,7 +2688,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValueAction(key, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValueAction(key, shard->physicalShard, type, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2690,7 +2698,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValueAction>(key, shard->physicalShard, type, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2713,7 +2721,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, key)) {
-			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, debugID);
+			auto a = new Reader::ReadValuePrefixAction(key, maxLength, shard->physicalShard, type, debugID);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2723,7 +2731,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 
 		checkWaiters(semaphore, maxWaiters);
-		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, debugID);
+		auto a = std::make_unique<Reader::ReadValuePrefixAction>(key, maxLength, shard->physicalShard, type, debugID);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
@@ -2760,7 +2768,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		}
 
 		if (!shouldThrottle(type, keys.begin)) {
-			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit);
+			auto a = new Reader::ReadRangeAction(keys, shards, rowLimit, byteLimit, type);
 			auto res = a->result.getFuture();
 			readThreads->post(a);
 			return res;
@@ -2770,7 +2778,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		int maxWaiters = (type == ReadType::FETCH) ? numFetchWaiters : numReadWaiters;
 		checkWaiters(semaphore, maxWaiters);
 
-		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit);
+		auto a = std::make_unique<Reader::ReadRangeAction>(keys, shards, rowLimit, byteLimit, type);
 		return read(a.release(), &semaphore, readThreads.getPtr(), &counters.failedToAcquire);
 	}
 
