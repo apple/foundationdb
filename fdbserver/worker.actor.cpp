@@ -1319,7 +1319,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
 				if (g_network->isSimulated()) {
-					// Do invarant check only in simulation.
+					// Do an invariant check only in simulation.
 					// Any recovered peer shouldn't appear as disconnected or degraded peer.
 					for (const auto& recoveredPeer : req.recoveredPeers) {
 						for (const auto& disconnectedPeer : req.disconnectedPeers) {

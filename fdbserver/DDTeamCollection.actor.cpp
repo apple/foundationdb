@@ -192,7 +192,7 @@ public:
 	}
 
 	// Returns the overall best team that matches the requirement from `req`. When preferWithinShardLimit is true, it
-	// also tries to select a team whose existing team is less than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM.
+	// also tries to select a team whose existing shard is less than SERVER_KNOBS->DESIRED_MAX_SHARDS_PER_TEAM.
 	static Optional<Reference<IDataDistributionTeam>> getBestTeam(DDTeamCollection* self,
 	                                                              const GetTeamRequest& req,
 	                                                              bool preferWithinShardLimit) {
