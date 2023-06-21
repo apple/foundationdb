@@ -428,39 +428,23 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, bool> results;
 	state bool anyError = false;
-	state double startTime = now();
-	state int retryCount = 0;
+	TraceEvent(SevDebug, "AuditLocationMetadataPreCheckStart")
+	    .detail("Servers", describe(servers))
+	    .detail("Context", context)
+	    .detail("AuditRange", range);
 	try {
-		loop {
-			try {
-				actors.clear();
-				results.clear();
-				for (auto& ssid : servers) {
-					actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context)));
-				}
-				wait(waitForAllReadyThenThrow(actors));
-				for (const auto& [ssid, res] : results) {
-					if (!res)
-						anyError = true;
-				}
-				if (anyError) {
-					throw location_metadata_corruption();
-				}
-				break;
-			} catch (Error& e) {
-				if (e.code() == error_code_actor_cancelled) {
-					throw e;
-				}
-				if (now() - startTime >= 0.5) {
-					TraceEvent(SevWarn, "AuditLocationMetadataPreCheckTimedOut")
-					    .detail("AuditRange", range)
-					    .detail("Servers", describe(servers))
-					    .detail("RetryCount", retryCount);
-					throw timed_out();
-				}
-				retryCount++;
-				wait(delay(0.1));
-			}
+		actors.clear();
+		results.clear();
+		for (auto& ssid : servers) {
+			actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context)));
+		}
+		wait(waitForAllReadyThenThrow(actors));
+		for (const auto& [ssid, res] : results) {
+			if (!res)
+				anyError = true;
+		}
+		if (anyError) {
+			throw location_metadata_corruption();
 		}
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
@@ -488,6 +472,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	state RangeResult readResultKS;
 	state RangeResult UIDtoTagMap;
 	state Transaction tr(occ);
+	TraceEvent(SevDebug, "AuditLocationMetadataPostCheckStart").detail("Context", context).detail("AuditRange", range);
 	try {
 		loop {
 			try {
@@ -509,7 +494,6 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 				TraceEvent(SevVerbose, "AuditLocationMetadataPostCheckReadDone")
 				    .detail("ResultSize", readResultKS.size());
-
 				// Read serverKeys
 				actors.clear();
 				state uint64_t resIdx = 0;
@@ -550,11 +534,11 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 			throw e;
 		} else {
-			TraceEvent(SevInfo, "AuditLocationMetadataPostCheckFailed")
+			TraceEvent(SevInfo, "AuditLocationMetadataPostCheckUnretriableError")
 			    .errorUnsuppressed(e)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
-			throw audit_storage_failed();
+			// Silently exit
 		}
 	}
 	return Void();
@@ -570,7 +554,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 	ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
 	TraceEvent(SevInfo, "CleanUpSingleShardDataMoveBegin", dataMoveId).detail("Range", keys);
 
-	state int auditStorageFailedCount = 0;
+	state bool runPreCheck = true;
 
 	loop {
 		state Transaction tr(occ);
@@ -605,12 +589,10 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			}
 
 			// Pre validate consistency of update of keyServers and serverKeys
-			if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
-			    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+			if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 				std::vector<UID> servers(src.size() + dest.size());
 				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 				wait(auditLocationMetadataPreCheck(&tr, keys, servers, "cleanUpSingleShardDataMove_precheck"));
-				auditStorageFailedCount = 0;
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -637,26 +619,17 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			wait(tr.commit());
 
 			// Post validate consistency of update of keyServers and serverKeys
-			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
-			    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck"));
-				auditStorageFailedCount = 0;
 			}
-
 			break;
 		} catch (Error& e) {
 			state Error err = e;
-			if (err.code() == error_code_audit_storage_failed) {
-				TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
-				    .error(err)
-				    .detail("Range", keys);
-				auditStorageFailedCount++;
-				continue;
-			} else if (err.code() == error_code_location_metadata_corruption) {
+			if (err.code() == error_code_location_metadata_corruption) {
 				int _ = wait(setDDMode(occ, 0));
-				throw err;
+				throw location_metadata_corruption();
 			}
-
+			runPreCheck = false;
 			wait(tr.onError(err));
 
 			TraceEvent(SevWarn, "CleanUpSingleShardDataMoveRetriableError", dataMoveId)
@@ -1551,7 +1524,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 	ASSERT(ranges.size() == 1);
 	state KeyRangeRef keys = ranges[0];
 	state bool cancelDataMove = false;
-	state int auditStorageFailedCount = 0;
+	state bool runPreCheck = true;
 	try {
 		loop {
 			state Key begin = keys.begin;
@@ -1673,13 +1646,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 						    .detail("ReadVersion", tr.getReadVersion().get());
 
 						// Pre validate consistency of update of keyServers and serverKeys
-						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
-						    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+						if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 							wait(auditLocationMetadataPreCheck(
 							    &tr, rangeIntersectKeys, servers, "startMoveShards_precheck"));
-							auditStorageFailedCount = 0;
 						}
 
 						if (destId.isValid()) {
@@ -1819,11 +1790,9 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				    .detail("DataMove", dataMove.toString());
 
 				// Post validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
-				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 					if (!currentKeys.empty()) {
 						wait(auditLocationMetadataPostCheck(occ, currentKeys, "startMoveShards_postcheck"));
-						auditStorageFailedCount = 0;
 					}
 				}
 
@@ -1832,13 +1801,11 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					break;
 				}
 			} catch (Error& e) {
-				if (e.code() == error_code_audit_storage_failed) {
-					auditStorageFailedCount++;
-					wait(delay(1));
-				} else if (e.code() == error_code_location_metadata_corruption) {
+				if (e.code() == error_code_location_metadata_corruption) {
 					int _ = wait(setDDMode(occ, 0));
 					throw location_metadata_corruption();
 				} else if (e.code() == error_code_retry) {
+					runPreCheck = false;
 					wait(delay(1));
 				} else {
 					TraceEvent(SevWarn, "StartMoveShardsError", dataMoveId)
@@ -1846,6 +1813,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					    .detail("DataMoveID", dataMoveId)
 					    .detail("DataMoveRange", keys)
 					    .detail("CurrentDataMoveMetaData", dataMove.toString());
+					runPreCheck = false;
 					wait(tr.onError(e));
 				}
 			}
@@ -1957,7 +1925,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 	state std::unordered_set<UID> tssToIgnore;
 	// try waiting for tss for a 2 loops, give up if they're behind to not affect the rest of the cluster
 	state int waitForTSSCounter = 2;
-	state int auditStorageFailedCount = 0;
+	state bool runPreCheck = true;
 
 	ASSERT(!destinationTeam.empty());
 
@@ -2049,12 +2017,10 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					}
 
 					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
-					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 						wait(auditLocationMetadataPreCheck(&tr, currentRange, servers, "finishMoveShards_precheck"));
-						auditStorageFailedCount = 0;
 					}
 
 					std::sort(dest.begin(), dest.end());
@@ -2235,10 +2201,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					wait(tr.commit());
 
 					// Post validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
-					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck"));
-						auditStorageFailedCount = 0;
 					}
 
 					if (complete) {
@@ -2251,20 +2215,18 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 				TraceEvent(SevWarn, "TryFinishMoveShardsError", relocationIntervalId)
 				    .errorUnsuppressed(error)
 				    .detail("DataMoveID", dataMoveId);
-				if (error.code() == error_code_audit_storage_failed) {
-					++auditStorageFailedCount;
-					++retries;
-					wait(delay(1));
-				} else if (error.code() == error_code_location_metadata_corruption) {
+				if (error.code() == error_code_location_metadata_corruption) {
 					int _ = wait(setDDMode(occ, 0));
 					throw location_metadata_corruption();
 				} else if (error.code() == error_code_retry) {
+					runPreCheck = false;
 					++retries;
 					wait(delay(1));
 				} else if (error.code() == error_code_actor_cancelled) {
 					throw;
 				} else {
 					state Error err = error;
+					runPreCheck = false;
 					wait(tr.onError(err));
 					retries++;
 					if (retries % 10 == 0) {
@@ -2878,7 +2840,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 	TraceEvent(sevDm, "CleanUpDataMoveBegin", dataMoveId).detail("DataMoveID", dataMoveId).detail("Range", keys);
 	state bool complete = false;
 	state Error lastError;
-	state int auditStorageFailedCount = 0;
+	state bool runPreCheck = true;
 
 	wait(cleanUpDataMoveParallelismLock->take(TaskPriority::DataDistributionLaunch));
 	state FlowLock::Releaser releaser = FlowLock::Releaser(*cleanUpDataMoveParallelismLock);
@@ -2953,13 +2915,11 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 					decodeKeyServersValue(UIDtoTagMap, currentShards[i].value, src, dest, srcId, destId);
 
 					// Pre validate consistency of update of keyServers and serverKeys
-					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK &&
-					    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 						wait(auditLocationMetadataPreCheck(
 						    &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck"));
-						auditStorageFailedCount = 0;
 					}
 
 					for (const auto& uid : src) {
@@ -3031,32 +2991,25 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 				    .detail("Range", range);
 
 				// Post validate consistency of update of keyServers and serverKeys
-				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK &&
-				    auditStorageFailedCount < SERVER_KNOBS->AUDIT_DATAMOVE_MAX_SUCCESSIVE_FAILED) {
+				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck"));
-					auditStorageFailedCount = 0;
 				}
 
 				if (complete) {
 					break;
 				}
-			} catch (Error& err) {
-				state Error e = err;
-				if (e.code() == error_code_audit_storage_failed) {
-					auditStorageFailedCount++;
+			} catch (Error& e) {
+				if (e.code() == error_code_location_metadata_corruption) {
+					int _ = wait(setDDMode(occ, 0));
+					throw location_metadata_corruption();
+				} else {
+					runPreCheck = false;
+					lastError = e;
+					wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
 					TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
 					    .error(lastError)
 					    .detail("DataMoveRange", range.toString());
-					continue;
-				} else if (e.code() == error_code_location_metadata_corruption) {
-					int _ = wait(setDDMode(occ, 0));
-					throw e;
 				}
-				lastError = e;
-				wait(tr.onError(e)); // throw error if retry_clean_up_datamove_tombstone_added
-				TraceEvent(SevWarn, "CleanUpDataMoveRetriableError", dataMoveId)
-				    .error(lastError)
-				    .detail("DataMoveRange", range.toString());
 			}
 		}
 	} catch (Error& e) {
