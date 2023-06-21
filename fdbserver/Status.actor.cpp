@@ -608,14 +608,9 @@ struct RolesInfo {
 				}
 			}
 
-		} catch (Error& e) {
-			if (e.code() != error_code_attribute_not_found)
-				throw e;
-			else {
-				TraceEvent(SevWarnAlways, "StorageServerStatusJson").error(e);
-			}
+		} catch (AttributeNotFoundError& e) {
+			TraceEvent(SevWarnAlways, "StorageServerStatusJson").detail("MissingAttribute", e.getMissingAttribute());
 		}
-
 		if (pDataLagSeconds) {
 			*pDataLagSeconds = dataLagSeconds;
 		}
