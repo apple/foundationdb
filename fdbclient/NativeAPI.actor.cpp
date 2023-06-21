@@ -3864,12 +3864,6 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 	}
 }
 
-ACTOR Future<Void> readVersionBatcher(
-    DatabaseContext* cx,
-    FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
-    uint32_t flags,
-    Optional<TenantGroupName> tenantGroup);
-
 ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> parameters) {
 	state Span span("NAPI:watchValue"_loc, parameters->spanContext);
 	state Version ver = parameters->version;
@@ -7514,7 +7508,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
+bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
 	if (priority == TransactionPriority::IMMEDIATE) {
 		return true;
 	} else if (priority == TransactionPriority::BATCH) {

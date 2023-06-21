@@ -19,7 +19,7 @@ public:
 					tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 
 					state RangeReadResult tagQuotas = wait(tr->getRange(tagQuotaKeys, CLIENT_KNOBS->TOO_MANY));
-					state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::TagQuotaValue>>
+					state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::ThroughputQuotaValue>>
 					    tenantGroupQuotas = wait(TenantMetadata::throughputQuota().getRange(
 					        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
 					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id)
@@ -29,7 +29,7 @@ public:
 					for (auto const kv : tagQuotas) {
 						auto const tag = kv.key.removePrefix(tagQuotaPrefix);
 						self->quotas[ThrottlingId::fromTag(tag)] =
-						    ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(kv.value));
+						    ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(kv.value));
 					}
 					for (auto const& [groupName, quota] : tenantGroupQuotas.results) {
 						// For now tenant group quotas override tag quotas.
