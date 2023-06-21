@@ -1,11 +1,15 @@
+/**
+ * BenchThrottlingCounter.cpp
+ */
+
 #include "benchmark/benchmark.h"
 
-#include "fdbserver/TransactionTagCounter.h"
+#include "fdbserver/ThrottlingCounter.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"
 
-static void bench_addRequest(benchmark::State& state) {
-	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/2, /*minRateTracked=*/0);
+static void bench_ThrottlingCounter_addRequest(benchmark::State& state) {
+	ThrottlingCounter counter(UID(), /*maxReadersTracked=*/2, /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;
@@ -21,10 +25,10 @@ static void bench_addRequest(benchmark::State& state) {
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
 
-BENCHMARK(bench_addRequest)->RangeMultiplier(2)->Range(8 << 4, 8 << 14);
+BENCHMARK(bench_ThrottlingCounter_addRequest)->RangeMultiplier(2)->Range(8 << 4, 8 << 14);
 
-static void bench_startNewInterval(benchmark::State& state) {
-	TransactionTagCounter counter(UID(), /*maxTagsTracked=*/state.range(0), /*minRateTracked=*/0);
+static void bench_ThrottlingCounter_startNewInterval(benchmark::State& state) {
+	ThrottlingCounter counter(UID(), /*maxReadersTracked=*/state.range(0), /*minRateTracked=*/0);
 
 	VectorRef<StringRef> tenantGroups;
 	Arena arena;
@@ -44,5 +48,5 @@ static void bench_startNewInterval(benchmark::State& state) {
 	state.SetItemsProcessed(static_cast<long>(state.range(1) * state.iterations()));
 }
 
-BENCHMARK(bench_startNewInterval)
+BENCHMARK(bench_ThrottlingCounter_startNewInterval)
     ->ArgsProduct({ benchmark::CreateRange(1, 1000, 10), benchmark::CreateRange(1, 100000, 10) });

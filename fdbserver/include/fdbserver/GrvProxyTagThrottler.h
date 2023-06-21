@@ -64,7 +64,7 @@ class GrvProxyTagThrottler {
 	};
 
 	// Track the budgets for each tag
-	TransactionTagMap<TagQueue> queues;
+	ThrottlingIdMap<TagQueue> queues;
 	double maxThrottleDuration;
 
 	// Track latency bands for each tag
@@ -74,7 +74,7 @@ public:
 	explicit GrvProxyTagThrottler(double maxThrottleDuration);
 
 	// Called with rates received from ratekeeper
-	void updateRates(TransactionTagMap<double> const& newRates);
+	void updateRates(ThrottlingIdMap<double> const& newRates);
 
 	// elapsed indicates the amount of time since the last epoch was run.
 	// If a request is ready to be executed, it is sent to the deque

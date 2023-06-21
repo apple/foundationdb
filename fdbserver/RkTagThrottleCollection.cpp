@@ -81,7 +81,7 @@ double RkTagThrottleCollection::computeTargetTpsRate(double currentBusyness,
 }
 
 Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
-                                                          TransactionTag const& tag,
+                                                          ThrottlingId const& tag,
                                                           double fractionalBusyness,
                                                           Optional<double> tpsRate,
                                                           Optional<double> expiration) {
@@ -160,7 +160,7 @@ Optional<double> RkTagThrottleCollection::autoThrottleTag(UID id,
 }
 
 void RkTagThrottleCollection::manualThrottleTag(UID id,
-                                                TransactionTag const& tag,
+                                                ThrottlingId const& tag,
                                                 TransactionPriority priority,
                                                 double tpsRate,
                                                 double expiration,
@@ -196,7 +196,7 @@ void RkTagThrottleCollection::manualThrottleTag(UID id,
 	ASSERT(clientRate.present());
 }
 
-Optional<ClientTagThrottleLimits> RkTagThrottleCollection::getManualTagThrottleLimits(TransactionTag const& tag,
+Optional<ClientTagThrottleLimits> RkTagThrottleCollection::getManualTagThrottleLimits(ThrottlingId const& tag,
                                                                                       TransactionPriority priority) {
 	auto itr = manualThrottledTags.find(tag);
 	if (itr != manualThrottledTags.end()) {
@@ -209,9 +209,9 @@ Optional<ClientTagThrottleLimits> RkTagThrottleCollection::getManualTagThrottleL
 	return Optional<ClientTagThrottleLimits>();
 }
 
-PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::getClientRates(
+PrioritizedThrottlingIdMap<ClientTagThrottleLimits> RkTagThrottleCollection::getClientRates(
     bool autoThrottlingEnabled) {
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientRates;
+	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> clientRates;
 
 	for (auto tagItr = tagData.begin(); tagItr != tagData.end();) {
 		bool tagPresent = false;
@@ -308,7 +308,7 @@ PrioritizedTransactionTagMap<ClientTagThrottleLimits> RkTagThrottleCollection::g
 	return clientRates;
 }
 
-void RkTagThrottleCollection::addRequests(TransactionTag const& tag, int requests) {
+void RkTagThrottleCollection::addRequests(ThrottlingId const& tag, int requests) {
 	if (requests > 0) {
 		CODE_PROBE(true, "Requests reported for throttled tag");
 
@@ -331,7 +331,7 @@ void RkTagThrottleCollection::addRequests(TransactionTag const& tag, int request
 	}
 }
 
-Optional<double> RkTagThrottleCollection::getRequestRate(TransactionTag const& tag) {
+Optional<double> RkTagThrottleCollection::getRequestRate(ThrottlingId const& tag) {
 	auto itr = tagData.find(tag);
 	if (itr != tagData.end()) {
 		return itr->second.requestRate.smoothRate();
