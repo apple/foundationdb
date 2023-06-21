@@ -1,5 +1,5 @@
 /*
- * RESTKmsSimVault.h
+ * SimKmsVault.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,6 +22,7 @@
 #define FDBCLIENT_SIM_KMS_VAULT_H
 #pragma once
 
+#include "fdbclient/BlobMetadataUtils.h"
 #include "flow/EncryptUtils.h"
 
 #define DEBUG_SIM_KEY_CIPHER DEBUG_ENCRYPT_KEY_CIPHER
@@ -45,6 +46,8 @@ namespace SimKmsVault {
 Reference<SimKmsVaultKeyCtx> getByBaseCipherId(const EncryptCipherBaseKeyId baseCipherId);
 Reference<SimKmsVaultKeyCtx> getByDomainId(const EncryptCipherDomainId domainId);
 uint32_t maxSimKeys();
+
+Standalone<BlobMetadataDetailsRef> getBlobMetadata(const BlobMetadataDomainId domainId, const std::string& bgUrl);
 } // namespace SimKmsVault
 
 #endif
