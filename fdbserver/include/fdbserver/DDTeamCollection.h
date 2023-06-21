@@ -283,10 +283,11 @@ protected:
 
 	// team pivot values
 	struct {
-		double lastPivotValuesUpdate = 0.0;
-		double pivotAvailableSpaceRatio = 0.0;
+		double lastPivotsUpdate = 0.0;
+		double pivotAvailableSpaceRatio = 100.0;
 		double pivotCPU = 100.0;
-		double strictPivotAvailableSpaceRatio = 0.0;
+		int64_t pivotLoadBytes = std::numeric_limits<int64_t>::max();
+		double strictPivotAvailableSpaceRatio = 100.0;
 		double strictPivotCPU = 100.0;
 		double minTeamAvgCPU = std::numeric_limits<double>::max();
 	} teamPivots;
@@ -656,14 +657,16 @@ protected:
 
 	Reference<TCTeamInfo> buildLargeTeam(int size);
 
-	void updateTeamPivotValues();
+	void updateTeamPivots(const double inflightPenalty);
 
-	// get the min available space ratio from every healthy team and update the pivot ratio `pivotAvailableSpaceRatio`
-	void updateAvailableSpacePivots();
+	void updateLoadBytesPivot(std::vector<int64_t>& teamLoadBytes);
 
-	void updateCpuPivots();
+	// get the median available space ratio from every healthy team and update the median pivot value
+	void updateMedianAvailableSpacePivot(std::vector<double>& teamAvailableSpace);
 
-	void updateTeamEligibility();
+	void updateCpuPivot(std::vector<double>& teamAverageCPU);
+
+	void updateTeamEligibility(const double inflightPenalty);
 
 public:
 	Reference<IDDTxnProcessor> db;
