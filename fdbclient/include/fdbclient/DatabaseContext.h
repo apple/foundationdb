@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "fdbclient/ReadVersionBatcher.h"
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
@@ -508,24 +509,8 @@ public:
 	// key-space is used.
 	Optional<TenantName> defaultTenant;
 
-	struct VersionRequest {
-		SpanContext spanContext;
-		Promise<GetReadVersionReply> reply;
-		TagSet tags;
-		Optional<UID> debugID;
-
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
-		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
-	};
-
-	// Transaction start request batching
-	struct VersionBatcher {
-		PromiseStream<VersionRequest> stream;
-		Future<Void> actor;
-	};
-
 	using VersionBatcherIndex = std::pair<uint32_t, Optional<TenantGroupName>>;
-	std::map<VersionBatcherIndex, VersionBatcher> versionBatcher;
+	std::map<VersionBatcherIndex, ReadVersionBatcher> versionBatchers;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
