@@ -188,11 +188,11 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
-	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
-	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
-	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
-	// has available space ratio < pivotAvailableSpaceRatio.
-	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// DD use LOAD_BYTES_PIVOT_RATIO to select pivot position based on load bytes. Given an array that's ascend
+	// sorted by load bytes, the pivot position is LOAD_BYTES_PIVOT_RATIO * healthy team count. DD won't choose a team
+	// as destination team when its load bytes > pivot load bytes.
+	double LOAD_BYTES_PIVOT_RATIO;
+
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;

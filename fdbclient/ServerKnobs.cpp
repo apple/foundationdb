@@ -169,10 +169,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
-	init( AVAILABLE_SPACE_PIVOT_RATIO,                           0.5 );
+	init( LOAD_BYTES_PIVOT_RATIO,                        	     0.5 );
 	init( CPU_PIVOT_RATIO,                                       0.9 );
 	// In order to make sure GetTeam has enough eligible destination team:
-	ASSERT_GT(AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
+	ASSERT_GT(LOAD_BYTES_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// For dd re-evaluatioin
 	init( DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO,                 0.5 ); if( randomize && BUGGIFY ) DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO = deterministicRandom()->random01() * 0.4 + 0.3;
 	init( DD_STRICT_CPU_PIVOT_RATIO,                             0.9 ); if( randomize && BUGGIFY ) DD_STRICT_CPU_PIVOT_RATIO = deterministicRandom()->random01() * 0.45 + 0.5;
