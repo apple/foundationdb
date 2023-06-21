@@ -1980,22 +1980,22 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			// Min and max shard sizes have a 3 * shardBounds.permittedError.bytes cushion for error since shard
 			// sizes are not precise Shard splits ignore the first key in a shard, so its size shouldn't be
 			// considered when checking the upper bound 0xff shards are not checked
-			// SOMEDAY: sampledKeys > 20, come up a theory value of 'sampledKeys' that can guarantee the size estimation.
-			if (canSplit && sampledKeys > 20 && performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
+			if (canSplit && sampledKeys > 5 && performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
 			    (sampledBytes < shardBounds.min.bytes - 3 * shardBounds.permittedError.bytes ||
 			     sampledBytes - firstKeySampledBytes > shardBounds.max.bytes + 3 * shardBounds.permittedError.bytes)) {
-				TraceEvent e("ConsistencyCheck_InvalidShardSize");
+				TraceEvent e(SevWarn, "ConsistencyCheck_InvalidShardSize");
 				traceShardEstimation(
 				    e,
 				    shardBounds,
 				    range,
 				    ShardSampleInfo{ sampledBytes, shardBytes, shardKeys, sampledKeys, sampledKeysWithProb });
-				testFailure(format("Shard size in quiescent database is too %s",
-				                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
-				            performQuiescentChecks,
-				            success,
-				            failureIsError);
-				return Void();
+				// NOTE: Shard sampling is known to be biased.
+				// Disable this test failure until we have a proper solution.
+				// testFailure(format("Shard size in quiescent database is too %s",
+				//                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
+				//            performQuiescentChecks,
+				//            success,
+				//            failureIsError);
 			}
 		}
 
