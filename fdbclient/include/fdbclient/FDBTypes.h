@@ -1761,6 +1761,16 @@ struct Versionstamp {
 	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
 	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
 
+	Versionstamp() {}
+	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
+	Versionstamp(Standalone<StringRef> str) {
+		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
+		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
+		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
+	}
+
+	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		int64_t beVersion;
@@ -1789,5 +1799,10 @@ template <class Ar>
 inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
+
+template <>
+struct Traceable<Versionstamp> : std::true_type {
+	static std::string toString(const Versionstamp& v) { return v.toString(); }
+};
 
 #endif
