@@ -2635,9 +2635,7 @@ static void attemptStartMerge(Reference<BlobManagerData> bmData,
 	auto reCheckMergeCandidates = bmData->mergeCandidates.intersectingRanges(mergeRange);
 	for (auto it : reCheckMergeCandidates) {
 		if (!it->cvalue().mergeEligible()) {
-			CODE_PROBE(true,
-			           "granule no longer merge candidate after checking metrics, aborting merge",
-			           probe::decoration::rare);
+			CODE_PROBE(true, "granule no longer merge candidate after checking metrics, aborting merge");
 			return;
 		}
 	}

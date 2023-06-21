@@ -492,9 +492,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 			// should for sure have found it
 			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption");
 		} else {
-			CODE_PROBE(true,
-			           "consistency check potentially missed injected corruption due to failures",
-			           probe::decoration::rare);
+			CODE_PROBE(true, "consistency check potentially missed injected corruption due to failures");
 			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
 			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
 			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
@@ -1110,8 +1108,7 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 	if (g_simulator->consistencyScanCorruptor.present() &&
 	    g_simulator->consistencyScanCorruptor.get() == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
-		CODE_PROBE(
-		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
+		CODE_PROBE(true, "Consistency Scan skipped corruption check because scan died in the middle");
 		g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
 		                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
 	}
