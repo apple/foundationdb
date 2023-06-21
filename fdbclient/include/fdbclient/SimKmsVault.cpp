@@ -154,10 +154,8 @@ uint32_t maxSimKeys() {
 void forceLinkSimKmsVaultTests() {}
 
 TEST_CASE("/simKmsVault") {
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("sim_kms_vault_max_keys", KnobValueRef::create(int{ 20 }));
-
 	Reference<SimKmsVaultCtx> vaultCtx = SimKmsVaultCtx::getInstance();
+	ASSERT_GT(vaultCtx->maxKeys(), 0);
 	ASSERT_EQ(vaultCtx->maxKeys(), CLIENT_KNOBS->SIM_KMS_VAULT_MAX_KEYS);
 
 	// Test non-existing baseCiphers
