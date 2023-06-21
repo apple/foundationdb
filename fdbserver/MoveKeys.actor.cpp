@@ -374,65 +374,47 @@ ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> f
 	return Optional<UID>(uid);
 }
 
-ACTOR Future<Void> validateRangeAssignment(Transaction* tr, KeyRange range, UID ssid, std::string context) {
-	if (range.empty()) {
-		TraceEvent(SevWarn, "ValidateRangeAssignmentEmptyInputRange").detail("AuditRange", range);
-		return Void();
-	}
-	state Key rangeBeginToRead = range.begin;
-	state bool anyError = false;
+ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange range, UID ssid, std::string context) {
+	ASSERT(!range.empty());
+	state Key toReadRangeBegin = range.begin;
+	state bool allCorrect = true;
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	try {
-		loop {
-			RangeResult readResult = wait(krmGetRanges(tr,
-			                                           serverKeysPrefixFor(ssid),
-			                                           KeyRangeRef(rangeBeginToRead, range.end),
-			                                           CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-			                                           CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
-			// We do not want to reset tr
-			for (int i = 0; i < readResult.size() - 1; i++) {
-				UID shardId;
-				bool assigned, emptyRange;
-				EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-				decodeServerKeysValue(readResult[0].value, assigned, emptyRange, enablePSM, shardId);
-				if (!assigned) {
-					TraceEvent(SevError, "ValidateRangeAssignmentError")
-					    .detail("Context", context)
-					    .detail("AuditRange", range)
-					    .detail("ErrorMessage", "KeyServers has range but ServerKeys does not have")
-					    .detail("CurrentEmptyRange", emptyRange)
-					    .detail("CurrentAssignment", assigned)
-					    .detail("EnablePSM", enablePSM)
-					    .detail("ServerID", ssid)
-					    .detail("ShardID", shardId);
-					anyError = true;
-				}
-			}
-			if (readResult.back().key < range.end) {
-				rangeBeginToRead = readResult.back().key;
-				TraceEvent(SevWarnAlways, "ValidateRangeAssignmentMultipleReads")
-				    .detail("Range", range)
-				    .detail("StorageServer", ssid);
-				continue;
-			} else {
-				break;
+	loop {
+		RangeResult readResult = wait(krmGetRanges(tr,
+		                                           serverKeysPrefixFor(ssid),
+		                                           KeyRangeRef(toReadRangeBegin, range.end),
+		                                           CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+		                                           CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES));
+		// We do not want to reset tr
+		for (int i = 0; i < readResult.size() - 1; i++) {
+			UID shardId;
+			bool assigned, emptyRange;
+			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
+			decodeServerKeysValue(readResult[0].value, assigned, emptyRange, enablePSM, shardId);
+			if (!assigned) {
+				TraceEvent(SevError, "ValidateRangeAssignmentError")
+				    .detail("Context", context)
+				    .detail("AuditRange", range)
+				    .detail("ErrorMessage", "KeyServers has range but ServerKeys does not have")
+				    .detail("CurrentEmptyRange", emptyRange)
+				    .detail("CurrentAssignment", assigned)
+				    .detail("EnablePSM", enablePSM)
+				    .detail("ServerID", ssid)
+				    .detail("ShardID", shardId);
+				allCorrect = false;
 			}
 		}
-		if (anyError) {
-			throw location_metadata_corruption();
-		}
-	} catch (Error& e) {
-		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
-			throw e;
+		if (readResult.back().key < range.end) {
+			toReadRangeBegin = readResult.back().key;
+			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentMultipleReads")
+			    .detail("Range", range)
+			    .detail("StorageServer", ssid);
+			continue;
 		} else {
-			TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
-			    .errorUnsuppressed(e)
-			    .detail("Context", context)
-			    .detail("AuditRange", range);
-			throw audit_storage_failed();
+			break;
 		}
 	}
-	return Void();
+	return allCorrect;
 }
 
 ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
@@ -443,17 +425,48 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 		TraceEvent(SevWarn, "AuditLocationMetadataPreCheckEmptyInputRange").detail("AuditRange", range);
 		return Void();
 	}
-	state ActorCollection actors(false);
-	state std::unordered_map<UID, bool> validationResult;
+	state std::vector<Future<Void>> actors;
+	state std::unordered_map<UID, bool> results;
+	state bool anyError = false;
+	state double startTime = now();
+	state int retryCount = 0;
 	try {
-		for (auto& ssid : servers) {
-			actors.add(validateRangeAssignment(tr, range, ssid, context));
+		loop {
+			try {
+				actors.clear();
+				results.clear();
+				for (auto& ssid : servers) {
+					actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context)));
+				}
+				wait(waitForAllReadyThenThrow(actors));
+				for (const auto& [ssid, res] : results) {
+					if (!res)
+						anyError = true;
+				}
+				if (anyError) {
+					throw location_metadata_corruption();
+				}
+				break;
+			} catch (Error& e) {
+				if (now() - startTime >= 0.5) {
+					TraceEvent(SevWarn, "AuditLocationMetadataPreCheckTimedOut")
+					    .detail("AuditRange", range)
+					    .detail("Servers", describe(servers))
+					    .detail("RetryCount", retryCount);
+					throw timed_out();
+				}
+				retryCount++;
+				wait(delay(0.1));
+			}
 		}
-		wait(actors.getResult());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 			throw e;
 		} else {
+			TraceEvent(SevInfo, "AuditLocationMetadataPreCheckEmptyFailed")
+			    .errorUnsuppressed(e)
+			    .detail("Context", context)
+			    .detail("AuditRange", range);
 			throw audit_storage_failed();
 		}
 	}
@@ -465,7 +478,9 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 		TraceEvent(SevWarn, "AuditLocationMetadataPostCheckEmptyInputRange").detail("AuditRange", range);
 		return Void();
 	}
-	state ActorCollection actors(false);
+	state std::vector<Future<Void>> actors;
+	state std::unordered_map<uint64_t, bool> results;
+	state bool anyError = false;
 	state Key rangeToReadBegin = range.begin;
 	state RangeResult readResultKS;
 	state RangeResult UIDtoTagMap;
@@ -473,26 +488,28 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	try {
 		loop {
 			try {
-				actors.clear(false);
+				actors.clear();
 				readResultKS.clear();
+				results.clear();
 				tr.trState->taskID = TaskPriority::MoveKeys;
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				// Read keyServers
-				actors.add(store(readResultKS,
-				                 krmGetRanges(&tr,
-				                              keyServersPrefix,
-				                              KeyRangeRef(rangeToReadBegin, range.end),
-				                              CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
-				                              CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
-				actors.add(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
-				wait(actors.getResult());
+				actors.push_back(store(readResultKS,
+				                       krmGetRanges(&tr,
+				                                    keyServersPrefix,
+				                                    KeyRangeRef(rangeToReadBegin, range.end),
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT,
+				                                    CLIENT_KNOBS->KRM_GET_RANGE_LIMIT_BYTES)));
+				actors.push_back(store(UIDtoTagMap, tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY)));
+				wait(waitForAll(actors));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
-				TraceEvent(SevVerbose, "ValidateRangeAssignmentKeyServersReadDone")
+				TraceEvent(SevVerbose, "AuditLocationMetadataPostCheckReadDone")
 				    .detail("ResultSize", readResultKS.size());
 
 				// Read serverKeys
-				actors.clear(false);
+				actors.clear();
+				state uint64_t resIdx = 0;
 				state int i = 0;
 				for (; i < readResultKS.size() - 1; ++i) {
 					std::vector<UID> src;
@@ -504,13 +521,21 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 					std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 					KeyRange skToReadRange = Standalone(KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key));
 					for (auto& ssid : servers) {
-						actors.add(validateRangeAssignment(&tr, skToReadRange, ssid, context));
+						actors.push_back(
+						    store(results[resIdx], validateRangeAssignment(&tr, skToReadRange, ssid, context)));
+						++resIdx;
 					}
 				}
-				wait(actors.getResult());
+				wait(waitForAllReadyThenThrow(actors));
+				for (const auto& [idx, res] : results) {
+					if (!res)
+						anyError = true;
+				}
 				if (readResultKS.back().key < range.end) {
 					rangeToReadBegin = readResultKS.back().key;
 					continue;
+				} else if (anyError) {
+					throw location_metadata_corruption();
 				} else {
 					break;
 				}
@@ -522,14 +547,13 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 		if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 			throw e;
 		} else {
-			TraceEvent(SevInfo, "ValidateRangeAssignmentFailed")
+			TraceEvent(SevInfo, "AuditLocationMetadataPostCheckFailed")
 			    .errorUnsuppressed(e)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
 			throw audit_storage_failed();
 		}
 	}
-
 	return Void();
 }
 
