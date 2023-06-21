@@ -964,9 +964,9 @@ struct AuthzSecurityWorkload : TestWorkload {
 				}
 				if (e.code() != error_code_permission_denied) {
 					TraceEvent(SevError, "AuthzSecurityClient")
-						.error(e)
-						.detail("Case", fmt::format("{} without token must fail", isGet ? "Read" : "Write"))
-						.log();
+					    .error(e)
+					    .detail("Case", fmt::format("{} without token must fail", isGet ? "Read" : "Write"))
+					    .log();
 				}
 				ASSERT(e.code() == error_code_permission_denied);
 			}
