@@ -374,7 +374,11 @@ ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> f
 	return Optional<UID>(uid);
 }
 
-ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange range, UID ssid, std::string context) {
+ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
+                                           KeyRange range,
+                                           UID ssid,
+                                           std::string context,
+                                           UID dataMoveId) {
 	ASSERT(!range.empty());
 	state Key toReadRangeBegin = range.begin;
 	state bool allCorrect = true;
@@ -393,6 +397,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange range, UID 
 			decodeServerKeysValue(readResult[0].value, assigned, emptyRange, enablePSM, shardId);
 			if (!assigned) {
 				TraceEvent(SevError, "ValidateRangeAssignmentError")
+				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range)
 				    .detail("ErrorMessage", "KeyServers has range but ServerKeys does not have")
@@ -407,6 +412,7 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange range, UID 
 		if (readResult.back().key < range.end) {
 			toReadRangeBegin = readResult.back().key;
 			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentMultipleReads")
+			    .detail("DataMoveID", dataMoveId)
 			    .detail("Range", range)
 			    .detail("StorageServer", ssid);
 			continue;
@@ -420,7 +426,8 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr, KeyRange range, UID 
 ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
                                                  KeyRange range,
                                                  std::vector<UID> servers,
-                                                 std::string context) {
+                                                 std::string context,
+                                                 UID dataMoveId) {
 	if (range.empty()) {
 		TraceEvent(SevWarn, "AuditLocationMetadataPreCheckEmptyInputRange").detail("AuditRange", range);
 		return Void();
@@ -428,6 +435,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<UID, bool> results;
 	TraceEvent(SevDebug, "AuditLocationMetadataPreCheckStart")
+	    .detail("DataMoveID", dataMoveId)
 	    .detail("Servers", describe(servers))
 	    .detail("Context", context)
 	    .detail("AuditRange", range);
@@ -435,7 +443,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 		actors.clear();
 		results.clear();
 		for (const auto& ssid : servers) {
-			actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context)));
+			actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context, dataMoveId)));
 		}
 		wait(waitForAllReadyThenThrow(actors));
 		for (const auto& [ssid, res] : results) {
@@ -448,6 +456,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 		} else {
 			TraceEvent(SevInfo, "AuditLocationMetadataPreCheckFailed")
 			    .errorUnsuppressed(e)
+			    .detail("DataMoveID", dataMoveId)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
 			throw audit_storage_failed();
@@ -456,7 +465,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Transaction* tr,
 	return Void();
 }
 
-ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context) {
+ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, std::string context, UID dataMoveId) {
 	if (range.empty()) {
 		TraceEvent(SevWarn, "AuditLocationMetadataPostCheckEmptyInputRange").detail("AuditRange", range);
 		return Void();
@@ -505,10 +514,13 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 						for (const auto& ssid : servers) {
-							actors.push_back(store(
-							    results[resIdx],
-							    validateRangeAssignment(
-							        &tr, KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key), ssid, context)));
+							actors.push_back(
+							    store(results[resIdx],
+							          validateRangeAssignment(&tr,
+							                                  KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key),
+							                                  ssid,
+							                                  context,
+							                                  dataMoveId)));
 							++resIdx;
 						}
 					}
@@ -536,6 +548,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 			} else if (retryCount > SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX) {
 				TraceEvent(SevInfo, "AuditLocationMetadataPostCheckFailed")
 				    .errorUnsuppressed(e)
+				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range);
 				break;
@@ -596,7 +609,8 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 				std::vector<UID> servers(src.size() + dest.size());
 				std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-				wait(auditLocationMetadataPreCheck(&tr, keys, servers, "cleanUpSingleShardDataMove_precheck"));
+				wait(auditLocationMetadataPreCheck(
+				    &tr, keys, servers, "cleanUpSingleShardDataMove_precheck", dataMoveId));
 			}
 
 			TraceEvent(SevInfo, "CleanUpSingleShardDataMove", dataMoveId)
@@ -624,7 +638,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 
 			// Post validate consistency of update of keyServers and serverKeys
 			if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck"));
+				wait(auditLocationMetadataPostCheck(occ, keys, "cleanUpSingleShardDataMove_postcheck", dataMoveId));
 			}
 			break;
 		} catch (Error& e) {
@@ -1658,7 +1672,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 							std::vector<UID> servers(src.size() + dest.size());
 							std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 							wait(auditLocationMetadataPreCheck(
-							    &tr, rangeIntersectKeys, servers, "startMoveShards_precheck"));
+							    &tr, rangeIntersectKeys, servers, "startMoveShards_precheck", dataMoveId));
 						}
 
 						if (destId.isValid()) {
@@ -1800,7 +1814,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 				// Post validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
 					if (!currentKeys.empty()) {
-						wait(auditLocationMetadataPostCheck(occ, currentKeys, "startMoveShards_postcheck"));
+						wait(auditLocationMetadataPostCheck(occ, currentKeys, "startMoveShards_postcheck", dataMoveId));
 					}
 				}
 
@@ -2031,7 +2045,8 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_PRE_CHECK && runPreCheck) {
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-						wait(auditLocationMetadataPreCheck(&tr, currentRange, servers, "finishMoveShards_precheck"));
+						wait(auditLocationMetadataPreCheck(
+						    &tr, currentRange, servers, "finishMoveShards_precheck", dataMoveId));
 					}
 
 					std::sort(dest.begin(), dest.end());
@@ -2213,7 +2228,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 
 					// Post validate consistency of update of keyServers and serverKeys
 					if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck"));
+						wait(auditLocationMetadataPostCheck(occ, range, "finishMoveShards_postcheck", dataMoveId));
 					}
 
 					if (complete) {
@@ -2934,7 +2949,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 						std::vector<UID> servers(src.size() + dest.size());
 						std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
 						wait(auditLocationMetadataPreCheck(
-						    &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck"));
+						    &tr, rangeIntersectKeys, servers, "cleanUpDataMoveCore_precheck", dataMoveId));
 					}
 
 					for (const auto& uid : src) {
@@ -3007,7 +3022,7 @@ ACTOR Future<Void> cleanUpDataMoveCore(Database occ,
 
 				// Post validate consistency of update of keyServers and serverKeys
 				if (SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK) {
-					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck"));
+					wait(auditLocationMetadataPostCheck(occ, range, "cleanUpDataMoveCore_postcheck", dataMoveId));
 				}
 
 				if (complete) {
