@@ -44,6 +44,7 @@
 extern "C" {
 #endif
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <signal.h>
 #include <sys/types.h>
@@ -254,7 +255,9 @@ struct eio_req {
 	long int3; /* chown, fchown: gid; rename, link: working directory of new name */
 	int errorno; /* errno value on syscall return */
 
-#if __i386 || __amd64
+#if ATOMIC_CHAR_LOCK_FREE
+	atomic_uchar cancelled;
+#elif __i386 || __amd64
 	unsigned char cancelled;
 #else
 	sig_atomic_t cancelled;
