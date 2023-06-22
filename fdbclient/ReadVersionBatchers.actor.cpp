@@ -95,8 +95,6 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 	}
 }
 
-} // namespace
-
 class Batcher {
 	struct VersionRequest {
 		SpanContext spanContext;
@@ -231,6 +229,8 @@ public:
 		return (now() - lastRequestTime < expirationTimeout) || (outstandingRequests > 0);
 	}
 };
+
+} // namespace
 
 class ReadVersionBatchersImpl {
 	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
