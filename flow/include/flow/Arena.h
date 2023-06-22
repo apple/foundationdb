@@ -1097,7 +1097,7 @@ public:
 		m_size--;
 	}
 
-	void pop_front(int count = 1) {
+	void pop_front(int count) {
 		VPS::invalidate();
 		count = std::min(m_size, count);
 

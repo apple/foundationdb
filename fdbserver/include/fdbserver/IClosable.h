@@ -17,8 +17,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#ifndef FDBCLIENT_ICLOSABLE_H
-#define FDBCLIENT_ICLOSABLE_H
+#ifndef FDBSERVER_ICLOSABLE_H
+#define FDBSERVER_ICLOSABLE_H
 #pragma once
 #include "flow/flow.h"
 class IClosable {
