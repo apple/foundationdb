@@ -90,7 +90,7 @@ void validateTimeoutDuration(double expectedSeconds, std::chrono::time_point<std
 TEST_CASE("500ms_transaction_timeout") {
 	auto start = std::chrono::steady_clock::now();
 
-	fdb::Transaction tr(db.createTransaction());
+	auto tr = db.createTransaction();
 
 	int64_t timeout = 500;
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
@@ -105,7 +105,7 @@ TEST_CASE("500ms_transaction_timeout") {
 TEST_CASE("500ms_transaction_timeout_after_op") {
 	auto start = std::chrono::steady_clock::now();
 
-	fdb::Transaction tr(db.createTransaction());
+	auto tr = db.createTransaction();
 	auto grvFuture = tr.getReadVersion();
 
 	int64_t timeout = 500;
@@ -116,122 +116,115 @@ TEST_CASE("500ms_transaction_timeout_after_op") {
 	validateTimeoutDuration(timeout / 1000.0, start);
 }
 
-//TEST_CASE("500ms_transaction_timeout_before_op_2000ms_after") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//fdb::Transaction tr(db);
-//
-	//int64_t timeout = 500;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-//
-	//timeout = 2000;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(timeout / 1000.0, start);
-//}
-//
-//TEST_CASE("2000ms_transaction_timeout_before_op_500ms_after") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//fdb::Transaction tr(db);
-//
-	//int64_t timeout = 2000;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-//
-	//timeout = 500;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(timeout / 1000.0, start);
-//}
-//
-//TEST_CASE("500ms_database_timeout") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//int64_t timeout = 500;
-	//fdb_check(fdb_database_set_option(
-	    //timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Transaction tr(timeoutDb);
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(timeout / 1000.0, start);
-//}
-//
-//TEST_CASE("2000ms_database_timeout_500ms_transaction_timeout") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//int64_t timeout = 2000;
-	//fdb_check(fdb_database_set_option(
-	    //timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Transaction tr(timeoutDb);
-//
-	//timeout = 500;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(timeout / 1000.0, start);
-//}
-//
-//TEST_CASE("500ms_database_timeout_2000ms_transaction_timeout_with_reset") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//int64_t dbTimeout = 500;
-	//fdb_check(fdb_database_set_option(
-	    //timeoutDb, FDB_DB_OPTION_TRANSACTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&dbTimeout), sizeof(dbTimeout)));
-//
-	//fdb::Transaction tr(timeoutDb);
-//
-	//int64_t trTimeout = 2000;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&trTimeout), sizeof(trTimeout)));
-//
-	//tr.reset();
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(dbTimeout / 1000.0, start);
-//}
-//
-//TEST_CASE("transaction_reset_cancels_without_timeout") {
-	//fdb::Transaction tr(db);
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//tr.reset();
-//
-	//fdb_error_t err = wait_future(grvFuture);
-	//CHECK(err == 1025);
-//}
-//
-//TEST_CASE("transaction_reset_cancels_with_timeout") {
-	//fdb::Transaction tr(db);
-//
-	//int64_t timeout = 500;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//tr.reset();
-//
-	//fdb_error_t err = wait_future(grvFuture);
-	//CHECK(err == 1025);
-//}
-//
+TEST_CASE("500ms_transaction_timeout_before_op_2000ms_after") {
+	auto start = std::chrono::steady_clock::now();
+
+	auto tr = db.createTransaction();
+
+	int64_t timeout = 500;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto grvFuture = tr.getReadVersion();
+	timeout = 2000;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto err = waitFuture(grvFuture);
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
+TEST_CASE("2000ms_transaction_timeout_before_op_500ms_after") {
+	auto start = std::chrono::steady_clock::now();
+
+	auto tr = db.createTransaction();
+
+	int64_t timeout = 2000;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto grvFuture = tr.getReadVersion();
+	timeout = 500;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto err = waitFuture(grvFuture);
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
+TEST_CASE("500ms_database_timeout") {
+	auto start = std::chrono::steady_clock::now();
+
+	int64_t timeout = 500;
+	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+
+	auto tr = timeoutDb.createTransaction();
+
+	auto grvFuture = tr.getReadVersion();
+	auto err = waitFuture(grvFuture);
+
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
+TEST_CASE("2000ms_database_timeout_500ms_transaction_timeout") {
+	auto start = std::chrono::steady_clock::now();
+
+	int64_t timeout = 2000;
+	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+
+	auto tr = timeoutDb.createTransaction();
+
+	timeout = 500;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto grvFuture = tr.getReadVersion();
+	auto err = waitFuture(grvFuture);
+
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
+TEST_CASE("500ms_database_timeout_2000ms_transaction_timeout_with_reset") {
+	auto start = std::chrono::steady_clock::now();
+
+	int64_t dbTimeout = 500;
+	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, dbTimeout));
+
+	auto tr = timeoutDb.createTransaction();
+
+	int64_t trTimeout = 2000;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, trTimeout));
+
+	tr.reset();
+
+	auto grvFuture = tr.getReadVersion();
+	auto err = waitFuture(grvFuture);
+
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(dbTimeout / 1000.0, start);
+}
+
+TEST_CASE("transaction_reset_cancels_without_timeout") {
+	auto tr = db.createTransaction();
+	auto grvFuture = tr.getReadVersion();
+	tr.reset();
+
+	auto err = waitFuture(grvFuture);
+	CHECK(err.code() == 1025);
+}
+
+TEST_CASE("transaction_reset_cancels_with_timeout") {
+	auto tr = db.createTransaction();
+
+	int64_t timeout = 500;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto grvFuture = tr.getReadVersion();
+	tr.reset();
+
+	auto err = waitFuture(grvFuture);
+	CHECK(err.code() == 1025);
+}
+
 //TEST_CASE("transaction_destruction_cancels_without_timeout") {
 	//FDBTransaction* tr;
 	//fdb_check(fdb_database_create_transaction(db, &tr));
