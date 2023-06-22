@@ -27,7 +27,6 @@
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
-#include "fdbserver/IPageEncryptionKeyProvider.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -8129,8 +8128,7 @@ public:
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
-	                     int64_t pageCacheBytes = 0)
+	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
@@ -8139,13 +8137,11 @@ public:
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
-		if (pageCacheBytes <= 0) {
-			pageCacheBytes =
-			    g_network->isSimulated()
-			        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-			                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
-			        : FLOW_KNOBS->PAGE_CACHE_4K;
-		}
+		int64_t pageCacheBytes =
+		    g_network->isSimulated()
+		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
+		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+		        : FLOW_KNOBS->PAGE_CACHE_4K;
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
 		    g_network->isSimulated()
@@ -8241,7 +8237,9 @@ public:
 
 	Future<Void> getErrorNoDelay() const { return m_errorPromise.getFuture() || m_tree->getError(); };
 
-	void clear(KeyRangeRef range, const Arena* arena = 0) override {
+	void clear(KeyRangeRef range,
+	           const StorageServerMetrics* storageMetrics = nullptr,
+	           const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
@@ -8456,15 +8454,8 @@ private:
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
-                                       Optional<EncryptionAtRestMode> encryptionMode,
-                                       int64_t pageCacheBytes) {
-	return new KeyValueStoreRedwood(filename,
-	                                logID,
-	                                db,
-	                                encryptionMode,
-	                                EncodingType::MAX_ENCODING_TYPE,
-	                                Reference<IPageEncryptionKeyProvider>(),
-	                                pageCacheBytes);
+                                       Optional<EncryptionAtRestMode> encryptionMode) {
+	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode);
 }
 
 int randomSize(int max) {
