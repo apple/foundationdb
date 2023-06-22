@@ -5458,26 +5458,7 @@ const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "
 	                                                                           "o", "p", "q", "r", "s", "t" };
 
 void debugAddTags(Reference<TransactionState> trState) {
-	int numTags = deterministicRandom()->randomInt(0, CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION + 1);
-	for (int i = 0; i < numTags; ++i) {
-		TransactionTag tag;
-		if (deterministicRandom()->random01() < 0.7) {
-			tag = TransactionTagRef(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
-		} else {
-			int length = deterministicRandom()->randomInt(1, CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH + 1);
-			uint8_t* s = new (tag.arena()) uint8_t[length];
-			for (int j = 0; j < length; ++j) {
-				s[j] = (uint8_t)deterministicRandom()->randomInt(0, 256);
-			}
-
-			tag.contents() = TransactionTagRef(s, length);
-		}
-
-		if (deterministicRandom()->coinflip()) {
-			trState->options.readTags.addTag(tag);
-		}
-		trState->options.tags.addTag(tag);
-	}
+	trState->options.tags.addTag(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
 }
 
 Transaction::Transaction()
