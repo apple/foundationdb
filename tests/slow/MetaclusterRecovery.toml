@@ -12,7 +12,7 @@ machineCount = 5
 
 [[test]]
 testTitle = 'MetaclusterRestoreTest'
-clearAfterTest = true
+clearAfterTest = false
 timeout = 2100
 runSetup = true
 simBackupAgents = 'BackupToFile'
@@ -21,3 +21,16 @@ simBackupAgents = 'BackupToFile'
     testName = 'MetaclusterRestore'
 	maxTenants = 500
 	maxTenantGroups = 10
+
+[[test]]
+testTitle = 'MetaclusterManagementTest'
+clearAfterTest = true
+timeout = 2100
+runSetup = true
+
+    [[test.workload]]
+    testName = 'MetaclusterManagement'
+	maxTenants = 100
+	maxTenantGroups = 20
+	testDuration = 60
+	useExistingMetacluster = true

@@ -9605,10 +9605,10 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
 		} catch (Error& e) {
