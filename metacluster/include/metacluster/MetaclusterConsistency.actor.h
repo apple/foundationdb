@@ -82,6 +82,7 @@ private:
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
 		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
 		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+		ASSERT(!data.maxRestoreId.present());
 
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
