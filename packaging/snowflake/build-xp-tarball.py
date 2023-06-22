@@ -35,8 +35,14 @@ class PackageBuilder:
     def add_source_file(self, dest_path, src_path):
         self.tar.add(self.src_dir.joinpath(src_path), dest_path)
 
-    def add_build_file(self, dest_path, src_path):
-        self.tar.add(self.build_dir.joinpath(src_path), dest_path)
+    def add_build_file(self, dest_path, src_path, strip=False):
+        full_src_path = self.build_dir.joinpath(src_path)
+        if strip:
+            with tempfile.NamedTemporaryFile() as tmp:
+                subprocess.check_output(["strip", "-S", full_src_path, "-o", tmp.name])
+                self.tar.add(tmp.name, dest_path)
+        else:
+            self.tar.add(full_src_path, dest_path)
 
     def build(self):
         for version in self.external_client_versions:
@@ -48,25 +54,30 @@ class PackageBuilder:
 
         with tarfile.open(self.output, "w:gz") as tar:
             self.tar = tar
-            self.add_source_file("include/fdb_c.h", "bindings/c/foundationdb/fdb_c.h")
             self.add_source_file(
-                "include/fdb_c_types.h", "bindings/c/foundationdb/fdb_c_types.h"
+                "include/foundationdb/fdb_c.h", "bindings/c/foundationdb/fdb_c.h"
             )
             self.add_source_file(
-                "include/fdb_c_shim.h", "bindings/c/foundationdb/fdb_c_shim.h"
+                "include/foundationdb/fdb_c_types.h",
+                "bindings/c/foundationdb/fdb_c_types.h",
+            )
+            self.add_source_file(
+                "include/foundationdb/fdb_c_shim.h",
+                "bindings/c/foundationdb/fdb_c_shim.h",
             )
             self.add_build_file(
-                "include/fdb_c_apiversion.g.h",
+                "include/foundationdb/fdb_c_apiversion.g.h",
                 "bindings/c/foundationdb/fdb_c_apiversion.g.h",
             )
             self.add_build_file(
-                "include/fdb_c_options.g.h", "bindings/c/foundationdb/fdb_c_options.g.h"
+                "include/foundationdb/fdb_c_options.g.h",
+                "bindings/c/foundationdb/fdb_c_options.g.h",
             )
             self.add_build_file("lib/libfdb_c_prerelease.so", "lib/libfdb_c.so")
             self.add_build_file("lib/libfdb_c_shim.so", "lib/libfdb_c_shim.so")
-            self.add_build_file("server/fdbmonitor", "bin/fdbmonitor")
-            self.add_build_file("server/fdbserver", "bin/fdbserver")
-            self.add_build_file("server/fdbcli", "bin/fdbcli")
+            self.add_build_file("server/fdbmonitor", "bin/fdbmonitor", strip=True)
+            self.add_build_file("server/fdbserver", "bin/fdbserver", strip=True)
+            self.add_build_file("server/fdbcli", "bin/fdbcli", strip=True)
             tar.add(self.downloader.lib_path(self.release_version), "lib/libfdb_c.so")
             for version in self.external_client_versions:
                 tar.add(
