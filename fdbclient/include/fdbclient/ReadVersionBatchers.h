@@ -11,7 +11,7 @@ class ReadVersionBatchers {
 	PImpl<class ReadVersionBatchersImpl> impl;
 
 public:
-	ReadVersionBatchers(int capacity);
+	ReadVersionBatchers(int capacity, double expirationTimeout, double cleaningInterval);
 	~ReadVersionBatchers();
 	Future<GetReadVersionReply> getReadVersion(Database,
 	                                           TransactionPriority,

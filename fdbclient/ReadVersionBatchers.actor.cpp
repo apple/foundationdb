@@ -227,7 +227,9 @@ public:
 		}
 	}
 
-	bool isActive() const { return (now() - lastRequestTime < 60.0) || (outstandingRequests > 0); }
+	bool isActive(double expirationTimeout) const {
+		return (now() - lastRequestTime < expirationTimeout) || (outstandingRequests > 0);
+	}
 };
 
 class ReadVersionBatchersImpl {
@@ -237,18 +239,24 @@ class ReadVersionBatchersImpl {
 	int capacity;
 	Future<Void> cleaner;
 
-	ACTOR static Future<Void> cleanerActor(ReadVersionBatchersImpl* self) {
+	ACTOR static Future<Void> cleanerActor(ReadVersionBatchersImpl* self,
+	                                       double expirationTimeout,
+	                                       double expirationCheckInterval) {
 		loop {
-			wait(delay(5.0));
-			std::erase_if(self->batchers, [](auto const& it) {
+			wait(delay(expirationCheckInterval));
+			auto const _expirationTimeout = expirationTimeout;
+			std::erase_if(self->batchers, [_expirationTimeout](auto const& it) {
 				auto const& [_, batcher] = it;
-				return !batcher.isActive();
+				return !batcher.isActive(_expirationTimeout);
 			});
 		}
 	}
 
 public:
-	ReadVersionBatchersImpl(int capacity) : capacity(capacity) { cleaner = cleanerActor(this); }
+	ReadVersionBatchersImpl(int capacity, double expirationTimeout, double expirationCheckInterval)
+	  : capacity(capacity) {
+		cleaner = cleanerActor(this, expirationTimeout, expirationCheckInterval);
+	}
 
 	Future<GetReadVersionReply> getReadVersion(Database cx,
 	                                           TransactionPriority priority,
@@ -281,6 +289,7 @@ Future<GetReadVersionReply> ReadVersionBatchers::getReadVersion(Database cx,
 	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tags, debugID);
 }
 
-ReadVersionBatchers::ReadVersionBatchers(int capacity) : impl(PImpl<ReadVersionBatchersImpl>::create(capacity)) {}
+ReadVersionBatchers::ReadVersionBatchers(int capacity, double expirationTimeout, double expirationCheckInterval)
+  : impl(PImpl<ReadVersionBatchersImpl>::create(capacity, expirationTimeout, expirationCheckInterval)) {}
 
 ReadVersionBatchers::~ReadVersionBatchers() = default;
