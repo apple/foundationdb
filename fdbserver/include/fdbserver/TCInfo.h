@@ -234,7 +234,7 @@ public:
 
 	bool hasHealthyAvailableSpace(double minRatio) const override;
 
-	bool hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const;
+	bool hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const override;
 
 	unsigned getEligibilityCount(int combinedType) { return eligibilityCounter.getCount(combinedType); }
 	void increaseEligibilityCount(data_distribution::EligibilityCounter::Type t) { eligibilityCounter.increase(t); }
