@@ -472,7 +472,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 		wait(waitForAllReadyThenThrow(actors));
 		for (const auto& [ssid, res] : results) {
 			ASSERT(res.present());
-			if (!res.get()) {
+			if (!res.get()) { // Stop check if corruption detected
 				TraceEvent(SevError, "AuditLocationMetadataCorruptionDetected")
 				    .detail("By", "PreCheck")
 				    .detail("DataMoveID", dataMoveId)
@@ -525,7 +525,6 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 	}
 	state std::vector<Future<Void>> actors;
 	state std::unordered_map<uint64_t, Optional<bool>> results;
-	state bool anyError = false;
 	state Key rangeToReadBegin = range.begin;
 	state RangeResult readResultKS;
 	state RangeResult UIDtoTagMap;
@@ -585,18 +584,13 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 					wait(waitForAllReadyThenThrow(actors));
 					for (const auto& [idx, res] : results) {
 						ASSERT(res.present());
-						anyError = anyError || !res.get();
+						if (!res.get()) { // Stop check if corruption detected
+							throw location_metadata_corruption();
+						}
 					}
 					if (readResultKS.back().key < range.end) {
 						rangeToReadBegin = readResultKS.back().key;
 						continue;
-					} else if (anyError) {
-						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
-						    .detail("By", "PostCheck")
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("Context", context)
-						    .detail("AuditRange", range);
-						throw location_metadata_corruption();
 					} else {
 						TraceEvent(SevDebug, "AuditLocationMetadataComplete")
 						    .detail("By", "PostCheck")
@@ -622,16 +616,6 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 				    .detail("Context", context)
 				    .detail("AuditRange", range);
 				// Do the best to check any existing result when failure presents
-				// If any corruption detected in past rounds
-				if (anyError) { // Set in past rounds
-					TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
-					    .detail("By", "PostCheck")
-					    .detail("DataMoveID", dataMoveId)
-					    .detail("Context", context)
-					    .detail("AuditRange", range);
-					throw location_metadata_corruption();
-				}
-				// If any corruption detected in the current (failed) round
 				for (const auto& [idx, res] : results) {
 					if (res.present() && !res.get()) {
 						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
