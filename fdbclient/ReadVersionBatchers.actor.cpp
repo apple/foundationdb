@@ -230,12 +230,29 @@ public:
 	}
 };
 
+class Index {
+	uint32_t flags;
+	Optional<ThrottlingId> throttlingId;
+
+public:
+	Index(uint32_t flags, Optional<ThrottlingId> const& throttlingId) : flags(flags), throttlingId(throttlingId) {}
+	bool operator==(Index const& rhs) const { return (flags == rhs.flags) && (throttlingId == rhs.throttlingId); }
+	size_t hash() const {
+		size_t result = 0;
+		boost::hash_combine(result, flags);
+		boost::hash_combine(result, throttlingId);
+		return result;
+	}
+};
+
+struct HashIndex {
+	size_t operator()(Index const& index) const { return index.hash(); }
+};
+
 } // namespace
 
 class ReadVersionBatchersImpl {
-	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
-	// TODO: Use more efficient data structure:
-	std::map<Index, Batcher> batchers;
+	std::unordered_map<Index, Batcher, HashIndex> batchers;
 	int capacity;
 	Future<Void> cleaner;
 
@@ -265,7 +282,13 @@ public:
 	                                           SpanContext spanContext,
 	                                           TagSet tags,
 	                                           Optional<UID> debugID) {
-		auto const index = std::make_pair(flags, tenantGroup);
+		Optional<ThrottlingId> throttlingId;
+		if (tenantGroup.present()) {
+			throttlingId = ThrottlingIdRef::fromTenantGroup(tenantGroup.get());
+		} else if (tags.size()) {
+			throttlingId = ThrottlingIdRef::fromTag(*tags.begin());
+		}
+		Index index(flags, throttlingId);
 		auto it = batchers.find(index);
 		if (it == batchers.end()) {
 			if (batchers.size() == capacity) {

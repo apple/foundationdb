@@ -33,6 +33,20 @@ public:
 	}
 };
 
+namespace std {
+
+template <>
+struct hash<ThrottlingIdRef> {
+	size_t operator()(ThrottlingIdRef const& throttlingId) const { return throttlingId.hash(); }
+};
+
+template <>
+struct hash<Standalone<ThrottlingIdRef>> {
+	size_t operator()(Standalone<ThrottlingIdRef> const throttlingId) const { return throttlingId.hash(); }
+};
+
+} // namespace std
+
 struct HashThrottlingId {
 	size_t operator()(ThrottlingIdRef const& throttlingId) const;
 };
