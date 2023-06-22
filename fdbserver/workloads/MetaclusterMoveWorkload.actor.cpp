@@ -20,8 +20,6 @@
 #include <cstdint>
 #include <limits>
 #include <utility>
-#include "fdbclient/BackupAgent.actor.h"
-#include "fdbclient/ClusterConnectionMemoryRecord.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/Knobs.h"
@@ -93,6 +91,46 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int maxTenantGroups;
 	int tenantGroupCapacity;
 	int retryLimit;
+	metacluster::metadata::management::MovementRecord moveRecord;
+
+	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
+		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
+		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
+		maxTenants =
+		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
+		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
+		maxTenantGroups = deterministicRandom()->randomInt(
+		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
+		tenantGroupCapacity =
+		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
+		retryLimit = getOption(options, "retryLimit"_sr, 5);
+	}
+
+	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
+
+	TenantName chooseTenantName() {
+		TenantName tenant(format("tenant%08d", deterministicRandom()->randomInt(0, maxTenants)));
+		return tenant;
+	}
+
+	Optional<TenantGroupName> chooseTenantGroup(Optional<ClusterName> cluster = Optional<ClusterName>()) {
+		Optional<TenantGroupName> tenantGroup;
+		if (deterministicRandom()->coinflip()) {
+			if (!cluster.present()) {
+				tenantGroup =
+				    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
+			} else {
+				auto const& existingGroups = dataDbs[cluster.get()].tenantGroups;
+				if (!existingGroups.empty()) {
+					tenantGroup = deterministicRandom()->randomChoice(
+					    std::vector<TenantGroupName>(existingGroups.begin(), existingGroups.end()));
+				}
+			}
+		}
+
+		return tenantGroup;
+	}
 
 	static void updateTestData(MetaclusterMoveWorkload* self,
 	                           TenantGroupName tenantGroup,
@@ -133,47 +171,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			ASSERT_EQ(self->createdTenants[tId].cluster, oldCluster);
 			self->createdTenants[tId].cluster = newCluster;
 		}
-	}
-
-	metacluster::metadata::management::MovementRecord moveRecord;
-
-	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
-		transactionsPerSecond = getOption(options, "transactionsPerSecond"_sr, 5000.0) / clientCount;
-		nodeCount = getOption(options, "nodeCount"_sr, transactionsPerSecond * clientCount);
-		keyPrefix = unprintable(getOption(options, "keyPrefix"_sr, ""_sr).toString());
-		maxTenants =
-		    deterministicRandom()->randomInt(1, std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 100)) + 1);
-		initialTenants = std::min<int>(maxTenants, getOption(options, "initialTenants"_sr, 40));
-		maxTenantGroups = deterministicRandom()->randomInt(
-		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
-		tenantGroupCapacity =
-		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
-		retryLimit = getOption(options, "retryLimit"_sr, 5);
-	}
-
-	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
-
-	TenantName chooseTenantName() {
-		TenantName tenant(format("tenant%08d", deterministicRandom()->randomInt(0, maxTenants)));
-		return tenant;
-	}
-
-	Optional<TenantGroupName> chooseTenantGroup(Optional<ClusterName> cluster = Optional<ClusterName>()) {
-		Optional<TenantGroupName> tenantGroup;
-		if (deterministicRandom()->coinflip()) {
-			if (!cluster.present()) {
-				tenantGroup =
-				    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
-			} else {
-				auto const& existingGroups = dataDbs[cluster.get()].tenantGroups;
-				if (!existingGroups.empty()) {
-					tenantGroup = deterministicRandom()->randomChoice(
-					    std::vector<TenantGroupName>(existingGroups.begin(), existingGroups.end()));
-				}
-			}
-		}
-
-		return tenantGroup;
 	}
 
 	// Used to gradually increase capacity so that the tenants are somewhat evenly distributed across the clusters
@@ -333,7 +330,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 					break;
 				}
-				if (++tries == self->retryLimit) {
+				if (++tries >= self->retryLimit) {
 					TraceEvent("MetaclusterMoveAbortRetryLimitReached")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
@@ -374,7 +371,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("DestinationCluster", dstCluster);
 					break;
 				}
-				if (++tries == self->retryLimit) {
+				if (++tries >= self->retryLimit) {
 					TraceEvent("MetaclusterMoveStartRetryLimitReached")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
@@ -428,7 +425,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 					break;
 				}
-				if (++tries == self->retryLimit) {
+				if (++tries >= self->retryLimit) {
 					TraceEvent("MetaclusterMoveSwitchRetryLimitReached")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
@@ -480,7 +477,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("DestinationCluster", dstCluster);
 					break;
 				}
-				if (++tries == self->retryLimit) {
+				if (++tries >= self->retryLimit) {
 					TraceEvent("MetaclusterMoveFinishRetryLimitReached")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
@@ -493,7 +490,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					state metacluster::metadata::management::MovementRecord moveRecord =
 					    wait(getMoveRecord(self, tenantGroup));
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
-					TraceEvent("MetaclusterMoveStartAttemptedAbort")
+					TraceEvent("MetaclusterMoveFinishAttemptedAbort")
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster)
@@ -518,6 +515,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterMoveWorkload* self) {
+		// TODO: blobbify and set quotas
 		metacluster::DataClusterEntry clusterEntry;
 		clusterEntry.capacity.numTenantGroups = self->tenantGroupCapacity;
 
@@ -613,36 +611,43 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state Tuple beginTuple = Tuple::makeTuple(tenantGroup, runId.toString(), tenantName, headBegin);
 		state Tuple endTuple =
 		    Tuple::makeTuple(tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
-		state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints =
-		    wait(metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
-		        tr, beginTuple, endTuple, 2));
-		ASSERT(!splitPoints.results.empty());
-		state KeyRef headEnd = splitPoints.results[0].second;
-		metacluster::metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple);
-
 		state TenantName nextTenantName;
-		try {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			if (splitPoints.results.size() >= 2) {
-				Tuple nextTuple = splitPoints.results[1].first;
-				nextTenantName = nextTuple.getString(2);
-				Key nextKey = nextTuple.getString(3);
-				ASSERT_EQ(headEnd, nextKey);
-				metacluster::metadata::management::emergency_movement::movementQueue().set(
-				    tr, std::make_pair(tenantGroup, runId.toString()), std::make_pair(nextTenantName, headEnd));
-			} else {
-				metacluster::metadata::management::emergency_movement::movementQueue().erase(
-				    tr, std::make_pair(tenantGroup, runId.toString()));
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints =
+				    wait(metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
+				        tr, beginTuple, endTuple, 2));
+				ASSERT(!splitPoints.results.empty());
+				state KeyRef headEnd = splitPoints.results[0].second;
+				metacluster::metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple);
+
+				if (splitPoints.results.size() >= 2) {
+					Tuple nextTuple = splitPoints.results[1].first;
+					nextTenantName = nextTuple.getString(2);
+					Key nextKey = nextTuple.getString(3);
+					// The tuple ending with "\xff" will not exist as a key in splitPointsMap
+					// The next Tuple key should have the next tenant with the empty key ""
+					if (headEnd != nextKey) {
+						ASSERT_NE(nextTenantName, tenantName);
+					}
+					metacluster::metadata::management::emergency_movement::movementQueue().set(
+					    tr, std::make_pair(tenantGroup, runId.toString()), std::make_pair(nextTenantName, headEnd));
+				} else {
+					metacluster::metadata::management::emergency_movement::movementQueue().erase(
+					    tr, std::make_pair(tenantGroup, runId.toString()));
+				}
+				wait(safeThreadFutureToFuture(tr->commit()));
+				// Don't do the copy if changing tenants (t1, \xff), (t2, "")
+				if (nextTenantName == tenantName) {
+					wait(success(copyTenantData(self, tenantGroup, tenantName, srcDb, dstDb, headBegin, headEnd)));
+				}
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
-			wait(safeThreadFutureToFuture(tr->commit()));
-		} catch (Error& e) {
-			wait(safeThreadFutureToFuture(tr->onError(e)));
 		}
 
-		// Don't do the copy if changing tenants (t1, \xff), (t2, "")
-		if (nextTenantName == tenantName) {
-			wait(success(copyTenantData(self, tenantGroup, tenantName, srcDb, dstDb, headBegin, headEnd)));
-		}
 		return Void();
 	}
 
@@ -650,11 +655,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                       TenantGroupName tenantGroup,
 	                                       Database srcDb,
 	                                       Database dstDb) {
-		state Reference<ITransaction> tr = self->managementDb->createTransaction();
 		state UID runId = self->moveRecord.runId;
 		state std::pair<TenantName, Key> queueHead;
 		state Optional<std::pair<TenantName, Key>> optionalQueueHead;
 		loop {
+			state Reference<ITransaction> tr = self->managementDb->createTransaction();
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			wait(store(optionalQueueHead,
 			           metacluster::metadata::management::emergency_movement::movementQueue().get(
 			               tr, std::make_pair(tenantGroup, runId.toString()))));
@@ -715,14 +721,12 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			} catch (Error& e) {
 				state Error err(e);
 				TraceEvent("MetaclusterMoveWorkloadError").error(err);
-				if (err.code() == error_code_invalid_tenant_move) {
-					if (srcCluster == dstCluster) {
-						TraceEvent("MetaclusterMoveWorkloadSameSrcDst")
-						    .detail("TenantGroup", tenantGroup)
-						    .detail("ClusterName", srcCluster);
-						// Change dst cluster since src is linked to the tenant group
-						dstCluster = self->chooseClusterName();
-					}
+				if (err.code() == error_code_invalid_tenant_move && srcCluster == dstCluster) {
+					TraceEvent("MetaclusterMoveWorkloadSameSrcDst")
+					    .detail("TenantGroup", tenantGroup)
+					    .detail("ClusterName", srcCluster);
+					// Change dst cluster since src is linked to the tenant group
+					dstCluster = self->chooseClusterName();
 					continue;
 				}
 				throw err;

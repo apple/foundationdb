@@ -862,6 +862,10 @@ struct AbortTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(store(self->moveRecord,
 		           initMoveParams(tr, self->tenantGroup, &self->tenantsInGroup, srcName, dstName, true)));
+		if (self->moveRecord.mState == metadata::management::MovementState::FINISH_UNLOCK) {
+			TraceEvent("TenantMoveAbortNotAllowedAfterDestUnlocked");
+			throw invalid_tenant_move();
+		}
 		// Mark movement as aborting and write it into metadata immediately
 		self->moveRecord.aborting = true;
 		metadata::management::emergency_movement::emergencyMovements().set(tr, self->tenantGroup, self->moveRecord);
