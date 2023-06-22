@@ -108,8 +108,10 @@ class Batcher {
 		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
 	};
 
+	int outstandingRequests = 0;
 	PromiseStream<VersionRequest> stream;
 	Future<Void> actor;
+	double lastRequestTime = now();
 
 	ACTOR static Future<Void> readVersionBatcher(Batcher* self,
 	                                             DatabaseContext* cx,
@@ -118,7 +120,7 @@ class Batcher {
 	                                             Optional<TenantGroupName> tenantGroup) {
 		state std::vector<Promise<GetReadVersionReply>> requests;
 		state PromiseStream<Future<Void>> addActor;
-		state Future<Void> collection = actorCollection(addActor.getFuture());
+		state Future<Void> collection = actorCollection(addActor.getFuture(), &self->outstandingRequests);
 		state Future<Void> timeout;
 		state Optional<UID> debugID;
 		state bool send_batch;
@@ -210,6 +212,7 @@ class Batcher {
 
 public:
 	Future<GetReadVersionReply> getReadVersion(SpanContext spanContext, TagSet tags, Optional<UID> debugId) {
+		lastRequestTime = now();
 		auto const req = VersionRequest(spanContext, tags, debugId);
 		stream.send(req);
 		return req.reply.getFuture();
@@ -223,6 +226,8 @@ public:
 			actor = readVersionBatcher(this, cx.getPtr(), priority, flags, tenantGroup);
 		}
 	}
+
+	bool isActive() const { return (now() - lastRequestTime < 60.0) || (outstandingRequests > 0); }
 };
 
 class ReadVersionBatchersImpl {
@@ -230,9 +235,20 @@ class ReadVersionBatchersImpl {
 	// TODO: Use more efficient data structure:
 	std::map<Index, Batcher> batchers;
 	int capacity;
+	Future<Void> cleaner;
+
+	ACTOR static Future<Void> cleanerActor(ReadVersionBatchersImpl* self) {
+		loop {
+			wait(delay(5.0));
+			std::erase_if(self->batchers, [](auto const& it) {
+				auto const& [_, batcher] = it;
+				return !batcher.isActive();
+			});
+		}
+	}
 
 public:
-	ReadVersionBatchersImpl(int capacity) : capacity(capacity) {}
+	ReadVersionBatchersImpl(int capacity) : capacity(capacity) { cleaner = cleanerActor(this); }
 
 	Future<GetReadVersionReply> getReadVersion(Database cx,
 	                                           TransactionPriority priority,
