@@ -380,29 +380,27 @@ TEST_CASE("fdb_future_set_callback") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_future_cancel after future completion") {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get("foo", false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//// Should have no effect
-		//f1.cancel();
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-		//break;
-	//}
-//}
+
+TEST_CASE("fdb_future_cancel after future completion") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		// Should have no effect
+		f1.cancel();
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_future_is_ready") {
 	//fdb::Transaction tr(db);
