@@ -94,34 +94,28 @@ TEST_CASE("500ms_transaction_timeout") {
 
 	int64_t timeout = 500;
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
 
 	auto grvFuture = tr.getReadVersion();
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1031);
 
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-	//fdb_error_t err = wait_future(grvFuture);
-
-	//CHECK(err == 1031);
 	validateTimeoutDuration(timeout / 1000.0, start);
 }
-//
-//TEST_CASE("500ms_transaction_timeout_after_op") {
-	//auto start = std::chrono::steady_clock::now();
-//
-	//fdb::Transaction tr(db);
-	//fdb::Int64Future grvFuture = tr.get_read_version();
-//
-	//int64_t timeout = 500;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, reinterpret_cast<const uint8_t*>(&timeout), sizeof(timeout)));
-//
-	//fdb_error_t err = wait_future(grvFuture);
-//
-	//CHECK(err == 1031);
-	//validateTimeoutDuration(timeout / 1000.0, start);
-//}
-//
+
+TEST_CASE("500ms_transaction_timeout_after_op") {
+	auto start = std::chrono::steady_clock::now();
+
+	fdb::Transaction tr(db.createTransaction());
+	auto grvFuture = tr.getReadVersion();
+
+	int64_t timeout = 500;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	auto err = waitFuture(grvFuture);
+	CHECK(err.code() == 1031);
+	validateTimeoutDuration(timeout / 1000.0, start);
+}
+
 //TEST_CASE("500ms_transaction_timeout_before_op_2000ms_after") {
 	//auto start = std::chrono::steady_clock::now();
 //
