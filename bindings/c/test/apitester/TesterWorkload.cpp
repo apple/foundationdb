@@ -85,6 +85,7 @@ WorkloadBase::WorkloadBase(const WorkloadConfig& config)
 	maxErrors = config.getIntOption("maxErrors", 10);
 	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
 	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
+	enableTransactionTracing = config.getBoolOption("enableTransactionTracing", false);
 	workloadId = fmt::format("{}{}", config.name, clientId);
 }
 
@@ -140,6 +141,12 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    if (transactional && maxTxTimeoutMs > 0) {
 			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
 			    ctx->tx().setOption(FDB_TR_OPTION_TIMEOUT, timeoutMs);
+		    }
+		    if (enableTransactionTracing) {
+			    auto traceId = Random::get().randomHexString<std::string>(32, 32);
+			    auto spanId = Random::get().randomHexString<std::string>(16, 16);
+			    ctx->tx().setOption(FDB_TR_OPTION_SERVER_REQUEST_TRACING);
+			    ctx->tx().setOption(FDB_TR_OPTION_TRACE_PARENT, fmt::format("00-{}-{}-01", traceId, spanId));
 		    }
 		    startFct(ctx);
 	    },

@@ -309,6 +309,7 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_ENABLE_RUN_LOOP_PROFILING);
 	}
 
+	fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, "log_file");
 	if (options.trace) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);

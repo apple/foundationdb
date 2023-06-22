@@ -77,6 +77,22 @@ public:
 		return str;
 	}
 
+	template <class StringType>
+	StringType randomHexString(int minLength, int maxLength) {
+		int length = randomInt(minLength, maxLength);
+		StringType str;
+		str.reserve(length);
+		for (int i = 0; i < length; i++) {
+			int digit = randomInt(0, 15);
+			if (digit < 10) {
+				str += (char)('0' + digit);
+			} else {
+				str += (char)('a' + (digit - 10));
+			}
+		}
+		return str;
+	}
+
 	fdb::ByteString randomByteStringLowerCase(int minLength, int maxLength) {
 		return randomStringLowerCase<fdb::ByteString>(minLength, maxLength);
 	}
