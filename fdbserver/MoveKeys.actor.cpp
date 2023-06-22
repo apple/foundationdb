@@ -396,12 +396,9 @@ ACTOR Future<bool> validateRangeAssignment(Database occ,
 			UID shardId;
 			bool assigned, emptyRange;
 			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
-			decodeServerKeysValue(readResult[0].value, assigned, emptyRange, enablePSM, shardId);
+			decodeServerKeysValue(readResult[i].value, assigned, emptyRange, enablePSM, shardId);
 			if (!assigned) {
-				// We do not use SevError here because we do not want to crash DD at this point
-				// We want to crash DD after all corruptions on relevant servers for the same range have
-				// been detected.
-				TraceEvent(SevWarnAlways, "ValidateRangeAssignmentCorruptionDetected")
+				TraceEvent(SevError, "ValidateRangeAssignmentCorruptionDetected")
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range)
