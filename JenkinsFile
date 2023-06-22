@@ -9,7 +9,6 @@ pipeline {
         stage('checkout') {
             steps {
                 script {
-                    abortPreviousBuilds()
                     repo_url = "https://github.com/snowflakedb/frostdb.git"
                     scmInfo = checkout scm
                     println("${scmInfo}")
@@ -17,6 +16,8 @@ pipeline {
                     user_id = ""
                     labels = []
                     if (env.BRANCH_NAME.startsWith("PR-")) {
+                        //Aborting previous runs if any in progress to avoid running multiple runs for same PR
+                        abortPreviousBuilds()
                         labels = getLabels()
                     }
                 }
@@ -94,7 +95,8 @@ pipeline {
                     }
                     // if any changes detected in path "/contrib/build_image/" run FDB_ECR/Build_Image job
                     def changedFiles = getChangedFiles()
-                    if (changedFiles.contains("/contrib/build_image/")) {
+                    println(changedFiles)
+                    if (changedFiles.contains("contrib/build_image/")) {
                         println("**** Starting FDB Build Image Job  **** ")
                         createCheck("FDB Build Image", "FDB Build Image", "In Progress", "in_progress", "");
                         def j = build job: "FDB_ECR/Build_Image",

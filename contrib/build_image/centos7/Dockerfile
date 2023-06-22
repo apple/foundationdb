@@ -3,7 +3,7 @@ FROM centos:7 as build
 ARG DEVTOOLSET_VERSION=11
 
 WORKDIR /tmp
-# skip installing elrepo-kernel on aarch64 ---
+# skip installing elrepo-kernel on aarch64 -------
 RUN if [ ! "$(uname -m)" == "aarch64" ]; then \
         rpm --import https://www.elrepo.org/RPM-GPG-KEY-elrepo.org && \
         yum -y install https://www.elrepo.org/elrepo-release-7.el7.elrepo.noarch.rpm && \
