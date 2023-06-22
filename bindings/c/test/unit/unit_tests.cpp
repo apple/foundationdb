@@ -31,6 +31,7 @@
 #include <mutex>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 #include <thread>
 #include <tuple>
 #include <vector>
@@ -48,6 +49,8 @@
 
 #include "test/fdb_api.hpp"
 
+using namespace std::string_view_literals;
+
 void fdbCheck(const fdb::Error& err) {
 	if (err) {
 		std::cerr << err.what() << std::endl;
@@ -63,6 +66,11 @@ fdb::Database fdbOpenDatabase(const char* clusterFilePath) {
 	}
 	// Not reachable
 	return fdb::Database();
+}
+
+fdb::Error waitFuture(fdb::Future& f) {
+	fdbCheck(f.blockUntilReady());
+	return f.error();
 }
 
 static fdb::Database db;
@@ -347,35 +355,31 @@ private:
 	bool complete = false;
 };
 
-//TEST_CASE("fdb_future_set_callback") {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-//
-		//struct Context {
-			//FdbEvent event;
-		//};
-		//Context context;
-		//fdb_check(f1.set_callback(
-		    //+[](FDBFuture*, void* param) {
-			    //auto* context = static_cast<Context*>(param);
-			    //context->event.set();
-		    //},
-		    //&context));
-//
-		//fdb_error_t err = wait_future(f1);
-//
-		//context.event.wait(); // Wait until callback is called
-//
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//break;
-	//}
-//}
+TEST_CASE("fdb_future_set_callback") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+
+		struct Context {
+			FdbEvent event;
+		};
+		Context context;
+		f1.then([&context](fdb::Future f) {
+			context.event.set();
+		});
+
+		auto err = waitFuture(f1);
+		context.event.wait(); // Wait until callback is called
+
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_future_cancel after future completion") {
 	//fdb::Transaction tr(db);
