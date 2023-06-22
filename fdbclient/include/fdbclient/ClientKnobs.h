@@ -275,6 +275,8 @@ public:
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
+	// Maximum number of concurrently running GRV request batchers supported
+	int MAX_GRV_BATCHERS;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;

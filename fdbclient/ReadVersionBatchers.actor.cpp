@@ -229,8 +229,11 @@ class ReadVersionBatchersImpl {
 	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
 	// TODO: Use more efficient data structure:
 	std::map<Index, Batcher> batchers;
+	int capacity;
 
 public:
+	ReadVersionBatchersImpl(int capacity) : capacity(capacity) {}
+
 	Future<GetReadVersionReply> getReadVersion(Database cx,
 	                                           TransactionPriority priority,
 	                                           uint32_t flags,
@@ -238,7 +241,15 @@ public:
 	                                           SpanContext spanContext,
 	                                           TagSet tags,
 	                                           Optional<UID> debugID) {
-		auto& batcher = batchers[std::make_pair(flags, tenantGroup)];
+		auto const index = std::make_pair(flags, tenantGroup);
+		auto it = batchers.find(index);
+		if (it == batchers.end()) {
+			if (batchers.size() == capacity) {
+				throw too_many_throttling_ids();
+			}
+			it = batchers.try_emplace(index).first;
+		}
+		auto& batcher = it->second;
 		batcher.startActor(cx, priority, flags, tenantGroup);
 		return batcher.getReadVersion(spanContext, tags, debugID);
 	}
@@ -254,6 +265,6 @@ Future<GetReadVersionReply> ReadVersionBatchers::getReadVersion(Database cx,
 	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tags, debugID);
 }
 
-ReadVersionBatchers::ReadVersionBatchers() : impl(PImpl<ReadVersionBatchersImpl>::create()) {}
+ReadVersionBatchers::ReadVersionBatchers(int capacity) : impl(PImpl<ReadVersionBatchersImpl>::create(capacity)) {}
 
 ReadVersionBatchers::~ReadVersionBatchers() = default;

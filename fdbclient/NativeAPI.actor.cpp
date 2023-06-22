@@ -1514,9 +1514,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  Optional<TenantName> defaultTenant)
   : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
     connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
-    enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant), internal(internal),
-    cc("TransactionMetrics", dbId.toString()), transactionReadVersions("ReadVersions", cc),
-    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+    enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
+    readVersionBatchers(CLIENT_KNOBS->MAX_GRV_BATCHERS), internal(internal), cc("TransactionMetrics", dbId.toString()),
+    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
@@ -1821,8 +1821,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 }
 
 DatabaseContext::DatabaseContext(const Error& err)
-  : deferredError(err), internal(IsInternal::False), cc("TransactionMetrics"),
-    transactionReadVersions("ReadVersions", cc), transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
+  : deferredError(err), readVersionBatchers(CLIENT_KNOBS->MAX_GRV_BATCHERS), internal(IsInternal::False),
+    cc("TransactionMetrics"), transactionReadVersions("ReadVersions", cc),
+    transactionReadVersionsThrottled("ReadVersionsThrottled", cc),
     transactionReadVersionsCompleted("ReadVersionsCompleted", cc),
     transactionReadVersionBatches("ReadVersionBatches", cc),
     transactionBatchReadVersions("BatchPriorityReadVersions", cc),
