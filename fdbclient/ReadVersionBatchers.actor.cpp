@@ -97,7 +97,7 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 
 } // namespace
 
-class ReadVersionBatcher {
+class Batcher {
 	struct VersionRequest {
 		SpanContext spanContext;
 		Promise<GetReadVersionReply> reply;
@@ -111,7 +111,7 @@ class ReadVersionBatcher {
 	PromiseStream<VersionRequest> stream;
 	Future<Void> actor;
 
-	ACTOR static Future<Void> readVersionBatcher(ReadVersionBatcher* self,
+	ACTOR static Future<Void> readVersionBatcher(Batcher* self,
 	                                             DatabaseContext* cx,
 	                                             TransactionPriority priority,
 	                                             uint32_t flags,
@@ -146,7 +146,7 @@ class ReadVersionBatcher {
 		loop {
 			send_batch = false;
 			choose {
-				when(ReadVersionBatcher::VersionRequest req = waitNext(self->stream.getFuture())) {
+				when(VersionRequest req = waitNext(self->stream.getFuture())) {
 					if (req.debugID.present()) {
 						if (!debugID.present()) {
 							debugID = nondeterministicRandom()->randomUniqueID();
@@ -228,7 +228,7 @@ public:
 class ReadVersionBatchersImpl {
 	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
 	// TODO: Use more efficient data structure:
-	std::map<Index, ReadVersionBatcher> batchers;
+	std::map<Index, Batcher> batchers;
 
 public:
 	Future<GetReadVersionReply> getReadVersion(Database cx,
