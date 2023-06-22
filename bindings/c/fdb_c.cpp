@@ -1305,7 +1305,8 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v
 		           if (input.isError()) {
 			           return ErrorOr<ReadBGDescriptionsApiResultV1>(input.getError());
 		           } else {
-			           *read_version_out = input.get().getPtr()->read_version;
+			           if (read_version_out)
+				           *read_version_out = input.get().getPtr()->read_version;
 			           return ErrorOr<ReadBGDescriptionsApiResultV1>(convertBlobGranulesDescriptionsToV1(input.get()));
 		           }
 	           })
