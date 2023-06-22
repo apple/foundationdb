@@ -136,4 +136,6 @@ private:
 	void parseUrl(const std::string& fullUrl);
 };
 
+double continuousTimeDecay(double initialValue, double decayRate, double time);
+
 #endif
