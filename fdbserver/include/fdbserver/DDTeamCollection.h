@@ -287,7 +287,6 @@ protected:
 		double pivotAvailableSpaceRatio = 100.0;
 		double pivotCPU = 100.0;
 		int64_t pivotLoadBytes = std::numeric_limits<int64_t>::max();
-		double strictPivotAvailableSpaceRatio = 100.0;
 		double strictPivotCPU = 100.0;
 		double minTeamAvgCPU = std::numeric_limits<double>::max();
 	} teamPivots;
@@ -331,9 +330,10 @@ protected:
 	// When "wantHealthy" is true, only return if the team is healthy.
 	Optional<Reference<IDataDistributionTeam>> findTeamFromServers(const std::vector<UID>& servers, bool wantHealthy);
 
-	// Evaluate the CPU and AvailableSpace of source team to determine if a shard can
+	// Evaluate the CPU and LoadBytes of source team to determine if a shard can
 	// remain on the source team rather than being moved to a new destination team.
-	Optional<Reference<IDataDistributionTeam>> evaluateSourceTeam(const std::vector<UID>& servers);
+	Optional<Reference<IDataDistributionTeam>> evaluateSourceTeam(const std::vector<UID>& servers,
+	                                                              const double inflightPenalty);
 
 	Future<Void> logOnCompletion(Future<Void> signal);
 
