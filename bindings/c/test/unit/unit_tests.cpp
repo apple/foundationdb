@@ -401,24 +401,24 @@ TEST_CASE("fdb_future_cancel after future completion") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_future_is_ready") {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get("foo", false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//CHECK(f1.is_ready());
-		//break;
-	//}
-//}
-//
+
+TEST_CASE("fdb_future_is_ready") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		CHECK(f1.ready());
+		break;
+	}
+}
+
 //TEST_CASE("fdb_future_release_memory") {
 	//fdb::Transaction tr(db);
 	//while (1) {
@@ -449,25 +449,25 @@ TEST_CASE("fdb_future_cancel after future completion") {
 		//break;
 	//}
 //}
-//
-//TEST_CASE("fdb_future_get_int64") {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::Int64Future f1 = tr.get_read_version();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int64_t rv;
-		//fdb_check(f1.get(&rv));
-		//CHECK(rv > 0);
-		//break;
-	//}
-//}
+
+TEST_CASE("fdb_future_get_int64") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getReadVersion();
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		int64_t rv;
+		fdbCheck(f1.getNothrow(rv));
+		CHECK(rv > 0);
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_future_get_key") {
 	//insert_data(db, create_data({ { "a", "1" }, { "baz", "2" }, { "bar", "3" } }));

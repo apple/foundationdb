@@ -557,8 +557,7 @@ public:
 	Error getNothrow(typename VarTraits::Type& var) const noexcept {
 		assert(valid());
 		assert(!error());
-		auto out = typename VarTraits::Type{};
-		return VarTraits::extract(f.get(), out);
+		return VarTraits::extract(f.get(), var);
 	}
 
 	template <class UserFunc>
