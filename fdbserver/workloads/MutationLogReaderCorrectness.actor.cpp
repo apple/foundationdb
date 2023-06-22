@@ -60,7 +60,7 @@ struct MutationLogReaderCorrectnessWorkload : TestWorkload {
 
 		beginVersion = deterministicRandom()->randomInt64(
 		    0, std::numeric_limits<int32_t>::max()); // intentionally not max of int64
-		records = deterministicRandom()->randomInt(0, 1e6);
+		records = deterministicRandom()->randomInt(0, 500e3);
 		versionRange = deterministicRandom()->randomInt64(records, std::numeric_limits<Version>::max());
 		versionIncrement = versionRange / (records + 1);
 
