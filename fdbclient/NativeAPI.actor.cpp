@@ -7423,13 +7423,11 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	if (tenant().present()) {
 		tenantGroup = tenant().get()->tenantGroup();
 	}
-	auto& batcher = cx->versionBatchers[std::make_pair(flags, tenantGroup)];
-	batcher.startActor(cx, options.priority, flags, tenantGroup);
-
 	Location location = "NAPI:getReadVersion"_loc;
 	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
-	auto const reply = batcher.getReadVersion(derivedSpanContext, options.tags, versionDebugID);
+	auto const reply = cx->readVersionBatchers.getReadVersion(
+	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.tags, versionDebugID);
 	startTime = now();
 	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
 }

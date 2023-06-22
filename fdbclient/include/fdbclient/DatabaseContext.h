@@ -21,7 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
-#include "fdbclient/ReadVersionBatcher.h"
+#include "fdbclient/ReadVersionBatchers.h"
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
@@ -509,8 +509,7 @@ public:
 	// key-space is used.
 	Optional<TenantName> defaultTenant;
 
-	using VersionBatcherIndex = std::pair<uint32_t, Optional<TenantGroupName>>;
-	std::map<VersionBatcherIndex, ReadVersionBatcher> versionBatchers;
+	ReadVersionBatchers readVersionBatchers;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
