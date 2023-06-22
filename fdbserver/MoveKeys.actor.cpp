@@ -374,7 +374,9 @@ ACTOR Future<Optional<UID>> checkReadWrite(Future<ErrorOr<GetShardStateReply>> f
 	return Optional<UID>(uid);
 }
 
-ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
+// Must propagate corruption signal to outside
+ACTOR Future<bool> validateRangeAssignment(Database occ,
+                                           Transaction* tr,
                                            KeyRange range,
                                            UID ssid,
                                            std::string context,
@@ -396,7 +398,10 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
 			EnablePhysicalShardMove enablePSM = EnablePhysicalShardMove::False;
 			decodeServerKeysValue(readResult[0].value, assigned, emptyRange, enablePSM, shardId);
 			if (!assigned) {
-				TraceEvent(SevError, "ValidateRangeAssignmentError")
+				// We do not use SevError here because we do not want to crash DD at this point
+				// We want to crash DD after all corruptions on relevant servers for the same range have
+				// been detected.
+				TraceEvent(SevWarnAlways, "ValidateRangeAssignmentCorruptionDetected")
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range)
@@ -409,6 +414,9 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
 				allCorrect = false;
 			}
 		}
+		if (!allCorrect) {
+			break; // Stop checking even for incomplete read
+		}
 		if (readResult.back().key < range.end) {
 			toReadRangeBegin = readResult.back().key;
 			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentMultipleReads")
@@ -418,6 +426,21 @@ ACTOR Future<bool> validateRangeAssignment(Transaction* tr,
 			continue;
 		} else {
 			break;
+		}
+	}
+	if (!allCorrect) {
+		try { // If corruption detected, stop using DD
+			int _ = wait(setDDMode(occ, 0));
+			TraceEvent(SevInfo, "ValidateRangeAssignmentCorruptionDetectedAndDDStopped")
+			    .detail("DataMoveID", dataMoveId)
+			    .detail("Range", range)
+			    .detail("StorageServer", ssid);
+		} catch (Error& e) {
+			TraceEvent(SevWarnAlways, "ValidateRangeAssignmentCorruptionDetectedButFailedToStopDD")
+			    .detail("DataMoveID", dataMoveId)
+			    .detail("Range", range)
+			    .detail("StorageServer", ssid);
+			// We do not want failure of setDDMode hide the corruption signal
 		}
 	}
 	return allCorrect;
@@ -436,7 +459,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 		return Void();
 	}
 	state std::vector<Future<Void>> actors;
-	state std::unordered_map<UID, bool> results;
+	state std::unordered_map<UID, Optional<bool>> results;
 	TraceEvent(SevDebug, "AuditLocationMetadataStart")
 	    .detail("By", "PreCheck")
 	    .detail("DataMoveID", dataMoveId)
@@ -447,19 +470,13 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 		actors.clear();
 		results.clear();
 		for (const auto& ssid : servers) {
-			actors.push_back(store(results[ssid], validateRangeAssignment(tr, range, ssid, context, dataMoveId)));
+			actors.push_back(store(results[ssid], validateRangeAssignment(occ, tr, range, ssid, context, dataMoveId)));
 		}
 		wait(waitForAllReadyThenThrow(actors));
 		for (const auto& [ssid, res] : results) {
-			if (!res) {
+			ASSERT(res.present());
+			if (!res.get()) {
 				TraceEvent(SevError, "AuditLocationMetadataCorruptionDetected")
-				    .detail("By", "PreCheck")
-				    .detail("DataMoveID", dataMoveId)
-				    .detail("Servers", describe(servers))
-				    .detail("Context", context)
-				    .detail("AuditRange", range);
-				int _ = wait(setDDMode(occ, 0));
-				TraceEvent(SevInfo, "AuditLocationMetadataDDStopped")
 				    .detail("By", "PreCheck")
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Servers", describe(servers))
@@ -484,7 +501,19 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
-			// Exit silently
+			// Do the best to check any existing result when failure presents
+			for (const auto& [ssid, res] : results) {
+				if (res.present() && !res.get()) {
+					TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
+					    .detail("By", "PreCheck")
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("Servers", describe(servers))
+					    .detail("Context", context)
+					    .detail("AuditRange", range);
+					throw location_metadata_corruption();
+				}
+			}
+			// If no corruption detected, exit silently
 		}
 	}
 	return Void();
@@ -498,7 +527,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 		return Void();
 	}
 	state std::vector<Future<Void>> actors;
-	state std::unordered_map<uint64_t, bool> results;
+	state std::unordered_map<uint64_t, Optional<bool>> results;
 	state bool anyError = false;
 	state Key rangeToReadBegin = range.begin;
 	state RangeResult readResultKS;
@@ -547,7 +576,8 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 						for (const auto& ssid : servers) {
 							actors.push_back(
 							    store(results[resIdx],
-							          validateRangeAssignment(&tr,
+							          validateRangeAssignment(occ,
+							                                  &tr,
 							                                  KeyRangeRef(readResultKS[i].key, readResultKS[i + 1].key),
 							                                  ssid,
 							                                  context,
@@ -557,19 +587,14 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 					}
 					wait(waitForAllReadyThenThrow(actors));
 					for (const auto& [idx, res] : results) {
-						anyError = anyError || !res;
+						ASSERT(res.present());
+						anyError = anyError || !res.get();
 					}
 					if (readResultKS.back().key < range.end) {
 						rangeToReadBegin = readResultKS.back().key;
 						continue;
 					} else if (anyError) {
-						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetected")
-						    .detail("By", "PostCheck")
-						    .detail("DataMoveID", dataMoveId)
-						    .detail("Context", context)
-						    .detail("AuditRange", range);
-						int _ = wait(setDDMode(occ, 0));
-						TraceEvent(SevInfo, "AuditLocationMetadataDDStopped")
+						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
 						    .detail("By", "PostCheck")
 						    .detail("DataMoveID", dataMoveId)
 						    .detail("Context", context)
@@ -599,7 +624,29 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 				    .detail("DataMoveID", dataMoveId)
 				    .detail("Context", context)
 				    .detail("AuditRange", range);
-				break; // Exit silently
+				// Do the best to check any existing result when failure presents
+				// If any corruption detected in past rounds
+				if (anyError) { // Set in past rounds
+					TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
+					    .detail("By", "PostCheck")
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("Context", context)
+					    .detail("AuditRange", range);
+					throw location_metadata_corruption();
+				}
+				// If any corruption detected in the current (failed) round
+				for (const auto& [idx, res] : results) {
+					if (res.present() && !res.get()) {
+						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
+						    .detail("By", "PostCheck")
+						    .detail("DataMoveID", dataMoveId)
+						    .detail("Context", context)
+						    .detail("AuditRange", range);
+						throw location_metadata_corruption();
+					}
+				}
+				// If no corruption detected, exit silently
+				break;
 			} else {
 				wait(delay(0.5));
 				retryCount++;
