@@ -560,8 +560,7 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 					// Read serverKeys
 					actors.clear();
 					state uint64_t resIdx = 0;
-					state int i = 0;
-					for (; i < readResultKS.size() - 1; ++i) {
+					for (int i = 0; i < readResultKS.size() - 1; ++i) {
 						std::vector<UID> src;
 						std::vector<UID> dest;
 						UID srcID;
