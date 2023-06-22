@@ -1,9 +1,11 @@
 /**
- * ReadVersionBatcher.actor.cpp
+ * ReadVersionBatchers.actor.cpp
  */
 
-#include "fdbclient/ReadVersionBatcher.h"
+#include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/DatabaseContext.h"
+#include "fdbclient/ReadVersionBatchers.h"
+#include "flow/actorcompiler.h" // must be last include
 
 namespace {
 
@@ -95,8 +97,20 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 
 } // namespace
 
-class ReadVersionBatcherImpl {
-public:
+class ReadVersionBatcher {
+	struct VersionRequest {
+		SpanContext spanContext;
+		Promise<GetReadVersionReply> reply;
+		TagSet tags;
+		Optional<UID> debugID;
+
+		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
+		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
+	};
+
+	PromiseStream<VersionRequest> stream;
+	Future<Void> actor;
+
 	ACTOR static Future<Void> readVersionBatcher(ReadVersionBatcher* self,
 	                                             DatabaseContext* cx,
 	                                             TransactionPriority priority,
@@ -194,21 +208,52 @@ public:
 		}
 	}
 
-}; // class ReadVersionBatcherImpl
-
-Future<GetReadVersionReply> ReadVersionBatcher::getReadVersion(SpanContext spanContext,
-                                                               TagSet tags,
-                                                               Optional<UID> debugId) {
-	auto const req = VersionRequest(spanContext, tags, debugId);
-	stream.send(req);
-	return req.reply.getFuture();
-}
-
-void ReadVersionBatcher::startActor(Database cx,
-                                    TransactionPriority priority,
-                                    uint32_t flags,
-                                    Optional<TenantGroupName> const& tenantGroup) {
-	if (!actor.isValid()) {
-		actor = ReadVersionBatcherImpl::readVersionBatcher(this, cx.getPtr(), priority, flags, tenantGroup);
+public:
+	Future<GetReadVersionReply> getReadVersion(SpanContext spanContext, TagSet tags, Optional<UID> debugId) {
+		auto const req = VersionRequest(spanContext, tags, debugId);
+		stream.send(req);
+		return req.reply.getFuture();
 	}
+
+	void startActor(Database cx,
+	                TransactionPriority priority,
+	                uint32_t flags,
+	                Optional<TenantGroupName> const& tenantGroup) {
+		if (!actor.isValid()) {
+			actor = readVersionBatcher(this, cx.getPtr(), priority, flags, tenantGroup);
+		}
+	}
+};
+
+class ReadVersionBatchersImpl {
+	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
+	// TODO: Use more efficient data structure:
+	std::map<Index, ReadVersionBatcher> batchers;
+
+public:
+	Future<GetReadVersionReply> getReadVersion(Database cx,
+	                                           TransactionPriority priority,
+	                                           uint32_t flags,
+	                                           Optional<TenantGroupName> const& tenantGroup,
+	                                           SpanContext spanContext,
+	                                           TagSet tags,
+	                                           Optional<UID> debugID) {
+		auto& batcher = batchers[std::make_pair(flags, tenantGroup)];
+		batcher.startActor(cx, priority, flags, tenantGroup);
+		return batcher.getReadVersion(spanContext, tags, debugID);
+	}
+};
+
+Future<GetReadVersionReply> ReadVersionBatchers::getReadVersion(Database cx,
+                                                                TransactionPriority priority,
+                                                                uint32_t flags,
+                                                                Optional<TenantGroupName> const& tenantGroup,
+                                                                SpanContext context,
+                                                                TagSet tags,
+                                                                Optional<UID> debugID) {
+	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tags, debugID);
 }
+
+ReadVersionBatchers::ReadVersionBatchers() : impl(PImpl<ReadVersionBatchersImpl>::create()) {}
+
+ReadVersionBatchers::~ReadVersionBatchers() = default;

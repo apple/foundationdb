@@ -4,14 +4,15 @@
 
 #pragma once
 
-#include "fdbclient/ReadVersionBatcher.h"
+#include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/PImpl.h"
 
 class ReadVersionBatchers {
-	using Index = std::pair<uint32_t, Optional<TenantGroupName>>;
-	// TODO: Use more efficient data structure:
-	std::map<Index, ReadVersionBatcher> batchers;
+	PImpl<class ReadVersionBatchersImpl> impl;
 
 public:
+	ReadVersionBatchers();
+	~ReadVersionBatchers();
 	Future<GetReadVersionReply> getReadVersion(Database,
 	                                           TransactionPriority,
 	                                           uint32_t flags,
