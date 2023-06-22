@@ -40,7 +40,6 @@
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
 
-#include "metacluster/ListTenants.actor.h"
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterConsistency.actor.h"
 #include "metacluster/MetaclusterData.actor.h"
@@ -95,6 +94,47 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int tenantGroupCapacity;
 	int retryLimit;
 
+	static void updateTestData(MetaclusterMoveWorkload* self,
+	                           TenantGroupName tenantGroup,
+	                           ClusterName newCluster,
+	                           ClusterName oldCluster) {
+		// Update tenantGroups
+		auto groupData = self->tenantGroups[tenantGroup];
+		auto groupTenants = groupData.tenants;
+		groupData.cluster = newCluster;
+		self->tenantGroups[tenantGroup] = groupData;
+
+		// Update dataDbs
+		auto newData = self->dataDbs[newCluster];
+		auto oldData = self->dataDbs[oldCluster];
+
+		// Take the set difference and update the old data
+		std::set<int64_t> result;
+		std::set_difference(oldData.tenants.begin(),
+		                    oldData.tenants.end(),
+		                    groupTenants.begin(),
+		                    groupTenants.end(),
+		                    std::inserter(result, result.end()));
+		oldData.tenants = result;
+
+		// Add all tenants to the new data
+		newData.tenants.insert(groupTenants.begin(), groupTenants.end());
+
+		// Erase tenant group from old data and add to new one
+		oldData.tenantGroups.erase(tenantGroup);
+		newData.tenantGroups.insert(tenantGroup);
+
+		self->dataDbs[oldCluster] = oldData;
+		self->dataDbs[newCluster] = newData;
+
+		// Update createdTenants
+		for (const auto& tId : groupTenants) {
+			self->createdTenants[tId].tenantGroup = tenantGroup;
+			ASSERT_EQ(self->createdTenants[tId].cluster, oldCluster);
+			self->createdTenants[tId].cluster = newCluster;
+		}
+	}
+
 	metacluster::metadata::management::MovementRecord moveRecord;
 
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -126,14 +166,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    TenantGroupNameRef(format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
 			} else {
 				auto const& existingGroups = dataDbs[cluster.get()].tenantGroups;
-				if (deterministicRandom()->coinflip() && !existingGroups.empty()) {
+				if (!existingGroups.empty()) {
 					tenantGroup = deterministicRandom()->randomChoice(
 					    std::vector<TenantGroupName>(existingGroups.begin(), existingGroups.end()));
-				} else if (tenantGroups.size() < maxTenantGroups) {
-					do {
-						tenantGroup = TenantGroupNameRef(
-						    format("tenantgroup%08d", deterministicRandom()->randomInt(0, maxTenantGroups)));
-					} while (tenantGroups.count(tenantGroup.get()) > 0);
 				}
 			}
 		}
@@ -241,7 +276,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	}
 
 	ACTOR static Future<bool> verifyMoveMetadataErased(MetaclusterMoveWorkload* self, TenantGroupName tenantGroup) {
-		state Reference<ReadYourWritesTransaction> tr = self->managementDb->createTransaction();
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
 		state Optional<metacluster::metadata::management::MovementRecord> mr;
 		state KeyBackedRangeResult<std::pair<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>> mq;
@@ -292,8 +328,9 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster);
-
-					// TODO: Update test metadata to reflect change back to source (if needed)
+					if (self->tenantGroups[tenantGroup].cluster == dstCluster) {
+						updateTestData(self, tenantGroup, srcCluster, dstCluster);
+					}
 					break;
 				}
 				if (++tries == self->retryLimit) {
@@ -363,9 +400,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
-				if (e.code() == error_code_invalid_tenant_move) {
-					continue;
-				}
 				throw e;
 			}
 		}
@@ -379,8 +413,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                     ClusterName dstCluster) {
 		state std::vector<std::string> messages;
 		state int tries = 0;
-		try {
-			loop {
+		loop {
+			try {
 				Future<Void> switchFuture = metacluster::switchTenantMovement(
 				    self->managementDb, tenantGroup, srcCluster, dstCluster, &messages);
 				Optional<Void> result = wait(timeout(switchFuture, deterministicRandom()->randomInt(1, 30)));
@@ -389,11 +423,17 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("TenantGroup", tenantGroup)
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster);
-					// Update test data to reflect the switch
-
+					if (self->tenantGroups[tenantGroup].cluster == srcCluster) {
+						updateTestData(self, tenantGroup, dstCluster, srcCluster);
+					}
 					break;
 				}
 				if (++tries == self->retryLimit) {
+					TraceEvent("MetaclusterMoveSwitchRetryLimitReached")
+					    .detail("TenantGroup", tenantGroup)
+					    .detail("SourceCluster", srcCluster)
+					    .detail("DestinationCluster", dstCluster)
+					    .detail("Attempts", tries);
 					throw operation_failed();
 				}
 				if (deterministicRandom()->random01() < 0.2) {
@@ -408,13 +448,13 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 				}
 				CODE_PROBE(true, "Metacluster move switch timed out");
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_invalid_tenant_move) {
+			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveWorkloadSwitchFailed")
+				    .error(e)
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
+				throw;
 			}
 		}
 		return false;
@@ -428,8 +468,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		// finish tenant move will fail to abort if movement record has been updated
 		// expect this case and keep trying to finish
 		state int tries = 0;
-		try {
-			loop {
+		loop {
+			try {
 				Future<Void> finishFuture =
 				    metacluster::finishTenantMovement(self->managementDb, tenantGroup, srcCluster, dstCluster);
 				Optional<Void> result = wait(timeout(finishFuture, deterministicRandom()->randomInt(1, 30)));
@@ -441,11 +481,17 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					break;
 				}
 				if (++tries == self->retryLimit) {
+					TraceEvent("MetaclusterMoveFinishRetryLimitReached")
+					    .detail("TenantGroup", tenantGroup)
+					    .detail("SourceCluster", srcCluster)
+					    .detail("DestinationCluster", dstCluster)
+					    .detail("Attempts", tries);
 					throw operation_failed();
 				}
 				if (deterministicRandom()->random01() < 0.2) {
 					// Keep track of move record before calling abort
-					auto moveRecord = wait(getMoveRecord(self, tenantGroup));
+					state metacluster::metadata::management::MovementRecord moveRecord =
+					    wait(getMoveRecord(self, tenantGroup));
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
 					TraceEvent("MetaclusterMoveStartAttemptedAbort")
 					    .detail("TenantGroup", tenantGroup)
@@ -459,13 +505,13 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					}
 				}
 				CODE_PROBE(true, "Metacluster move finish timed out");
-			}
-		} catch (Error& e) {
-			if (e.code() == error_code_invalid_tenant_move) {
-				TraceEvent("MetaclusterMoveWorkloadSwitchFailed")
+			} catch (Error& e) {
+				TraceEvent("MetaclusterMoveWorkloadFinishFailed")
+				    .error(e)
 				    .detail("TenantGroup", tenantGroup)
 				    .detail("SourceCluster", srcCluster)
 				    .detail("DestinationCluster", dstCluster);
+				throw;
 			}
 		}
 		return false;
@@ -498,15 +544,19 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 		// container of range-based for with continuation must be a state variable
 		state std::map<ClusterName, DataClusterData> dataDbs = self->dataDbs;
-		for (auto const& [name, dataDb] : dataDbs) {
-			std::vector<Reference<Tenant>> dataTenants;
+		for (auto const& [clusterName, dataDb] : dataDbs) {
+			state std::vector<Reference<Tenant>> dataTenants;
+			state Database dbObj = dataDb.db;
 			// Iterate over each data cluster and attempt to fill some of the tenants with data
 			for (auto const& tId : dataDb.tenants) {
-				dataTenants.push_back(makeReference<Tenant>(tId));
+				TestTenantData testData = self->createdTenants[tId];
+				TenantName tName = testData.name;
+				TenantLookupInfo const tenantLookupInfo(tId, testData.tenantGroup);
+				dataTenants.push_back(makeReference<Tenant>(tenantLookupInfo, tName));
 			}
-			wait(bulkSetup(dataDb.db,
+			wait(bulkSetup(dbObj,
 			               self,
-			               10000,
+			               self->nodeCount,
 			               Promise<double>(),
 			               false,
 			               0.0,
@@ -525,35 +575,93 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<Void> copyTenantData(Database cx,
-	                                         MetaclusterMoveWorkload* self,
+	ACTOR static Future<Void> copyTenantData(MetaclusterMoveWorkload* self,
 	                                         TenantGroupName tenantGroup,
+	                                         TenantName tenantName,
 	                                         Database srcDb,
-	                                         Database dstDb) {
-		ClusterName srcName = self->moveRecord.srcCluster;
-		ClusterName dstName = self->moveRecord.dstCluster;
+	                                         Database dstDb,
+	                                         KeyRef begin,
+	                                         KeyRef end) {
 		TenantGroupData groupData = self->tenantGroups[tenantGroup];
-		KeyRangeRef normalKeys(""_sr, "\xff"_sr);
-
-		// container of range-based for with continuation must be a state variable
-		state std::set<int64_t> tenants = groupData.tenants;
-		for (auto const& tId : tenants) {
-			state Reference<ReadYourWritesTransaction> srcTr =
-			    makeReference<ReadYourWritesTransaction>(srcDb, makeReference<Tenant>(tId));
-			state Reference<ReadYourWritesTransaction> dstTr =
-			    makeReference<ReadYourWritesTransaction>(dstDb, makeReference<Tenant>(tId));
-			srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		KeyRangeRef keyRange(begin, end);
+		state Reference<ReadYourWritesTransaction> srcTr =
+		    makeReference<ReadYourWritesTransaction>(srcDb, makeReference<Tenant>(srcDb, tenantName));
+		state Reference<ReadYourWritesTransaction> dstTr =
+		    makeReference<ReadYourWritesTransaction>(dstDb, makeReference<Tenant>(dstDb, tenantName));
+		srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+		state RangeReadResult srcRange = wait(srcTr->getRange(keyRange, 0));
+		try {
 			dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			// read the split points map to model actual procedure
-			state RangeReadResult srcRange = wait(srcTr->getRange(normalKeys, 0));
-			try {
-				for (const auto& [k, v] : srcRange) {
-					dstTr->set(k, v);
-				}
-				wait(dstTr->commit());
-			} catch (Error& e) {
-				wait(dstTr->onError(e));
+			for (const auto& [k, v] : srcRange) {
+				dstTr->set(k, v);
 			}
+			wait(dstTr->commit());
+		} catch (Error& e) {
+			wait(dstTr->onError(e));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> updateQueueHead(MetaclusterMoveWorkload* self,
+	                                          TenantGroupName tenantGroup,
+	                                          TenantName tenantName,
+	                                          Key headBegin,
+	                                          Database srcDb,
+	                                          Database dstDb) {
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		state UID runId = self->moveRecord.runId;
+		state Tuple beginTuple = Tuple::makeTuple(tenantGroup, runId.toString(), tenantName, headBegin);
+		state Tuple endTuple =
+		    Tuple::makeTuple(tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
+		state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints =
+		    wait(metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
+		        tr, beginTuple, endTuple, 2));
+		ASSERT(!splitPoints.results.empty());
+		state KeyRef headEnd = splitPoints.results[0].second;
+		metacluster::metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple);
+
+		state TenantName nextTenantName;
+		try {
+			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			if (splitPoints.results.size() >= 2) {
+				Tuple nextTuple = splitPoints.results[1].first;
+				nextTenantName = nextTuple.getString(2);
+				Key nextKey = nextTuple.getString(3);
+				ASSERT_EQ(headEnd, nextKey);
+				metacluster::metadata::management::emergency_movement::movementQueue().set(
+				    tr, std::make_pair(tenantGroup, runId.toString()), std::make_pair(nextTenantName, headEnd));
+			} else {
+				metacluster::metadata::management::emergency_movement::movementQueue().erase(
+				    tr, std::make_pair(tenantGroup, runId.toString()));
+			}
+			wait(safeThreadFutureToFuture(tr->commit()));
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(tr->onError(e)));
+		}
+
+		// Don't do the copy if changing tenants (t1, \xff), (t2, "")
+		if (nextTenantName == tenantName) {
+			wait(success(copyTenantData(self, tenantGroup, tenantName, srcDb, dstDb, headBegin, headEnd)));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> processQueue(MetaclusterMoveWorkload* self,
+	                                       TenantGroupName tenantGroup,
+	                                       Database srcDb,
+	                                       Database dstDb) {
+		state Reference<ITransaction> tr = self->managementDb->createTransaction();
+		state UID runId = self->moveRecord.runId;
+		state std::pair<TenantName, Key> queueHead;
+		state Optional<std::pair<TenantName, Key>> optionalQueueHead;
+		loop {
+			wait(store(optionalQueueHead,
+			           metacluster::metadata::management::emergency_movement::movementQueue().get(
+			               tr, std::make_pair(tenantGroup, runId.toString()))));
+			if (!optionalQueueHead.present())
+				break;
+			auto queueHead = optionalQueueHead.get();
+			wait(updateQueueHead(self, tenantGroup, queueHead.first, queueHead.second, srcDb, dstDb));
 		}
 		return Void();
 	}
@@ -595,7 +703,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 				}
 				// If start completes successfully, the move identifier should be written
 				wait(store(self->moveRecord, getMoveRecord(self, tenantGroup)));
-				wait(copyTenantData(cx, self, tenantGroup, srcDb, dstDb));
+				wait(processQueue(self, tenantGroup, srcDb, dstDb));
 				wait(store(aborted, switchMove(self, tenantGroup, srcCluster, dstCluster)));
 				if (aborted) {
 					break;

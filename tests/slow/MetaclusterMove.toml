@@ -3,6 +3,7 @@ allowDefaultTenant = false
 allowCreatingTenants = false
 extraDatabaseMode = 'Multiple'
 extraDatabaseCount = 3
+tenantModes = ['required']
 
 [[test]]
 testTitle = 'MetaclusterMoveTest'

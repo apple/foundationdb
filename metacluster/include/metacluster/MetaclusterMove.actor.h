@@ -71,12 +71,12 @@ ACTOR static Future<Void> updateMoveRecordState(Reference<ITransaction> tr,
 ACTOR static Future<metadata::management::MovementRecord> initMoveParams(
     Reference<ITransaction> tr,
     TenantGroupName tenantGroup,
-    std::vector<std::pair<TenantName, int64_t>> tenantsInGroup,
+    std::vector<std::pair<TenantName, int64_t>>* tenantsInGroup,
     ClusterName src,
     ClusterName dst,
     bool aborting = false) {
-	wait(store(tenantsInGroup,
-	           listTenantGroupTenantsTransaction(
+	wait(store(*tenantsInGroup,
+	           metacluster::listTenantGroupTenantsTransaction(
 	               tr, tenantGroup, TenantName(""_sr), TenantName("\xff"_sr), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER)));
 	Optional<metadata::management::MovementRecord> moveRecord =
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
@@ -138,11 +138,11 @@ struct StartTenantMovementImpl {
 	ACTOR static Future<Void> findTenantsInGroup(StartTenantMovementImpl* self,
 	                                             Reference<typename DB::TransactionT> tr) {
 		wait(store(self->tenantsInGroup,
-		           listTenantGroupTenantsTransaction(tr,
-		                                             self->tenantGroup,
-		                                             TenantName(""_sr),
-		                                             TenantName("\xff"_sr),
-		                                             CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER)));
+		           metacluster::listTenantGroupTenantsTransaction(tr,
+		                                                          self->tenantGroup,
+		                                                          TenantName(""_sr),
+		                                                          TenantName("\xff"_sr),
+		                                                          CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER)));
 		return Void();
 	}
 
@@ -228,17 +228,14 @@ struct StartTenantMovementImpl {
 
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getTenantSplitPointsFromSource(StartTenantMovementImpl* self,
 	                                                                                  TenantName tenantName) {
-		Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
-		Reference<ITransaction> srcTr = srcTenant->createTransaction();
-		KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
+		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
+		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
+		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
 		// chunkSize = 100MB
-		/*
-		IndexedSet<Key, int64_t>::const_iterator endKey =
-		    byteSample.sample.index(byteSample.sample.sumTo(byteSample.sample.lower_bound(beginKey)) + chunkSize);
-		*/
-		int64_t chunkSize = 100000000;
-		ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture = srcTr->getRangeSplitPoints(allKeys, chunkSize);
-		Standalone<VectorRef<KeyRef>> splitPoints = wait(safeThreadFutureToFuture(resultFuture));
+		state int64_t chunkSize = 100000000;
+		state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture = srcTr->getRangeSplitPoints(allKeys, chunkSize);
+		state Standalone<VectorRef<KeyRef>> splitPoints = wait(safeThreadFutureToFuture(resultFuture));
+
 		return splitPoints;
 	}
 
@@ -258,6 +255,7 @@ struct StartTenantMovementImpl {
 			    tr, Tuple::makeTuple(self->tenantGroup, self->moveRecord.runId.toString(), tenantName, lastKey), key);
 			lastKey = key;
 		}
+
 		return Void();
 	}
 
@@ -301,7 +299,7 @@ struct StartTenantMovementImpl {
 		ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
 		self->tagQuota = v.map([](Value val) { return ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(val)); });
 		Optional<int64_t> optionalQuota = wait(TenantMetadata::storageQuota().get(tr, self->tenantGroup));
-		self->storageQuota = optionalQuota.get();
+		self->storageQuota = optionalQuota;
 		return Void();
 	}
 
@@ -402,7 +400,7 @@ struct SwitchTenantMovementImpl {
 			    .detail("ClusterName", srcName);
 			throw invalid_tenant_move();
 		}
-		wait(store(self->moveRecord, initMoveParams(tr, self->tenantGroup, self->tenantsInGroup, srcName, dstName)));
+		wait(store(self->moveRecord, initMoveParams(tr, self->tenantGroup, &self->tenantsInGroup, srcName, dstName)));
 		return Void();
 	}
 
@@ -420,6 +418,8 @@ struct SwitchTenantMovementImpl {
 		state RangeReadResult srcRange;
 		state RangeReadResult dstRange;
 		loop {
+			srcTr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
+			dstTr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
 			srcFuture = srcTr->getRange(KeyRangeRef(begin, end), limit);
 			dstFuture = dstTr->getRange(KeyRangeRef(begin, end), limit);
 			wait(store(srcRange, safeThreadFutureToFuture(srcFuture)) &&
@@ -505,7 +505,7 @@ struct SwitchTenantMovementImpl {
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
-		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
+		wait(store(tenantMetadataList, metacluster::listTenantMetadataTransaction(tr, self->tenantsInGroup)));
 		for (auto& tenantPair : tenantMetadataList) {
 			state TenantName tName = tenantPair.first;
 			state MetaclusterTenantMapEntry tenantEntry = tenantPair.second;
@@ -601,7 +601,7 @@ struct FinishTenantMovementImpl {
 			    .detail("ClusterName", dstName);
 			throw invalid_tenant_move();
 		}
-		wait(store(self->moveRecord, initMoveParams(tr, self->tenantGroup, self->tenantsInGroup, srcName, dstName)));
+		wait(store(self->moveRecord, initMoveParams(tr, self->tenantGroup, &self->tenantsInGroup, srcName, dstName)));
 		return Void();
 	}
 
@@ -861,7 +861,7 @@ struct AbortTenantMovementImpl {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
 		wait(store(self->moveRecord,
-		           initMoveParams(tr, self->tenantGroup, self->tenantsInGroup, srcName, dstName, true)));
+		           initMoveParams(tr, self->tenantGroup, &self->tenantsInGroup, srcName, dstName, true)));
 		// Mark movement as aborting and write it into metadata immediately
 		self->moveRecord.aborting = true;
 		metadata::management::emergency_movement::emergencyMovements().set(tr, self->tenantGroup, self->moveRecord);
@@ -1037,7 +1037,7 @@ struct AbortTenantMovementImpl {
 		metadata::management::clusterTenantCount().atomicOp(tr, dstName, -numTenants, MutationRef::AddValue);
 
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
-		wait(store(tenantMetadataList, listTenantMetadataTransaction(tr, self->tenantsInGroup)));
+		wait(store(tenantMetadataList, metacluster::listTenantMetadataTransaction(tr, self->tenantsInGroup)));
 		for (auto& tenantPair : tenantMetadataList) {
 			state TenantName tName = tenantPair.first;
 			state MetaclusterTenantMapEntry tenantEntry = tenantPair.second;
