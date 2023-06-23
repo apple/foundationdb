@@ -2614,166 +2614,164 @@ TEST_CASE("commit_does_not_reset") {
 		break;
 	}
 }
-//
-//TEST_CASE("Fast alloc thread cleanup") {
-	//// Try to cause an OOM if thread cleanup doesn't work
-	//for (int i = 0; i < 50000; ++i) {
-		//auto thread = std::thread([]() {
-			//fdb::Transaction tr(db);
-			//for (int s = 0; s < 11; ++s) {
-				//tr.set(key("foo"), std::string(8 << s, '\x00'));
-			//}
-		//});
-		//thread.join();
-	//}
-//}
-//
-//TEST_CASE("Tenant create, access, and delete") {
-	//std::string tenantName = "tenant";
-	//std::string testKey = "foo";
-	//std::string testValue = "bar";
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		//tr.set("\xff\xff/management/tenant/map/" + tenantName, "");
-		//fdb::EmptyFuture commitFuture = tr.commit();
-		//fdb_error_t err = wait_future(commitFuture);
-		//if (err) {
-			//fdb::EmptyFuture f = tr.on_error(err);
-			//fdb_check(wait_future(f));
-			//continue;
-		//}
-		//tr.reset();
-		//break;
-	//}
-//
-	//while (1) {
-		//StringRef begin = "\xff\xff/management/tenant/map/"_sr;
-		//StringRef end = "\xff\xff/management/tenant/map0"_sr;
-//
-		//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		//fdb::KeyValueArrayFuture f = tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(begin.begin(), begin.size()),
-		                                          //FDB_KEYSEL_FIRST_GREATER_OR_EQUAL(end.begin(), end.size()),
-		                                          ///* limit */ 0,
-		                                          ///* target_bytes */ 0,
-		                                          ///* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		                                          ///* iteration */ 0,
-		                                          ///* snapshot */ false,
-		                                          ///* reverse */ 0);
-//
-		//fdb_error_t err = wait_future(f);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//FDBKeyValue const* outKv;
-		//int outCount;
-		//int outMore;
-		//fdb_check(f.get(&outKv, &outCount, &outMore));
-		//CHECK(outCount == 1);
-		//CHECK(StringRef(outKv->key, outKv->key_length) == StringRef(tenantName).withPrefix(begin));
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//fdb::Tenant tenant(db, reinterpret_cast<const uint8_t*>(tenantName.c_str()), tenantName.size());
-	//fdb::Transaction tr2(tenant);
-//
-	//while (1) {
-		//tr2.set(testKey, testValue);
-		//fdb::EmptyFuture commitFuture = tr2.commit();
-		//fdb_error_t err = wait_future(commitFuture);
-		//if (err) {
-			//fdb::EmptyFuture f = tr2.on_error(err);
-			//fdb_check(wait_future(f));
-			//continue;
-		//}
-		//tr2.reset();
-		//break;
-	//}
-//
-	//while (1) {
-		//fdb::ValueFuture f1 = tr2.get(testKey, false);
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-		//CHECK(out_present == 1);
-		//CHECK(vallen == testValue.size());
-		//CHECK(testValue == val);
-//
-		//tr2.clear(testKey);
-		//fdb::EmptyFuture commitFuture = tr2.commit();
-		//err = wait_future(commitFuture);
-		//if (err) {
-			//fdb::EmptyFuture f = tr2.on_error(err);
-			//fdb_check(wait_future(f));
-			//continue;
-		//}
-//
-		//tr2.reset();
-		//break;
-	//}
-//
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-		//tr.clear("\xff\xff/management/tenant/map/" + tenantName);
-		//fdb::EmptyFuture commitFuture = tr.commit();
-		//fdb_error_t err = wait_future(commitFuture);
-		//if (err) {
-			//fdb::EmptyFuture f = tr.on_error(err);
-			//fdb_check(wait_future(f));
-			//continue;
-		//}
-		//tr.reset();
-		//break;
-	//}
-//
-	//while (1) {
-		//fdb::ValueFuture f1 = tr2.get(testKey, false);
-		//fdb_error_t err = wait_future(f1);
-		//if (err == error_code_tenant_not_found) {
-			//tr2.reset();
-			//break;
-		//}
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-	//}
-//}
-//
-//int64_t granule_start_load_fail(const char* filename,
-                                //int filenameLength,
-                                //int64_t offset,
-                                //int64_t length,
-                                //int64_t fullFileLength,
-                                //void* userContext) {
-	//CHECK(false);
-	//return -1;
-//}
-//
-//uint8_t* granule_get_load_fail(int64_t loadId, void* userContext) {
-	//CHECK(false);
-	//return nullptr;
-//}
-//
-//void granule_free_load_fail(int64_t loadId, void* userContext) {
-	//CHECK(false);
-//}
-//
+
+TEST_CASE("Fast alloc thread cleanup") {
+	// Try to cause an OOM if thread cleanup doesn't work
+	for (int i = 0; i < 50000; ++i) {
+		auto thread = std::thread([]() {
+			auto tr = db.createTransaction();
+			for (int s = 0; s < 11; ++s) {
+				tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef(std::string(8 << s, '\x00')));
+			}
+		});
+		thread.join();
+	}
+}
+
+TEST_CASE("Tenant create, access, and delete") {
+	std::string tenantName = "tenant";
+	std::string testKey = "foo";
+	std::string testValue = "bar";
+
+	auto tr = db.createTransaction();
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		tr.set(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName), fdb::toBytesRef(""sv));
+		auto commitFuture = tr.commit();
+		auto err = waitFuture(commitFuture);
+		if (err) {
+			auto f = tr.onError(err);
+			fdbCheck(waitFuture(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		std::string begin = "\xff\xff/management/tenant/map/";
+		std::string end = "\xff\xff/management/tenant/map0";
+
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		auto f = tr.getRange(fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(begin)),
+				     fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(end)),
+		                     /* limit */ 0,
+		                     /* target_bytes */ 0,
+		                     /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		                     /* iteration */ 0,
+		                     /* snapshot */ false,
+		                     /* reverse */ false);
+
+		auto err = waitFuture(f);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f.getNothrow(output));
+
+		auto outKv = std::get<0>(output);
+		auto outCount = std::get<1>(output);
+	
+		CHECK(outCount == 1);
+		CHECK(StringRef(outKv[0].key().begin(), outKv[0].key().size()) == StringRef(tenantName).withPrefix(begin));
+
+		tr.reset();
+		break;
+	}
+
+	auto tenant = db.openTenant(fdb::toBytesRef(tenantName));
+	auto tr2 = tenant.createTransaction();
+
+	while (1) {
+		tr2.set(fdb::toBytesRef(testKey), fdb::toBytesRef(testValue));
+		auto commitFuture = tr2.commit();
+		auto err = waitFuture(commitFuture);
+		if (err) {
+			auto f = tr2.onError(err);
+			fdbCheck(waitFuture(f));
+			continue;
+		}
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		auto f1 = tr2.get(fdb::toBytesRef(testKey), false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr2.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+		CHECK(val.has_value());
+		CHECK(testValue == std::string(val->begin(), val->end()));
+
+		tr2.clear(fdb::toBytesRef(testKey));
+		auto commitFuture = tr2.commit();
+		err = waitFuture(commitFuture);
+		if (err) {
+			auto f = tr2.onError(err);
+			fdbCheck(waitFuture(f));
+			continue;
+		}
+		tr2.reset();
+		break;
+	}
+
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		tr.clear(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName));
+		auto commitFuture = tr.commit();
+		auto err = waitFuture(commitFuture);
+		if (err) {
+			auto f = tr.onError(err);
+			fdbCheck(waitFuture(f));
+			continue;
+		}
+		tr.reset();
+		break;
+	}
+
+	while (1) {
+		auto f1 = tr2.get(fdb::toBytesRef(testKey), false);
+		auto err = waitFuture(f1);
+		if (err.code() == error_code_tenant_not_found) {
+			tr2.reset();
+			break;
+		}
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+	}
+}
+
+int64_t granule_start_load_fail(const char* filename,
+                                int filenameLength,
+                                int64_t offset,
+                                int64_t length,
+                                int64_t fullFileLength,
+                                void* userContext) {
+	CHECK(false);
+	return -1;
+}
+
+uint8_t* granule_get_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+	return nullptr;
+}
+
+void granule_free_load_fail(int64_t loadId, void* userContext) {
+	CHECK(false);
+}
+
 //TEST_CASE("Blob Granule Functions") {
 	//auto confValue =
 	    //get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
