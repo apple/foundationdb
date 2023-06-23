@@ -494,9 +494,6 @@ void GlobalTagThrottler::addRequests(ThrottlingId throttlingId, int count) {
 uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
 	return impl->getThrottledTagChangeId();
 }
-PrioritizedThrottlingIdMap<ClientTagThrottleLimits> GlobalTagThrottler::getClientRates() {
-	return {};
-}
 ThrottlingIdMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 	return impl->getProxyRates(numProxies);
 }

@@ -38,10 +38,6 @@ public:
 	// This throttled tag change ID is used to coordinate updates with the GRV proxies
 	virtual uint64_t getThrottledTagChangeId() const = 0;
 
-	// For each throttling ID and priority combination, return the throughput limit and expiration time
-	// Also, erase expired throttling IDs
-	virtual PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() = 0;
-
 	// For each throttling ID and priority combination, return the throughput limit for the cluster
 	// (to be shared across all GRV proxies)
 	virtual ThrottlingIdMap<double> getProxyRates(int numProxies) = 0;
@@ -75,7 +71,6 @@ public:
 	bool isAutoThrottlingEnabled() const override;
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
-	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() override;
 	ThrottlingIdMap<double> getProxyRates(int numProxies) override;
 
 	// Testing only:
@@ -97,6 +92,5 @@ public:
 	bool isAutoThrottlingEnabled() const override { return 0; }
 
 	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
-	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() override { return {}; }
 	ThrottlingIdMap<double> getProxyRates(int numProxies) override { return {}; }
 };

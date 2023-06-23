@@ -49,21 +49,11 @@ public:
 				p.lastThrottledTagChangeId = tagThrottler->getThrottledTagChangeId();
 				p.lastTagPushTime = now();
 
-				bool returningTagsToProxy{ false };
-				if (SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES) {
-					auto proxyThrottledTags = tagThrottler->getProxyRates(self->grvProxyInfo.size());
-					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-						returningTagsToProxy = proxyThrottledTags.size() > 0;
-						reply.proxyThrottledTags = std::move(proxyThrottledTags);
-					}
-				} else {
-					auto clientThrottledTags = tagThrottler->getClientRates();
-					if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
-						returningTagsToProxy = clientThrottledTags.size() > 0;
-						reply.clientThrottledTags = std::move(clientThrottledTags);
-					}
+				auto proxyThrottledTags = tagThrottler->getProxyRates(self->grvProxyInfo.size());
+				if (!SERVER_KNOBS->GLOBAL_TAG_THROTTLING_REPORT_ONLY) {
+					CODE_PROBE(proxyThrottledTags.size() > 0, "Returning tag throttles to a proxy");
+					reply.proxyThrottledTags = std::move(proxyThrottledTags);
 				}
-				CODE_PROBE(returningTagsToProxy, "Returning tag throttles to a proxy");
 			}
 
 			reply.healthMetrics.update(normalRateUpdater->getHealthMetrics(), true, req.detailed);
