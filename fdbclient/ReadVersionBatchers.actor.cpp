@@ -264,6 +264,7 @@ class ReadVersionBatchersImpl {
 			auto const _expirationTimeout = expirationTimeout;
 			std::erase_if(self->batchers, [_expirationTimeout](auto const& it) {
 				auto const& [_, batcher] = it;
+				CODE_PROBE(!batcher.isActive(_expirationTimeout), "Expiring GRV batcher");
 				return !batcher.isActive(_expirationTimeout);
 			});
 		}
@@ -292,6 +293,7 @@ public:
 		auto it = batchers.find(index);
 		if (it == batchers.end()) {
 			if (batchers.size() == capacity) {
+				CODE_PROBE(true, "Too many GRV batchers");
 				throw too_many_grv_batchers();
 			}
 			it = batchers.try_emplace(index).first;
