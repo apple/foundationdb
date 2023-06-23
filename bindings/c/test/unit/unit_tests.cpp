@@ -561,7 +561,6 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 		fdb::future_var::KeyValueRefArray::Type output;
 		fdbCheck(f1.getNothrow(output));
 
-		//auto& [kvs, out_count, out_more] = output;
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -853,23 +852,21 @@ TEST_CASE("fdb_transaction_set_option size_limit") {
 //                                     sizeof(size_limit)));
 // }
 
-//TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
-	//int64_t size_limit = 32;
-	//fdb_check(fdb_database_set_option(
-	    //db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, (const uint8_t*)&size_limit, sizeof(size_limit)));
-//
-	//fdb::Transaction tr(db);
-	//tr.set("foo", "foundation database is amazing");
-	//fdb::EmptyFuture f1 = tr.commit();
-//
-	//CHECK(wait_future(f1) == 2101); // transaction_too_large
-//
-	//// Set size limit back to default.
-	//size_limit = 10000000;
-	//fdb_check(fdb_database_set_option(
-	    //db, FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, (const uint8_t*)&size_limit, sizeof(size_limit)));
-//}
-//
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
+	int64_t size_limit = 32;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
+
+	auto tr = db.createTransaction();
+	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("foundation database is amazing"sv));
+	auto f1 = tr.commit();
+
+	CHECK(waitFuture(f1).code() == 2101); // transaction_too_large
+
+	// Set size limit back to default.
+	size_limit = 10000000;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
+}
+
 //TEST_CASE("fdb_transaction_set_read_version old_version") {
 	//fdb::Transaction tr(db);
 //
@@ -959,74 +956,74 @@ const static int SPLIT_SIZE = 3;
 	    //Tuple::makeTuple(prefix, RECORD, (allMissing ? "{K[2]}"_sr : "{K[3]}"_sr), "{...}"_sr).pack().toString();
 	//return getMappedIndexEntries(beginId, endId, tr, mapper, matchIndex);
 //}
-//
-//TEST_CASE("versionstamp_unit_test") {
-	//// a random 12 bytes long StringRef as a versionstamp
-	//StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
-	//TupleVersionstamp vs(str), vs2(str);
-	//ASSERT(vs == vs2);
-	//ASSERT(vs.begin() != vs2.begin());
-//
-	//int64_t version = vs.getVersion();
-	//int64_t version2 = vs2.getVersion();
-	//int64_t versionExpected = ((int64_t)0x01 << 56) + ((int64_t)0x02 << 48) + ((int64_t)0x03 << 40) +
-	                          //((int64_t)0x04 << 32) + (0x05 << 24) + (0x06 << 16) + (0x07 << 8) + 0x08;
-	//ASSERT(version == versionExpected);
-	//ASSERT(version2 == versionExpected);
-//
-	//int16_t batch = vs.getBatchNumber();
-	//int16_t batch2 = vs2.getBatchNumber();
-	//int16_t batchExpected = (0x09 << 8) + 0x10;
-	//ASSERT(batch == batchExpected);
-	//ASSERT(batch2 == batchExpected);
-//
-	//int16_t user = vs.getUserVersion();
-	//int16_t user2 = vs2.getUserVersion();
-	//int16_t userExpected = (0x11 << 8) + 0x12;
-	//ASSERT(user == userExpected);
-	//ASSERT(user2 == userExpected);
-//
-	//ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
-	//ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
-//}
-//
-//TEST_CASE("tuple_support_versionstamp") {
-	//// a random 12 bytes long StringRef as a versionstamp
-	//StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
-	//TupleVersionstamp vs(str);
-	//const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
-	//ASSERT(t.getVersionstamp(2) == vs);
-//
-	//// verify the round-way pack-unpack path for a Tuple containing a versionstamp
-	//StringRef result1 = t.pack();
-	//Tuple t2 = Tuple::unpack(result1);
-	//StringRef result2 = t2.pack();
-	//ASSERT(t2.getVersionstamp(2) == vs);
-	//ASSERT(result1.toString() == result2.toString());
-//}
-//
-//TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
-	//// a truncated 11 bytes long StringRef as a versionstamp
-	//StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
-	//try {
-		//TupleVersionstamp truncatedVersionstamp(str);
-	//} catch (Error& e) {
-		//return;
-	//}
-	//UNREACHABLE();
-//}
-//
-//TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
-	//// a longer than expected 13 bytes long StringRef as a versionstamp
-	//StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
-	//try {
-		//TupleVersionstamp longerVersionstamp(str);
-	//} catch (Error& e) {
-		//return;
-	//}
-	//UNREACHABLE();
-//}
-//
+
+TEST_CASE("versionstamp_unit_test") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	TupleVersionstamp vs(str), vs2(str);
+	ASSERT(vs == vs2);
+	ASSERT(vs.begin() != vs2.begin());
+
+	int64_t version = vs.getVersion();
+	int64_t version2 = vs2.getVersion();
+	int64_t versionExpected = ((int64_t)0x01 << 56) + ((int64_t)0x02 << 48) + ((int64_t)0x03 << 40) +
+	                          ((int64_t)0x04 << 32) + (0x05 << 24) + (0x06 << 16) + (0x07 << 8) + 0x08;
+	ASSERT(version == versionExpected);
+	ASSERT(version2 == versionExpected);
+
+	int16_t batch = vs.getBatchNumber();
+	int16_t batch2 = vs2.getBatchNumber();
+	int16_t batchExpected = (0x09 << 8) + 0x10;
+	ASSERT(batch == batchExpected);
+	ASSERT(batch2 == batchExpected);
+
+	int16_t user = vs.getUserVersion();
+	int16_t user2 = vs2.getUserVersion();
+	int16_t userExpected = (0x11 << 8) + 0x12;
+	ASSERT(user == userExpected);
+	ASSERT(user2 == userExpected);
+
+	ASSERT(vs.size() == VERSIONSTAMP_TUPLE_SIZE);
+	ASSERT(vs2.size() == VERSIONSTAMP_TUPLE_SIZE);
+}
+
+TEST_CASE("tuple_support_versionstamp") {
+	// a random 12 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11\x12"_sr;
+	TupleVersionstamp vs(str);
+	const Tuple t = Tuple::makeTuple(prefix, RECORD, vs, "{K[3]}"_sr, "{...}"_sr);
+	ASSERT(t.getVersionstamp(2) == vs);
+
+	// verify the round-way pack-unpack path for a Tuple containing a versionstamp
+	StringRef result1 = t.pack();
+	Tuple t2 = Tuple::unpack(result1);
+	StringRef result2 = t2.pack();
+	ASSERT(t2.getVersionstamp(2) == vs);
+	ASSERT(result1.toString() == result2.toString());
+}
+
+TEST_CASE("tuple_fail_to_append_truncated_versionstamp") {
+	// a truncated 11 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		TupleVersionstamp truncatedVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
+TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
+	// a longer than expected 13 bytes long StringRef as a versionstamp
+	StringRef str = "\x01\x02\x03\x04\x05\x06\x07\x08\x09\x10\x11"_sr;
+	try {
+		TupleVersionstamp longerVersionstamp(str);
+	} catch (Error& e) {
+		return;
+	}
+	UNREACHABLE();
+}
+
 //TEST_CASE("fdb_transaction_get_mapped_range") {
 	//const int TOTAL_RECORDS = 20;
 	//fillInRecords(TOTAL_RECORDS);
@@ -1195,443 +1192,484 @@ const static int SPLIT_SIZE = 3;
 	//ASSERT(result.err == error_code_mapper_not_tuple);
 //}
 //
-//TEST_CASE("fdb_transaction_get_range reverse") {
-	//std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
-	//insert_data(db, data);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//auto result = get_range(tr,
-		                        //FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)key("a").c_str(), key("a").size()),
-		                        //FDB_KEYSEL_LAST_LESS_OR_EQUAL((const uint8_t*)key("d").c_str(), key("d").size()) + 1,
-		                        ///* limit */ 0,
-		                        ///* target_bytes */ 0,
-		                        ///* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		                        ///* iteration */ 0,
-		                        ///* snapshot */ false,
-		                        ///* reverse */ 1);
-//
-		//if (result.err) {
-			//fdb::EmptyFuture f1 = tr.on_error(result.err);
-			//fdb_check(wait_future(f1));
-			//continue;
-		//}
-//
-		//CHECK(result.kvs.size() > 0);
-		//CHECK(result.kvs.size() <= 4);
-		//if (result.kvs.size() < 4) {
-			//CHECK(result.more);
-		//}
-//
-		//// Read data in reverse order.
-		//auto it = data.rbegin();
-		//for (auto results_it = result.kvs.begin(); results_it != result.kvs.end(); ++results_it, ++it) {
-			//std::string data_key = it->first;
-			//std::string data_value = it->second;
-//
-			//CHECK(data_key.compare(results_it->first /*key*/) == 0);
-			//CHECK(data[data_key].compare(results_it->second /*value*/) == 0);
-		//}
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_get_range limit") {
-	//std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
-	//insert_data(db, data);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//auto result = get_range(tr,
-		                        //FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)key("a").c_str(), key("a").size()),
-		                        //FDB_KEYSEL_LAST_LESS_OR_EQUAL((const uint8_t*)key("d").c_str(), key("d").size()) + 1,
-		                        ///* limit */ 2,
-		                        ///* target_bytes */ 0,
-		                        ///* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		                        ///* iteration */ 0,
-		                        ///* snapshot */ false,
-		                        ///* reverse */ 0);
-//
-		//if (result.err) {
-			//fdb::EmptyFuture f1 = tr.on_error(result.err);
-			//fdb_check(wait_future(f1));
-			//continue;
-		//}
-//
-		//CHECK(result.kvs.size() > 0);
-		//CHECK(result.kvs.size() <= 2);
-		//if (result.kvs.size() < 4) {
-			//CHECK(result.more);
-		//}
-//
-		//for (const auto& kv : result.kvs) {
-			//CHECK(data[kv.first].compare(kv.second) == 0);
-		//}
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
-	//std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
-	//insert_data(db, data);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//auto result = get_range(tr,
-		                        //FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)key("a").c_str(), key("a").size()),
-		                        //FDB_KEYSEL_LAST_LESS_OR_EQUAL((const uint8_t*)key("d").c_str(), key("d").size()) + 1,
-		                        ///* limit */ 3,
-		                        ///* target_bytes */ 0,
-		                        ///* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT,
-		                        ///* iteration */ 0,
-		                        ///* snapshot */ false,
-		                        ///* reverse */ 0);
-//
-		//if (result.err) {
-			//fdb::EmptyFuture f1 = tr.on_error(result.err);
-			//fdb_check(wait_future(f1));
-			//continue;
-		//}
-//
-		//CHECK(result.kvs.size() == 3);
-		//CHECK(result.more);
-//
-		//for (const auto& kv : result.kvs) {
-			//CHECK(data[kv.first].compare(kv.second) == 0);
-		//}
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_clear") {
-	//insert_data(db, create_data({ { "foo", "bar" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.clear(key("foo"));
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(!value.has_value());
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
-	//insert_data(db, create_data({ { "foo", "\x00" } }));
-//
-	//fdb::Transaction tr(db);
-	//int8_t param = 1;
-	//int potentialCommitCount = 0;
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)&param, sizeof(param), FDB_MUTATION_TYPE_ADD);
-		//if (potentialCommitCount + 1 == 256) {
-			//// Trying to commit again might overflow the one unsigned byte we're looking at
-			//break;
-		//}
-		//++potentialCommitCount;
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//if (fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err)) {
-				//--potentialCommitCount;
-			//}
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(uint8_t(value->data()[0]) > 0);
-	//CHECK(uint8_t(value->data()[0]) <= potentialCommitCount);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_AND") {
-	//// Test bitwise and on values of same length:
-	////   db key = foo
-	////   db value = 'a' == 97
-	////   param = 'b' == 98
-	////
-	////   'a' == 97 == 0b01100001
-	//// & 'b' == 98 == 0b01100010
-	////   -----------------------
-	////                0b01100000 == 96 == '`'
-	////
-	//// Test bitwise and on extended database value:
-	////   db key = bar
-	////   db value = 'c' == 99
-	////   param = "ad"
-	////
-	////   'c' == 99 == 0b0110001100000000 (zero extended on right to match length of param)
-	//// & "ad"   ==    0b0110000101100100
-	////   -------------------------------
-	////                0b0110000100000000 == 'a' followed by null (0)
-	////
-	//// Test bitwise and on truncated database value:
-	////   db key = baz
-	////   db value = "abc"
-	////   param = 'e' == 101
-	////
-	////   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
-	//// & 'e' == 101 0b01100101
-	////   ---------------------
-	////              0b01100001 == 97 == 'a'
-	////
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "c" }, { "baz", "abc" } }));
-//
-	//fdb::Transaction tr(db);
-	//char param[] = { 'a', 'd' };
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BIT_AND);
-		//tr.atomic_op(key("bar"), (const uint8_t*)param, 2, FDB_MUTATION_TYPE_BIT_AND);
-		//tr.atomic_op(key("baz"), (const uint8_t*)"e", 1, FDB_MUTATION_TYPE_BIT_AND);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 96);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 2);
-	//CHECK(value->data()[0] == 97);
-	//CHECK(value->data()[1] == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 97);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
-	//// Test bitwise or on values of same length:
-	////   db key = foo
-	////   db value = 'a' == 97
-	////   param = 'b' == 98
-	////
-	////   'a' == 97 == 0b01100001
-	//// | 'b' == 98 == 0b01100010
-	////   -----------------------
-	////                0b01100011 == 99 == 'c'
-	////
-	//// Test bitwise or on extended database value:
-	////   db key = bar
-	////   db value = 'b' == 98
-	////   param = "ad"
-	////
-	////   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
-	//// | "ad"   ==    0b0110000101100100
-	////   -------------------------------
-	////                0b0110001101100100 == "cd"
-	////
-	//// Test bitwise or on truncated database value:
-	////   db key = baz
-	////   db value = "abc"
-	////   param = 'd' == 100
-	////
-	////   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
-	//// | 'd' == 100 0b01100100
-	////   ---------------------
-	////              0b01100101 == 101 == 'e'
-	////
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
-//
-	//fdb::Transaction tr(db);
-	//char param[] = { 'a', 'd' };
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BIT_OR);
-		//tr.atomic_op(key("bar"), (const uint8_t*)param, 2, FDB_MUTATION_TYPE_BIT_OR);
-		//tr.atomic_op(key("baz"), (const uint8_t*)"d", 1, FDB_MUTATION_TYPE_BIT_OR);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 99);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("cd") == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 101);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
-	//// Test bitwise xor on values of same length:
-	////   db key = foo
-	////   db value = 'a' == 97
-	////   param = 'b' == 98
-	////
-	////   'a' == 97 == 0b01100001
-	//// ^ 'b' == 98 == 0b01100010
-	////   -----------------------
-	////                0b00000011 == 0x3
-	////
-	//// Test bitwise xor on extended database value:
-	////   db key = bar
-	////   db value = 'b' == 98
-	////   param = "ad"
-	////
-	////   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
-	//// ^ "ad"   ==    0b0110000101100100
-	////   -------------------------------
-	////                0b0000001101100100 == 0x3 followed by 0x64
-	////
-	//// Test bitwise xor on truncated database value:
-	////   db key = baz
-	////   db value = "abc"
-	////   param = 'd' == 100
-	////
-	////   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
-	//// ^ 'd' == 100 0b01100100
-	////   ---------------------
-	////              0b00000101 == 0x5
-	////
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
-//
-	//fdb::Transaction tr(db);
-	//char param[] = { 'a', 'd' };
-	//int potentialCommitCount = 0;
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BIT_XOR);
-		//tr.atomic_op(key("bar"), (const uint8_t*)param, 2, FDB_MUTATION_TYPE_BIT_XOR);
-		//tr.atomic_op(key("baz"), (const uint8_t*)"d", 1, FDB_MUTATION_TYPE_BIT_XOR);
-		//++potentialCommitCount;
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//if (fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err)) {
-				//--potentialCommitCount;
-			//}
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//if (potentialCommitCount != 1) {
-		//MESSAGE("Transaction may not have committed exactly once. Suppressing assertions");
-		//return;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 0x3);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 2);
-	//CHECK(value->data()[0] == 0x3);
-	//CHECK(value->data()[1] == 0x64);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 1);
-	//CHECK(value->data()[0] == 0x5);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_COMPARE_AND_CLEAR") {
-	//// Atomically remove a key-value pair from the database based on a value
-	//// comparison.
-	//insert_data(db, create_data({ { "foo", "bar" }, { "fdb", "foundation" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"bar", 3, FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//CHECK(!value.has_value());
-//
-	//value = get_value(key("fdb"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("foundation") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
-	//// Atomically append a value to an existing key-value pair, or insert the
-	//// key-value pair if an existing key-value pair doesn't exist.
-	//insert_data(db, create_data({ { "foo", "f" } }));
-//
-	//fdb::Transaction tr(db);
-	//int potentialCommitCount = 0;
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"db", 2, FDB_MUTATION_TYPE_APPEND_IF_FITS);
-		//tr.atomic_op(key("bar"), (const uint8_t*)"foundation", 10, FDB_MUTATION_TYPE_APPEND_IF_FITS);
-		//++potentialCommitCount;
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//if (fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err)) {
-				//--potentialCommitCount;
-			//}
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value_foo = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value_foo.has_value());
-//
-	//auto value_bar = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value_bar.has_value());
-//
-	//if (potentialCommitCount != 1) {
-		//MESSAGE("Transaction may not have committed exactly once. Suppressing assertions");
-	//} else {
-		//CHECK(value_foo.value() == "fdb");
-		//CHECK(value_bar.value() == "foundation");
-	//}
-//}
+TEST_CASE("fdb_transaction_get_range reverse") {
+	auto data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
+	insert_data(db, data);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getRange(
+			fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(key("a"))),
+			fdb::key_select::lastLessOrEqual(fdb::toBytesRef(key("d")), 1),
+		        /* limit */ 0,
+		        /* target_bytes */ 0,
+		        /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		        /* iteration */ 0,
+		        /* snapshot */ false,
+		        /* reverse */ true);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		auto out_kv = std::get<0>(output);
+		auto out_count = std::get<1>(output);
+		auto out_more = std::get<2>(output);
+		CHECK(out_count > 0);
+		CHECK(out_count <= 4);
+		if (out_count < 4) {
+			CHECK(out_more);
+		}
+
+		// Read data in reverse order.
+		auto it = data.rbegin();
+		for (int i = 0; i < out_count; i++) {
+			auto kv = *out_kv++;
+			std::string key(kv.key().begin(), kv.key().end());
+			std::string value(kv.value().begin(), kv.value().end());
+
+			CHECK(key.compare(it->first) == 0);
+			CHECK(value.compare(it->second) == 0);
+			++it;
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_range limit") {
+	auto  data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
+	insert_data(db, data);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getRange(
+				fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(key("a"))),
+				fdb::key_select::lastLessOrEqual(fdb::toBytesRef(key("d")), 1),
+		                /* limit */ 2,
+		                /* target_bytes */ 0,
+		                /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		                /* iteration */ 0,
+		                /* snapshot */ false,
+		                /* reverse */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		auto out_kv = std::get<0>(output);
+		auto out_count = std::get<1>(output);
+		auto out_more = std::get<2>(output);
+		CHECK(out_count > 0);
+		CHECK(out_count <= 2);
+		if (out_count < 4) {
+			CHECK(out_more);
+		}
+
+		for (int i = 0; i < out_count; i++) {
+			auto kv = *out_kv++;
+			std::string key(kv.key().begin(), kv.key().end());
+			std::string value(kv.value().begin(), kv.value().end());
+
+			CHECK(data[key].compare(value) == 0);
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
+	auto data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
+	insert_data(db, data);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getRange(
+			fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(key("a"))),
+			fdb::key_select::lastLessOrEqual(fdb::toBytesRef(key("d")), 1),
+		        /* limit */ 3,
+		        /* target_bytes */ 0,
+		        /* FDBStreamingMode */ FDB_STREAMING_MODE_EXACT,
+		        /* iteration */ 0,
+		        /* snapshot */ false,
+		        /* reverse */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		auto out_kv = std::get<0>(output);
+		auto out_count = std::get<1>(output);
+		auto out_more = std::get<2>(output);
+
+		CHECK(out_count == 3);
+		CHECK(out_more);
+
+		for (int i = 0; i < out_count; i++) {
+			auto kv = *out_kv++;
+			std::string key(kv.key().begin(), kv.key().end());
+			std::string value(kv.value().begin(), kv.value().end());
+
+			CHECK(data[key].compare(value) == 0);
+		}
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_clear") {
+	insert_data(db, create_data({ { "foo", "bar" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.clear(fdb::toBytesRef(key("foo")));
+		auto f1 = tr.commit();
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(!value.has_value());
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
+	insert_data(db, create_data({ { "foo", "\x00" } }));
+
+	auto tr = db.createTransaction();
+	int8_t param = 1;
+	int potentialCommitCount = 0;
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")),
+			    fdb::BytesRef(reinterpret_cast<const uint8_t*>(&param), sizeof(param)),
+			    FDB_MUTATION_TYPE_ADD); 
+		if (potentialCommitCount + 1 == 256) {
+			// Trying to commit again might overflow the one unsigned byte we're looking at
+			break;
+		}
+		++potentialCommitCount;
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+				--potentialCommitCount;
+			}
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(uint8_t(value->data()[0]) > 0);
+	CHECK(uint8_t(value->data()[0]) <= potentialCommitCount);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_AND") {
+	// Test bitwise and on values of same length:
+	//   db key = foo
+	//   db value = 'a' == 97
+	//   param = 'b' == 98
+	//
+	//   'a' == 97 == 0b01100001
+	// & 'b' == 98 == 0b01100010
+	//   -----------------------
+	//                0b01100000 == 96 == '`'
+	//
+	// Test bitwise and on extended database value:
+	//   db key = bar
+	//   db value = 'c' == 99
+	//   param = "ad"
+	//
+	//   'c' == 99 == 0b0110001100000000 (zero extended on right to match length of param)
+	// & "ad"   ==    0b0110000101100100
+	//   -------------------------------
+	//                0b0110000100000000 == 'a' followed by null (0)
+	//
+	// Test bitwise and on truncated database value:
+	//   db key = baz
+	//   db value = "abc"
+	//   param = 'e' == 101
+	//
+	//   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+	// & 'e' == 101 0b01100101
+	//   ---------------------
+	//              0b01100001 == 97 == 'a'
+	//
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "c" }, { "baz", "abc" } }));
+
+	auto tr = db.createTransaction();	
+	char param[] = { 'a', 'd' };
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_AND);
+		tr.atomicOp(fdb::toBytesRef(key("bar")),
+			    fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
+			    FDB_MUTATION_TYPE_BIT_AND);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("e"sv), FDB_MUTATION_TYPE_BIT_AND);
+			    
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		} 
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 96);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 2);
+	CHECK(value->data()[0] == 97);
+	CHECK(value->data()[1] == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 97);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
+	// Test bitwise or on values of same length:
+	//   db key = foo
+	//   db value = 'a' == 97
+	//   param = 'b' == 98
+	//
+	//   'a' == 97 == 0b01100001
+	// | 'b' == 98 == 0b01100010
+	//   -----------------------
+	//                0b01100011 == 99 == 'c'
+	//
+	// Test bitwise or on extended database value:
+	//   db key = bar
+	//   db value = 'b' == 98
+	//   param = "ad"
+	//
+	//   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
+	// | "ad"   ==    0b0110000101100100
+	//   -------------------------------
+	//                0b0110001101100100 == "cd"
+	//
+	// Test bitwise or on truncated database value:
+	//   db key = baz
+	//   db value = "abc"
+	//   param = 'd' == 100
+	//
+	//   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+	// | 'd' == 100 0b01100100
+	//   ---------------------
+	//              0b01100101 == 101 == 'e'
+	//
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+	auto tr = db.createTransaction();
+	char param[] = { 'a', 'd' };
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_OR);
+		tr.atomicOp(fdb::toBytesRef(key("bar")),
+			    fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
+			    FDB_MUTATION_TYPE_BIT_OR);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("d"sv), FDB_MUTATION_TYPE_BIT_OR);
+	
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		} 
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 99);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("cd") == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 101);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
+	// Test bitwise xor on values of same length:
+	//   db key = foo
+	//   db value = 'a' == 97
+	//   param = 'b' == 98
+	//
+	//   'a' == 97 == 0b01100001
+	// ^ 'b' == 98 == 0b01100010
+	//   -----------------------
+	//                0b00000011 == 0x3
+	//
+	// Test bitwise xor on extended database value:
+	//   db key = bar
+	//   db value = 'b' == 98
+	//   param = "ad"
+	//
+	//   'b' == 98 -> 0b0110001000000000 (zero extended on right to match length of param)
+	// ^ "ad"   ==    0b0110000101100100
+	//   -------------------------------
+	//                0b0000001101100100 == 0x3 followed by 0x64
+	//
+	// Test bitwise xor on truncated database value:
+	//   db key = baz
+	//   db value = "abc"
+	//   param = 'd' == 100
+	//
+	//   "abc"  ->  0b01100001 (truncated to "a" to match length of param)
+	// ^ 'd' == 100 0b01100100
+	//   ---------------------
+	//              0b00000101 == 0x5
+	//
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+	auto tr = db.createTransaction();
+	char param[] = { 'a', 'd' };
+	int potentialCommitCount = 0;
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_XOR);
+		tr.atomicOp(fdb::toBytesRef(key("bar")),
+			    fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
+			    FDB_MUTATION_TYPE_BIT_XOR);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("d"sv), FDB_MUTATION_TYPE_BIT_XOR);
+	
+		++potentialCommitCount;
+
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+				--potentialCommitCount;
+			}
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+
+	}
+
+	if (potentialCommitCount != 1) {
+		MESSAGE("Transaction may not have committed exactly once. Suppressing assertions");
+		return;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 0x3);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 2);
+	CHECK(value->data()[0] == 0x3);
+	CHECK(value->data()[1] == 0x64);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 1);
+	CHECK(value->data()[0] == 0x5);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_COMPARE_AND_CLEAR") {
+	// Atomically remove a key-value pair from the database based on a value
+	// comparison.
+	insert_data(db, create_data({ { "foo", "bar" }, { "fdb", "foundation" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv), FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		} 
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	CHECK(!value.has_value());
+
+	value = get_value(fdb::toBytesRef(key("fdb")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("foundation") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
+	// Atomically append a value to an existing key-value pair, or insert the
+	// key-value pair if an existing key-value pair doesn't exist.
+	insert_data(db, create_data({ { "foo", "f" } }));
+
+	auto tr = db.createTransaction();
+	int potentialCommitCount = 0;
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("db"sv), FDB_MUTATION_TYPE_APPEND_IF_FITS);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("foundation"sv),
+			FDB_MUTATION_TYPE_APPEND_IF_FITS);
+		++potentialCommitCount;
+
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+				--potentialCommitCount;
+			}
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value_foo = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value_foo.has_value());
+
+	auto value_bar = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value_bar.has_value());
+
+	if (potentialCommitCount != 1) {
+		MESSAGE("Transaction may not have committed exactly once. Suppressing assertions");
+	} else {
+		CHECK(value_foo.value() == "fdb");
+		CHECK(value_bar.value() == "foundation");
+	}
+}
 //
 //TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
 	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));

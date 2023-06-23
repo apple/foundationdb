@@ -218,6 +218,8 @@ public:
 
 	static Error success() { return Error(); }
 
+	bool hasPredicate(int predicateTest) { return native::fdb_error_predicate(predicateTest, err) != 0; }
+
 private:
 	CodeType err;
 };
