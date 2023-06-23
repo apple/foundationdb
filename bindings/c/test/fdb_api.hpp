@@ -62,8 +62,8 @@ struct KeyRangeRef : native::FDBKeyRange {
 };
 
 struct KeyValueRef : native::FDBKeyValue {
-	fdb::KeyRef key() const noexcept { return fdb::KeyRef(native::FDBKeyValue::key, key_length); }
-	fdb::ValueRef value() const noexcept { return fdb::ValueRef(native::FDBKeyValue::value, value_length); }
+	KeyRef key() const noexcept { return KeyRef(native::FDBKeyValue::key, key_length); }
+	ValueRef value() const noexcept { return ValueRef(native::FDBKeyValue::value, value_length); }
 };
 
 struct KeyValue {
@@ -113,8 +113,8 @@ struct GranuleSummary {
 	int64_t deltaSize;
 
 	GranuleSummary(const native::FDBGranuleSummary& nativeSummary) {
-		keyRange.beginKey = fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
-		keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
+		keyRange.beginKey = Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
+		keyRange.endKey = Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
 		snapshotVersion = nativeSummary.snapshot_version;
 		snapshotSize = nativeSummary.snapshot_size;
 		deltaVersion = nativeSummary.delta_version;
