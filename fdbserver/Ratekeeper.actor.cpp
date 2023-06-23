@@ -84,9 +84,7 @@ public:
 		self.addActor.send(self.rateServer.run(
 		    self.normalRateUpdater, self.batchRateUpdater, *self.tagThrottler, self.recoveryTracker));
 
-		if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-			self.addActor.send(self.quotaCache->run());
-		}
+		self.addActor.send(self.quotaCache->run());
 		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.blobMonitor.run(self.configurationMonitor, self.recoveryTracker));
@@ -197,13 +195,9 @@ Ratekeeper::Ratekeeper(UID id,
                                       SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                                       SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                                       SERVER_KNOBS->TARGET_BW_LAG_BATCH)) {
-	if (SERVER_KNOBS->GLOBAL_TAG_THROTTLING) {
-		quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
-		tagThrottler = std::make_unique<GlobalTagThrottler>(
-		    metricsTracker, *quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
-	} else {
-		tagThrottler = std::make_unique<TagThrottler>(db, id);
-	}
+	quotaCache = std::make_unique<RKThroughputQuotaCache>(id, db);
+	tagThrottler = std::make_unique<GlobalTagThrottler>(
+	    metricsTracker, *quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
 }
 
 void Ratekeeper::tryUpdateAutoTagThrottling() {

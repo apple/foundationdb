@@ -55,26 +55,6 @@ public:
 	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
 };
 
-class TagThrottler : public ITagThrottler {
-	PImpl<class TagThrottlerImpl> impl;
-
-public:
-	TagThrottler(Database db, UID id);
-	~TagThrottler();
-
-	Future<Void> monitorThrottlingChanges() override;
-	void addRequests(ThrottlingId, int count) override;
-	uint64_t getThrottledTagChangeId() const override;
-	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() override;
-	ThrottlingIdMap<double> getProxyRates(int numProxies) override { throw not_implemented(); }
-	int64_t autoThrottleCount() const override;
-	uint32_t busyReadersCount() const override;
-	uint32_t busyWritersCount() const override;
-	int64_t manualThrottleCount() const override;
-	bool isAutoThrottlingEnabled() const override;
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
-};
-
 class GlobalTagThrottler : public ITagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
