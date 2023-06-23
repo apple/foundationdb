@@ -46,22 +46,6 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 				                               cx->taskID))) {
 					CODE_PROBE(v.proxyTagThrottledDuration > 0.0,
 					           "getConsistentReadVersion received GetReadVersionReply delayed by proxy tag throttling");
-					if (tags.size() != 0) {
-						auto& priorityThrottledTags = cx->throttledTags[priority];
-						for (auto& tag : tags) {
-							auto itr = v.tagThrottleInfo.find(tag.first);
-							if (itr == v.tagThrottleInfo.end()) {
-								CODE_PROBE(true, "Removing client throttle");
-								priorityThrottledTags.erase(tag.first);
-							} else {
-								CODE_PROBE(true, "Setting client throttle");
-								auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
-								if (!result.second) {
-									result.first->second.update(itr->second);
-								}
-							}
-						}
-					}
 
 					if (debugID.present())
 						g_traceBatch.addEvent(

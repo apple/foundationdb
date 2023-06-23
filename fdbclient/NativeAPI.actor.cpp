@@ -1814,7 +1814,6 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 		    SpecialKeySpace::IMPLTYPE::READWRITE,
 		    std::make_unique<TenantRangeImpl>(SpecialKeySpace::getManagementApiCommandRange("tenant")));
 	}
-	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
 	if (BUGGIFY) {
 		debugUseTags = true;
@@ -2229,19 +2228,6 @@ Future<Void> DatabaseContext::switchConnectionRecord(Reference<IClusterConnectio
 
 Future<Void> DatabaseContext::connectionFileChanged() {
 	return connectionFileChangedTrigger.onTrigger();
-}
-
-void DatabaseContext::expireThrottles() {
-	for (auto& priorityItr : throttledTags) {
-		for (auto tagItr = priorityItr.second.begin(); tagItr != priorityItr.second.end();) {
-			if (tagItr->second.expired()) {
-				CODE_PROBE(true, "Expiring client throttle");
-				tagItr = priorityItr.second.erase(tagItr);
-			} else {
-				++tagItr;
-			}
-		}
-	}
 }
 
 // Initialize tracing for FDB client
@@ -6083,24 +6069,6 @@ void Transaction::addWriteConflictRange(const KeyRangeRef& keys) {
 double Transaction::getBackoff(int errCode) {
 	double returnedBackoff = backoff;
 
-	if (errCode == error_code_tag_throttled) {
-		auto priorityItr = trState->cx->throttledTags.find(trState->options.priority);
-		for (auto& tag : trState->options.tags) {
-			if (priorityItr != trState->cx->throttledTags.end()) {
-				auto tagItr = priorityItr->second.find(tag);
-				if (tagItr != priorityItr->second.end()) {
-					CODE_PROBE(true, "Returning throttle backoff");
-					returnedBackoff = std::max(
-					    returnedBackoff,
-					    std::min(CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL, tagItr->second.throttleDuration()));
-					if (returnedBackoff == CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL) {
-						break;
-					}
-				}
-			}
-		}
-	}
-
 	returnedBackoff *= deterministicRandom()->random01();
 
 	// Set backoff for next time
@@ -7277,29 +7245,6 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 		ASSERT(false);
 	}
 
-	if (trState->options.tags.size() != 0) {
-		auto& priorityThrottledTags = trState->cx->throttledTags[trState->options.priority];
-		for (auto& tag : trState->options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				if (itr->second.expired()) {
-					priorityThrottledTags.erase(itr);
-				} else if (itr->second.throttleDuration() > 0) {
-					CODE_PROBE(true, "throttling transaction after getting read version");
-					++trState->cx->transactionReadVersionsThrottled;
-					throw tag_throttled();
-				}
-			}
-		}
-
-		for (auto& tag : trState->options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				itr->second.addReleased(1);
-			}
-		}
-	}
-
 	if (rep.version > trState->cx->metadataVersionCache[trState->cx->mvCacheInsertLocation].first) {
 		trState->cx->mvCacheInsertLocation =
 		    (trState->cx->mvCacheInsertLocation + 1) % trState->cx->metadataVersionCache.size();
@@ -7370,39 +7315,6 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 		break;
 	default:
 		ASSERT(false);
-	}
-
-	if (options.tags.size() != 0) {
-		double maxThrottleDelay = 0.0;
-		bool canRecheck = false;
-
-		auto& priorityThrottledTags = cx->throttledTags[options.priority];
-		for (auto& tag : options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				if (!itr->second.expired()) {
-					maxThrottleDelay = std::max(maxThrottleDelay, itr->second.throttleDuration());
-					canRecheck = itr->second.canRecheck();
-				} else {
-					priorityThrottledTags.erase(itr);
-				}
-			}
-		}
-
-		if (maxThrottleDelay > 0.0 && !canRecheck) { // TODO: allow delaying?
-			CODE_PROBE(true, "Throttling tag before GRV request");
-			++cx->transactionReadVersionsThrottled;
-			return tag_throttled();
-		} else {
-			CODE_PROBE(maxThrottleDelay > 0.0, "Rechecking throttle");
-		}
-
-		for (auto& tag : options.tags) {
-			auto itr = priorityThrottledTags.find(tag);
-			if (itr != priorityThrottledTags.end()) {
-				itr->second.updateChecked();
-			}
-		}
 	}
 
 	Optional<TenantGroupName> tenantGroup;
@@ -7539,25 +7451,6 @@ ACTOR Future<ProtocolVersion> getClusterProtocolImpl(
 // Note: this will never return if the server is running a protocol from FDB 5.0 or older
 Future<ProtocolVersion> DatabaseContext::getClusterProtocol(Optional<ProtocolVersion> expectedVersion) {
 	return getClusterProtocolImpl(coordinator, expectedVersion);
-}
-
-double ClientTagThrottleData::throttleDuration() const {
-	if (expiration <= now()) {
-		return 0.0;
-	}
-
-	double capacity =
-	    (smoothRate.smoothTotal() - smoothReleased.smoothRate()) * CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW;
-
-	if (capacity >= 1) {
-		return 0.0;
-	}
-
-	if (tpsRate == 0) {
-		return std::max(0.0, expiration - now());
-	}
-
-	return std::min(expiration - now(), capacity / tpsRate);
 }
 
 uint32_t Transaction::getSize() {

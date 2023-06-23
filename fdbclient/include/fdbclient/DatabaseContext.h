@@ -78,50 +78,6 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
 using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
-class ClientTagThrottleData : NonCopyable {
-private:
-	double tpsRate;
-	double expiration;
-	double lastCheck;
-	bool rateSet = false;
-
-	Smoother smoothRate;
-	Smoother smoothReleased;
-
-public:
-	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
-	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
-	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
-		ASSERT(tpsRate >= 0);
-		smoothRate.reset(tpsRate);
-	}
-
-	void update(ClientTagThrottleLimits const& limits) {
-		ASSERT(limits.tpsRate >= 0);
-		this->tpsRate = limits.tpsRate;
-
-		if (!rateSet || expired()) {
-			rateSet = true;
-			smoothRate.reset(limits.tpsRate);
-		} else {
-			smoothRate.setTotal(limits.tpsRate);
-		}
-
-		expiration = limits.expiration;
-	}
-
-	void addReleased(int released) { smoothReleased.addDelta(released); }
-
-	bool expired() const { return expiration <= now(); }
-
-	void updateChecked() { lastCheck = now(); }
-
-	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
-
-	double throttleDuration() const;
-};
-
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const TenantInfo tenant;
 	const Key key;
@@ -445,8 +401,6 @@ public:
 
 	explicit DatabaseContext(const Error& err);
 
-	void expireThrottles();
-
 	UID dbId;
 
 	// Key DB-specific information
@@ -515,8 +469,6 @@ public:
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
-
-	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 
 	CounterCollection cc;
 
@@ -621,7 +573,6 @@ public:
 	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
-	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 
