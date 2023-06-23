@@ -142,34 +142,33 @@ void insert_data(fdb::Database db, const std::map<std::string, std::string>& dat
 		break;
 	}
 }
-//
-//// Get the value associated with `key_name` from the database. Accepts a list
-//// of transaction options to apply (values for options not supported). Returns
-//// an optional which will be populated with the result if one was found.
-//std::optional<std::string> get_value(std::string_view key,
-                                     //fdb_bool_t snapshot,
-                                     //std::vector<FDBTransactionOption> options) {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//for (auto& option : options) {
+
+// Get the value associated with `key_name` from the database. Accepts a list
+// of transaction options to apply (values for options not supported). Returns
+// an optional which will be populated with the result if one was found.
+std::optional<std::string> get_value(fdb::KeyRef key,
+                                     bool snapshot,
+                                     std::vector<FDBTransactionOption> options) {
+	auto tr = db.createTransaction();
+	while (1) {
+		for (auto& option : options) {
+			fdbCheck(tr.setOptionNothrow(option));
 			//fdb_check(tr.set_option(option, nullptr, 0));
-		//}
-		//fdb::ValueFuture f1 = tr.get(key, snapshot);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-		//return out_present ? std::make_optional(std::string(val, vallen)) : std::nullopt;
-	//}
-//}
+		}
+		auto f1 = tr.get(key, snapshot);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+		return value.has_value() ? std::make_optional(std::string(value->begin(), value->end())) : std::nullopt;
+	}
+}
 //
 //struct GetRangeResult {
 	//// List of key-value pairs in the range read.
@@ -581,20 +580,19 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 		break;
 	}
 }
-//
-//TEST_CASE("cannot read system key") {
-	//fdb::Transaction tr(db);
-//
-	//fdb::ValueFuture f1 = tr.get("\xff/coordinators", /* snapshot */ false);
-//
-	//fdb_error_t err = wait_future(f1);
-	//CHECK(err == 2004); // key_outside_legal_range
-//}
-//
-//TEST_CASE("read system key") {
-	//auto value = get_value("\xff/coordinators", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
-	//REQUIRE(value.has_value());
-//}
+
+TEST_CASE("cannot read system key") {
+	auto tr = db.createTransaction();
+	auto f1 = tr.get(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false);
+
+	auto err = waitFuture(f1);
+	CHECK(err.code() == 2004); // key_outside_legal_range
+}
+
+TEST_CASE("read system key") {
+	auto value = get_value(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	REQUIRE(value.has_value());
+}
 //
 //TEST_CASE("cannot write system key") {
 	//fdb::Transaction tr(db);
