@@ -498,7 +498,7 @@ ACTOR Future<Void> auditLocationMetadataPreCheck(Database occ,
 			    .detail("DataMoveID", dataMoveId)
 			    .detail("Context", context)
 			    .detail("AuditRange", range);
-			// Do the best to check any existing result when failure presents
+			// Check any existing result when failure presents
 			for (const auto& [ssid, res] : results) {
 				if (res.present() && !res.get()) {
 					TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
@@ -607,14 +607,8 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 		} catch (Error& e) {
 			if (e.code() == error_code_actor_cancelled || e.code() == error_code_location_metadata_corruption) {
 				throw e;
-			} else if (retryCount > SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX) {
-				TraceEvent(SevInfo, "AuditLocationMetadataFailed")
-				    .errorUnsuppressed(e)
-				    .detail("By", "PostCheck")
-				    .detail("DataMoveID", dataMoveId)
-				    .detail("Context", context)
-				    .detail("AuditRange", range);
-				// Do the best to check any existing result when failure presents
+			} else {
+				// Check corruptions for the current (failed) round
 				for (const auto& [idx, res] : results) {
 					if (res.present() && !res.get()) {
 						TraceEvent(SevError, "AuditLocationMetadataCorruptionDetectedWhenFailed")
@@ -625,11 +619,18 @@ ACTOR Future<Void> auditLocationMetadataPostCheck(Database occ, KeyRange range, 
 						throw location_metadata_corruption();
 					}
 				}
-				// If no corruption detected, exit silently
-				break;
-			} else {
-				wait(delay(0.5));
-				retryCount++;
+				if (retryCount > SERVER_KNOBS->AUDIT_DATAMOVE_POST_CHECK_RETRY_COUNT_MAX) {
+					TraceEvent(SevInfo, "AuditLocationMetadataFailed")
+					    .errorUnsuppressed(e)
+					    .detail("By", "PostCheck")
+					    .detail("DataMoveID", dataMoveId)
+					    .detail("Context", context)
+					    .detail("AuditRange", range);
+					// If no corruption detected, exit silently
+				} else {
+					wait(delay(0.5));
+					retryCount++;
+				}
 			}
 		}
 	}
