@@ -536,51 +536,51 @@ TEST_CASE("fdb_future_get_value") {
 	//}
 //}
 //
-//TEST_CASE("fdb_future_get_keyvalue_array") {
-	//std::map<std::string, std::string> data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
-	//insert_data(db, data);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::KeyValueArrayFuture f1 =
-		    //tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)key("a").c_str(), key("a").size()),
-		                 //FDB_KEYSEL_LAST_LESS_OR_EQUAL((const uint8_t*)key("c").c_str(), key("c").size()) + 1,
-		                 ///* limit */ 0,
-		                 ///* target_bytes */ 0,
-		                 ///* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		                 ///* iteration */ 0,
-		                 ///* snapshot */ false,
-		                 ///* reverse */ 0);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//FDBKeyValue const* out_kv;
-		//int out_count;
-		//int out_more;
-		//fdb_check(f1.get(&out_kv, &out_count, &out_more));
-//
-		//CHECK(out_count > 0);
-		//CHECK(out_count <= 3);
-		//if (out_count < 3) {
-			//CHECK(out_more);
-		//}
-//
-		//for (int i = 0; i < out_count; ++i) {
-			//FDBKeyValue kv = *out_kv++;
-//
-			//std::string key((const char*)kv.key, kv.key_length);
-			//std::string value((const char*)kv.value, kv.value_length);
-//
-			//CHECK(data[key].compare(value) == 0);
-		//}
-		//break;
-	//}
-//}
+TEST_CASE("fdb_future_get_keyvalue_array") {
+	auto data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
+	insert_data(db, data);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getRange(
+			fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(key("a"))),
+			fdb::key_select::lastLessOrEqual(fdb::toBytesRef(key("c")), 1),
+		        /* limit */ 0,
+		        /* target_bytes */ 0,
+		        /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		        /* iteration */ 0,
+		        /* snapshot */ false,
+		        /* reverse */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		//auto& [kvs, out_count, out_more] = output;
+		auto out_kv = std::get<0>(output);
+		auto out_count = std::get<1>(output);
+		auto out_more = std::get<2>(output);
+		CHECK(out_count > 0);
+		CHECK(out_count <= 3);
+		if (out_count < 3) {
+			CHECK(out_more);
+		}
+
+		for (int i = 0; i < out_count; ++i) {
+			auto kv = *out_kv++;
+			std::string key(kv.key().begin(), kv.key().end());
+			std::string value(kv.value().begin(), kv.value().end());
+			CHECK(data[key].compare(value) == 0);
+		}
+		break;
+	}
+}
 //
 //TEST_CASE("cannot read system key") {
 	//fdb::Transaction tr(db);
