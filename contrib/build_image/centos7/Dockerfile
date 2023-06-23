@@ -416,7 +416,8 @@ RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
 # gcc and clang are using different ABIs, thus a gcc-built Boost::context is
 # not linkable to clang objects.
 # 
-# Bug with b2 4.9.4 and clang, need to force the target triplet: https://github.com/bfgroup/b2/issues/183 
+# Bug with b2 4.9.4 and clang https://github.com/bfgroup/b2/issues/183
+# Download and use b2 4.8.2
 RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     source /opt/rh/rh-python38/enable && \
     curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.82.0/source/boost_1_82_0.tar.bz2 -o boost_1_82_0.tar.bz2 && \
@@ -424,9 +425,11 @@ RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     sha256sum --quiet -c boost-sha.txt && \
     mkdir -p /opt/boost_1_82_0_clang && \
     tar --strip-components 1 --no-same-owner --directory /opt/boost_1_82_0_clang -xjf boost_1_82_0.tar.bz2 && \
+    curl -Ls https://github.com/bfgroup/b2/archive/refs/tags/4.8.2.tar.gz -o b2-4.8.2.tar.gz && \
+    tar --strip-components 1 --no-same-owner --directory /opt/boost_1_82_0_clang/tools/build -xf b2-4.8.2.tar.gz && \
     cd /opt/boost_1_82_0_clang && \
     ./bootstrap.sh --with-toolset=clang --with-libraries=all && \
-    ./b2 link=static cxxflags="-std=c++17 -stdlib=libc++ -nostdlib++ -fPIC --target=x86_64-unknown-linux-gnu" linkflags="-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi" --prefix=/opt/boost_1_82_0_clang -j32 install && \
+    ./b2 link=static cxxflags="-std=c++17 -stdlib=libc++ -nostdlib++ -fPIC" linkflags="-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi" --prefix=/opt/boost_1_82_0_clang -j32 install && \
     rm -rf /opt/boost_1_82_0_clang/libs && \
     rm -rf /tmp/*
 
