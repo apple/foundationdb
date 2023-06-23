@@ -112,7 +112,7 @@ public:
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
 
-						auto& a = storageServerTrackers[change.first];
+						auto& a = storageServerTrackers[id];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
@@ -120,8 +120,8 @@ public:
 					}
 				} else {
 					storageServerTrackers.erase(id);
-
 					self->storageServerInterfaces.erase(id);
+					self->storageQueueInfo.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -200,6 +200,7 @@ public:
 			when(wait(self->dbInfo->onChange())) {
 				if (tlogInterfs != self->dbInfo->get().logSystemConfig.allLocalLogs()) {
 					tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
+					self->tlogQueueInfo.clear();
 					tlogTrackers = std::vector<Future<Void>>();
 					for (auto tli : tlogInterfs) {
 						tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli), err));
