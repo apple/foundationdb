@@ -489,32 +489,26 @@ TEST_CASE("fdb_future_get_key") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_future_get_value") {
-	//insert_data(db, create_data({ { "foo", "bar" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get(key("foo"), /* snapshot */ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(out_present);
-		//std::string dbValue(val, vallen);
-		//CHECK(dbValue.compare("bar") == 0);
-		//break;
-	//}
-//}
+
+TEST_CASE("fdb_future_get_value") {
+	insert_data(db, create_data({ { "foo", "bar" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef(key("foo")), /* snapshot */ false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> dbValue;
+		fdbCheck(f1.getNothrow(dbValue));
+		CHECK(std::string(dbValue->begin(), dbValue->end()) == "bar");
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_future_get_string_array") {
 	//insert_data(db, create_data({ { "foo", "bar" } }));
