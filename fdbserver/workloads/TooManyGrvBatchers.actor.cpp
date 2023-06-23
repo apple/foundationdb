@@ -1,11 +1,11 @@
 /**
- * TooManyThrottlingIds.actor.cpp
+ * TooManyGrvBatchers.actor.cpp
  */
 
 #include "fdbserver/workloads/workloads.actor.h"
 #include "flow/actorcompiler.h" // must be last include
 
-class TooManyThrottlingIdsWorkload : public TestWorkload {
+class TooManyGrvBatchersWorkload : public TestWorkload {
 	Database cx;
 
 	static TransactionTag getTag(int index) { return TransactionTag(format("tag/%06d", index)); }
@@ -38,7 +38,7 @@ class TooManyThrottlingIdsWorkload : public TestWorkload {
 		try {
 			wait(waitForAll(actors));
 		} catch (Error& e) {
-			ASSERT_EQ(e.code(), error_code_too_many_throttling_ids);
+			ASSERT_EQ(e.code(), error_code_too_many_grv_batchers);
 			return Void();
 		}
 		ASSERT(false);
@@ -63,8 +63,8 @@ class TooManyThrottlingIdsWorkload : public TestWorkload {
 	}
 
 public:
-	static constexpr auto NAME = "TooManyThrottlingIds";
-	explicit TooManyThrottlingIdsWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
+	static constexpr auto NAME = "TooManyGrvBatchers";
+	explicit TooManyGrvBatchersWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {}
 	Future<Void> setup(Database const& cx) override {
 		this->cx = cx->clone();
 		this->cx->debugUseTags = false;
@@ -75,4 +75,4 @@ public:
 	void getMetrics(std::vector<PerfMetric>&) override {}
 };
 
-WorkloadFactory<TooManyThrottlingIdsWorkload> TooManyThrottlingIdsWorkloadFactory;
+WorkloadFactory<TooManyGrvBatchersWorkload> TooManyGrvBatchersWorkloadFactory;

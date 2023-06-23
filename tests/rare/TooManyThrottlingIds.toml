@@ -1,5 +1,0 @@
-[[test]]
-testTitle='TooManyThrottlingIds'
-
-  [[test.workload]]
-  testName='TooManyThrottlingIds'

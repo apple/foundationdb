@@ -292,7 +292,7 @@ public:
 		auto it = batchers.find(index);
 		if (it == batchers.end()) {
 			if (batchers.size() == capacity) {
-				throw too_many_throttling_ids();
+				throw too_many_grv_batchers();
 			}
 			it = batchers.try_emplace(index).first;
 		}
