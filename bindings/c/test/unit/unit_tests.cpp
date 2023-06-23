@@ -2772,220 +2772,239 @@ void granule_free_load_fail(int64_t loadId, void* userContext) {
 	CHECK(false);
 }
 
-//TEST_CASE("Blob Granule Functions") {
-	//auto confValue =
-	    //get_value("\xff/conf/blob_granules_enabled", /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
-	//if (!confValue.has_value() || confValue.value() != "1") {
-		//// std::cout << "skipping blob granule test" << std::endl;
-		//return;
-	//}
-//
-	//// write some data
-	//insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
-//
-	//// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
-	//FDBReadBlobGranuleContext granuleContext;
-	//granuleContext.userContext = nullptr;
-	//granuleContext.start_load_f = &granule_start_load_fail;
-	//granuleContext.get_load_f = &granule_get_load_fail;
-	//granuleContext.free_load_f = &granule_free_load_fail;
-	//granuleContext.debugNoMaterialize = true;
-	//granuleContext.granuleParallelism = 1;
-//
-	//// dummy values
+TEST_CASE("Blob Granule Functions") {
+	auto confValue =
+	    get_value(fdb::toBytesRef("\xff/conf/blob_granules_enabled"sv),
+		/* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	if (!confValue.has_value() || confValue.value() != "1") {
+		// std::cout << "skipping blob granule test" << std::endl;
+		return;
+	}
+
+	// write some data
+	insert_data(db, create_data({ { "bg1", "a" }, { "bg2", "b" }, { "bg3", "c" } }));
+
+	// because wiring up files is non-trivial, just test the calls complete with the expected no_materialize error
+	fdb::native::FDBReadBlobGranuleContext granuleContext;
+	granuleContext.userContext = nullptr;
+	granuleContext.start_load_f = &granule_start_load_fail;
+	granuleContext.get_load_f = &granule_get_load_fail;
+	granuleContext.free_load_f = &granule_free_load_fail;
+	granuleContext.debugNoMaterialize = true;
+	granuleContext.granuleParallelism = 1;
+
+	// dummy values
 	//FDBKeyValue const* out_kv;
 	//int out_count;
 	//int out_more;
-//
-	//fdb::Transaction tr(db);
-	//int64_t originalReadVersion = -1;
-//
-	//// test no materialize gets error but completes, save read version
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-		//// -2 is latest version
-		//fdb::KeyValueArrayResult r = tr.read_blob_granules(key("bg"), key("bh"), 0, -2, granuleContext);
-		//fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		//if (err && err != 2037 /* blob_granule_not_materialized */) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//CHECK(err == 2037 /* blob_granule_not_materialized */);
-//
-		//// If read done, save read version. Should have already used read version so this shouldn't error
-		//fdb::Int64Future grvFuture = tr.get_read_version();
-		//fdb_error_t grvErr = wait_future(grvFuture);
-		//CHECK(!grvErr);
-		//CHECK(!grvFuture.get(&originalReadVersion));
-//
-		//CHECK(originalReadVersion > 0);
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//// test with begin version > 0
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-		//// -2 is latest version, read version should be >= originalReadVersion
-		//fdb::KeyValueArrayResult r =
-		    //tr.read_blob_granules(key("bg"), key("bh"), originalReadVersion, -2, granuleContext);
-		//fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		//if (err && err != 2037 /* blob_granule_not_materialized */) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//CHECK(err == 2037 /* blob_granule_not_materialized */);
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//// test with prior read version completes after delay larger than normal MVC window
-	//// TODO: should we not do this?
-	//std::this_thread::sleep_for(std::chrono::milliseconds(6000));
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-		//fdb::KeyValueArrayResult r =
-		    //tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
-		//fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		//if (err && err != 2037 /* blob_granule_not_materialized */) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//CHECK(err == 2037 /* blob_granule_not_materialized */);
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//// test ranges
-//
-	//while (1) {
-		//fdb::KeyRangeArrayFuture f = tr.get_blob_granule_ranges(key("bg"), key("bh"), 1000);
-		//fdb_error_t err = wait_future(f);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//const FDBKeyRange* out_kr;
-		//int out_count;
-		//fdb_check(f.get(&out_kr, &out_count));
-//
-		//CHECK(std::string((const char*)out_kr[0].begin_key, out_kr[0].begin_key_length) <= key("bg"));
-		//CHECK(std::string((const char*)out_kr[out_count - 1].end_key, out_kr[out_count - 1].end_key_length) >=
-		      //key("bh"));
-//
-		//CHECK(out_count >= 1);
-		//// check key ranges are in order
-		//for (int i = 0; i < out_count; i++) {
-			//// key range start < end
-			//CHECK(std::string((const char*)out_kr[i].begin_key, out_kr[i].begin_key_length) <
-			      //std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length));
-		//}
-		//// Ranges themselves are sorted and contiguous
-		//for (int i = 0; i < out_count - 1; i++) {
-			//CHECK(std::string((const char*)out_kr[i].end_key, out_kr[i].end_key_length) ==
-			      //std::string((const char*)out_kr[i + 1].begin_key, out_kr[i + 1].begin_key_length));
-		//}
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//// do a purge + wait at that version to purge everything before originalReadVersion
-//
-	//fdb::KeyFuture purgeKeyFuture =
-	    //fdb::Database::purge_blob_granules(db, key("bg"), key("bh"), originalReadVersion, false);
-//
-	//fdb_check(wait_future(purgeKeyFuture));
-//
-	//const uint8_t* purgeKeyData;
-	//int purgeKeyLen;
-//
-	//fdb_check(purgeKeyFuture.get(&purgeKeyData, &purgeKeyLen));
-//
-	//std::string purgeKey((const char*)purgeKeyData, purgeKeyLen);
-//
-	//fdb::EmptyFuture waitPurgeFuture = fdb::Database::wait_purge_granules_complete(db, purgeKey);
-	//fdb_check(wait_future(waitPurgeFuture));
-//
-	//// re-read again at the purge version to make sure it is still valid
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-		//fdb::KeyValueArrayResult r =
-		    //tr.read_blob_granules(key("bg"), key("bh"), 0, originalReadVersion, granuleContext);
-		//fdb_error_t err = r.get(&out_kv, &out_count, &out_more);
-		//if (err && err != 2037 /* blob_granule_not_materialized */) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//CHECK(err == 2037 /* blob_granule_not_materialized */);
-//
-		//tr.reset();
-		//break;
-	//}
-//
-	//// check granule summary
-	//while (1) {
-		//fdb::GranuleSummaryArrayFuture f = tr.summarize_blob_granules(key("bg"), key("bh"), originalReadVersion, 100);
-		//fdb_error_t err = wait_future(f);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//const FDBGranuleSummary* out_summaries;
-		//int out_count;
-		//fdb_check(f.get(&out_summaries, &out_count));
-//
-		//CHECK(out_count >= 1);
-		//CHECK(out_count <= 100);
-//
-		//// check that ranges cover requested range
-		//CHECK(std::string((const char*)out_summaries[0].key_range.begin_key,
-		                  //out_summaries[0].key_range.begin_key_length) <= key("bg"));
-		//CHECK(std::string((const char*)out_summaries[out_count - 1].key_range.end_key,
-		                  //out_summaries[out_count - 1].key_range.end_key_length) >= key("bh"));
-//
-		//// check key ranges are in order
-		//for (int i = 0; i < out_count; i++) {
-			//// key range start < end
-			//CHECK(std::string((const char*)out_summaries[i].key_range.begin_key,
-			                  //out_summaries[i].key_range.begin_key_length) <
-			      //std::string((const char*)out_summaries[i].key_range.end_key,
-			                  //out_summaries[i].key_range.end_key_length));
+
+	auto tr = db.createTransaction();
+	int64_t originalReadVersion = -1;
+
+	// test no materialize gets error but completes, save read version
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		// -2 is latest version
+		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")),
+					     fdb::toBytesRef(key("bh")),
+					     0,
+					     -2,
+					     granuleContext);
+		auto out = fdb::Result::KeyValueRefArray{};
+		auto err = r.getKeyValueArrayNothrow(out);
+		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		
+		CHECK(err.code() == 2037 /* blob_granule_not_materialized */);
+
+
+		// If read done, save read version. Should have already used read version so this shouldn't error
+		auto grvFuture = tr.getReadVersion();
+		auto grvErr = waitFuture(grvFuture);
+		CHECK(!grvErr);
+		CHECK(!grvFuture.getNothrow(originalReadVersion));
+		CHECK(originalReadVersion > 0);
+		
+		tr.reset();
+		break;
+	}
+
+	// test with begin version > 0
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		// -2 is latest version, read version should be >= originalReadVersion
+		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")),
+					     fdb::toBytesRef(key("bh")),
+					     originalReadVersion,
+					     -2,
+					     granuleContext);
+
+		auto out = fdb::Result::KeyValueRefArray{};
+		auto err = r.getKeyValueArrayNothrow(out);
+		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		
+		CHECK(err.code() == 2037 /* blob_granule_not_materialized */);
+		tr.reset();
+		break;
+	}
+
+	// test with prior read version completes after delay larger than normal MVC window
+	// TODO: should we not do this?
+	std::this_thread::sleep_for(std::chrono::milliseconds(6000));
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")),
+					     fdb::toBytesRef(key("bh")),
+					     0,
+					     originalReadVersion,
+					     granuleContext);
+
+		auto out = fdb::Result::KeyValueRefArray{};
+		auto err = r.getKeyValueArrayNothrow(out);
+		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		
+		CHECK(err.code() == 2037 /* blob_granule_not_materialized */);
+		tr.reset();
+		break;
+	}
+
+	// test ranges
+
+	while (1) {
+		auto f = tr.getBlobGranuleRanges(fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 1000);
+		auto err = waitFuture(f);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyRangeRefArray::Type output;
+		fdbCheck(f.getNothrow(output));
+
+		auto outKr = std::get<0>(output);
+		auto outCount = std::get<1>(output);
+
+		CHECK(std::string(outKr[0].beginKey().begin(), outKr[0].beginKey().end()) <= key("bg"));
+		CHECK(std::string(outKr[outCount - 1].endKey().begin(), outKr[outCount - 1].endKey().end()) >=
+		      key("bh"));
+
+		CHECK(outCount >= 1);
+		// check key ranges are in order
+		for (int i = 0; i < outCount; i++) {
+			// key range start < end
+			CHECK(std::string(outKr[i].beginKey().begin(), outKr[i].beginKey().end()) <
+			      std::string(outKr[i].endKey().begin(), outKr[i].endKey().end()));
+		}
+		// Ranges themselves are sorted and contiguous
+		for (int i = 0; i < outCount - 1; i++) {
+			CHECK(std::string(outKr[i].endKey().begin(), outKr[i].endKey().end()) ==
+			      std::string(outKr[i + 1].beginKey().begin(), outKr[i + 1].beginKey().end()));
+		}
+
+		tr.reset();
+		break;
+	}
+
+	// do a purge + wait at that version to purge everything before originalReadVersion
+
+	auto purgeKeyFuture = db.purgeBlobGranules(fdb::toBytesRef(key("bg")),
+						   fdb::toBytesRef(key("bh")),
+						   originalReadVersion,
+						   false);
+	fdbCheck(waitFuture(purgeKeyFuture));
+
+	fdb::KeyRef purgeKey;
+	fdbCheck(purgeKeyFuture.getNothrow(purgeKey));
+
+	auto waitPurgeFuture = db.waitPurgeGranulesComplete(purgeKey);
+	fdbCheck(waitFuture(waitPurgeFuture));
+
+	// re-read again at the purge version to make sure it is still valid
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")),
+				0, originalReadVersion, granuleContext);
+		auto out = fdb::Result::KeyValueRefArray{};
+		auto err = r.getKeyValueArrayNothrow(out);
+		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		
+		CHECK(err.code() == 2037 /* blob_granule_not_materialized */);
+		tr.reset();
+		break;
+	
+	}
+
+	// check granule summary
+	while (1) {
+		auto f = tr.summarizeBlobGranules(fdb::toBytesRef(key("bg")),
+						  fdb::toBytesRef(key("bh")),
+						  originalReadVersion,
+						  100);
+		auto err = waitFuture(f);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::GranuleSummaryRefArray::Type out;
+		fdbCheck(f.getNothrow(out));
+
+		auto out_summaries = std::get<0>(out);
+		auto out_count = std::get<1>(out); 
+
+		CHECK(out_count >= 1);
+		CHECK(out_count <= 100);
+
+		// check that ranges cover requested range
+		CHECK(std::string(out_summaries[0].beginKey().begin(),
+		                  out_summaries[0].beginKey().end()) <= key("bg"));
+		CHECK(std::string(out_summaries[out_count - 1].endKey().begin(),
+		                  out_summaries[out_count - 1].endKey().begin()) >= key("bh"));
+
+		// check key ranges are in order
+		for (int i = 0; i < out_count; i++) {
+			// key range start < end
+			CHECK(std::string(out_summaries[i].beginKey().begin(),
+			                  out_summaries[i].beginKey().end()) <
+			      std::string(out_summaries[i].endKey().begin(),
+			                  out_summaries[i].endKey().end()));
 			//// sanity check versions and sizes
-			//CHECK(out_summaries[i].snapshot_version <= originalReadVersion);
-			//CHECK(out_summaries[i].delta_version <= originalReadVersion);
-			//CHECK(out_summaries[i].snapshot_version <= out_summaries[i].delta_version);
-			//CHECK(out_summaries[i].snapshot_size > 0);
-			//CHECK(out_summaries[i].delta_size >= 0);
-		//}
-//
-		//// Ranges themselves are sorted and contiguous
-		//for (int i = 0; i < out_count - 1; i++) {
-			//CHECK(std::string((const char*)out_summaries[i].key_range.end_key,
-			                  //out_summaries[i].key_range.end_key_length) ==
-			      //std::string((const char*)out_summaries[i + 1].key_range.begin_key,
-			                  //out_summaries[i + 1].key_range.begin_key_length));
-		//}
-//
-		//tr.reset();
-		//break;
-	//}
-//}
+			CHECK(out_summaries[i].snapshot_version <= originalReadVersion);
+			CHECK(out_summaries[i].delta_version <= originalReadVersion);
+			CHECK(out_summaries[i].snapshot_version <= out_summaries[i].delta_version);
+			CHECK(out_summaries[i].snapshot_size > 0);
+			CHECK(out_summaries[i].delta_size >= 0);
+		}
+
+		// Ranges themselves are sorted and contiguous
+		for (int i = 0; i < out_count - 1; i++) {
+			CHECK(std::string(out_summaries[i].endKey().begin(),
+			                  out_summaries[i].endKey().end()) ==
+			      std::string(out_summaries[i + 1].beginKey().begin(),
+			                  out_summaries[i + 1].beginKey().end()));
+		}
+
+		tr.reset();
+		break;
+	}
+}
 
 int main(int argc, char** argv) {
 	if (argc < 3) {
