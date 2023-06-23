@@ -332,11 +332,11 @@ std::optional<std::string> get_value(fdb::KeyRef key,
 	//return result;
 //}
 //
-//// Clears all data in the database.
-//void clear_data(FDBDatabase* db) {
-	//insert_data(db, {});
-//}
-//
+// Clears all data in the database.
+void clear_data(fdb::Database db) {
+	insert_data(db, {});
+}
+
 struct FdbEvent {
 	void wait() {
 		std::unique_lock<std::mutex> l(mutex);
@@ -593,68 +593,64 @@ TEST_CASE("read system key") {
 	auto value = get_value(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	REQUIRE(value.has_value());
 }
-//
-//TEST_CASE("cannot write system key") {
-	//fdb::Transaction tr(db);
-//
-	//tr.set("\xff\x02", "bar");
-//
-	//fdb::EmptyFuture f1 = tr.commit();
-	//fdb_error_t err = wait_future(f1);
-	//CHECK(err == 2004); // key_outside_legal_range
-//}
-//
-//TEST_CASE("write system key") {
-	//fdb::Transaction tr(db);
-//
-	//std::string syskey("\xff\x02");
-//
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_ACCESS_SYSTEM_KEYS, nullptr, 0));
-		//tr.set(syskey, "bar");
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(syskey, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("bar") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction read_your_writes") {
-	//fdb::Transaction tr(db);
-	//clear_data(db);
-//
-	//while (1) {
-		//tr.set("foo", "bar");
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
-//
-		//// Read before committing, should read the initial write.
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(out_present);
-		//std::string value(val, vallen);
-		//CHECK(value.compare("bar") == 0);
-		//break;
-	//}
-//}
+
+TEST_CASE("cannot write system key") {
+	auto tr = db.createTransaction();
+
+	tr.set(fdb::toBytesRef("\xff\x02"sv), fdb::toBytesRef("bar"sv));
+
+	auto f1 = tr.commit();
+	auto err = waitFuture(f1);
+	CHECK(err.code() == 2004); // key_outside_legal_range
+}
+
+TEST_CASE("write system key") {
+	auto tr = db.createTransaction();
+	auto syskey(fdb::toBytesRef("\xff\x02"sv));
+
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_ACCESS_SYSTEM_KEYS));
+		tr.set(syskey, fdb::toBytesRef("bar"sv));
+		auto f1 = tr.commit();
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(syskey, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	REQUIRE(value.has_value());
+	CHECK(value->compare("bar") == 0);
+}
+
+TEST_CASE("fdb_transaction read_your_writes") {
+	auto tr = db.createTransaction();
+	clear_data(db);
+
+	while (1) {
+		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+
+		// Read before committing, should read the initial write.
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+
+		CHECK(val.has_value());
+		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
 	//clear_data(db);
