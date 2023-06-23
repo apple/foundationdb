@@ -1817,7 +1817,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	throttleExpirer = recurring([this]() { expireThrottles(); }, CLIENT_KNOBS->TAG_THROTTLE_EXPIRATION_INTERVAL);
 
 	if (BUGGIFY) {
-		DatabaseContext::debugUseTags = true;
+		debugUseTags = true;
 	}
 
 	initializeSpecialCounters();
@@ -5452,7 +5452,6 @@ Future<RangeReadResult> getRange(Reference<TransactionState> const& trState,
 	                                                                         useTenant);
 }
 
-bool DatabaseContext::debugUseTags = false;
 const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "a", "b", "c", "d", "e", "f", "g",
 	                                                                           "h", "i", "j", "k", "l", "m", "n",
 	                                                                           "o", "p", "q", "r", "s", "t" };
@@ -5471,7 +5470,7 @@ Transaction::Transaction(Database const& cx, Optional<Reference<Tenant>> const& 
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
-	if (DatabaseContext::debugUseTags) {
+	if (cx->debugUseTags) {
 		debugAddTags(trState);
 	}
 }

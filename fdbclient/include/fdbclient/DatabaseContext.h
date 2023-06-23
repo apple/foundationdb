@@ -712,7 +712,7 @@ public:
 	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
 	                             int deprecatedVersion = -1);
 
-	static bool debugUseTags;
+	bool debugUseTags = false;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
 	// Cache of the latest commit versions of storage servers.
