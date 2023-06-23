@@ -153,7 +153,6 @@ std::optional<std::string> get_value(fdb::KeyRef key,
 	while (1) {
 		for (auto& option : options) {
 			fdbCheck(tr.setOptionNothrow(option));
-			//fdb_check(tr.set_option(option, nullptr, 0));
 		}
 		auto f1 = tr.get(key, snapshot);
 
@@ -2104,272 +2103,267 @@ TEST_CASE("fdb_transaction_watch max watches") {
 	max_watches = 10000;
 	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_MAX_WATCHES, max_watches));
 }
-//
-//TEST_CASE("fdb_transaction_watch") {
-	//insert_data(db, create_data({ { "foo", "foo" } }));
-//
-	//struct Context {
-		//FdbEvent event;
-	//};
-	//Context context;
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::EmptyFuture f1 = tr.watch(key("foo"));
-		//fdb::EmptyFuture f2 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f2);
-		//if (err) {
-			//fdb::EmptyFuture f3 = tr.on_error(err);
-			//fdb_check(wait_future(f3));
-			//continue;
-		//}
-//
-		//fdb_check(f1.set_callback(
-		    //+[](FDBFuture*, void* param) {
-			    //auto* context = static_cast<Context*>(param);
-			    //context->event.set();
-		    //},
-		    //&context));
-//
-		//// Update value for key "foo" to trigger the watch.
-		//insert_data(db, create_data({ { "foo", "bar" } }));
-		//context.event.wait();
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_cancel") {
-	//// Cannot use transaction after cancelling it...
-	//fdb::Transaction tr(db);
-	//tr.cancel();
-	//fdb::ValueFuture f1 = tr.get("foo", /* snapshot */ false);
-	//CHECK(wait_future(f1) == 1025); // transaction_cancelled
-//
-	//// ... until the transaction has been reset.
-	//tr.reset();
-	//fdb::ValueFuture f2 = tr.get("foo", /* snapshot */ false);
-	//CHECK(wait_future(f2) != 1025); // transaction_cancelled
-//}
-//
-//TEST_CASE("fdb_transaction_add_conflict_range") {
-	//bool success = false;
-//
-	//bool retry = true;
-	//while (retry) {
-		//fdb::Transaction tr(db);
-		//while (1) {
-			//fdb::Int64Future f1 = tr.get_read_version();
-//
-			//fdb_error_t err = wait_future(f1);
-			//if (err) {
-				//fdb::EmptyFuture f2 = tr.on_error(err);
-				//fdb_check(wait_future(f2));
-				//continue;
-			//}
-			//break;
-		//}
-//
-		//fdb::Transaction tr2(db);
-		//while (1) {
-			//fdb_check(tr2.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
-			//fdb::EmptyFuture f1 = tr2.commit();
-//
-			//fdb_error_t err = wait_future(f1);
-			//if (err) {
-				//fdb::EmptyFuture f2 = tr2.on_error(err);
-				//fdb_check(wait_future(f2));
-				//continue;
-			//}
-			//break;
-		//}
-//
-		//while (1) {
-			//fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_READ));
-			//fdb_check(tr.add_conflict_range(key("a"), strinc_str(key("a")), FDB_CONFLICT_RANGE_TYPE_WRITE));
-			//fdb::EmptyFuture f1 = tr.commit();
-//
-			//fdb_error_t err = wait_future(f1);
-			//if (err == 1020) { // not_committed
-				//// Test should pass if transactions conflict.
-				//success = true;
-				//retry = false;
-			//} else if (err) {
-				//fdb::EmptyFuture f2 = tr.on_error(err);
-				//fdb_check(wait_future(f2));
-				//retry = true;
-			//} else {
-				//// If the transaction succeeded, something went wrong.
-				//CHECK(false);
-				//retry = false;
-			//}
-			//break;
-		//}
-	//}
-//
-	//// Double check that failure was achieved and the loop wasn't just broken out
-	//// of.
-	//CHECK(success);
-//}
-//
-//TEST_CASE("special-key-space valid transaction ID") {
-	//auto value = get_value("\xff\xff/tracing/transaction_id", /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//UID transaction_id = UID::fromString(value.value());
-	//CHECK(transaction_id.first() > 0);
-	//CHECK(transaction_id.second() > 0);
-//}
-//
-//TEST_CASE("special-key-space custom transaction ID") {
-	//fdb::Transaction tr(db);
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	//while (1) {
-		//UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
-		//tr.set("\xff\xff/tracing/transaction_id", randomTransactionID.toString());
-		//fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
-		                             ///* snapshot */ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//REQUIRE(out_present);
-		//UID transaction_id = UID::fromString(std::string(val, vallen));
-		//CHECK(transaction_id == randomTransactionID);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("special-key-space set transaction ID after write") {
-	//fdb::Transaction tr(db);
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	//while (1) {
-		//tr.set(key("foo"), "bar");
-		//tr.set("\xff\xff/tracing/transaction_id", "0");
-		//fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
-		                             ///* snapshot */ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//REQUIRE(out_present);
-		//UID transaction_id = UID::fromString(std::string(val, vallen));
-		//CHECK(transaction_id.first() > 0);
-		//CHECK(transaction_id.second() > 0);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("special-key-space disable tracing") {
-	//fdb::Transaction tr(db);
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	//while (1) {
-		//tr.set("\xff\xff/tracing/token", "false");
-		//fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/token",
-		                             ///* snapshot */ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//REQUIRE(out_present);
-		//uint64_t token = std::stoul(std::string(val, vallen));
-		//CHECK(token == 0);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("special-key-space tracing get range") {
-	//std::string tracingBegin = "\xff\xff/tracing/";
-	//std::string tracingEnd = "\xff\xff/tracing0";
-//
-	//fdb::Transaction tr(db);
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES, nullptr, 0));
-	//while (1) {
-		//fdb::KeyValueArrayFuture f1 =
-		    //tr.get_range(FDB_KEYSEL_FIRST_GREATER_OR_EQUAL((const uint8_t*)tracingBegin.c_str(), tracingBegin.size()),
-		                 //FDB_KEYSEL_LAST_LESS_THAN((const uint8_t*)tracingEnd.c_str(), tracingEnd.size()) + 1,
-		                 ///* limit */ 0,
-		                 ///* target_bytes */ 0,
-		                 ///* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-		                 ///* iteration */ 0,
-		                 ///* snapshot */ false,
-		                 ///* reverse */ 0);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//FDBKeyValue const* out_kv;
-		//int out_count;
-		//int out_more;
-		//fdb_check(f1.get(&out_kv, &out_count, &out_more));
-//
-		//CHECK(!out_more);
-		//CHECK(out_count == 2);
-//
-		//CHECK(std::string((char*)out_kv[1].key, out_kv[1].key_length) == tracingBegin + "transaction_id");
-		//UID transaction_id = UID::fromString(std::string((char*)out_kv[1].value, out_kv[1].value_length));
-		//CHECK(transaction_id.first() > 0);
-		//CHECK(transaction_id.second() > 0);
-		//break;
-	//}
-//}
-//
-//std::string get_valid_status_json() {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get("\xff\xff/status/json", false);
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-		//assert(out_present);
-		//std::string statusJsonStr(val, vallen);
-		//rapidjson::Document statusJson;
-		//statusJson.Parse(statusJsonStr.c_str());
-		//// make sure it is available
-		//bool available = statusJson["client"]["database_status"]["available"].GetBool();
-		//if (!available)
-			//continue; // cannot reach to the cluster, retry
-		//return statusJsonStr;
-	//}
-//}
+
+TEST_CASE("fdb_transaction_watch") {
+	insert_data(db, create_data({ { "foo", "foo" } }));
+
+	struct Context {
+		FdbEvent event;
+	};
+	Context context;
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.watch(fdb::toBytesRef(key("foo")));
+		auto f2 = tr.commit();
+
+		auto err = waitFuture(f2);
+		if (err) {
+			auto f3 = tr.onError(err);
+			fdbCheck(waitFuture(f3));
+			continue;
+		}
+
+		f1.then([&context](fdb::Future f) {
+			context.event.set();
+		});
+
+		// Update value for key "foo" to trigger the watch.
+		insert_data(db, create_data({ { "foo", "bar" } }));
+		context.event.wait();
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_cancel") {
+	// Cannot use transaction after cancelling it...
+	auto tr = db.createTransaction();
+	tr.cancel();
+	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+	CHECK(waitFuture(f1).code() == 1025); // transaction_cancelled
+
+	// ... until the transaction has been reset.
+	tr.reset();
+	auto f2 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+	CHECK(waitFuture(f1).code() != 1024); // transaction_cancelled
+}
+
+TEST_CASE("fdb_transaction_add_conflict_range") {
+	bool success = false;
+
+	bool retry = true;
+	while (retry) {
+		auto tr = db.createTransaction();
+		while (1) {
+			auto f1 = tr.getReadVersion();
+			auto err = waitFuture(f1);
+			if (err) {
+				auto f2 = tr.onError(err);
+				fdbCheck(waitFuture(f2));
+				continue;
+			}
+			break;
+		}
+
+		auto tr2 = db.createTransaction();
+		while (1) {
+			tr2.addConflictRange(fdb::toBytesRef(key("a")),
+					     fdb::toBytesRef(strinc_str(key("a"))),
+					     FDB_CONFLICT_RANGE_TYPE_WRITE);
+			auto f1 = tr2.commit();
+			auto err = waitFuture(f1);
+			if (err) {
+				auto f2 = tr2.onError(err);
+				fdbCheck(waitFuture(f2));
+				continue;
+			}
+			break;
+		}
+
+		while (1) {
+			tr.addConflictRange(fdb::toBytesRef(key("a")),
+                                            fdb::toBytesRef(strinc_str(key("a"))),
+					    FDB_CONFLICT_RANGE_TYPE_READ);
+			tr.addConflictRange(fdb::toBytesRef(key("a")),
+                                            fdb::toBytesRef(strinc_str(key("a"))),
+					    FDB_CONFLICT_RANGE_TYPE_WRITE);
+			auto f1 = tr.commit();
+			auto err = waitFuture(f1);
+			if (err.code() == 1020) { // not_committed
+				// Test should pass if transactions conflict.
+				success = true;
+				retry = false;
+			} else if (err) {
+				auto f2 = tr.onError(err);
+				fdbCheck(waitFuture(f2));
+				retry = true;
+			} else {
+				// If the transaction succeeded, something went wrong.
+				CHECK(false);
+				retry = false;
+			}
+			break;
+		}
+	}
+
+	// Double check that failure was achieved and the loop wasn't just broken out
+	// of.
+	CHECK(success);
+}
+
+TEST_CASE("special-key-space valid transaction ID") {
+	auto value = get_value(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	UID transaction_id = UID::fromString(value.value());
+	CHECK(transaction_id.first() > 0);
+	CHECK(transaction_id.second() > 0);
+}
+
+TEST_CASE("special-key-space custom transaction ID") {
+	auto tr = db.createTransaction();
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	while (1) {
+		UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
+		tr.set(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv),
+		       fdb::toBytesRef(randomTransactionID.toString()));
+		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+		REQUIRE(value.has_value());	
+		UID transaction_id = UID::fromString(std::string(value->begin(), value->end()));
+		CHECK(transaction_id == randomTransactionID);
+		break;
+	}
+}
+
+TEST_CASE("special-key-space set transaction ID after write") {
+	auto tr = db.createTransaction();
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	while (1) {
+		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef(key("bar")));
+		tr.set(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), fdb::toBytesRef("0"sv));
+		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+
+		REQUIRE(value.has_value());
+		UID transaction_id = UID::fromString(std::string(value->begin(), value->end()));
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
+		break;
+	}
+}
+
+TEST_CASE("special-key-space disable tracing") {
+	auto tr = db.createTransaction();
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	while (1) {
+		tr.set(fdb::toBytesRef("\xff\xff/tracing/token"sv), fdb::toBytesRef("false"sv));
+		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/token"sv), /* snapshot */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+
+		REQUIRE(value.has_value());
+		uint64_t token = std::stoul(std::string(value->begin(), value->end()));
+		CHECK(token == 0);
+		break;
+	}
+}
+
+TEST_CASE("special-key-space tracing get range") {
+	std::string tracingBegin = "\xff\xff/tracing/";
+	std::string tracingEnd = "\xff\xff/tracing0";
+
+	auto tr = db.createTransaction();
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	while (1) {
+		auto f1 = tr.getRange(
+			fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(tracingBegin)),
+			fdb::key_select::lastLessThan(fdb::toBytesRef(tracingEnd), 1),
+		        /* limit */ 0,
+		        /* target_bytes */ 0,
+		        /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+		        /* iteration */ 0,
+		        /* snapshot */ false,
+		        /* reverse */ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::KeyValueRefArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		auto out_kv = std::get<0>(output);
+		auto out_count = std::get<1>(output);
+		auto out_more = std::get<2>(output);
+	
+
+		CHECK(!out_more);
+		CHECK(out_count == 2);
+
+		auto tracingBeginTidKey = std::string(out_kv[1].key().begin(), out_kv[1].key().end());
+		CHECK(tracingBeginTidKey == tracingBegin + "transaction_id");
+		auto tracingBeginTidVal = std::string(out_kv[1].value().begin(), out_kv[1].value().end());
+		UID transaction_id = UID::fromString(tracingBeginTidVal);
+		CHECK(transaction_id.first() > 0);
+		CHECK(transaction_id.second() > 0);
+		break;
+	}
+}
+
+std::string get_valid_status_json() {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/status/json"sv), false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+
+		assert(value.has_value());
+		std::string statusJsonStr(value->begin(), value->end());
+		rapidjson::Document statusJson;
+		statusJson.Parse(statusJsonStr.c_str());
+		// make sure it is available
+		bool available = statusJson["client"]["database_status"]["available"].GetBool();
+		if (!available)
+			continue; // cannot reach to the cluster, retry
+		return statusJsonStr;
+	}
+}
 //
 //TEST_CASE("fdb_database_reboot_worker") {
 //#ifdef USE_TSAN
@@ -2465,71 +2459,68 @@ TEST_CASE("fdb_transaction_watch max watches") {
 		//}
 	//}
 //}
-//
-//TEST_CASE("fdb_error_predicate") {
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1007)); // transaction_too_old
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1020)); // not_committed
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1038)); // database_locked
-//
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 1036)); // accessed_unreadable
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2000)); // client_invalid_operation
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2004)); // key_outside_legal_range
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2005)); // inverted_range
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2006)); // invalid_option_value
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2007)); // invalid_option
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2011)); // version_invalid
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2020)); // transaction_invalid_version
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2023)); // transaction_read_only
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2100)); // incompatible_protocol_version
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2101)); // transaction_too_large
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2102)); // key_too_large
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2103)); // value_too_large
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2108)); // unsupported_operation
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 2200)); // api_version_unset
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 4000)); // unknown_error
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, 4001)); // internal_error
-//
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1021)); // commit_unknown_result
-//
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1000)); // operation_failed
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1004)); // timed_out
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1025)); // transaction_cancelled
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1038)); // database_locked
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 1101)); // operation_cancelled
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, 2002)); // commit_read_incomplete
-//
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1007)); // transaction_too_old
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1020)); // not_committed
-	//CHECK(fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1038)); // database_locked
-//
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1021)); // commit_unknown_result
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1025)); // transaction_cancelled
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1031)); // transaction_timed_out
-	//CHECK(!fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, 1040)); // proxy_memory_limit_exceeded
-//}
-//
-//TEST_CASE("block_from_callback") {
-	//fdb::Transaction tr(db);
-	//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-	//struct Context {
-		//FdbEvent event;
-		//fdb::Transaction* tr;
-	//};
-	//Context context;
-	//context.tr = &tr;
-	//fdb_check(f1.set_callback(
-	    //+[](FDBFuture*, void* param) {
-		    //auto* context = static_cast<Context*>(param);
-		    //fdb::ValueFuture f2 = context->tr->get("bar", /*snapshot*/ true);
-		    //fdb_error_t error = f2.block_until_ready();
-		    //if (error) {
-			    //CHECK(error == /*blocked_from_network_thread*/ 2026);
-		    //}
-		    //context->event.set();
-	    //},
-	    //&context));
-	//context.event.wait();
-//}
+
+TEST_CASE("fdb_error_predicate") {
+	CHECK(fdb::Error(1007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_too_old
+	CHECK(fdb::Error(1020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // not_committed
+	CHECK(fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // database_locked
+
+	CHECK(!fdb::Error(1036).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // accessed_unreadable
+	CHECK(!fdb::Error(2000).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // client_invalid_operation
+	CHECK(!fdb::Error(2004).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // key_outside_legal_range
+	CHECK(!fdb::Error(2005).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // inverted_range
+	CHECK(!fdb::Error(2006).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // invalid_option_value
+	CHECK(!fdb::Error(2007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // invalid_option
+	CHECK(!fdb::Error(2011).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // version_invalid
+	CHECK(!fdb::Error(2020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_invalid_version
+	CHECK(!fdb::Error(2023).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_read_only
+	CHECK(!fdb::Error(2100).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // incompatible_protocol_version
+	CHECK(!fdb::Error(2101).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_too_large
+	CHECK(!fdb::Error(2102).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // key_too_large
+	CHECK(!fdb::Error(2103).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // value_too_large
+	CHECK(!fdb::Error(2108).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // unsupported_operation
+	CHECK(!fdb::Error(2200).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // api_version_unset
+	CHECK(!fdb::Error(4000).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // unknown_error
+	CHECK(!fdb::Error(4001).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // internal_error
+
+	CHECK(fdb::Error(1021).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // commit_unknown_result
+	
+	CHECK(!fdb::Error(1000).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // operation_failed
+	CHECK(!fdb::Error(1004).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // timed_out
+	CHECK(!fdb::Error(1025).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // transaction_cancelled
+	CHECK(!fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // database_locked
+	CHECK(!fdb::Error(1101).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // operation_cancelled
+	CHECK(!fdb::Error(2002).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // commit_read_incomplete
+
+	CHECK(fdb::Error(1007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_too_old
+	CHECK(fdb::Error(1020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // not_committed
+	CHECK(fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // database_locked
+
+	CHECK(!fdb::Error(1021).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // commit_unknown_result
+	CHECK(!fdb::Error(1025).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_cancelled
+	CHECK(!fdb::Error(1031).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_timed_out
+	CHECK(!fdb::Error(1040).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // proxy_memory_limit_exceeded
+}
+
+TEST_CASE("block_from_callback") {
+	auto tr = db.createTransaction();
+	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+	struct Context {
+		FdbEvent event;
+		fdb::Transaction* tr;
+	};
+	Context context;
+	context.tr = &tr;
+	f1.then([&context](fdb::Future f) {
+		auto f2 = context.tr->get(fdb::toBytesRef("bar"sv), /*snapshot*/ true);
+		auto err = f2.blockUntilReady();
+		if (err) {
+			CHECK(err.code() == /*blocked_from_network_thread*/ 2026);
+		}
+		context.event.set();
+	});
+	context.event.wait();
+}
 //
 //// monitors network busyness for 2 sec (40 readings)
 //TEST_CASE("monitor_network_busyness") {
@@ -2548,81 +2539,81 @@ TEST_CASE("fdb_transaction_watch max watches") {
 	//// assert that at least one of the busyness readings was greater than 0
 	//CHECK(containsGreaterZero);
 //}
-//
-//// Commit a transaction and confirm it has not been reset
-//TEST_CASE("commit_does_not_reset") {
-	//fdb::Transaction tr(db);
-	//fdb::Transaction tr2(db);
-//
-	//// Commit two transactions, one that will fail with conflict and the other
-	//// that will succeed. Ensure both transactions are not reset at the end.
-	//while (1) {
-		//fdb::Int64Future tr1GrvFuture = tr.get_read_version();
-		//fdb_error_t err = wait_future(tr1GrvFuture);
-		//if (err) {
-			//fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
-			//fdb_check(wait_future(tr1OnErrorFuture));
-			//continue;
-		//}
-//
-		//int64_t tr1StartVersion;
-		//CHECK(!tr1GrvFuture.get(&tr1StartVersion));
-//
-		//fdb::Int64Future tr2GrvFuture = tr2.get_read_version();
-		//err = wait_future(tr2GrvFuture);
-//
-		//if (err) {
-			//fdb::EmptyFuture tr2OnErrorFuture = tr2.on_error(err);
-			//fdb_check(wait_future(tr2OnErrorFuture));
-			//continue;
-		//}
-//
-		//int64_t tr2StartVersion;
-		//CHECK(!tr2GrvFuture.get(&tr2StartVersion));
-//
-		//tr.set(key("foo"), "bar");
-		//fdb::EmptyFuture tr1CommitFuture = tr.commit();
-		//err = wait_future(tr1CommitFuture);
-		//if (err) {
-			//fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
-			//fdb_check(wait_future(tr1OnErrorFuture));
-			//continue;
-		//}
-//
-		//fdb_check(tr2.add_conflict_range(key("foo"), strinc_str(key("foo")), FDB_CONFLICT_RANGE_TYPE_READ));
-		//tr2.set(key("foo"), "bar");
-		//fdb::EmptyFuture tr2CommitFuture = tr2.commit();
-		//err = wait_future(tr2CommitFuture);
-		//CHECK(err == 1020); // not_committed
-//
-		//fdb::Int64Future tr1GrvFuture2 = tr.get_read_version();
-		//err = wait_future(tr1GrvFuture2);
-		//if (err) {
-			//fdb::EmptyFuture tr1OnErrorFuture = tr.on_error(err);
-			//fdb_check(wait_future(tr1OnErrorFuture));
-			//continue;
-		//}
-//
-		//int64_t tr1EndVersion;
-		//CHECK(!tr1GrvFuture2.get(&tr1EndVersion));
-//
-		//fdb::Int64Future tr2GrvFuture2 = tr2.get_read_version();
-		//err = wait_future(tr2GrvFuture2);
-		//if (err) {
-			//fdb::EmptyFuture tr2OnErrorFuture = tr2.on_error(err);
-			//fdb_check(wait_future(tr2OnErrorFuture));
-			//continue;
-		//}
-//
-		//int64_t tr2EndVersion;
-		//CHECK(!tr2GrvFuture2.get(&tr2EndVersion));
-//
-		//// If we reset the transaction, then the read version will change
-		//CHECK(tr1StartVersion == tr1EndVersion);
-		//CHECK(tr2StartVersion == tr2EndVersion);
-		//break;
-	//}
-//}
+
+// Commit a transaction and confirm it has not been reset
+TEST_CASE("commit_does_not_reset") {
+	auto tr = db.createTransaction();
+	auto tr2 = db.createTransaction();
+
+	// Commit two transactions, one that will fail with conflict and the other
+	// that will succeed. Ensure both transactions are not reset at the end.
+	while (1) {
+		auto tr1GrvFuture = tr.getReadVersion();
+		auto err = waitFuture(tr1GrvFuture);
+		if (err) {
+			auto tr1OnErrorFuture = tr.onError(err);
+			fdbCheck(waitFuture(tr1OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr1StartVersion;
+		fdbCheck(tr1GrvFuture.getNothrow(tr1StartVersion));
+
+		auto tr2GrvFuture = tr2.getReadVersion();
+		err = waitFuture(tr2GrvFuture);
+		if (err) {
+			auto tr2OnErrorFuture = tr2.onError(err);
+			fdbCheck(waitFuture(tr2OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr2StartVersion;
+		fdbCheck(tr2GrvFuture.getNothrow(tr2StartVersion));
+
+		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		auto tr1CommitFuture = tr.commit();
+		err = waitFuture(tr1CommitFuture);
+		if (err) {
+			auto tr1OnErrorFuture = tr.onError(err);
+			fdbCheck(waitFuture(tr1OnErrorFuture));
+			continue;
+		}
+
+		tr2.addConflictRange(fdb::toBytesRef(key("foo")), fdb::toBytesRef(strinc_str(key("foo"))),
+			FDB_CONFLICT_RANGE_TYPE_READ);
+		tr2.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		auto tr2CommitFuture = tr2.commit();
+		err = waitFuture(tr2CommitFuture);
+		CHECK(err.code() == 1020); // not_committed
+
+		auto tr1GrvFuture2 = tr.getReadVersion();
+		err = waitFuture(tr1GrvFuture2);
+		if (err) {
+			auto tr1OnErrorFuture = tr.onError(err);
+			fdbCheck(waitFuture(tr1OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr1EndVersion;
+		fdbCheck(tr1GrvFuture2.getNothrow(tr1EndVersion));
+
+		auto tr2GrvFuture2 = tr2.getReadVersion();
+		err = waitFuture(tr2GrvFuture2);
+		if (err) {
+			auto tr2OnErrorFuture = tr2.onError(err);
+			fdbCheck(waitFuture(tr2OnErrorFuture));
+			continue;
+		}
+
+		int64_t tr2EndVersion;
+		fdbCheck(tr2GrvFuture2.getNothrow(tr2EndVersion));
+
+		// If we reset the transaction, then the read version will change
+		CHECK(tr1StartVersion == tr1EndVersion);
+		CHECK(tr2StartVersion == tr2EndVersion);
+		break;
+	}
+}
 //
 //TEST_CASE("Fast alloc thread cleanup") {
 	//// Try to cause an OOM if thread cleanup doesn't work
