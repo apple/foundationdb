@@ -371,7 +371,6 @@ ACTOR Future<Void> getRate(UID myID,
                            GetHealthMetricsReply* healthMetricsReply,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            ThrottlingIdMap<uint64_t>* transactionTagCounter,
-                           PrioritizedThrottlingIdMap<ClientTagThrottleLimits>* clientThrottledTags,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -426,11 +425,6 @@ ACTOR Future<Void> getRate(UID myID,
 				lastDetailedReply = now();
 			}
 
-			// Replace our throttles with what was sent by ratekeeper. Because we do this,
-			// we are not required to expire tags out of the map
-			if (rep.clientThrottledTags.present()) {
-				*clientThrottledTags = std::move(rep.clientThrottledTags.get());
-			}
 			if (rep.proxyThrottledTags.present()) {
 				proxyData->tagThrottler.updateRates(rep.proxyThrottledTags.get());
 			}
@@ -701,7 +695,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
-                                  PrioritizedThrottlingIdMap<ClientTagThrottleLimits> clientThrottledTags,
                                   int64_t midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
@@ -736,27 +729,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		}
 		reply.proxyId = grvProxyData->dbgid;
 		reply.proxyTagThrottledDuration = request.proxyTagThrottledDuration;
-
-		if (request.isTagged()) {
-			auto& priorityThrottledTags = clientThrottledTags[request.priority];
-			for (auto tag : request.tags) {
-				auto tagItr = priorityThrottledTags.find(ThrottlingIdRef::fromTag(tag.first));
-				if (tagItr != priorityThrottledTags.end()) {
-					if (tagItr->second.expiration > now()) {
-						if (tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
-							CODE_PROBE(true, "Auto TPS rate is unlimited");
-						} else {
-							CODE_PROBE(true, "GRV proxy returning tag throttle");
-							reply.tagThrottleInfo[tag.first] = tagItr->second;
-						}
-					} else {
-						// This isn't required, but we might as well
-						CODE_PROBE(true, "GRV proxy expiring tag throttle");
-						priorityThrottledTags.erase(tagItr);
-					}
-				}
-			}
-		}
 
 		if (stats->lastBatchQueueThrottled) {
 			// Check if this throttling has been sustained for a certain amount of time to avoid false positives
@@ -846,7 +818,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Deque<GetReadVersionRequest> batchQueue;
 
 	state ThrottlingIdMap<uint64_t> transactionTagCounter;
-	state PrioritizedThrottlingIdMap<ClientTagThrottleLimits> clientThrottledTags;
 
 	state PromiseStream<double> normalGRVLatency;
 
@@ -864,7 +835,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
 	                      &transactionTagCounter,
-	                      &clientThrottledTags,
 	                      &grvProxyData->stats,
 	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
@@ -1048,7 +1018,6 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 				                             grvProxyData,
 				                             &grvProxyData->stats,
 				                             grvProxyData->minKnownCommittedVersion,
-				                             clientThrottledTags,
 				                             midShardSize));
 
 				// Use normal priority transaction's GRV latency to dynamically calculate transaction batching interval.
