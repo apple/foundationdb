@@ -169,7 +169,6 @@ struct TransactionOptions {
 	TransactionPriority priority;
 
 	TagSet tags; // All tags set on transaction
-	TagSet readTags; // Tags that can be sent with read requests
 
 	// update clear function if you add a new field
 

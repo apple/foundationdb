@@ -3604,8 +3604,7 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         trState->readVersion(),
-					                         trState->cx->sampleReadTags() ? trState->options.readTags
-					                                                       : Optional<TagSet>(),
+					                         trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>(),
 					                         readOptions,
 					                         ssLatestCommitVersions),
 					         TaskPriority::DefaultPromiseEndpoint,
@@ -3735,7 +3734,7 @@ ACTOR Future<KeyReadResult> getKey(Reference<TransactionState> trState,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  trState->readVersion(),
-			                  trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>(),
+			                  trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>(),
 			                  readOptions,
 			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
@@ -4246,7 +4245,7 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
-			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
+			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
 
 			req.options = trState->readOptions;
 
@@ -4646,7 +4645,7 @@ Future<RangeReadResultFamily> getRange(Reference<TransactionState> trState,
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
-			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
+			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
 			req.spanContext = span.context;
 			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 				getRangeID = nondeterministicRandom()->randomUniqueID();
@@ -5087,7 +5086,7 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
-			req.tags = trState->cx->sampleReadTags() ? trState->options.readTags : Optional<TagSet>();
+			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
 
 			try {
 				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
@@ -5675,7 +5674,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	return ::watch(watch,
 	               trState->cx,
 	               populateAndGetTenant(trState, watch->key),
-	               trState->options.readTags,
+	               trState->options.tags,
 	               trState->spanContext,
 	               trState->taskID,
 	               trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
@@ -6105,7 +6104,6 @@ void TransactionOptions::clear() {
 	includePort = false;
 	reportConflictingKeys = false;
 	tags = TagSet{};
-	readTags = TagSet{};
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
 	useGrvCache = false;
@@ -6389,7 +6387,7 @@ void Transaction::setupWatches() {
 			                  watches[i]->key,
 			                  watches[i]->value,
 			                  trState->cx,
-			                  trState->options.readTags,
+			                  trState->options.tags,
 			                  trState->spanContext,
 			                  trState->taskID,
 			                  trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
@@ -7093,7 +7091,6 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 	case FDBTransactionOptions::AUTO_THROTTLE_TAG:
 		validateOptionValuePresent(value);
 		trState->options.tags.addTag(value.get());
-		trState->options.readTags.addTag(value.get());
 		break;
 
 	case FDBTransactionOptions::SPAN_PARENT:
