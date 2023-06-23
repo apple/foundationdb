@@ -66,7 +66,7 @@ class Ratekeeper {
 	RKBlobMonitor blobMonitor;
 	RKRateServer rateServer;
 	RKRateUpdater normalRateUpdater, batchRateUpdater;
-	std::unique_ptr<IRKThroughputQuotaCache> quotaCache;
+	RKThroughputQuotaCache quotaCache;
 	std::unique_ptr<class ITagThrottler> tagThrottler;
 
 	PromiseStream<Future<Void>> addActor;
