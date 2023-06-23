@@ -18,6 +18,7 @@
  * limitations under the License.
  */
 
+#include "fdbclient/ApiRequest.h"
 #include "fdbclient/ApiRequestHandler.h"
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/BlobGranuleApiImpl.h"
@@ -1299,15 +1300,16 @@ extern "C" DLLEXPORT FDBFuture* fdb_transaction_read_blob_granules_description_v
                                                                                   int64_t* read_version_out) {
 	FDBFuture* f = fdb_transaction_read_blob_granules_description_v2(
 	    tr, begin_key_name, begin_key_name_length, end_key_name, end_key_name_length, begin_version, read_version);
-	return (FDBFuture*)mapThreadFuture<ReadBGDescriptionsApiResult, ReadBGDescriptionsApiResultV1>(
-	           ThreadFuture<ReadBGDescriptionsApiResult>(TSAV(ReadBGDescriptionsApiResult, f)),
-	           [read_version_out](ErrorOr<ReadBGDescriptionsApiResult> input) {
+	return (FDBFuture*)mapThreadFuture<ApiResult, ReadBGDescriptionsApiResultV1>(
+	           ThreadFuture<ApiResult>(TSAV(ApiResult, f)),
+	           [read_version_out](ErrorOr<ApiResult> input) {
 		           if (input.isError()) {
 			           return ErrorOr<ReadBGDescriptionsApiResultV1>(input.getError());
 		           } else {
+			           auto inputResult = (ReadBGDescriptionsApiResult&)input.get();
 			           if (read_version_out)
-				           *read_version_out = input.get().getPtr()->read_version;
-			           return ErrorOr<ReadBGDescriptionsApiResultV1>(convertBlobGranulesDescriptionsToV1(input.get()));
+				           *read_version_out = inputResult.getData()->read_version;
+			           return ErrorOr<ReadBGDescriptionsApiResultV1>(convertBlobGranulesDescriptionsToV1(inputResult));
 		           }
 	           })
 	    .extractPtr();
