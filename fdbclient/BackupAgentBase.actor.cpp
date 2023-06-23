@@ -628,8 +628,8 @@ ACTOR Future<Void> readCommitted(Database cx,
 				}
 				rangevalue = copy;
 				rangevalue.more = true;
-				// Half of the time wait for this tr to expire so that the next read is at a different version
-				if (deterministicRandom()->random01() < 0.5)
+				// Some of the time wait for this tr to expire so that the next read is at a different version
+				if (deterministicRandom()->random01() < 0.01)
 					wait(delay(6.0));
 			}
 
