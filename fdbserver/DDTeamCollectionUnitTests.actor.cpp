@@ -607,7 +607,7 @@ public:
 			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
 		};
 		std::vector<int64_t> load_bytes{
-			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
+			50 * 1024 * 1024, 300 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 400 * 1024 * 1024
 		};
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
@@ -855,7 +855,7 @@ public:
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
 		                               ForReadBalance::True);
-		collection->teamPivots.lastPivotValuesUpdate = -100;
+		collection->teamPivots.lastPivotsUpdate = -100;
 
 		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
@@ -927,7 +927,7 @@ public:
 		return Void();
 	}
 
-	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED=true, we would evaluate the cpu and available space of
+	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED = true, we would evaluate the cpu and load bytes of
 	// source team when we are relocating a shard. If both are better than pivot values, we would return the source team
 	// as new destination team.
 	ACTOR static Future<Void> GetTeam_EvaluateSourceTeam() {
@@ -936,7 +936,7 @@ public:
 		state int teamSize = 1;
 		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
 
-		collection->teamPivots.lastPivotValuesUpdate = -100;
+		collection->teamPivots.lastPivotsUpdate = -100;
 
 		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
@@ -953,18 +953,14 @@ public:
 
 		GetStorageMetricsReply low_s_low_r;
 		low_s_low_r.capacity.bytes = capacity;
-		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 2;
-		low_s_low_r.load.bytes = loadBytes;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		low_s_low_r.load.bytes = loadBytes * 2;
 		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
 
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_reevaluation_enabled",
 		                                                          KnobValueRef::create(bool{ true }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.6 }));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_available_space_pivot_ratio",
-		                                                          KnobValueRef::create(double{ 0.5 }));
-		IKnobCollection::getMutableGlobalKnobCollection().setKnob("available_space_pivot_ratio",
-		                                                          KnobValueRef::create(double{ 0.5 }));
 		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
 		                                                          KnobValueRef::create(double{ 0.9 }));
 
@@ -1005,10 +1001,6 @@ public:
 
 		wait(collection->getTeam(sourceReq));
 		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
-		fmt::print("StrictPivotRatio: {}, teamStrictPivotCPU: {}, strictPivotAvailableSpaceRatio: {}\n",
-		           SERVER_KNOBS->DD_STRICT_CPU_PIVOT_RATIO,
-		           collection->teamPivots.strictPivotCPU,
-		           collection->teamPivots.strictPivotAvailableSpaceRatio);
 		ASSERT(sourceTeam.present());
 		ASSERT_EQ(sourceTeam.get()->getServerIDs(), std::vector<UID>{ UID(1, 0) });
 
@@ -1026,7 +1018,7 @@ public:
 		ASSERT(bestTeam.present());
 		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
 
-		// CASE 3: Don't return source team because its available space is below pivot values
+		// CASE 3: Don't return source team because its load bytes is greater than pivot values
 		TeamSelect anySelect(TeamSelect::ANY);
 		anySelect.setForRelocateShard(ForRelocateShard::True);
 		state GetTeamRequest anyReq(anySelect,

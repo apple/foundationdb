@@ -626,8 +626,8 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
 		    .detail("TagsAutoThrottled", tagThrottler.autoThrottleCount())
-		    .detail("TagsAutoThrottledBusyRead", tagThrottler.busyReadTagCount())
-		    .detail("TagsAutoThrottledBusyWrite", tagThrottler.busyWriteTagCount())
+		    .detail("TagsAutoThrottledBusyRead", tagThrottler.busyReadersCount())
+		    .detail("TagsAutoThrottledBusyWrite", tagThrottler.busyWritersCount())
 		    .detail("TagsManuallyThrottled", tagThrottler.manualThrottleCount())
 		    .detail("AutoThrottlingEnabled", tagThrottler.isAutoThrottlingEnabled())
 		    .trackLatest(name);

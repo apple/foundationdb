@@ -1364,7 +1364,6 @@ void DatabaseContext::registerSpecialKeysImpl(SpecialKeySpace::MODULE module,
 	}
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> clusterRecord);
 ACTOR Future<ValueReadResult> getJSON(Database db);
 
 struct SingleSpecialKeyImpl : SpecialKeyRangeReadImpl {
@@ -3865,12 +3864,6 @@ ACTOR Future<Version> getRawVersion(Reference<TransactionState> trState) {
 	}
 }
 
-ACTOR Future<Void> readVersionBatcher(
-    DatabaseContext* cx,
-    FutureStream<std::pair<Promise<GetReadVersionReply>, Optional<UID>>> versionStream,
-    uint32_t flags,
-    Optional<TenantGroupName> tenantGroup);
-
 ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> parameters) {
 	state Span span("NAPI:watchValue"_loc, parameters->spanContext);
 	state Version ver = parameters->version;
@@ -4351,6 +4344,7 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 						    KeyRangeRef(keyAfter(output[output.size() - 1].key), locations[shard].range.end);
 				}
 
+				bool redoKeyLocationRequest = false;
 				if (!more || locations[shard].range.empty()) {
 					CODE_PROBE(true, "getExactrange (!more || locations[shard].first.empty())");
 					if (shard == locations.size() - 1) {
@@ -4362,10 +4356,9 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 							output.more = false;
 							return output;
 						}
-						CODE_PROBE(true, "Multiple requests of key locations");
 
 						keys = KeyRangeRef(begin, end);
-						break;
+						redoKeyLocationRequest = true;
 					}
 
 					++shard;
@@ -4379,6 +4372,10 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 					return output;
 				}
 
+				if (redoKeyLocationRequest) {
+					CODE_PROBE(true, "Multiple requests of key locations");
+					break;
+				}
 			} catch (Error& e) {
 				if (e.code() == error_code_wrong_shard_server || e.code() == error_code_all_alternatives_failed) {
 					const KeyRangeRef& range = locations[shard].range;
@@ -6797,7 +6794,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			    e.code() != error_code_tenant_not_found && e.code() != error_code_illegal_tenant_access &&
 			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
 			    e.code() != error_code_tenant_locked && e.code() != error_code_tenant_name_required &&
-			    e.code() != error_code_management_cluster_invalid_access && e.code() != error_code_tenants_disabled) {
+			    e.code() != error_code_management_cluster_invalid_access && e.code() != error_code_tenants_disabled &&
+			    e.code() != error_code_permission_denied) {
+				// Part of the reason that this block exists is that negative unit tests can trip over these cases
+				// and result in SevError logs being emitted. Gating against these status codes also means their
+				// existences must get surfaced and logged somewhere else during production system.
 				TraceEvent(SevError, "TryCommitError").error(e);
 			}
 			if (trState->trLogInfo)
@@ -7511,7 +7512,7 @@ ACTOR Future<Version> extractReadVersion(Reference<TransactionState> trState,
 	return rep.version;
 }
 
-bool rkThrottlingCooledDown(DatabaseContext* cx, TransactionPriority priority) {
+bool rkThrottlingCooledDown(DatabaseContext const* cx, TransactionPriority priority) {
 	if (priority == TransactionPriority::IMMEDIATE) {
 		return true;
 	} else if (priority == TransactionPriority::BATCH) {
@@ -9554,6 +9555,31 @@ ACTOR Future<bool> verifyInterfaceActor(Reference<FlowLock> connectLock, ClientW
 	}
 }
 
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
+	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
+	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
+
+	loop {
+		choose {
+			when(std::vector<ClientWorkerInterface> workers =
+			         wait(clusterInterface->get().present()
+			                  ? brokenPromiseToNever(
+			                        clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))
+			                  : Never())) {
+				RangeReadResult result;
+				for (auto& it : workers) {
+					result.push_back_deep(
+					    result.arena(),
+					    KeyValueRef(it.address().toString(), BinaryWriter::toValue(it, IncludeVersion())));
+				}
+
+				return result;
+			}
+			when(wait(clusterInterface->onChange())) {}
+		}
+	}
+}
+
 ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef addr, bool check, int duration) {
 	// ignore negative value
 	if (duration < 0)
@@ -9561,7 +9587,7 @@ ACTOR static Future<int64_t> rebootWorkerActor(DatabaseContext* cx, ValueRef add
 	if (!cx->getConnectionRecord())
 		return 0;
 	// fetch all workers' addresses and interfaces from CC
-	RangeResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
+	RangeReadResult kvs = wait(getWorkerInterfaces(cx->getConnectionRecord()));
 	ASSERT(!kvs.more);
 	// map worker network address to its interface
 	state std::map<Key, ClientWorkerInterface> workerInterfaces;
@@ -10693,7 +10719,7 @@ void coalesceChangeFeedLocations(std::vector<KeyRangeLocationInfo>& locations) {
 		return;
 	}
 
-	CODE_PROBE(true, "coalescing change feed locations", probe::decoration::rare);
+	CODE_PROBE(true, "coalescing change feed locations");
 
 	// FIXME: there's technically a probability of "hash" collisions here, but it's extremely low. Could validate that
 	// two teams with the same xor are in fact the same, or fall back to not doing this if it gets a wrong shard server

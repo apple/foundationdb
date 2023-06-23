@@ -60,14 +60,15 @@ function(compile_boost)
 
   set(BOOST_INSTALL_DIR "${CMAKE_BINARY_DIR}/boost_install")
   ExternalProject_add("${COMPILE_BOOST_TARGET}Project"
-    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2"
-    URL_HASH           SHA256=8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc
+    URL                "https://boostorg.jfrog.io/artifactory/main/release/1.82.0/source/boost_1_82_0.tar.bz2"
+    URL_HASH           SHA256=a6e1ab9b0860e6a2881dd7b21fe9f737a095e5f33a3a874afc6a345228597ee6
     CONFIGURE_COMMAND  ${BOOTSTRAP_COMMAND}
                        ${BOOTSTRAP_ARGS}
                        --with-libraries=${BOOTSTRAP_LIBRARIES}
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
                        link=static
+                       cflags=--target=x86_64-unknown-linux-gnu  # Bug with b2 4.9.4 and clang: https://github.com/bfgroup/b2/issues/183
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
@@ -124,12 +125,12 @@ set(Boost_USE_STATIC_LIBS ON)
 
 # Clang and Gcc will have different name mangling to std::call_once, etc.
 if (UNIX AND CMAKE_CXX_COMPILER_ID MATCHES "Clang$")
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0_clang)
-  set(BOOST_HINT_PATHS /opt/boost_1_78_0_clang)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_82_0_clang)
+  set(BOOST_HINT_PATHS /opt/boost_1_82_0_clang)
   message(STATUS "Using Clang version of boost::context boost::filesystem and boost::iostreams")
 else ()
-  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_78_0)
-  set(BOOST_HINT_PATHS /opt/boost_1_78_0)
+  list(APPEND CMAKE_PREFIX_PATH /opt/boost_1_82_0)
+  set(BOOST_HINT_PATHS /opt/boost_1_82_0)
   message(STATUS "Using g++ version of boost::context boost::filesystem and boost::iostreams")
 endif ()
 
@@ -137,7 +138,7 @@ if(BOOST_ROOT)
   list(APPEND BOOST_HINT_PATHS ${BOOST_ROOT})
 endif()
 
-find_package(Boost 1.78.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
+find_package(Boost 1.82.0 EXACT QUIET COMPONENTS context filesystem iostreams serialization system CONFIG PATHS ${BOOST_HINT_PATHS})
 set(FORCE_BOOST_BUILD OFF CACHE BOOL "Forces cmake to build boost and ignores any installed boost")
 
 # The precompiled boost silently broke in CI.  While investigating, I considered extending

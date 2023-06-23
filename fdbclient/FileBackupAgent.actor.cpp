@@ -3633,6 +3633,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 			tr->clear(blobGranuleHistoryKeys);
 			tr->clear(blobGranuleFileKeys);
 			tr->clear(blobGranuleMappingKeys);
+			tr->clear(blobGranuleLockKeys);
 			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
 			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
 		}
@@ -5445,9 +5446,11 @@ public:
 				bgBackupConfig.manifestUrl().set(tr, blobManifestUrl.get());
 				bgBackupConfig.mutationLogsUrl().set(tr, bc->getURL());
 				bgBackupConfig.enabled().set(tr, true);
+				bgBackupConfig.lastFlushTs().set(tr, 0);
 			}
 			// Allow only incremental backup
 			incrementalBackupOnly = IncrementalBackupOnly::True;
+			stopWhenDone = StopWhenDone::False;
 		}
 
 		KeyRangeMap<int> backupRangeSet;
@@ -5773,6 +5776,7 @@ public:
 		if (bgBackupEnabled) {
 			BlobGranuleBackupConfig bgbackupConfig;
 			bgbackupConfig.enabled().set(tr, false);
+			bgbackupConfig.lastFlushTs().set(tr, 0);
 		}
 
 		// Cancel backup task through tag

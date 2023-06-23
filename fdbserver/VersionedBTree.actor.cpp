@@ -2657,7 +2657,7 @@ public:
 			cacheEntry.writeFuture =
 			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
-			CODE_PROBE(true, "DWALPager update cached page", probe::decoration::rare);
+			CODE_PROBE(true, "DWALPager update cached page");
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
 
@@ -5805,7 +5805,7 @@ private:
 			int bNodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(b.largeDeltaTree);
 
 			if (b.bytesLeft < bNodeSize) {
-				CODE_PROBE(true, "Redwood skip page balancing since the right page is full", probe::decoration::rare);
+				CODE_PROBE(true, "Redwood skip page balancing since the right page is full");
 				return false;
 			}
 

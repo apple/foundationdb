@@ -2861,7 +2861,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				}
 
 				CODE_PROBE(metadata->doEarlyReSnapshot(), "granule snapshotting early");
-				CODE_PROBE(metadata->newDeltaFileCount >= 20, "granule snapshotting due to many small delta files");
+				CODE_PROBE(metadata->newDeltaFileCount >= 20,
+				           "granule snapshotting due to many small delta files",
+				           probe::decoration::rare);
 
 				// cancel previous candidate checker
 				checkMergeCandidate.cancel();
@@ -4167,7 +4169,7 @@ ACTOR Future<Void> streamBlobGranuleMutations(Reference<BlobWorkerData> bwData,
 			return Void();
 		}
 		if (!metadata->activeCFData.get().isValid() || metadata->activeCFData.get()->getVersion() < req.readVersion) {
-			CODE_PROBE(true, "blob granule mutation stream feed no longer valid");
+			CODE_PROBE(true, "blob granule mutation stream feed no longer valid", probe::decoration::rare);
 			req.reply.sendError(wrong_shard_server());
 			return Void();
 		}
@@ -4224,7 +4226,7 @@ ACTOR Future<Void> handleBlobGranuleMutationStreamRequest(Reference<BlobWorkerDa
 				ASSERT(tenantEntry.get().id == req.tenantInfo.tenantId);
 				tenantPrefix = tenantEntry.get().prefix;
 			} else {
-				CODE_PROBE(true, "Blob worker tenant not found");
+				CODE_PROBE(true, "Blob worker tenant not found", probe::decoration::rare);
 				// FIXME - better way. Wait on retry here, or just have better model for tenant metadata?
 				// Just throw wrong_shard_server and make the client retry and assume we load it later
 				TraceEvent(SevDebug, "BlobWorkerRequestTenantNotFound", bwData->id)

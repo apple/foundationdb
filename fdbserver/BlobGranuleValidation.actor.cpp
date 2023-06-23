@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/BlobGranuleValidation.actor.h"
+#include "fdbclient/FDBOptions.h"
 #include "fdbserver/Knobs.h"
 #include "fdbclient/BlobGranuleRequest.actor.h"
 #include "fdbclient/DatabaseContext.h"
@@ -383,16 +384,17 @@ ACTOR Future<Void> validateForceFlushing(Database cx,
 
 				// client req may not exactly align to granules - buggify this behavior
 				if (BUGGIFY_WITH_PROB(0.1)) {
-					if (deterministicRandom()->coinflip()) {
-						startKey = keyAfter(startKey);
-					}
 					// extend end (if there are granules in that space)
 					if (targetStart + targetRanges < granules.size() && deterministicRandom()->coinflip()) {
 						endKey = keyAfter(endKey);
 					}
+					if (deterministicRandom()->coinflip() && keyAfter(startKey) < endKey) {
+						startKey = keyAfter(startKey);
+					}
 				}
 
 				toFlush = KeyRangeRef(startKey, endKey);
+				ASSERT(!toFlush.empty());
 			}
 
 			break;
@@ -608,6 +610,51 @@ ACTOR Future<Void> checkFeedCleanup(Database cx, bool debug) {
 			wait(delay(2.0));
 			// reset transaction to get higher read version
 			tr.reset();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
+ACTOR Future<Void> killBlobWorkers(Database cx) {
+	state Transaction tr(cx);
+	state std::set<UID> knownWorkers;
+	state bool first = true;
+	loop {
+		tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+		tr.setOption(FDBTransactionOptions::RAW_ACCESS);
+		try {
+			RangeReadResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
+
+			state std::vector<UID> haltIds;
+			state std::vector<Future<ErrorOr<Void>>> haltRequests;
+			for (auto& it : r) {
+				BlobWorkerInterface interf = decodeBlobWorkerListValue(it.value);
+				if (first) {
+					knownWorkers.insert(interf.id());
+				}
+				if (knownWorkers.count(interf.id())) {
+					haltIds.push_back(interf.id());
+					haltRequests.push_back(interf.haltBlobWorker.tryGetReply(HaltBlobWorkerRequest(1e6, UID())));
+				}
+			}
+			first = false;
+			wait(waitForAll(haltRequests));
+			bool allPresent = true;
+			for (int i = 0; i < haltRequests.size(); i++) {
+				if (haltRequests[i].get().present()) {
+					knownWorkers.erase(haltIds[i]);
+				} else {
+					allPresent = false;
+				}
+			}
+			if (allPresent) {
+				return Void();
+			} else {
+				wait(delay(1.0));
+			}
 		} catch (Error& e) {
 			wait(tr.onError(e));
 		}

@@ -30,15 +30,10 @@
 // context.
 // NOTE: We should avoid the shared class become an insanely large class, think twice before add member to it.
 class DDSharedContext : public ReferenceCounted<DDSharedContext> {
-	// FIXME(xwang) mark fields privates
 public:
-	std::unique_ptr<DDEnabledState>
-	    ddEnabledState; // Note: don't operate directly because it's shared with snapshot server
-	IDDShardTracker* shardTracker = nullptr;
-	IDDRelocationQueue* relocationQueue = nullptr;
-	std::vector<IDDTeamCollection*> teamCollections;
+	const std::unique_ptr<DDEnabledState>
+	    ddEnabledState; // Note: can't be reset because the underlying object is shared with snapshot server
 
-	// public:
 	DataDistributorInterface interface;
 	UID ddId;
 	MoveKeysLock lock;
@@ -46,15 +41,17 @@ public:
 	DatabaseConfiguration configuration;
 
 	Reference<ShardsAffectedByTeamFailure> shardsAffectedByTeamFailure;
-	Reference<AsyncVar<bool>> processingUnhealthy, processingWiggle;
+
+	Reference<DataDistributionTracker> tracker;
+	Reference<DDQueue> ddQueue;
+	Reference<DDTeamCollection> primaryTeamCollection, remoteTeamCollection;
 
 	DDSharedContext() = default;
 
 	explicit DDSharedContext(const DataDistributorInterface& iface) : DDSharedContext(iface.id()) { interface = iface; }
 
 	explicit DDSharedContext(UID id)
-	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure),
-	    processingUnhealthy(new AsyncVar<bool>(false)), processingWiggle(new AsyncVar<bool>(false)) {}
+	  : ddEnabledState(new DDEnabledState), ddId(id), shardsAffectedByTeamFailure(new ShardsAffectedByTeamFailure) {}
 
 	UID id() const { return ddId; }
 

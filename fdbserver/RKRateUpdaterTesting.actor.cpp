@@ -140,7 +140,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 struct RKRateUpdaterTestEnvironment {
 	MockRKMetricsTracker metricsTracker;
 	MockRKRateServer rateServer;
-	MockTagThrottler tagThrottler;
+	StubTagThrottler tagThrottler;
 	MockRKConfigurationMonitor configurationMonitor;
 	MockRKRecoveryTracker recoveryTracker;
 	Deque<double> actualTpsHistory;

@@ -370,8 +370,8 @@ ACTOR Future<Void> getRate(UID myID,
                            GrvTransactionRateInfo* batchTransactionRateInfo,
                            GetHealthMetricsReply* healthMetricsReply,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
-                           TransactionTagMap<uint64_t>* transactionTagCounter,
-                           PrioritizedTransactionTagMap<ClientTagThrottleLimits>* clientThrottledTags,
+                           ThrottlingIdMap<uint64_t>* transactionTagCounter,
+                           PrioritizedThrottlingIdMap<ClientTagThrottleLimits>* clientThrottledTags,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -480,7 +480,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
                                                FutureStream<double> normalGRVLatency,
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
-                                               TransactionTagMap<uint64_t>* transactionTagCounter,
+                                               ThrottlingIdMap<uint64_t>* transactionTagCounter,
                                                GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
@@ -522,10 +522,11 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 				stats->addRequest(req.transactionCount);
 				// TODO: check whether this is reasonable to do in the fast path
 				for (auto tag : req.tags) {
-					(*transactionTagCounter)[tag.first] += tag.second;
+					(*transactionTagCounter)[ThrottlingIdRef::fromTag(tag.first)] += tag.second;
 				}
 				if (req.tenantGroup.present()) {
-					(*transactionTagCounter)[req.tenantGroup.get()] += req.transactionCount;
+					(*transactionTagCounter)[ThrottlingIdRef::fromTenantGroup(req.tenantGroup.get())] +=
+					    req.transactionCount;
 				}
 
 				if (req.debugID.present())
@@ -700,7 +701,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
                                   GrvProxyData* grvProxyData,
                                   GrvProxyStats* stats,
                                   Version minKnownCommittedVersion,
-                                  PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags,
+                                  PrioritizedThrottlingIdMap<ClientTagThrottleLimits> clientThrottledTags,
                                   int64_t midShardSize = 0) {
 	GetReadVersionReply _reply = wait(replyFuture);
 	GetReadVersionReply reply = _reply;
@@ -739,7 +740,7 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 		if (request.isTagged()) {
 			auto& priorityThrottledTags = clientThrottledTags[request.priority];
 			for (auto tag : request.tags) {
-				auto tagItr = priorityThrottledTags.find(tag.first);
+				auto tagItr = priorityThrottledTags.find(ThrottlingIdRef::fromTag(tag.first));
 				if (tagItr != priorityThrottledTags.end()) {
 					if (tagItr->second.expiration > now()) {
 						if (tagItr->second.tpsRate == std::numeric_limits<double>::max()) {
@@ -844,8 +845,8 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Deque<GetReadVersionRequest> defaultQueue;
 	state Deque<GetReadVersionRequest> batchQueue;
 
-	state TransactionTagMap<uint64_t> transactionTagCounter;
-	state PrioritizedTransactionTagMap<ClientTagThrottleLimits> clientThrottledTags;
+	state ThrottlingIdMap<uint64_t> transactionTagCounter;
+	state PrioritizedThrottlingIdMap<ClientTagThrottleLimits> clientThrottledTags;
 
 	state PromiseStream<double> normalGRVLatency;
 
