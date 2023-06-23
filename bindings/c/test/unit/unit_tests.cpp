@@ -1670,273 +1670,264 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
 		CHECK(value_bar.value() == "foundation");
 	}
 }
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MAX);
+		// Value in database will be extended with zeros to match length of param.
+		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_MAX);
+		// Value in database will be truncated to match length of param.
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MAX);
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("b") == 0);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("aa") == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("c") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MIN") {
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MIN);
+		// Value in database will be extended with zeros to match length of param.
+		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_MIN);
+		// Value in database will be truncated to match length of param.
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MIN);
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("a") == 0);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->size() == 2);
+	CHECK(value->data()[0] == 'b');
+	CHECK(value->data()[1] == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("b") == 0);
+}
 //
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_MAX);
-		//// Value in database will be extended with zeros to match length of param.
-		//tr.atomic_op(key("bar"), (const uint8_t*)"aa", 2, FDB_MUTATION_TYPE_MAX);
-		//// Value in database will be truncated to match length of param.
-		//tr.atomic_op(key("baz"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_MAX);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("b") == 0);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("aa") == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("c") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MIN") {
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_MIN);
-		//// Value in database will be extended with zeros to match length of param.
-		//tr.atomic_op(key("bar"), (const uint8_t*)"aa", 2, FDB_MUTATION_TYPE_MIN);
-		//// Value in database will be truncated to match length of param.
-		//tr.atomic_op(key("baz"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_MIN);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("a") == 0);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->size() == 2);
-	//CHECK(value->data()[0] == 'b');
-	//CHECK(value->data()[1] == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("b") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MAX") {
-	//// The difference with FDB_MUTATION_TYPE_MAX is that strings will not be
-	//// extended/truncated so lengths match.
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BYTE_MAX);
-		//tr.atomic_op(key("bar"), (const uint8_t*)"cc", 2, FDB_MUTATION_TYPE_BYTE_MAX);
-		//tr.atomic_op(key("baz"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BYTE_MAX);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("b") == 0);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("cc") == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("cba") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
-	//// The difference with FDB_MUTATION_TYPE_MIN is that strings will not be
-	//// extended/truncated so lengths match.
-	//insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BYTE_MIN);
-		//tr.atomic_op(key("bar"), (const uint8_t*)"aa", 2, FDB_MUTATION_TYPE_BYTE_MIN);
-		//tr.atomic_op(key("baz"), (const uint8_t*)"b", 1, FDB_MUTATION_TYPE_BYTE_MIN);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("a") == 0);
-//
-	//value = get_value(key("bar"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("aa") == 0);
-//
-	//value = get_value(key("baz"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("abc") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") {
-	//int offset = prefix.size() + 3;
-	//const char* p = reinterpret_cast<const char*>(&offset);
-	//char keybuf[] = {
-		//'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', p[0], p[1], p[2], p[3]
-	//};
-	//std::string key = prefix + std::string(keybuf, 17);
-	//std::string versionstamp("");
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key, (const uint8_t*)"bar", 3, FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
-		//fdb::KeyFuture f1 = tr.get_versionstamp();
-		//fdb::EmptyFuture f2 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f2);
-		//if (err) {
-			//fdb::EmptyFuture f3 = tr.on_error(err);
-			//fdb_check(wait_future(f3));
-			//continue;
-		//}
-//
-		//fdb_check(wait_future(f1));
-//
-		//const uint8_t* key;
-		//int keylen;
-		//fdb_check(f1.get(&key, &keylen));
-//
-		//versionstamp = std::string((const char*)key, keylen);
-		//break;
-	//}
-//
-	//REQUIRE(versionstamp.size() > 0);
-	//std::string dbKey(prefix + "foo" + versionstamp);
-	//auto value = get_value(dbKey, /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("bar") == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE") {
-	//// Don't care about prefixing value like we did the key.
-	//char valbuf[] = { 'b', 'a', 'r', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 3, 0, 0, 0 };
-	//std::string versionstamp("");
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(key("foo"), (const uint8_t*)valbuf, 17, FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
-		//fdb::KeyFuture f1 = tr.get_versionstamp();
-		//fdb::EmptyFuture f2 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f2);
-		//if (err) {
-			//fdb::EmptyFuture f3 = tr.on_error(err);
-			//fdb_check(wait_future(f3));
-			//continue;
-		//}
-//
-		//fdb_check(wait_future(f1));
-//
-		//const uint8_t* key;
-		//int keylen;
-		//fdb_check(f1.get(&key, &keylen));
-//
-		//versionstamp = std::string((const char*)key, keylen);
-		//break;
-	//}
-//
-	//REQUIRE(versionstamp.size() > 0);
-	//auto value = get_value(key("foo"), /* snapshot */ false, {});
-	//REQUIRE(value.has_value());
-	//CHECK(value->compare("bar" + versionstamp) == 0);
-//}
-//
-//TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY invalid index") {
-	//// Only 9 bytes available starting at index 4 (ten bytes needed), should
-	//// return an error.
-	//char keybuf[] = { 'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 4, 0, 0, 0 };
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.atomic_op(keybuf, (const uint8_t*)"bar", 3, FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//CHECK(wait_future(f1) != 0); // type of error not specified
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_get_committed_version read_only") {
-	//// Read-only transaction should have a committed version of -1.
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int64_t out_version;
-		//fdb_check(tr.get_committed_version(&out_version));
-		//CHECK(out_version == -1);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_get_committed_version") {
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//tr.set(key("foo"), "bar");
-		//fdb::EmptyFuture f1 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int64_t out_version;
-		//fdb_check(tr.get_committed_version(&out_version));
-		//CHECK(out_version >= 0);
-		//break;
-	//}
-//}
-//
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MAX") {
+	// The difference with FDB_MUTATION_TYPE_MAX is that strings will not be
+	// extended/truncated so lengths match.
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "cba" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("cc"sv), FDB_MUTATION_TYPE_BYTE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MAX);
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("b") == 0);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("cc") == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("cba") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
+	// The difference with FDB_MUTATION_TYPE_MIN is that strings will not be
+	// extended/truncated so lengths match.
+	insert_data(db, create_data({ { "foo", "a" }, { "bar", "b" }, { "baz", "abc" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_BYTE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MIN);
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("a") == 0);
+
+	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("aa") == 0);
+
+	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("abc") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") {
+	int offset = prefix.size() + 3;
+	const char* p = reinterpret_cast<const char*>(&offset);
+	char keybuf[] = {
+		'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', p[0], p[1], p[2], p[3]
+	};
+	std::string key = prefix + std::string(keybuf, 17);
+	std::string versionstamp("");
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key), fdb::toBytesRef("bar"sv), FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
+		auto f1 = tr.getVersionstamp();
+		auto f2 = tr.commit();
+
+		auto err = waitFuture(f2);
+		if (err) {
+			auto f3 = tr.onError(err);
+			fdbCheck(waitFuture(f3));
+			continue;
+		}
+
+		fdbCheck(waitFuture(f1));
+		fdb::KeyRef key;
+		fdbCheck(f1.getNothrow(key));
+		versionstamp = std::string(key.begin(), key.end());	
+		break;
+	}
+
+	REQUIRE(versionstamp.size() > 0);
+	std::string dbKey(prefix + "foo" + versionstamp);
+	auto value = get_value(fdb::toBytesRef(dbKey), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("bar") == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE") {
+	// Don't care about prefixing value like we did the key.
+	char valbuf[] = { 'b', 'a', 'r', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 3, 0, 0, 0 };
+	std::string versionstamp("");
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::toBytesRef(key("foo")),
+			    fdb::BytesRef(reinterpret_cast<const uint8_t*>(valbuf), 17),
+			    FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE);
+		auto f1 = tr.getVersionstamp();
+		auto f2 = tr.commit(); 
+
+		auto err = waitFuture(f2);
+		if (err) {
+			auto f3 = tr.onError(err);
+			fdbCheck(waitFuture(f3));
+			continue;
+		}
+
+		fdbCheck(waitFuture(f1));
+		fdb::KeyRef key;
+		fdbCheck(f1.getNothrow(key));
+		versionstamp = std::string(key.begin(), key.end());	
+		break;
+	}
+
+	REQUIRE(versionstamp.size() > 0);
+	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	REQUIRE(value.has_value());
+	CHECK(value->compare("bar" + versionstamp) == 0);
+}
+
+TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY invalid index") {
+	// Only 9 bytes available starting at index 4 (ten bytes needed), should
+	// return an error.
+	char keybuf[] = { 'f', 'o', 'o', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', '\0', 4, 0, 0, 0 };
+
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.atomicOp(fdb::BytesRef(reinterpret_cast<const uint8_t*>(keybuf), 17), fdb::toBytesRef("bar"sv),
+			FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
+		auto f1 = tr.commit();
+		CHECK(waitFuture(f1).code() != 0); // type of error not specified
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_committed_version read_only") {
+	// Read-only transaction should have a committed version of -1.
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+	
+		int64_t out_version;
+		fdbCheck(tr.getCommittedVersionNothrow(out_version));
+		CHECK(out_version == -1);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_committed_version") {
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		int64_t out_version;
+		fdbCheck(tr.getCommittedVersionNothrow(out_version));
+		CHECK(out_version >= 0);
+		break;
+	}
+}
+
 //TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
 	//fdb::Transaction tr(db);
 	//while (1) {
