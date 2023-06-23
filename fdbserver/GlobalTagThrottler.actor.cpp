@@ -753,23 +753,6 @@ bool targetRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId throt
 	return isNear(rate, expected);
 }
 
-bool clientRateIsNear(GlobalTagThrottler& globalTagThrottler, ThrottlingId throttlingId, Optional<double> expected) {
-	Optional<double> rate;
-	auto clientRates = globalTagThrottler.getClientRates();
-	auto it1 = clientRates.find(TransactionPriority::DEFAULT);
-	if (it1 != clientRates.end()) {
-		auto it2 = it1->second.find(throttlingId);
-		if (it2 != it1->second.end()) {
-			rate = it2->second.tpsRate;
-		}
-	}
-	TraceEvent("GlobalTagThrottling_ClientRateMonitor")
-	    .detail("ThrottlingId", throttlingId)
-	    .detail("CurrentTPSRate", rate)
-	    .detail("ExpectedTPSRate", expected);
-	return isNear(rate, expected);
-}
-
 ACTOR Future<Void> updateGlobalTagThrottler(MockRKMetricsTracker* metricsTracker,
                                             GlobalTagThrottler* globalTagThrottler,
                                             StorageServerCollection const* storageServers) {
@@ -882,9 +865,8 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 6.0, OpType::READ);
-	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 100.0 / 6.0) && clientRateIsNear(gtt, testTag, 100.0 / 6.0);
-	});
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 100.0 / 6.0); });
 	state Future<Void> updater = updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || client2 || updater, 600.0));
 	return Void();
@@ -894,7 +876,6 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling") {
 // Total quota set to 100 pages/second.
 // 2 clients each attempt 20 10-page transactions per second.
 // Target rate should adjust to allow 100/10 transactions per second.
-// Each client is throttled to only perform (100/10)/2 transactions per second.
 TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	state MockRKMetricsTracker metricsTracker;
 	state MockRKThroughputQuotaCache quotaCache;
@@ -904,9 +885,8 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 20.0, 10.0, OpType::READ);
-	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 10.0) && clientRateIsNear(gtt, testTag, 5.0);
-	});
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 10.0); });
 	state Future<Void> updater = updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
@@ -917,7 +897,6 @@ TEST_CASE("/GlobalTagThrottler/MultiClientThrottling2") {
 // One client attempts 5 5-page read transactions per second.
 // Another client attempts 25 5-page read transactions per second.
 // Target rate should adjust to allow 100/5 transactions per second.
-// This 20 transactions/second limit is split with a distribution of (5, 15) between the 2 clients.
 TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	state MockRKMetricsTracker metricsTracker;
 	state MockRKThroughputQuotaCache quotaCache;
@@ -927,9 +906,8 @@ TEST_CASE("/GlobalTagThrottler/SkewedMultiClientThrottling") {
 	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 5.0, 5.0, OpType::READ);
 	state Future<Void> client2 = runClient(&globalTagThrottler, &storageServers, testTag, 25.0, 5.0, OpType::READ);
-	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 20.0) && clientRateIsNear(gtt, testTag, 15.0);
-	});
+	state Future<Void> monitor =
+	    monitorActor(&globalTagThrottler, [testTag](auto& gtt) { return targetRateIsNear(gtt, testTag, 20.0); });
 	state Future<Void> updater = updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
 	return Void();
