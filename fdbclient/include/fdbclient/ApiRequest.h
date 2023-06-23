@@ -29,11 +29,6 @@ public:
 		       reqRef.getPtr()->header->allocator.handle != nullptr;
 	}
 
-	bool isAllocatorCompatible(FDBAllocatorIfc* alloc) const {
-		ASSERT(reqRef.isValid());
-		return getAllocatorInterface() == alloc;
-	}
-
 	int32_t getType() const {
 		ASSERT(reqRef.isValid());
 		return reqRef.getPtr()->header->request_type;

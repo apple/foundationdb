@@ -762,7 +762,7 @@ ThreadFuture<ApiResult> ThreadSafeTransaction::execAsyncRequest(ApiRequest reque
 	if (!request.hasValidHeader()) {
 		return client_invalid_operation();
 	}
-	if (!request.isAllocatorCompatible(getAllocatorInterface())) {
+	if (request.getAllocatorInterface() != getAllocatorInterface()) {
 		// the request was allocated with a different client.
 		// The transaction must be retried and the request recreated.
 		return cluster_version_changed();
