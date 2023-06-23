@@ -651,34 +651,31 @@ TEST_CASE("fdb_transaction read_your_writes") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
-	//clear_data(db);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-		//tr.set("foo", "bar");
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
-//
-		//// Read before committing, shouldn't read the initial write because
-		//// read_your_writes is disabled.
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(!out_present);
-		//break;
-	//}
-//}
+
+TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
+	clear_data(db);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+
+		// Read before committing, shouldn't read the initial write because
+		// read_your_writes is disabled.
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+		CHECK(!val.has_value());
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
 	//clear_data(db);
