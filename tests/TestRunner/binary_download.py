@@ -90,7 +90,8 @@ class FdbBinaryDownloader:
         )
 
         print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
-        os.system("aws s3 cp '{}' '{}'".format(remote_file, local_file_tmp))
+        ret = os.system("aws s3 cp '{}' '{}'".format(remote_file, local_file_tmp))
+        assert ret == 0, "Download failed. Return code: {}".format(ret)
         print("Download complete")
 
         os.rename(local_file_tmp, local_file)
