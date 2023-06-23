@@ -676,153 +676,140 @@ TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
-	//clear_data(db);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//// Enable read your writes for snapshot reads.
-		//fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE, nullptr, 0));
-		//tr.set("foo", "bar");
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(out_present);
-		//std::string value(val, vallen);
-		//CHECK(value.compare("bar") == 0);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
-	//clear_data(db);
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//// Disable read your writes for snapshot reads.
-		//fdb_check(tr.set_option(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE, nullptr, 0));
-		//tr.set("foo", "bar");
-		//fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-		//fdb::ValueFuture f2 = tr.get("foo", /*snapshot*/ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f3 = tr.on_error(err);
-			//fdb_check(wait_future(f3));
-			//continue;
-		//}
-//
-		//int out_present;
-		//char* val;
-		//int vallen;
-		//fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(!out_present);
-//
+
+TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
+	clear_data(db);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		// Enable read your writes for snapshot reads.
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE));
+		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+		CHECK(val.has_value());
+		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
+	clear_data(db);
+
+	auto tr = db.createTransaction();
+	while (1) {
+		// Disable read your writes for snapshot reads.
+		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE));
+		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+		auto f2 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f3 = tr.onError(err);
+			fdbCheck(waitFuture(f3));
+			continue;
+		}
+
+		std::optional<fdb::ValueRef> val;
+		fdbCheck(f1.getNothrow(val));
+		CHECK(!val.has_value());
+
 		//// Non-snapshot reads should still read writes in the transaction.
-		//err = wait_future(f2);
-		//if (err) {
-			//fdb::EmptyFuture f3 = tr.on_error(err);
-			//fdb_check(wait_future(f3));
-			//continue;
-		//}
-		//fdb_check(f2.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-		//CHECK(out_present);
-		//std::string value(val, vallen);
-		//CHECK(value.compare("bar") == 0);
-		//break;
-	//}
-//}
-//
-//TEST_CASE("fdb_transaction_set_option timeout") {
-	//fdb::Transaction tr(db);
-	//// Set smallest possible timeout, retry until a timeout occurs.
-	//int64_t timeout = 1;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_TIMEOUT, (const uint8_t*)&timeout, sizeof(timeout)));
-//
-	//fdb_error_t err = 0;
-	//while (!err) {
-		//fdb::ValueFuture f1 = tr.get("foo", /* snapshot */ false);
-		//err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//err = wait_future(f2);
-		//}
-	//}
-	//CHECK(err == 1031); // transaction_timed_out
-//}
-//
-//TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
-	//// Set smallest possible timeout, retry until a timeout occurs.
-	//int64_t timeout = 1;
-	//fdb_check(
-	    //fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TIMEOUT, (const uint8_t*)&timeout, sizeof(timeout)));
-//
-	//fdb::Transaction tr(db);
-	//fdb_error_t err = 0;
-	//while (!err) {
-		//fdb::ValueFuture f1 = tr.get("foo", /* snapshot */ false);
-		//err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//err = wait_future(f2);
-		//}
-	//}
-	//CHECK(err == 1031); // transaction_timed_out
-//
-	//// Reset transaction timeout (disable timeout).
-	//timeout = 0;
-	//fdb_check(
-	    //fdb_database_set_option(db, FDB_DB_OPTION_TRANSACTION_TIMEOUT, (const uint8_t*)&timeout, sizeof(timeout)));
-//}
-//
-//TEST_CASE("fdb_transaction_set_option size_limit too small") {
-	//fdb::Transaction tr(db);
-//
-	//// Size limit must be at least 32 to be valid, so test a smaller size.
-	//int64_t size_limit = 31;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT, (const uint8_t*)&size_limit, sizeof(size_limit)));
-	//tr.set("foo", "bar");
-	//fdb::EmptyFuture f1 = tr.commit();
-//
-	//CHECK(wait_future(f1) == 2006); // invalid_option_value
-//}
-//
-//TEST_CASE("fdb_transaction_set_option size_limit too large") {
-	//fdb::Transaction tr(db);
-//
-	//// Size limit must be less than or equal to 10,000,000.
-	//int64_t size_limit = 10000001;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT, (const uint8_t*)&size_limit, sizeof(size_limit)));
-	//tr.set("foo", "bar");
-	//fdb::EmptyFuture f1 = tr.commit();
-//
-	//CHECK(wait_future(f1) == 2006); // invalid_option_value
-//}
-//
-//TEST_CASE("fdb_transaction_set_option size_limit") {
-	//fdb::Transaction tr(db);
-//
-	//int64_t size_limit = 32;
-	//fdb_check(tr.set_option(FDB_TR_OPTION_SIZE_LIMIT, (const uint8_t*)&size_limit, sizeof(size_limit)));
-	//tr.set("foo", "foundation database is amazing");
-	//fdb::EmptyFuture f1 = tr.commit();
-//
-	//CHECK(wait_future(f1) == 2101); // transaction_too_large
-//}
+		err = waitFuture(f2);
+		if (err) {
+			auto f3 = tr.onError(err);
+			fdbCheck(waitFuture(f3));
+			continue;
+		}
+
+		fdbCheck(f2.getNothrow(val));
+		CHECK(val.has_value());
+		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_set_option timeout") {
+	auto tr = db.createTransaction();
+	// Set smallest possible timeout, retry until a timeout occurs.
+	int64_t timeout = 1;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+
+	fdb::Error err;
+	while (!err) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+		err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			err = waitFuture(f2);
+		}
+	}
+	CHECK(err.code() == 1031); // transaction_timed_out
+}
+
+TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
+	// Set smallest possible timeout, retry until a timeout occurs.
+	int64_t timeout = 1;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+
+	auto tr = db.createTransaction();
+	fdb::Error err;
+	while (!err) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+		err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			err = waitFuture(f2);
+		}
+	}
+	CHECK(err.code() == 1031); // transaction_timed_out
+
+	// Reset transaction timeout (disable timeout).
+	timeout = 0;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit too small") {
+	auto tr = db.createTransaction();
+
+	// Size limit must be at least 32 to be valid, so test a smaller size.
+	int64_t size_limit = 31;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+	auto f1 = tr.commit();
+	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit too large") {
+	auto tr = db.createTransaction();
+
+	// Size limit must be less than or equal to 10,000,000.
+	int64_t size_limit = 10000001;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+	auto f1 = tr.commit();
+	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
+}
+
+TEST_CASE("fdb_transaction_set_option size_limit") {
+	auto tr = db.createTransaction();
+
+	int64_t size_limit = 32;
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("foundation database is amazing"sv));
+	auto f1 = tr.commit();
+	CHECK(waitFuture(f1).code() == 2101);
+}
 //
 // Setting the transaction size limit as a database option causes issues when
 // outside the bounds of acceptable values. TODO: Needs investigating...
