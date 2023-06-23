@@ -122,26 +122,26 @@ std::map<std::string, std::string> create_data(std::map<std::string, std::string
 	return out;
 }
 
-//// Clears all data in the database, then inserts the given key value pairs.
-//void insert_data(FDBDatabase* db, const std::map<std::string, std::string>& data) {
-	//fdb::Transaction tr(db);
-	//auto end_key = strinc_str(prefix);
-	//while (1) {
-		//tr.clear_range(prefix, end_key);
-		//for (const auto& [key, val] : data) {
-			//tr.set(key, val);
-		//}
-//
-		//fdb::EmptyFuture f1 = tr.commit();
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-		//break;
-	//}
-//}
+// Clears all data in the database, then inserts the given key value pairs.
+void insert_data(fdb::Database db, const std::map<std::string, std::string>& data) {
+	auto tr = db.createTransaction();
+	auto end_key = strinc_str(prefix);
+	while (1) {
+		tr.clearRange(fdb::toBytesRef(prefix), fdb::toBytesRef(end_key));
+		for (const auto& [key, val] : data) {
+			tr.set(fdb::toBytesRef(key), fdb::toBytesRef(val));
+		}
+
+		auto f1 = tr.commit();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+		break;
+	}
+}
 //
 //// Get the value associated with `key_name` from the database. Accepts a list
 //// of transaction options to apply (values for options not supported). Returns
@@ -468,31 +468,27 @@ TEST_CASE("fdb_future_get_int64") {
 		break;
 	}
 }
-//
-//TEST_CASE("fdb_future_get_key") {
-	//insert_data(db, create_data({ { "a", "1" }, { "baz", "2" }, { "bar", "3" } }));
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::KeyFuture f1 = tr.get_key(FDB_KEYSEL_FIRST_GREATER_THAN((const uint8_t*)key("a").c_str(), key("a").size()),
-		                               ///* snapshot */ false);
-//
-		//fdb_error_t err = wait_future(f1);
-		//if (err) {
-			//fdb::EmptyFuture f2 = tr.on_error(err);
-			//fdb_check(wait_future(f2));
-			//continue;
-		//}
-//
-		//const uint8_t* key;
-		//int keylen;
-		//fdb_check(f1.get(&key, &keylen));
-//
-		//std::string dbKey((const char*)key, keylen);
-		//CHECK(dbKey.compare(prefix + "bar") == 0);
-		//break;
-	//}
-//}
+
+TEST_CASE("fdb_future_get_key") {
+	insert_data(db, create_data({ { "a", "1" }, { "baz", "2" }, { "bar", "3" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getKey(fdb::key_select::firstGreaterThan(fdb::toBytesRef(key("a"))),
+				    /* snapshot */ false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::KeyRef dbKey;
+		fdbCheck(f1.getNothrow(dbKey));
+		CHECK(std::string(dbKey.begin(), dbKey.end()) == prefix + "bar");
+		break;
+	}
+}
 //
 //TEST_CASE("fdb_future_get_value") {
 	//insert_data(db, create_data({ { "foo", "bar" } }));
