@@ -2011,104 +2011,99 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 	//fdb_check(fdb_future_get_uint64(protocolFuture, &out));
 	//fdb_future_destroy(protocolFuture);
 //}
-//
-//TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
-	//// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
-	//// should return a watches_disabled error.
-	//fdb::Transaction tr(db);
-	//fdb_check(tr.set_option(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE, nullptr, 0));
-	//fdb::EmptyFuture f1 = tr.watch(key("foo"));
-//
-	//CHECK(wait_future(f1) == 1034); // watches_disabled
-//}
-//
-//TEST_CASE("fdb_transaction_watch reset") {
-	//// Resetting (or destroying) an uncommitted transaction should cause watches
-	//// created by the transaction to fail with a transaction_cancelled error.
-	//fdb::Transaction tr(db);
-	//fdb::EmptyFuture f1 = tr.watch(key("foo"));
-	//tr.reset();
-	//CHECK(wait_future(f1) == 1025); // transaction_cancelled
-//}
-//
-//TEST_CASE("fdb_transaction_watch max watches") {
-	//int64_t max_watches = 3;
-	//fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_MAX_WATCHES, (const uint8_t*)&max_watches, 8));
-//
-	//auto event = std::make_shared<FdbEvent>();
-//
-	//fdb::Transaction tr(db);
-	//while (1) {
-		//fdb::EmptyFuture f1 = tr.watch(key("a"));
-		//fdb::EmptyFuture f2 = tr.watch(key("b"));
-		//fdb::EmptyFuture f3 = tr.watch(key("c"));
-		//fdb::EmptyFuture f4 = tr.watch(key("d"));
-		//fdb::EmptyFuture f5 = tr.commit();
-//
-		//fdb_error_t err = wait_future(f5);
-		//if (err) {
-			//fdb::EmptyFuture f6 = tr.on_error(err);
-			//fdb_check(wait_future(f6));
-			//continue;
-		//}
-//
-		//// Callbacks will be triggered with operation_cancelled errors once the
-		//// too_many_watches error fires, as the other futures will go out of scope
-		//// and be cleaned up. The future which too_many_watches occurs on is
-		//// nondeterministic, so each future is checked.
-		//fdb_check(f1.set_callback(
-		    //+[](FDBFuture* f, void* param) {
-			    //fdb_error_t err = fdb_future_get_error(f);
-			    //if (err != /*operation_cancelled*/ 1101 && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
-				    //CHECK(err == 1032); // too_many_watches
-			    //}
-			    //auto* event = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			    //(*event)->set();
-			    //delete event;
-		    //},
-		    //new std::shared_ptr<FdbEvent>(event)));
-		//fdb_check(f2.set_callback(
-		    //+[](FDBFuture* f, void* param) {
-			    //fdb_error_t err = fdb_future_get_error(f);
-			    //if (err != /*operation_cancelled*/ 1101 && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
-				    //CHECK(err == 1032); // too_many_watches
-			    //}
-			    //auto* event = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			    //(*event)->set();
-			    //delete event;
-		    //},
-		    //new std::shared_ptr<FdbEvent>(event)));
-		//fdb_check(f3.set_callback(
-		    //+[](FDBFuture* f, void* param) {
-			    //fdb_error_t err = fdb_future_get_error(f);
-			    //if (err != /*operation_cancelled*/ 1101 && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
-				    //CHECK(err == 1032); // too_many_watches
-			    //}
-			    //auto* event = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			    //(*event)->set();
-			    //delete event;
-		    //},
-		    //new std::shared_ptr<FdbEvent>(event)));
-		//fdb_check(f4.set_callback(
-		    //+[](FDBFuture* f, void* param) {
-			    //fdb_error_t err = fdb_future_get_error(f);
-			    //if (err != /*operation_cancelled*/ 1101 && !fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err)) {
-				    //CHECK(err == 1032); // too_many_watches
-			    //}
-			    //auto* event = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			    //(*event)->set();
-			    //delete event;
-		    //},
-		    //new std::shared_ptr<FdbEvent>(event)));
-//
-		//event->wait();
-		//break;
-	//}
-//
-	//// Reset available number of watches.
-	//max_watches = 10000;
-	//fdb_check(fdb_database_set_option(db, FDB_DB_OPTION_MAX_WATCHES, (const uint8_t*)&max_watches, 8));
-//}
+
+TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
+	// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
+	// should return a watches_disabled error.
+	auto tr = db.createTransaction();
+	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+	auto f1 = tr.watch(fdb::toBytesRef(key("foo")));
+	CHECK(waitFuture(f1).code() == 1034); // watches_disabled
+}
+
+TEST_CASE("fdb_transaction_watch reset") {
+	// Resetting (or destroying) an uncommitted transaction should cause watches
+	// created by the transaction to fail with a transaction_cancelled error.
+	auto tr = db.createTransaction();
+	auto f1 = tr.watch(fdb::toBytesRef(key("foo")));
+	tr.reset();
+	CHECK(waitFuture(f1).code() == 1025); // transaction_cancelled
+}
+
+TEST_CASE("fdb_transaction_watch max watches") {
+	int64_t max_watches = 3;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_MAX_WATCHES, max_watches));
+
+	auto event = std::make_shared<FdbEvent>();
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.watch(fdb::toBytesRef(key("a")));
+		auto f2 = tr.watch(fdb::toBytesRef(key("b")));
+		auto f3 = tr.watch(fdb::toBytesRef(key("c")));
+		auto f4 = tr.watch(fdb::toBytesRef(key("d")));
+		auto f5 = tr.commit();
+
+		auto err = waitFuture(f5);
+		if (err) {
+			auto f6 = tr.onError(err);
+			fdbCheck(waitFuture(f6));
+			continue;
+		}
+
+		// Callbacks will be triggered with operation_cancelled errors once the
+		// too_many_watches error fires, as the other futures will go out of scope
+		// and be cleaned up. The future which too_many_watches occurs on is
+		// nondeterministic, so each future is checked.
+		f1.then([&event](fdb::Future f) {
+			auto err = waitFuture(f);
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+				CHECK(err.code() == 1032); // too_many_watches
+			}
+			auto param = new std::shared_ptr<FdbEvent>(event);
+			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
+			(*e)->set();
+			delete e;
+		});
+
+		f2.then([&event](fdb::Future f) {
+			auto err = waitFuture(f);
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+				CHECK(err.code() == 1032); // too_many_watches
+			}
+			auto param = new std::shared_ptr<FdbEvent>(event);
+			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
+			(*e)->set();
+			delete e;
+		});
+		f3.then([&event](fdb::Future f) {
+			auto err = waitFuture(f);
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+				CHECK(err.code() == 1032); // too_many_watches
+			}
+			auto param = new std::shared_ptr<FdbEvent>(event);
+			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
+			(*e)->set();
+			delete e;
+		});
+		f4.then([&event](fdb::Future f) {
+			auto err = waitFuture(f);
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+				CHECK(err.code() == 1032); // too_many_watches
+			}
+			auto param = new std::shared_ptr<FdbEvent>(event);
+			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
+			(*e)->set();
+			delete e;
+		});
+		event->wait();
+		break;
+	}
+
+	// Reset available number of watches.
+	max_watches = 10000;
+	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_MAX_WATCHES, max_watches));
+}
 //
 //TEST_CASE("fdb_transaction_watch") {
 	//insert_data(db, create_data({ { "foo", "foo" } }));
