@@ -2118,10 +2118,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					}
 
 					std::sort(dest.begin(), dest.end());
-					ASSERT(std::equal(destServers.begin(),
-					                  destServers.end(),
-					                  dest.begin(),
-					                  dest.end()));
+					ASSERT(std::equal(destServers.begin(), destServers.end(), dest.begin(), dest.end()));
 
 					std::set<UID> srcSet;
 					for (int s = 0; s < src.size(); s++) {
