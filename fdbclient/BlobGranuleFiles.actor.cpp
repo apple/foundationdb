@@ -314,8 +314,10 @@ struct IndexBlockRef {
 		    BlobCipherMetrics::BLOB_GRANULE);
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef;
-			buffer = encryptor.encrypt(
-			    serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+			buffer =
+			    encryptor
+			        .encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena)
+			        .first;
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			arena.dependsOn(serialized.arena());
 			encryptHeaderRef = serialized;
@@ -352,7 +354,7 @@ struct IndexBlockRef {
 			                                     eKeys.headerCipherKey,
 			                                     cipherKeysCtx.ivRef.begin(),
 			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
+			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena).first;
 		} else {
 			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
 			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
@@ -456,7 +458,8 @@ struct IndexBlobGranuleFileChunkRef {
 		    BlobCipherMetrics::BLOB_GRANULE);
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef;
-			chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+			chunkRef.buffer =
+			    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena).first;
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			arena.dependsOn(serialized.arena());
 			chunkRef.encryptHeaderRef = serialized;
@@ -495,7 +498,7 @@ struct IndexBlobGranuleFileChunkRef {
 			                                     eKeys.headerCipherKey,
 			                                     cipherKeysCtx.ivRef.begin(),
 			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
+			decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena).first;
 		} else {
 			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
 			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);

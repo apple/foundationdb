@@ -525,7 +525,7 @@ private:
 			Arena arena;
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef;
-				StringRef cipherText = cipher.encrypt(plaintext, v1.size() + v2.size(), &headerRef, arena);
+				StringRef cipherText = cipher.encrypt(plaintext, v1.size() + v2.size(), &headerRef, arena).first;
 				Standalone<StringRef> headerRefStr = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 				encryptHeaderSize = headerRefStr.size();
 				ASSERT(encryptHeaderSize > 0);
@@ -602,7 +602,7 @@ private:
 			                                  cipherKeys.cipherHeaderKey,
 			                                  cipherHeaderRef.getIV(),
 			                                  BlobCipherMetrics::KV_MEMORY);
-			plaintext = cipher.decrypt(data.begin() + encryptHeaderSize, h.len1 + h.len2, cipherHeaderRef, arena);
+			plaintext = cipher.decrypt(data.begin() + encryptHeaderSize, h.len1 + h.len2, cipherHeaderRef, arena).first;
 		} else {
 			state BlobCipherEncryptHeader cipherHeader = *(BlobCipherEncryptHeader*)data.begin();
 			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(

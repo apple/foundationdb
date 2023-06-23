@@ -1114,10 +1114,10 @@ void EncryptBlobCipherAes265Ctr::updateEncryptHeader(const uint8_t* ciphertext,
 	}
 }
 
-StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
-                                              const int plaintextLen,
-                                              BlobCipherEncryptHeaderRef* headerRef,
-                                              Arena& arena) {
+std::pair<StringRef, double> EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
+                                                                 const int plaintextLen,
+                                                                 BlobCipherEncryptHeaderRef* headerRef,
+                                                                 Arena& arena) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1148,8 +1148,10 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
+	double encryptTime = 0;
 	updateEncryptHeader(ciphertext, plaintextLen, headerRef);
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
+		encryptTime = int64_t((timer_monotonic() - startTime) * 1e9);
 		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
 	}
 
@@ -1160,7 +1162,7 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	           "ConfigurableEncryption: Encryption with AES_CMAC Auth token generation");
 
-	return encryptBuf.substr(0, plaintextLen);
+	return std::make_pair(encryptBuf.substr(0, plaintextLen), encryptTime);
 }
 
 void EncryptBlobCipherAes265Ctr::encryptInplace(uint8_t* plaintext,
@@ -1445,10 +1447,10 @@ void DecryptBlobCipherAes256Ctr::validateEncryptHeader(const uint8_t* ciphertext
 	*authTokenAlgo = (EncryptAuthTokenAlgo)flags.authTokenAlgo;
 }
 
-StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
-                                              const int ciphertextLen,
-                                              const BlobCipherEncryptHeaderRef& headerRef,
-                                              Arena& arena) {
+std::pair<StringRef, double> DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
+                                                                 const int ciphertextLen,
+                                                                 const BlobCipherEncryptHeaderRef& headerRef,
+                                                                 Arena& arena) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1476,8 +1478,10 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
+	double decryptTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
-		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+		decryptTime = int64_t((timer_monotonic() - startTime) * 1e9);
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += decryptTime;
 	}
 
 	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
@@ -1487,7 +1491,7 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	           "ConfigurableEncryption: Decryption with AES_CMAC Auth token generation");
 
-	return decrypted.substr(0, ciphertextLen);
+	return std::make_pair(decrypted.substr(0, ciphertextLen), decryptTime);
 }
 
 void DecryptBlobCipherAes256Ctr::verifyHeaderSingleAuthToken(const uint8_t* ciphertext,
@@ -1984,7 +1988,7 @@ StringRef encryptTest(EncryptBlobCipherAes265Ctr& encryptor,
 		memcpy(data, plaintext, plaintextLen);
 		encryptor.encryptInplace(data, plaintextLen, headerRef);
 	} else {
-		encrypted = encryptor.encrypt(plaintext, plaintextLen, headerRef, arena);
+		encrypted = encryptor.encrypt(plaintext, plaintextLen, headerRef, arena).first;
 	}
 	return encrypted;
 }
@@ -2020,7 +2024,7 @@ StringRef decryptTest(DecryptBlobCipherAes256Ctr& decryptor,
 		memcpy(data, ciphertext, ciphertextLen);
 		decryptor.decryptInplace(data, ciphertextLen, headerRef);
 	} else {
-		decrypted = decryptor.decrypt(ciphertext, ciphertextLen, headerRef, arena);
+		decrypted = decryptor.decrypt(ciphertext, ciphertextLen, headerRef, arena).first;
 	}
 	return decrypted;
 }
@@ -3022,7 +3026,6 @@ void testEncryptInplaceNoAuthMode(const int minDomainId) {
 	TraceEvent("EncryptInplaceStart");
 
 	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("encrypt_inplace_enabled", KnobValueRef::create(bool{ true }));
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 

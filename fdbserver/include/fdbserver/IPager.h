@@ -436,13 +436,7 @@ public:
 
 			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 				BlobCipherEncryptHeaderRef headerRef;
-				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
-					cipher.encryptInplace(payload, len, &headerRef);
-				} else {
-					StringRef ciphertext = cipher.encrypt(payload, len, &headerRef, arena);
-					ASSERT_EQ(len, ciphertext.size());
-					memcpy(payload, ciphertext.begin(), len);
-				}
+				cipher.encryptInplace(payload, len, &headerRef);
 
 				Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 				ASSERT(serializedHeader.size() <= BlobCipherEncryptHeader::headerSize);
@@ -453,13 +447,7 @@ public:
 					       BlobCipherEncryptHeader::headerSize - serializedHeader.size());
 				}
 			} else {
-				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
-					cipher.encryptInplace(payload, len, &h->encryption);
-				} else {
-					StringRef ciphertext = cipher.encrypt(payload, len, &h->encryption, arena)->toStringRef();
-					ASSERT_EQ(len, ciphertext.size());
-					memcpy(payload, ciphertext.begin(), len);
-				}
+				cipher.encryptInplace(payload, len, &h->encryption);
 			}
 
 			if constexpr (encodingType == AESEncryption) {
@@ -492,26 +480,14 @@ public:
 				                                  cipherKeys.cipherHeaderKey,
 				                                  headerRef.getIV(),
 				                                  BlobCipherMetrics::KV_REDWOOD);
-				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
-					cipher.decryptInplace(payload, len, headerRef);
-				} else {
-					StringRef plaintext = cipher.decrypt(payload, len, headerRef, arena);
-					ASSERT_EQ(len, plaintext.size());
-					memcpy(payload, plaintext.begin(), len);
-				}
+				cipher.decryptInplace(payload, len, headerRef);
 
 			} else {
 				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
 				                                  cipherKeys.cipherHeaderKey,
 				                                  h->encryption.iv,
 				                                  BlobCipherMetrics::KV_REDWOOD);
-				if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
-					cipher.decryptInplace(payload, len, h->encryption);
-				} else {
-					StringRef plaintext = cipher.decrypt(payload, len, h->encryption, arena)->toStringRef();
-					ASSERT_EQ(len, plaintext.size());
-					memcpy(payload, plaintext.begin(), len);
-				}
+				cipher.decryptInplace(payload, len, h->encryption);
 			}
 		}
 	};

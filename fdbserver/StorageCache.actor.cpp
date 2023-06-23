@@ -1929,7 +1929,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 								msg.updateEncryptCipherDetails(cipherDetails);
 								collectingCipherKeys = true;
 							} else {
-								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena(), BlobCipherMetrics::TLOG);
+								msg = msg.decrypt(cipherKeys.get(), cloneReader.arena(), BlobCipherMetrics::TLOG).first;
 							}
 						}
 						if (!collectingCipherKeys) {
@@ -2026,7 +2026,7 @@ ACTOR Future<Void> pullAsyncData(StorageCacheData* data) {
 					MutationRef msg;
 					reader >> msg;
 					if (msg.isEncrypted()) {
-						msg = msg.decrypt(cipherKeys.get(), reader.arena(), BlobCipherMetrics::TLOG);
+						msg = msg.decrypt(cipherKeys.get(), reader.arena(), BlobCipherMetrics::TLOG).first;
 					}
 
 					if (ver != invalidVersion) // This change belongs to a version < minVersion

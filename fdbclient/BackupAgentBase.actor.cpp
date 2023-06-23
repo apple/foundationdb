@@ -357,12 +357,12 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 						TextAndHeaderCipherKeys cipherKeys =
 						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
 						        dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE).first;
 					} else {
 						TextAndHeaderCipherKeys cipherKeys =
 						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
 						        dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
+						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE).first;
 					}
 				} catch (Error& e) {
 					// It's possible a tenant was deleted and the encrypt key fetch failed

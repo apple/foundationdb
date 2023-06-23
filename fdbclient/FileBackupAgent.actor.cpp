@@ -618,7 +618,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 			}
 			DecryptBlobCipherAes256Ctr decryptor(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
-			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
+			return decryptor.decrypt(dataP, dataLen, headerRef, *arena).first;
 		} else {
 			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
 			TextAndHeaderCipherKeys cipherKeys = wait(
@@ -676,7 +676,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		StringRef encryptedData;
 		if (self->options.configurableEncryptionEnabled) {
 			BlobCipherEncryptHeaderRef headerRef;
-			encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
+			encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena).first;
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			self->arena->dependsOn(serialized.arena());
 			ASSERT(serialized.size() == self->encryptHeader.size());

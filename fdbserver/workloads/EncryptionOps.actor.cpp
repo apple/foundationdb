@@ -329,7 +329,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		    textCipherKey, headerCipherKey, &iv[0], AES_256_IV_LENGTH, authMode, authAlgo, BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
-		StringRef encrypted = encryptor.encrypt(payload, len, headerRef, arena);
+		StringRef encrypted = encryptor.encrypt(payload, len, headerRef, arena).first;
 		auto end = std::chrono::high_resolution_clock::now();
 
 		// validate encrypted buffer size and contents (not matching with plaintext)
@@ -438,7 +438,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 		DecryptBlobCipherAes256Ctr decryptor(cipherKey, headerCipherKey, &iv[0], BlobCipherMetrics::TEST);
 
 		auto start = std::chrono::high_resolution_clock::now();
-		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena);
+		StringRef decrypted = decryptor.decrypt(encrypted.begin(), len, headerRef, arena).first;
 		auto end = std::chrono::high_resolution_clock::now();
 		metrics->updateDecryptionTime(std::chrono::duration<double, std::nano>(end - start).count());
 

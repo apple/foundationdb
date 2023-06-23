@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <tuple>
+#include <utility>
 #include <variant>
 
 #include "fdbclient/Atomic.h"
@@ -1704,11 +1705,12 @@ ACTOR Future<Void> applyMetadataToCommittedTransactions(CommitBatchContext* self
 	return Void();
 }
 
-ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchContext* self,
-                                                                 int64_t tenantId,
-                                                                 const MutationRef* mutation,
-                                                                 Optional<MutationRef>* encryptedMutationOpt,
-                                                                 Arena* arena) {
+ACTOR Future<std::pair<WriteMutationRefVar, double>> writeMutationEncryptedMutation(
+    CommitBatchContext* self,
+    int64_t tenantId,
+    const MutationRef* mutation,
+    Optional<MutationRef>* encryptedMutationOpt,
+    Arena* arena) {
 	state MutationRef encryptedMutation = encryptedMutationOpt->get();
 	state const BlobCipherEncryptHeader* header;
 	state BlobCipherEncryptHeaderRef headerRef;
@@ -1724,12 +1726,12 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 		headerRef = encryptedMutation.configurableEncryptionHeader();
 		TextAndHeaderCipherKeys cipherKeys =
 		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::TLOG));
-		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG).first;
 	} else {
 		header = encryptedMutation.encryptionHeader();
 		TextAndHeaderCipherKeys cipherKeys =
 		    wait(GetEncryptCipherKeys<ServerDBInfo>::getEncryptCipherKeys(dbInfo, *header, BlobCipherMetrics::TLOG));
-		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG);
+		decryptedMutation = encryptedMutation.decrypt(cipherKeys, *arena, BlobCipherMetrics::TLOG).first;
 	}
 
 	ASSERT(decryptedMutation.type == mutation->type);
@@ -1738,14 +1740,14 @@ ACTOR Future<WriteMutationRefVar> writeMutationEncryptedMutation(CommitBatchCont
 
 	CODE_PROBE(true, "encrypting non-metadata mutations");
 	self->toCommit.writeTypedMessage(encryptedMutation);
-	return encryptedMutation;
+	return std::make_pair(encryptedMutation, 0);
 }
 
-Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
-                                          int64_t domainId,
-                                          const MutationRef* mutation,
-                                          Optional<MutationRef>* encryptedMutationOpt,
-                                          Arena* arena) {
+Future<std::pair<WriteMutationRefVar, double>> writeMutation(CommitBatchContext* self,
+                                                             int64_t domainId,
+                                                             const MutationRef* mutation,
+                                                             Optional<MutationRef>* encryptedMutationOpt,
+                                                             Arena* arena) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 
 	// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
@@ -1768,6 +1770,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::OPTIONAL_TENANT,
 		           "using optional tenant mode");
 		CODE_PROBE(self->pProxyCommitData->getTenantMode() == TenantMode::REQUIRED, "using required tenant mode");
+		double encryptionTime = 0;
 
 		if (encryptedMutationOpt && encryptedMutationOpt->present()) {
 			CODE_PROBE(true, "using already encrypted mutation");
@@ -1784,15 +1787,17 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			}
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 			ASSERT(self->cipherKeys.count(domainId) > 0);
-			encryptedMutation = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
+			auto payload = mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG);
+			encryptedMutation = payload.first;
+			encryptionTime = payload.second;
 		}
 		ASSERT(encryptedMutation.isEncrypted());
 		CODE_PROBE(true, "encrypting non-metadata mutations");
 		self->toCommit.writeTypedMessage(encryptedMutation);
-		return std::variant<MutationRef, VectorRef<MutationRef>>{ encryptedMutation };
+		return std::make_pair(std::variant<MutationRef, VectorRef<MutationRef>>{ encryptedMutation }, encryptionTime);
 	} else {
 		self->toCommit.writeTypedMessage(*mutation);
-		return std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation };
+		return std::make_pair(std::variant<MutationRef, VectorRef<MutationRef>>{ *mutation }, 0.0);
 	}
 }
 
@@ -1813,13 +1818,14 @@ inline bool shouldBackup(MutationRef const& m) {
 	return false;
 }
 
-void pushToBackupMutations(CommitBatchContext* self,
-                           ProxyCommitData* const pProxyCommitData,
-                           Arena& arena,
-                           MutationRef const& m,
-                           MutationRef const& writtenMutation,
-                           Optional<MutationRef> const& encryptedMutation) {
+double pushToBackupMutations(CommitBatchContext* self,
+                             ProxyCommitData* const pProxyCommitData,
+                             Arena& arena,
+                             MutationRef const& m,
+                             MutationRef const& writtenMutation,
+                             Optional<MutationRef> const& encryptedMutation) {
 	// In required tenant mode, the clear ranges are already split by tenant
+	double encryptionTime = 0;
 	if (m.type != MutationRef::Type::ClearRange ||
 	    (pProxyCommitData->getTenantMode() == TenantMode::REQUIRED && !systemKeys.contains(m.param1))) {
 		if (EXPENSIVE_VALIDATION && m.type == MutationRef::ClearRange) {
@@ -1853,8 +1859,6 @@ void pushToBackupMutations(CommitBatchContext* self,
 			// Create the custom mutation for the specific backup tag
 			MutationRef backupMutation(MutationRef::Type::ClearRange, intersectionRange.begin, intersectionRange.end);
 
-			// TODO (Nim): Currently clear ranges are encrypted using the default encryption key, this must
-			// be changed to account for clear ranges which span tenant boundaries
 			if (pProxyCommitData->encryptMode.isEncryptionEnabled()) {
 				CODE_PROBE(true, "encrypting clear range backup mutation");
 				if (backupMutation.param1 == m.param1 && backupMutation.param2 == m.param2 &&
@@ -1862,8 +1866,9 @@ void pushToBackupMutations(CommitBatchContext* self,
 					backupMutation = encryptedMutation.get();
 				} else {
 					EncryptCipherDomainId domainId = getEncryptDetailsFromMutationRef(pProxyCommitData, backupMutation);
-					backupMutation =
-					    backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
+					auto payload = backupMutation.encrypt(self->cipherKeys, domainId, arena, BlobCipherMetrics::BACKUP);
+					backupMutation = payload.first;
+					encryptionTime += payload.second;
 				}
 			}
 			ASSERT(!pProxyCommitData->encryptMode.isEncryptionEnabled() || backupMutation.isEncrypted());
@@ -1874,6 +1879,7 @@ void pushToBackupMutations(CommitBatchContext* self,
 			}
 		}
 	}
+	return encryptionTime;
 }
 
 /// This second pass through committed transactions assigns the actual mutations to the appropriate storage servers'
@@ -1900,6 +1906,7 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		}
 
 		state int64_t encryptDomain = trs[self->transactionNum].tenantInfo.tenantId;
+		state double totalEncryptionTime = 0;
 		if (self->pProxyCommitData->encryptMode.mode == EncryptionAtRestMode::CLUSTER_AWARE &&
 		    encryptDomain != SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID) {
 			encryptDomain = FDB_DEFAULT_ENCRYPT_DOMAIN_ID;
@@ -1970,7 +1977,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (encryptedMutation.present()) {
 					ASSERT(encryptedMutation.get().isEncrypted());
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+
+				std::pair<WriteMutationRefVar, double> result =
+				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+				WriteMutationRefVar var = result.first;
+				totalEncryptionTime += result.second;
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -2026,7 +2037,10 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				if (pProxyCommitData->needsCacheTag(clearRange)) {
 					self->toCommit.addTag(cacheTag);
 				}
-				WriteMutationRefVar var = wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+				std::pair<WriteMutationRefVar, double> result =
+				    wait(writeMutation(self, encryptDomain, &m, &encryptedMutation, &arena));
+				WriteMutationRefVar var = result.first;
+				totalEncryptionTime += result.second;
 				// FIXME: Remove assert once ClearRange RAW_ACCESS usecase handling is done
 				ASSERT(std::holds_alternative<MutationRef>(var));
 				writtenMutation = std::get<MutationRef>(var);
@@ -2050,7 +2064,11 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 				continue;
 			}
 
-			pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
+			totalEncryptionTime +=
+			    pushToBackupMutations(self, pProxyCommitData, arena, m, writtenMutation, encryptedMutation);
+		}
+		if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+			trs[self->transactionNum].transaction.encryptionTime = totalEncryptionTime;
 		}
 
 		if (checkSample) {
@@ -2134,39 +2152,41 @@ ACTOR Future<Void> postResolution(CommitBatchContext* self) {
 		                        &self->computeStart));
 	}
 
-	buildIdempotencyIdMutations(self->trs,
-	                            self->idempotencyKVBuilder,
-	                            self->commitVersion,
-	                            self->committed,
-	                            ConflictBatch::TransactionCommitted,
-	                            self->locked,
-	                            [&](const KeyValue& kv) {
-		                            MutationRef idempotencyIdSet;
-		                            idempotencyIdSet.type = MutationRef::Type::SetValue;
-		                            idempotencyIdSet.param1 = kv.key;
-		                            idempotencyIdSet.param2 = kv.value;
-		                            auto& tags = pProxyCommitData->tagsForKey(kv.key);
-		                            self->toCommit.addTags(tags);
-		                            if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-			                            CODE_PROBE(true, "encrypting idempotency mutation");
-			                            EncryptCipherDomainId domainId =
-			                                getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
-			                            MutationRef encryptedMutation = idempotencyIdSet.encrypt(
-			                                self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG);
-			                            ASSERT(encryptedMutation.isEncrypted());
-			                            self->toCommit.writeTypedMessage(encryptedMutation);
-		                            } else {
-			                            self->toCommit.writeTypedMessage(idempotencyIdSet);
-		                            }
-	                            });
+	buildIdempotencyIdMutations(
+	    self->trs,
+	    self->idempotencyKVBuilder,
+	    self->commitVersion,
+	    self->committed,
+	    ConflictBatch::TransactionCommitted,
+	    self->locked,
+	    [&](const KeyValue& kv) {
+		    MutationRef idempotencyIdSet;
+		    idempotencyIdSet.type = MutationRef::Type::SetValue;
+		    idempotencyIdSet.param1 = kv.key;
+		    idempotencyIdSet.param2 = kv.value;
+		    auto& tags = pProxyCommitData->tagsForKey(kv.key);
+		    self->toCommit.addTags(tags);
+		    if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
+			    CODE_PROBE(true, "encrypting idempotency mutation");
+			    EncryptCipherDomainId domainId =
+			        getEncryptDetailsFromMutationRef(self->pProxyCommitData, idempotencyIdSet);
+			    MutationRef encryptedMutation =
+			        idempotencyIdSet.encrypt(self->cipherKeys, domainId, self->arena, BlobCipherMetrics::TLOG).first;
+			    ASSERT(encryptedMutation.isEncrypted());
+			    self->toCommit.writeTypedMessage(encryptedMutation);
+		    } else {
+			    self->toCommit.writeTypedMessage(idempotencyIdSet);
+		    }
+	    });
 	state int i = 0;
 	for (i = 0; i < pProxyCommitData->idempotencyClears.size(); i++) {
 		auto& tags = pProxyCommitData->tagsForKey(pProxyCommitData->idempotencyClears[i].param1);
 		self->toCommit.addTags(tags);
 		// We already have an arena with an appropriate lifetime handy
 		Arena& arena = pProxyCommitData->idempotencyClears.arena();
-		WriteMutationRefVar var = wait(writeMutation(
+		std::pair<WriteMutationRefVar, double> payload = wait(writeMutation(
 		    self, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, &pProxyCommitData->idempotencyClears[i], nullptr, &arena));
+		WriteMutationRefVar var = payload.first;
 		ASSERT(std::holds_alternative<MutationRef>(var));
 	}
 	pProxyCommitData->idempotencyClears = Standalone<VectorRef<MutationRef>>();
@@ -2466,6 +2486,9 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		// TODO: filter if pipelined with large commit
 		const double duration = endTime - tr.requestTime();
 		pProxyCommitData->stats.commitLatencySample.addMeasurement(duration);
+		if (self->pProxyCommitData->encryptMode.isEncryptionEnabled() && tr.transaction.encryptionTime.present()) {
+			pProxyCommitData->stats.encryptionLatencySample.addMeasurement(tr.transaction.encryptionTime.get());
+		}
 		if (pProxyCommitData->latencyBandConfig.present()) {
 			bool filter = self->maxTransactionBytes >
 			              pProxyCommitData->latencyBandConfig.get().commitConfig.maxCommitBytes.orDefault(

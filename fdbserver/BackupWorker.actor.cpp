@@ -81,7 +81,7 @@ struct VersionedMessage {
 			// In case the mutation is encrypted, get the decrypted mutation and also update message to point to
 			// the decrypted mutation.
 			// We use dedicated arena for decrypt buffer, as the other arena is used to count towards backup lock bytes.
-			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message);
+			*m = m->decrypt(cipherKeys, decryptArena, BlobCipherMetrics::BACKUP, &message).first;
 		}
 
 		// Return true if the mutation intersects any legal backup ranges
