@@ -6743,11 +6743,11 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			if (e.code() != error_code_transaction_too_old && e.code() != error_code_not_committed &&
 			    e.code() != error_code_database_locked && e.code() != error_code_commit_proxy_memory_limit_exceeded &&
 			    e.code() != error_code_grv_proxy_memory_limit_exceeded &&
-			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_tag_throttled &&
-			    e.code() != error_code_process_behind && e.code() != error_code_future_version &&
-			    e.code() != error_code_tenant_not_found && e.code() != error_code_illegal_tenant_access &&
-			    e.code() != error_code_proxy_tag_throttled && e.code() != error_code_storage_quota_exceeded &&
-			    e.code() != error_code_tenant_locked && e.code() != error_code_tenant_name_required &&
+			    e.code() != error_code_batch_transaction_throttled && e.code() != error_code_process_behind &&
+			    e.code() != error_code_future_version && e.code() != error_code_tenant_not_found &&
+			    e.code() != error_code_illegal_tenant_access && e.code() != error_code_proxy_tag_throttled &&
+			    e.code() != error_code_storage_quota_exceeded && e.code() != error_code_tenant_locked &&
+			    e.code() != error_code_tenant_name_required &&
 			    e.code() != error_code_management_cluster_invalid_access && e.code() != error_code_tenants_disabled &&
 			    e.code() != error_code_permission_denied) {
 				// Part of the reason that this block exists is that negative unit tests can trip over these cases
@@ -7471,8 +7471,8 @@ Future<Void> Transaction::onError(Error const& e) {
 	if (e.code() == error_code_not_committed || e.code() == error_code_commit_unknown_result ||
 	    e.code() == error_code_database_locked || e.code() == error_code_commit_proxy_memory_limit_exceeded ||
 	    e.code() == error_code_grv_proxy_memory_limit_exceeded || e.code() == error_code_process_behind ||
-	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled ||
-	    e.code() == error_code_blob_granule_request_failed || e.code() == error_code_proxy_tag_throttled) {
+	    e.code() == error_code_batch_transaction_throttled || e.code() == error_code_blob_granule_request_failed ||
+	    e.code() == error_code_proxy_tag_throttled) {
 		if (e.code() == error_code_not_committed)
 			++trState->cx->transactionsNotCommitted;
 		else if (e.code() == error_code_commit_unknown_result)
@@ -7482,7 +7482,7 @@ Future<Void> Transaction::onError(Error const& e) {
 			++trState->cx->transactionsResourceConstrained;
 		else if (e.code() == error_code_process_behind)
 			++trState->cx->transactionsProcessBehind;
-		else if (e.code() == error_code_batch_transaction_throttled || e.code() == error_code_tag_throttled) {
+		else if (e.code() == error_code_batch_transaction_throttled) {
 			++trState->cx->transactionsThrottled;
 		} else if (e.code() == error_code_proxy_tag_throttled) {
 			++trState->cx->transactionsThrottled;
