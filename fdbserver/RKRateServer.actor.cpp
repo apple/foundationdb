@@ -4,6 +4,7 @@
 
 #include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRateUpdater.h"
+#include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 

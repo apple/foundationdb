@@ -38,6 +38,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/TagThrottler.h"
 #include "fdbserver/TLogInterface.h"
 
 /**
@@ -67,7 +68,7 @@ class Ratekeeper {
 	RKRateServer rateServer;
 	RKRateUpdater normalRateUpdater, batchRateUpdater;
 	RKThroughputQuotaCache quotaCache;
-	std::unique_ptr<class ITagThrottler> tagThrottler;
+	GlobalTagThrottler tagThrottler;
 
 	PromiseStream<Future<Void>> addActor;
 

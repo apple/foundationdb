@@ -3,9 +3,13 @@
  */
 
 #include "fdbrpc/Locality.h"
+#include "fdbserver/IRKBlobMonitor.h"
+#include "fdbserver/IRKConfigurationMonitor.h"
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRateUpdater.h"
+#include "fdbserver/IRKRecoveryTracker.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include

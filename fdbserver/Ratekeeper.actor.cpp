@@ -82,10 +82,10 @@ public:
 		self.addActor.send(traceRole(Role::RATEKEEPER, rkInterf.id()));
 
 		self.addActor.send(self.rateServer.run(
-		    self.normalRateUpdater, self.batchRateUpdater, *self.tagThrottler, self.recoveryTracker));
+		    self.normalRateUpdater, self.batchRateUpdater, self.tagThrottler, self.recoveryTracker));
 
 		self.addActor.send(self.quotaCache.run());
-		self.addActor.send(self.tagThrottler->monitorThrottlingChanges());
+		self.addActor.send(self.tagThrottler.monitorThrottlingChanges());
 		if (SERVER_KNOBS->BW_THROTTLING_ENABLED) {
 			self.addActor.send(self.blobMonitor.run(self.configurationMonitor, self.recoveryTracker));
 		}
@@ -126,14 +126,14 @@ public:
 
 					self.normalRateUpdater.update(self.metricsTracker,
 					                              self.rateServer,
-					                              *self.tagThrottler,
+					                              self.tagThrottler,
 					                              self.configurationMonitor,
 					                              self.recoveryTracker,
 					                              self.actualTpsHistory,
 					                              self.blobMonitor);
 					self.batchRateUpdater.update(self.metricsTracker,
 					                             self.rateServer,
-					                             *self.tagThrottler,
+					                             self.tagThrottler,
 					                             self.configurationMonitor,
 					                             self.recoveryTracker,
 					                             self.actualTpsHistory,
@@ -195,16 +195,13 @@ Ratekeeper::Ratekeeper(UID id,
                                       SERVER_KNOBS->MAX_TL_SS_VERSION_DIFFERENCE_BATCH,
                                       SERVER_KNOBS->TARGET_DURABILITY_LAG_VERSIONS_BATCH,
                                       SERVER_KNOBS->TARGET_BW_LAG_BATCH)),
-    quotaCache(id, db) {
-	tagThrottler =
-	    std::make_unique<GlobalTagThrottler>(metricsTracker, quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND);
-}
+    quotaCache(id, db), tagThrottler(metricsTracker, quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND) {}
 
 void Ratekeeper::tryUpdateAutoTagThrottling() {
 	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		addActor.send(tagThrottler->tryUpdateAutoThrottling(ss));
+		addActor.send(tagThrottler.tryUpdateAutoThrottling(ss));
 	}
 }
 

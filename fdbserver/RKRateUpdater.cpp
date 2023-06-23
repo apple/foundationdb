@@ -2,7 +2,11 @@
  * RateUpdater.cpp
  */
 
+#include "fdbserver/IRKBlobMonitor.h"
+#include "fdbserver/IRKConfigurationMonitor.h"
+#include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRateUpdater.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 #include "flow/UnitTest.h"
 

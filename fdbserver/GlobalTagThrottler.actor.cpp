@@ -23,6 +23,7 @@
 #include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
+#include "fdbserver/Knobs.h"
 #include "fdbserver/TagThrottler.h"
 
 #include <limits>
