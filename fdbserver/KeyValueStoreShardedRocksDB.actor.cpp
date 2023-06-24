@@ -111,6 +111,14 @@ std::string getErrorReason(BackgroundErrorReason reason) {
 	}
 }
 
+ACTOR Future<Void> forwardError(Future<int> input) {
+	int errorCode = wait(input);
+	if (errorCode == error_code_success) {
+		return Never();
+	}
+	throw Error::fromCode(errorCode);
+}
+
 // Background error handling is tested with Chaos test.
 // TODO: Test background error in simulation. RocksDB doesn't use flow IO in simulation, which limits our ability to
 // inject IO errors. We could implement rocksdb::FileSystem using flow IO to unblock simulation. Also, trace event is
@@ -135,14 +143,14 @@ public:
 		// https://github.com/facebook/rocksdb/blob/2e09a54c4fb82e88bcaa3e7cfa8ccbbbbf3635d5/db/error_handler.cc#L138.
 		// All background errors will be treated as storage engine failure. Send the error to storage server.
 		if (bg_error->IsIOError()) {
-			errorPromise.sendError(io_error());
+			errorPromise.send(error_code_io_error);
 		} else if (bg_error->IsCorruption()) {
-			errorPromise.sendError(file_corrupt());
+			errorPromise.send(error_code_file_corrupt);
 		} else {
-			errorPromise.sendError(unknown_error());
+			errorPromise.send(error_code_unknown_error);
 		}
 	}
-	Future<Void> getFuture() {
+	Future<int> getFuture() {
 		std::unique_lock<std::mutex> lock(mutex);
 		return errorPromise.getFuture();
 	}
@@ -150,11 +158,11 @@ public:
 		std::unique_lock<std::mutex> lock(mutex);
 		if (!errorPromise.isValid())
 			return;
-		errorPromise.send(Never());
+		errorPromise.send(error_code_success);
 	}
 
 private:
-	ThreadReturnPromise<Void> errorPromise;
+	ThreadReturnPromise<int> errorPromise;
 	std::mutex mutex;
 };
 
@@ -3206,7 +3214,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 	    fetchSemaphore(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
 	    numReadWaiters(SERVER_KNOBS->ROCKSDB_READ_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_READ_QUEUE_SOFT_MAX),
 	    numFetchWaiters(SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_HARD_MAX - SERVER_KNOBS->ROCKSDB_FETCH_QUEUE_SOFT_MAX),
-	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(errorListener->getFuture()),
+	    errorListener(std::make_shared<RocksDBErrorListener>()), errorFuture(forwardError(errorListener->getFuture())),
 	    dbOptions(getOptions()), shardManager(path, id, dbOptions, errorListener, &counters),
 	    rocksDBMetrics(std::make_shared<RocksDBMetrics>(id, dbOptions.statistics)) {
 		// In simluation, run the reader/writer threads as Coro threads (i.e. in the network thread. The storage

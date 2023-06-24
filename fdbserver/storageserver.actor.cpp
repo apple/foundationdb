@@ -1655,7 +1655,7 @@ public:
 
 		newestAvailableVersion.insert(allKeys, invalidVersion);
 		newestDirtyVersion.insert(allKeys, invalidVersion);
-		if (SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && storage->shardAware()) {
+		if (storage->shardAware()) {
 			addShard(ShardInfo::newShard(this, StorageServerShard::notAssigned(allKeys)));
 		} else {
 			addShard(ShardInfo::newNotAssigned(allKeys));
@@ -9605,10 +9605,10 @@ ACTOR Future<Void> fetchShard(StorageServer* data, MoveInShard* moveInShard) {
 			} else if (phase == MoveInPhase::ApplyingUpdates) {
 				wait(fetchShardApplyUpdates(data, moveInShard, moveInUpdates));
 			} else if (phase == MoveInPhase::Complete) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			} else if (phase == MoveInPhase::Error || phase == MoveInPhase::Cancel) {
-				wait(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
+				data->actors.add(cleanUpMoveInShard(data, data->data().getLatestVersion(), moveInShard));
 				break;
 			}
 		} catch (Error& e) {
@@ -12837,9 +12837,6 @@ ByteSampleInfo isKeyValueInSample(const KeyRef key, int64_t totalKvSize) {
 	    (double)info.size / (key.size() + SERVER_KNOBS->BYTE_SAMPLING_OVERHEAD) / SERVER_KNOBS->BYTE_SAMPLING_FACTOR;
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0.99 only for testing
 	// MIN_BYTE_SAMPLING_PROBABILITY is 0 for other cases
-	if (SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY != 0) {
-		ASSERT(SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA);
-	}
 	info.probability = std::clamp(info.probability, SERVER_KNOBS->MIN_BYTE_SAMPLING_PROBABILITY, 1.0);
 	info.inSample = a / ((1 << 30) * 4.0) < info.probability;
 	info.sampledSize = info.size / info.probability;
@@ -13971,7 +13968,7 @@ ACTOR Future<Void> storageServer(IKeyValueStore* persistentData,
                                  Reference<AsyncVar<ServerDBInfo> const> db,
                                  std::string folder) {
 	state StorageServer self(persistentData, db, ssi);
-	self.shardAware = SERVER_KNOBS->SHARD_ENCODE_LOCATION_METADATA && persistentData->shardAware();
+	self.shardAware = persistentData->shardAware();
 	state Future<Void> ssCore;
 	self.initialClusterVersion = startVersion;
 	if (ssi.isTss()) {

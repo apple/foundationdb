@@ -1066,7 +1066,7 @@ void DDQueue::launchQueuedWork(std::set<RelocateData, std::greater<RelocateData>
 						rrs.dataMoveId = UID();
 					} else {
 						const bool enabled =
-						    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+						    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 						rrs.dataMoveId = newDataMoveId(deterministicRandom()->randomUInt64(),
 						                               AssignEmptyRange::False,
 						                               EnablePhysicalShardMove(enabled));
@@ -1655,7 +1655,7 @@ ACTOR Future<Void> dataDistributionRelocator(DDQueue* self,
 						self->moveCreateNewPhysicalShard++;
 					}
 					const bool enabled =
-					    deterministicRandom()->random01() <= SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
+					    deterministicRandom()->random01() < SERVER_KNOBS->DD_PHYSICAL_SHARD_MOVE_PROBABILITY;
 					rd.dataMoveId = newDataMoveId(
 					    physicalShardIDCandidate, AssignEmptyRange::False, EnablePhysicalShardMove(enabled));
 					TraceEvent(SevInfo, "NewDataMoveWithPhysicalShard")
