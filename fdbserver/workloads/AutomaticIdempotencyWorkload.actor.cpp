@@ -170,66 +170,113 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		return Void();
 	}
 
-	ACTOR static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
+	Key idempotencyKeyValueToTestKey(KeyValueRef kv, Version* commitVersion, int64_t* timestamp) {
+		uint8_t highOrderBatchIndex;
+		decodeIdempotencyKey(kv.key, *commitVersion, highOrderBatchIndex);
+
+		// Decode the first idempotency id in the value
+		BinaryReader valReader(kv.value.begin(), kv.value.size(), IncludeVersion());
+		valReader >> *timestamp;
+		uint8_t length;
+		valReader >> length;
+		StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+		uint8_t lowOrderBatchIndex;
+		valReader >> lowOrderBatchIndex;
+
+		// Recover the key written in the transaction associated with this idempotency id
+		BinaryWriter keyWriter(Unversioned());
+		keyWriter.serializeBytes(keyPrefix);
+		keyWriter.serializeBinaryItem(bigEndian64(*commitVersion));
+		keyWriter.serializeBinaryItem(highOrderBatchIndex);
+		keyWriter.serializeBinaryItem(lowOrderBatchIndex);
+
+		return keyWriter.toValue();
+	}
+
+	// Returns the largest gap between createdTime and the idempotency timestamp
+	ACTOR static Future<int64_t> getMaxTimestampDelta(AutomaticIdempotencyWorkload* self, Database db) {
+		state std::vector<int64_t> timestamps;
+		state std::vector<Key> keys;
+
+		RangeResult result = wait(runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
+		}));
+
+		for (const auto& kv : result) {
+			Version commitVersion;
+			int64_t timestamp;
+			Key key = self->idempotencyKeyValueToTestKey(kv, &commitVersion, &timestamp);
+			timestamps.push_back(timestamp);
+			keys.push_back(key);
+		}
+
 		state ReadYourWritesTransaction tr(db);
-		state RangeResult result;
-		state Key key;
-		state Version commitVersion;
 		loop {
 			try {
-				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				wait(store(result, tr.getRange(idempotencyIdKeys, /*limit*/ 1)));
-				if (result.empty()) {
-					TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
-					return -1;
+				state std::vector<Future<Optional<Value>>> futures;
+
+				for (auto const& key : keys) {
+					futures.push_back(tr.get(key));
 				}
-				for (const auto& [k, v] : result) {
-					uint8_t highOrderBatchIndex;
-					decodeIdempotencyKey(k, commitVersion, highOrderBatchIndex);
 
-					// Decode the first idempotency id in the value
-					BinaryReader valReader(v.begin(), v.size(), IncludeVersion());
-					int64_t timeStamp; // ignored
-					valReader >> timeStamp;
-					uint8_t length;
-					valReader >> length;
-					StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
-					uint8_t lowOrderBatchIndex;
-					valReader >> lowOrderBatchIndex;
+				wait(waitForAll(futures));
 
-					// Recover the key written in the transaction associated with this idempotency id
-					BinaryWriter keyWriter(Unversioned());
-					keyWriter.serializeBytes(self->keyPrefix);
-					keyWriter.serializeBinaryItem(bigEndian64(commitVersion));
-					keyWriter.serializeBinaryItem(highOrderBatchIndex);
-					keyWriter.serializeBinaryItem(lowOrderBatchIndex);
-					key = keyWriter.toValue();
-
-					// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
-					// be using a tenant.
-					Optional<Value> entry = wait(runRYWTransaction(
-					    db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
-					if (!entry.present()) {
-						TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
-						    .detail("Key", key)
-						    .detail("CommitVersion", commitVersion)
-						    .detail("ReadVersion", tr.getReadVersion().get());
-					}
+				int64_t maxCreatedTimeDelta = 0;
+				for (int i = 0; i < futures.size(); ++i) {
+					auto entry = futures[i].get();
 					ASSERT(entry.present());
 					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
-					return e.createdTime;
+					maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
 				}
-				ASSERT(false);
+
+				return maxCreatedTimeDelta;
 			} catch (Error& e) {
 				wait(tr.onError(e));
 			}
 		}
 	}
 
+	ACTOR static Future<int64_t> getOldestCreatedTime(AutomaticIdempotencyWorkload* self, Database db) {
+		state ReadYourWritesTransaction tr(db);
+		state Key key;
+		state Version commitVersion;
+
+		state RangeResult result = wait(runRYWTransaction(db, [](Reference<ReadYourWritesTransaction> tr) {
+			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			return tr->getRange(idempotencyIdKeys, 1);
+		}));
+
+		if (result.empty()) {
+			TraceEvent("AutomaticIdempotencyNoIdsLeft").log();
+			return -1;
+		}
+
+		int64_t timestamp;
+		key = self->idempotencyKeyValueToTestKey(result[0], &commitVersion, &timestamp);
+
+		// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
+		// be using a tenant.
+		Optional<Value> entry =
+		    wait(runRYWTransaction(db, [key = key](Reference<ReadYourWritesTransaction> tr) { return tr->get(key); }));
+
+		if (!entry.present()) {
+			TraceEvent(SevError, "AutomaticIdempotencyKeyMissing")
+			    .detail("Key", key)
+			    .detail("CommitVersion", commitVersion)
+			    .detail("ReadVersion", tr.getReadVersion().get());
+		}
+		ASSERT(entry.present());
+
+		auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
+		return e.createdTime;
+	}
+
 	ACTOR static Future<bool> testCleanerOneIteration(AutomaticIdempotencyWorkload* self,
 	                                                  Database db,
 	                                                  ActorCollection* actors,
 	                                                  int64_t minAgeSeconds,
+	                                                  int64_t maxTimestampDelta,
 	                                                  const std::vector<int64_t>* createdTimes) {
 		state Future<Void> cleaner = recurringAsync(
 		    [db = db, minAgeSeconds = minAgeSeconds]() { return cleanIdempotencyIds(db, minAgeSeconds); },
@@ -250,7 +297,12 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			// oldestCreatedTime could seem too high if there's a large gap in the age
 			// of entries, so account for this by making oldestCreatedTime one more than
 			// the youngest entry that actually got deleted.
-			auto iter = std::lower_bound(createdTimes->begin(), createdTimes->end(), oldestCreatedTime);
+			//
+			// Because of some uncertainty around what the most recently deleted entry
+			// was, we subtract out the largest observed gap between idempotency timestamp
+			// and created timestamp.
+			auto iter =
+			    std::lower_bound(createdTimes->begin(), createdTimes->end(), oldestCreatedTime - maxTimestampDelta);
 			if (iter != createdTimes->begin()) {
 				--iter;
 				oldestCreatedTime = *iter + 1;
@@ -310,6 +362,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			           return getCreatedTimes(self, tr);
 		           })));
 
+		state int64_t maxTimestampDelta = wait(getMaxTimestampDelta(self, db));
+
 		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
 		// much.
 		loop {
@@ -318,7 +372,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				break;
 			}
 			choose {
-				when(bool done = wait(testCleanerOneIteration(self, db, &actors, minAgeSeconds, &createdTimes))) {
+				when(bool done = wait(
+				         testCleanerOneIteration(self, db, &actors, minAgeSeconds, maxTimestampDelta, &createdTimes))) {
 					if (done) {
 						break;
 					}
