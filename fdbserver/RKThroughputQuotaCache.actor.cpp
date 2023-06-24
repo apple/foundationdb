@@ -32,8 +32,6 @@ public:
 						    ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(kv.value));
 					}
 					for (auto const& [groupName, quota] : tenantGroupQuotas.results) {
-						// For now tenant group quotas override tag quotas.
-						// TODO: In the future, these two types of quotas should not conflict.
 						self->quotas[ThrottlingId::fromTenantGroup(groupName)] = quota;
 					}
 					wait(delay(5.0));
