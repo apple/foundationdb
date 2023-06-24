@@ -14,11 +14,9 @@ static void bench_grvProxyTagThrottler(benchmark::State& state) {
 	for (int i = 0; i < state.range(0); ++i) {
 		auto& req = reqs.emplace_back();
 
-		TransactionTagMap<uint32_t> tags;
-		tags[StringRef(arena, deterministicRandom()->randomAlphaNumeric(10))] = 1;
-
 		req.priority = TransactionPriority::DEFAULT;
-		req.tags = tags;
+		req.transactionCount = 1;
+		req.throttlingId = ThrottlingIdRef::fromTag(deterministicRandom()->randomAlphaNumeric(10));
 	}
 
 	for (auto _ : state) {
