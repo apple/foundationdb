@@ -35,9 +35,6 @@ public:
 	// Increment the number of known requests associated with the specified throttling ID
 	virtual void addRequests(ThrottlingId, int count) = 0;
 
-	// This throttled tag change ID is used to coordinate updates with the GRV proxies
-	virtual uint64_t getThrottledTagChangeId() const = 0;
-
 	// For each throttling ID and priority combination, return the throughput limit for the cluster
 	// (to be shared across all GRV proxies)
 	virtual ThrottlingIdMap<double> getProxyRates(int numProxies) = 0;
@@ -62,7 +59,6 @@ public:
 
 	Future<Void> monitorThrottlingChanges() override;
 	void addRequests(ThrottlingId, int count) override;
-	uint64_t getThrottledTagChangeId() const override;
 
 	int64_t autoThrottleCount() const override;
 	uint32_t busyReadersCount() const override;
@@ -83,7 +79,6 @@ class StubTagThrottler : public ITagThrottler {
 public:
 	Future<Void> monitorThrottlingChanges() override { return Never(); }
 	void addRequests(ThrottlingId, int count) override {}
-	uint64_t getThrottledTagChangeId() const override { return 0; }
 
 	int64_t autoThrottleCount() const override { return 0; }
 	uint32_t busyReadersCount() const override { return 0; }

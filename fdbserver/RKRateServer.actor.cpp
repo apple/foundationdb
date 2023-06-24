@@ -44,9 +44,7 @@ public:
 			reply.batchTransactionRate = batchRateUpdater->getTpsLimit() / self->grvProxyInfo.size();
 			reply.leaseDuration = SERVER_KNOBS->METRIC_UPDATE_RATE;
 
-			if (p.lastThrottledTagChangeId != tagThrottler->getThrottledTagChangeId() ||
-			    now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
-				p.lastThrottledTagChangeId = tagThrottler->getThrottledTagChangeId();
+			if (now() > p.lastTagPushTime + SERVER_KNOBS->TAG_THROTTLE_PUSH_INTERVAL) {
 				p.lastTagPushTime = now();
 
 				auto proxyThrottledTags = tagThrottler->getProxyRates(self->grvProxyInfo.size());

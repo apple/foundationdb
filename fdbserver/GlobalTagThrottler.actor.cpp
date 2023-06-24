@@ -153,7 +153,6 @@ class GlobalTagThrottlerImpl {
 	IRKThroughputQuotaCache const* quotaCache;
 	UID id;
 	int maxFallingBehind{ 0 };
-	uint64_t throttledTagChangeId{ 0 };
 	uint32_t lastBusyThrottlingIdCount{ 0 };
 
 	ThrottlingIdMap<PerThrottlingIdStatistics> throttlingStatistics;
@@ -390,7 +389,6 @@ public:
 			it->second.addTransactions(static_cast<double>(count));
 		}
 	}
-	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
 
 	ThrottlingIdMap<double> getProxyRates(int numProxies) {
 		ThrottlingIdMap<double> result;
@@ -490,9 +488,6 @@ Future<Void> GlobalTagThrottler::monitorThrottlingChanges() {
 
 void GlobalTagThrottler::addRequests(ThrottlingId throttlingId, int count) {
 	return impl->addRequests(throttlingId, count);
-}
-uint64_t GlobalTagThrottler::getThrottledTagChangeId() const {
-	return impl->getThrottledTagChangeId();
 }
 ThrottlingIdMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 	return impl->getProxyRates(numProxies);
