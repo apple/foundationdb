@@ -737,10 +737,9 @@ public:
 	// Limit to the number of throttling tags each storage server
 	// will track and send to the ratekeeper
 	int64_t SS_THROTTLE_TAGS_TRACKED;
-	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
-	// throughput for tags and their associated quotas.
+	// Deprecated (TODO: Remove in 8.1)
 	bool GLOBAL_TAG_THROTTLING;
-	// Enforce tag throttling on proxies rather than on clients
+	// Deprecated (TODO: Remove in 8.1)
 	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
 	// When the measured tps for a tag gets too low, the denominator in the
