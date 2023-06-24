@@ -13,7 +13,7 @@ public:
 	ACTOR static Future<Void> run(RKRateServer* self,
 	                              IRKRateUpdater const* normalRateUpdater,
 	                              IRKRateUpdater const* batchRateUpdater,
-	                              ITagThrottler* tagThrottler,
+	                              GlobalTagThrottler* tagThrottler,
 	                              IRKRecoveryTracker* recoveryTracker) {
 		loop {
 			GetRateInfoRequest req = waitNext(self->getRateInfo);
@@ -97,7 +97,7 @@ void RKRateServer::updateLastLimited(double batchTpsLimit) {
 
 Future<Void> RKRateServer::run(IRKRateUpdater const& normalRateUpdater,
                                IRKRateUpdater const& batchRateUpdater,
-                               ITagThrottler& tagThrottler,
+                               GlobalTagThrottler& tagThrottler,
                                IRKRecoveryTracker& recoveryTracker) {
 	return RKRateServerImpl::run(this, &normalRateUpdater, &batchRateUpdater, &tagThrottler, &recoveryTracker);
 }

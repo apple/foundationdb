@@ -25,53 +25,33 @@
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
 
-class ITagThrottler {
-public:
-	virtual ~ITagThrottler() = default;
-
-	// Poll the system keyspace looking for updates made through the tag throttling API
-	virtual Future<Void> monitorThrottlingChanges() = 0;
-
-	// Increment the number of known requests associated with the specified throttling ID
-	virtual void addRequests(ThrottlingId, int count) = 0;
-
-	// For each throttling ID and priority combination, return the throughput limit for the cluster
-	// (to be shared across all GRV proxies)
-	virtual ThrottlingIdMap<double> getProxyRates(int numProxies) = 0;
-
-	// Number of throttling IDs for which throttling information is a rate is being
-	// sent to GRV proxies
-	virtual int64_t throttleCount() const = 0;
-
-	// Based on the busiest readers and writers in the provided storage queue info, update
-	// throttling limits.
-	virtual void updateThrottling(StorageQueueInfo const&) = 0;
-};
-
-class GlobalTagThrottler : public ITagThrottler {
+class GlobalTagThrottler {
 	PImpl<class GlobalTagThrottlerImpl> impl;
 
 public:
 	GlobalTagThrottler(IRKMetricsTracker const&, IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
 	~GlobalTagThrottler();
 
-	Future<Void> monitorThrottlingChanges() override;
-	void addRequests(ThrottlingId, int count) override;
-	int64_t throttleCount() const override;
-	void updateThrottling(StorageQueueInfo const&) override;
-	ThrottlingIdMap<double> getProxyRates(int numProxies) override;
+	// Poll the system keyspace looking for updates made through the tag throttling API
+	Future<Void> monitorThrottlingChanges();
+
+	// Increment the number of known requests associated with the specified throttling ID
+	void addRequests(ThrottlingId, int count);
+
+	// Number of throttling IDs for which throttling information is a rate is being
+	// sent to GRV proxies
+	int64_t throttleCount() const;
+
+	// Based on the busiest readers and writers in the provided storage queue info, update
+	// throttling limits.
+	void updateThrottling(StorageQueueInfo const&);
+
+	// For each throttling ID and priority combination, return the throughput limit for the cluster
+	// (to be shared across all GRV proxies)
+	ThrottlingIdMap<double> getProxyRates(int numProxies);
 
 	// Testing only:
 public:
 	void removeExpiredThrottlingIds();
 	uint32_t throttlingIdsTracked() const;
-};
-
-class StubTagThrottler : public ITagThrottler {
-public:
-	Future<Void> monitorThrottlingChanges() override { return Never(); }
-	void addRequests(ThrottlingId, int count) override {}
-	int64_t throttleCount() const override { return 0; }
-	void updateThrottling(StorageQueueInfo const&) override {}
-	ThrottlingIdMap<double> getProxyRates(int numProxies) override { return {}; }
 };
