@@ -5494,7 +5494,7 @@ ACTOR Future<AuditGetKeyServersRes> getShardMapFromKeyServers(UID auditServerId,
 			totalShardsCount++;
 			std::vector<UID> servers(src.size() + dest.size());
 			std::merge(src.begin(), src.end(), dest.begin(), dest.end(), servers.begin());
-			for (auto& ssid : servers) { // how to decide servers
+			for (auto& ssid : servers) {
 				serverOwnRanges[ssid].push_back(Standalone(KeyRangeRef(readResult[i].key, readResult[i + 1].key)));
 			}
 		}
@@ -5887,7 +5887,7 @@ ACTOR Future<Void> auditStorageLocationMetadataQ(StorageServer* data, AuditStora
 					KeyRange mismatchedRangeByKeyServer = anyMismatch.get().first;
 					KeyRange mismatchedRangeByServerKey = anyMismatch.get().second;
 					std::string error =
-					    format("Storage server shard info mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
+					    format("KeyServers and serverKeys mismatch on Server(%s): KeyServer: %s; ServerKey: %s",
 					           ssid.toString().c_str(),
 					           mismatchedRangeByKeyServer.toString().c_str(),
 					           mismatchedRangeByServerKey.toString().c_str());
