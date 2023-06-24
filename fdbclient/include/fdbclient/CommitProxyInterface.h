@@ -222,7 +222,7 @@ struct CommitTransactionRequest : TimedRequest {
 	uint32_t flags;
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
-	Optional<TagSet> tagSet;
+	Optional<TransactionTag> throttlingTag;
 	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
@@ -240,7 +240,7 @@ struct CommitTransactionRequest : TimedRequest {
 		           flags,
 		           debugID,
 		           commitCostEstimation,
-		           tagSet,
+		           throttlingTag,
 		           spanContext,
 		           tenantInfo,
 		           idempotencyId,

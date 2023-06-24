@@ -6552,7 +6552,7 @@ ACTOR static Future<Void> tryCommit(Reference<TransactionState> trState, CommitT
 			                                                              commit_unknown_result() });
 		}
 
-		if (req.tagSet.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
+		if (req.throttlingTag.present() && trState->options.priority < TransactionPriority::IMMEDIATE) {
 			state Future<Optional<ClientTrCommitCostEstimation>> commitCostFuture =
 			    estimateCommitCosts(trState, &req.transaction);
 			wait(startFuture);
@@ -6784,7 +6784,7 @@ Future<Void> Transaction::commitMutations() {
 		trState->cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		trState->cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
 		if (trState->options.tags.size())
-			tr.tagSet = trState->options.tags;
+			tr.throttlingTag = *(trState->options.tags.begin());
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
