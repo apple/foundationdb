@@ -798,6 +798,10 @@ public:
 		                                         reverse);
 	}
 
+	TypedFuture<future_var::StringArray> getAddressForKey(KeyRef key) {
+		return native::fdb_transaction_get_addresses_for_key(tr.get(), key.data(), key.size());
+	}
+
 	TypedFuture<future_var::KeyRangeRefArray> getBlobGranuleRanges(KeyRef begin, KeyRef end, int rangeLimit) {
 		return native::fdb_transaction_get_blob_granule_ranges(
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);

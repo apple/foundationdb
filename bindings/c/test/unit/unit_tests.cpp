@@ -501,33 +501,35 @@ TEST_CASE("fdb_future_get_value") {
 		break;
 	}
 }
-//
-// TEST_CASE("fdb_future_get_string_array") {
-// insert_data(db, create_data({ { "foo", "bar" } }));
-//
-// fdb::Transaction tr(db);
-// while (1) {
-// fdb::StringArrayFuture f1 = tr.get_addresses_for_key(key("foo"));
-//
-// fdb_error_t err = wait_future(f1);
-// if (err) {
-// fdb::EmptyFuture f2 = tr.on_error(err);
-// fdb_check(wait_future(f2));
-// continue;
-//}
-//
-// const char** strings;
-// int count;
-// fdb_check(f1.get(&strings, &count));
-//
-// CHECK(count > 0);
-// for (int i = 0; i < count; ++i) {
-// CHECK(strlen(strings[i]) > 0);
-//}
-// break;
-//}
-//}
-//
+
+TEST_CASE("fdb_future_get_string_array") {
+	insert_data(db, create_data({ { "foo", "bar" } }));
+
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.getAddressForKey(fdb::toBytesRef(key("foo")));
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		fdb::future_var::StringArray::Type output;
+		fdbCheck(f1.getNothrow(output));
+
+		auto strings = std::get<0>(output);
+		auto count = std::get<1>(output);
+
+		CHECK(count > 0);
+		for(int i = 0; i < count; i++) {
+			CHECK(strlen(strings[i]) > 0);
+		}
+		break;
+	}
+}
+
 TEST_CASE("fdb_future_get_keyvalue_array") {
 	auto data = create_data({ { "a", "1" }, { "b", "2" }, { "c", "3" }, { "d", "4" } });
 	insert_data(db, data);
