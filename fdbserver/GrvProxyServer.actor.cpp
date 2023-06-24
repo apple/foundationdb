@@ -722,7 +722,6 @@ ACTOR Future<Void> sendGrvReplies(Future<GetReadVersionReply> replyFuture,
 			reply.version = replyVersion;
 		}
 		reply.midShardSize = midShardSize;
-		reply.tagThrottleInfo.clear();
 		if (SERVER_KNOBS->ENABLE_VERSION_VECTOR) {
 			grvProxyData->ssVersionVectorCache.getDelta(request.maxVersion, reply.ssVersionVectorDelta);
 			grvProxyData->versionVectorSizeOnGRVReply.addMeasurement(reply.ssVersionVectorDelta.size());

@@ -270,7 +270,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkDefaultThrottled = false;
 	bool rkBatchThrottled = false;
 
-	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
@@ -285,7 +284,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           version,
 		           locked,
 		           metadataVersion,
-		           tagThrottleInfo,
 		           midShardSize,
 		           rkDefaultThrottled,
 		           rkBatchThrottled,

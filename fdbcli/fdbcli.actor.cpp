@@ -2060,13 +2060,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 					continue;
 				}
 
-				if (tokencmp(tokens[0], "throttle")) {
-					bool _result = wait(makeInterruptable(throttleCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
-					continue;
-				}
-
 				if (tokencmp(tokens[0], "cache_range")) {
 					bool _result = wait(makeInterruptable(cacheRangeCommandActor(db, tokens)));
 					if (!_result)
