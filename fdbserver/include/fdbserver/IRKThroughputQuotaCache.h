@@ -5,21 +5,20 @@
 #pragma once
 
 #include "fdbclient/NativeAPI.actor.h"
-#include "fdbclient/TagThrottle.h"
 #include "flow/flow.h"
 #include "flow/Optional.h"
 
-// Responsible for maintaining a cache of per-tag throughput quotas
+// Responsible for maintaining a cache of per-throttlingId throughput quotas
 class IRKThroughputQuotaCache {
 public:
 	virtual ~IRKThroughputQuotaCache() = default;
 
 	// Returns the cached value for the total throughput quota for
-	// the provided tag (in bytes/second)
+	// the provided throttling ID (in bytes/second)
 	virtual Optional<int64_t> getTotalQuota(ThrottlingId const&) const = 0;
 
 	// Returns the cached value for the reserved throughput quota
-	// for the provided tag (in bytes/second)
+	// for the provided throttling ID (in bytes/second)
 	virtual Optional<int64_t> getReservedQuota(ThrottlingId const&) const = 0;
 
 	// Returns the number of quotas currently cached
@@ -57,6 +56,6 @@ public:
 	int size() const override;
 	Future<Void> run() override;
 
-	void setQuota(ThrottlingId const& tag, int64_t totalQuota, int64_t reservedQuota);
-	void removeQuota(ThrottlingId const& tag);
+	void setQuota(ThrottlingId const&, int64_t totalQuota, int64_t reservedQuota);
+	void removeQuota(ThrottlingId const&);
 };
