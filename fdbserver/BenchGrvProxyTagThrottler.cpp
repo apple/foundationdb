@@ -1,6 +1,6 @@
 #include "benchmark/benchmark.h"
 
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbserver/GrvProxyTagThrottler.h"
 #include "flow/Arena.h"
 #include "flow/IRandom.h"

@@ -26,7 +26,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKBlobMonitor.h"
 #include "fdbserver/IRKConfigurationMonitor.h"

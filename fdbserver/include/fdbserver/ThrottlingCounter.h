@@ -22,7 +22,7 @@
 
 #include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tenant.h"
 
 // Tracks the read throughput of different throttling ids, and periodically (triggered by a call
