@@ -421,12 +421,10 @@ public:
 		return result;
 	}
 
-	int64_t autoThrottleCount() const { return quotaCache->size(); }
-	uint32_t busyReadersCount() const { return lastBusyThrottlingIdCount; }
-	uint32_t busyWritersCount() const { return lastBusyThrottlingIdCount; }
+	int64_t throttleCount() const { return lastBusyThrottlingIdCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
+	void updateThrottling(StorageQueueInfo const& ss) {
 		auto& throttlingIdToThroughputCounters = throughput[ss.id];
 		std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
 		for (const auto& busyReader : ss.busiestReaders) {
@@ -450,7 +448,6 @@ public:
 				throughputCounters.updateCost(0.0, OpType::WRITE);
 			}
 		}
-		return Void();
 	}
 
 	void removeExpiredThrottlingIds() {
@@ -492,23 +489,11 @@ void GlobalTagThrottler::addRequests(ThrottlingId throttlingId, int count) {
 ThrottlingIdMap<double> GlobalTagThrottler::getProxyRates(int numProxies) {
 	return impl->getProxyRates(numProxies);
 }
-int64_t GlobalTagThrottler::autoThrottleCount() const {
-	return impl->autoThrottleCount();
+int64_t GlobalTagThrottler::throttleCount() const {
+	return impl->throttleCount();
 }
-uint32_t GlobalTagThrottler::busyReadersCount() const {
-	return impl->busyReadersCount();
-}
-uint32_t GlobalTagThrottler::busyWritersCount() const {
-	return impl->busyWritersCount();
-}
-int64_t GlobalTagThrottler::manualThrottleCount() const {
-	return impl->manualThrottleCount();
-}
-bool GlobalTagThrottler::isAutoThrottlingEnabled() const {
-	return true;
-}
-Future<Void> GlobalTagThrottler::tryUpdateAutoThrottling(StorageQueueInfo const& ss) {
-	return impl->tryUpdateAutoThrottling(ss);
+void GlobalTagThrottler::updateThrottling(StorageQueueInfo const& ss) {
+	return impl->updateThrottling(ss);
 }
 
 uint32_t GlobalTagThrottler::throttlingIdsTracked() const {
@@ -701,7 +686,7 @@ ACTOR Future<Void> updateGlobalTagThrottler(MockRKMetricsTracker* metricsTracker
 		wait(delay(1.0));
 		auto const storageQueueInfos = storageServers->getStorageQueueInfos();
 		for (const auto& ss : storageQueueInfos) {
-			globalTagThrottler->tryUpdateAutoThrottling(ss);
+			globalTagThrottler->updateThrottling(ss);
 			metricsTracker->updateStorageQueueInfo(ss);
 		}
 	}
@@ -861,7 +846,7 @@ TEST_CASE("/GlobalTagThrottler/ActiveThrottling") {
 	quotaCache.setQuota(testTag, 100 * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE, 0);
 	state Future<Void> client = runClient(&globalTagThrottler, &storageServers, testTag, 10.0, 6.0, OpType::READ);
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag](auto& gtt) {
-		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.busyReadersCount() == 1;
+		return targetRateIsNear(gtt, testTag, 50 / 6.0) && gtt.throttleCount() == 1;
 	});
 	state Future<Void> updater = updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers);
 	wait(timeoutError(monitor || client || updater, 600.0));
@@ -888,7 +873,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, (50 / 6.0) / 3) && targetRateIsNear(gtt, testTag2, 2 * (50 / 6.0) / 3) &&
-		       gtt.busyReadersCount() == 2;
+		       gtt.throttleCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -915,7 +900,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling2") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 50 / 6.0) &&
-		       gtt.busyReadersCount() == 2;
+		       gtt.throttleCount() == 2;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));
@@ -943,7 +928,7 @@ TEST_CASE("/GlobalTagThrottler/MultiTagActiveThrottling3") {
 	futures.push_back(runClient(&globalTagThrottler, &storageServers, testTag2, 10.0, 6.0, OpType::READ, { 1, 2 }));
 	state Future<Void> monitor = monitorActor(&globalTagThrottler, [testTag1, testTag2](auto& gtt) {
 		return targetRateIsNear(gtt, testTag1, 50 / 6.0) && targetRateIsNear(gtt, testTag2, 100 / 6.0) &&
-		       gtt.busyReadersCount() == 1;
+		       gtt.throttleCount() == 1;
 	});
 	futures.push_back(updateGlobalTagThrottler(&metricsTracker, &globalTagThrottler, &storageServers));
 	wait(timeoutError(waitForAny(futures) || monitor, 600.0));

@@ -629,11 +629,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-		    .detail("TagsAutoThrottled", tagThrottler.autoThrottleCount())
-		    .detail("TagsAutoThrottledBusyRead", tagThrottler.busyReadersCount())
-		    .detail("TagsAutoThrottledBusyWrite", tagThrottler.busyWritersCount())
-		    .detail("TagsManuallyThrottled", tagThrottler.manualThrottleCount())
-		    .detail("AutoThrottlingEnabled", tagThrottler.isAutoThrottlingEnabled())
+		    .detail("TagsAutoThrottled", tagThrottler.throttleCount())
 		    .trackLatest(name);
 	}
 }

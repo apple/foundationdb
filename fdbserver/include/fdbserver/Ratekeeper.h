@@ -76,7 +76,7 @@ class Ratekeeper {
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
-	void tryUpdateAutoTagThrottling();
+	void updateTagThrottling();
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

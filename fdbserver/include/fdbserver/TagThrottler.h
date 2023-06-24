@@ -39,15 +39,13 @@ public:
 	// (to be shared across all GRV proxies)
 	virtual ThrottlingIdMap<double> getProxyRates(int numProxies) = 0;
 
-	virtual int64_t autoThrottleCount() const = 0;
-	virtual uint32_t busyReadersCount() const = 0;
-	virtual uint32_t busyWritersCount() const = 0;
-	virtual int64_t manualThrottleCount() const = 0;
-	virtual bool isAutoThrottlingEnabled() const = 0;
+	// Number of throttling IDs for which throttling information is a rate is being
+	// sent to GRV proxies
+	virtual int64_t throttleCount() const = 0;
 
 	// Based on the busiest readers and writers in the provided storage queue info, update
 	// throttling limits.
-	virtual Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) = 0;
+	virtual void updateThrottling(StorageQueueInfo const&) = 0;
 };
 
 class GlobalTagThrottler : public ITagThrottler {
@@ -59,14 +57,8 @@ public:
 
 	Future<Void> monitorThrottlingChanges() override;
 	void addRequests(ThrottlingId, int count) override;
-
-	int64_t autoThrottleCount() const override;
-	uint32_t busyReadersCount() const override;
-	uint32_t busyWritersCount() const override;
-	int64_t manualThrottleCount() const override;
-	bool isAutoThrottlingEnabled() const override;
-
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override;
+	int64_t throttleCount() const override;
+	void updateThrottling(StorageQueueInfo const&) override;
 	ThrottlingIdMap<double> getProxyRates(int numProxies) override;
 
 	// Testing only:
@@ -79,13 +71,7 @@ class StubTagThrottler : public ITagThrottler {
 public:
 	Future<Void> monitorThrottlingChanges() override { return Never(); }
 	void addRequests(ThrottlingId, int count) override {}
-
-	int64_t autoThrottleCount() const override { return 0; }
-	uint32_t busyReadersCount() const override { return 0; }
-	uint32_t busyWritersCount() const override { return 0; }
-	int64_t manualThrottleCount() const override { return 0; }
-	bool isAutoThrottlingEnabled() const override { return 0; }
-
-	Future<Void> tryUpdateAutoThrottling(StorageQueueInfo const&) override { return Void(); }
+	int64_t throttleCount() const override { return 0; }
+	void updateThrottling(StorageQueueInfo const&) override {}
 	ThrottlingIdMap<double> getProxyRates(int numProxies) override { return {}; }
 };

@@ -138,7 +138,7 @@ public:
 					                             self.recoveryTracker,
 					                             self.actualTpsHistory,
 					                             self.blobMonitor);
-					self.tryUpdateAutoTagThrottling();
+					self.updateTagThrottling();
 
 					self.rateServer.updateLastLimited(self.batchRateUpdater.getTpsLimit());
 					self.rateServer.cleanupExpiredGrvProxies();
@@ -197,11 +197,11 @@ Ratekeeper::Ratekeeper(UID id,
                                       SERVER_KNOBS->TARGET_BW_LAG_BATCH)),
     quotaCache(id, db), tagThrottler(metricsTracker, quotaCache, id, SERVER_KNOBS->MAX_MACHINES_FALLING_BEHIND) {}
 
-void Ratekeeper::tryUpdateAutoTagThrottling() {
+void Ratekeeper::updateTagThrottling() {
 	auto const& storageQueueInfo = metricsTracker.getStorageQueueInfo();
 	for (auto i = storageQueueInfo.begin(); i != storageQueueInfo.end(); ++i) {
 		auto const& ss = i->value;
-		addActor.send(tagThrottler.tryUpdateAutoThrottling(ss));
+		tagThrottler.updateThrottling(ss);
 	}
 }
 
