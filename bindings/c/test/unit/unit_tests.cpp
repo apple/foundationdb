@@ -523,7 +523,7 @@ TEST_CASE("fdb_future_get_string_array") {
 		auto count = std::get<1>(output);
 
 		CHECK(count > 0);
-		for(int i = 0; i < count; i++) {
+		for (int i = 0; i < count; i++) {
 			CHECK(strlen(strings[i]) > 0);
 		}
 		break;
@@ -862,26 +862,26 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
 	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
 }
 
-// TEST_CASE("fdb_transaction_set_read_version old_version") {
-// fdb::Transaction tr(db);
-//
-// tr.set_read_version(1);
-// fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-//
-// fdb_error_t err = wait_future(f1);
-// CHECK(err == 1007); // transaction_too_old
-//}
-//
-// TEST_CASE("fdb_transaction_set_read_version future_version") {
-// fdb::Transaction tr(db);
-//
-// tr.set_read_version(1UL << 62);
-// fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ true);
-//
-// fdb_error_t err = wait_future(f1);
-// CHECK(err == 1009); // future_version
-//}
-//
+TEST_CASE("fdb_transaction_set_read_version old_version") {
+	auto tr = db.createTransaction();
+
+	tr.setReadVersion(1);
+	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+
+	auto err = waitFuture(f1);
+	CHECK(err.code() == 1007); // transaction_too_old
+}
+
+TEST_CASE("fdb_transaction_set_read_version future_version") {
+	auto tr = db.createTransaction();
+
+	tr.setReadVersion(1UL << 62);
+	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+
+	auto err = waitFuture(f1);
+	CHECK(err.code() == 1009); // future_version
+}
+
 const std::string EMPTY = Tuple().pack().toString();
 const KeyRef RECORD = "RECORD"_sr;
 const KeyRef INDEX = "INDEX"_sr;

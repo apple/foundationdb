@@ -749,6 +749,8 @@ public:
 
 	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 
+	void setReadVersion(int64_t version) { native::fdb_transaction_set_read_version(tr.get(), version); }
+
 	Error getCommittedVersionNothrow(int64_t& out) {
 		return Error(native::fdb_transaction_get_committed_version(tr.get(), &out));
 	}
