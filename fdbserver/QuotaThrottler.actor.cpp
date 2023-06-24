@@ -33,27 +33,28 @@
 // In the function names below, several terms are used repeatedly. The context-specific are defined here:
 //
 // Cost: Every read or write operation has an associated cost, determined by the number of bytes accessed.
-//       Global tag throttling quotas are specified in terms of the amount of this cost that can be consumed
-//       per second. In the global tag throttler, cost refers to the per second rate of cost consumption.
+//       Throttling quotas are specified in terms of the amount of this cost that can be consumed
+//       per second. In the quota throttler, cost refers to the per second rate of bytes accessed.
 //
 // TPS: Transactions per second. Quotas are not specified in terms of TPS, but the limits given to clients must
 //      be specified in terms of TPS because throttling is performed at the front end of transactions (before costs are
 //      known).
 //
-// Total: Refers to the total quota specified by clients through the global tag throttling API. The sum of the
-//        costs of all operations (cluster-wide) with a particular tag cannot exceed the tag's specified total quota,
-//        even if the cluster has no saturated processes.
+// Total: Refers to the total quota specified by clients through the quota throttling API. The sum of the
+//        costs of all operations (cluster-wide) with a particular throttling ID cannot exceed the throttling ID's specified
+//        total quota, even if the cluster has no saturated processes.
 //
-// Desired TPS: Assuming that a tag is able to achieve its total quota, this is the TPS it would be able to perform.
+// Desired TPS: Assuming that a throttling ID is able to achieve its total quota, this is the TPS it would be able to perform.
 //
-// Reserved: Refers to the reserved quota specified by clients through the global tag throttling API. As long as the
-//           sum of the costs of all operations (cluster-wide) with a particular tag are not above the tag's
-//           specified reserved quota, the tag should not experience any throttling from the global tag throttler.
+// Reserved: Refers to the reserved quota specified by clients through the quota throttling API. As long as the
+//           sum of the costs of all operations (cluster-wide) with a particular throttling ID is not above the
+//           throttling ID's specified reserved quota, the throttling ID should not experience any throttling
+//           from the quota throttler.
 //
 // Current [Cost|TPS]: Measuring the current throughput on the cluster, independent of any specified quotas.
 //
-// ThrottlingRatio: Based on the health of each storage server, a throttling ratio is provided,
-//                  informing the global tag throttler what ratio of the current throughput can be maintained.
+// ThrottlingRatio: Based on the health of each storage server, a throttling ratio is calculated,
+//                  informing the quota throttler what ratio of the current throughput can be maintained.
 //
 // Limiting [Cost|TPS]: Based on the health of storage servers, a limiting throughput may be enforced.
 //
