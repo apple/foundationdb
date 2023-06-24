@@ -126,18 +126,18 @@ public:
 
 					self.normalRateUpdater.update(self.metricsTracker,
 					                              self.rateServer,
-					                              self.tagThrottler,
 					                              self.configurationMonitor,
 					                              self.recoveryTracker,
 					                              self.actualTpsHistory,
-					                              self.blobMonitor);
+					                              self.blobMonitor,
+					                              self.tagThrottler.throttleCount());
 					self.batchRateUpdater.update(self.metricsTracker,
 					                             self.rateServer,
-					                             self.tagThrottler,
 					                             self.configurationMonitor,
 					                             self.recoveryTracker,
 					                             self.actualTpsHistory,
-					                             self.blobMonitor);
+					                             self.blobMonitor,
+					                             self.tagThrottler.throttleCount());
 					self.updateTagThrottling();
 
 					self.rateServer.updateLastLimited(self.batchRateUpdater.getTpsLimit());

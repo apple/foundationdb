@@ -10,7 +10,6 @@
 #include "fdbserver/IRKRateUpdater.h"
 #include "fdbserver/IRKRecoveryTracker.h"
 #include "fdbserver/Knobs.h"
-#include "fdbserver/TagThrottler.h"
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // must be last include
 
@@ -144,7 +143,6 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 struct RKRateUpdaterTestEnvironment {
 	MockRKMetricsTracker metricsTracker;
 	MockRKRateServer rateServer;
-	StubTagThrottler tagThrottler;
 	MockRKConfigurationMonitor configurationMonitor;
 	MockRKRecoveryTracker recoveryTracker;
 	Deque<double> actualTpsHistory;
@@ -172,11 +170,11 @@ struct RKRateUpdaterTestEnvironment {
 	void update() {
 		rateUpdater.update(metricsTracker,
 		                   rateServer,
-		                   tagThrottler,
 		                   configurationMonitor,
 		                   recoveryTracker,
 		                   actualTpsHistory,
-		                   blobMonitor);
+		                   blobMonitor,
+		                   /*tagsThrottled=*/0);
 	}
 };
 

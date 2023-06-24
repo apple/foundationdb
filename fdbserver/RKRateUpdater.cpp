@@ -17,11 +17,11 @@ RKRateUpdater::~RKRateUpdater() = default;
 
 void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKRateServer const& rateServer,
-                           ITagThrottler const& tagThrottler,
                            IRKConfigurationMonitor const& configurationMonitor,
                            IRKRecoveryTracker const& recoveryTracker,
                            Deque<double> const& actualTpsHistory,
-                           IRKBlobMonitor& blobMonitor) {
+                           IRKBlobMonitor& blobMonitor,
+                           int throttledTags) {
 	// double controlFactor = ;  // dt / eFoldingTime
 	double actualTps = getActualTps(rateServer, metricsTracker);
 
@@ -629,7 +629,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-		    .detail("TagsAutoThrottled", tagThrottler.throttleCount())
+		    .detail("TagsAutoThrottled", throttledTags)
 		    .trackLatest(name);
 	}
 }
