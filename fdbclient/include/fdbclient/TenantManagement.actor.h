@@ -106,6 +106,23 @@ Future<ClusterType> getClusterType(Transaction tr) {
 }
 
 ACTOR template <class Transaction>
+Future<TenantMode> getTenantModeAndCheckClusterType(Transaction tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	state ClusterType clusterType = wait(getClusterType(tr));
+	typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
+	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
+	if (clusterType == ClusterType::METACLUSTER_DATA) {
+		ASSERT(g_network->isSimulated() || tenantMode == TenantMode::REQUIRED);
+	} else if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
+		// A management cluster's tenant mode must be 'disabled' in non-simulation
+		ASSERT(g_network->isSimulated() || tenantMode == TenantMode::DISABLED);
+	}
+	return tenantMode;
+}
+
+ACTOR template <class Transaction>
 Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));

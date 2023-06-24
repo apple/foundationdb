@@ -149,10 +149,35 @@ private:
 		}
 	}
 
+	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
+	    TenantConsistencyCheck<DB, StandardTenantTypes>* self) {
+		Future<TenantMode> tenantModeFuture =
+		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
+			    return TenantAPI::getTenantModeAndCheckClusterType(tr);
+		    });
+		TenantMode tenantMode = wait(tenantModeFuture);
+		if (tenantMode != TenantMode::REQUIRED) {
+			return Void();
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
+	    TenantConsistencyCheck<DB, MetaclusterTenantTypes>* self) {
+		Future<TenantMode> tenantModeFuture =
+		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
+			    return TenantAPI::getTenantModeAndCheckClusterType(tr);
+		    });
+		TenantMode tenantMode = wait(tenantModeFuture);
+		ASSERT(g_network->isSimulated() || tenantMode == TenantMode::DISABLED);
+		return Void();
+	}
+
 	ACTOR static Future<Void> run(TenantConsistencyCheck* self) {
 		wait(self->tenantData.load());
 		self->validateTenantMetadata(self->tenantData);
 		self->checkTenantTombstones();
+		wait(checkNoDataOutsideTenantsInRequiredMode(self));
 
 		return Void();
 	}
