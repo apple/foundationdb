@@ -1816,7 +1816,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	}
 
 	if (BUGGIFY) {
-		debugUseTags = true;
+		debugUseTag = true;
 	}
 
 	initializeSpecialCounters();
@@ -5448,7 +5448,7 @@ const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "
 	                                                                           "h", "i", "j", "k", "l", "m", "n",
 	                                                                           "o", "p", "q", "r", "s", "t" };
 
-void debugAddTags(Reference<TransactionState> trState) {
+void debugAddTag(Reference<TransactionState> trState) {
 	trState->options.throttlingTag = deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices);
 }
 
@@ -5462,8 +5462,8 @@ Transaction::Transaction(Database const& cx, Optional<Reference<Tenant>> const& 
                                             generateSpanID(cx->transactionTracingSample),
                                             createTrLogInfoProbabilistically(cx))),
     span(trState->spanContext, "Transaction"_loc), backoff(CLIENT_KNOBS->DEFAULT_BACKOFF), tr(trState->spanContext) {
-	if (cx->debugUseTags) {
-		debugAddTags(trState);
+	if (cx->debugUseTag) {
+		debugAddTag(trState);
 	}
 }
 
