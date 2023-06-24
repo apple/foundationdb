@@ -599,6 +599,7 @@ public:
 	}
 
 	void cancel() noexcept { native::fdb_future_cancel(f.get()); }
+	void releaseMemory() noexcept { native::fdb_future_release_memory(f.get()); }
 
 	template <class VarTraits>
 	typename VarTraits::Type get() const {

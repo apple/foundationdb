@@ -413,36 +413,34 @@ TEST_CASE("fdb_future_is_ready") {
 	}
 }
 
-// TEST_CASE("fdb_future_release_memory") {
-// fdb::Transaction tr(db);
-// while (1) {
-// fdb::ValueFuture f1 = tr.get("foo", false);
-//
-// fdb_error_t err = wait_future(f1);
-// if (err) {
-// fdb::EmptyFuture f2 = tr.on_error(err);
-// fdb_check(wait_future(f2));
-// continue;
-//}
-//
-//// "After [fdb_future_release_memory] has been called the same number of
-//// times as fdb_future_get_*(), further calls to fdb_future_get_*() will
-//// return a future_released error".
-// int out_present;
-// char* val;
-// int vallen;
-// fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-// fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-//
-// f1.release_memory();
-// fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-// f1.release_memory();
-// f1.release_memory();
-// err = f1.get(&out_present, (const uint8_t**)&val, &vallen);
-// CHECK(err == 1102); // future_released
-// break;
-//}
-//}
+TEST_CASE("fdb_future_release_memory") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		// "After [fdb_future_release_memory] has been called the same number of
+		// times as fdb_future_get_*(), further calls to fdb_future_get_*() will
+		// return a future_released error".
+		std::optional<fdb::ValueRef> value;
+		fdbCheck(f1.getNothrow(value));
+		fdbCheck(f1.getNothrow(value));
+
+		f1.releaseMemory();
+		fdbCheck(f1.getNothrow(value));
+		f1.releaseMemory();
+		f1.releaseMemory();
+		err = f1.getNothrow(value);
+		CHECK(err.code() == 1102); // future_released
+		break;
+	}
+}
 
 TEST_CASE("fdb_future_get_int64") {
 	auto tr = db.createTransaction();
@@ -2791,7 +2789,7 @@ TEST_CASE("Blob Granule Functions") {
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
 		// -2 is latest version
 		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, -2, granuleContext);
-		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::future_var::KeyValueRefArray::Type out;
 		auto err = r.getKeyValueArrayNothrow(out);
 		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
 			auto f2 = tr.onError(err);
@@ -2819,7 +2817,7 @@ TEST_CASE("Blob Granule Functions") {
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), originalReadVersion, -2, granuleContext);
 
-		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::future_var::KeyValueRefArray::Type out;
 		auto err = r.getKeyValueArrayNothrow(out);
 		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
 			auto f2 = tr.onError(err);
@@ -2840,7 +2838,7 @@ TEST_CASE("Blob Granule Functions") {
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, originalReadVersion, granuleContext);
 
-		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::future_var::KeyValueRefArray::Type out;
 		auto err = r.getKeyValueArrayNothrow(out);
 		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
 			auto f2 = tr.onError(err);
@@ -2907,7 +2905,7 @@ TEST_CASE("Blob Granule Functions") {
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, originalReadVersion, granuleContext);
-		auto out = fdb::Result::KeyValueRefArray{};
+		fdb::future_var::KeyValueRefArray::Type out;
 		auto err = r.getKeyValueArrayNothrow(out);
 		if (err && err.code() != 2037 /* blob_granule_not_materialized */) {
 			auto f2 = tr.onError(err);
