@@ -6,7 +6,7 @@ Specific workloads can be throttled independently according to user-specified th
 
 ### Throttling IDs
 
-A throttlingId refers to either a tenant group or a transaction tag. Transaction tags are specified through transaction options as documented [here](https://apple.github.io/foundationdb/transaction-tagging.html). Each transaction can specifify 0 or 1 transaction tags and belong to 0 or 1 tenant groups. If a transaction is tagged and belongs to a tenant group, the transaction tag is ignored.
+A throttlingId refers to either a tenant group or a transaction tag. Transaction tags are specified via the `AUTO_THROTTLE_TAG` transaction option. Each transaction can specifify 0 or 1 transaction tags and belong to 0 or 1 tenant groups. If a transaction is tagged and belongs to a tenant group, the transaction tag is ignored.
 
 ### Quotas
 For each throttlingId, a throughput quota can be specified. Throughput quotas contain two components:

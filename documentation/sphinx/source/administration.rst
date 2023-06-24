@@ -619,11 +619,6 @@ In the present version of FoundationDB, disaster recovery (DR) is implemented vi
 
 Recovery takes place by reversing the asynchronous replication, so the data in the destination cluster is streamed back to a source cluster. For further information, see the :ref:`overview of backups <backup-introduction>` and the :ref:`fdbdr tool <fdbdr-intro>` that performs asynchronous replication.
 
-Managing traffic
-================
-
-If clients of the database make use of the :doc:`transaction tagging feature <transaction-tagging>`, then the number of transactions allowed to start for different tags can be controlled using the :ref:`throttle command <cli-throttle>` in ``fdbcli``. 
-
 .. _administration-other-administrative-concerns:
 
 Other administrative concerns
