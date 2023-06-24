@@ -278,6 +278,10 @@ public:
 	double GRV_BATCHER_EXPIRATION_TIMEOUT;
 	// Interval at which GRV batchers are checked for expiration
 	double GRV_BATCHER_CLEANING_INTERVAL;
+	// If enabled, clients are responsible for reporting the throughput
+	// of each throttlingId. If disabled, this is the responsibility of storage
+	// servers and commit proxies.
+	bool TRACK_THROUGHPUT_ON_CLIENTS;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
