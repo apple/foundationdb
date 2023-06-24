@@ -722,25 +722,12 @@ public:
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
 	// Tag throttling
-	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
-	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
-	double MIN_TAG_COST;
-	double AUTO_THROTTLE_TARGET_TAG_BUSYNESS;
-	double AUTO_THROTTLE_RAMP_TAG_BUSYNESS;
-	double AUTO_TAG_THROTTLE_RAMP_UP_TIME;
-	double AUTO_TAG_THROTTLE_DURATION;
 	double TAG_THROTTLE_PUSH_INTERVAL;
-	double AUTO_TAG_THROTTLE_START_AGGREGATION_TIME;
-	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
-	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
-	bool AUTO_TAG_THROTTLING_ENABLED;
 	// Limit to the number of throttling tags each storage server
 	// will track and send to the ratekeeper
 	int64_t SS_THROTTLE_TAGS_TRACKED;
 	// Deprecated (TODO: Remove in 8.1)
 	bool GLOBAL_TAG_THROTTLING;
-	// Deprecated (TODO: Remove in 8.1)
-	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
 	// When the measured tps for a tag gets too low, the denominator in the
 	// average cost calculation gets small, resulting in an unstable calculation.
