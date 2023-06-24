@@ -53,7 +53,7 @@ public:
 	// from GRV proxies.
 	virtual Future<Void> run(class IRKRateUpdater const& normalRateUpdater,
 	                         class IRKRateUpdater const& batchRateUpdater,
-	                         class GlobalTagThrottler&,
+	                         class QuotaThrottler&,
 	                         class IRKRecoveryTracker&) = 0;
 };
 
@@ -75,7 +75,7 @@ public:
 	void updateLastLimited(double batchTpsLimit) override;
 	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,
 	                 class IRKRateUpdater const& batchRateUpdater,
-	                 class GlobalTagThrottler&,
+	                 class QuotaThrottler&,
 	                 class IRKRecoveryTracker&) override;
 };
 
@@ -92,7 +92,7 @@ public:
 	void updateLastLimited(double batchTpsLimit) override {}
 	Future<Void> run(class IRKRateUpdater const& normalRateUpdater,
 	                 class IRKRateUpdater const& batchRateUpdater,
-	                 class GlobalTagThrottler&,
+	                 class QuotaThrottler&,
 	                 class IRKRecoveryTracker&) override {
 		return Never();
 	}

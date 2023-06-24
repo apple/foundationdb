@@ -1,5 +1,5 @@
 /*
- * TagThrottler.h
+ * QuotaThrottler.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -25,12 +25,12 @@
 #include "fdbserver/IRKMetricsTracker.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
 
-class GlobalTagThrottler {
-	PImpl<class GlobalTagThrottlerImpl> impl;
+class QuotaThrottler {
+	PImpl<class QuotaThrottlerImpl> impl;
 
 public:
-	GlobalTagThrottler(IRKMetricsTracker const&, IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
-	~GlobalTagThrottler();
+	QuotaThrottler(IRKMetricsTracker const&, IRKThroughputQuotaCache const&, UID id, int maxFallingBehind);
+	~QuotaThrottler();
 
 	// Poll the system keyspace looking for updates made through the tag throttling API
 	Future<Void> monitorThrottlingChanges();
