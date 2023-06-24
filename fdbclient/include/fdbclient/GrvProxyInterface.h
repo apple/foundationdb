@@ -44,6 +44,7 @@ struct GrvProxyInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure; // reports heartbeat to master.
 	RequestStream<struct GetHealthMetricsRequest> getHealthMetrics;
 	PublicRequestStream<struct GlobalConfigRefreshRequest> refreshGlobalConfig;
+	RequestStream<struct ReportThroughputRequest> reportThroughput;
 
 	UID id() const { return getConsistentReadVersion.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -62,6 +63,8 @@ struct GrvProxyInterface {
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2));
 			refreshGlobalConfig = PublicRequestStream<struct GlobalConfigRefreshRequest>(
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(3));
+			reportThroughput = RequestStream<struct ReportThroughputRequest>(
+			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -71,6 +74,7 @@ struct GrvProxyInterface {
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(refreshGlobalConfig.getReceiver());
+		streams.push_back(reportThroughput.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
