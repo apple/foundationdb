@@ -84,7 +84,7 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const Optional<Value> value;
 
 	const Version version;
-	const TagSet tags;
+	const Optional<TransactionTag> throttlingTag;
 	const SpanContext spanContext;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
@@ -94,13 +94,13 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                Key key,
 	                Optional<Value> value,
 	                Version version,
-	                TagSet tags,
+	                Optional<TransactionTag> throttlingTag,
 	                SpanContext spanContext,
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
-	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), throttlingTag(throttlingTag),
+	    spanContext(spanContext), taskID(taskID), debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {

@@ -429,7 +429,7 @@ struct ReadWriteWorkload : ReadWriteCommon {
 		if (batchPriority) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_BATCH);
 		}
-		if (transactionTag.present() && tr.getTags().size() == 0) {
+		if (transactionTag.present() && !tr.getTag().present()) {
 			tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, transactionTag.get());
 		}
 

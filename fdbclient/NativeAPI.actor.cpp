@@ -3604,7 +3604,8 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 					                         useTenant ? trState->getTenantInfo() : TenantInfo(),
 					                         key,
 					                         trState->readVersion(),
-					                         trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>(),
+					                         trState->cx->sampleReadTags() ? trState->options.throttlingTag
+					                                                       : Optional<TransactionTag>(),
 					                         readOptions,
 					                         ssLatestCommitVersions),
 					         TaskPriority::DefaultPromiseEndpoint,
@@ -3734,7 +3735,8 @@ ACTOR Future<KeyReadResult> getKey(Reference<TransactionState> trState,
 			                  useTenant ? trState->getTenantInfo() : TenantInfo(),
 			                  k,
 			                  trState->readVersion(),
-			                  trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>(),
+			                  trState->cx->sampleReadTags() ? trState->options.throttlingTag
+			                                                : Optional<TransactionTag>(),
 			                  readOptions,
 			                  ssLatestCommitVersions);
 			req.arena.dependsOn(k.arena());
@@ -3886,18 +3888,19 @@ ACTOR Future<Version> watchValue(Database cx, Reference<const WatchParameters> p
 			}
 			state WatchValueReply resp;
 			choose {
-				when(WatchValueReply r = wait(
-				         loadBalance(cx.getPtr(),
-				                     locationInfo.locations,
-				                     &StorageServerInterface::watchValue,
-				                     WatchValueRequest(span.context,
-				                                       parameters->tenant,
-				                                       parameters->key,
-				                                       parameters->value,
-				                                       ver,
-				                                       cx->sampleReadTags() ? parameters->tags : Optional<TagSet>(),
-				                                       watchValueID),
-				                     TaskPriority::DefaultPromiseEndpoint))) {
+				when(WatchValueReply r =
+				         wait(loadBalance(cx.getPtr(),
+				                          locationInfo.locations,
+				                          &StorageServerInterface::watchValue,
+				                          WatchValueRequest(span.context,
+				                                            parameters->tenant,
+				                                            parameters->key,
+				                                            parameters->value,
+				                                            ver,
+				                                            cx->sampleReadTags() ? parameters->throttlingTag
+				                                                                 : Optional<TransactionTag>(),
+				                                            watchValueID),
+				                          TaskPriority::DefaultPromiseEndpoint))) {
 					resp = r;
 				}
 				when(wait(cx->connectionRecord ? cx->connectionRecord->onChange() : Never())) {
@@ -4132,7 +4135,7 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
                                  Key key,
                                  Optional<Value> value,
                                  Database cx,
-                                 TagSet tags,
+                                 Optional<TransactionTag> throttlingTag,
                                  SpanContext spanContext,
                                  TaskPriority taskID,
                                  Optional<UID> debugID,
@@ -4140,9 +4143,10 @@ ACTOR Future<Void> watchValueMap(Future<Version> version,
 	state Version ver = wait(version);
 	state WatchRefCountUpdater watchRefCountUpdater(cx, tenant.tenantId, key, ver);
 
-	wait(getWatchFuture(cx,
-	                    makeReference<WatchParameters>(
-	                        tenant, key, value, ver, tags, spanContext, taskID, debugID, useProvisionalProxies)));
+	wait(getWatchFuture(
+	    cx,
+	    makeReference<WatchParameters>(
+	        tenant, key, value, ver, throttlingTag, spanContext, taskID, debugID, useProvisionalProxies)));
 
 	return Void();
 }
@@ -4245,7 +4249,8 @@ Future<RangeReadResultFamily> getExactRange(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
-			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
+			req.throttlingTag =
+			    trState->cx->sampleReadTags() ? trState->options.throttlingTag : Optional<TransactionTag>();
 
 			req.options = trState->readOptions;
 
@@ -4645,7 +4650,8 @@ Future<RangeReadResultFamily> getRange(Reference<TransactionState> trState,
 			transformRangeLimits(limits, reverse, req);
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
-			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
+			req.throttlingTag =
+			    trState->cx->sampleReadTags() ? trState->options.throttlingTag : Optional<TransactionTag>();
 			req.spanContext = span.context;
 			if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
 				getRangeID = nondeterministicRandom()->randomUniqueID();
@@ -5086,7 +5092,8 @@ ACTOR Future<Void> getRangeStreamFragment(Reference<TransactionState> trState,
 			ASSERT(req.limitBytes > 0 && req.limit != 0 && req.limit < 0 == reverse);
 
 			// FIXME: buggify byte limits on internal functions that use them, instead of globally
-			req.tags = trState->cx->sampleReadTags() ? trState->options.tags : Optional<TagSet>();
+			req.throttlingTag =
+			    trState->cx->sampleReadTags() ? trState->options.throttlingTag : Optional<TransactionTag>();
 
 			try {
 				if (trState->readOptions.present() && trState->readOptions.get().debugID.present()) {
@@ -5442,7 +5449,7 @@ const std::vector<std::string> DatabaseContext::debugTransactionTagChoices = { "
 	                                                                           "o", "p", "q", "r", "s", "t" };
 
 void debugAddTags(Reference<TransactionState> trState) {
-	trState->options.tags.addTag(deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices));
+	trState->options.throttlingTag = deterministicRandom()->randomChoice(DatabaseContext::debugTransactionTagChoices);
 }
 
 Transaction::Transaction()
@@ -5587,7 +5594,7 @@ ACTOR Future<Void> restartWatch(Database cx,
                                 TenantInfo tenantInfo,
                                 Key key,
                                 Optional<Value> value,
-                                TagSet tags,
+                                Optional<TransactionTag> throttlingTag,
                                 SpanContext spanContext,
                                 TaskPriority taskID,
                                 Optional<UID> debugID,
@@ -5601,7 +5608,7 @@ ACTOR Future<Void> restartWatch(Database cx,
 	                   key,
 	                   value,
 	                   cx,
-	                   tags,
+	                   throttlingTag,
 	                   spanContext,
 	                   taskID,
 	                   debugID,
@@ -5614,7 +5621,7 @@ ACTOR Future<Void> restartWatch(Database cx,
 ACTOR Future<Void> watch(Reference<Watch> watch,
                          Database cx,
                          Future<TenantInfo> tenant,
-                         TagSet tags,
+                         Optional<TransactionTag> throttlingTag,
                          SpanContext spanContext,
                          TaskPriority taskID,
                          Optional<UID> debugID,
@@ -5642,7 +5649,7 @@ ACTOR Future<Void> watch(Reference<Watch> watch,
 							                                  tenantInfo,
 							                                  watch->key,
 							                                  watch->value,
-							                                  tags,
+							                                  throttlingTag,
 							                                  spanContext,
 							                                  taskID,
 							                                  debugID,
@@ -5674,7 +5681,7 @@ Future<Void> Transaction::watch(Reference<Watch> watch) {
 	return ::watch(watch,
 	               trState->cx,
 	               populateAndGetTenant(trState, watch->key),
-	               trState->options.tags,
+	               trState->options.throttlingTag,
 	               trState->spanContext,
 	               trState->taskID,
 	               trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
@@ -6103,7 +6110,7 @@ void TransactionOptions::clear() {
 	firstInBatch = false;
 	includePort = false;
 	reportConflictingKeys = false;
-	tags = TagSet{};
+	throttlingTag = Optional<TransactionTag>();
 	priority = TransactionPriority::DEFAULT;
 	expensiveClearCostEstimation = false;
 	useGrvCache = false;
@@ -6134,8 +6141,8 @@ void Transaction::resetImpl(bool generateNewSpan) {
 	cancelWatches();
 }
 
-TagSet const& Transaction::getTags() const {
-	return trState->options.tags;
+Optional<TransactionTag> const& Transaction::getTag() const& {
+	return trState->options.throttlingTag;
 }
 
 void Transaction::reset() {
@@ -6387,7 +6394,7 @@ void Transaction::setupWatches() {
 			                  watches[i]->key,
 			                  watches[i]->value,
 			                  trState->cx,
-			                  trState->options.tags,
+			                  trState->options.throttlingTag,
 			                  trState->spanContext,
 			                  trState->taskID,
 			                  trState->readOptions.present() ? trState->readOptions.get().debugID : Optional<UID>(),
@@ -6783,8 +6790,7 @@ Future<Void> Transaction::commitMutations() {
 
 		trState->cx->mutationsPerCommit.addSample(tr.transaction.mutations.size());
 		trState->cx->bytesPerCommit.addSample(tr.transaction.mutations.expectedSize());
-		if (trState->options.tags.size())
-			tr.throttlingTag = *(trState->options.tags.begin());
+		tr.throttlingTag = trState->options.throttlingTag;
 
 		size_t transactionSize = getSize();
 		if (transactionSize > (uint64_t)FLOW_KNOBS->PACKET_WARNING) {
@@ -7085,12 +7091,12 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 
 	case FDBTransactionOptions::TAG:
 		validateOptionValuePresent(value);
-		trState->options.tags.addTag(value.get());
+		trState->options.throttlingTag = value.get();
 		break;
 
 	case FDBTransactionOptions::AUTO_THROTTLE_TAG:
 		validateOptionValuePresent(value);
-		trState->options.tags.addTag(value.get());
+		trState->options.throttlingTag = value.get();
 		break;
 
 	case FDBTransactionOptions::SPAN_PARENT:
@@ -7322,7 +7328,7 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	SpanContext derivedSpanContext = generateSpanID(cx->transactionTracingSample, spanContext);
 	Optional<UID> versionDebugID = readOptions.present() ? readOptions.get().debugID : Optional<UID>();
 	auto const reply = cx->readVersionBatchers.getReadVersion(
-	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.tags, versionDebugID);
+	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.throttlingTag, versionDebugID);
 	startTime = now();
 	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
 }

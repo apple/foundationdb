@@ -216,7 +216,7 @@ public:
 	Transaction& getTransaction() { return tr; }
 
 	Optional<Reference<Tenant>> getTenant() { return tr.getTenant(); }
-	TagSet const& getTags() const { return tr.getTags(); }
+	Optional<TransactionTag> getTag() const { return tr.getTag(); }
 
 	// used in template functions as returned Future type
 	template <typename Type>

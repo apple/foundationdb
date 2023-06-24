@@ -256,13 +256,13 @@ public:
 	                                           uint32_t flags,
 	                                           Optional<TenantGroupName> const& tenantGroup,
 	                                           SpanContext spanContext,
-	                                           TagSet tags,
+	                                           Optional<TransactionTag> tag,
 	                                           Optional<UID> debugID) {
 		Optional<ThrottlingId> throttlingId;
 		if (tenantGroup.present()) {
 			throttlingId = ThrottlingIdRef::fromTenantGroup(tenantGroup.get());
-		} else if (tags.size()) {
-			throttlingId = ThrottlingIdRef::fromTag(*tags.begin());
+		} else if (tag.present()) {
+			throttlingId = ThrottlingIdRef::fromTag(tag.get());
 		}
 		Index index(flags, throttlingId);
 		auto it = batchers.find(index);
@@ -284,9 +284,9 @@ Future<GetReadVersionReply> ReadVersionBatchers::getReadVersion(Database cx,
                                                                 uint32_t flags,
                                                                 Optional<TenantGroupName> const& tenantGroup,
                                                                 SpanContext context,
-                                                                TagSet tags,
+                                                                Optional<TransactionTag> const& tag,
                                                                 Optional<UID> debugID) {
-	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tags, debugID);
+	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tag, debugID);
 }
 
 ReadVersionBatchers::ReadVersionBatchers(int capacity, double expirationTimeout, double expirationCheckInterval)
