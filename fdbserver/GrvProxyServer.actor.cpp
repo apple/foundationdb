@@ -397,13 +397,13 @@ ACTOR Future<Void> getRate(UID myID,
 			nextRequestTimer = Never();
 			bool detailed = now() - lastDetailedReply > SERVER_KNOBS->DETAILED_METRIC_UPDATE_RATE;
 
-			reply = brokenPromiseToNever(
-			    db->get().ratekeeper.get().getRateInfo.getReply(GetRateInfoRequest(myID,
-			                                                                       *inTransactionCount,
-			                                                                       *inBatchTransactionCount,
-			                                                                       proxyData->version,
-			                                                                       *throttlingIdTransactionCounter,
-			                                                                       detailed)));
+			reply = brokenPromiseToNever(db->get().ratekeeper.get().getRateInfo.getReply(
+			    GetRateInfoRequest(myID,
+			                       *inTransactionCount,
+			                       *inBatchTransactionCount,
+			                       proxyData->version,
+			                       std::move(*throttlingIdTransactionCounter),
+			                       detailed)));
 			throttlingIdTransactionCounter->clear();
 			expectingDetailedReply = detailed;
 		}

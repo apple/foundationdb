@@ -102,11 +102,11 @@ struct GetRateInfoRequest {
 	                   int64_t totalReleasedTransactions,
 	                   int64_t batchReleasedTransactions,
 	                   Version version,
-	                   ThrottlingIdMap<uint64_t> throttlingIdToTransactionCount,
+	                   ThrottlingIdMap<uint64_t>&& throttlingIdToTransactionCount,
 	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), version(version),
-	    throttlingIdToTransactionCount(throttlingIdToTransactionCount), detailed(detailed) {}
+	    throttlingIdToTransactionCount(std::move(throttlingIdToTransactionCount)), detailed(detailed) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
