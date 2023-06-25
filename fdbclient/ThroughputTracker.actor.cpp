@@ -13,8 +13,11 @@ public:
 		loop {
 			ReportThroughputRequest req(std::move(self->throughput));
 			self->throughput.clear();
-			wait(basicLoadBalance(
-			    cx->getGrvProxies(UseProvisionalProxies::False), &GrvProxyInterface::reportThroughput, std::move(req)));
+			wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
+			                      &GrvProxyInterface::reportThroughput,
+			                      std::move(req),
+			                      TaskPriority::DefaultPromiseEndpoint,
+			                      AtMostOnce::True));
 			wait(delayJittered(CLIENT_KNOBS->CLIENT_THROUGHPUT_REPORT_INTERVAL));
 		}
 	}
