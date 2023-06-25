@@ -131,3 +131,7 @@ void ClientThroughputTracker::update(ThrottlingIdMap<uint64_t> const& newThrough
 		throughput[throttlingId].smoother.addDelta(newPerThrottlingIdThroughput);
 	}
 }
+
+void ClientThroughputTracker::removeThrottlingId(ThrottlingId const& throttlingId) {
+	throughput.erase(throttlingId);
+}

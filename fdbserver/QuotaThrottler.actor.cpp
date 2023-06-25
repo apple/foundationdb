@@ -382,6 +382,9 @@ public:
 			const auto& [throttlingId, stats] = *it;
 			if (!stats.recentTransactionsAdded()) {
 				serverThroughputTracker.removeThrottlingId(throttlingId);
+				if (clientThroughputTracker.present()) {
+					clientThroughputTracker.get().removeThrottlingId(throttlingId);
+				}
 				it = throttlingStatistics.erase(it);
 			} else {
 				++it;

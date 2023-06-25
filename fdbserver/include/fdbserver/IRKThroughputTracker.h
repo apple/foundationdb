@@ -13,6 +13,7 @@ class IRKThroughputTracker {
 public:
 	virtual ~IRKThroughputTracker() = default;
 
+	// Returns the current cluster-wide throughput for the provided throttling ID
 	virtual double getThroughput(ThrottlingId const&) const = 0;
 };
 
@@ -49,7 +50,6 @@ public:
 	// provided storage server
 	Optional<double> getThroughput(UID storageServerId, ThrottlingId const&) const;
 
-	// Returns the current cluster-wide throughput for the provided throttling ID
 	double getThroughput(ThrottlingId const&) const override;
 
 	// Returns the current throughput on the provided storage server, summed
@@ -63,6 +63,9 @@ public:
 	int storageServersTracked() const;
 };
 
+// The ClientThroughputTracker class is responsible for tracking
+// every throttlingId's cluster-wide throughput from statistics
+// reported originally from clients
 class ClientThroughputTracker : public IRKThroughputTracker {
 	struct ThroughputSmoother {
 		HoltLinearSmoother smoother;
@@ -73,6 +76,13 @@ class ClientThroughputTracker : public IRKThroughputTracker {
 
 public:
 	~ClientThroughputTracker();
+
 	double getThroughput(ThrottlingId const&) const override;
-	void update(ThrottlingIdMap<uint64_t> const&);
+
+	// Updates per-throttlingId throughput statistics based on newly
+	// reported throughput metrics from a GRV proxy
+	void update(ThrottlingIdMap<uint64_t> const& newThroughput);
+
+	// Used to remove a throttling ID which has expired
+	void removeThrottlingId(ThrottlingId const&);
 };
