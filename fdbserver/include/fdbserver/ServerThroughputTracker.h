@@ -33,7 +33,7 @@ public:
 	std::vector<ThrottlingId> getThrottlingIdsAffectingStorageServer(UID storageServerId) const;
 
 	// Updates throughput statistics based on new storage queue info
-	void update(StorageQueueInfo const&) override;
+	void update(StorageQueueInfo const&);
 
 	// Returns the current throughput for the provided throttling ID on the
 	// provided storage server
@@ -51,7 +51,4 @@ public:
 
 	// Returns the number of storage servers currently being tracked
 	int storageServersTracked() const;
-
-	// This is a noop
-	void update(ThrottlingIdMap<int64_t>&&) override {}
 };

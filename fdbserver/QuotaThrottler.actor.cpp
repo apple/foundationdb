@@ -141,14 +141,6 @@ class QuotaThrottlerImpl {
 	ServerThroughputTracker serverThroughputTracker;
 	Optional<ClientThroughputTracker> clientThroughputTracker;
 
-	IRKThroughputTracker& throughputTracker() & {
-		if (clientThroughputTracker.present()) {
-			return clientThroughputTracker.get();
-		} else {
-			return serverThroughputTracker;
-		}
-	}
-
 	IRKThroughputTracker const& throughputTracker() const& {
 		if (clientThroughputTracker.present()) {
 			return clientThroughputTracker.get();
@@ -323,6 +315,7 @@ public:
 			clientThroughputTracker = ClientThroughputTracker();
 		}
 	}
+
 	void addRequests(ThrottlingId throttlingId, int count) {
 		auto it = throttlingStatistics.find(throttlingId);
 		if (it == throttlingStatistics.end()) {
