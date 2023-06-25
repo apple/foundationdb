@@ -21,8 +21,8 @@ GrvProxyThroughputTracker::GrvProxyThroughputTracker(FutureStream<ReportThroughp
 	actor = GrvProxyThroughputTrackerImpl::run(this, stream);
 }
 
-ThrottlingIdMap<int64_t> GrvProxyThroughputTracker::getAndClearThroughput() {
-  auto const result = std::move(throughput);
-  throughput.clear();
-  return result;
+ThrottlingIdMap<uint64_t> GrvProxyThroughputTracker::getAndClearThroughput() {
+	auto const result = std::move(throughput);
+	throughput.clear();
+	return result;
 }

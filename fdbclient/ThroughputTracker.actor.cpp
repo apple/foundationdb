@@ -24,6 +24,6 @@ ThroughputTracker::ThroughputTracker(Database cx) {
 	reporter = ThroughputTrackerImpl::reporterActor(this, cx);
 }
 
-void ThroughputTracker::addCost(ThrottlingId const& throttlingId, int64_t cost) {
+void ThroughputTracker::addCost(ThrottlingId const& throttlingId, uint64_t cost) {
 	throughput[throttlingId] += cost;
 }

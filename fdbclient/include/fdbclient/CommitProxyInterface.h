@@ -752,11 +752,11 @@ struct GlobalConfigRefreshRequest {
 
 struct ReportThroughputRequest {
 	constexpr static FileIdentifier file_identifier = 8192740;
-	ThrottlingIdMap<int64_t> throughput;
+	ThrottlingIdMap<uint64_t> throughput;
 	ReplyPromise<Void> reply;
 
 	ReportThroughputRequest() = default;
-	explicit ReportThroughputRequest(ThrottlingIdMap<int64_t>&& throughput) : throughput(std::move(throughput)) {}
+	explicit ReportThroughputRequest(ThrottlingIdMap<uint64_t>&& throughput) : throughput(std::move(throughput)) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {

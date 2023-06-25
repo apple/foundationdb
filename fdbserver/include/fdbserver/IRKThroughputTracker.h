@@ -23,5 +23,5 @@ public:
 	double getThroughput(ThrottlingId const&) const override { throw not_implemented(); }
 
 	// TODO: Implement
-	void update(ThrottlingIdMap<int64_t>&&) { throw not_implemented(); }
+	void update(ThrottlingIdMap<uint64_t>&&) { throw not_implemented(); }
 };

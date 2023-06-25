@@ -14,9 +14,9 @@ class ThroughputTracker {
 	friend class ThroughputTrackerImpl;
 
 	Future<Void> reporter;
-	ThrottlingIdMap<int64_t> throughput;
+	ThrottlingIdMap<uint64_t> throughput;
 
 public:
 	ThroughputTracker(Database cx);
-	void addCost(ThrottlingId const&, int64_t cost);
+	void addCost(ThrottlingId const&, uint64_t cost);
 };

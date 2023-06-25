@@ -11,10 +11,10 @@
 class GrvProxyThroughputTracker {
   friend class GrvProxyThroughputTrackerImpl;
 
-  ThrottlingIdMap<int64_t> throughput;
+  ThrottlingIdMap<uint64_t> throughput;
   Future<Void> actor;
 
 public:
   GrvProxyThroughputTracker(FutureStream<ReportThroughputRequest>);
-  ThrottlingIdMap<int64_t> getAndClearThroughput();
+  ThrottlingIdMap<uint64_t> getAndClearThroughput();
 };
