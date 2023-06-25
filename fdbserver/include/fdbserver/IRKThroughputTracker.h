@@ -16,12 +16,15 @@ public:
 };
 
 class ClientThroughputTracker : public IRKThroughputTracker {
+	struct ThroughputSmoother {
+		HoltLinearSmoother smoother;
+		ThroughputSmoother() : smoother(1.0, 1.0) {}
+	};
+
+	ThrottlingIdMap<ThroughputSmoother> throughput;
+
 public:
 	~ClientThroughputTracker();
-
-	// TODO: Implement
-	double getThroughput(ThrottlingId const&) const override { throw not_implemented(); }
-
-	// TODO: Implement
-	void update(ThrottlingIdMap<uint64_t>&&) { throw not_implemented(); }
+	double getThroughput(ThrottlingId const&) const override;
+	void update(ThrottlingIdMap<uint64_t>&&);
 };
