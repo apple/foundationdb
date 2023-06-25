@@ -9,7 +9,7 @@
 
 class ThroughputTrackerImpl {
 public:
-	ACTOR static Future<Void> reporterActor(ThroughputTracker* self, Database cx) {
+	ACTOR static Future<Void> run(ThroughputTracker* self, DatabaseContext* cx) {
 		loop {
 			ReportThroughputRequest req(std::move(self->throughput));
 			self->throughput.clear();
@@ -20,8 +20,8 @@ public:
 	}
 }; // class ThroughputTrackersImpl
 
-ThroughputTracker::ThroughputTracker(Database cx) {
-	reporter = ThroughputTrackerImpl::reporterActor(this, cx);
+Future<Void> ThroughputTracker::run(DatabaseContext& cx) {
+	return ThroughputTrackerImpl::run(this, &cx);
 }
 
 void ThroughputTracker::addCost(ThrottlingId const& throttlingId, uint64_t cost) {

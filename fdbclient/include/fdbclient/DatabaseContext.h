@@ -38,6 +38,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/ThroughputTracker.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
@@ -573,6 +574,9 @@ public:
 	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
+
+	ThroughputTracker throughputTracker;
+	Future<Void> throughputTrackerFuture;
 
 	TaskPriority taskID;
 

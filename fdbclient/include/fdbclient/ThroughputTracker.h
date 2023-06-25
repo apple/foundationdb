@@ -1,8 +1,9 @@
 /**
- * ThroughputTrackers.h
+ * ThroughputTracker.h
  */
 
-#include "fdbclient/NativeAPI.actor.h"
+#pragma once
+
 #include "fdbclient/ThrottlingId.h"
 
 // The ThroughputTracker class is responsible for periodically reporting each
@@ -12,11 +13,9 @@
 // for each throttlingId.
 class ThroughputTracker {
 	friend class ThroughputTrackerImpl;
-
-	Future<Void> reporter;
 	ThrottlingIdMap<uint64_t> throughput;
 
 public:
-	ThroughputTracker(Database cx);
+	Future<Void> run(class DatabaseContext& cx);
 	void addCost(ThrottlingId const&, uint64_t cost);
 };
