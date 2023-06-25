@@ -91,8 +91,24 @@ double ServerThroughputTracker::getThroughput(ThrottlingId const& throttlingId) 
 	return result;
 }
 
+Optional<double> ServerThroughputTracker::getThroughput(UID storageServerId) const {
+	auto throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
+	if (!throttlingIdToThroughputCounters.present()) {
+		return {};
+	}
+	double result = 0;
+	for (const auto& [_, throughputCounters] : throttlingIdToThroughputCounters.get()) {
+		result += throughputCounters.getThroughput();
+	}
+	return result;
+}
+
 void ServerThroughputTracker::removeThrottlingId(ThrottlingId const& throttlingId) {
 	for (auto& [ss, throttlingIdToCounters] : throughput) {
 		throttlingIdToCounters.erase(throttlingId);
 	}
+}
+
+int ServerThroughputTracker::storageServersTracked() const {
+	return throughput.size();
 }

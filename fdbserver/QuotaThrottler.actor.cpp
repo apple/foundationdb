@@ -95,26 +95,6 @@ class QuotaThrottlerImpl {
 
 	enum class LimitType { RESERVED, TOTAL };
 
-	class ThroughputCounters {
-		Smoother readCost;
-		Smoother writeCost;
-
-	public:
-		ThroughputCounters()
-		  : readCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME),
-		    writeCost(SERVER_KNOBS->GLOBAL_TAG_THROTTLING_COST_FOLDING_TIME) {}
-
-		void updateCost(double newCost, OpType opType) {
-			if (opType == OpType::READ) {
-				readCost.setTotal(newCost);
-			} else {
-				writeCost.setTotal(newCost);
-			}
-		}
-
-		double getCost() const { return readCost.smoothTotal() + writeCost.smoothTotal(); }
-	};
-
 	// Track various statistics per throttling ID, aggregated across all storage servers
 	class PerThrottlingIdStatistics {
 		HoltLinearSmoother transactionCounter;
@@ -157,48 +137,12 @@ class QuotaThrottlerImpl {
 	uint32_t lastBusyThrottlingIdCount{ 0 };
 
 	ThrottlingIdMap<PerThrottlingIdStatistics> throttlingStatistics;
-	std::unordered_map<UID, ThrottlingIdMap<ThroughputCounters>> throughput;
-
-	// Returns the cost rate for the given throttling ID on the given storage server
-	Optional<double> getCurrentCost(UID storageServerId, ThrottlingId throttlingId) const {
-		auto const throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!throttlingIdToThroughputCounters.present()) {
-			return {};
-		}
-		auto const throughputCounter = tryGet(throttlingIdToThroughputCounters.get(), throttlingId);
-		if (!throughputCounter.present()) {
-			return {};
-		}
-		return throughputCounter.get().getCost();
-	}
-
-	// Return the cost rate on the given storage server, summed across all throttling IDs
-	Optional<double> getCurrentCost(UID storageServerId) const {
-		auto throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!throttlingIdToThroughputCounters.present()) {
-			return {};
-		}
-		double result = 0;
-		for (const auto& [_, throughputCounters] : throttlingIdToThroughputCounters.get()) {
-			result += throughputCounters.getCost();
-		}
-		return result;
-	}
-
-	// Return the cost rate for the given throttlingId, summed across all storage servers
-	double getCurrentCost(ThrottlingId throttlingId) const {
-		double result{ 0.0 };
-		for (const auto& [ssId, _] : throughput) {
-			result += getCurrentCost(ssId, throttlingId).orDefault(0);
-		}
-
-		return result;
-	}
+	ServerThroughputTracker serverThroughputTracker;
 
 	// For transactions with the provided throttlingId, returns the average cost that gets associated with the provided
 	// storage server
 	Optional<double> getAverageTransactionCost(ThrottlingId throttlingId, UID storageServerId) const {
-		auto const cost = getCurrentCost(storageServerId, throttlingId);
+		auto const cost = serverThroughputTracker.getThroughput(storageServerId, throttlingId);
 		if (!cost.present()) {
 			return {};
 		}
@@ -220,7 +164,7 @@ class QuotaThrottlerImpl {
 	// accross the cluster. The minimum cost is one page. If the transaction rate is too low,
 	// return an empty Optional, because no accurate estimation can be made.
 	Optional<double> getAverageTransactionCost(ThrottlingId throttlingId, TraceEvent& te) const {
-		auto const cost = getCurrentCost(throttlingId);
+		auto const cost = serverThroughputTracker.getThroughput(throttlingId);
 		auto const stats = tryGet(throttlingStatistics, throttlingId);
 		if (!stats.present()) {
 			return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
@@ -235,27 +179,13 @@ class QuotaThrottlerImpl {
 		}
 	}
 
-	// Returns the list of all throttling IDs performing meaningful work on the given storage server
-	std::vector<ThrottlingId> getThrottlingIdsAffectingStorageServer(UID storageServerId) const {
-		std::vector<ThrottlingId> result;
-		auto const throttlingIdToThroughputCounters = tryGet(throughput, storageServerId);
-		if (!throttlingIdToThroughputCounters.present()) {
-			return {};
-		} else {
-			result.reserve(throttlingIdToThroughputCounters.get().size());
-			for (const auto& [throttlingId, _] : throttlingIdToThroughputCounters.get()) {
-				result.push_back(throttlingId);
-			}
-		}
-		return result;
-	}
-
 	// Of all throttling IDs meaningfully performing workload on the given storage server,
 	// returns the ratio of total quota allocated to the specified throttling ID
 	double getQuotaRatio(ThrottlingIdRef throttlingId, UID storageServerId) const {
 		double sumQuota{ 0.0 };
 		double throttlingIdQuota{ 0.0 };
-		auto const throttlingIdsAffectingStorageServer = getThrottlingIdsAffectingStorageServer(storageServerId);
+		auto const throttlingIdsAffectingStorageServer =
+		    serverThroughputTracker.getThrottlingIdsAffectingStorageServer(storageServerId);
 		for (const auto& t : throttlingIdsAffectingStorageServer) {
 			auto const tQuota = quotaCache->getTotalQuota(t);
 			sumQuota += tQuota.orDefault(0);
@@ -285,7 +215,7 @@ class QuotaThrottlerImpl {
 	// cost and throttling ratio
 	Optional<double> getLimitingCost(UID storageServerId) const {
 		Optional<double> const throttlingRatio = getThrottlingRatio(storageServerId);
-		Optional<double> const currentCost = getCurrentCost(storageServerId);
+		Optional<double> const currentCost = serverThroughputTracker.getThroughput(storageServerId);
 		if (!throttlingRatio.present() || !currentCost.present()) {
 			return {};
 		}
@@ -358,7 +288,7 @@ class QuotaThrottlerImpl {
 		    .detail("LimitingTps", limitingTps)
 		    .detail("ReservedTps", reservedTps)
 		    .detail("DesiredTps", desiredTps)
-		    .detail("NumStorageServers", throughput.size())
+		    .detail("NumStorageServers", serverThroughputTracker.storageServersTracked())
 		    .detail("TotalQuota", totalQuota)
 		    .detail("ReservedQuota", reservedQuota);
 
@@ -425,39 +355,13 @@ public:
 	int64_t throttleCount() const { return lastBusyThrottlingIdCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
-	void updateThrottling(StorageQueueInfo const& ss) {
-		auto& throttlingIdToThroughputCounters = throughput[ss.id];
-		std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
-		for (const auto& busyReader : ss.busiestReaders) {
-			busyReaders.insert(busyReader.throttlingId);
-			if (throttlingStatistics.find(busyReader.throttlingId) != throttlingStatistics.end()) {
-				throttlingIdToThroughputCounters[busyReader.throttlingId].updateCost(busyReader.rate, OpType::READ);
-			}
-		}
-		for (const auto& busyWriter : ss.busiestWriters) {
-			busyWriters.insert(busyWriter.throttlingId);
-			if (throttlingStatistics.find(busyWriter.throttlingId) != throttlingStatistics.end()) {
-				throttlingIdToThroughputCounters[busyWriter.throttlingId].updateCost(busyWriter.rate, OpType::WRITE);
-			}
-		}
-
-		for (auto& [throttlingId, throughputCounters] : throttlingIdToThroughputCounters) {
-			if (!busyReaders.count(throttlingId)) {
-				throughputCounters.updateCost(0.0, OpType::READ);
-			}
-			if (!busyWriters.count(throttlingId)) {
-				throughputCounters.updateCost(0.0, OpType::WRITE);
-			}
-		}
-	}
+	void updateThrottling(StorageQueueInfo const& ss) { serverThroughputTracker.update(ss); }
 
 	void removeExpiredThrottlingIds() {
 		for (auto it = throttlingStatistics.begin(); it != throttlingStatistics.end();) {
 			const auto& [throttlingId, stats] = *it;
 			if (!stats.recentTransactionsAdded()) {
-				for (auto& [ss, throttlingIdToCounters] : throughput) {
-					throttlingIdToCounters.erase(throttlingId);
-				}
+				serverThroughputTracker.removeThrottlingId(throttlingId);
 				it = throttlingStatistics.erase(it);
 			} else {
 				++it;
