@@ -24,7 +24,6 @@
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
 #include "fdbserver/IRKThroughputTracker.h"
-#include "fdbserver/ServerThroughputTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/QuotaThrottler.h"
 

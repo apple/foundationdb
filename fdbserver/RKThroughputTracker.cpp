@@ -1,9 +1,9 @@
 /**
- * ServerThroughputTracker.cpp
+ * RKThroughputTracker.cpp
  */
 
 #include "fdbserver/Knobs.h"
-#include "fdbserver/ServerThroughputTracker.h"
+#include "fdbserver/IRKThroughputTracker.h"
 
 namespace {
 
@@ -113,4 +113,21 @@ void ServerThroughputTracker::removeThrottlingId(ThrottlingId const& throttlingI
 
 int ServerThroughputTracker::storageServersTracked() const {
 	return throughput.size();
+}
+
+ClientThroughputTracker::~ClientThroughputTracker() = default;
+
+double ClientThroughputTracker::getThroughput(ThrottlingId const& throttlingId) const {
+	auto it = throughput.find(throttlingId);
+	if (it == throughput.end()) {
+		return 0.0;
+	} else {
+		return it->second.smoother.smoothRate();
+	}
+}
+
+void ClientThroughputTracker::update(ThrottlingIdMap<uint64_t>&& newThroughput) {
+	for (auto const& [throttlingId, newPerThrottlingIdThroughput] : newThroughput) {
+		throughput[throttlingId].smoother.addDelta(newPerThrottlingIdThroughput);
+	}
 }
