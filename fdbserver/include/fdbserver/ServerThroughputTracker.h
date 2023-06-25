@@ -4,7 +4,7 @@
 
 #include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Smoother.h"
-#include "fdbserver/IRKMetricsTracker.h"
+#include "fdbserver/IRKThroughputTracker.h"
 
 enum class OpType {
 	READ,
@@ -13,7 +13,7 @@ enum class OpType {
 
 // The ServerThroughputTracker class is responsible for tracking
 // every throttlingId's reported throughput across all storage servers
-class ServerThroughputTracker {
+class ServerThroughputTracker : public IRKThroughputTracker {
 	class ThroughputCounters {
 		Smoother readThroughput;
 		Smoother writeThroughput;
@@ -27,18 +27,20 @@ class ServerThroughputTracker {
 	std::unordered_map<UID, ThrottlingIdMap<ThroughputCounters>> throughput;
 
 public:
+	~ServerThroughputTracker();
+
 	// Returns all throttling IDs running significant workload on the specified storage server.
 	std::vector<ThrottlingId> getThrottlingIdsAffectingStorageServer(UID storageServerId) const;
 
 	// Updates throughput statistics based on new storage queue info
-	void update(StorageQueueInfo const&);
+	void update(StorageQueueInfo const&) override;
 
 	// Returns the current throughput for the provided throttling ID on the
 	// provided storage server
 	Optional<double> getThroughput(UID storageServerId, ThrottlingId const&) const;
 
 	// Returns the current cluster-wide throughput for the provided throttling ID
-	double getThroughput(ThrottlingId const&) const;
+	double getThroughput(ThrottlingId const&) const override;
 
 	// Returns the current throughput on the provided storage server, summed
 	// across all throttling IDs
@@ -49,4 +51,7 @@ public:
 
 	// Returns the number of storage servers currently being tracked
 	int storageServersTracked() const;
+
+	// This is a noop
+	void update(ThrottlingIdMap<int64_t>&&) override {}
 };

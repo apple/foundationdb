@@ -49,6 +49,8 @@ double ServerThroughputTracker::ThroughputCounters::getThroughput() const {
 	return readThroughput.smoothTotal() + writeThroughput.smoothTotal();
 }
 
+ServerThroughputTracker::~ServerThroughputTracker() = default;
+
 void ServerThroughputTracker::update(StorageQueueInfo const& ss) {
 	auto& throttlingIdToThroughputCounters = throughput[ss.id];
 	std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
