@@ -366,6 +366,12 @@ public:
 		return result;
 	}
 
+	void updateThroughput(ThrottlingIdMap<uint64_t> const& newThroughput) {
+		if (clientThroughputTracker.present()) {
+			clientThroughputTracker.get().update(newThroughput);
+		}
+	}
+
 	int64_t throttleCount() const { return lastBusyThrottlingIdCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
@@ -413,6 +419,10 @@ int64_t QuotaThrottler::throttleCount() const {
 }
 void QuotaThrottler::updateThrottling(StorageQueueInfo const& ss) {
 	return impl->updateThrottling(ss);
+}
+
+void QuotaThrottler::updateThroughput(ThrottlingIdMap<uint64_t> const& newThroughput) {
+	return impl->updateThroughput(newThroughput);
 }
 
 uint32_t QuotaThrottler::throttlingIdsTracked() const {

@@ -74,5 +74,5 @@ class ClientThroughputTracker : public IRKThroughputTracker {
 public:
 	~ClientThroughputTracker();
 	double getThroughput(ThrottlingId const&) const override;
-	void update(ThrottlingIdMap<uint64_t>&&);
+	void update(ThrottlingIdMap<uint64_t> const&);
 };

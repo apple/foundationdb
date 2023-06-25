@@ -126,7 +126,7 @@ double ClientThroughputTracker::getThroughput(ThrottlingId const& throttlingId) 
 	}
 }
 
-void ClientThroughputTracker::update(ThrottlingIdMap<uint64_t>&& newThroughput) {
+void ClientThroughputTracker::update(ThrottlingIdMap<uint64_t> const& newThroughput) {
 	for (auto const& [throttlingId, newPerThrottlingIdThroughput] : newThroughput) {
 		throughput[throttlingId].smoother.addDelta(newPerThrottlingIdThroughput);
 	}

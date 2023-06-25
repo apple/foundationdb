@@ -27,6 +27,7 @@ public:
 				for (auto const& [throttlingId, count] : req.throttlingIdToTransactionCount) {
 					quotaThrottler->addRequests(throttlingId, count);
 				}
+				quotaThrottler->updateThroughput(req.throttlingIdToThroughput);
 			}
 			if (p.batchTransactions > 0) {
 				self->smoothBatchReleasedTransactions.addDelta(req.batchReleasedTransactions - p.batchTransactions);
