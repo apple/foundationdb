@@ -23,6 +23,7 @@
 #include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKThroughputQuotaCache.h"
+#include "fdbserver/IRKThroughputTracker.h"
 #include "fdbserver/ServerThroughputTracker.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/QuotaThrottler.h"
@@ -138,6 +139,23 @@ class QuotaThrottlerImpl {
 
 	ThrottlingIdMap<PerThrottlingIdStatistics> throttlingStatistics;
 	ServerThroughputTracker serverThroughputTracker;
+	Optional<ClientThroughputTracker> clientThroughputTracker;
+
+	IRKThroughputTracker& throughputTracker() & {
+		if (clientThroughputTracker.present()) {
+			return clientThroughputTracker.get();
+		} else {
+			return serverThroughputTracker;
+		}
+	}
+
+	IRKThroughputTracker const& throughputTracker() const& {
+		if (clientThroughputTracker.present()) {
+			return clientThroughputTracker.get();
+		} else {
+			return serverThroughputTracker;
+		}
+	}
 
 	// For transactions with the provided throttlingId, returns the average cost that gets associated with the provided
 	// storage server
@@ -164,7 +182,7 @@ class QuotaThrottlerImpl {
 	// accross the cluster. The minimum cost is one page. If the transaction rate is too low,
 	// return an empty Optional, because no accurate estimation can be made.
 	Optional<double> getAverageTransactionCost(ThrottlingId throttlingId, TraceEvent& te) const {
-		auto const cost = serverThroughputTracker.getThroughput(throttlingId);
+		auto const cost = throughputTracker().getThroughput(throttlingId);
 		auto const stats = tryGet(throttlingStatistics, throttlingId);
 		if (!stats.present()) {
 			return CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
@@ -300,7 +318,11 @@ public:
 	                   IRKThroughputQuotaCache const& quotaCache,
 	                   UID id,
 	                   int maxFallingBehind)
-	  : metricsTracker(&metricsTracker), quotaCache(&quotaCache), id(id), maxFallingBehind(maxFallingBehind) {}
+	  : metricsTracker(&metricsTracker), quotaCache(&quotaCache), id(id), maxFallingBehind(maxFallingBehind) {
+		if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+			clientThroughputTracker = ClientThroughputTracker();
+		}
+	}
 	void addRequests(ThrottlingId throttlingId, int count) {
 		auto it = throttlingStatistics.find(throttlingId);
 		if (it == throttlingStatistics.end()) {
