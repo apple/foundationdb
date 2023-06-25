@@ -282,6 +282,9 @@ public:
 	// of each throttlingId. If disabled, this is the responsibility of storage
 	// servers and commit proxies.
 	bool TRACK_THROUGHPUT_ON_CLIENTS;
+	// Interval at which clients report their per-throttlingId throughput
+	// statistics to GRV proxies
+	double CLIENT_THROUGHPUT_REPORT_INTERVAL;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;

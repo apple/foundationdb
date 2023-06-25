@@ -15,7 +15,7 @@ public:
 			self->throughput.clear();
 			wait(basicLoadBalance(
 			    cx->getGrvProxies(UseProvisionalProxies::False), &GrvProxyInterface::reportThroughput, std::move(req)));
-			wait(delay(1.0));
+			wait(delayJittered(CLIENT_KNOBS->CLIENT_THROUGHPUT_REPORT_INTERVAL));
 		}
 	}
 }; // class ThroughputTrackersImpl
