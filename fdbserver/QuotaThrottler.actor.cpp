@@ -549,6 +549,19 @@ public:
 	}
 };
 
+void updateThroughput(QuotaThrottler& quotaThrottler,
+                      ThrottlingId const& throttlingId,
+                      double numPages,
+                      OpType opType) {
+	auto cost = numPages * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	if (opType == OpType::WRITE) {
+		cost *= CLIENT_KNOBS->GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
+	}
+	ThrottlingIdMap<uint64_t> newThroughput;
+	newThroughput[throttlingId] = cost;
+	quotaThrottler.updateThroughput(newThroughput);
+}
+
 ACTOR Future<Void> runClient(QuotaThrottler* quotaThrottler,
                              StorageServerCollection* storageServers,
                              ThrottlingId throttlingId,
@@ -562,6 +575,7 @@ ACTOR Future<Void> runClient(QuotaThrottler* quotaThrottler,
 		wait(delay(1 / enforcedRate));
 		storageServers->addCost(throttlingId, costPerTransaction, storageServerIndices, opType);
 		quotaThrottler->addRequests(throttlingId, 1);
+		updateThroughput(*quotaThrottler, throttlingId, costPerTransaction, opType);
 	}
 }
 
@@ -690,7 +704,7 @@ TEST_CASE("/QuotaThrottler/MultiTagThrottling") {
 
 // 10 storage servers can handle 100 pages/second each.
 // Total quota set to 100 pages/second.
-// Client attempts 20 10-byte read transactions per second.
+// Client attempts 20 10-page read transactions per second.
 // Limit should adjust to allow 100/10 transactions per second.
 TEST_CASE("/QuotaThrottler/AttemptWorkloadAboveQuota") {
 	state MockRKMetricsTracker metricsTracker;
