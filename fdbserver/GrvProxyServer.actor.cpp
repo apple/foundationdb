@@ -370,7 +370,7 @@ ACTOR Future<Void> getRate(UID myID,
                            GrvTransactionRateInfo* batchTransactionRateInfo,
                            GetHealthMetricsReply* healthMetricsReply,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
-                           ThrottlingIdMap<uint64_t>* throttlingIdCounter,
+                           ThrottlingIdMap<uint64_t>* throttlingIdTransactionCounter,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -402,9 +402,9 @@ ACTOR Future<Void> getRate(UID myID,
 			                                                                       *inTransactionCount,
 			                                                                       *inBatchTransactionCount,
 			                                                                       proxyData->version,
-			                                                                       *throttlingIdCounter,
+			                                                                       *throttlingIdTransactionCounter,
 			                                                                       detailed)));
-			throttlingIdCounter->clear();
+			throttlingIdTransactionCounter->clear();
 			expectingDetailedReply = detailed;
 		}
 		when(GetRateInfoReply rep = wait(reply)) {
@@ -474,7 +474,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
                                                FutureStream<double> normalGRVLatency,
                                                GrvProxyStats* stats,
                                                GrvTransactionRateInfo* batchRateInfo,
-                                               ThrottlingIdMap<uint64_t>* throttlingIdCounter,
+                                               ThrottlingIdMap<uint64_t>* throttlingIdTransactionCounter,
                                                GrvProxyTagThrottler* tagThrottler) {
 	getCurrentLineage()->modify(&TransactionLineage::operation) =
 	    TransactionLineage::Operation::GetConsistentReadVersion;
@@ -515,7 +515,7 @@ ACTOR Future<Void> queueGetReadVersionRequests(Reference<AsyncVar<ServerDBInfo> 
 			} else {
 				stats->addRequest(req.transactionCount);
 				if (req.throttlingId.present()) {
-					(*throttlingIdCounter)[req.throttlingId.get()] += req.transactionCount;
+					(*throttlingIdTransactionCounter)[req.throttlingId.get()] += req.transactionCount;
 				}
 
 				if (req.debugID.present())
@@ -811,7 +811,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Deque<GetReadVersionRequest> defaultQueue;
 	state Deque<GetReadVersionRequest> batchQueue;
 
-	state ThrottlingIdMap<uint64_t> throttlingIdCounter;
+	state ThrottlingIdMap<uint64_t> throttlingIdTransactionCounter;
 
 	state PromiseStream<double> normalGRVLatency;
 
@@ -828,7 +828,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      &batchRateInfo,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
-	                      &throttlingIdCounter,
+	                      &throttlingIdTransactionCounter,
 	                      &grvProxyData->stats,
 	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
@@ -842,7 +842,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                                          normalGRVLatency.getFuture(),
 	                                          &grvProxyData->stats,
 	                                          &batchRateInfo,
-	                                          &throttlingIdCounter,
+	                                          &throttlingIdTransactionCounter,
 	                                          &grvProxyData->tagThrottler));
 
 	while (std::find(db->get().client.grvProxies.begin(), db->get().client.grvProxies.end(), proxy) ==
