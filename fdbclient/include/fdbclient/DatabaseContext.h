@@ -575,9 +575,6 @@ public:
 
 	Future<Void> logger;
 
-	ThroughputTracker throughputTracker;
-	Future<Void> throughputTrackerFuture;
-
 	TaskPriority taskID;
 
 	Int64MetricHandle getValueSubmitted;
@@ -675,6 +672,8 @@ public:
 		return clientInfo->get().tenantMode;
 	}
 
+	void addCost(ThrottlingId const&, uint64_t bytes);
+
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
 	Reference<TransactionT> createTransaction();
@@ -737,6 +736,9 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	ThroughputTracker throughputTracker;
+	Future<Void> throughputTrackerFuture;
 
 	void initializeSpecialCounters();
 };

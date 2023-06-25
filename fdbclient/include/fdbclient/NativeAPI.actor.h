@@ -338,9 +338,13 @@ struct TransactionState : ReferenceCounted<TransactionState> {
 	Future<Void> startTransaction(uint32_t readVersionFlags = 0);
 	Future<Version> getReadVersion(uint32_t flags);
 
+	void addCost(uint64_t bytes);
+
 private:
 	Optional<Reference<Tenant>> tenant_;
 	bool tenantSet;
+
+	Optional<ThrottlingId> getThrottlingId();
 };
 
 class Transaction : NonCopyable {

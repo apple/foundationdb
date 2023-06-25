@@ -3636,8 +3636,7 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
-			trState->totalCost +=
-			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
+			trState->addCost(getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0)));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4508,7 +4507,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
-	trState->totalCost += getReadOperationCost(bytes);
+	trState->addCost(getReadOperationCost(bytes));
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -5960,7 +5959,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
+	trState->addCost(getWriteOperationCost(key.expectedSize() + value.expectedSize()));
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5990,7 +5989,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize());
+	trState->addCost(getWriteOperationCost(key.expectedSize()));
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -6025,7 +6024,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	trState->addCost(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -7334,6 +7333,27 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.throttlingTag, versionDebugID);
 	startTime = now();
 	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
+}
+
+Optional<ThrottlingId> TransactionState::getThrottlingId() {
+	Optional<TenantGroupName> tenantGroup;
+	if (tenant().present() && tenant().get()->tenantGroup().present()) {
+		return ThrottlingIdRef::fromTenantGroup(tenant().get()->tenantGroup().get());
+	} else if (options.throttlingTag.present()) {
+		return ThrottlingIdRef::fromTag(options.throttlingTag.get());
+	} else {
+		return {};
+	}
+}
+
+void TransactionState::addCost(uint64_t bytes) {
+	totalCost += bytes;
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		auto const throttlingId = getThrottlingId();
+		if (throttlingId.present()) {
+			cx->addCost(throttlingId.get(), bytes);
+		}
+	}
 }
 
 Optional<Version> Transaction::getCachedReadVersion() const {
@@ -10870,6 +10890,10 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+}
+
+void DatabaseContext::addCost(ThrottlingId const& throttlingId, uint64_t bytes) {
+	throughputTracker.addCost(throttlingId, bytes);
 }
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
