@@ -361,6 +361,17 @@ ACTOR Future<Void> globalConfigRequestServer(GrvProxyData* grvProxyData, GrvProx
 	}
 }
 
+ACTOR Future<Void> handleClientThroughputReports(FutureStream<ReportThroughputRequest> stream,
+                                                 ThrottlingIdMap<uint64_t>* throttlingIdToThroughput) {
+	loop {
+		ReportThroughputRequest req = waitNext(stream);
+		for (auto const& [throttlingId, clientThroughput] : req.throughput) {
+			(*throttlingIdToThroughput)[throttlingId] += clientThroughput;
+		}
+		req.reply.send(Void());
+	}
+}
+
 // Get transaction rate info from RateKeeper.
 ACTOR Future<Void> getRate(UID myID,
                            Reference<AsyncVar<ServerDBInfo> const> db,
@@ -371,6 +382,7 @@ ACTOR Future<Void> getRate(UID myID,
                            GetHealthMetricsReply* healthMetricsReply,
                            GetHealthMetricsReply* detailedHealthMetricsReply,
                            ThrottlingIdMap<uint64_t>* throttlingIdTransactionCounter,
+                           ThrottlingIdMap<uint64_t>* throttlingIdThroughput,
                            GrvProxyStats* stats,
                            GrvProxyData* proxyData) {
 	state Future<Void> nextRequestTimer = Never();
@@ -403,8 +415,10 @@ ACTOR Future<Void> getRate(UID myID,
 			                       *inBatchTransactionCount,
 			                       proxyData->version,
 			                       std::move(*throttlingIdTransactionCounter),
+			                       std::move(*throttlingIdThroughput),
 			                       detailed)));
 			throttlingIdTransactionCounter->clear();
+			throttlingIdThroughput->clear();
 			expectingDetailedReply = detailed;
 		}
 		when(GetRateInfoReply rep = wait(reply)) {
@@ -812,6 +826,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	state Deque<GetReadVersionRequest> batchQueue;
 
 	state ThrottlingIdMap<uint64_t> throttlingIdTransactionCounter;
+	state ThrottlingIdMap<uint64_t> throttlingIdThroughput;
 
 	state PromiseStream<double> normalGRVLatency;
 
@@ -820,6 +835,9 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	    TransactionLineage::Operation::GetConsistentReadVersion;
 	addActor.send(monitorDDMetricsChanges(&midShardSize, db));
 
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		addActor.send(handleClientThroughputReports(proxy.reportThroughput.getFuture(), &throttlingIdThroughput));
+	}
 	addActor.send(getRate(proxy.id(),
 	                      db,
 	                      &transactionCount,
@@ -829,6 +847,7 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 	                      healthMetricsReply,
 	                      detailedHealthMetricsReply,
 	                      &throttlingIdTransactionCounter,
+	                      &throttlingIdThroughput,
 	                      &grvProxyData->stats,
 	                      grvProxyData));
 	addActor.send(queueGetReadVersionRequests(db,
