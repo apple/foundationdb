@@ -1,0 +1,19 @@
+[configuration]
+buggify = false
+tenantModes = ['disabled']
+grvProxyCount = 1
+
+[[test]]
+testTitle='ExpectStableThroughput'
+
+  [[test.workload]]
+  testName='ThroughputQuota'
+  nameRepresentsTenantGroup=false
+  name='testTag'
+  totalQuota=409600
+
+  [[test.workload]]
+  testName='ExpectStableThroughput'
+  throttlingTag='testTag'
+  expectedThroughputPagesRate=100
+  errorTolerance=0.3

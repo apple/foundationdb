@@ -77,10 +77,7 @@ public:
 		totalQuota = getOption(options, "totalQuota"_sr, 0.0);
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		cx->debugUseTag = true;
-		return clientId ? Void() : setup(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
