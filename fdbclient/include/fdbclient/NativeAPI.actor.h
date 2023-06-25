@@ -350,6 +350,7 @@ private:
 	// Measured by summing the bytes accessed by each write operation
 	// after rounding up to the nearest page size and applying a write penalty
 	int64_t writeCost = 0;
+	bool flushedWriteCost = false;
 
 	Optional<ThrottlingId> getThrottlingId();
 };

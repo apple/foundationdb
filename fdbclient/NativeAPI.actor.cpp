@@ -7364,11 +7364,12 @@ void TransactionState::addWriteCost(uint64_t bytes) {
 }
 
 void TransactionState::flushWriteCost() {
-	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS && !flushedWriteCost) {
 		auto const throttlingId = getThrottlingId();
 		if (throttlingId.present()) {
 			cx->addCost(throttlingId.get(), writeCost);
 		}
+		flushedWriteCost = true;
 	}
 }
 
