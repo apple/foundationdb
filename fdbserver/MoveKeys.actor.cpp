@@ -3331,7 +3331,7 @@ Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID se
 }
 
 ACTOR Future<Void> prepareBlobRestore(Database occ,
-                                      MoveKeysLock lock,
+                                      MoveKeysLock* lock,
                                       const DDEnabledState* ddEnabledState,
                                       UID traceId,
                                       KeyRangeRef keys,
@@ -3346,7 +3346,7 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			wait(checkPersistentMoveKeysLock(&tr, lock));
+			wait(checkPersistentMoveKeysLock(&tr, *lock));
 			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
 			if (currentOwnerId != bmId) {
 				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
