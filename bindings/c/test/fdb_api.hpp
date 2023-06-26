@@ -364,6 +364,12 @@ struct Int64 {
 		return Error(native::fdb_future_get_int64(f, &out));
 	}
 };
+struct Uint64 {
+	using Type = uint64_t;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		return Error(native::fdb_future_get_uint64(f, &out));
+	}
+};
 struct KeyRef {
 	using Type = fdb::KeyRef;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -888,6 +894,10 @@ public:
 
 	TypedFuture<future_var::None> onError(Error err) { return native::fdb_transaction_on_error(tr.get(), err.code()); }
 
+	TypedFuture<future_var::Int64> getApproximateSize() const {
+		return native::fdb_transaction_get_approximate_size(tr.get());
+	}
+
 	void reset() { return native::fdb_transaction_reset(tr.get()); }
 
 	void cancel() { return native::fdb_transaction_cancel(tr.get()); }
@@ -1197,16 +1207,23 @@ public:
 
 	TypedFuture<future_var::None> forceRecoveryWithDataLoss(ValueRef dcid) {
 		if (!db) {
-			throw std::runtime_error("createSnapshot from null database");
+			throw std::runtime_error("forceRecoveryWithDataLoss from null database");
 		}
 		return native::fdb_database_force_recovery_with_data_loss(db.get(), dcid.data(), intSize(dcid));
 	}
 
 	TypedFuture<future_var::Int64> rebootWorker(ValueRef address, bool check, int duration) {
 		if (!db) {
-			throw std::runtime_error("createSnapshot from null database");
+			throw std::runtime_error("rebootWorker from null database");
 		}
 		return native::fdb_database_reboot_worker(db.get(), address.data(), intSize(address), check, duration);
+	}
+
+	TypedFuture<future_var::Uint64> getServerProtocol(uint64_t expected_version) const {
+		if (!db) {
+			throw std::runtime_error("getServerProtocol from null database");
+		}
+		return native::fdb_database_get_server_protocol(db.get(), expected_version);
 	}
 };
 

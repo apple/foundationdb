@@ -1968,41 +1968,38 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 //}
 //}
 //
-// TEST_CASE("fdb_transaction_get_approximate_size") {
-// fdb::Transaction tr(db);
-// while (1) {
-// tr.set(key("foo"), "bar");
-// fdb::Int64Future f1 = tr.get_approximate_size();
-//
-// fdb_error_t err = wait_future(f1);
-// if (err) {
-// fdb::EmptyFuture f2 = tr.on_error(err);
-// fdb_check(wait_future(f2));
-// continue;
-//}
-//
-// int64_t size;
-// fdb_check(f1.get(&size));
-// CHECK(size >= 3);
-// break;
-//}
-//}
-//
-// TEST_CASE("fdb_database_get_server_protocol") {
-//// We don't really have any expectations other than "don't crash" here
-// FDBFuture* protocolFuture = fdb_database_get_server_protocol(db, 0);
-// uint64_t out;
-//
-// fdb_check(fdb_future_block_until_ready(protocolFuture));
-// fdb_check(fdb_future_get_uint64(protocolFuture, &out));
-// fdb_future_destroy(protocolFuture);
-//
-//// Passing in an expected version that's different than the cluster version
-// protocolFuture = fdb_database_get_server_protocol(db, 0x0FDB00A200090000LL);
-// fdb_check(fdb_future_block_until_ready(protocolFuture));
-// fdb_check(fdb_future_get_uint64(protocolFuture, &out));
-// fdb_future_destroy(protocolFuture);
-//}
+TEST_CASE("fdb_transaction_get_approximate_size") {
+	auto tr = db.createTransaction();
+	while (1) {
+		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		auto f1 = tr.getApproximateSize();
+		auto err = waitFuture(f1);
+		if (err) {
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
+			continue;
+		}
+
+		int64_t size;
+		fdbCheck(f1.getNothrow(size));
+		CHECK(size >= 3);
+		break;
+	}
+}
+
+TEST_CASE("fdb_database_get_server_protocol") {
+	// We don't really have any expectations other than "don't crash" here
+	auto protocolFuture = db.getServerProtocol(0);
+	fdbCheck(waitFuture(protocolFuture));
+	uint64_t out;
+
+	fdbCheck(protocolFuture.getNothrow(out));
+
+	// Passing in an expected version that's different than the cluster version
+	protocolFuture = db.getServerProtocol(0x0FDB00A200090000LL);
+	fdbCheck(waitFuture(protocolFuture));
+	fdbCheck(protocolFuture.getNothrow(out));
+}
 
 TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
 	// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
