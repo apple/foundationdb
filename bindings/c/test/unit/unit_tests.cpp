@@ -1920,54 +1920,54 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 	}
 }
 
-// TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
-// fdb::Transaction tr(db);
-// while (1) {
-// fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
-// fdb_error_t err = wait_future(f1);
-// if (err) {
-// fdb::EmptyFuture fOnError = tr.on_error(err);
-// fdb_check(wait_future(fOnError));
-// continue;
-//}
-// fdb::DoubleFuture f2 = tr.get_tag_throttled_duration();
-// err = wait_future(f2);
-// if (err) {
-// fdb::EmptyFuture fOnError = tr.on_error(err);
-// fdb_check(wait_future(fOnError));
-// continue;
-//}
-// double tagThrottledDuration;
-// fdb_check(f2.get(&tagThrottledDuration));
-// CHECK(tagThrottledDuration >= 0.0);
-// break;
-//}
-//}
-//
-// TEST_CASE("fdb_transaction_get_total_cost") {
-// fdb::Transaction tr(db);
-// while (1) {
-// fdb::ValueFuture f1 = tr.get("foo", /*snapshot*/ false);
-// fdb_error_t err = wait_future(f1);
-// if (err) {
-// fdb::EmptyFuture fOnError = tr.on_error(err);
-// fdb_check(wait_future(fOnError));
-// continue;
-//}
-// fdb::Int64Future f2 = tr.get_total_cost();
-// err = wait_future(f2);
-// if (err) {
-// fdb::EmptyFuture fOnError = tr.on_error(err);
-// fdb_check(wait_future(fOnError));
-// continue;
-//}
-// int64_t cost;
-// fdb_check(f2.get(&cost));
-// CHECK(cost > 0);
-// break;
-//}
-//}
-//
+TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto fOnError = tr.onError(err);
+			fdbCheck(waitFuture(fOnError));
+			continue;
+		}
+		auto f2 = tr.getTagThrottledDuration();
+		err = waitFuture(f2);
+		if (err) {
+			auto fOnError = tr.onError(err);
+			fdbCheck(waitFuture(fOnError));
+			continue;
+		}
+		double tagThrottledDuration;
+		fdbCheck(f2.getNothrow(tagThrottledDuration));
+		CHECK(tagThrottledDuration >= 0.0);
+		break;
+	}
+}
+
+TEST_CASE("fdb_transaction_get_total_cost") {
+	auto tr = db.createTransaction();
+	while (1) {
+		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		auto err = waitFuture(f1);
+		if (err) {
+			auto fOnError = tr.onError(err);
+			fdbCheck(waitFuture(fOnError));
+			continue;
+		}
+		auto f2 = tr.getTotalCost();
+		err = waitFuture(f2);
+		if (err) {
+			auto fOnError = tr.onError(err);
+			fdbCheck(waitFuture(fOnError));
+			continue;
+		}
+		int64_t cost;
+		fdbCheck(f2.getNothrow(cost));
+		CHECK(cost > 0);
+		break;
+	}
+}
+
 TEST_CASE("fdb_transaction_get_approximate_size") {
 	auto tr = db.createTransaction();
 	while (1) {

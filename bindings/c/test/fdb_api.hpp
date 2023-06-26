@@ -370,6 +370,12 @@ struct Uint64 {
 		return Error(native::fdb_future_get_uint64(f, &out));
 	}
 };
+struct Double {
+	using Type = double;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		return Error(native::fdb_future_get_double(f, &out));
+	}
+};
 struct KeyRef {
 	using Type = fdb::KeyRef;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -896,6 +902,14 @@ public:
 
 	TypedFuture<future_var::Int64> getApproximateSize() const {
 		return native::fdb_transaction_get_approximate_size(tr.get());
+	}
+
+	TypedFuture<future_var::Int64> getTotalCost() const {
+		return native::fdb_transaction_get_total_cost(tr.get());
+	}
+
+	TypedFuture<future_var::Double> getTagThrottledDuration() const {
+		return native::fdb_transaction_get_tag_throttled_duration(tr.get());
 	}
 
 	void reset() { return native::fdb_transaction_reset(tr.get()); }
