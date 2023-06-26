@@ -2407,43 +2407,39 @@ std::string get_valid_status_json() {
 //}
 //}
 //
-// std::string random_hex_string(size_t length) {
-// const char charset[] = "0123456789"
-//"ABCDEF"
-//"abcdef";
-//// construct a random generator engine from a time-based seed:
-// std::default_random_engine generator(time(nullptr));
-// std::uniform_int_distribution<int> distribution(0, strlen(charset) - 1);
-// auto randchar = [&charset, &generator, &distribution]() -> char { return charset[distribution(generator)]; };
-// std::string str(length, 0);
-// std::generate_n(str.begin(), length, randchar);
-// return str;
-//}
-//
-// TEST_CASE("fdb_database_create_snapshot") {
-// std::string snapshot_command = "test";
-// std::string uid = "invalid_uid";
-// bool retry = false;
-// while (1) {
-// fdb::EmptyFuture f = fdb::Database::create_snapshot(db,
-//(const uint8_t*)uid.c_str(),
-// uid.length(),
-//(const uint8_t*)snapshot_command.c_str(),
-// snapshot_command.length());
-// fdb_error_t err = wait_future(f);
-// if (err == 2509) { // expected error code
-// CHECK(!retry);
-// uid = random_hex_string(32);
-// retry = true;
-//} else if (err == 2505) {
-// CHECK(retry);
-// break;
-//} else {
-//// Otherwise, something went wrong.
-// CHECK(false);
-//}
-//}
-//}
+std::string random_hex_string(size_t length) {
+	const char charset[] = "0123456789"
+	                       "ABCDEF"
+	                       "abcdef";
+	// construct a random generator engine from a time-based seed:
+	std::default_random_engine generator(time(nullptr));
+	std::uniform_int_distribution<int> distribution(0, strlen(charset) - 1);
+	auto randchar = [&charset, &generator, &distribution]() -> char { return charset[distribution(generator)]; };
+	std::string str(length, 0);
+	std::generate_n(str.begin(), length, randchar);
+	return str;
+}
+
+TEST_CASE("fdb_database_create_snapshot") {
+	std::string snapshot_command = "test";
+	std::string uid = "invalid_uid";
+	bool retry = false;
+	while (1) {
+		auto f = db.createSnapshot(fdb::toBytesRef(uid), fdb::toBytesRef(snapshot_command));
+		auto err = waitFuture(f);
+		if (err.code() == 2509) { // expected error code
+			CHECK(!retry);
+			uid = random_hex_string(32);
+			retry = true;
+		} else if (err.code() == 2505) {
+			CHECK(retry);
+			break;
+		} else {
+			// Otherwise, something went wrong.
+			CHECK(false);
+		}
+	}
+}
 
 TEST_CASE("fdb_error_predicate") {
 	CHECK(fdb::Error(1007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_too_old
@@ -2506,24 +2502,24 @@ TEST_CASE("block_from_callback") {
 	});
 	context.event.wait();
 }
-//
-//// monitors network busyness for 2 sec (40 readings)
-// TEST_CASE("monitor_network_busyness") {
-// bool containsGreaterZero = false;
-// for (int i = 0; i < 40; i++) {
-// double busyness = fdb_database_get_main_thread_busyness(db);
-//// make sure the busyness is between 0 and 1
-// CHECK(busyness >= 0);
-// CHECK(busyness <= 1);
-// if (busyness > 0) {
-// containsGreaterZero = true;
-//}
-// std::this_thread::sleep_for(std::chrono::milliseconds(50));
-//}
-//
-//// assert that at least one of the busyness readings was greater than 0
-// CHECK(containsGreaterZero);
-//}
+
+// monitors network busyness for 2 sec (40 readings)
+TEST_CASE("monitor_network_busyness") {
+	bool containsGreaterZero = false;
+	for (int i = 0; i < 40; i++) {
+		double busyness = db.getMainThreadBusyness();
+		// make sure the busyness is between 0 and 1
+		CHECK(busyness >= 0);
+		CHECK(busyness <= 1);
+		if (busyness > 0) {
+			containsGreaterZero = true;
+		}
+		std::this_thread::sleep_for(std::chrono::milliseconds(50));
+	}
+
+	// assert that at least one of the busyness readings was greater than 0
+	CHECK(containsGreaterZero);
+}
 
 // Commit a transaction and confirm it has not been reset
 TEST_CASE("commit_does_not_reset") {

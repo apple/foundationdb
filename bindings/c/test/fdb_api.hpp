@@ -1129,6 +1129,10 @@ public:
 		return Transaction(tx_native);
 	}
 
+	double getMainThreadBusyness() const noexcept {
+		return native::fdb_database_get_main_thread_busyness(db.get());
+	}
+
 	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) override {
 		if (!db)
 			throw std::runtime_error("listBlobbifiedRanges from null database");
@@ -1184,6 +1188,13 @@ public:
 	}
 
 	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
+
+	TypedFuture<future_var::None> createSnapshot(ValueRef uid, ValueRef snapCommand) {
+		if (!db) {
+			throw std::runtime_error("createSnapshot from null database");
+		}
+		return native::fdb_database_create_snapshot(db.get(), uid.data(), intSize(uid), snapCommand.data(), intSize(snapCommand));
+	}
 };
 
 inline Error selectApiVersionNothrow(int version) {
