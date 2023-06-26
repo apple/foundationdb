@@ -118,6 +118,19 @@ ACTOR static Future<std::vector<TenantMapEntry>> getTenantEntries(
 	return results;
 }
 
+ACTOR static Future<Void> purgeAndVerifyTenant(Reference<IDatabase> db, TenantName tenant) {
+	state Reference<ITenant> tenantObj = db->openTenant(tenant);
+	state ThreadFuture<Key> resultFuture = tenantObj->purgeBlobGranules(normalKeys, latestVersion, false);
+	TraceEvent("BreakpointPurge4");
+	state Key purgeKey = wait(safeThreadFutureToFuture(resultFuture));
+	TraceEvent("BreakpointPurge5");
+	// state ThreadFuture<Void> resultFuture2 = tenantObj->waitPurgeGranulesComplete(purgeKey);
+	// // wait(safeThreadFutureToFuture(tenantObj->waitPurgeGranulesComplete(purgeKey)));
+	// wait(safeThreadFutureToFuture(resultFuture2));
+	// TraceEvent("BreakpointPurge6");
+	return Void();
+}
+
 template <class DB>
 struct StartTenantMovementImpl {
 	MetaclusterOperationContext<DB> srcCtx;
@@ -672,32 +685,17 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> purgeSourceBlobRanges(FinishTenantMovementImpl* self,
-	                                                Reference<typename DB::TransactionT> tr) {
-		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
-		state std::vector<Future<Key>> purgeFutures;
-		state std::vector<Reference<ITenant>> srcTenants;
+	ACTOR static Future<Void> purgeSourceBlobRanges(FinishTenantMovementImpl* self) {
+		state std::vector<Future<Void>> purgeFutures;
+		TraceEvent("BreakpointPurge1");
 
 		for (auto& tenantPair : self->tenantsInGroup) {
 			state TenantName tName = tenantPair.first;
-			state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
-			srcTenants.push_back(srcTenant);
-			state ThreadFuture<Key> resultFuture = srcTenant->purgeBlobGranules(allKeys, latestVersion, false);
-			purgeFutures.push_back(safeThreadFutureToFuture(resultFuture));
+			purgeFutures.push_back(purgeAndVerifyTenant(self->srcCtx.dataClusterDb, tName));
 		}
+		TraceEvent("BreakpointPurge2");
 		wait(waitForAll(purgeFutures));
-
-		state int index = 0;
-		state size_t iterLen = self->tenantsInGroup.size();
-		state std::vector<Future<Void>> completeFutures;
-		ASSERT(purgeFutures.size() == iterLen);
-		ASSERT(srcTenants.size() == iterLen);
-		for (; index < iterLen; index++) {
-			state ThreadFuture<Void> resultFuture2 =
-			    srcTenants[index]->waitPurgeGranulesComplete(purgeFutures[index].get());
-			completeFutures.push_back(safeThreadFutureToFuture(resultFuture2));
-		}
-		wait(waitForAll(completeFutures));
+		TraceEvent("BreakpointPurge3");
 
 		return Void();
 	}
@@ -762,7 +760,6 @@ struct FinishTenantMovementImpl {
 	static Future<Void> deleteSourceData(FinishTenantMovementImpl* self, TenantName tName) {
 		Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 		Reference<ITransaction> srcTr = srcTenant->createTransaction();
-		KeyRangeRef normalKeys(""_sr, "\xff"_sr);
 		srcTr->clear(normalKeys);
 		return Void();
 	}
@@ -781,6 +778,7 @@ struct FinishTenantMovementImpl {
 
 	static Future<Void> updateCapacityMetadata(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr) {
+		// TODO: verify idempotency
 		ClusterName srcName = self->srcCtx.clusterName.get();
 
 		// clusterCapacityIndex() reduce allocated capacity of source
@@ -793,6 +791,18 @@ struct FinishTenantMovementImpl {
 		// clusterTenantCount() reduce tenant count of source
 		int numTenants = self->tenantsInGroup.size();
 		metadata::management::clusterTenantCount().atomicOp(tr, srcName, -numTenants, MutationRef::AddValue);
+		return Void();
+	}
+
+	static Future<Void> clearMovementMetadata(FinishTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
+		UID runId = self->moveRecord.runId;
+		metadata::management::emergency_movement::emergencyMovements().erase(tr, self->tenantGroup);
+		metadata::management::emergency_movement::movementQueue().erase(
+		    tr, std::make_pair(self->tenantGroup, runId.toString()));
+		Tuple beginTuple = Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName(""_sr), KeyRef(""_sr));
+		Tuple endTuple =
+		    Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
+		metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple, endTuple);
 		return Void();
 	}
 
@@ -809,32 +819,44 @@ struct FinishTenantMovementImpl {
 			    .detail("MoveState", initialMoveState);
 			throw invalid_tenant_move();
 		}
+		TraceEvent("Breakpoint1");
 
 		state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+		TraceEvent("Breakpoint2");
 		state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+		TraceEvent("Breakpoint3");
 		wait(self->dstCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
+		TraceEvent("Breakpoint4");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
 			    return checkValidUnlock(self, tr, srcEntries, dstEntries);
 		    }));
+		TraceEvent("Breakpoint5");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
 			    return checkValidDelete(self, tr, srcEntries, dstEntries);
 		    }));
 
+		TraceEvent("Breakpoint6");
+		wait(unlockDestinationTenants(self));
+
+		TraceEvent("Breakpoint7");
+		wait(purgeSourceBlobRanges(self));
+
+		TraceEvent("Breakpoint8");
+		wait(self->srcCtx.runDataClusterTransaction(
+		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
+
+		TraceEvent("Breakpoint9");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return updateCapacityMetadata(self, tr); }));
 
-		wait(unlockDestinationTenants(self));
-
+		TraceEvent("Breakpoint10");
 		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return purgeSourceBlobRanges(self, tr); }));
-
-		wait(self->dstCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
+		    [self = self](Reference<typename DB::TransactionT> tr) { return clearMovementMetadata(self, tr); }));
 
 		return Void();
 	}
@@ -970,7 +992,6 @@ struct AbortTenantMovementImpl {
 	static Future<Void> deleteDestinationData(AbortTenantMovementImpl* self, TenantName tName) {
 		Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
 		Reference<ITransaction> dstTr = dstTenant->createTransaction();
-		KeyRangeRef normalKeys(""_sr, "\xff"_sr);
 		dstTr->clear(normalKeys);
 		return Void();
 	}
@@ -988,30 +1009,13 @@ struct AbortTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> purgeDestinationBlobRanges(AbortTenantMovementImpl* self) {
-		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
-		state std::vector<Future<Key>> purgeFutures;
-		state std::vector<Reference<ITenant>> dstTenants;
+		state std::vector<Future<Void>> purgeFutures;
 
 		for (auto& tenantPair : self->tenantsInGroup) {
 			state TenantName tName = tenantPair.first;
-			state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
-			dstTenants.push_back(dstTenant);
-			state ThreadFuture<Key> resultFuture = dstTenant->purgeBlobGranules(allKeys, latestVersion, false);
-			purgeFutures.push_back(safeThreadFutureToFuture(resultFuture));
+			purgeFutures.push_back(purgeAndVerifyTenant(self->dstCtx.dataClusterDb, tName));
 		}
 		wait(waitForAll(purgeFutures));
-
-		state int index = 0;
-		state size_t iterLen = self->tenantsInGroup.size();
-		state std::vector<Future<Void>> completeFutures;
-		ASSERT(purgeFutures.size() == iterLen);
-		ASSERT(dstTenants.size() == iterLen);
-		for (; index < iterLen; index++) {
-			state ThreadFuture<Void> resultFuture2 =
-			    dstTenants[index]->waitPurgeGranulesComplete(purgeFutures[index].get());
-			completeFutures.push_back(safeThreadFutureToFuture(resultFuture2));
-		}
-		wait(waitForAll(completeFutures));
 
 		return Void();
 	}

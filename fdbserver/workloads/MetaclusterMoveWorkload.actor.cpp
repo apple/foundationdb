@@ -139,6 +139,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		// Update tenantGroups
 		auto groupData = self->tenantGroups[tenantGroup];
 		auto groupTenants = groupData.tenants;
+		TraceEvent("BreakpointTestUpdateStart")
+		    .detail("OldCluster", oldCluster)
+		    .detail("NewCluster", newCluster)
+		    .detail("TenantGroup", tenantGroup)
+		    .detail("Size", groupTenants.size());
 		groupData.cluster = newCluster;
 		self->tenantGroups[tenantGroup] = groupData;
 
@@ -298,7 +303,11 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		              tr, beginTuple, endTuple, limit));
 
 		wait(mrFuture && mqFuture && splitPointsFuture);
-		return (!mr.present() && !mq.results.empty() && !splitPoints.results.empty());
+		TraceEvent("MetaclusterMoveVerifyMetadataErased")
+		    .detail("MrPresent", mr.present())
+		    .detail("MqEmpty", mq.results.empty())
+		    .detail("SplitpointsEmpty", splitPoints.results.empty());
+		return (!mr.present() && mq.results.empty() && splitPoints.results.empty());
 	}
 
 	ACTOR static Future<bool> finishVerification(MetaclusterMoveWorkload* self,
@@ -735,6 +744,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		bool success = wait(finishVerification(self, tenantGroup, aborted ? srcCluster : dstCluster));
 		if (!success) {
 			TraceEvent("MetaclusterMoveFinalVerificationFailed")
+			    .detail("Aborted", aborted)
 			    .detail("TenantGroup", tenantGroup)
 			    .detail("DestinationCluster", dstCluster)
 			    .detail("SourceCluster", srcCluster);
@@ -747,7 +757,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	ACTOR static Future<bool> _check(MetaclusterMoveWorkload* self) {
 		// The metacluster consistency check runs the tenant consistency check for each cluster
 		state metacluster::util::MetaclusterConsistencyCheck<IDatabase> metaclusterConsistencyCheck(
-		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::True);
+		    self->managementDb, metacluster::util::AllowPartialMetaclusterOperations::False);
 
 		wait(metaclusterConsistencyCheck.run());
 

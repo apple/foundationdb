@@ -231,6 +231,9 @@ private:
 
 			std::set<TenantGroupName> tenantGroupsWithCompletedTenants;
 			if (!self->allowPartialMetaclusterOperations) {
+				TraceEvent("BreakpointDataTenantMapSize")
+				    .detail("Cluster", clusterName)
+				    .detail("EntryId", clusterMetadata.entry.id);
 				ASSERT_EQ(data.tenantData.tenantMap.size(), expectedTenants.size());
 			} else {
 				ASSERT_LE(data.tenantData.tenantMap.size(), expectedTenants.size());

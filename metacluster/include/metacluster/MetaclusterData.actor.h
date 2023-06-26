@@ -232,6 +232,7 @@ private:
 
 		state std::vector<Future<Void>> dataClusterFutures;
 		for (auto [clusterName, clusterMetadata] : self->managementMetadata.dataClusters) {
+			TraceEvent("BreakpointLoadingDataClusterMetadata").detail("ClusterName", clusterName);
 			dataClusterFutures.push_back(loadDataClusterMetadata(self, clusterName, clusterMetadata.connectionString));
 		}
 
