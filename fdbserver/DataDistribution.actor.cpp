@@ -85,7 +85,8 @@ ShardSizeBounds ShardSizeBounds::shardSizeBoundsBeforeTrack() {
 struct DDAudit {
 	DDAudit(AuditStorageState coreState)
 	  : coreState(coreState), actors(true), foundError(false), auditStorageAnyChildFailed(false), retryCount(0),
-	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0) {}
+	    cancelled(false), overallCompleteDoAuditCount(0), overallIssuedDoAuditCount(0),
+	    remainingBudgetForAuditTasks(SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX) {}
 
 	AuditStorageState coreState;
 	ActorCollection actors;
@@ -96,6 +97,7 @@ struct DDAudit {
 	bool cancelled; // use to cancel any actor beyond auditActor
 	int64_t overallIssuedDoAuditCount;
 	int64_t overallCompleteDoAuditCount;
+	AsyncVar<int> remainingBudgetForAuditTasks;
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -370,7 +372,6 @@ public:
 	FlowLock auditStorageReplicaLaunchingLock;
 	FlowLock auditStorageLocationMetadataLaunchingLock;
 	FlowLock auditStorageSsShardLaunchingLock;
-	std::unordered_map<AuditType, AsyncVar<int>> remainingBudgetForAuditTasks;
 
 	Optional<Reference<TenantCache>> ddTenantCache;
 
@@ -2140,7 +2141,7 @@ ACTOR Future<Void> cancelAuditStorage(Reference<DataDistributor> self, TriggerAu
 		    .detail("AuditType", req.getType())
 		    .detail("AuditID", req.id);
 		wait(cancelAuditMetadata(self->txnProcessor->context(), req.getType(), req.id));
-		// Once clearAuditMetadata cancelled, any ongoing audit will stop
+		// Once auditMetadata cancelled, any ongoing audit will stop
 		// Then clear ongoing audit D/S
 		if (auditExistInAuditMap(self, req.getType(), req.id)) {
 			removeAuditFromAuditMap(self, req.getType(), req.id);
@@ -2272,12 +2273,10 @@ ACTOR Future<Void> dispatchAuditStorageServerShard(Reference<DataDistributor> se
 			if (targetServer.isTss()) {
 				continue;
 			}
-			if (self->remainingBudgetForAuditTasks.contains(auditType)) {
-				ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-				while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
-					wait(self->remainingBudgetForAuditTasks[auditType].onChange());
-					ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-				}
+			ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+			while (audit->remainingBudgetForAuditTasks.get() == 0) {
+				wait(audit->remainingBudgetForAuditTasks.onChange());
+				ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 			}
 			audit->actors.add(scheduleAuditStorageShardOnServer(self, audit, targetServer));
 			wait(delay(0.1));
@@ -2344,29 +2343,19 @@ ACTOR Future<Void> scheduleAuditStorageShardOnServer(Reference<DataDistributor> 
 				} else {
 					ASSERT(phase == AuditPhase::Invalid);
 					// Set doAuditOnStorageServer
-					if (self->remainingBudgetForAuditTasks.contains(auditType)) {
-						ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-						while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
-							wait(self->remainingBudgetForAuditTasks[auditType].onChange());
-							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-						}
-						self->remainingBudgetForAuditTasks[auditType].set(
-						    self->remainingBudgetForAuditTasks[auditType].get() - 1);
-						ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-						TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-							.detail("Loc", "scheduleAuditStorageShardOnServer1")
-							.detail("Ops", "Decrease")
-							.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-							.detail("AuditType", auditType);
-					} else {
-						self->remainingBudgetForAuditTasks[auditType].set(
-						    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
-						TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-							.detail("Loc", "scheduleAuditStorageShardOnServer2")
-							.detail("Ops", "Decrease")
-							.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-							.detail("AuditType", auditType);
+					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+					while (audit->remainingBudgetForAuditTasks.get() == 0) {
+						wait(audit->remainingBudgetForAuditTasks.onChange());
+						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 					}
+					audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
+					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+					TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+					    .detail("Loc", "scheduleAuditStorageShardOnServer")
+					    .detail("Ops", "Decrease")
+					    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+					    .detail("AuditType", auditType);
+
 					AuditStorageRequest req(audit->coreState.id, auditStates[i].range, auditType);
 					// Since remaining part is always successcive
 					// We always issue exactly one audit task (for the remaining part) when schedule
@@ -2412,7 +2401,7 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 	    .detail("AuditID", audit->coreState.id)
 	    .detail("Range", range)
 	    .detail("AuditType", auditType)
-		.detail("RemainingBudget", self->remainingBudgetForAuditTasks.contains(auditType) ? self->remainingBudgetForAuditTasks[auditType].get() : 9999);
+	    .detail("RemainingBudget", audit->remainingBudgetForAuditTasks.get());
 	state Key begin = range.begin;
 	state KeyRange currentRange = range;
 	state int64_t completedCount = 0;
@@ -2442,12 +2431,10 @@ ACTOR Future<Void> dispatchAuditStorage(Reference<DataDistributor> self,
 					audit->foundError = true;
 				} else {
 					ASSERT(phase == AuditPhase::Invalid);
-					if (self->remainingBudgetForAuditTasks.contains(auditType)) {
-						ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-						while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
-							wait(self->remainingBudgetForAuditTasks[auditType].onChange());
-							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-						}
+					ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+					while (audit->remainingBudgetForAuditTasks.get() == 0) {
+						wait(audit->remainingBudgetForAuditTasks.onChange());
+						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 					}
 					audit->actors.add(scheduleAuditOnRange(self, audit, auditStates[i].range));
 				}
@@ -2578,29 +2565,19 @@ ACTOR Future<Void> scheduleAuditOnRange(Reference<DataDistributor> self,
 							UNREACHABLE();
 						}
 						// Set doAuditOnStorageServer
-						if (self->remainingBudgetForAuditTasks.contains(auditType)) {
-							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-							while (self->remainingBudgetForAuditTasks[auditType].get() == 0) {
-								wait(self->remainingBudgetForAuditTasks[auditType].onChange());
-								ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-							}
-							self->remainingBudgetForAuditTasks[auditType].set(
-							    self->remainingBudgetForAuditTasks[auditType].get() - 1);
-							ASSERT(self->remainingBudgetForAuditTasks[auditType].get() >= 0);
-							TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-								.detail("Loc", "scheduleAuditOnRange1")
-								.detail("Ops", "Decrease")
-								.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-								.detail("AuditType", auditType);
-						} else {
-							self->remainingBudgetForAuditTasks[auditType].set(
-							    SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX - 1);
-							TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-								.detail("Loc", "scheduleAuditOnRange2")
-								.detail("Ops", "Decrease")
-								.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-								.detail("AuditType", auditType);
+						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+						while (audit->remainingBudgetForAuditTasks.get() == 0) {
+							wait(audit->remainingBudgetForAuditTasks.onChange());
+							ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
 						}
+						audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() - 1);
+						ASSERT(audit->remainingBudgetForAuditTasks.get() >= 0);
+						TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
+						    .detail("Loc", "scheduleAuditOnRange1")
+						    .detail("Ops", "Decrease")
+						    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+						    .detail("AuditType", auditType);
+
 						issueDoAuditCount++;
 						req.ddId = self->ddId; // send this ddid to SS
 						audit->actors.add(doAuditOnStorageServer(self, audit, targetServer, req));
@@ -2669,14 +2646,13 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
-		ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
-		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
-		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-			.detail("Loc", "doAuditOnStorageServer1")
-			.detail("Ops", "Increase")
-			.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-			.detail("AuditType", auditType);
+		    .detail("Loc", "doAuditOnStorageServer1")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", auditType);
 
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
@@ -2691,14 +2667,13 @@ ACTOR Future<Void> doAuditOnStorageServer(Reference<DataDistributor> self,
 		    .detail("TargetServers", describe(req.targetServers))
 		    .detail("DDDoAuditTaskIssue", audit->overallIssuedDoAuditCount)
 		    .detail("DDDoAuditTaskComplete", audit->overallCompleteDoAuditCount);
-		ASSERT(self->remainingBudgetForAuditTasks.contains(auditType));
-		self->remainingBudgetForAuditTasks[auditType].set(self->remainingBudgetForAuditTasks[auditType].get() + 1);
-		ASSERT(self->remainingBudgetForAuditTasks[auditType].get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
+		audit->remainingBudgetForAuditTasks.set(audit->remainingBudgetForAuditTasks.get() + 1);
+		ASSERT(audit->remainingBudgetForAuditTasks.get() <= SERVER_KNOBS->CONCURRENT_AUDIT_TASK_COUNT_MAX);
 		TraceEvent(SevDebug, "RemainingBudgetForAuditTasks")
-			.detail("Loc", "doAuditOnStorageServer2")
-			.detail("Ops", "Increase")
-			.detail("Val", self->remainingBudgetForAuditTasks[auditType].get())
-			.detail("AuditType", auditType);
+		    .detail("Loc", "doAuditOnStorageServer2")
+		    .detail("Ops", "Increase")
+		    .detail("Val", audit->remainingBudgetForAuditTasks.get())
+		    .detail("AuditType", auditType);
 
 		if (e.code() == error_code_not_implemented || e.code() == error_code_audit_storage_exceeded_request_limit ||
 		    e.code() == error_code_audit_storage_cancelled) {
