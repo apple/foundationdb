@@ -1,4 +1,4 @@
-set(xp_tarball_name ${CMAKE_BINARY_DIR}/packages/foundationdb-${CMAKE_SYSTEM_PROCESSOR}-${FDB_VERSION}-snapshot.tar.gz)
+set(xp_tarball_name ${CMAKE_BINARY_DIR}/packages/frostdb-${CMAKE_SYSTEM_PROCESSOR}-${FDB_VERSION}-snapshot.tar.gz)
 
 add_custom_command(OUTPUT ${xp_tarball_name}
   COMMAND ${CMAKE_COMMAND} -E env PYTHONPATH="${CMAKE_SOURCE_DIR}/tests/TestRunner:${CMAKE_BINARY_DIR}/tests/TestRunner"
@@ -17,4 +17,3 @@ add_custom_command(OUTPUT ${xp_tarball_name}
   COMMENT "Creating FDB dependency tarball for XP")
 
 add_custom_target(package_xp_tarball DEPENDS ${xp_tarball_name})
-add_dependencies(packages package_xp_tarball)
