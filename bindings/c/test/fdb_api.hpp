@@ -1129,9 +1129,7 @@ public:
 		return Transaction(tx_native);
 	}
 
-	double getMainThreadBusyness() const noexcept {
-		return native::fdb_database_get_main_thread_busyness(db.get());
-	}
+	double getMainThreadBusyness() const noexcept { return native::fdb_database_get_main_thread_busyness(db.get()); }
 
 	TypedFuture<future_var::KeyRangeRefArray> listBlobbifiedRanges(KeyRef begin, KeyRef end, int rangeLimit) override {
 		if (!db)
@@ -1193,7 +1191,22 @@ public:
 		if (!db) {
 			throw std::runtime_error("createSnapshot from null database");
 		}
-		return native::fdb_database_create_snapshot(db.get(), uid.data(), intSize(uid), snapCommand.data(), intSize(snapCommand));
+		return native::fdb_database_create_snapshot(
+		    db.get(), uid.data(), intSize(uid), snapCommand.data(), intSize(snapCommand));
+	}
+
+	TypedFuture<future_var::None> forceRecoveryWithDataLoss(ValueRef dcid) {
+		if (!db) {
+			throw std::runtime_error("createSnapshot from null database");
+		}
+		return native::fdb_database_force_recovery_with_data_loss(db.get(), dcid.data(), intSize(dcid));
+	}
+
+	TypedFuture<future_var::Int64> rebootWorker(ValueRef address, bool check, int duration) {
+		if (!db) {
+			throw std::runtime_error("createSnapshot from null database");
+		}
+		return native::fdb_database_reboot_worker(db.get(), address.data(), intSize(address), check, duration);
 	}
 };
 

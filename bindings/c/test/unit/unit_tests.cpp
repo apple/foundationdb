@@ -2349,64 +2349,62 @@ std::string get_valid_status_json() {
 		return statusJsonStr;
 	}
 }
-//
-// TEST_CASE("fdb_database_reboot_worker") {
-// #ifdef USE_TSAN
-// MESSAGE(
-//"fdb_database_reboot_worker disabled for tsan, since fdbmonitor doesn't seem to restart the killed process");
-// return;
-// #endif
-// std::string status_json = get_valid_status_json();
-// rapidjson::Document statusJson;
-// statusJson.Parse(status_json.c_str());
-// CHECK(statusJson.HasMember("cluster"));
-// CHECK(statusJson["cluster"].HasMember("generation"));
-// int old_generation = statusJson["cluster"]["generation"].GetInt();
-// CHECK(statusJson["cluster"].HasMember("processes"));
-//// Make sure we only have one process in the cluster
-//// Thus, rebooting the worker ensures a recovery
-//// Configuration changes may break the contract here
-// CHECK(statusJson["cluster"]["processes"].MemberCount() == 1);
-// auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
-// CHECK(processPtr->value.HasMember("address"));
-// std::string network_address = processPtr->value["address"].GetString();
-// while (1) {
-// fdb::Int64Future f =
-// fdb::Database::reboot_worker(db, (const uint8_t*)network_address.c_str(), network_address.size(), false, 0);
-// fdb_check(wait_future(f));
-// int64_t successful;
-// fdb_check(f.get(&successful));
-// if (successful)
-// break; // retry rebooting until success
-//}
-// status_json = get_valid_status_json();
-// statusJson.Parse(status_json.c_str());
-// CHECK(statusJson.HasMember("cluster"));
-// CHECK(statusJson["cluster"].HasMember("generation"));
-// int new_generation = statusJson["cluster"]["generation"].GetInt();
-//// The generation number should increase after the recovery
-// CHECK(new_generation > old_generation);
-//}
-//
-// TEST_CASE("fdb_database_force_recovery_with_data_loss") {
-//// This command cannot be tested completely in the current unit test configuration
-//// For now, we simply call the function to make sure it exist
-//// Background:
-//// It is also only usable when usable_regions=2, so it requires a fearless configuration
-//// In particular, you have two data centers, and the storage servers in one region are allowed to fall behind (async
-//// replication) Normally, you would not want to recover to that set of storage servers unless there are tlogs which
-//// can let those storage servers catch up However, if all the tlogs are dead and you still want to be able to
-//// recover your database even if that means losing recently committed mutation, that's the time this function works
-//
-// std::string dcid = "test_id";
-// while (1) {
-// fdb::EmptyFuture f =
-// fdb::Database::force_recovery_with_data_loss(db, (const uint8_t*)dcid.c_str(), dcid.size());
-// fdb_check(wait_future(f));
-// break;
-//}
-//}
-//
+
+TEST_CASE("fdb_database_reboot_worker") {
+#ifdef USE_TSAN
+	MESSAGE(
+	    "fdb_database_reboot_worker disabled for tsan, since fdbmonitor doesn't seem to restart the killed process");
+	return;
+#endif
+	std::string status_json = get_valid_status_json();
+	rapidjson::Document statusJson;
+	statusJson.Parse(status_json.c_str());
+	CHECK(statusJson.HasMember("cluster"));
+	CHECK(statusJson["cluster"].HasMember("generation"));
+	int old_generation = statusJson["cluster"]["generation"].GetInt();
+	CHECK(statusJson["cluster"].HasMember("processes"));
+	// Make sure we only have one process in the cluster
+	// Thus, rebooting the worker ensures a recovery
+	// Configuration changes may break the contract here
+	CHECK(statusJson["cluster"]["processes"].MemberCount() == 1);
+	auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
+	CHECK(processPtr->value.HasMember("address"));
+	std::string network_address = processPtr->value["address"].GetString();
+	while (1) {
+		auto f = db.rebootWorker(fdb::toBytesRef(network_address), false, 0);
+		fdbCheck(waitFuture(f));
+		int64_t successful;
+		fdbCheck(f.getNothrow(successful));
+		if (successful)
+			break; // retry rebooting until success
+	}
+	status_json = get_valid_status_json();
+	statusJson.Parse(status_json.c_str());
+	CHECK(statusJson.HasMember("cluster"));
+	CHECK(statusJson["cluster"].HasMember("generation"));
+	int new_generation = statusJson["cluster"]["generation"].GetInt();
+	// The generation number should increase after the recovery
+	CHECK(new_generation > old_generation);
+}
+
+TEST_CASE("fdb_database_force_recovery_with_data_loss") {
+	// This command cannot be tested completely in the current unit test configuration
+	// For now, we simply call the function to make sure it exist
+	// Background:
+	// It is also only usable when usable_regions=2, so it requires a fearless configuration
+	// In particular, you have two data centers, and the storage servers in one region are allowed to fall behind (async
+	// replication) Normally, you would not want to recover to that set of storage servers unless there are tlogs which
+	// can let those storage servers catch up However, if all the tlogs are dead and you still want to be able to
+	// recover your database even if that means losing recently committed mutation, that's the time this function works
+
+	std::string dcid = "test_id";
+	while (1) {
+		auto f = db.forceRecoveryWithDataLoss(fdb::toBytesRef(dcid));
+		fdbCheck(waitFuture(f));
+		break;
+	}
+}
+
 std::string random_hex_string(size_t length) {
 	const char charset[] = "0123456789"
 	                       "ABCDEF"
