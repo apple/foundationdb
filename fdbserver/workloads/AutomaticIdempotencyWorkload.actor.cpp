@@ -194,7 +194,9 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	}
 
 	// Returns the largest gap between createdTime and the idempotency timestamp
-	ACTOR static Future<int64_t> getMaxTimestampDelta(AutomaticIdempotencyWorkload* self, Database db) {
+	ACTOR static Future<int64_t> getMaxTimestampDelta(AutomaticIdempotencyWorkload* self,
+	                                                  Database db,
+	                                                  int64_t numCreatedTimes) {
 		state std::vector<int64_t> timestamps;
 		state std::vector<Key> keys;
 
@@ -202,6 +204,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			return tr->getRange(idempotencyIdKeys, CLIENT_KNOBS->TOO_MANY);
 		}));
+
+		ASSERT(!result.more);
 
 		for (const auto& kv : result) {
 			Version commitVersion;
@@ -228,6 +232,10 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					ASSERT(entry.present());
 					auto e = ObjectReader::fromStringRef<ValueType>(entry.get(), Unversioned());
 					maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
+				}
+
+				if (futures.size() < numCreatedTimes) {
+					maxCreatedTimeDelta = std::max<int64_t>(maxCreatedTimeDelta, 10);
 				}
 
 				return maxCreatedTimeDelta;
@@ -301,6 +309,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			// Because of some uncertainty around what the most recently deleted entry
 			// was, we subtract out the largest observed gap between idempotency timestamp
 			// and created timestamp.
+			int64_t initialOldestCreatedTime = oldestCreatedTime;
 			auto iter =
 			    std::lower_bound(createdTimes->begin(), createdTimes->end(), oldestCreatedTime - maxTimestampDelta);
 			if (iter != createdTimes->begin()) {
@@ -318,8 +327,16 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			} else if (maxActualAge < minAgeSeconds / self->slop) {
 				TraceEvent(SevError, "AutomaticIdempotencyCleanedTooMuch")
 				    .detail("MaxActualAge", maxActualAge)
-				    .detail("MinAgePolicy", minAgeSeconds);
+				    .detail("MinAgePolicy", minAgeSeconds)
+				    .detail("InitialOldestCreatedTime", initialOldestCreatedTime)
+				    .detail("OldestCreatedTime", oldestCreatedTime)
+				    .detail("MaxTimestampDelta", maxTimestampDelta);
 				self->ok = false;
+
+				// One possible reason this fails is because of our timestamps for creation are not an accurate
+				// reflection of the idempotency ID timestamps. Currently, we try to address this in
+				// getMaxTimestampDelta with a lower bound on the delta. If it continues failing for this reason, we
+				// could raise the lower bound or remove this assert.
 				ASSERT(false);
 			} else {
 				++successes;
@@ -362,7 +379,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			           return getCreatedTimes(self, tr);
 		           })));
 
-		state int64_t maxTimestampDelta = wait(getMaxTimestampDelta(self, db));
+		state int64_t maxTimestampDelta = wait(getMaxTimestampDelta(self, db, createdTimes.size()));
 
 		// Slowly and somewhat randomly allow the cleaner to do more cleaning. Observe that it cleans some, but not too
 		// much.
