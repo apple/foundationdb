@@ -1903,6 +1903,9 @@ DatabaseContext::~DatabaseContext() {
 	clientDBInfoMonitor.cancel();
 	monitorTssInfoChange.cancel();
 	tssMismatchHandler.cancel();
+	initializeChangeFeedCache = Void();
+	storage = nullptr;
+	changeFeedStorageCommitter = Void();
 	if (grvUpdateHandler.isValid()) {
 		grvUpdateHandler.cancel();
 	}
