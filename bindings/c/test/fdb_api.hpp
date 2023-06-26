@@ -442,8 +442,7 @@ struct MappedKeyValueRefArray {
 		auto out_more_native = native::fdb_bool_t{};
 		auto& [out_ranges, out_count, out_more] = out;
 		auto err = native::fdb_future_get_mappedkeyvalue_array(
-		    f, reinterpret_cast<const native::FDBMappedKeyValue**>(&out_ranges), &out_count,
-		    &out_more_native);
+		    f, reinterpret_cast<const native::FDBMappedKeyValue**>(&out_ranges), &out_count, &out_more_native);
 		out_more = out_more_native != 0;
 		return Error(err);
 	}
@@ -836,22 +835,35 @@ public:
 		                                         reverse);
 	}
 
-	TypedFuture<future_var::MappedKeyValueRefArray> getMappedRange(
-		KeySelector first,
-		KeySelector last,
-		KeyRef mapperName,
-		int limit,
-		int targetBytes,
-		FDBStreamingMode mode,
-		int iteration,
-		int matchIndex,
-		bool snapshot,
-		bool reverse) {
-		return native::fdb_transaction_get_mapped_range(tr.get(), first.key, first.keyLength,
-			first.orEqual, first.offset, last.key, last.keyLength, last.orEqual, last.offset,
-			mapperName.data(), intSize(mapperName), limit, targetBytes, mode, iteration,
-			matchIndex, snapshot, reverse); 
-	}		
+	TypedFuture<future_var::MappedKeyValueRefArray> getMappedRange(KeySelector first,
+	                                                               KeySelector last,
+	                                                               KeyRef mapperName,
+	                                                               int limit,
+	                                                               int targetBytes,
+	                                                               FDBStreamingMode mode,
+	                                                               int iteration,
+	                                                               int matchIndex,
+	                                                               bool snapshot,
+	                                                               bool reverse) {
+		return native::fdb_transaction_get_mapped_range(tr.get(),
+		                                                first.key,
+		                                                first.keyLength,
+		                                                first.orEqual,
+		                                                first.offset,
+		                                                last.key,
+		                                                last.keyLength,
+		                                                last.orEqual,
+		                                                last.offset,
+		                                                mapperName.data(),
+		                                                intSize(mapperName),
+		                                                limit,
+		                                                targetBytes,
+		                                                mode,
+		                                                iteration,
+		                                                matchIndex,
+		                                                snapshot,
+		                                                reverse);
+	}
 
 	TypedFuture<future_var::StringArray> getAddressForKey(KeyRef key) {
 		return native::fdb_transaction_get_addresses_for_key(tr.get(), key.data(), key.size());
@@ -943,9 +955,7 @@ public:
 		return native::fdb_transaction_get_approximate_size(tr.get());
 	}
 
-	TypedFuture<future_var::Int64> getTotalCost() const {
-		return native::fdb_transaction_get_total_cost(tr.get());
-	}
+	TypedFuture<future_var::Int64> getTotalCost() const { return native::fdb_transaction_get_total_cost(tr.get()); }
 
 	TypedFuture<future_var::Double> getTagThrottledDuration() const {
 		return native::fdb_transaction_get_tag_throttled_duration(tr.get());
