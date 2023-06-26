@@ -616,13 +616,13 @@ void initHelp() {
 	                "All commands that are used to read or write keys will be done without a tenant and will operate "
 	                "on the raw key-space. This is the default behavior. The tenant cannot be configured while a "
 	                "transaction started with `begin' is open.");
-	helpMap["usecluster"] =
-	    CommandHelp("usecluster <NAME>",
-	                "opens connections to a data cluster in the metacluster",
-	                "User must first connect to a management cluster in order to use this command. "
-	                "This command opens connections to a data cluster by cluster name. "
-	                "When a data cluster is chosen, any commands run in that fdbcli would be sent directly to that cluster, "
-	                "possibly with the exception of certain metacluster commands.");
+	helpMap["usecluster"] = CommandHelp(
+	    "usecluster <NAME>",
+	    "opens connections to a data cluster in the metacluster",
+	    "User must first connect to a management cluster in order to use this command. "
+	    "This command opens connections to a data cluster by cluster name. "
+	    "When a data cluster is chosen, any commands run in that fdbcli would be sent directly to that cluster, "
+	    "possibly with the exception of certain metacluster commands.");
 	helpMap["usemanagementcluster"] =
 	    CommandHelp("usemanagementcluster",
 	                "connect to the management cluster in the metacluster",
@@ -754,10 +754,10 @@ ACTOR Future<std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool
 
 	ASSERT(mgmtDatabase.present());
 	metacluster::DataClusterMetadata clusterMetadata =
-		wait(metacluster::getCluster(mgmtDatabase->db, newClusterNameStr));
+	    wait(metacluster::getCluster(mgmtDatabase->db, newClusterNameStr));
 	ClusterConnectionString connectionString = clusterMetadata.connectionString;
 	Reference<IClusterConnectionRecord> connectionRecord =
-		makeReference<ClusterConnectionMemoryRecord>(connectionString);
+	    makeReference<ClusterConnectionMemoryRecord>(connectionString);
 	currentDatabase.localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
 	currentDatabase.db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
 	currentDatabase.configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
