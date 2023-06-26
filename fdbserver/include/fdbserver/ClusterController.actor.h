@@ -2971,16 +2971,28 @@ public:
 		for (int i = 0; i < req.disconnectedPeers.size(); ++i) {
 			disconnectedPeersString += (i == 0 ? "" : " ") + req.disconnectedPeers[i].toString();
 		}
+		std::string recoveredPeersString;
+		for (int i = 0; i < req.recoveredPeers.size(); ++i) {
+			recoveredPeersString += (i == 0 ? "" : " ") + req.recoveredPeers[i].toString();
+		}
 		TraceEvent("ClusterControllerUpdateWorkerHealth")
 		    .detail("WorkerAddress", req.address)
 		    .detail("DegradedPeers", degradedPeersString)
-		    .detail("DisconnectedPeers", disconnectedPeersString);
+		    .detail("DisconnectedPeers", disconnectedPeersString)
+		    .detail("RecoveredPeers", recoveredPeersString);
 
 		double currentTime = now();
 
 		// Current `workerHealth` doesn't have any information about the incoming worker. Add the worker into
 		// `workerHealth`.
 		if (workerHealth.find(req.address) == workerHealth.end()) {
+			if (req.degradedPeers.empty() && req.disconnectedPeers.empty()) {
+				// This request doesn't report any new degradation. Although there may contain recovered peer, since
+				// `workerHealth` doesn't record any information on this address, those recovered peers have already
+				// been considered recovered.
+				return;
+			}
+
 			workerHealth[req.address] = {};
 			for (const auto& degradedPeer : req.degradedPeers) {
 				workerHealth[req.address].degradedPeers[degradedPeer] = { currentTime, currentTime };
@@ -2990,12 +3002,24 @@ public:
 				workerHealth[req.address].disconnectedPeers[degradedPeer] = { currentTime, currentTime };
 			}
 
+			// We can return directly here since we just created the health info for this address and there shouldn't be
+			// any recovered peers.
 			return;
 		}
 
 		// The incoming worker already exists in `workerHealth`.
 
 		auto& health = workerHealth[req.address];
+
+		// Remove any recovered peers.
+		for (const auto& peer : req.recoveredPeers) {
+			TraceEvent("ClusterControllerReceivedPeerRecovering")
+			    .suppressFor(10.0)
+			    .detail("Worker", req.address)
+			    .detail("Peer", peer);
+			health.degradedPeers.erase(peer);
+			health.disconnectedPeers.erase(peer);
+		}
 
 		// Update the worker's degradedPeers.
 		for (const auto& peer : req.degradedPeers) {
