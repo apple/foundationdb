@@ -131,8 +131,6 @@ def run_tester(args, cluster, test_file):
         logger.error("'%s' did not complete succesfully (%s)" % (cmd[0], reason))
         if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
-
-    logger.info("")
     return ret_code
 
 
