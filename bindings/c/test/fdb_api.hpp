@@ -66,6 +66,15 @@ struct KeyValueRef : native::FDBKeyValue {
 	ValueRef value() const noexcept { return ValueRef(native::FDBKeyValue::value, value_length); }
 };
 
+struct MappedKeyValueRef : native::FDBMappedKeyValue {
+	KeyRef key() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::key.key, native::FDBMappedKeyValue::key.key_length);
+	}
+	ValueRef value() const noexcept {
+		return ValueRef(native::FDBMappedKeyValue::value.key, native::FDBMappedKeyValue::value.key_length);
+	}
+};
+
 struct KeyValue {
 	Key key;
 	Value value;
@@ -423,6 +432,19 @@ struct KeyRangeRefArray {
 		auto& [out_ranges, out_count] = out;
 		auto err = native::fdb_future_get_keyrange_array(
 		    f, reinterpret_cast<const native::FDBKeyRange**>(&out_ranges), &out_count);
+		return Error(err);
+	}
+};
+
+struct MappedKeyValueRefArray {
+	using Type = std::tuple<MappedKeyValueRef const*, int, bool>;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		auto out_more_native = native::fdb_bool_t{};
+		auto& [out_ranges, out_count, out_more] = out;
+		auto err = native::fdb_future_get_mappedkeyvalue_array(
+		    f, reinterpret_cast<const native::FDBMappedKeyValue**>(&out_ranges), &out_count,
+		    &out_more_native);
+		out_more = out_more_native != 0;
 		return Error(err);
 	}
 };
@@ -813,6 +835,23 @@ public:
 		                                         snapshot,
 		                                         reverse);
 	}
+
+	TypedFuture<future_var::MappedKeyValueRefArray> getMappedRange(
+		KeySelector first,
+		KeySelector last,
+		KeyRef mapperName,
+		int limit,
+		int targetBytes,
+		FDBStreamingMode mode,
+		int iteration,
+		int matchIndex,
+		bool snapshot,
+		bool reverse) {
+		return native::fdb_transaction_get_mapped_range(tr.get(), first.key, first.keyLength,
+			first.orEqual, first.offset, last.key, last.keyLength, last.orEqual, last.offset,
+			mapperName.data(), intSize(mapperName), limit, targetBytes, mode, iteration,
+			matchIndex, snapshot, reverse); 
+	}		
 
 	TypedFuture<future_var::StringArray> getAddressForKey(KeyRef key) {
 		return native::fdb_transaction_get_addresses_for_key(tr.get(), key.data(), key.size());
