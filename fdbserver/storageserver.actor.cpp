@@ -1305,7 +1305,7 @@ public:
 		LatencySample readQueueWaitSample;
 		LatencySample kvReadRangeLatencySample;
 		LatencySample updateLatencySample;
-		LatencySample encryptionUpdateLatencySample;
+		LatencySample updateEncryptionLatencySample;
 
 		LatencyBands readLatencyBands;
 		LatencySample mappedRangeSample; // Samples getMappedRange latency
@@ -1387,7 +1387,7 @@ public:
 		                        self->thisServerID,
 		                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-		    encryptionUpdateLatencySample("EncryptionUpdateLatencyMetrics",
+		    updateEncryptionLatencySample("UpdateEncryptionLatencyMetrics",
 		                                  self->thisServerID,
 		                                  SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 		                                  SERVER_KNOBS->LATENCY_SKETCH_ACCURACY) {
@@ -2855,8 +2855,7 @@ MutationsAndVersionRef filterMutations(Arena& arena,
 					if (modified) {
 						MutationRef clearMutation = MutationRef(MutationRef::ClearRange, clearBegin, clearEnd);
 						if (encrypted && m.encrypted.present() && m.encrypted.get()[i].isEncrypted()) {
-							clearMutation =
-							    clearMutation.encrypt(m.cipherKeys[i], arena, BlobCipherMetrics::TLOG).first;
+							clearMutation = clearMutation.encrypt(m.cipherKeys[i], arena, BlobCipherMetrics::TLOG);
 						}
 						modifiedMutations.get().push_back(arena, clearMutation);
 					} else {
@@ -3167,9 +3166,8 @@ ACTOR Future<std::pair<ChangeFeedStreamReply, bool>> getChangeFeedMutations(Stor
 					       mutationForKey(encryptedMutations[j], lastEpochEndPrivateKey));
 					if (encryptedMutations[j].isEncrypted()) {
 						cipherKeys[j] = encryptedMutations[j].getCipherKeys(cipherMap);
-						mutations[j] = encryptedMutations[j]
-						                   .decrypt(cipherKeys[j], mutations.arena(), BlobCipherMetrics::TLOG)
-						                   .first;
+						mutations[j] =
+						    encryptedMutations[j].decrypt(cipherKeys[j], mutations.arena(), BlobCipherMetrics::TLOG);
 					} else {
 						mutations[j] = encryptedMutations[j];
 					}
@@ -6465,11 +6463,9 @@ void applyChangeFeedMutation(StorageServer* self,
 						if (modified) {
 							it->mutations.back().encrypted.get().push_back_deep(
 							    it->mutations.back().arena(),
-							    clearMutation
-							        .encrypt(encryptedMutation.cipherKeys,
-							                 it->mutations.back().arena(),
-							                 BlobCipherMetrics::TLOG)
-							        .first);
+							    clearMutation.encrypt(encryptedMutation.cipherKeys,
+							                          it->mutations.back().arena(),
+							                          BlobCipherMetrics::TLOG));
 						} else {
 							it->mutations.back().encrypted.get().push_back_deep(it->mutations.back().arena(),
 							                                                    encryptedMutation.mutation);
@@ -8807,7 +8803,7 @@ void StorageServer::addMutation(Version version,
 		MutationRefAndCipherKeys encrypt = encryptedMutation;
 		if (encrypt.mutation.isEncrypted() && mutation.type != MutationRef::SetValue &&
 		    mutation.type != MutationRef::ClearRange) {
-			encrypt.mutation = expanded.encrypt(encrypt.cipherKeys, mLog.arena(), BlobCipherMetrics::TLOG).first;
+			encrypt.mutation = expanded.encrypt(encrypt.cipherKeys, mLog.arena(), BlobCipherMetrics::TLOG);
 		}
 
 		applyChangeFeedMutation(
@@ -9528,9 +9524,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 							msg.updateEncryptCipherDetails(cipherDetails);
 							collectingCipherKeys = true;
 						} else {
-							auto payload = msg.decrypt(cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG);
-							msg = payload.first;
-							decryptionTime += payload.second;
+							double decryptionTimeV = 0;
+							msg = msg.decrypt(
+							    cipherKeys.get(), eager.arena, BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+							decryptionTime += decryptionTimeV;
 						}
 					}
 					// TraceEvent(SevDebug, "SSReadingLog", data->thisServerID).detail("Mutation", msg);
@@ -9686,9 +9683,10 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 					ASSERT(cipherKeys.present());
 					encryptedMutation.mutation = msg;
 					encryptedMutation.cipherKeys = msg.getCipherKeys(cipherKeys.get());
-					auto payload = msg.decrypt(encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG);
-					msg = payload.first;
-					decryptionTime += payload.second;
+					double decryptionTimeV = 0;
+					msg = msg.decrypt(
+					    encryptedMutation.cipherKeys, rd.arena(), BlobCipherMetrics::TLOG, nullptr, &decryptionTimeV);
+					decryptionTime += decryptionTimeV;
 				}
 
 				Span span("SS:update"_loc, spanContext);
@@ -9869,7 +9867,7 @@ ACTOR Future<Void> update(StorageServer* data, bool* pReceivedUpdate) {
 			data->behind = false;
 		}
 		const double duration = g_network->timer() - updateStart;
-		data->counters.encryptionUpdateLatencySample.addMeasurement(decryptionTime);
+		data->counters.updateEncryptionLatencySample.addMeasurement(decryptionTime);
 		data->counters.updateLatencySample.addMeasurement(duration);
 
 		return Void(); // update will get called again ASAP

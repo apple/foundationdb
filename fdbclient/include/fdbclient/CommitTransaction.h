@@ -178,9 +178,10 @@ struct MutationRef {
 		}
 	}
 
-	std::pair<MutationRef, double> encrypt(TextAndHeaderCipherKeys cipherKeys,
-	                                       Arena& arena,
-	                                       BlobCipherMetrics::UsageType usageType) const {
+	MutationRef encrypt(TextAndHeaderCipherKeys cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    double* encryptTime = nullptr) const {
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
@@ -196,13 +197,10 @@ struct MutationRef {
 
 		StringRef serializedHeader;
 		StringRef payload;
-		double encryptTime = 0;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef header;
-			auto encryptedData =
-			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena);
-			payload = encryptedData.first;
-			encryptTime = encryptedData.second;
+			payload =
+			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTime);
 			Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
 			arena.dependsOn(headerStr.arena());
 			serializedHeader = headerStr;
@@ -213,14 +211,14 @@ struct MutationRef {
 			payload =
 			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
 		}
-		return std::make_pair(MutationRef(Encrypted, serializedHeader, payload), encryptTime);
+		return MutationRef(Encrypted, serializedHeader, payload);
 	}
 
-	std::pair<MutationRef, double> encrypt(
-	    const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
-	    const EncryptCipherDomainId& domainId,
-	    Arena& arena,
-	    BlobCipherMetrics::UsageType usageType) const {
+	MutationRef encrypt(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
+	                    const EncryptCipherDomainId& domainId,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    double* encryptionTime = nullptr) const {
 		ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 		auto getCipherKey = [&](const EncryptCipherDomainId& domainId) {
 			auto iter = cipherKeys.find(domainId);
@@ -247,10 +245,11 @@ struct MutationRef {
 
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef header;
-			auto payload = cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena);
+			auto payload = cipher.encrypt(
+			    static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptionTime);
 			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
 			arena.dependsOn(serializedHeader.arena());
-			return std::make_pair(MutationRef(Encrypted, serializedHeader, payload.first), payload.second);
+			return MutationRef(Encrypted, serializedHeader, payload);
 		} else {
 			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
 			StringRef serializedHeader =
@@ -258,30 +257,28 @@ struct MutationRef {
 			StringRef payload =
 			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
 			// Non-configurable encryption does not support getting encryption CPU time
-			return std::make_pair(MutationRef(Encrypted, serializedHeader, payload), 0);
+			return MutationRef(Encrypted, serializedHeader, payload);
 		}
 	}
 
-	std::pair<MutationRef, double> encryptMetadata(
-	    const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
-	    Arena& arena,
-	    BlobCipherMetrics::UsageType usageType) const {
-		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType);
+	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
+	                            Arena& arena,
+	                            BlobCipherMetrics::UsageType usageType,
+	                            double* encryptionTime = nullptr) const {
+		return encrypt(cipherKeys, SYSTEM_KEYSPACE_ENCRYPT_DOMAIN_ID, arena, usageType, encryptionTime);
 	}
 
-	std::pair<MutationRef, double> decrypt(TextAndHeaderCipherKeys cipherKeys,
-	                                       Arena& arena,
-	                                       BlobCipherMetrics::UsageType usageType,
-	                                       StringRef* buf = nullptr) const {
+	MutationRef decrypt(TextAndHeaderCipherKeys cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    StringRef* buf = nullptr,
+	                    double* decryptTime = nullptr) const {
 		StringRef plaintext;
-		double decryptionTime = 0;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
 			DecryptBlobCipherAes256Ctr cipher(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
-			auto payload = cipher.decrypt(param2.begin(), param2.size(), header, arena);
-			plaintext = payload.first;
-			decryptionTime = payload.second;
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTime);
 		} else {
 			const BlobCipherEncryptHeader* header = encryptionHeader();
 			DecryptBlobCipherAes256Ctr cipher(
@@ -294,16 +291,16 @@ struct MutationRef {
 		ArenaReader reader(arena, plaintext, AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
 		MutationRef mutation;
 		reader >> mutation;
-		return std::make_pair(mutation, decryptionTime);
+		return mutation;
 	}
 
-	std::pair<MutationRef, double> decrypt(
-	    const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
-	    Arena& arena,
-	    BlobCipherMetrics::UsageType usageType,
-	    StringRef* buf = nullptr) const {
+	MutationRef decrypt(const std::unordered_map<BlobCipherDetails, Reference<BlobCipherKey>>& cipherKeys,
+	                    Arena& arena,
+	                    BlobCipherMetrics::UsageType usageType,
+	                    StringRef* buf = nullptr,
+	                    double* decryptTime = nullptr) const {
 		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
-		return decrypt(textAndHeaderKeys, arena, usageType, buf);
+		return decrypt(textAndHeaderKeys, arena, usageType, buf, decryptTime);
 	}
 
 	TextAndHeaderCipherKeys getCipherKeys(
@@ -403,9 +400,6 @@ struct CommitTransactionRef {
 	// mutations[i].encrypt(). Currently this field is not serialized so clients should NOT set this field during a
 	// usual commit path. It is currently only used during backup mutation log restores.
 	VectorRef<Optional<MutationRef>> encryptedMutations;
-	// If encryption is enabled this value represents the total time (in nanoseconds) that was spent on encryption in
-	// the commit proxy for a given CommitTransaction request
-	Optional<double> encryptionTime;
 	Version read_snapshot = 0;
 	bool report_conflicting_keys = false;
 	bool lock_aware = false; // set when metadata mutations are present

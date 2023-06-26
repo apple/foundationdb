@@ -218,7 +218,7 @@ static void blob_cipher_decrypt(benchmark::State& state) {
 		if (isInplace) {
 			decryptor.decryptInplace(&orgData[0], pageLen, headerRef);
 		} else {
-			StringRef decrypted = decryptor.decrypt(&orgData[0], pageLen, headerRef, arena).first;
+			StringRef decrypted = decryptor.decrypt(&orgData[0], pageLen, headerRef, arena);
 			memcpy(orgData, decrypted.begin(), pageLen);
 		}
 	}

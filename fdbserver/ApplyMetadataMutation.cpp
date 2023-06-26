@@ -194,7 +194,7 @@ private:
 			Arena arena;
 			CODE_PROBE(!forResolver, "encrypting metadata mutations");
 			CODE_PROBE(forResolver, "encrypting resolver mutations");
-			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG).first);
+			toCommit->writeTypedMessage(m.encryptMetadata(*cipherKeys, arena, BlobCipherMetrics::TLOG));
 		}
 	}
 
