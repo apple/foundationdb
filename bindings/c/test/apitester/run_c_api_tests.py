@@ -109,7 +109,7 @@ def run_tester(args, cluster, test_file):
         knob_name, knob_value = knob.split("=")
         cmd += ["--knob-" + knob_name, knob_value]
 
-    logger.info("\nRunning tester '%s'..." % " ".join(map(str, cmd)))
+    logger.info("Running tester '%s'..." % " ".join(map(str, cmd)))
     proc = Popen(cmd, stdout=sys.stdout, stderr=sys.stderr)
     timed_out = False
     ret_code = 1
@@ -128,7 +128,7 @@ def run_tester(args, cluster, test_file):
             reason = signal.Signals(-ret_code).name
         else:
             reason = "exit code: %d" % ret_code
-        logger.error("\n'%s' did not complete succesfully (%s)" % (cmd[0], reason))
+        logger.error("'%s' did not complete succesfully (%s)" % (cmd[0], reason))
         if log_dir is not None and not args.disable_log_dump:
             dump_client_logs(log_dir)
 

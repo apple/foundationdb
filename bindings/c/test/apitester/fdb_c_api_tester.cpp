@@ -260,7 +260,7 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 
 void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expectedError = error_code_success) {
 	if (e.code()) {
-		fmt::print(stderr, "{}, Error: {}({})\n", msg, e.code(), e.what());
+		Logger::error(fmt::format("{}, Error: {}({})", msg, e.code(), e.what()));
 		std::abort();
 	}
 }
@@ -332,7 +332,7 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 
 	for (auto knob : options.testSpec.knobs) {
-		fmt::print(stderr, "Setting knob {}={}\n", knob.first.c_str(), knob.second.c_str());
+		Logger::info(fmt::format("Setting knob {}={}", knob.first.c_str(), knob.second.c_str()));
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
 		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
 	}
@@ -392,8 +392,8 @@ bool runWorkloads(TesterOptions& options) {
 			// a deadlock.
 			int minClientThreads = maxSelfBlockingFutures + 1;
 			if (numClientThreads < minClientThreads) {
-				fmt::print(
-				    stderr, "WARNING: Adjusting minClientThreads from {} to {}\n", numClientThreads, minClientThreads);
+				Logger::warn(fmt::format(
+				    "WARNING: Adjusting minClientThreads from {} to {}", numClientThreads, minClientThreads));
 				numClientThreads = minClientThreads;
 			}
 		}
@@ -418,7 +418,7 @@ bool runWorkloads(TesterOptions& options) {
 		workloadMgr.run();
 		return !workloadMgr.failed();
 	} catch (const std::exception& err) {
-		fmt::print(stderr, "ERROR: {}\n", err.what());
+		Logger::error(fmt::format("ERROR: {}", err.what()));
 		return false;
 	}
 }
@@ -447,12 +447,12 @@ int main(int argc, char** argv) {
 			retCode = 1;
 		}
 
-		fprintf(stderr, "Stopping FDB network thread\n");
+		Logger::info("Stopping FDB network thread");
 		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
-		fprintf(stderr, "FDB network thread successfully stopped\n");
+		Logger::info("FDB network thread successfully stopped");
 	} catch (const std::exception& err) {
-		fmt::print(stderr, "ERROR: {}\n", err.what());
+		Logger::error(fmt::format("ERROR: {}", err.what()));
 		retCode = 1;
 	}
 	return retCode;

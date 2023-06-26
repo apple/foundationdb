@@ -165,14 +165,14 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 }
 
 void WorkloadBase::info(const std::string& msg) {
-	fmt::print(stderr, "[{}] {}\n", workloadId, msg);
+	Logger::info(fmt::format("{}: {}", workloadId, msg));
 }
 
 void WorkloadBase::error(const std::string& msg) {
-	fmt::print(stderr, "[{}] ERROR: {}\n", workloadId, msg);
+	Logger::error(fmt::format("{}: {}", workloadId, msg));
 	numErrors++;
 	if (numErrors > maxErrors && !failed) {
-		fmt::print(stderr, "[{}] ERROR: Stopping workload after {} errors\n", workloadId, numErrors);
+		Logger::error(fmt::format("{}: Stopping workload after {} errors", workloadId, numErrors));
 		failed = true;
 	}
 }
@@ -198,7 +198,7 @@ void WorkloadBase::confirmProgress() {
 void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 	std::unique_lock<std::mutex> lock(mutex);
 	workloads[workload.get()] = WorkloadInfo{ workload, cont, workload->getControlIfc(), false };
-	fmt::print(stderr, "Workload {} added\n", workload->getWorkloadId());
+	Logger::info(fmt::format("Workload {} added", workload->getWorkloadId()));
 }
 
 void WorkloadManager::run() {
@@ -224,9 +224,9 @@ void WorkloadManager::run() {
 		outputPipe.close();
 	}
 	if (failed()) {
-		fmt::print(stderr, "{} workloads failed\n", numWorkloadsFailed);
+		Logger::error(fmt::format("{} workloads failed", numWorkloadsFailed));
 	} else {
-		fprintf(stderr, "All workloads succesfully completed\n");
+		Logger::info("All workloads succesfully completed");
 	}
 }
 
@@ -256,13 +256,13 @@ void WorkloadManager::openControlPipes(const std::string& inputPipeName, const s
 		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
 	}
 	if (!outputPipeName.empty()) {
-		fmt::print(stderr, "Opening pipe {} for writing\n", outputPipeName);
+		Logger::info(fmt::format("Opening pipe {} for writing", outputPipeName));
 		outputPipe.open(outputPipeName, std::ofstream::out);
 	}
 }
 
 void WorkloadManager::readControlInput(std::string pipeName) {
-	fmt::print(stderr, "Opening pipe {} for reading\n", pipeName);
+	Logger::info(fmt::format("Opening pipe {} for reading", pipeName));
 	// Open in binary mode and read char-by-char to avoid
 	// any kind of buffering
 	FILE* f = fopen(pipeName.c_str(), "rb");
@@ -280,7 +280,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 		if (line.empty()) {
 			continue;
 		}
-		fmt::print(stderr, "Received {} command\n", line);
+		Logger::info(fmt::format("Received {} command", line));
 		if (line == "STOP") {
 			handleStopCommand();
 		} else if (line == "CHECK") {

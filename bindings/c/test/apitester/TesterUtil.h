@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <string_view>
 #ifndef APITESTER_UTIL_H
 #define APITESTER_UTIL_H
 
@@ -84,6 +85,27 @@ public:
 	bool randomBool(double trueRatio);
 
 	std::mt19937 random;
+};
+
+class Logger {
+public:
+	static Logger& get();
+
+	enum class Level { ERROR, WARN, INFO, DEBUG };
+
+	void setLevel(Level lvl) { level = lvl; }
+
+	static void error(std::string_view msg) { get().logMessage(Level::ERROR, msg); }
+	static void warn(std::string_view msg) { get().logMessage(Level::WARN, msg); }
+	static void info(std::string_view msg) { get().logMessage(Level::INFO, msg); }
+	static void debug(std::string_view msg) { get().logMessage(Level::DEBUG, msg); }
+
+private:
+	Logger() : level(Level::INFO) {}
+
+	void logMessage(Level lvl, std::string_view msg);
+
+	Level level;
 };
 
 class TesterError : public std::runtime_error {
