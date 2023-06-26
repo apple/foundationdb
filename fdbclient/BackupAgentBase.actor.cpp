@@ -715,7 +715,8 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 int* mutationSize,
                                                 PromiseStream<Future<Void>> addActor,
                                                 FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit) {
+                                                PublicRequestStream<CommitTransactionRequest> commit,
+                                                bool tenantMapChanging) {
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -737,7 +738,14 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
-	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
+	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
+	if (tenantMapChanging) {
+		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
+		// Next muations need the updated tenant map for filtering.
+		wait(commitAndUnlock);
+	} else {
+		addActor.send(commitAndUnlock);
+	}
 	return Void();
 }
 
@@ -814,7 +822,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					                                  &mutationSize,
 					                                  addActor,
 					                                  commitLock,
-					                                  commit));
+					                                  commit,
+					                                  false));
 					req = CommitTransactionRequest();
 					mutationSize = 0;
 				}
@@ -857,7 +866,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 		                                  &mutationSize,
 		                                  addActor,
 		                                  commitLock,
-		                                  commit));
+		                                  commit,
+		                                  tenantMapChanging));
 		if (endOfStream) {
 			return totalBytes;
 		}
