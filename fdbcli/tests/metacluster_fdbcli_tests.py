@@ -479,9 +479,6 @@ def usecluster_test(logger, cluster_files):
         max_tenant_groups_per_cluster,
     )
 
-    _, output, err = usecluster(cluster_files[0], management_cluster_name)
-    assert output == "Using the current cluster, no changes made."
-
     _, output, err = usecluster(cluster_files[1], data_cluster_names[1])
     assert err == "ERROR: Please first connect to a management cluster"
 
@@ -491,7 +488,7 @@ def usecluster_test(logger, cluster_files):
         "metacluster status;",
         "usecluster {};".format(data_cluster_names[1]),
         "metacluster status;",
-        "usecluster {};".format(management_cluster_name),
+        "usemanagementcluster;",
         "metacluster status",
     ]
     rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
@@ -512,9 +509,7 @@ def usecluster_test(logger, cluster_files):
     ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
         data_cluster_names[1], management_cluster_name
     )
-    assert lines[9] == "cluster changed to {}, tenant reset to default.".format(
-        management_cluster_name
-    )
+    assert lines[9] == "Using management cluster, tenant reset to default."
     expected = """
   number of data clusters: {}
   tenant group capacity: {}
@@ -536,7 +531,7 @@ def usecluster_test(logger, cluster_files):
     setup_tenants(cluster_files[0], tenants)
 
     subcmds = [
-        "usecluster {};".format(management_cluster_name),
+        "usemanagementcluster;",
         "usetenant {}".format("tenant1"),
     ]
     _, _, err = run_fdbcli_command(cluster_files[0], *subcmds)
@@ -607,9 +602,7 @@ def usemanagementcluster_test(logger, cluster_files):
     rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
     lines = output.split("\n")
     logger.debug(output)
-    assert lines[5] == "Using management cluster {}, tenant reset to default.".format(
-        management_cluster_name
-    )
+    assert lines[5] == "Using management cluster, tenant reset to default."
     expected = """
   number of data clusters: {}
   tenant group capacity: {}

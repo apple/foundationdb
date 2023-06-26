@@ -618,10 +618,10 @@ void initHelp() {
 	                "transaction started with `begin' is open.");
 	helpMap["usecluster"] =
 	    CommandHelp("usecluster <NAME>",
-	                "opens connections to a cluster in the metacluster",
+	                "opens connections to a data cluster in the metacluster",
 	                "User must first connect to a management cluster in order to use this command. "
-	                "This command opens connections to a cluster by cluster name. "
-	                "When a cluster is chosen, any commands run in that fdbcli would be sent directly to that cluster, "
+	                "This command opens connections to a data cluster by cluster name. "
+	                "When a data cluster is chosen, any commands run in that fdbcli would be sent directly to that cluster, "
 	                "possibly with the exception of certain metacluster commands.");
 	helpMap["usemanagementcluster"] =
 	    CommandHelp("usemanagementcluster",
@@ -753,19 +753,15 @@ ACTOR Future<std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool
 	}
 
 	ASSERT(mgmtDatabase.present());
-	if (tokencmp(newClusterNameStr, mgmtDatabase->clusterName.toString().c_str())) {
-		currentDatabase = mgmtDatabase.get();
-	} else {
-		metacluster::DataClusterMetadata clusterMetadata =
-		    wait(metacluster::getCluster(mgmtDatabase->db, newClusterNameStr));
-		ClusterConnectionString connectionString = clusterMetadata.connectionString;
-		Reference<IClusterConnectionRecord> connectionRecord =
-		    makeReference<ClusterConnectionMemoryRecord>(connectionString);
-		currentDatabase.localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
-		currentDatabase.db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-		currentDatabase.configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
-		currentDatabase.configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
-	}
+	metacluster::DataClusterMetadata clusterMetadata =
+		wait(metacluster::getCluster(mgmtDatabase->db, newClusterNameStr));
+	ClusterConnectionString connectionString = clusterMetadata.connectionString;
+	Reference<IClusterConnectionRecord> connectionRecord =
+		makeReference<ClusterConnectionMemoryRecord>(connectionString);
+	currentDatabase.localDb = Database::createDatabase(connectionRecord, apiVersion, IsInternal::False);
+	currentDatabase.db = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+	currentDatabase.configDb = API->createDatabaseFromConnectionString(connectionString.toString().c_str());
+	currentDatabase.configDb->setOption(FDBDatabaseOptions::USE_CONFIG_DATABASE);
 	return std::make_tuple(currentDatabase, mgmtDatabase, true);
 }
 
@@ -2316,8 +2312,7 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							tenant = Reference<ITenant>();
 							tenantName = Optional<Standalone<StringRef>>();
 							tenantEntry = Optional<TenantMapEntry>();
-							fmt::print("Using management cluster {}, tenant reset to default.\n",
-							           mgmtDatabase->clusterName);
+							fmt::print("Using management cluster, tenant reset to default.\n");
 						}
 					}
 					continue;
