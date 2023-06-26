@@ -54,13 +54,9 @@ struct DatabaseConnections {
 	Database localDb;
 	Reference<IDatabase> db;
 	Reference<IDatabase> configDb;
-	ClusterName clusterName;
 	DatabaseConnections() = default;
-	DatabaseConnections(Database localDb,
-	                    Reference<IDatabase> db,
-	                    Reference<IDatabase> configDb,
-	                    ClusterName clusterName)
-	  : localDb(localDb), db(db), configDb(configDb), clusterName(clusterName) {}
+	DatabaseConnections(Database localDb, Reference<IDatabase> db, Reference<IDatabase> configDb)
+	  : localDb(localDb), db(db), configDb(configDb) {}
 };
 
 struct CommandHelp {

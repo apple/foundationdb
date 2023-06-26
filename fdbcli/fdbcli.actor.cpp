@@ -736,15 +736,16 @@ Future<T> makeInterruptable(Future<T> f) {
 
 ACTOR Future<std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool>> useClusterCommand(
     DatabaseConnections currentDatabase,
-    ClusterType clusterType,
+    ClusterName currentClusterName,
+    ClusterType currentClusterType,
     Optional<DatabaseConnections> mgmtDatabase,
     StringRef newClusterNameStr,
     int apiVersion) {
 
-	ASSERT(!tokencmp(newClusterNameStr, currentDatabase.clusterName.toString().c_str()));
+	ASSERT(!tokencmp(newClusterNameStr, currentClusterName.toString().c_str()));
 
 	if (!mgmtDatabase.present()) {
-		if (clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+		if (currentClusterType != ClusterType::METACLUSTER_MANAGEMENT) {
 			fprintf(stderr, "ERROR: Please first connect to a management cluster\n");
 			return std::make_tuple(currentDatabase, mgmtDatabase, false);
 		} else {
@@ -2253,11 +2254,14 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
 							is_error = true;
 						} else {
-							state DatabaseConnections currentDatabase =
-							    DatabaseConnections(localDb, db, configDb, clusterName);
+							state DatabaseConnections currentDatabase = DatabaseConnections(localDb, db, configDb);
 							std::tuple<DatabaseConnections, Optional<DatabaseConnections>, bool> _result =
-							    wait(makeInterruptable(useClusterCommand(
-							        currentDatabase, clusterType, mgmtDatabase, newClusterNameStr, opt.apiVersion)));
+							    wait(makeInterruptable(useClusterCommand(currentDatabase,
+							                                             clusterName,
+							                                             clusterType,
+							                                             mgmtDatabase,
+							                                             newClusterNameStr,
+							                                             opt.apiVersion)));
 							if (!std::get<2>(_result))
 								is_error = true;
 							else {
@@ -2281,26 +2285,23 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						printUsage(tokens[0]);
 						is_error = true;
 					} else {
-						Optional<MetaclusterRegistrationEntry> registrationEntry =
-						    wait(metacluster::metadata::metaclusterRegistration().get(db));
-						if (!registrationEntry.present()) {
-							fprintf(stderr, "ERROR: This cluster is not part of a metacluster\n");
-							is_error = true;
-							continue;
-						}
-						ASSERT(registrationEntry.present());
-						ClusterName clusterName = registrationEntry->name;
+						ClusterType clusterType = localDb->clientInfo->get().clusterType;
 						if (!mgmtDatabase.present()) {
-							if (registrationEntry->clusterType != ClusterType::METACLUSTER_MANAGEMENT) {
+							if (clusterType == ClusterType::STANDALONE) {
+								fprintf(stderr, "ERROR: This cluster is not part of a metacluster\n");
+								is_error = true;
+							} else if (clusterType == ClusterType::METACLUSTER_DATA) {
 								fprintf(stderr, "ERROR: No management cluster information\n");
 								is_error = true;
-								continue;
 							} else {
-								mgmtDatabase = DatabaseConnections(localDb, db, configDb, registrationEntry->name);
+								ASSERT(clusterType == ClusterType::METACLUSTER_MANAGEMENT);
+								mgmtDatabase = DatabaseConnections(localDb, db, configDb);
+								fmt::print("Using the current cluster, no changes made.\n");
 							}
+							continue;
 						}
 						ASSERT(mgmtDatabase.present());
-						if (tokencmp(mgmtDatabase->clusterName, registrationEntry->name.toString().c_str())) {
+						if (clusterType == ClusterType::METACLUSTER_MANAGEMENT) {
 							fmt::print("Using the current cluster, no changes made.\n");
 						} else if (intrans) {
 							fprintf(stderr, "ERROR: Cluster cannot be changed while a transaction is open\n");
