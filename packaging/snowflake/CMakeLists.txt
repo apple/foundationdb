@@ -17,3 +17,4 @@ add_custom_command(OUTPUT ${xp_tarball_name}
   COMMENT "Creating FDB dependency tarball for XP")
 
 add_custom_target(package_xp_tarball DEPENDS ${xp_tarball_name})
+add_dependencies(packages package_xp_tarball)
