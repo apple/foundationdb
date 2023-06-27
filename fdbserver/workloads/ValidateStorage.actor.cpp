@@ -280,6 +280,9 @@ struct ValidateStorage : TestWorkload {
 		wait(self->testAuditStorageWhenDDDisabled(self, cx));
 		TraceEvent("TestAuditStorageWhenDDDisabledDone");
 
+		wait(self->testAuditStorageWhenDDReenabled(self, cx));
+		TraceEvent("TestAuditStorageWhenDDReenabledDone");
+
 		return Void();
 	}
 
@@ -425,16 +428,16 @@ struct ValidateStorage : TestWorkload {
 	ACTOR Future<Void> testAuditStorageFunctionality(ValidateStorage* self, Database cx) {
 		UID auditIdA =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityHADone");
+		TraceEvent("TestFunctionalityHADone", auditIdA);
 		UID auditIdB =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityReplicaDone");
+		TraceEvent("TestFunctionalityReplicaDone", auditIdB);
 		UID auditIdC = wait(
 		    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalityShardLocationMetadataDone");
+		TraceEvent("TestFunctionalityShardLocationMetadataDone", auditIdC);
 		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageFunctionality"));
-		TraceEvent("TestFunctionalitySSShardInfoDone");
+		TraceEvent("TestFunctionalitySSShardInfoDone", auditIdD);
 		return Void();
 	}
 
@@ -613,32 +616,36 @@ struct ValidateStorage : TestWorkload {
 		int _ = wait(setDDMode(cx, 0));
 		UID auditIdA =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDDisabled"));
-		TraceEvent("TestFunctionalityHADoneWhenDDDisabled");
+		TraceEvent("TestFunctionalityHADoneWhenDDDisabled", auditIdA);
 		UID auditIdB =
 		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDDisabled"));
-		TraceEvent("TestFunctionalityReplicaDoneWhenDDDisabled");
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDDisabled", auditIdB);
 		UID auditIdC = wait(
 		    self->auditStorageForType(self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDDisabled"));
-		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDDisabled");
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDDisabled", auditIdC);
 		UID auditIdD = wait(self->auditStorageForType(
 		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDDisabled"));
-		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDDisabled");
-
-		int _ = wait(setDDMode(cx, 1));
-		UID auditIdE =
-		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDReenabled"));
-		TraceEvent("TestFunctionalityHADoneWhenDDReenabled");
-		UID auditIdF =
-		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDReenabled"));
-		TraceEvent("TestFunctionalityReplicaDoneWhenDDReenabled");
-		UID auditIdG = wait(self->auditStorageForType(
-		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDReenabled"));
-		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDReenabled");
-		UID auditIdH = wait(self->auditStorageForType(
-		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDReenabled"));
-		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDReenabled");
-
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDDisabled", auditIdD);
 		TraceEvent("TestAuditStorageWhenDDDisabledEnd");
+		return Void();
+	}
+
+	ACTOR Future<Void> testAuditStorageWhenDDReenabled(ValidateStorage* self, Database cx) {
+		TraceEvent("TestAuditStorageWhenDDReenabledBegin");
+		int _ = wait(setDDMode(cx, 1));
+		UID auditIdA =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateHA, "TestAuditStorageWhenDDReenabled"));
+		TraceEvent("TestFunctionalityHADoneWhenDDReenabled", auditIdA);
+		UID auditIdB =
+		    wait(self->auditStorageForType(self, cx, AuditType::ValidateReplica, "TestAuditStorageWhenDDReenabled"));
+		TraceEvent("TestFunctionalityReplicaDoneWhenDDReenabled", auditIdB);
+		UID auditIdC = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateLocationMetadata, "TestAuditStorageWhenDDReenabled"));
+		TraceEvent("TestFunctionalityShardLocationMetadataDoneWhenDDReenabled", auditIdC);
+		UID auditIdD = wait(self->auditStorageForType(
+		    self, cx, AuditType::ValidateStorageServerShard, "TestAuditStorageWhenDDReenabled"));
+		TraceEvent("TestFunctionalitySSShardInfoDoneWhenDDReenabled", auditIdD);
+		TraceEvent("TestAuditStorageWhenDDReenabledEnd");
 		return Void();
 	}
 
