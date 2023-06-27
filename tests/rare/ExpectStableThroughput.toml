@@ -10,7 +10,7 @@ testTitle='ExpectStableThroughput'
   testName='ThroughputQuota'
   nameRepresentsTenantGroup=false
   name='testTag'
-  totalQuota=409600
+  totalQuotaInPages=100
 
   [[test.workload]]
   testName='ExpectStableThroughput'
