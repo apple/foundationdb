@@ -1271,7 +1271,7 @@ struct ContinuousMetric final : NonCopyable,
                                 MetricUtil<ContinuousMetric<T>, T>,
                                 BaseMetric {
 	// Needed for MetricUtil
-	static const StringRef metricType;
+	static inline const StringRef metricType = "INVALID"_sr;
 
 private:
 	EventField<TimeAndValue<T>> field;

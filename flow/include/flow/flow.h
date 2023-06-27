@@ -955,8 +955,8 @@ public:
 			rhs.sav = nullptr;
 		}
 	}
-	bool operator==(const Future& rhs) { return rhs.sav == sav; }
-	bool operator!=(const Future& rhs) { return rhs.sav != sav; }
+	bool operator==(const Future& rhs) const { return rhs.sav == sav; }
+	bool operator!=(const Future& rhs) const { return rhs.sav != sav; }
 
 	void cancel() {
 		if (sav)

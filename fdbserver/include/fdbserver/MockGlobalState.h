@@ -63,7 +63,7 @@ inline bool isStatusTransitionValid(MockShardStatus from, MockShardStatus to) {
 }
 
 class MockStorageServerImpl;
-class MockStorageServer : public IStorageMetricsService, public ReferenceCounted<MockStorageServer> {
+class MockStorageServer final : public IStorageMetricsService, public ReferenceCounted<MockStorageServer> {
 	friend struct MockGlobalStateTester;
 	friend class MockStorageServerImpl;
 
@@ -245,7 +245,7 @@ struct Process : public TopologyObject {
 };
 } // namespace mock
 
-class MockGlobalState : public IKeyLocationService {
+class MockGlobalState final : public IKeyLocationService {
 	friend struct MockGlobalStateTester;
 	friend class MockGlobalStateImpl;
 

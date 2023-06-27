@@ -333,13 +333,13 @@ struct ProxyCommitData {
 	    stats(dbgid, &version, &committedVersion, &commitBatchesMemBytesCount, &tenantMap), master(master),
 	    logAdapter(nullptr), txnStateStore(nullptr), committedVersion(recoveryTransactionVersion),
 	    minKnownCommittedVersion(0), version(0), lastVersionTime(0), commitVersionRequestNumber(1),
-	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), encryptMode(encryptMode), provisional(provisional),
-	    lastCoalesceTime(0), locked(false), commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN),
+	    mostRecentProcessedRequestNumber(0), firstProxy(firstProxy), lastCoalesceTime(0), locked(false),
+	    commitBatchInterval(SERVER_KNOBS->COMMIT_TRANSACTION_BATCH_INTERVAL_MIN), provisional(provisional),
 	    localCommitBatchesStarted(0), getConsistentReadVersion(getConsistentReadVersion), commit(commit),
 	    cx(openDBOnServer(db, TaskPriority::DefaultEndpoint, LockAware::True)), db(db),
 	    singleKeyMutationEvent("SingleKeyMutation"_sr), lastTxsPop(0), popRemoteTxs(false), lastStartCommit(0),
 	    lastCommitLatency(SERVER_KNOBS->REQUIRED_MIN_RECOVERY_DURATION), lastCommitTime(0), lastMasterReset(now()),
-	    lastResolverReset(now()) {
+	    lastResolverReset(now()), encryptMode(encryptMode) {
 		commitComputePerOperation.resize(SERVER_KNOBS->PROXY_COMPUTE_BUCKETS, 0.0);
 	}
 };
