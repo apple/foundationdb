@@ -26,42 +26,6 @@
 
 #include "flow/actorcompiler.h" // has to be last include
 
-void TagSet::addTag(TransactionTagRef tag) {
-	ASSERT(CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH < 256); // Tag length is encoded with a single byte
-	ASSERT(CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION < 256); // Number of tags is encoded with a single byte
-
-	if (tag.size() > CLIENT_KNOBS->MAX_TRANSACTION_TAG_LENGTH) {
-		throw tag_too_long();
-	}
-	if (tags.size() >= CLIENT_KNOBS->MAX_TAGS_PER_TRANSACTION) {
-		throw too_many_tags();
-	}
-
-	TransactionTagRef tagRef(arena, tag);
-	auto it = find(tags.begin(), tags.end(), tagRef);
-	if (it == tags.end()) {
-		tags.push_back(std::move(tagRef));
-		bytes += tag.size();
-	}
-}
-
-size_t TagSet::size() const {
-	return tags.size();
-}
-
-std::string TagSet::toString(Capitalize capitalize) const {
-	ASSERT(!tags.empty());
-	if (tags.size() == 1) {
-		std::string start = capitalize ? "Tag" : "tag";
-		return format("%s `%s'", start.c_str(), tags[0].toString().c_str());
-	}
-	std::string result = capitalize ? "Tags (" : "tags (";
-	for (int index = 0; index < tags.size() - 1; ++index) {
-		result += format("`%s', ", tags[index].toString().c_str());
-	}
-	return result + format("`%s')", tags.back().toString().c_str());
-}
-
 KeyRangeRef const tagQuotaKeys = KeyRangeRef("\xff/tagQuota/"_sr, "\xff/tagQuota0"_sr);
 KeyRef const tagQuotaPrefix = tagQuotaKeys.begin;
 
@@ -100,24 +64,4 @@ ThrottleApi::ThroughputQuotaValue ThrottleApi::ThroughputQuotaValue::unpack(Tupl
 
 bool ThrottleApi::ThroughputQuotaValue::operator==(ThrottleApi::ThroughputQuotaValue const& rhs) const {
 	return reservedQuota == rhs.reservedQuota && totalQuota == rhs.totalQuota;
-}
-
-TEST_CASE("TagSet/toString") {
-	{
-		TagSet tagSet;
-		tagSet.addTag("a"_sr);
-		ASSERT(tagSet.toString() == "tag `a'");
-		ASSERT(tagSet.toString(Capitalize::True) == "Tag `a'");
-	}
-	{
-		// Order is not guaranteed when multiple tags are present
-		TagSet tagSet;
-		tagSet.addTag("a"_sr);
-		tagSet.addTag("b"_sr);
-		auto tagString = tagSet.toString();
-		ASSERT(tagString == "tags (`a', `b')" || tagString == "tags (`b', `a')");
-		auto capitalizedTagString = tagSet.toString(Capitalize::True);
-		ASSERT(capitalizedTagString == "Tags (`a', `b')" || capitalizedTagString == "Tags (`b', `a')");
-	}
-	return Void();
 }
