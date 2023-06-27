@@ -36,6 +36,7 @@
 #include "flow/BooleanParam.h"
 
 #include "metacluster/Metacluster.h"
+#include "metacluster/MetaclusterMetadata.h"
 #include "metacluster/MetaclusterUtil.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -49,7 +50,8 @@ public:
 		std::map<ClusterName, DataClusterMetadata> dataClusters;
 		KeyBackedRangeResult<std::pair<ClusterName, int64_t>> clusterTenantCounts;
 		KeyBackedRangeResult<UID> registrationTombstones;
-		KeyBackedRangeResult<std::pair<ClusterName, UID>> activeRestoreIds;
+		KeyBackedRangeResult<std::pair<ClusterName, metadata::RestoreId>> activeRestoreIds;
+		Optional<Versionstamp> maxRestoreId;
 
 		std::map<ClusterName, int64_t> clusterAllocatedMap;
 		std::map<ClusterName, std::set<int64_t>> clusterTenantMap;
@@ -65,6 +67,7 @@ public:
 			ASSERT(clusterTenantCounts == other.clusterTenantCounts);
 			ASSERT(registrationTombstones == other.registrationTombstones);
 			ASSERT(activeRestoreIds == other.activeRestoreIds);
+			ASSERT(maxRestoreId == other.maxRestoreId);
 			ASSERT(clusterAllocatedMap == other.clusterAllocatedMap);
 			ASSERT(clusterTenantMap == other.clusterTenantMap);
 			ASSERT(clusterTenantGroupMap == other.clusterTenantGroupMap);
@@ -76,9 +79,10 @@ public:
 			return metaclusterRegistration == other.metaclusterRegistration && dataClusters == other.dataClusters &&
 			       clusterTenantCounts == other.clusterTenantCounts &&
 			       registrationTombstones == other.registrationTombstones &&
-			       activeRestoreIds == other.activeRestoreIds && clusterAllocatedMap == other.clusterAllocatedMap &&
-			       clusterTenantMap == other.clusterTenantMap && clusterTenantGroupMap == other.clusterTenantGroupMap &&
-			       tenantIdPrefix == other.tenantIdPrefix && tenantData == other.tenantData;
+			       activeRestoreIds == other.activeRestoreIds && maxRestoreId == other.maxRestoreId &&
+			       clusterAllocatedMap == other.clusterAllocatedMap && clusterTenantMap == other.clusterTenantMap &&
+			       clusterTenantGroupMap == other.clusterTenantGroupMap && tenantIdPrefix == other.tenantIdPrefix &&
+			       tenantData == other.tenantData;
 		}
 
 		bool operator!=(ManagementClusterData const& other) const { return !(*this == other); }
@@ -86,16 +90,25 @@ public:
 
 	struct DataClusterData {
 		Optional<MetaclusterRegistrationEntry> metaclusterRegistration;
+		KeyBackedRangeResult<UID> registrationTombstones;
+		KeyBackedRangeResult<std::pair<ClusterName, metadata::RestoreId>> activeRestoreIds;
+		Optional<Versionstamp> maxRestoreId;
 		TenantData<DB, StandardTenantTypes> tenantData;
 
 		// Similar to operator==, but useful in assertions for identifying which member is different
 		void assertEquals(DataClusterData const& other) const {
 			ASSERT(metaclusterRegistration == other.metaclusterRegistration);
+			ASSERT(registrationTombstones == other.registrationTombstones);
+			ASSERT(activeRestoreIds == other.activeRestoreIds);
+			ASSERT(maxRestoreId == other.maxRestoreId);
 			tenantData.assertEquals(other.tenantData);
 		}
 
 		bool operator==(DataClusterData const& other) const {
-			return metaclusterRegistration == other.metaclusterRegistration;
+			return metaclusterRegistration == other.metaclusterRegistration &&
+			       registrationTombstones == other.registrationTombstones &&
+			       activeRestoreIds == other.activeRestoreIds && maxRestoreId == other.maxRestoreId &&
+			       tenantData == other.tenantData;
 		}
 
 		bool operator!=(DataClusterData const& other) const { return !(*this == other); }
@@ -138,6 +151,7 @@ private:
 				     store(self->managementMetadata.activeRestoreIds,
 				           metadata::activeRestoreIds().getRange(
 				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+				     store(self->managementMetadata.maxRestoreId, metadata::maxRestoreId().get(managementTr)) &&
 				     store(clusterCapacityTuples,
 				           metadata::management::clusterCapacityIndex().getRange(
 				               managementTr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
@@ -209,9 +223,15 @@ private:
 				loop {
 					try {
 						tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-						wait(store(clusterItr.first->second.metaclusterRegistration,
-						           metadata::metaclusterRegistration().get(tr)) &&
-						     clusterItr.first->second.tenantData.load(tr));
+						wait(
+						    store(clusterItr.first->second.metaclusterRegistration,
+						          metadata::metaclusterRegistration().get(tr)) &&
+						    store(clusterItr.first->second.registrationTombstones,
+						          metadata::registrationTombstones().getRange(tr, {}, {}, CLIENT_KNOBS->TOO_MANY)) &&
+						    store(clusterItr.first->second.activeRestoreIds,
+						          metadata::activeRestoreIds().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_DATA_CLUSTERS)) &&
+						    store(clusterItr.first->second.maxRestoreId, metadata::maxRestoreId().get(tr)) &&
+						    clusterItr.first->second.tenantData.load(tr));
 
 						break;
 					} catch (Error& e) {

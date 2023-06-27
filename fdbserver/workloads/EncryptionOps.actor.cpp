@@ -512,7 +512,7 @@ struct EncryptionOpsWorkload : TestWorkload {
 				// decrypt
 				doDecryption(encrypted, dataLen, header, buff.get(), cipherKey, tmpArena);
 
-				if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
+				{
 					BlobCipherEncryptHeaderRef headerRef;
 					StringRef encrypted = doEncryption(
 					    cipherKey, headerCipherKey, buff.get(), dataLen, authMode, authAlgo, &headerRef, tmpArena);

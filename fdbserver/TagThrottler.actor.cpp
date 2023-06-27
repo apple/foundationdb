@@ -100,15 +100,19 @@ class TagThrottlerImpl {
 						if (tagValue.expirationTime > now()) {
 							TransactionTag tag = *tagKey.tags.begin();
 							Optional<ClientTagThrottleLimits> oldLimits =
-							    self->throttledTags.getManualTagThrottleLimits(tag, tagKey.priority);
+							    self->throttledTags.getManualTagThrottleLimits(ThrottlingId::fromTag(tag),
+							                                                   tagKey.priority);
 
 							if (tagKey.throttleType == TagThrottleType::AUTO) {
-								updatedTagThrottles.autoThrottleTag(
-								    self->id, tag, 0, tagValue.tpsRate, tagValue.expirationTime);
+								updatedTagThrottles.autoThrottleTag(self->id,
+								                                    ThrottlingIdRef::fromTag(tag),
+								                                    0,
+								                                    tagValue.tpsRate,
+								                                    tagValue.expirationTime);
 								updatedTagThrottles.incrementBusyTagCount(tagValue.reason);
 							} else {
 								updatedTagThrottles.manualThrottleTag(self->id,
-								                                      tag,
+								                                      ThrottlingIdRef::fromTag(tag),
 								                                      tagKey.priority,
 								                                      tagValue.tpsRate,
 								                                      tagValue.expirationTime,
@@ -136,16 +140,16 @@ class TagThrottlerImpl {
 		}
 	}
 
-	Future<Void> tryUpdateAutoThrottling(TransactionTag tag, double rate, double busyness, TagThrottledReason reason) {
+	Future<Void> tryUpdateAutoThrottling(ThrottlingId tag, double rate, double busyness, TagThrottledReason reason) {
 		// NOTE: before the comparison with MIN_TAG_COST, the busiest tag rate also compares with MIN_TAG_PAGES_RATE
 		// currently MIN_TAG_PAGES_RATE > MIN_TAG_COST in our default knobs.
 		if (busyness > SERVER_KNOBS->AUTO_THROTTLE_TARGET_TAG_BUSYNESS && rate > SERVER_KNOBS->MIN_TAG_COST) {
 			CODE_PROBE(true, "Transaction tag auto-throttled");
 			Optional<double> clientRate = throttledTags.autoThrottleTag(id, tag, busyness);
 			// TODO: Increment tag throttle counts here?
-			if (clientRate.present()) {
+			if (clientRate.present() && tag.isTag()) {
 				TagSet tags;
-				tags.addTag(tag);
+				tags.addTag(tag.getTag());
 
 				Reference<DatabaseContext> dbRef = Reference<DatabaseContext>::addRef(db.getPtr());
 				return ThrottleApi::throttleTags(dbRef,
@@ -168,14 +172,14 @@ public:
 	}
 	Future<Void> monitorThrottlingChanges() { return monitorThrottlingChanges(this); }
 
-	void addRequests(TransactionTag tag, int count) { throttledTags.addRequests(tag, count); }
+	void addRequests(ThrottlingId tag, int count) { throttledTags.addRequests(tag, count); }
 	uint64_t getThrottledTagChangeId() const { return throttledTagChangeId; }
-	PrioritizedTransactionTagMap<ClientTagThrottleLimits> getClientRates() {
+	PrioritizedThrottlingIdMap<ClientTagThrottleLimits> getClientRates() {
 		return throttledTags.getClientRates(autoThrottlingEnabled);
 	}
 	int64_t autoThrottleCount() const { return throttledTags.autoThrottleCount(); }
-	uint32_t busyReadTagCount() const { return throttledTags.getBusyReadTagCount(); }
-	uint32_t busyWriteTagCount() const { return throttledTags.getBusyWriteTagCount(); }
+	uint32_t busyReadersCount() const { return throttledTags.getBusyReadTagCount(); }
+	uint32_t busyWritersCount() const { return throttledTags.getBusyWriteTagCount(); }
 	int64_t manualThrottleCount() const { return throttledTags.manualThrottleCount(); }
 	bool isAutoThrottlingEnabled() const { return autoThrottlingEnabled; }
 
@@ -188,15 +192,17 @@ public:
 		std::vector<Future<Void>> futures;
 		if (storageQueue > SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES ||
 		    storageDurabilityLag > SERVER_KNOBS->AUTO_TAG_THROTTLE_DURABILITY_LAG_VERSIONS) {
-			for (const auto& busyWriteTag : ss.busiestWriteTags) {
-				futures.push_back(tryUpdateAutoThrottling(busyWriteTag.tag,
-				                                          busyWriteTag.rate,
-				                                          busyWriteTag.fractionalBusyness,
+			for (const auto& busyWriter : ss.busiestWriters) {
+				futures.push_back(tryUpdateAutoThrottling(busyWriter.throttlingId,
+				                                          busyWriter.rate,
+				                                          busyWriter.fractionalBusyness,
 				                                          TagThrottledReason::BUSY_WRITE));
 			}
-			for (const auto& busyReadTag : ss.busiestReadTags) {
-				futures.push_back(tryUpdateAutoThrottling(
-				    busyReadTag.tag, busyReadTag.rate, busyReadTag.fractionalBusyness, TagThrottledReason::BUSY_READ));
+			for (const auto& busyReader : ss.busiestReaders) {
+				futures.push_back(tryUpdateAutoThrottling(busyReader.throttlingId,
+				                                          busyReader.rate,
+				                                          busyReader.fractionalBusyness,
+				                                          TagThrottledReason::BUSY_READ));
 			}
 		}
 		return waitForAll(futures);
@@ -209,23 +215,23 @@ TagThrottler::~TagThrottler() = default;
 Future<Void> TagThrottler::monitorThrottlingChanges() {
 	return impl->monitorThrottlingChanges();
 }
-void TagThrottler::addRequests(TransactionTag tag, int count) {
+void TagThrottler::addRequests(ThrottlingId tag, int count) {
 	impl->addRequests(tag, count);
 }
 uint64_t TagThrottler::getThrottledTagChangeId() const {
 	return impl->getThrottledTagChangeId();
 }
-PrioritizedTransactionTagMap<ClientTagThrottleLimits> TagThrottler::getClientRates() {
+PrioritizedThrottlingIdMap<ClientTagThrottleLimits> TagThrottler::getClientRates() {
 	return impl->getClientRates();
 }
 int64_t TagThrottler::autoThrottleCount() const {
 	return impl->autoThrottleCount();
 }
-uint32_t TagThrottler::busyReadTagCount() const {
-	return impl->busyReadTagCount();
+uint32_t TagThrottler::busyReadersCount() const {
+	return impl->busyReadersCount();
 }
-uint32_t TagThrottler::busyWriteTagCount() const {
-	return impl->busyWriteTagCount();
+uint32_t TagThrottler::busyWritersCount() const {
+	return impl->busyWritersCount();
 }
 int64_t TagThrottler::manualThrottleCount() const {
 	return impl->manualThrottleCount();

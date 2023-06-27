@@ -1699,33 +1699,6 @@ inline bool isValidPerpetualStorageWiggleLocality(std::string locality) {
 	return ((pos > 0 && pos < locality.size() - 1) || locality == "0");
 }
 
-// matches what's in fdb_c.h
-struct ReadBlobGranuleContext {
-	// User context to pass along to functions
-	void* userContext;
-
-	// Returns a unique id for the load. Asynchronous to support queueing multiple in parallel.
-	int64_t (*start_load_f)(const char* filename,
-	                        int filenameLength,
-	                        int64_t offset,
-	                        int64_t length,
-	                        int64_t fullFileLength,
-	                        void* context);
-
-	// Returns data for the load. Pass the loadId returned by start_load_f
-	uint8_t* (*get_load_f)(int64_t loadId, void* context);
-
-	// Frees data from load. Pass the loadId returned by start_load_f
-	void (*free_load_f)(int64_t loadId, void* context);
-
-	// Set this to true for testing if you don't want to read the granule files,
-	// just do the request to the blob workers
-	bool debugNoMaterialize;
-
-	// number of granules to load in parallel (default 1)
-	int granuleParallelism = 1;
-};
-
 // Store metadata associated with each storage server. Now it only contains data be used in perpetual storage
 // wiggle.
 struct StorageMetadataType {
@@ -1846,6 +1819,16 @@ struct Versionstamp {
 	bool operator<=(const Versionstamp& r) const { return !(*this > r); }
 	bool operator>=(const Versionstamp& r) const { return !(*this < r); }
 
+	Versionstamp() {}
+	Versionstamp(Version version, uint16_t batchNumber) : version(version), batchNumber(batchNumber) {}
+	Versionstamp(Standalone<StringRef> str) {
+		ASSERT(str.size() == sizeof(Version) + sizeof(batchNumber));
+		version = bigEndian64(*reinterpret_cast<const Version*>(str.begin()));
+		batchNumber = bigEndian16(*reinterpret_cast<const uint16_t*>(str.begin() + sizeof(Version)));
+	}
+
+	std::string toString() const { return fmt::format("{}.{}", version, batchNumber); }
+
 	template <class Ar>
 	void serialize(Ar& ar) {
 		int64_t beVersion;
@@ -1874,5 +1857,10 @@ template <class Ar>
 inline void load(Ar& ar, Versionstamp& value) {
 	value.serialize(ar);
 }
+
+template <>
+struct Traceable<Versionstamp> : std::true_type {
+	static std::string toString(const Versionstamp& v) { return v.toString(); }
+};
 
 #endif

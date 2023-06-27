@@ -55,7 +55,7 @@ public:
 	std::map<TenantGroupName, typename TenantTypes::TenantGroupEntryT> tenantGroupMap;
 	std::map<TenantGroupName, std::set<int64_t>> tenantGroupIndex;
 	std::map<TenantGroupName, int64_t> storageQuotas;
-	std::map<TenantGroupName, ThrottleApi::TagQuotaValue> throughputQuotas;
+	std::map<TenantGroupName, ThrottleApi::ThroughputQuotaValue> throughputQuotas;
 
 private:
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
@@ -70,7 +70,7 @@ private:
 		state KeyBackedRangeResult<std::pair<TenantGroupName, typename TenantTypes::TenantGroupEntryT>> tenantGroupList;
 		state KeyBackedRangeResult<Tuple> tenantGroupTenantTuples;
 		state KeyBackedRangeResult<std::pair<TenantGroupName, int64_t>> storageQuotaList;
-		state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::TagQuotaValue>> throughputQuotaList;
+		state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::ThroughputQuotaValue>> throughputQuotaList;
 
 		wait(store(self->metaclusterRegistration, metacluster::metadata::metaclusterRegistration().get(tr)));
 
@@ -116,7 +116,7 @@ private:
 		    std::map<TenantGroupName, int64_t>(storageQuotaList.results.begin(), storageQuotaList.results.end());
 
 		ASSERT(!throughputQuotaList.more);
-		self->throughputQuotas = std::map<TenantGroupName, ThrottleApi::TagQuotaValue>(
+		self->throughputQuotas = std::map<TenantGroupName, ThrottleApi::ThroughputQuotaValue>(
 		    throughputQuotaList.results.begin(), throughputQuotaList.results.end());
 
 		self->tenantGroupIndex.clear();

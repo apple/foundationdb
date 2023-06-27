@@ -255,7 +255,7 @@ const std::array<Operation, MAX_OP> opTable{
 
 	            user_context.clear();
 
-	            auto out = Result::KeyValueRefArray{};
+	            auto out = ReadRangeResult::KeyValueRefArray{};
 	            err = r.getKeyValueArrayNothrow(out);
 	            if (!err || err.is(2037 /*blob_granule_not_materialized*/))
 		            return Future();

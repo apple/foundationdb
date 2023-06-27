@@ -109,10 +109,25 @@ public:
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
 	double BLOCKING_PEEK_TIMEOUT;
-	bool PEEK_BATCHING_EMPTY_MSG;
-	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
 	double TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS;
+
+	// Empty Version Peek Batching
+	bool PEEK_BATCHING_EMPTY_MSG; // Enable tlog empty version peeks batching.
+	double PEEK_BATCHING_EMPTY_MSG_INTERVAL; // Maximum wait time for a batch on tlog side.
+	enum DYNAMIC_EMPTY_VERSION_WAIT_MODE { DISABLED, EMPTY_VERSION_WAIT_LOG_ONLY, EMPTY_VERSION_WAIT };
+	int DYNAMIC_EMPTY_VERSION_WAIT; // Choose from DYNAMIC_EMPTY_VERSION_WAIT_MODE.
+	bool SS_EMPTY_VERSION_WAIT_LESS_SKEW_STAT; // Whether to log non-queue-popping samples in empty version wait window
+	                                           // logging. Enabling this will result in less skewed logging but trace
+	                                           // many more lines.
+	double SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL; // Interval of sampling incoming requests at each storage server for
+	                                              // empty version wait window logging. Sampling too frequently may
+	                                              // incur extra storage server CPU cost and latency penalty for reads.
+	int SS_EMPTY_VERSION_WAIT_QUEUE_MAX_LENGTH; // Max size limit of empty version wait window logging queue. Tlog
+	                                            // samples will be discarded once limit is reached. It is advised to
+	                                            // keep this window big enough to capture tlog sync time window of
+	                                            // multiple times the size of SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL
+	                                            // for collected statistics to make sense.AA
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -188,19 +203,17 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
-	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
-	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
-	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
-	// has available space ratio < pivotAvailableSpaceRatio.
-	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// DD use LOAD_BYTES_PIVOT_RATIO to select pivot position based on load bytes. Given an array that's ascend
+	// sorted by load bytes, the pivot position is LOAD_BYTES_PIVOT_RATIO * healthy team count. DD won't choose a team
+	// as destination team when its load bytes > pivot load bytes.
+	double LOAD_BYTES_PIVOT_RATIO;
+
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
 	// DD won't move out a shard from its source team, if the utilization of source team meets two criterias:
-	// 1. The available space ratio is above strict pivot space ratio, where using DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO
-	// to calculate pivot space ratio.
-	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU.
-	double DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO;
+	// 1. The load bytes is below pivot load bytes, where using LOAD_BYTES_PIVOT_RATIO to calculate pivot load bytes
+	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU
 	double DD_STRICT_CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;

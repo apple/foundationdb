@@ -596,21 +596,21 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 	}
 }
 
-class TagQuotaValue {
+class ThroughputQuotaValue {
 public:
 	int64_t reservedQuota{ 0 };
 	int64_t totalQuota{ 0 };
 	bool isValid() const;
 	Tuple pack() const;
-	static TagQuotaValue unpack(Tuple const& val);
-	bool operator==(TagQuotaValue const&) const;
+	static ThroughputQuotaValue unpack(Tuple const& val);
+	bool operator==(ThroughputQuotaValue const&) const;
 };
 
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
 void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
-	TagQuotaValue tagQuotaValue;
+	ThroughputQuotaValue tagQuotaValue;
 	tagQuotaValue.reservedQuota = reservedQuota;
 	tagQuotaValue.totalQuota = totalQuota;
 	if (!tagQuotaValue.isValid()) {

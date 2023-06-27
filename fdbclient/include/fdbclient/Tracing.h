@@ -52,8 +52,11 @@ struct SpanContext {
 	SpanContext(UID traceID, uint64_t spanID) : traceID(traceID), spanID(spanID), m_Flags(TraceFlags::unsampled) {}
 	SpanContext(const SpanContext& span) = default;
 	bool isSampled() const { return (m_Flags & TraceFlags::sampled) == TraceFlags::sampled; }
-	std::string toString() const { return format("%016llx%016llx%016llx", traceID.first(), traceID.second(), spanID); };
 	bool isValid() const { return traceID.first() != 0 && traceID.second() != 0 && spanID != 0; }
+
+	// Serializes and deserializes to/from traceparent https://www.w3.org/TR/trace-context/ specification.
+	std::string toString() const;
+	static Optional<SpanContext> fromString(const std::string& s);
 
 	template <class Ar>
 	void serialize(Ar& ar) {
