@@ -192,7 +192,7 @@ struct VersionStampWorkload : TestWorkload {
 		state RangeResult result;
 		loop {
 			try {
-				RangeResult result_ = wait(tr.getRange(
+				RangeReadResult result_ = wait(tr.getRange(
 				    KeyRangeRef(self->vsValuePrefix, endOfRange(self->vsValuePrefix)), self->nodeCount + 1));
 				result = result_;
 				if (self->allowMetadataVersionKey && self->key_commit.count(metadataVersionKey)) {
@@ -253,7 +253,7 @@ struct VersionStampWorkload : TestWorkload {
 					}
 				}
 
-				RangeResult result__ = wait(
+				RangeReadResult result__ = wait(
 				    tr.getRange(KeyRangeRef(self->vsKeyPrefix, endOfRange(self->vsKeyPrefix)), self->nodeCount + 1));
 				result = result__;
 				ASSERT(result.size() <= self->nodeCount);

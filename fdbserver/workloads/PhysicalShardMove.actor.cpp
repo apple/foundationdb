@@ -387,7 +387,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 			debugID = deterministicRandom()->randomUniqueID();
 			try {
 				tr.debugTransaction(debugID);
-				RangeResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult res = wait(tr.getRange(range, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!res.more && res.size() < CLIENT_KNOBS->TOO_MANY);
 
 				for (const auto& kv : res) {
@@ -505,7 +505,7 @@ struct PhysicalShardMoveWorkLoad : TestWorkload {
 				state MoveKeysLock moveKeysLock = wait(takeMoveKeysLock(cx, owner));
 
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state RangeResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult dataMoves = wait(tr.getRange(dataMoveKeys, CLIENT_KNOBS->TOO_MANY));
 				Version readVersion = wait(tr.getReadVersion());
 				TraceEvent("TestMoveShardReadDataMoves")
 				    .detail("DataMoves", dataMoves.size())

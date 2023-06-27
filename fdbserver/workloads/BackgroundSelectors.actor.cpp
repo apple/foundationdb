@@ -145,7 +145,7 @@ struct BackgroundSelectorWorkload : TestWorkload {
 				loop {
 					try {
 						if (diff < 0) {
-							RangeResult rangeResult_ =
+							RangeReadResult rangeResult_ =
 							    wait(tr.getRange(randomizedSelector(endKey, true, endDrift),
 							                     randomizedSelector(startKey, true, startDrift + 1),
 							                     self->resultLimit));
@@ -155,9 +155,10 @@ struct BackgroundSelectorWorkload : TestWorkload {
 							KeyReadResult startResult_ = wait(tr.getKey(randomizedSelector(endKey, true, endDrift)));
 							startResult = startResult_;
 						} else {
-							RangeResult rangeResult_ = wait(tr.getRange(randomizedSelector(startKey, true, startDrift),
-							                                            randomizedSelector(endKey, true, endDrift + 1),
-							                                            self->resultLimit));
+							RangeReadResult rangeResult_ =
+							    wait(tr.getRange(randomizedSelector(startKey, true, startDrift),
+							                     randomizedSelector(endKey, true, endDrift + 1),
+							                     self->resultLimit));
 							rangeResult = rangeResult_;
 							KeyReadResult startResult_ =
 							    wait(tr.getKey(randomizedSelector(startKey, true, startDrift)));

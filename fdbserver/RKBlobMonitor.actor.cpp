@@ -18,7 +18,7 @@ class RKBlobMonitorImpl {
 				// FIXME: check if any active ranges. This still returns true if there are inactive ranges, but it
 				// mostly serves its purpose to allow setting blob_granules_enabled=1 on a cluster that has no blob
 				// workers currently.
-				RangeResult anyData = wait(tr.getRange(blobRangeKeys, 1));
+				RangeReadResult anyData = wait(tr.getRange(blobRangeKeys, 1));
 				return !anyData.empty();
 			} catch (Error& e) {
 				wait(tr.onError(e));

@@ -69,7 +69,7 @@ struct GetRangeStream : TestWorkload {
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
 			try {
-				RangeResult range = wait(
+				RangeReadResult range = wait(
 				    tx.getRange(KeySelector(firstGreaterOrEqual(next), next.arena()),
 				                KeySelector(firstGreaterOrEqual(self->end)),
 				                GetRangeLimits(GetRangeLimits::ROW_LIMIT_UNLIMITED, CLIENT_KNOBS->REPLY_BYTE_LIMIT)));
@@ -95,14 +95,14 @@ struct GetRangeStream : TestWorkload {
 		state Key next = self->begin;
 		state Future<Void> logFuture = logThroughput(self, &next);
 		loop {
-			state PromiseStream<RangeResult> results;
+			state PromiseStream<RangeReadResult> results;
 			try {
 				state Future<Void> stream = tx.getRangeStream(results,
 				                                              KeySelector(firstGreaterOrEqual(next), next.arena()),
 				                                              KeySelector(firstGreaterOrEqual(self->end)),
 				                                              GetRangeLimits());
 				loop {
-					RangeResult range = waitNext(results.getFuture());
+					RangeReadResult range = waitNext(results.getFuture());
 					for (const auto& [k, v] : range) {
 						if (self->printKVPairs) {
 							printf("%s -> %s\n", printable(k).c_str(), printable(v).c_str());

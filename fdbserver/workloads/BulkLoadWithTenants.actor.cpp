@@ -75,7 +75,7 @@ struct BulkSetupWorkload : TestWorkload {
 		state ReadYourWritesTransaction tr = ReadYourWritesTransaction(cx, tenant);
 		loop {
 			try {
-				RangeResult kvRange = wait(tr.getRange(begin, end, 1000));
+				RangeReadResult kvRange = wait(tr.getRange(begin, end, 1000));
 				if (!kvRange.more && kvRange.size() == 0) {
 					break;
 				}

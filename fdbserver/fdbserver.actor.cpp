@@ -429,7 +429,7 @@ ACTOR Future<Void> dumpDatabase(Database cx, std::string outputFilename, KeyRang
 				fprintf(output, "<h3>Database version: %" PRId64 "</h3>", ver);
 
 				loop {
-					RangeResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
+					RangeReadResult results = wait(tr.getRange(iter, firstGreaterOrEqual(range.end), 1000));
 					for (int r = 0; r < results.size(); r++) {
 						std::string key = toHTML(results[r].key), value = toHTML(results[r].value);
 						fprintf(output, "<p>%s <b>:=</b> %s</p>\n", key.c_str(), value.c_str());
@@ -2196,10 +2196,6 @@ int main(int argc, char* argv[]) {
 				g_knobs.setKnob("encrypt_header_auth_token_algo",
 				                KnobValue::create((int)ini.GetLongValue(
 				                    "META", "encryptHeaderAuthTokenAlgo", FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ALGO)));
-				g_knobs.setKnob("enable_configurable_encryption",
-				                KnobValue::create(ini.GetBoolValue("META",
-				                                                   "enableConfigurableEncryption",
-				                                                   CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION)));
 
 				g_knobs.setKnob(
 				    "shard_encode_location_metadata",

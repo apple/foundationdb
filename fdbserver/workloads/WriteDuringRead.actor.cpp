@@ -264,7 +264,7 @@ struct WriteDuringReadWorkload : TestWorkload {
 			    limit,
 			    reverse);
 			*memLimit -= memRes.expectedSize();
-			RangeResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
+			RangeReadResult _res = wait(tr->getRange(begin, end, limit, snapshot, reverse));
 			RangeResult res = _res;
 			*memLimit += memRes.expectedSize();
 
@@ -285,8 +285,10 @@ struct WriteDuringReadWorkload : TestWorkload {
 						if (res[systemKeyCount].key < self->getKeyForIndex(self->nodes))
 							break;
 					if (systemKeyCount > 0) {
-						res = RangeResultRef(VectorRef<KeyValueRef>(&res[systemKeyCount], res.size() - systemKeyCount),
-						                     true);
+						res = RangeResult(
+						    RangeResultRef(VectorRef<KeyValueRef>(&res[systemKeyCount], res.size() - systemKeyCount),
+						                   true),
+						    res.arena());
 						resized = true;
 					}
 				}

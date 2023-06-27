@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
+#include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -286,7 +287,8 @@ struct GetValueReply : public LoadBalancedReply {
 	ReadMetrics readMetrics;
 
 	GetValueReply() : cached(false) {}
-	GetValueReply(Optional<Value> value, bool cached) : value(value), cached(cached) {}
+	GetValueReply(Optional<Value> value, bool cached, ReadMetrics readMetrics)
+	  : value(value), cached(cached), readMetrics(readMetrics) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -501,7 +503,7 @@ struct GetKeyValuesStreamReply : public ReplyPromiseStreamReply {
 
 	GetKeyValuesStreamReply() : version(invalidVersion), more(false), cached(false) {}
 	GetKeyValuesStreamReply(GetKeyValuesReply r)
-	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached) {}
+	  : arena(r.arena), data(r.data), version(r.version), more(r.more), cached(r.cached), readMetrics(r.readMetrics) {}
 
 	int expectedSize() const { return sizeof(GetKeyValuesStreamReply) + data.expectedSize(); }
 
@@ -563,7 +565,8 @@ struct GetKeyReply : public LoadBalancedReply {
 	ReadMetrics readMetrics;
 
 	GetKeyReply() : cached(false) {}
-	GetKeyReply(KeySelector sel, bool cached) : sel(sel), cached(cached) {}
+	GetKeyReply(KeySelector sel, bool cached, ReadMetrics readMetrics)
+	  : sel(sel), cached(cached), readMetrics(readMetrics) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1179,22 +1182,22 @@ struct GetStorageMetricsRequest {
 };
 
 // Tracks the busyness of tags on individual storage servers.
-struct BusyTagInfo {
+struct BusyThrottlingIdInfo {
 	constexpr static FileIdentifier file_identifier = 4528694;
-	TransactionTag tag;
+	ThrottlingId throttlingId;
 	double rate{ 0.0 };
 	double fractionalBusyness{ 0.0 };
 
-	BusyTagInfo() = default;
-	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+	BusyThrottlingIdInfo() = default;
+	BusyThrottlingIdInfo(ThrottlingId const& throttlingId, double rate, double fractionalBusyness)
+	  : throttlingId(throttlingId), rate(rate), fractionalBusyness(fractionalBusyness) {}
 
-	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
-	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+	bool operator<(BusyThrottlingIdInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyThrottlingIdInfo const& rhs) const { return rate > rhs.rate; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tag, rate, fractionalBusyness);
+		serializer(ar, throttlingId, rate, fractionalBusyness);
 	}
 };
 
@@ -1209,7 +1212,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage{ 0.0 };
 	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<BusyTagInfo> busiestTags;
+	std::vector<BusyThrottlingIdInfo> busiestReaders;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1224,7 +1227,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTags);
+		           busiestReaders);
 	}
 };
 

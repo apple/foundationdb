@@ -353,17 +353,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 				try {
-					if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-						TextAndHeaderCipherKeys cipherKeys =
-						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-						        dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-					} else {
-						TextAndHeaderCipherKeys cipherKeys =
-						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-						        dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-					}
+					TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+					    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
+					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
 				} catch (Error& e) {
 					// It's possible a tenant was deleted and the encrypt key fetch failed
 					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")
@@ -526,7 +518,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			releaser = FlowLock::Releaser(
 			    *lock, limits.bytes + CLIENT_KNOBS->VALUE_SIZE_LIMIT + CLIENT_KNOBS->SYSTEM_KEY_SIZE_LIMIT);
 
-			state RangeResult values = wait(tr.getRange(begin, end, limits));
+			state RangeReadResult values = wait(tr.getRange(begin, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -598,7 +590,7 @@ ACTOR Future<Void> readCommitted(Database cx,
 			if (lockAware)
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			state RangeResult rangevalue = wait(tr.getRange(nextKey, end, limits));
+			state RangeReadResult rangevalue = wait(tr.getRange(nextKey, end, limits));
 
 			// When this buggify line is enabled, if there are more than 1 result then use half of the results.
 			// Copy the data instead of messing with the results directly to avoid TSS issues.
@@ -610,8 +602,8 @@ ACTOR Future<Void> readCommitted(Database cx,
 				}
 				rangevalue = copy;
 				rangevalue.more = true;
-				// Half of the time wait for this tr to expire so that the next read is at a different version
-				if (deterministicRandom()->random01() < 0.5)
+				// Some of the time wait for this tr to expire so that the next read is at a different version
+				if (deterministicRandom()->random01() < 0.01)
 					wait(delay(6.0));
 			}
 
@@ -697,7 +689,8 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
                                                 int* mutationSize,
                                                 PromiseStream<Future<Void>> addActor,
                                                 FlowLock* commitLock,
-                                                PublicRequestStream<CommitTransactionRequest> commit) {
+                                                PublicRequestStream<CommitTransactionRequest> commit,
+                                                bool tenantMapChanging) {
 	Key applyBegin = uid.withPrefix(applyMutationsBeginRange.begin);
 	Key versionKey = BinaryWriter::toValue(newBeginVersion, Unversioned());
 	Key rangeEnd = getApplyKey(newBeginVersion, uid);
@@ -719,7 +712,14 @@ ACTOR Future<Void> sendCommitTransactionRequest(CommitTransactionRequest req,
 
 	*totalBytes += *mutationSize;
 	wait(commitLock->take(TaskPriority::DefaultYield, *mutationSize));
-	addActor.send(commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize));
+	Future<Void> commitAndUnlock = commitLock->releaseWhen(success(commit.getReply(req)), *mutationSize);
+	if (tenantMapChanging) {
+		// If tenant map is changing, we need to wait until it's committed before processing next mutations.
+		// Next muations need the updated tenant map for filtering.
+		wait(commitAndUnlock);
+	} else {
+		addActor.send(commitAndUnlock);
+	}
 	return Void();
 }
 
@@ -796,7 +796,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 					                                  &mutationSize,
 					                                  addActor,
 					                                  commitLock,
-					                                  commit));
+					                                  commit,
+					                                  false));
 					req = CommitTransactionRequest();
 					mutationSize = 0;
 				}
@@ -839,7 +840,8 @@ ACTOR Future<int> kvMutationLogToTransactions(Database cx,
 		                                  &mutationSize,
 		                                  addActor,
 		                                  commitLock,
-		                                  commit));
+		                                  commit,
+		                                  tenantMapChanging));
 		if (endOfStream) {
 			return totalBytes;
 		}
@@ -999,7 +1001,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 			return Void();
 	}
 
-	state RangeResult backupVersions = wait(
+	state RangeReadResult backupVersions = wait(
 	    tr->getRange(KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 
 	// Make sure version history key does exist and lower the beginVersion if needed
@@ -1091,7 +1093,7 @@ ACTOR static Future<Void> _eraseLogData(Reference<ReadYourWritesTransaction> tr,
 	}
 
 	if (!endVersion.present() && backupVersions.size() == 1) {
-		RangeResult existingDestUidValues =
+		RangeReadResult existingDestUidValues =
 		    wait(tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 		for (auto it : existingDestUidValues) {
 			if (it.value == destUidValue) {
@@ -1124,7 +1126,7 @@ ACTOR Future<Void> cleanupLogMutations(Database cx, Value destUidValue, bool del
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult backupVersions = wait(tr->getRange(
+			state RangeReadResult backupVersions = wait(tr->getRange(
 			    KeyRangeRef(backupLatestVersionsPath, strinc(backupLatestVersionsPath)), CLIENT_KNOBS->TOO_MANY));
 			state Version readVer = tr->getReadVersion().get();
 
@@ -1210,7 +1212,7 @@ ACTOR Future<Void> cleanupBackup(Database cx, DeleteData deleteData) {
 			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-			state RangeResult destUids = wait(
+			state RangeReadResult destUids = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 
 			for (auto destUid : destUids) {

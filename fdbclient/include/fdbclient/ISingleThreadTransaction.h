@@ -60,23 +60,23 @@ public:
 	virtual Optional<Version> getCachedReadVersion() const = 0;
 	virtual Future<ValueReadResult> get(const Key& key, Snapshot = Snapshot::False) = 0;
 	virtual Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False) = 0;
-	virtual Future<RangeResult> getRange(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     int limit,
-	                                     Snapshot = Snapshot::False,
-	                                     Reverse = Reverse::False) = 0;
-	virtual Future<RangeResult> getRange(KeySelector begin,
-	                                     KeySelector end,
-	                                     GetRangeLimits limits,
-	                                     Snapshot = Snapshot::False,
-	                                     Reverse = Reverse::False) = 0;
-	virtual Future<MappedRangeResult> getMappedRange(KeySelector begin,
-	                                                 KeySelector end,
-	                                                 Key mapper,
-	                                                 GetRangeLimits limits,
-	                                                 int matchIndex = MATCH_INDEX_ALL,
-	                                                 Snapshot = Snapshot::False,
-	                                                 Reverse = Reverse::False) = 0;
+	virtual Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                         const KeySelector& end,
+	                                         int limit,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) = 0;
+	virtual Future<RangeReadResult> getRange(KeySelector begin,
+	                                         KeySelector end,
+	                                         GetRangeLimits limits,
+	                                         Snapshot = Snapshot::False,
+	                                         Reverse = Reverse::False) = 0;
+	virtual Future<MappedRangeReadResult> getMappedRange(KeySelector begin,
+	                                                     KeySelector end,
+	                                                     Key mapper,
+	                                                     GetRangeLimits limits,
+	                                                     int matchIndex = MATCH_INDEX_ALL,
+	                                                     Snapshot = Snapshot::False,
+	                                                     Reverse = Reverse::False) = 0;
 	virtual Future<Standalone<VectorRef<const char*>>> getAddressesForKey(Key const& key) = 0;
 	virtual Future<Standalone<VectorRef<KeyRef>>> getRangeSplitPoints(KeyRange const& range, int64_t chunkSize) = 0;
 	virtual Future<int64_t> getEstimatedRangeSizeBytes(KeyRange const& keys) = 0;

@@ -193,10 +193,10 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 		return std::make_pair(Optional<TenantMapEntry>(), false);
 	}
 
-	state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+	state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 	    tr->getRange(prefixRange(tenantEntry.prefix), 1);
 
-	RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+	RangeReadResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 	if (!contents.empty()) {
 		CODE_PROBE(hasTombstone, "Tenant creation conflict with existing data", probe::decoration::rare);
 		throw tenant_prefix_allocator_conflict();
@@ -318,8 +318,17 @@ Future<Void> markTenantTombstones(Transaction tr, int64_t tenantId) {
 	// In data clusters, we store a tombstone
 	state Future<KeyBackedRangeResult<int64_t>> latestTombstoneFuture =
 	    TenantMetadata::tenantTombstones().getRange(tr, {}, {}, 1, Snapshot::False, Reverse::True);
+	state Future<int64_t> tenantIdPrefixFuture = TenantMetadata::tenantIdPrefix().getD(tr, Snapshot::False, 0);
 	state Optional<TenantTombstoneCleanupData> cleanupData = wait(TenantMetadata::tombstoneCleanupData().get(tr));
 	state Version transactionReadVersion = wait(safeThreadFutureToFuture(tr->getReadVersion()));
+
+	// If the tenant being deleted has a different tenant ID prefix than the current cluster, then it won't conflict
+	// with any tenant creations. In that case, we do not need to create a tombstone.
+	int64_t tenantIdPrefix = wait(tenantIdPrefixFuture);
+	if (tenantIdPrefix != TenantAPI::getTenantIdPrefix(tenantId)) {
+		CODE_PROBE(true, "Skipping tenant tombstone for tenant with different prefix");
+		return Void();
+	}
 
 	// If it has been long enough since we last cleaned up the tenant tombstones, we do that first
 	if (!cleanupData.present() || cleanupData.get().nextTombstoneEraseVersion <= transactionReadVersion) {
@@ -375,10 +384,10 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 	if (tenantEntry.present()) {
-		state typename transaction_future_type<Transaction, RangeResult>::type prefixRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 
-		RangeResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
+		RangeReadResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 		if (!contents.empty()) {
 			CODE_PROBE(true, "Attempt deletion of non-empty tenant");
 			throw tenant_not_empty();

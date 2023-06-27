@@ -32,7 +32,7 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
-ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Transaction* tr, KeyRange keys) {
+ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeReadResult> results, Transaction* tr, KeyRange keys) {
 	state KeySelectorRef begin = firstGreaterOrEqual(keys.begin);
 	state KeySelectorRef end = firstGreaterOrEqual(keys.end);
 
@@ -40,7 +40,7 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 		loop {
 			GetRangeLimits limits(GetRangeLimits::ROW_LIMIT_UNLIMITED, 1e6);
 			limits.minRows = 0;
-			state RangeResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
+			state RangeReadResult rep = wait(tr->getRange(begin, end, limits, Snapshot::True));
 
 			results.send(rep);
 
@@ -60,10 +60,10 @@ ACTOR Future<Void> streamUsingGetRange(PromiseStream<RangeResult> results, Trans
 	}
 }
 
-ACTOR Future<Void> convertStream(PromiseStream<RangeResult> input, PromiseStream<KeyValue> output) {
+ACTOR Future<Void> convertStream(PromiseStream<RangeReadResult> input, PromiseStream<KeyValue> output) {
 	try {
 		loop {
-			RangeResult res = waitNext(input.getFuture());
+			RangeReadResult res = waitNext(input.getFuture());
 			for (auto& kv : res) {
 				output.send(kv);
 			}
@@ -114,8 +114,8 @@ struct StreamingRangeReadWorkload : KVWorkload {
 		state Key next;
 		state Future<Void> rateLimit = delay(0.01);
 		loop {
-			state PromiseStream<RangeResult> streamRaw;
-			state PromiseStream<RangeResult> compareRaw;
+			state PromiseStream<RangeReadResult> streamRaw;
+			state PromiseStream<RangeReadResult> compareRaw;
 			state PromiseStream<KeyValue> streamResults;
 			state PromiseStream<KeyValue> compareResults;
 

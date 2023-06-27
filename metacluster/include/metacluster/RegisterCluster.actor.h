@@ -48,6 +48,9 @@ struct RegisterClusterImpl {
 	ClusterConnectionString connectionString;
 	DataClusterEntry clusterEntry;
 
+	// Loaded from the management cluster
+	int64_t tenantIdPrefix;
+
 	RegisterClusterImpl(Reference<DB> managementDb,
 	                    ClusterName clusterName,
 	                    ClusterConnectionString connectionString,
@@ -57,6 +60,7 @@ struct RegisterClusterImpl {
 	// Store the cluster entry for the new cluster in a registering state
 	ACTOR static Future<Void> registerInManagementCluster(RegisterClusterImpl* self,
 	                                                      Reference<typename DB::TransactionT> tr) {
+		state Future<Optional<int64_t>> tenantIdPrefixFuture = TenantMetadata::tenantIdPrefix().get(tr);
 		state Optional<DataClusterMetadata> dataClusterMetadata = wait(tryGetClusterTransaction(tr, self->clusterName));
 		if (!dataClusterMetadata.present()) {
 			CODE_PROBE(true, "Register new cluster");
@@ -83,6 +87,11 @@ struct RegisterClusterImpl {
 			self->clusterEntry = dataClusterMetadata.get().entry;
 		}
 
+		Optional<int64_t> tenantIdPrefix = wait(tenantIdPrefixFuture);
+		ASSERT(tenantIdPrefix.present());
+
+		self->tenantIdPrefix = tenantIdPrefix.get();
+
 		TraceEvent("RegisteringDataCluster")
 		    .detail("ClusterName", self->clusterName)
 		    .detail("ClusterID", self->clusterEntry.id)
@@ -103,7 +112,7 @@ struct RegisterClusterImpl {
 
 				state Future<std::vector<std::pair<TenantName, int64_t>>> existingTenantsFuture =
 				    TenantAPI::listTenantsTransaction(tr, ""_sr, "\xff\xff"_sr, 1);
-				state ThreadFuture<RangeResult> existingDataFuture = tr->getRange(normalKeys, 1);
+				state ThreadFuture<RangeReadResult> existingDataFuture = tr->getRange(normalKeys, 1);
 				state Future<bool> tombstoneFuture =
 				    metadata::registrationTombstones().exists(tr, self->clusterEntry.id);
 
@@ -141,7 +150,7 @@ struct RegisterClusterImpl {
 					throw cluster_not_empty();
 				}
 
-				RangeResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
+				RangeReadResult existingData = wait(safeThreadFutureToFuture(existingDataFuture));
 				if (!existingData.empty()) {
 					CODE_PROBE(true, "Registering cluster with data", probe::decoration::rare);
 					TraceEvent(SevWarn, "CannotRegisterClusterWithData").detail("ClusterName", self->clusterName);
@@ -152,6 +161,8 @@ struct RegisterClusterImpl {
 				    tr,
 				    self->ctx.metaclusterRegistration.get().toDataClusterRegistration(self->clusterName,
 				                                                                      self->clusterEntry.id));
+
+				TenantMetadata::tenantIdPrefix().set(tr, self->tenantIdPrefix);
 
 				// The data cluster will track the last ID it allocated in this metacluster, so erase any prior tenant
 				// ID state

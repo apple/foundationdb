@@ -679,7 +679,7 @@ ACTOR Future<DatabaseConfiguration> getDatabaseConfiguration(Transaction* tr, bo
 	}
 	tr->setOption(FDBTransactionOptions::READ_LOCK_AWARE);
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-	RangeResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeReadResult res = wait(tr->getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(res.size() < CLIENT_KNOBS->TOO_MANY);
 	DatabaseConfiguration config;
 	config.fromKeyValues((VectorRef<KeyValueRef>)res);
@@ -968,8 +968,8 @@ ConfigureAutoResult parseConfig(StatusObject const& status) {
 }
 
 ACTOR Future<std::vector<ProcessData>> getWorkers(Transaction* tr) {
-	state Future<RangeResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
-	state Future<RangeResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeReadResult> processClasses = tr->getRange(processClassKeys, CLIENT_KNOBS->TOO_MANY);
+	state Future<RangeReadResult> processData = tr->getRange(workerListKeys, CLIENT_KNOBS->TOO_MANY);
 
 	wait(success(processClasses) && success(processData));
 	ASSERT(!processClasses.get().more && processClasses.get().size() < CLIENT_KNOBS->TOO_MANY);
@@ -1964,9 +1964,9 @@ ACTOR Future<Void> setClass(Database cx, AddressExclusion server, ProcessClass p
 }
 
 ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult r = wait(tr->getRange(excludedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state RangeResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult r2 = wait(tr->getRange(failedServersKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<AddressExclusion> exclusions;
@@ -2001,9 +2001,9 @@ ACTOR Future<std::vector<AddressExclusion>> getExcludedServers(Database cx) {
 
 // Get the current list of excluded localities by reading the keys.
 ACTOR Future<std::vector<std::string>> getExcludedLocalities(Transaction* tr) {
-	state RangeResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult r = wait(tr->getRange(excludedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r.more && r.size() < CLIENT_KNOBS->TOO_MANY);
-	state RangeResult r2 = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult r2 = wait(tr->getRange(failedLocalityKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!r2.more && r2.size() < CLIENT_KNOBS->TOO_MANY);
 
 	std::vector<std::string> excludedLocalities;
@@ -2155,6 +2155,7 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 		try {
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			ValueReadResult old = wait(tr.get(dataDistributionModeKey));
 			if (oldMode < 0) {
 				oldMode = 1;
@@ -2206,7 +2207,7 @@ ACTOR Future<bool> checkForExcludingServersTxActor(ReadYourWritesTransaction* tr
 	// recovery
 
 	// Check that there aren't any storage servers with addresses violating the exclusions
-	RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+	RangeReadResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 	state bool ok = true;
@@ -2287,7 +2288,7 @@ ACTOR Future<Void> waitForFullReplication(Database cx) {
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 
-			RangeResult confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult confResults = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!confResults.more && confResults.size() < CLIENT_KNOBS->TOO_MANY);
 			state DatabaseConfiguration config;
 			config.fromKeyValues((VectorRef<KeyValueRef>)confResults);

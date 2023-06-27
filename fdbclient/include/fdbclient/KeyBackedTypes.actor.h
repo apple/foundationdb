@@ -37,6 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
+#include "fdbclient/TupleVersionstamp.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
@@ -121,6 +122,26 @@ inline Standalone<StringRef> TupleCodec<UID>::pack(UID const& val) {
 template <>
 inline UID TupleCodec<UID>::unpack(Standalone<StringRef> const& val) {
 	return BinaryReader::fromStringRef<UID>(TupleCodec<Standalone<StringRef>>::unpack(val), Unversioned());
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp const& val) {
+	return Tuple::makeTuple(val).pack();
+}
+template <>
+inline TupleVersionstamp TupleCodec<TupleVersionstamp>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getVersionstamp(0);
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<Versionstamp>::pack(Versionstamp const& val) {
+	return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val.version, val.batchNumber));
+}
+template <>
+inline Versionstamp TupleCodec<Versionstamp>::unpack(Standalone<StringRef> const& val) {
+	TupleVersionstamp vs = TupleCodec<TupleVersionstamp>::unpack(val);
+	ASSERT(vs.getUserVersion() == 0);
+	return Versionstamp(vs.getVersion(), vs.getBatchNumber());
 }
 
 // This is backward compatible with TupleCodec<Standalone<StringRef>>
@@ -216,6 +237,7 @@ template <typename ResultType>
 struct KeyBackedRangeResult {
 	std::vector<ResultType> results;
 	bool more;
+	ReadMetrics readMetrics;
 
 	bool operator==(KeyBackedRangeResult const& other) const { return results == other.results && more == other.more; }
 	bool operator!=(KeyBackedRangeResult const& other) const { return !(*this == other); }
@@ -556,13 +578,13 @@ public:
 			Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
 			Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-			typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+			typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 			    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
 			return holdWhile(
 			    getRangeFuture,
 			    map(safeThreadFutureToFuture(getRangeFuture),
-			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+			        [prefix = subspace.begin, valueCodec = valueCodec](RangeReadResult const& kvs) -> RangeResultType {
 				        RangeResultType rangeResult;
 				        for (int i = 0; i < kvs.size(); ++i) {
 					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
@@ -570,6 +592,7 @@ public:
 					        rangeResult.results.push_back(PairType(key, val));
 				        }
 				        rangeResult.more = kvs.more;
+				        rangeResult.readMetrics = kvs.getReadMetrics();
 				        return rangeResult;
 			        }));
 		}
@@ -589,7 +612,7 @@ public:
 
 		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
 		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
@@ -598,7 +621,8 @@ public:
 		// and continue with the next request here.
 		state RangeResultType rangeResult;
 		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			rangeResult.readMetrics.combine(kvs.getReadMetrics());
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -691,10 +715,10 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
 		if (kvs.empty()) {
 			return Optional<KVType>();
 		}
@@ -769,6 +793,16 @@ public:
 		Key k = packKey(key);
 		Value v = packValue(val);
 		tr->atomicOp(k, v, type);
+		if (trigger.present()) {
+			trigger->update(tr);
+		}
+	}
+
+	template <class Transaction>
+	void setVersionstamp(Transaction tr, KeyType const& key, ValueType const& val, int offset = 0) {
+		Key k = packKey(key);
+		Value v = packValue(val).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4));
+		tr->atomicOp(k, v, MutationRef::SetVersionstampedValue);
 		if (trigger.present()) {
 			trigger->update(tr);
 		}
@@ -867,17 +901,18 @@ public:
 		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
 		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
 
 		return holdWhile(getRangeFuture,
 		                 map(safeThreadFutureToFuture(getRangeFuture),
-		                     [prefix = subspace.begin](RangeResult const& kvs) -> RangeResultType {
+		                     [prefix = subspace.begin](RangeReadResult const& kvs) -> RangeResultType {
 			                     RangeResultType rangeResult;
 			                     for (auto const& kv : kvs) {
 				                     rangeResult.results.push_back(Codec::unpack(kv.key.removePrefix(prefix)));
 			                     }
 			                     rangeResult.more = kvs.more;
+			                     rangeResult.readMetrics = kvs.getReadMetrics();
 			                     return rangeResult;
 		                     }));
 	}
@@ -896,7 +931,7 @@ public:
 
 		state ::KeySelector ksBegin = begin.pack(self.subspace.begin);
 		state ::KeySelector ksEnd = end.pack(self.subspace.begin);
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(ksBegin, ksEnd, limits, snapshot, reverse);
 
 		// Since the getRange result must be filtered to keys within the map subspace, it is possible that the given
@@ -905,7 +940,8 @@ public:
 		// and continue with the next request here.
 		state RangeResultType rangeResult;
 		loop {
-			RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+			rangeResult.readMetrics.combine(kvs.getReadMetrics());
 			kbt_debug("MAP GETRANGE KeySelectors {} - {} results={} more={}\n",
 			          begin.pack(self.subspace.begin).toString(),
 			          end.pack(self.subspace.begin).toString(),
@@ -996,10 +1032,10 @@ public:
 			end = self.subspace.end;
 		}
 
-		state typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+		state typename transaction_future_type<Transaction, RangeReadResult>::type getRangeFuture =
 		    tr->getRange(KeyRangeRef(begin, end), 1, snapshot, Reverse{ lessThan });
 
-		RangeResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
+		RangeReadResult kvs = wait(safeThreadFutureToFuture(getRangeFuture));
 		if (kvs.empty()) {
 			return Optional<ValueType>();
 		}

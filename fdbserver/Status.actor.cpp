@@ -1531,9 +1531,9 @@ ACTOR static Future<Void> logRangeWarningFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-				state Future<RangeResult> existingDestUidValues =
+				state Future<RangeReadResult> existingDestUidValues =
 				    tr.getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> existingLogRanges = tr.getRange(logRangesRange, CLIENT_KNOBS->TOO_MANY);
 				wait((success(existingDestUidValues) && success(existingLogRanges)) || timeoutFuture);
 
 				std::set<LogRangeAndUID> loggingRanges;
@@ -1658,7 +1658,7 @@ loadConfiguration(Database cx, JsonBuilderArray* messages, std::set<std::string>
 		tr.setOption(FDBTransactionOptions::CAUSAL_READ_RISKY);
 		try {
 			choose {
-				when(RangeResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
+				when(RangeReadResult res = wait(tr.getRange(configKeys, SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH))) {
 					DatabaseConfiguration configuration;
 					if (res.size() == SERVER_KNOBS->CONFIGURATION_ROWS_TO_FETCH) {
 						status_incomplete_reasons->insert("Too many configuration parameters set.");
@@ -1990,7 +1990,7 @@ static Future<std::vector<StorageServerStatusInfo>> readStorageInterfaceAndMetad
 			if (use_system_priority) {
 				tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			}
-			state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 
 			servers.reserve(serverList.size());
@@ -2446,17 +2446,29 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		bool backupEnabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
+		state BlobGranuleBackupConfig config;
+		bool backupEnabled = wait(config.enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
 		statusObj["blob_granules_backup_enabled"] = backupEnabled;
+		if (backupEnabled) {
+			std::string manifestUrl = wait(config.manifestUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_manifest_url"] = manifestUrl;
+			std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_mlogs_url"] = mlogsUrl;
+		}
 		// Blob manager status
 		if (managerIntf.present()) {
 			Optional<TraceEventFields> fields = wait(timeoutError(
 			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
 			if (fields.present()) {
-				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
-				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
-				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
-				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+				int64_t lastFlushVersion = fields.get().getUint64("LastFlushVersion");
+				if (lastFlushVersion > 0) {
+					statusObj["last_flush_version"] = fields.get().getUint64("LastFlushVersion");
+					statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
+					statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
+					statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
+					statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+					statusObj["last_truncation_version"] = fields.get().getUint64("LastMLogTruncationVersion");
+				}
 			}
 		}
 
@@ -2519,6 +2531,8 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 					statusObj["blob_full_restore_start_ts"] = startTs;
 					std::string error = wait(config.error().getD(&tr));
 					statusObj["blob_full_restore_error"] = error;
+					Version targetVersion = wait(config.targetVersion().getD(&tr));
+					statusObj["blob_full_restore_version"] = targetVersion;
 				}
 				break;
 			} catch (Error& e) {
@@ -2815,10 +2829,10 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				tr.setOption(FDBTransactionOptions::TIMEOUT, StringRef((uint8_t*)&timeout_ms, sizeof(int64_t)));
 
 				std::string jsonPrefix = layerStatusMetaPrefixRange.begin.toString() + "json/";
-				RangeResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
+				RangeReadResult jsonLayers = wait(tr.getRange(KeyRangeRef(jsonPrefix, strinc(jsonPrefix)), 1000));
 				// TODO:  Also fetch other linked subtrees of meta keys
 
-				state std::vector<Future<RangeResult>> docFutures;
+				state std::vector<Future<RangeReadResult>> docFutures;
 				state int i;
 				for (i = 0; i < jsonLayers.size(); ++i)
 					docFutures.push_back(
@@ -2828,7 +2842,7 @@ ACTOR Future<JsonBuilderObject> layerStatusFetcher(Database cx,
 				JSONDoc::expires_reference_version = (uint64_t)tr.getReadVersion().get();
 
 				for (i = 0; i < docFutures.size(); ++i) {
-					state RangeResult docs = wait(docFutures[i]);
+					state RangeReadResult docs = wait(docFutures[i]);
 					state int j;
 					for (j = 0; j < docs.size(); ++j) {
 						state json_spirit::mValue doc;
@@ -2926,7 +2940,7 @@ ACTOR Future<Optional<Value>> getActivePrimaryDC(Database cx, int* fullyReplicat
 			}
 			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-			state Future<RangeResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeReadResult> fReplicaKeys = tr.getRange(datacenterReplicasKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<ValueReadResult> fPrimaryDatacenterKey = tr.get(primaryDatacenterKey);
 			wait(timeoutError(success(fPrimaryDatacenterKey) && success(fReplicaKeys), 5));
 

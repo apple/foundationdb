@@ -30,9 +30,12 @@
 struct BlobGranuleBackupConfig : public KeyBackedClass {
 	BlobGranuleBackupConfig(KeyRef prefix = SystemKey("\xff\x02/bgbackup/"_sr)) : KeyBackedClass(prefix) {}
 
-	KeyBackedProperty<bool> enabled() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> enabled() { return { subspace.pack(__FUNCTION__sr), trigger, TupleCodec<bool>() }; }
 	KeyBackedProperty<std::string> manifestUrl() { return subspace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::string> mutationLogsUrl() { return subspace.pack(__FUNCTION__sr); }
+
+	KeyBackedProperty<int64_t> lastFlushTs() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> lastFlushVersion() { return subspace.pack(__FUNCTION__sr); }
 };
 
 // Defines blob restore state
@@ -64,6 +67,8 @@ struct BlobGranuleRestoreConfig : public KeyBackedClass {
 	KeyBackedProperty<std::string> error() { return subspace.pack(__FUNCTION__sr); }
 	KeyBackedMap<BlobRestorePhase, int64_t> phaseStartTs() { return subspace.pack(__FUNCTION__sr); };
 	KeyBackedProperty<UID> lock() { return subspace.pack(__FUNCTION__sr); }
+	// Begin version to apply mutation logs
+	KeyBackedProperty<Version> beginVersion() { return subspace.pack(__FUNCTION__sr); }
 };
 
 #endif

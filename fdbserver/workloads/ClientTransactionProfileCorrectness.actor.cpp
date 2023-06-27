@@ -328,7 +328,7 @@ struct ClientTransactionProfileCorrectnessWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				state RangeResult kvRange = wait(tr.getRange(begin, end, keysLimit));
+				state RangeReadResult kvRange = wait(tr.getRange(begin, end, keysLimit));
 				if (kvRange.empty())
 					break;
 				txInfoEntries.arena().dependsOn(kvRange.arena());

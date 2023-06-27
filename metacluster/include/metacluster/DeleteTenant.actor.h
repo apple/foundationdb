@@ -94,8 +94,8 @@ struct DeleteTenantImpl {
 			return Void();
 		}
 
-		ThreadFuture<RangeResult> rangeFuture = tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
-		RangeResult result = wait(safeThreadFutureToFuture(rangeFuture));
+		ThreadFuture<RangeReadResult> rangeFuture = tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
+		RangeReadResult result = wait(safeThreadFutureToFuture(rangeFuture));
 		if (!result.empty()) {
 			CODE_PROBE(true, "Attempt to delete non-empty tenant");
 			throw tenant_not_empty();

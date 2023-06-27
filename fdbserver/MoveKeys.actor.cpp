@@ -64,7 +64,7 @@ ACTOR Future<Void> unassignServerKeys(Transaction* tr, UID ssId, KeyRange range,
 	state KeyRange maxWithPrefix =
 	    KeyRangeRef(mapPrefix.toString() + allKeys.begin.toString(), mapPrefix.toString() + allKeys.end.toString());
 
-	state std::vector<Future<RangeResult>> keys;
+	state std::vector<Future<RangeReadResult>> keys;
 	keys.push_back(
 	    tr->getRange(lastLessThan(withPrefix.begin), firstGreaterOrEqual(withPrefix.begin), 1, Snapshot::True));
 	keys.push_back(
@@ -395,7 +395,7 @@ ACTOR Future<Void> cleanUpSingleShardDataMove(Database occ,
 			                                                    SERVER_KNOBS->MOVE_SHARD_KRM_BYTE_LIMIT));
 			ASSERT(!currentShards.empty() && !currentShards.more);
 
-			state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+			state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 			ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 			if (KeyRangeRef(currentShards[0].key, currentShards[1].key) != keys) {
@@ -569,7 +569,7 @@ ACTOR Future<std::vector<std::vector<UID>>> additionalSources(RangeResult shards
                                                               Reference<ReadYourWritesTransaction> tr,
                                                               int desiredHealthy,
                                                               int maxServers) {
-	state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+	state RangeReadResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 	ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 	std::vector<Future<ValueReadResult>> serverListEntries;
 	std::set<UID> fetching;
@@ -739,7 +739,7 @@ ACTOR static Future<Void> startMoveKeys(Database occ,
 					// 	printf("'%s': '%s'\n", old[i].key.toString().c_str(), old[i].value.toString().c_str());
 
 					// Check that enough servers for each shard are in the correct state
-					state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					std::vector<std::vector<UID>> addAsSource = wait(additionalSources(
 					    old, tr, servers.size(), SERVER_KNOBS->MAX_ADDED_SOURCES_MULTIPLIER * servers.size()));
@@ -1004,7 +1004,7 @@ ACTOR static Future<Void> finishMoveKeys(Database occ,
 					wait(checkMoveKeysLock(&tr, lock, ddEnabledState));
 
 					state KeyRange currentKeys = KeyRangeRef(begin, keys.end);
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 					state RangeResult keyServers = wait(krmGetRanges(&tr,
 					                                                 keyServersPrefix,
@@ -1417,7 +1417,7 @@ ACTOR static Future<Void> startMoveShards(Database occ,
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
 					// Check that enough servers for each shard are in the correct state
-					state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 					// For each intersecting range, update keyServers[range] dest to be servers and clear existing dest
@@ -1628,7 +1628,7 @@ ACTOR static Future<Void> checkDataMoveComplete(Database occ, UID dataMoveId, Ke
 					currentKeys = KeyRangeRef(currentKeys.begin, endKey);
 
 					// Check that enough servers for each shard are in the correct state
-					state RangeResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+					state RangeReadResult UIDtoTagMap = wait(tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 					for (int i = 0; i < keyServers.size() - 1; ++i) {
@@ -1739,7 +1739,7 @@ ACTOR static Future<Void> finishMoveShards(Database occ,
 					return Void();
 				}
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 				state RangeResult keyServers = wait(krmGetRanges(&tr,
@@ -1948,7 +1948,7 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 
 			// FIXME: don't fetch tag localities, all tags, and history tags if tss. Just fetch pair's tag
-			state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
+			state Future<RangeReadResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
 			state Future<ValueReadResult> fv = tr->get(serverListKeyFor(server.id()));
 
 			state Future<ValueReadResult> fExclProc = tr->get(
@@ -1986,8 +1986,8 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 				    LocalityData::ExcludeLocalityPrefix.toString() + l.first + ":" + l.second))));
 			}
 
-			state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
-			state Future<RangeResult> fHistoryTags =
+			state Future<RangeReadResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
+			state Future<RangeReadResult> fHistoryTags =
 			    tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True);
 
 			wait(success(fTagLocalities) && success(fv) && success(fTags) && success(fHistoryTags) &&
@@ -2100,7 +2100,9 @@ ACTOR Future<std::pair<Version, Tag>> addStorageServer(Database cx, StorageServe
 
 			tr->set(serverListKeyFor(server.id()), serverListValue(server));
 			wait(tr->commit());
-			TraceEvent("AddedStorageServerSystemKey").detail("ServerID", server.id());
+			TraceEvent("AddedStorageServerSystemKey")
+			    .detail("ServerID", server.id())
+			    .detail("CommitVersion", tr->getCommittedVersion());
 
 			return std::make_pair(tr->getCommittedVersion(), tag);
 		} catch (Error& e) {
@@ -2180,10 +2182,12 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 				tr->reset();
 			} else {
 				state Future<ValueReadResult> fListKey = tr->get(serverListKeyFor(serverID));
-				state Future<RangeResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fTagLocalities = tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
-				state Future<RangeResult> fTLogDatacenters = tr->getRange(tLogDatacentersKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> fTags = tr->getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> fHistoryTags = tr->getRange(serverTagHistoryKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> fTagLocalities =
+				    tr->getRange(tagLocalityListKeys, CLIENT_KNOBS->TOO_MANY);
+				state Future<RangeReadResult> fTLogDatacenters =
+				    tr->getRange(tLogDatacentersKeys, CLIENT_KNOBS->TOO_MANY);
 
 				wait(success(fListKey) && success(fTags) && success(fHistoryTags) && success(fTagLocalities) &&
 				     success(fTLogDatacenters));
@@ -2254,7 +2258,10 @@ ACTOR Future<Void> removeStorageServer(Database cx,
 
 				retry = true;
 				wait(tr->commit());
-				TraceEvent("RemoveStorageServer").detail("State", "Success").detail("ServerID", serverID);
+				TraceEvent("RemoveStorageServer")
+				    .detail("State", "Success")
+				    .detail("ServerID", serverID)
+				    .detail("CommitVersion", tr->getCommittedVersion());
 				return Void();
 			}
 		} catch (Error& e) {
@@ -2295,7 +2302,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 				// Get all values of keyServers and remove serverID from every occurrence
 				// Very inefficient going over every entry in keyServers
 				// No shortcut because keyServers and serverKeys are not guaranteed same shard boundaries
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 				state RangeResult keyServers = wait(krmGetRanges(&tr,
 				                                                 keyServersPrefix,
@@ -2497,7 +2504,7 @@ ACTOR Future<Void> cleanUpDataMove(Database occ,
 				ASSERT(range.begin == currentShards.front().key);
 				range = KeyRangeRef(range.begin, currentShards.back().key);
 
-				state RangeResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
+				state RangeReadResult UIDtoTagMap = wait(tr.getRange(serverTagKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!UIDtoTagMap.more && UIDtoTagMap.size() < CLIENT_KNOBS->TOO_MANY);
 
 				// For each intersecting range, clear existing dest servers and checkpoints on all src servers.
@@ -2770,7 +2777,7 @@ void seedShardServers(Arena& arena, CommitTransactionRef& tr, std::vector<Storag
 // Unassign given key range from its current storage servers
 ACTOR template <typename TrType = Transaction*>
 Future<Void> unassignServerKeys(UID traceId, TrType tr, KeyRangeRef keys, std::set<UID> ignoreServers) {
-	state RangeResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
+	state RangeReadResult serverList = wait(tr->getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY, Snapshot::True));
 	ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 	for (auto& server : serverList) {
 		state UID id = decodeServerListValue(server.value).id();

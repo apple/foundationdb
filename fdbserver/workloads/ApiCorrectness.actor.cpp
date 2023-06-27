@@ -476,7 +476,7 @@ public:
 		state int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from memory
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
+		state RangeReadResult storeResults = self->store.getRange(KeyRangeRef(start, end), limit, reverse);
 
 		// Get the range from the database
 		state RangeResult dbResults;
@@ -490,7 +490,7 @@ public:
 				readVersion = version;
 
 				KeyRangeRef range(start, end);
-				RangeResult rangeResults = wait(transaction->getRange(range, limit, reverse));
+				RangeReadResult rangeResults = wait(transaction->getRange(range, limit, reverse));
 				dbResults = rangeResults;
 				break;
 			} catch (Error& e) {
@@ -563,7 +563,7 @@ public:
 		state int limit = deterministicRandom()->randomInt(0, 101);
 
 		// Get the range from the memory store
-		state RangeResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
+		state RangeReadResult storeResults = self->store.getRange(KeyRangeRef(startKey, endKey), limit, reverse);
 
 		// Get the range from the database
 		state RangeResult dbResults;
@@ -576,7 +576,7 @@ public:
 				Version version = wait(transaction->getReadVersion());
 				readVersion = version;
 
-				RangeResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
+				RangeReadResult range = wait(transaction->getRange(startSelector, endSelector, limit, reverse));
 
 				if (endKey == self->store.endKey()) {
 					for (int i = 0; i < range.size(); i++) {

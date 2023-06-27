@@ -59,7 +59,7 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, i
 			}
 			param = tokens[tokenNum];
 		} else {
-			bool foundEquals;
+			bool foundEquals = false;
 			param = token.eat("=", &foundEquals);
 			if (!foundEquals) {
 				fmt::print(stderr,
@@ -79,6 +79,15 @@ parseTenantConfiguration(std::vector<StringRef> const& tokens, int startIndex, i
 		if (tokencmp(param, "tenant_group")) {
 			configParams[param] = value;
 		} else if (tokencmp(param, "assigned_cluster")) {
+			configParams[param] = value;
+		} else if (tokencmp(param, "tenant_state")) {
+			if (!value.present() ||
+			    value.compare(metacluster::tenantStateToString(metacluster::TenantState::READY)) != 0) {
+				fmt::print(stderr,
+				           "ERROR: only support setting tenant state back to `ready', but `{}' given.\n",
+				           value.present() ? value.get().toString().c_str() : "null");
+				return {};
+			}
 			configParams[param] = value;
 		} else {
 			fmt::print(stderr, "ERROR: unrecognized configuration parameter `{}'.\n", param.toString().c_str());
@@ -427,9 +436,9 @@ ACTOR Future<bool> tenantListCommand(Reference<IDatabase> db, std::vector<String
 					}
 				} else {
 					// Hold the reference to the standalone's memory
-					state ThreadFuture<RangeResult> kvsFuture =
+					state ThreadFuture<RangeReadResult> kvsFuture =
 					    tr->getRange(firstGreaterOrEqual(beginTenantKey), firstGreaterOrEqual(endTenantKey), limit);
-					RangeResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
+					RangeReadResult tenants = wait(safeThreadFutureToFuture(kvsFuture));
 					for (auto tenant : tenants) {
 						TenantName tName = tenant.key.removePrefix(tenantMapSpecialKeyRange.begin);
 						json_spirit::mValue jsonObject;

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import glob
+import logging
 import os
 import shutil
 import subprocess
@@ -9,7 +10,9 @@ from pathlib import Path
 
 from cluster_args import CreateTmpFdbClusterArgParser
 from local_cluster import LocalCluster, TLSConfig
-from test_util import random_alphanum_string
+from test_util import random_alphanum_string, get_logger
+
+logger = get_logger()
 
 
 class TempCluster(LocalCluster):
@@ -122,10 +125,10 @@ if __name__ == "__main__":
         authorization_keypair_id=args.authorization_keypair_id,
         remove_at_exit=not args.no_remove_at_exit,
     ) as cluster:
-        print("log-dir: {}".format(cluster.log))
-        print("etc-dir: {}".format(cluster.etc))
-        print("data-dir: {}".format(cluster.data))
-        print("cluster-file: {}".format(cluster.cluster_file))
+        logger.info("log-dir: {}".format(cluster.log))
+        logger.info("etc-dir: {}".format(cluster.etc))
+        logger.info("data-dir: {}".format(cluster.data))
+        logger.info("cluster-file: {}".format(cluster.cluster_file))
         cmd_args = []
         substitution_table = [
             ("@CLUSTER_FILE@", str(cluster.cluster_file)),
@@ -147,7 +150,7 @@ if __name__ == "__main__":
             cmd_args.append(cmd)
         env = dict(**os.environ)
         env["FDB_CLUSTER_FILE"] = env.get("FDB_CLUSTER_FILE", cluster.cluster_file)
-        print("command: {}".format(cmd_args))
+        logger.info("command: {}".format(cmd_args))
         errcode = subprocess.run(
             cmd_args, stdout=sys.stdout, stderr=sys.stderr, env=env
         ).returncode
@@ -168,18 +171,20 @@ if __name__ == "__main__":
                 in line
             ):
                 continue
-            print(">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails")
+            logger.error(
+                ">>>>>>>>>>>>>>>>>>>> Found severity 40 events - the test fails"
+            )
             errcode = 1
             break
 
         if errcode and not args.disable_log_dump:
             for etc_file in glob.glob(os.path.join(cluster.etc, "*")):
-                print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
+                logger.error(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
                 with open(etc_file, "r") as f:
-                    print(f.read())
+                    logger.error(f.read())
             for log_file in glob.glob(os.path.join(cluster.log, "*")):
-                print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
+                logger.error(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
                 with open(log_file, "r") as f:
-                    print(f.read())
+                    logger.error(f.read())
 
     sys.exit(errcode)

@@ -247,7 +247,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 							tssMapping.clear();
 							wait(readTSSMapping(&tr, &tssMapping));
 						}
-						RangeResult res = wait(tr.getRange(configKeys, 1000));
+						RangeReadResult res = wait(tr.getRange(configKeys, 1000));
 						if (res.size() == 1000) {
 							TraceEvent("ConsistencyCheck_TooManyConfigOptions").log();
 							self->testFailure("Read too many configuration options");
@@ -347,6 +347,11 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					bool consistencyScanStopped = wait(self->checkConsistencyScan(cx));
 					if (!consistencyScanStopped)
 						self->testFailure("Consistency scan active");
+
+					// FIXME: re-enable this check and the associated code probe!
+					// bool singleSingletons = self->checkSingleSingletons(self, configuration);
+					// if (!singleSingletons)
+					// 	self->testFailure("Cluster has multiple instances of a singleton!");
 				}
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -993,7 +998,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				state KeyBackedRangeResult<std::pair<UID, StorageMetadataType>> metadata =
 				    wait(metadataMap.getRange(&tr, {}, {}, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!metadata.more && metadata.results.size() < CLIENT_KNOBS->TOO_MANY);
-				RangeResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult serverList = wait(tr.getRange(serverListKeys, CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!serverList.more && serverList.size() < CLIENT_KNOBS->TOO_MANY);
 				ASSERT_EQ(metadata.results.size(), serverList.size());
 				id_ssi = std::unordered_map<UID, StorageMetadataType>(metadata.results.begin(), metadata.results.end());
@@ -1646,6 +1651,21 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check ConsistencyScan
+		if (db.consistencyScan.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass.machineClassFitness(
+		         ProcessClass::ConsistencyScan) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_ConsistencyScanNotBest")
+			    .detail("BestConsistencyScanFitness", fitnessLowerBound)
+			    .detail("ExistingConsistencyScanFitness",
+			            nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address())
+			                ? nonExcludedWorkerProcessMap[db.consistencyScan.get().address()]
+			                      .processClass.machineClassFitness(ProcessClass::ConsistencyScan)
+			                : -1);
+			return false;
+		}
+
 		// TODO: Check Tlog
 
 		return true;
@@ -1667,6 +1687,68 @@ struct ConsistencyCheckWorkload : TestWorkload {
 				wait(tr->onError(e));
 			}
 		}
+	}
+
+	bool checkSingleSingleton(std::vector<ISimulator::ProcessInfo*> const& allProcesses,
+	                          TraceEvent& ev,
+	                          std::string const& role,
+	                          int expectedCount) {
+		// FIXME: this doesn't actually check that there aren't multiple of the same role running on the same process
+		// either
+		int count = 0;
+		for (int i = 0; i < allProcesses.size(); i++) {
+			if (g_simulator->hasRole(allProcesses[i]->address, role)) {
+				count++;
+				ev.detail(role + std::to_string(count), allProcesses[i]->address.toString());
+			}
+		}
+		ev.detail(role + "Count", count).detail(role + "ExpectedCount", expectedCount);
+		if (count != expectedCount) {
+			fmt::print("ConsistencyCheck failure: incorrect number {0} of singleton {1} running (expected {2})\n",
+			           count,
+			           role,
+			           expectedCount);
+		}
+		return count == expectedCount;
+	}
+
+	// checks that there is only one instance of each singleton running in the cluster in simulation
+	bool checkSingleSingletons(ConsistencyCheckWorkload* self, DatabaseConfiguration config) {
+		if (!g_network->isSimulated()) {
+			return true;
+		}
+
+		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons", probe::decoration::rare);
+
+		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
+
+		bool success = true;
+		TraceEvent ev("CheckSingletons");
+
+		success &= self->checkSingleSingleton(allProcesses, ev, "Ratekeeper", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "DataDistributor", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "ConsistencyScan", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "BlobManager", config.blobGranulesEnabled ? 1 : 0);
+
+		// FIXME: add blob migrator once it's always on
+		// success &= self->checkSingleSingleton(allProcesses, ev, "BlobMigrator", TODO ? 1 : 0);
+
+		success &= self->checkSingleSingleton(
+		    allProcesses,
+		    ev,
+		    "EncryptKeyProxy",
+		    config.encryptionAtRestMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION ? 1 : 0);
+
+		if (!success) {
+			// TODO REMOVE
+			fmt::print("ConsistencyCheck singletons: roles map:\n");
+			for (int i = 0; i < allProcesses.size(); i++) {
+				fmt::print(
+				    "{0}: {1}\n", allProcesses[i]->address.toString(), g_simulator->getRoles(allProcesses[i]->address));
+			}
+		}
+
+		return success;
 	}
 };
 

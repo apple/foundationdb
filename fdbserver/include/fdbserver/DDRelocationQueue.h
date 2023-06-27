@@ -235,7 +235,7 @@ public:
 	ActorCollectionNoErrors noErrorActors; // has to be the last one to be destroyed because other Actors may use it.
 	UID distributorId;
 	MoveKeysLock lock;
-	Database cx;
+	// Should always use txnProcessor to access Database object
 	Reference<IDDTxnProcessor> txnProcessor;
 
 	std::vector<TeamCollectionInterface> teamCollections;
@@ -317,6 +317,10 @@ public:
 	Smoother queueRetentionTime{ SERVER_KNOBS->RELOCATION_METRICS_SMOOTHING };
 	MovingWindow<int64_t> relocationCompleteWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
 	MovingWindow<int64_t> relocationCancelWindow{ SERVER_KNOBS->RELOCATION_METRICS_WINDOW };
+
+	int64_t relocateTotalCount;
+
+	int64_t relocateToSourceCount;
 
 	DDQueue() = default;
 

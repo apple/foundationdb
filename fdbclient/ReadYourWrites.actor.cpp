@@ -19,6 +19,7 @@
  */
 
 #include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/FDBTypes.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbclient/Atomic.h"
 #include "fdbclient/DatabaseContext.h"
@@ -57,13 +58,13 @@ public:
 	struct GetValueReq {
 		explicit GetValueReq(Key key) : key(key) {}
 		Key key;
-		typedef ValueReadResult Result;
+		using Result = ValueReadResult;
 	};
 
 	struct GetKeyReq {
 		explicit GetKeyReq(KeySelector key) : key(key) {}
 		KeySelector key;
-		typedef KeyReadResult Result;
+		using Result = KeyReadResult;
 	};
 
 	template <bool reverse>
@@ -72,7 +73,7 @@ public:
 		  : begin(begin), end(end), limits(limits) {}
 		KeySelector begin, end;
 		GetRangeLimits limits;
-		using Result = RangeResult;
+		using Result = RangeReadResult;
 	};
 
 	template <bool reverse>
@@ -83,7 +84,7 @@ public:
 		Key mapper;
 		GetRangeLimits limits;
 		int matchIndex;
-		using Result = MappedRangeResult;
+		using Result = MappedRangeReadResult;
 	};
 
 	// read() Performs a read (get, getKey, getRange, etc), in the context of the given transaction.  Snapshot or RYW
@@ -141,32 +142,32 @@ public:
 	ACTOR template <class Iter>
 	static Future<KeyReadResult> read(ReadYourWritesTransaction* ryw, GetKeyReq read, Iter* it) {
 		if (read.key.offset > 0) {
-			RangeResult result =
+			RangeReadResult result =
 			    wait(getRangeValue(ryw, read.key, firstGreaterOrEqual(ryw->getMaxReadKey()), GetRangeLimits(1), it));
 			if (result.readToBegin)
-				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
+				return KeyReadResult(allKeys.begin, result.getReadMetrics());
 			if (result.readThroughEnd || !result.size())
-				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
-			return KeyReadResult(std::move(result[0].key), ReadMetricsNeedFilled());
+				return KeyReadResult(ryw->getMaxReadKey(), result.getReadMetrics());
+			return KeyReadResult(std::move(result[0].key), result.getReadMetrics());
 		} else {
 			read.key.offset++;
-			RangeResult result =
+			RangeReadResult result =
 			    wait(getRangeValueBack(ryw, firstGreaterOrEqual(allKeys.begin), read.key, GetRangeLimits(1), it));
 			if (result.readThroughEnd)
-				return KeyReadResult(ryw->getMaxReadKey(), ReadMetricsNeedFilled());
+				return KeyReadResult(ryw->getMaxReadKey(), result.getReadMetrics());
 			if (result.readToBegin || !result.size())
-				return KeyReadResult(allKeys.begin, ReadMetricsNeedFilled());
-			return KeyReadResult(result[0].key, ReadMetricsNeedFilled());
+				return KeyReadResult(allKeys.begin, result.getReadMetrics());
+			return KeyReadResult(result[0].key, result.getReadMetrics());
 		}
 	};
 
 	template <class Iter>
-	static Future<RangeResult> read(ReadYourWritesTransaction* ryw, GetRangeReq<false> read, Iter* it) {
+	static Future<RangeReadResult> read(ReadYourWritesTransaction* ryw, GetRangeReq<false> read, Iter* it) {
 		return getRangeValue(ryw, read.begin, read.end, read.limits, it);
 	};
 
 	template <class Iter>
-	static Future<RangeResult> read(ReadYourWritesTransaction* ryw, GetRangeReq<true> read, Iter* it) {
+	static Future<RangeReadResult> read(ReadYourWritesTransaction* ryw, GetRangeReq<true> read, Iter* it) {
 		return getRangeValueBack(ryw, read.begin, read.end, read.limits, it);
 	};
 
@@ -188,32 +189,38 @@ public:
 	}
 
 	ACTOR template <bool backwards>
-	static Future<RangeResult> readThrough(ReadYourWritesTransaction* ryw,
-	                                       GetRangeReq<backwards> read,
-	                                       Snapshot snapshot) {
+	static Future<RangeReadResult> readThrough(ReadYourWritesTransaction* ryw,
+	                                           GetRangeReq<backwards> read,
+	                                           Snapshot snapshot) {
+		state ReadMetrics readMetrics;
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
 			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
+			readMetrics.combine(key.getReadMetrics());
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
 
-		RangeResult v = wait(
+		RangeReadResult vConst = wait(
 		    ryw->tr.getRange(read.begin, read.end, read.limits, snapshot, backwards ? Reverse::True : Reverse::False));
+		RangeReadResult v = vConst;
+		v.getReadMetrics().combine(readMetrics);
+
 		KeyRef maxKey = ryw->getMaxReadKey();
 		if (v.size() > 0) {
 			if (!backwards && v[v.size() - 1].key >= maxKey) {
-				state RangeResult _v = v;
-				int i = _v.size() - 2;
-				for (; i >= 0 && _v[i].key >= maxKey; --i) {
+				int i = v.size() - 2;
+				for (; i >= 0 && v[i].key >= maxKey; --i) {
 				}
-				return RangeResult(RangeResultRef(VectorRef<KeyValueRef>(&_v[0], i + 1), false), _v.arena());
+				v.resize(v.arena(), i + 1);
+				v.more = false;
 			}
 		}
 
+		ASSERT(v.size() >= 0);
 		return v;
 	}
 
@@ -248,11 +255,11 @@ public:
 		ryw->updateConflictMap(readRange, it);
 	}
 
-	template <bool mustUnmodified = false, class RangeResultFamily = RangeResult>
+	template <bool mustUnmodified = false, class RangeReadResultFamily = RangeReadResult>
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetRangeReq<false> read,
 	                             WriteMap::iterator& it,
-	                             RangeResultFamily& result) {
+	                             RangeReadResultFamily& result) {
 		KeyRef rangeBegin, rangeEnd;
 		bool endInArena = false;
 
@@ -286,12 +293,12 @@ public:
 		updateConflictMap<mustUnmodified>(ryw, readRange, it);
 	}
 
-	// In the case where RangeResultFamily is MappedRangeResult, it only adds the primary range to conflict.
-	template <bool mustUnmodified = false, class RangeResultFamily = RangeResult>
+	// In the case where RangeReadResultFamily is MappedRangeReadResult, it only adds the primary range to conflict.
+	template <bool mustUnmodified = false, class RangeReadResultFamily = RangeReadResult>
 	static void addConflictRange(ReadYourWritesTransaction* ryw,
 	                             GetRangeReq<true> read,
 	                             WriteMap::iterator& it,
-	                             RangeResultFamily& result) {
+	                             RangeReadResultFamily& result) {
 		KeyRef rangeBegin, rangeEnd;
 		bool endInArena = false;
 
@@ -490,7 +497,7 @@ public:
 		}
 	}
 
-	static KeyRangeRef getKnownKeyRange(RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena) {
+	static KeyRangeRef getKnownKeyRange(RangeReadResult data, KeySelector begin, KeySelector end, Arena& arena) {
 		StringRef beginKey = begin.offset <= 1 ? begin.getKey() : allKeys.end;
 		ExtStringRef endKey = !data.more && end.offset >= 1 ? end.getKey() : allKeys.begin;
 
@@ -597,14 +604,14 @@ public:
 
 	// TODO: read to begin, read through end flags for result
 	ACTOR template <class Iter>
-	static Future<RangeResult> getRangeValue(ReadYourWritesTransaction* ryw,
-	                                         KeySelector begin,
-	                                         KeySelector end,
-	                                         GetRangeLimits limits,
-	                                         Iter* pit) {
+	static Future<RangeReadResult> getRangeValue(ReadYourWritesTransaction* ryw,
+	                                             KeySelector begin,
+	                                             KeySelector end,
+	                                             GetRangeLimits limits,
+	                                             Iter* pit) {
 		state Iter& it(*pit);
 		state Iter itEnd(*pit);
-		state RangeResult result;
+		state RangeReadResult result;
 		state int64_t additionalRows = 0;
 		state int itemsPastEnd = 0;
 		state int requestCount = 0;
@@ -618,10 +625,10 @@ public:
 		resolveKeySelectorFromCache(end, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-			return RangeResultRef(false, false);
+			return result;
 		} else if ((begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey()) ||
 		           (end.isFirstGreaterOrEqual() && end.getKey() == allKeys.begin)) {
-			return RangeResultRef(readToBegin, readThroughEnd);
+			return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 		}
 
 		if (!end.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
@@ -632,9 +639,9 @@ public:
 				readThroughEnd = true;
 
 			if (begin.getKey() >= resolvedEnd && !begin.isBackward()) {
-				return RangeResultRef(false, false);
+				return result;
 			} else if (resolvedEnd == allKeys.begin) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			resolveKeySelectorFromCache(
@@ -657,11 +664,11 @@ public:
 			    .detail("Requests", requestCount);*/
 
 			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-				return RangeResultRef(false, false);
+				return result;
 			}
 
 			if (end.offset <= 1 && end.getKey() == allKeys.begin) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			if ((begin.offset >= end.offset && begin.getKey() >= end.getKey()) ||
@@ -674,6 +681,9 @@ public:
 				    wait(read(ryw,
 				              GetKeyReq(end),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
+
+				result.getReadMetrics().combine(resolvedEnd.getReadMetrics());
+
 				if (resolvedEnd == allKeys.begin)
 					readToBegin = true;
 				if (resolvedEnd == ryw->getMaxReadKey())
@@ -685,7 +695,7 @@ public:
 			if (!it.is_unreadable() && !it.is_unknown_range() && it.beginKey() > itEnd.beginKey()) {
 				if (end.isFirstGreaterOrEqual())
 					break;
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			if (limits.isReached() && itemsPastEnd >= 1 - end.offset)
@@ -761,9 +771,11 @@ public:
 				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey()).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
-				RangeResult snapshot_read =
+				RangeReadResult snapshot_read =
 				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::False));
 				KeyRangeRef range = getKnownKeyRange(snapshot_read, read_begin, read_end, ryw->arena);
+
+				result.getReadMetrics().combine(snapshot_read.getReadMetrics());
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
 
@@ -819,7 +831,10 @@ public:
 		return result;
 	}
 
-	static KeyRangeRef getKnownKeyRangeBack(RangeResultRef data, KeySelector begin, KeySelector end, Arena& arena) {
+	static KeyRangeRef getKnownKeyRangeBack(RangeResultRef const& data,
+	                                        KeySelector const& begin,
+	                                        KeySelector const& end,
+	                                        Arena& arena) {
 		StringRef beginKey = !data.more && begin.offset <= 1 ? begin.getKey() : allKeys.end;
 		ExtStringRef endKey = end.offset >= 1 ? end.getKey() : allKeys.begin;
 
@@ -900,14 +915,14 @@ public:
 	}
 
 	ACTOR template <class Iter>
-	static Future<RangeResult> getRangeValueBack(ReadYourWritesTransaction* ryw,
-	                                             KeySelector begin,
-	                                             KeySelector end,
-	                                             GetRangeLimits limits,
-	                                             Iter* pit) {
+	static Future<RangeReadResult> getRangeValueBack(ReadYourWritesTransaction* ryw,
+	                                                 KeySelector begin,
+	                                                 KeySelector end,
+	                                                 GetRangeLimits limits,
+	                                                 Iter* pit) {
 		state Iter& it(*pit);
 		state Iter itEnd(*pit);
-		state RangeResult result;
+		state RangeReadResult result;
 		state int64_t additionalRows = 0;
 		state int itemsPastBegin = 0;
 		state int requestCount = 0;
@@ -922,10 +937,10 @@ public:
 		    begin, itEnd, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualBeginOffset);
 
 		if (actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-			return RangeResultRef(false, false);
+			return result;
 		} else if ((begin.isFirstGreaterOrEqual() && begin.getKey() == ryw->getMaxReadKey()) ||
 		           (end.isFirstGreaterOrEqual() && end.getKey() == allKeys.begin)) {
-			return RangeResultRef(readToBegin, readThroughEnd);
+			return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 		}
 
 		if (!begin.isFirstGreaterOrEqual() && begin.getKey() > end.getKey()) {
@@ -936,9 +951,9 @@ public:
 				readThroughEnd = true;
 
 			if (resolvedBegin >= end.getKey() && end.offset <= 1) {
-				return RangeResultRef(false, false);
+				return result;
 			} else if (resolvedBegin == ryw->getMaxReadKey()) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			resolveKeySelectorFromCache(end, it, ryw->getMaxReadKey(), &readToBegin, &readThroughEnd, &actualEndOffset);
@@ -961,11 +976,11 @@ public:
 			    .detail("Requests", requestCount);*/
 
 			if (!result.size() && actualBeginOffset >= actualEndOffset && begin.getKey() >= end.getKey()) {
-				return RangeResultRef(false, false);
+				return result;
 			}
 
 			if (!begin.isBackward() && begin.getKey() >= ryw->getMaxReadKey()) {
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			if ((begin.offset >= end.offset && begin.getKey() >= end.getKey()) ||
@@ -978,6 +993,9 @@ public:
 				    wait(read(ryw,
 				              GetKeyReq(begin),
 				              pit)); // do not worry about iterator invalidation, because we are breaking for the loop
+
+				result.getReadMetrics().combine(resolvedBegin.getReadMetrics());
+
 				if (resolvedBegin == allKeys.begin)
 					readToBegin = true;
 				if (resolvedBegin == ryw->getMaxReadKey())
@@ -990,7 +1008,7 @@ public:
 			    it.beginKey() < itEnd.beginKey()) {
 				if (begin.isFirstGreaterOrEqual())
 					break;
-				return RangeResultRef(readToBegin, readThroughEnd);
+				return RangeReadResult(RangeResultRef(readToBegin, readThroughEnd), result.getReadMetrics());
 			}
 
 			if (limits.isReached() && itemsPastBegin >= begin.offset - 1)
@@ -1065,9 +1083,11 @@ public:
 				//TraceEvent("RYWIssuing", randomID).detail("Begin", read_begin.toString()).detail("End", read_end.toString()).detail("Bytes", requestLimit.bytes).detail("Rows", requestLimit.rows).detail("Limits", limits.bytes).detail("Reached", limits.isReached()).detail("RequestCount", requestCount).detail("SingleClears", singleClears).detail("UcEnd", ucEnd.beginKey()).detail("MinRows", requestLimit.minRows);
 
 				additionalRows = 0;
-				RangeResult snapshot_read =
+				RangeReadResult snapshot_read =
 				    wait(ryw->tr.getRange(read_begin, read_end, requestLimit, Snapshot::True, Reverse::True));
 				KeyRangeRef range = getKnownKeyRangeBack(snapshot_read, read_begin, read_end, ryw->arena);
+
+				result.getReadMetrics().combine(snapshot_read.getReadMetrics());
 
 				//TraceEvent("RYWCacheInsert", randomID).detail("Range", range).detail("ExpectedSize", snapshot_read.expectedSize()).detail("Rows", snapshot_read.size()).detail("Results", snapshot_read).detail("More", snapshot_read.more).detail("ReadToBegin", snapshot_read.readToBegin).detail("ReadThroughEnd", snapshot_read.readThroughEnd).detail("ReadThrough", snapshot_read.readThrough);
 
@@ -1137,37 +1157,43 @@ public:
 #endif
 
 	template <class Iter>
-	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<false> read, Iter* it) {
+	static Future<MappedRangeReadResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<false> read, Iter* it) {
 		return getMappedRangeValue(ryw, read.begin, read.end, read.mapper, read.limits, it);
 	};
 
 	template <class Iter>
-	static Future<MappedRangeResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<true> read, Iter* it) {
+	static Future<MappedRangeReadResult> read(ReadYourWritesTransaction* ryw, GetMappedRangeReq<true> read, Iter* it) {
 		throw unsupported_operation();
 		// TODO: Support reverse. return getMappedRangeValueBack(ryw, read.begin, read.end, read.mapper,
 		// read.limits, it);
 	};
 
 	ACTOR template <bool backwards>
-	static Future<MappedRangeResult> readThrough(ReadYourWritesTransaction* ryw,
-	                                             GetMappedRangeReq<backwards> read,
-	                                             Snapshot snapshot) {
+	static Future<MappedRangeReadResult> readThrough(ReadYourWritesTransaction* ryw,
+	                                                 GetMappedRangeReq<backwards> read,
+	                                                 Snapshot snapshot) {
+		state ReadMetrics readMetrics;
 		if (backwards && read.end.offset > 1) {
 			// FIXME: Optimistically assume that this will not run into the system keys, and only reissue if the result
 			// actually does.
 			KeyReadResult key = wait(ryw->tr.getKey(read.end, snapshot));
+			readMetrics.combine(key.getReadMetrics());
+
 			if (key > ryw->getMaxReadKey())
 				read.end = firstGreaterOrEqual(ryw->getMaxReadKey());
 			else
 				read.end = KeySelector(firstGreaterOrEqual(key), key.arena());
 		}
-		MappedRangeResult v = wait(ryw->tr.getMappedRange(read.begin,
-		                                                  read.end,
-		                                                  read.mapper,
-		                                                  read.limits,
-		                                                  read.matchIndex,
-		                                                  snapshot,
-		                                                  backwards ? Reverse::True : Reverse::False));
+		MappedRangeReadResult vConst = wait(ryw->tr.getMappedRange(read.begin,
+		                                                           read.end,
+		                                                           read.mapper,
+		                                                           read.limits,
+		                                                           read.matchIndex,
+		                                                           snapshot,
+		                                                           backwards ? Reverse::True : Reverse::False));
+
+		MappedRangeReadResult v = vConst;
+		v.getReadMetrics().combine(readMetrics);
 		return v;
 	}
 
@@ -1175,9 +1201,9 @@ public:
 	static void addConflictRangeAndMustUnmodified(ReadYourWritesTransaction* ryw,
 	                                              GetMappedRangeReq<backwards> read,
 	                                              WriteMap::iterator& it,
-	                                              MappedRangeResult result) {
+	                                              MappedRangeReadResult result) {
 		// Primary getRange.
-		addConflictRange<true, MappedRangeResult>(
+		addConflictRange<true, MappedRangeReadResult>(
 		    ryw, GetRangeReq<backwards>(read.begin, read.end, read.limits), it, result);
 
 		// Secondary getValue/getRanges.
@@ -1204,11 +1230,11 @@ public:
 
 	// For Snapshot::True and NOT readYourWritesDisabled.
 	ACTOR template <bool backwards>
-	static Future<MappedRangeResult> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
-	                                                          GetMappedRangeReq<backwards> req,
-	                                                          Snapshot snapshot) {
+	static Future<MappedRangeReadResult> readWithConflictRangeRYW(ReadYourWritesTransaction* ryw,
+	                                                              GetMappedRangeReq<backwards> req,
+	                                                              Snapshot snapshot) {
 		choose {
-			when(MappedRangeResult result = wait(readThrough(ryw, req, Snapshot::True))) {
+			when(MappedRangeReadResult result = wait(readThrough(ryw, req, Snapshot::True))) {
 				// Insert read conflicts (so that it supported Snapshot::True) and check it is not modified (so it masks
 				// sure not break RYW semantic while not implementing RYW) for both the primary getRange and all
 				// underlying getValue/getRanges.
@@ -1223,7 +1249,7 @@ public:
 	}
 
 	template <bool backwards>
-	static inline Future<MappedRangeResult> readWithConflictRangeForGetMappedRange(
+	static inline Future<MappedRangeReadResult> readWithConflictRangeForGetMappedRange(
 	    ReadYourWritesTransaction* ryw,
 	    GetMappedRangeReq<backwards> const& req,
 	    Snapshot snapshot) {
@@ -1612,31 +1638,6 @@ ACTOR Future<ValueReadResult> getJSON(Database db) {
 	return ValueReadResult(getValueFromJSON(statusObj));
 }
 
-ACTOR Future<RangeResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord) {
-	state Reference<AsyncVar<Optional<ClusterInterface>>> clusterInterface(new AsyncVar<Optional<ClusterInterface>>);
-	state Future<Void> leaderMon = monitorLeader<ClusterInterface>(connRecord, clusterInterface);
-
-	loop {
-		choose {
-			when(std::vector<ClientWorkerInterface> workers =
-			         wait(clusterInterface->get().present()
-			                  ? brokenPromiseToNever(
-			                        clusterInterface->get().get().getClientWorkers.getReply(GetClientWorkersRequest()))
-			                  : Never())) {
-				RangeResult result;
-				for (auto& it : workers) {
-					result.push_back_deep(
-					    result.arena(),
-					    KeyValueRef(it.address().toString(), BinaryWriter::toValue(it, IncludeVersion())));
-				}
-
-				return result;
-			}
-			when(wait(clusterInterface->onChange())) {}
-		}
-	}
-}
-
 Future<ValueReadResult> ReadYourWritesTransaction::get(const Key& key, Snapshot snapshot) {
 	CODE_PROBE(true, "ReadYourWritesTransaction::get");
 
@@ -1717,11 +1718,11 @@ Future<KeyReadResult> ReadYourWritesTransaction::getKey(const KeySelector& key, 
 	return result;
 }
 
-Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
-                                                        KeySelector end,
-                                                        GetRangeLimits limits,
-                                                        Snapshot snapshot,
-                                                        Reverse reverse) {
+Future<RangeReadResult> ReadYourWritesTransaction::getRange(KeySelector begin,
+                                                            KeySelector end,
+                                                            GetRangeLimits limits,
+                                                            Snapshot snapshot,
+                                                            Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
@@ -1733,7 +1734,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 			if (tr.getDatabase().getPtr() && tr.getDatabase()->getConnectionRecord()) {
 				return getWorkerInterfaces(tr.getDatabase()->getConnectionRecord());
 			} else {
-				return RangeResult();
+				return RangeReadResult();
 			}
 		}
 	}
@@ -1752,7 +1753,7 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
 		CODE_PROBE(true, "RYW range read limit 0");
-		return RangeResult();
+		return RangeReadResult();
 	}
 
 	if (!limits.isValid())
@@ -1766,10 +1767,10 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
 		CODE_PROBE(true, "RYW range inverted");
-		return RangeResult();
+		return RangeReadResult();
 	}
 
-	Future<RangeResult> result =
+	Future<RangeReadResult> result =
 	    reverse ? RYWImpl::readWithConflictRange(this, RYWImpl::GetRangeReq<true>(begin, end, limits), snapshot)
 	            : RYWImpl::readWithConflictRange(this, RYWImpl::GetRangeReq<false>(begin, end, limits), snapshot);
 
@@ -1777,21 +1778,21 @@ Future<RangeResult> ReadYourWritesTransaction::getRange(KeySelector begin,
 	return result;
 }
 
-Future<RangeResult> ReadYourWritesTransaction::getRange(const KeySelector& begin,
-                                                        const KeySelector& end,
-                                                        int limit,
-                                                        Snapshot snapshot,
-                                                        Reverse reverse) {
+Future<RangeReadResult> ReadYourWritesTransaction::getRange(const KeySelector& begin,
+                                                            const KeySelector& end,
+                                                            int limit,
+                                                            Snapshot snapshot,
+                                                            Reverse reverse) {
 	return getRange(begin, end, GetRangeLimits(limit), snapshot, reverse);
 }
 
-Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector begin,
-                                                                    KeySelector end,
-                                                                    Key mapper,
-                                                                    GetRangeLimits limits,
-                                                                    int matchIndex,
-                                                                    Snapshot snapshot,
-                                                                    Reverse reverse) {
+Future<MappedRangeReadResult> ReadYourWritesTransaction::getMappedRange(KeySelector begin,
+                                                                        KeySelector end,
+                                                                        Key mapper,
+                                                                        GetRangeLimits limits,
+                                                                        int matchIndex,
+                                                                        Snapshot snapshot,
+                                                                        Reverse reverse) {
 	if (getDatabase()->apiVersionAtLeast(630)) {
 		if (specialKeys.contains(begin.getKey()) && specialKeys.begin <= end.getKey() &&
 		    end.getKey() <= specialKeys.end) {
@@ -1816,7 +1817,7 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 
 	// This optimization prevents nullptr operations from being added to the conflict range
 	if (limits.isReached()) {
-		return MappedRangeResult();
+		return MappedRangeReadResult();
 	}
 
 	if (!limits.isValid())
@@ -1829,10 +1830,10 @@ Future<MappedRangeResult> ReadYourWritesTransaction::getMappedRange(KeySelector 
 		end.removeOrEqual(end.arena());
 
 	if (begin.offset >= end.offset && begin.getKey() >= end.getKey()) {
-		return MappedRangeResult();
+		return MappedRangeReadResult();
 	}
 
-	Future<MappedRangeResult> result =
+	Future<MappedRangeReadResult> result =
 	    reverse ? RYWImpl::readWithConflictRangeForGetMappedRange(
 	                  this, RYWImpl::GetMappedRangeReq<true>(begin, end, mapper, matchIndex, limits), snapshot)
 	            : RYWImpl::readWithConflictRangeForGetMappedRange(

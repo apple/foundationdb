@@ -187,7 +187,7 @@ ACTOR Future<bool> compareDatabaseToMemory(ApiWorkload* self) {
 
 		loop {
 			try {
-				state RangeResult dbResults = wait(transaction->getRange(range, resultsPerRange, Reverse::False));
+				state RangeReadResult dbResults = wait(transaction->getRange(range, resultsPerRange, Reverse::False));
 
 				// Compare results of database and memory store
 				Version v = wait(transaction->getReadVersion());

@@ -26,12 +26,10 @@ constexpr int64_t testSpringBytes = 100e6;
 // TARGET_DURABILTY_LAG_VERSIONS_BATCH, and MAX_TL_SS_VERSION_DIFFERENCE_BATCH:
 constexpr int64_t testTargetVersionDifference = 2e9;
 constexpr int64_t testTotalSpace = 100e9;
-constexpr int64_t testGenerateMockInfoIterations = 20e3;
+constexpr int64_t testGenerateMockInfoIterations = 3e3;
 double const testInputBytesPerSecond = 1e6;
 
-// FIXME: The default error bound should be lowered in the future,
-// but doing so today causes some tests to fail
-bool checkApproximatelyEqual(double a, double b, double errorBound = 0.2) {
+bool checkApproximatelyEqual(double a, double b, double errorBound = 0.05) {
 	if ((a > b + 0.01 && a > b * (1 + errorBound)) || (b > a + 0.01 && b > a * (1 + errorBound))) {
 		TraceEvent(SevError, "CheckApproximatelyEqualFailure")
 		    .detail("A", a)
@@ -68,19 +66,20 @@ ACTOR Future<TLogQueueInfo> getMockTLogQueueInfo(UID id,
 	// to their desired values.
 	while (iterations--) {
 		// Use orderedDelay to prevent buggification
-		wait(orderedDelay(0.01));
+		wait(orderedDelay(0.1));
 
-		reply.bytesInput += testInputBytesPerSecond / 100;
-		reply.bytesDurable += testInputBytesPerSecond / 100;
-		reply.v += 1000;
+		reply.bytesInput += testInputBytesPerSecond / 10;
+		reply.bytesDurable += testInputBytesPerSecond / 10;
+		reply.v += 100000;
 		result.update(reply, smoothTotalDurableBytes);
 	}
 
 	// Validate that result statistics approximately match desired values:
-	ASSERT(checkApproximatelyEqual(result.getSmoothFreeSpace(), availableSpace, 0.05));
-	ASSERT(checkApproximatelyEqual(result.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05));
-	ASSERT(checkApproximatelyEqual(result.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05));
-	ASSERT(checkApproximatelyEqual(result.getSmoothTotalSpace(), totalSpace, 0.05));
+	ASSERT(checkApproximatelyEqual(result.getSmoothFreeSpace(), availableSpace, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(result.getSmoothInputBytesRate(), testInputBytesPerSecond, /*errorBound=*/0.01));
+	ASSERT(
+	    checkApproximatelyEqual(result.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(result.getSmoothTotalSpace(), totalSpace, /*errorBound=*/0.01));
 
 	return result;
 }
@@ -114,26 +113,26 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 	// to their desired values.
 	while (iterations--) {
 		// Use orderedDelay to prevent buggification
-		wait(orderedDelay(0.01));
+		wait(orderedDelay(0.1));
 
-		reply.bytesInput += (testInputBytesPerSecond / 100);
-		reply.bytesDurable += (testInputBytesPerSecond / 100);
-		reply.version += 10000;
-		reply.durableVersion += 10000;
+		reply.bytesInput += (testInputBytesPerSecond / 10);
+		reply.bytesDurable += (testInputBytesPerSecond / 10);
+		reply.version += 100000;
+		reply.durableVersion += 100000;
 		ss.update(reply, smoothTotalDurableBytes);
 	}
 
 	// Validate that ss statistics approximately match desired values:
-	ASSERT(checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond, 0.05));
-	ASSERT(checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, 0.05));
-	ASSERT(checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace, 0.05));
-	ASSERT(checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace, 0.05));
-	ASSERT(checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes, 0.05));
+	ASSERT(checkApproximatelyEqual(ss.getSmoothInputBytesRate(), testInputBytesPerSecond, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(ss.getVerySmoothDurableBytesRate(), testInputBytesPerSecond, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(ss.getSmoothFreeSpace(), availableSpace, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(ss.getSmoothTotalSpace(), totalSpace, /*errorBound=*/0.01));
+	ASSERT(checkApproximatelyEqual(ss.getStorageQueueBytes(), storageQueueBytes, /*errorBound=*/0.01));
 	ASSERT(checkApproximatelyEqual(
 	    ss.getDurabilityLag(),
 	    std::max<int64_t>(targetNonDurableVersionsLag,
 	                      SERVER_KNOBS->VERSIONS_PER_SECOND * (storageQueueBytes / testInputBytesPerSecond)),
-	    0.05));
+	    /*errorBound=*/0.01));
 
 	return ss;
 }
@@ -141,7 +140,7 @@ ACTOR Future<StorageQueueInfo> getMockStorageQueueInfo(UID id,
 struct RKRateUpdaterTestEnvironment {
 	MockRKMetricsTracker metricsTracker;
 	MockRKRateServer rateServer;
-	MockTagThrottler tagThrottler;
+	StubTagThrottler tagThrottler;
 	MockRKConfigurationMonitor configurationMonitor;
 	MockRKRecoveryTracker recoveryTracker;
 	Deque<double> actualTpsHistory;
@@ -554,8 +553,10 @@ TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag1") {
 		env.update();
 	}
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
+	// FIXME: Figure out how to lower the error bound on this test
 	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(),
-	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT));
+	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_DECREASE_AMOUNT,
+	                               /*errorBound=*/0.2));
 	return Void();
 }
 
@@ -577,8 +578,10 @@ TEST_CASE("/fdbserver/RKRateUpdater/BlobWorkerLag2") {
 		env.update();
 	}
 	ASSERT_EQ(env.rateUpdater.getLimitReason(), limitReason_t::blob_worker_lag);
+	// FIXME: Figure out how to lower the error bound on this test
 	ASSERT(checkApproximatelyEqual(env.rateUpdater.getTpsLimit(),
-	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_INCREASE_AMOUNT));
+	                               (testActualTps / 2) * SERVER_KNOBS->BW_LAG_INCREASE_AMOUNT,
+	                               /*errorBound=*/0.2));
 	return Void();
 }
 

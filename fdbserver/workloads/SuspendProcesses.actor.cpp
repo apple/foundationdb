@@ -49,7 +49,7 @@ struct SuspendProcessesWorkload : TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 				tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-				RangeResult kvs =
+				RangeReadResult kvs =
 				    wait(tr.getRange(KeyRangeRef("\xff\xff/worker_interfaces/"_sr, "\xff\xff/worker_interfaces0"_sr),
 				                     CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);

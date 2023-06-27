@@ -26,8 +26,8 @@ class StorageQueueInfo {
 
 	UID ratekeeperID;
 	Smoother smoothFreeSpace, smoothTotalSpace;
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
-	Smoother smoothDurableVersion, smoothLatestVersion;
+	HoltLinearSmoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	HoltLinearSmoother smoothDurableVersion, smoothLatestVersion;
 
 public:
 	bool valid;
@@ -36,7 +36,7 @@ public:
 	StorageQueuingMetricsReply lastReply;
 	bool acceptingRequests;
 	limitReason_t limitReason;
-	std::vector<BusyTagInfo> busiestReadTags, busiestWriteTags;
+	std::vector<BusyThrottlingIdInfo> busiestReaders, busiestWriters;
 
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);
@@ -60,7 +60,7 @@ public:
 
 // Stores statistics for an individual tlog that are relevant for ratekeeper throttling
 class TLogQueueInfo {
-	Smoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
+	HoltLinearSmoother smoothDurableBytes, smoothInputBytes, verySmoothDurableBytes;
 	Smoother smoothFreeSpace;
 	Smoother smoothTotalSpace;
 

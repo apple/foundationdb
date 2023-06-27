@@ -139,35 +139,35 @@ public:
 
 	ThreadFuture<ValueReadResult> get(const KeyRef& key, bool snapshot = false) override;
 	ThreadFuture<KeyReadResult> getKey(const KeySelectorRef& key, bool snapshot = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
-	                                   int limit,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeySelectorRef& begin,
-	                                   const KeySelectorRef& end,
-	                                   GetRangeLimits limits,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override;
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
-	                                   int limit,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override {
+	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
+	                                       const KeySelectorRef& end,
+	                                       int limit,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override;
+	ThreadFuture<RangeReadResult> getRange(const KeySelectorRef& begin,
+	                                       const KeySelectorRef& end,
+	                                       GetRangeLimits limits,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override;
+	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
+	                                       int limit,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limit, snapshot, reverse);
 	}
-	ThreadFuture<RangeResult> getRange(const KeyRangeRef& keys,
-	                                   GetRangeLimits limits,
-	                                   bool snapshot = false,
-	                                   bool reverse = false) override {
+	ThreadFuture<RangeReadResult> getRange(const KeyRangeRef& keys,
+	                                       GetRangeLimits limits,
+	                                       bool snapshot = false,
+	                                       bool reverse = false) override {
 		return getRange(firstGreaterOrEqual(keys.begin), firstGreaterOrEqual(keys.end), limits, snapshot, reverse);
 	}
-	ThreadFuture<MappedRangeResult> getMappedRange(const KeySelectorRef& begin,
-	                                               const KeySelectorRef& end,
-	                                               const StringRef& mapper,
-	                                               GetRangeLimits limits,
-	                                               int matchIndex,
-	                                               bool snapshot,
-	                                               bool reverse) override;
+	ThreadFuture<MappedRangeReadResult> getMappedRange(const KeySelectorRef& begin,
+	                                                   const KeySelectorRef& end,
+	                                                   const StringRef& mapper,
+	                                                   GetRangeLimits limits,
+	                                                   int matchIndex,
+	                                                   bool snapshot,
+	                                                   bool reverse) override;
 	ThreadFuture<Standalone<VectorRef<const char*>>> getAddressesForKey(const KeyRef& key) override;
 	ThreadFuture<Standalone<StringRef>> getVersionstamp() override;
 	ThreadFuture<int64_t> getEstimatedRangeSizeBytes(const KeyRangeRef& keys) override;
@@ -176,23 +176,6 @@ public:
 
 	ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> getBlobGranuleRanges(const KeyRangeRef& keyRange,
 	                                                                      int rangeLimit) override;
-
-	ThreadResult<RangeResult> readBlobGranules(const KeyRangeRef& keyRange,
-	                                           Version beginVersion,
-	                                           Optional<Version> readVersion,
-	                                           ReadBlobGranuleContext granuleContext) override;
-
-	ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> readBlobGranulesStart(const KeyRangeRef& keyRange,
-	                                                                               Version beginVersion,
-	                                                                               Optional<Version> readVersion,
-	                                                                               Version* readVersionOut) override;
-
-	ThreadResult<RangeResult> readBlobGranulesFinish(
-	    ThreadFuture<Standalone<VectorRef<BlobGranuleChunkRef>>> startFuture,
-	    const KeyRangeRef& keyRange,
-	    Version beginVersion,
-	    Version readVersion,
-	    ReadBlobGranuleContext granuleContext) override;
 
 	ThreadFuture<Standalone<VectorRef<BlobGranuleSummaryRef>>> summarizeBlobGranules(const KeyRangeRef& keyRange,
 	                                                                                 Optional<Version> summaryVersion,
@@ -241,6 +224,10 @@ public:
 	void debugTrace(BaseTraceEvent&&) override;
 	void debugPrint(std::string const& message) override;
 
+	ThreadFuture<ApiResult> execAsyncRequest(ApiRequest request) override;
+
+	FDBAllocatorIfc* getAllocatorInterface() override;
+
 private:
 	ISingleThreadTransaction* tr;
 	const Optional<TenantName> tenantName;
@@ -264,6 +251,7 @@ public:
 	Reference<IDatabase> createDatabaseFromConnectionString(const char* connectionString) override;
 
 	void addNetworkThreadCompletionHook(void (*hook)(void*), void* hookParameter) override;
+	FDBAllocatorIfc* getAllocatorInterface() override;
 
 private:
 	friend IClientApi* getLocalClientAPI();

@@ -1834,8 +1834,8 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						}
 
 						getTransaction(db, tenant, tr, options, intrans);
-						state ThreadFuture<RangeResult> kvsF = tr->getRange(KeyRangeRef(tokens[1], endKey), limit);
-						RangeResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
+						state ThreadFuture<RangeReadResult> kvsF = tr->getRange(KeyRangeRef(tokens[1], endKey), limit);
+						RangeReadResult kvs = wait(makeInterruptable(safeThreadFutureToFuture(kvsF)));
 
 						printf("\nRange limited to %d keys\n", limit);
 						for (auto iter = kvs.begin(); iter < kvs.end(); iter++) {

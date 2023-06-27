@@ -277,7 +277,7 @@ struct FileSystemWorkload : TestWorkload {
 		if (self->loggingQueries)
 			TraceEvent("UserQuery").detail("UserID", userID).detail("PathBase", base);
 		Key keyEnd(base + "/updated0");
-		RangeResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
+		RangeReadResult val = wait(tr->getRange(firstGreaterOrEqual(keyEnd) - 10, firstGreaterOrEqual(keyEnd), 10));
 		Key keyBegin(base + "/updated/");
 		for (int i = val.size() - 1; i >= 0; i--) {
 			if (val[i].key.startsWith(keyBegin) && self->loggingQueries) {
@@ -304,7 +304,7 @@ struct FileSystemWorkload : TestWorkload {
 		state int transferSize = 1000;
 		state uint64_t deletedFiles = 0;
 		while (transfered == transferSize) {
-			RangeResult val = wait(tr->getRange(begin, end, transferSize));
+			RangeReadResult val = wait(tr->getRange(begin, end, transferSize));
 			transfered = val.size();
 			deletedFiles += transfered;
 			begin = begin + transfered;

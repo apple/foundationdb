@@ -363,30 +363,30 @@ public:
 	[[nodiscard]] Future<Void> watch(Reference<Watch> watch);
 	[[nodiscard]] Future<KeyReadResult> getKey(const KeySelector& key, Snapshot = Snapshot::False);
 	// Future< Optional<KeyValue> > get( const KeySelectorRef& key );
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           int limit,
-	                                           Snapshot = Snapshot::False,
-	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           GetRangeLimits limits,
-	                                           Snapshot = Snapshot::False,
-	                                           Reverse = Reverse::False);
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
-	                                           int limit,
-	                                           Snapshot snapshot = Snapshot::False,
-	                                           Reverse reverse = Reverse::False) {
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               int limit,
+	                                               Snapshot = Snapshot::False,
+	                                               Reverse = Reverse::False);
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               GetRangeLimits limits,
+	                                               Snapshot = Snapshot::False,
+	                                               Reverse = Reverse::False);
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                               int limit,
+	                                               Snapshot snapshot = Snapshot::False,
+	                                               Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limit,
 		                snapshot,
 		                reverse);
 	}
-	[[nodiscard]] Future<RangeResult> getRange(const KeyRange& keys,
-	                                           GetRangeLimits limits,
-	                                           Snapshot snapshot = Snapshot::False,
-	                                           Reverse reverse = Reverse::False) {
+	[[nodiscard]] Future<RangeReadResult> getRange(const KeyRange& keys,
+	                                               GetRangeLimits limits,
+	                                               Snapshot snapshot = Snapshot::False,
+	                                               Reverse reverse = Reverse::False) {
 		return getRange(KeySelector(firstGreaterOrEqual(keys.begin), keys.arena()),
 		                KeySelector(firstGreaterOrEqual(keys.end), keys.arena()),
 		                limits,
@@ -394,40 +394,40 @@ public:
 		                reverse);
 	}
 
-	[[nodiscard]] Future<MappedRangeResult> getMappedRange(const KeySelector& begin,
-	                                                       const KeySelector& end,
-	                                                       const Key& mapper,
-	                                                       GetRangeLimits limits,
-	                                                       int matchIndex = MATCH_INDEX_ALL,
-	                                                       Snapshot = Snapshot::False,
-	                                                       Reverse = Reverse::False);
+	[[nodiscard]] Future<MappedRangeReadResult> getMappedRange(const KeySelector& begin,
+	                                                           const KeySelector& end,
+	                                                           const Key& mapper,
+	                                                           GetRangeLimits limits,
+	                                                           int matchIndex = MATCH_INDEX_ALL,
+	                                                           Snapshot = Snapshot::False,
+	                                                           Reverse = Reverse::False);
 
 private:
-	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeResultFamily>
-	Future<RangeResultFamily> getRangeInternal(const KeySelector& begin,
-	                                           const KeySelector& end,
-	                                           const Key& mapper,
-	                                           GetRangeLimits limits,
-	                                           int matchIndex,
-	                                           Snapshot snapshot,
-	                                           Reverse reverse);
+	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply, class RangeReadResultFamily>
+	Future<RangeReadResultFamily> getRangeInternal(const KeySelector& begin,
+	                                               const KeySelector& end,
+	                                               const Key& mapper,
+	                                               GetRangeLimits limits,
+	                                               int matchIndex,
+	                                               Snapshot snapshot,
+	                                               Reverse reverse);
 
 public:
 	// A method for streaming data from the storage server that is more efficient than getRange when reading large
 	// amounts of data
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          int limit,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeySelector& begin,
 	                                          const KeySelector& end,
 	                                          GetRangeLimits limits,
 	                                          Snapshot = Snapshot::False,
 	                                          Reverse = Reverse::False);
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeyRange& keys,
 	                                          int limit,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -439,7 +439,7 @@ public:
 		                      snapshot,
 		                      reverse);
 	}
-	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeResult>& results,
+	[[nodiscard]] Future<Void> getRangeStream(PromiseStream<RangeReadResult>& results,
 	                                          const KeyRange& keys,
 	                                          GetRangeLimits limits,
 	                                          Snapshot snapshot = Snapshot::False,
@@ -560,12 +560,12 @@ public:
 
 private:
 	template <class GetKeyValuesFamilyRequest, class GetKeyValuesFamilyReply>
-	Future<RangeResult> getRangeInternal(const KeySelector& begin,
-	                                     const KeySelector& end,
-	                                     const Key& mapper,
-	                                     GetRangeLimits limits,
-	                                     Snapshot snapshot,
-	                                     Reverse reverse);
+	Future<RangeReadResult> getRangeInternal(const KeySelector& begin,
+	                                         const KeySelector& end,
+	                                         const Key& mapper,
+	                                         GetRangeLimits limits,
+	                                         Snapshot snapshot,
+	                                         Reverse reverse);
 
 	void resetImpl(bool generateNewSpan);
 
@@ -682,6 +682,8 @@ ACTOR Future<Optional<Standalone<VectorRef<KeyRef>>>> splitStorageMetricsWithLoc
     StorageMetrics limit,
     StorageMetrics estimated,
     Optional<int> minSplitBytes);
+
+ACTOR Future<RangeReadResult> getWorkerInterfaces(Reference<IClusterConnectionRecord> connRecord);
 
 namespace NativeAPI {
 ACTOR Future<std::vector<std::pair<StorageServerInterface, ProcessClass>>> getServerListAndProcessClasses(

@@ -48,6 +48,7 @@ constexpr char msgMetaclusterKey[] = "metacluster";
 constexpr char msgDataClustersKey[] = "data_clusters";
 constexpr char msgCapacityKey[] = "capacity";
 constexpr char msgAllocatedKey[] = "allocated";
+constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
 constexpr char msgErrorKey[] = "error";
 
 struct DatabaseConnections {

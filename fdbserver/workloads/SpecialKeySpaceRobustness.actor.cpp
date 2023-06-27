@@ -74,7 +74,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				        .withSuffix(option),
 				    ValueRef());
 			}
-			RangeResult result = wait(tx->getRange(
+			RangeReadResult result = wait(tx->getRange(
 			    KeyRangeRef("options/"_sr, "options0"_sr)
 			        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::MANAGEMENT).begin),
 			    CLIENT_KNOBS->TOO_MANY));
@@ -116,7 +116,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
 				tx->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
 				// test getRange
-				state RangeResult result = wait(tx->getRange(
+				state RangeReadResult result = wait(tx->getRange(
 				    KeyRangeRef("process/class_type/"_sr, "process/class_type0"_sr)
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
 				    CLIENT_KNOBS->TOO_MANY));
@@ -186,7 +186,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			try {
 				// test getRange
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				state RangeResult class_source_result = wait(tx->getRange(
+				state RangeReadResult class_source_result = wait(tx->getRange(
 				    KeyRangeRef("process/class_source/"_sr, "process/class_source0"_sr)
 				        .withPrefix(SpecialKeySpace::getModuleRange(SpecialKeySpace::MODULE::CONFIGURATION).begin),
 				    CLIENT_KNOBS->TOO_MANY));
@@ -305,7 +305,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 		loop {
 			try {
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
+				RangeReadResult res = wait(tx->getRange(normalKeys, 1));
 			} catch (Error& e) {
 				if (e.code() == error_code_actor_cancelled)
 					throw;
@@ -342,7 +342,7 @@ struct SpecialKeySpaceRobustnessWorkload : TestWorkload {
 			try {
 				// read should be successful
 				tx->setOption(FDBTransactionOptions::RAW_ACCESS);
-				RangeResult res = wait(tx->getRange(normalKeys, 1));
+				RangeReadResult res = wait(tx->getRange(normalKeys, 1));
 				break;
 			} catch (Error& e) {
 				wait(tx->onError(e));

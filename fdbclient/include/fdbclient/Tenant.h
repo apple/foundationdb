@@ -216,7 +216,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectMap<TenantGroupName, typename TenantTypes::TenantGroupEntryT, decltype(IncludeVersion()), NullCodec>
 	    tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
-	KeyBackedMap<TenantGroupName, ThrottleApi::TagQuotaValue> throughputQuota;
+	KeyBackedMap<TenantGroupName, ThrottleApi::ThroughputQuotaValue> throughputQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)

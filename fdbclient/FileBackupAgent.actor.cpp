@@ -65,7 +65,6 @@
 #include <algorithm>
 #include <unordered_map>
 #include <utility>
-#include <variant>
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
@@ -574,67 +573,39 @@ struct SnapshotFileBackupEncryptionKeys {
 //   truncated to just the tenant prefix and the value will be empty (to avoid having sensitive data of one tenant be
 //   encrypted with a key for a different tenant)
 struct EncryptedRangeFileWriter : public IRangeFileWriter {
-	struct Options {
-		constexpr static FileIdentifier file_identifier = 3152016;
-
-		bool configurableEncryptionEnabled = false;
-
-		Options() {}
-
-		template <class Ar>
-		void serialize(Ar& ar) {
-			serializer(ar, configurableEncryptionEnabled);
-		}
-	};
-
 	EncryptedRangeFileWriter(Database cx,
 	                         Arena* arena,
 	                         EncryptionAtRestMode encryptMode,
 	                         Optional<Reference<TenantEntryCache<Void>>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
-	                         int blockSize = 0,
-	                         Options options = Options())
+	                         int blockSize = 0)
 	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), tenantCache(tenantCache), blockSize(blockSize),
-	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION), options(options) {
+	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);
 	}
 
-	ACTOR static Future<StringRef> decryptImpl(
-	    Database cx,
-	    std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> headerVariant,
-	    const uint8_t* dataP,
-	    int64_t dataLen,
-	    Arena* arena) {
+	ACTOR static Future<StringRef> decryptImpl(Database cx,
+	                                           BlobCipherEncryptHeaderRef header,
+	                                           const uint8_t* dataP,
+	                                           int64_t dataLen,
+	                                           Arena* arena) {
 		Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
-		if (std::holds_alternative<BlobCipherEncryptHeaderRef>(headerVariant)) { // configurable encryption
-			state BlobCipherEncryptHeaderRef headerRef = std::get<BlobCipherEncryptHeaderRef>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-			    dbInfo, headerRef, BlobCipherMetrics::RESTORE));
-			EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
-			cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
-			if (cipherDetails.headerCipherDetails.present()) {
-				cipherDetails.headerCipherDetails.get().validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
-			}
-			DecryptBlobCipherAes256Ctr decryptor(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
-			return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
-		} else {
-			state BlobCipherEncryptHeader header = std::get<BlobCipherEncryptHeader>(headerVariant);
-			TextAndHeaderCipherKeys cipherKeys = wait(
-			    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, header, BlobCipherMetrics::RESTORE));
-			header.cipherTextDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
-			if (header.cipherHeaderDetails.isValid()) {
-				header.cipherHeaderDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
-			}
-			DecryptBlobCipherAes256Ctr decryptor(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.iv, BlobCipherMetrics::RESTORE);
-			return decryptor.decrypt(dataP, dataLen, header, *arena)->toStringRef();
+		state BlobCipherEncryptHeaderRef headerRef = header;
+		TextAndHeaderCipherKeys cipherKeys = wait(
+		    GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(dbInfo, headerRef, BlobCipherMetrics::RESTORE));
+		EncryptHeaderCipherDetails cipherDetails = headerRef.getCipherDetails();
+		cipherDetails.textCipherDetails.validateCipherDetailsWithCipherKey(cipherKeys.cipherTextKey);
+		if (cipherDetails.headerCipherDetails.present()) {
+			cipherDetails.headerCipherDetails.get().validateCipherDetailsWithCipherKey(cipherKeys.cipherHeaderKey);
 		}
+		DecryptBlobCipherAes256Ctr decryptor(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::RESTORE);
+		return decryptor.decrypt(dataP, dataLen, headerRef, *arena);
 	}
 
 	static Future<StringRef> decrypt(Database cx,
-	                                 std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> header,
+	                                 BlobCipherEncryptHeaderRef header,
 	                                 const uint8_t* dataP,
 	                                 int64_t dataLen,
 	                                 Arena* arena) {
@@ -674,21 +645,12 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		    BlobCipherMetrics::BACKUP);
 		int64_t payloadSize = self->wPtr - self->dataPayloadStart;
 		StringRef encryptedData;
-		if (self->options.configurableEncryptionEnabled) {
-			BlobCipherEncryptHeaderRef headerRef;
-			encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
-			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
-			self->arena->dependsOn(serialized.arena());
-			ASSERT(serialized.size() == self->encryptHeader.size());
-			std::memcpy(mutateString(self->encryptHeader), serialized.begin(), self->encryptHeader.size());
-		} else {
-			BlobCipherEncryptHeader header;
-			encryptedData =
-			    encryptor.encrypt(self->dataPayloadStart, payloadSize, &header, *self->arena)->toStringRef();
-			StringRef encryptHeaderStringRef = BlobCipherEncryptHeader::toStringRef(header, *self->arena);
-			ASSERT(encryptHeaderStringRef.size() == self->encryptHeader.size());
-			std::memcpy(mutateString(self->encryptHeader), encryptHeaderStringRef.begin(), self->encryptHeader.size());
-		}
+		BlobCipherEncryptHeaderRef headerRef;
+		encryptedData = encryptor.encrypt(self->dataPayloadStart, payloadSize, &headerRef, *self->arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		self->arena->dependsOn(serialized.arena());
+		ASSERT(serialized.size() == self->encryptHeader.size());
+		std::memcpy(mutateString(self->encryptHeader), serialized.begin(), self->encryptHeader.size());
 
 		// re-write encrypted data to buffer
 		std::memcpy(self->dataPayloadStart, encryptedData.begin(), payloadSize);
@@ -801,27 +763,17 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 		// write Header
 		copyToBuffer(self, (uint8_t*)&self->fileVersion, sizeof(self->fileVersion));
 
-		// write options struct
-		self->options.configurableEncryptionEnabled = CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION;
-		Value serialized =
-		    ObjectWriter::toValue(self->options, IncludeVersion(ProtocolVersion::withEncryptedSnapshotBackupFile()));
-		appendStringRefWithLenToBuffer(self, &serialized);
-
 		// calculate encryption header size
 		uint32_t headerSize = 0;
-		if (self->options.configurableEncryptionEnabled) {
-			EncryptAuthTokenMode authTokenMode =
-			    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
-			EncryptAuthTokenAlgo authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
-			headerSize = BlobCipherEncryptHeaderRef::getHeaderSize(
-			    CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION,
-			    getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo),
-			    ENCRYPT_CIPHER_MODE_AES_256_CTR,
-			    authTokenMode,
-			    authTokenAlgo);
-		} else {
-			headerSize = BlobCipherEncryptHeader::headerSize;
-		}
+		EncryptAuthTokenMode authTokenMode =
+		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE);
+		EncryptAuthTokenAlgo authTokenAlgo = getAuthTokenAlgoFromMode(authTokenMode);
+		headerSize =
+		    BlobCipherEncryptHeaderRef::getHeaderSize(CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION,
+		                                              getEncryptCurrentAlgoHeaderVersion(authTokenMode, authTokenAlgo),
+		                                              ENCRYPT_CIPHER_MODE_AES_256_CTR,
+		                                              authTokenMode,
+		                                              authTokenAlgo);
 		ASSERT(headerSize > 0);
 		// write header size to buffer
 		copyToBuffer(self, (uint8_t*)&headerSize, sizeof(headerSize));
@@ -977,7 +929,6 @@ private:
 	uint8_t* dataPayloadStart;
 	int64_t blockEnd;
 	uint32_t fileVersion;
-	Options options;
 	Key lastKey;
 	Key lastValue;
 	SnapshotFileBackupEncryptionKeys cipherKeys;
@@ -1258,27 +1209,15 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			wait(decodeKVPairs(&reader, &results, false, encryptMode, Optional<int64_t>(), tenantCache));
 		} else if (file_version == BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 			CODE_PROBE(true, "decoding encrypted block");
-			// decode options struct
-			state uint32_t optionsLen = reader.consumeNetworkUInt32();
-			const uint8_t* o = reader.consume(optionsLen);
-			StringRef optionsStringRef = StringRef(o, optionsLen);
-			EncryptedRangeFileWriter::Options options =
-			    ObjectReader::fromStringRef<EncryptedRangeFileWriter::Options>(optionsStringRef, IncludeVersion());
 			// read header size
 			state uint32_t headerLen = reader.consume<uint32_t>();
 			// read the encryption header
 			state const uint8_t* headerStart = reader.consume(headerLen);
 			StringRef headerS = StringRef(headerStart, headerLen);
-			state std::variant<BlobCipherEncryptHeaderRef, BlobCipherEncryptHeader> encryptHeader;
-			if (options.configurableEncryptionEnabled) {
-				encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
-				blockDomainId = std::get<BlobCipherEncryptHeaderRef>(encryptHeader)
-				                    .getCipherDetails()
-				                    .textCipherDetails.encryptDomainId;
-			} else {
-				encryptHeader = BlobCipherEncryptHeader::fromStringRef(headerS);
-				blockDomainId = std::get<BlobCipherEncryptHeader>(encryptHeader).cipherTextDetails.encryptDomainId;
-			}
+			state BlobCipherEncryptHeaderRef encryptHeader;
+
+			encryptHeader = BlobCipherEncryptHeaderRef::fromStringRef(headerS);
+			blockDomainId = encryptHeader.getCipherDetails().textCipherDetails.encryptDomainId;
 
 			if (config.tenantMode == TenantMode::REQUIRED && !isReservedEncryptDomain(blockDomainId)) {
 				ASSERT(tenantCache.present());
@@ -1289,7 +1228,7 @@ ACTOR Future<Standalone<VectorRef<KeyValueRef>>> decodeRangeFileBlock(Reference<
 			}
 			const uint8_t* dataPayloadStart = headerStart + headerLen;
 			// calculate the total bytes read up to (and including) the header
-			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + sizeof(uint32_t) + optionsLen + headerLen;
+			int64_t bytesRead = sizeof(int32_t) + sizeof(uint32_t) + headerLen;
 			// get the size of the encrypted payload and decrypt it
 			int64_t dataLen = len - bytesRead;
 			StringRef decryptedData =
@@ -1703,7 +1642,7 @@ ACTOR static Future<Standalone<VectorRef<KeyRef>>> getBlockOfShards(Reference<Re
 	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 	tr->setOption(FDBTransactionOptions::LOCK_AWARE);
 	state Standalone<VectorRef<KeyRef>> results;
-	RangeResult values = wait(tr->getRange(
+	RangeReadResult values = wait(tr->getRange(
 	    KeyRangeRef(keyAfter(beginKey.withPrefix(keyServersPrefix)), endKey.withPrefix(keyServersPrefix)), limit));
 
 	for (auto& s : values) {
@@ -3633,6 +3572,7 @@ struct RestoreCompleteTaskFunc : RestoreTaskFuncBase {
 			tr->clear(blobGranuleHistoryKeys);
 			tr->clear(blobGranuleFileKeys);
 			tr->clear(blobGranuleMappingKeys);
+			tr->clear(blobGranuleLockKeys);
 			BlobGranuleRestoreConfig().phase().set(tr, BlobRestorePhase::DONE);
 			BlobGranuleRestoreConfig().phaseStartTs().set(tr, BlobRestorePhase::DONE, now());
 		}
@@ -4916,7 +4856,17 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 				if (phase != BlobRestorePhase::APPLYING_MLOGS) {
 					wait(delay(CLIENT_KNOBS->BLOB_GRANULE_RESTORE_CHECK_INTERVAL));
 				} else {
-					TraceEvent("BlobGranuleRestoreResume").log();
+					Version version = wait(BlobGranuleRestoreConfig().beginVersion().getOrThrow(tr));
+					beginVersion = version;
+					restore.beginVersion().set(tr, beginVersion);
+					TraceEvent("BlobGranuleRestoreResume").detail("BeginVersion", beginVersion);
+					wait(tr->commit());
+					if (restoreVersion <= beginVersion) {
+						TraceEvent("BlobGranuleRestoreDone")
+						    .detail("BeginVersion", beginVersion)
+						    .detail("Target", restoreVersion);
+						return Void();
+					}
 					break;
 				}
 			} catch (Error& e) {
@@ -5061,6 +5011,23 @@ struct StartFullRestoreTaskFunc : RestoreTaskFuncBase {
 
 		state Version firstVersion = Params.firstVersion().getOrDefault(task, invalidVersion);
 		if (firstVersion == invalidVersion) {
+			// For blob granule restore, we can complete the restore job if no mutation log is needed
+			state bool isBlobGranuleRestore;
+			wait(store(isBlobGranuleRestore, restore.isBlobGranuleRestore().getD(tr, Snapshot::False, false)));
+			if (isBlobGranuleRestore) {
+				state Version beginVersion;
+				state Version restoreVersion;
+				wait(store(beginVersion, restore.beginVersion().getD(tr, Snapshot::False, ::invalidVersion)));
+				wait(store(restoreVersion, restore.restoreVersion().getOrThrow(tr)));
+				// no need to apply mutations if target version is less than begin version
+				if (restoreVersion <= beginVersion) {
+					wait(
+					    success(RestoreCompleteTaskFunc::addTask(tr, taskBucket, task, TaskCompletionKey::noSignal())));
+					wait(taskBucket->finish(tr, task));
+					return Void();
+				}
+			}
+
 			wait(restore.logError(
 			    tr->getDatabase(), restore_missing_data(), "StartFullRestore: The backup had no data.", THIS));
 			std::string tag = wait(restore.tag().getD(tr));
@@ -5418,9 +5385,11 @@ public:
 				bgBackupConfig.manifestUrl().set(tr, blobManifestUrl.get());
 				bgBackupConfig.mutationLogsUrl().set(tr, bc->getURL());
 				bgBackupConfig.enabled().set(tr, true);
+				bgBackupConfig.lastFlushTs().set(tr, 0);
 			}
 			// Allow only incremental backup
 			incrementalBackupOnly = IncrementalBackupOnly::True;
+			stopWhenDone = StopWhenDone::False;
 		}
 
 		KeyRangeMap<int> backupRangeSet;
@@ -5441,7 +5410,7 @@ public:
 
 		state Key destUidValue(BinaryWriter::toValue(uid, Unversioned()));
 		if (normalizedRanges.size() == 1 || isDefaultBackup(normalizedRanges)) {
-			RangeResult existingDestUidValues = wait(
+			RangeReadResult existingDestUidValues = wait(
 			    tr->getRange(KeyRangeRef(destUidLookupPrefix, strinc(destUidLookupPrefix)), CLIENT_KNOBS->TOO_MANY));
 			bool found = false;
 			KeyRangeRef targetRange =
@@ -5558,7 +5527,7 @@ public:
 				KeyRange restoreIntoRange = KeyRangeRef(restoreRanges[index].begin, restoreRanges[index].end)
 				                                .removePrefix(removePrefix)
 				                                .withPrefix(addPrefix);
-				RangeResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
+				RangeReadResult existingRows = wait(tr->getRange(restoreIntoRange, 1));
 				if (existingRows.size() > 0) {
 					throw restore_destination_not_empty();
 				}
@@ -5746,6 +5715,7 @@ public:
 		if (bgBackupEnabled) {
 			BlobGranuleBackupConfig bgbackupConfig;
 			bgbackupConfig.enabled().set(tr, false);
+			bgbackupConfig.lastFlushTs().set(tr, 0);
 		}
 
 		// Cancel backup task through tag
@@ -6235,7 +6205,8 @@ public:
 		Optional<RestorableFileSet> restoreSet =
 		    wait(bc->getRestoreSet(targetVersion, ranges, onlyApplyMutationLogs, beginVersion));
 
-		if (!restoreSet.present()) {
+		// for blob granule restore, we don't have the begin version yet, so no need to check restore data set
+		if (!restoreSet.present() && !blobManifestUrl.present()) {
 			TraceEvent(SevWarn, "FileBackupAgentRestoreNotPossible")
 			    .detail("BackupContainer", bc->getURL())
 			    .detail("BeginVersion", beginVersion)
@@ -6835,7 +6806,7 @@ ACTOR static Future<Void> writeKVs(Database cx, Standalone<VectorRef<KeyValueRef
 			    .detail("Range", KeyRangeRef(k1, k2))
 			    .detail("Begin", begin)
 			    .detail("End", end);
-			RangeResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult readKVs = wait(tr.getRange(KeyRangeRef(k1, k2), CLIENT_KNOBS->TOO_MANY));
 			ASSERT(readKVs.size() > 0 || begin == end);
 			break;
 		} catch (Error& e) {
@@ -6867,7 +6838,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 			for (i = 0; i < restoreRanges.size(); ++i) {
-				RangeResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
+				RangeReadResult kvs = wait(tr.getRange(restoreRanges[i], CLIENT_KNOBS->TOO_MANY));
 				ASSERT(!kvs.more);
 				for (auto kv : kvs) {
 					oldData.push_back_deep(oldData.arena(), KeyValueRef(kv.key, kv.value));
@@ -6934,7 +6905,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult emptyData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			for (int i = 0; i < emptyData.size(); ++i) {
 				TraceEvent(SevError, "ExpectEmptyData")
 				    .detail("Index", i)
@@ -6972,7 +6943,7 @@ ACTOR static Future<Void> transformDatabaseContents(Database cx,
 		try {
 			tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
-			RangeResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
+			RangeReadResult allData = wait(tr.getRange(normalKeys, CLIENT_KNOBS->TOO_MANY));
 			TraceEvent(SevFRTestInfo, "SanityCheckData").detail("Size", allData.size());
 			for (int i = 0; i < allData.size(); ++i) {
 				std::pair<bool, bool> backupRestoreValid = insideValidRange(allData[i], restoreRanges, backupRanges);

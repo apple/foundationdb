@@ -159,9 +159,9 @@ struct Increment : TestWorkload {
 			loop {
 				try {
 					state Version v = wait(tr.getReadVersion());
-					RangeResult data = wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
-					                                    firstGreaterOrEqual(intToTestKey(self->nodeCount)),
-					                                    self->nodeCount + 1));
+					RangeReadResult data = wait(tr.getRange(firstGreaterOrEqual(intToTestKey(0)),
+					                                        firstGreaterOrEqual(intToTestKey(self->nodeCount)),
+					                                        self->nodeCount + 1));
 					ok = self->incrementCheckData(data, v, self) && ok;
 					break;
 				} catch (Error& e) {

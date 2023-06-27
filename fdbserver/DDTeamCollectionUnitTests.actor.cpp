@@ -607,7 +607,7 @@ public:
 			300 * 1024 * 1024, 100 * 1024 * 1024, 500 * 1024 * 1024, 100 * 1024 * 1024, 900 * 1024 * 1024
 		};
 		std::vector<int64_t> load_bytes{
-			50 * 1024 * 1024, 600 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 100 * 1024 * 1024
+			50 * 1024 * 1024, 300 * 1024 * 1024, 800 * 1024 * 1024, 200 * 1024 * 1024, 400 * 1024 * 1024
 		};
 		GetStorageMetricsReply metrics[5];
 		for (int i = 0; i < 5; ++i) {
@@ -855,7 +855,7 @@ public:
 		                               TeamMustHaveShards::False,
 		                               PreferLowerReadUtil::True,
 		                               ForReadBalance::True);
-		collection->teamPivots.lastPivotValuesUpdate = -100;
+		collection->teamPivots.lastPivotsUpdate = -100;
 
 		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
 		GetStorageMetricsReply high_s_high_r;
@@ -924,6 +924,114 @@ public:
 			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
 			ASSERT_NE(randomTeam.get()->getServerIDs(), std::vector<UID>{ UID(4, 0) });
 		}
+		return Void();
+	}
+
+	// After enabling SERVER_KNOBS->DD_REEVALUATION_ENABLED = true, we would evaluate the cpu and load bytes of
+	// source team when we are relocating a shard. If both are better than pivot values, we would return the source team
+	// as new destination team.
+	ACTOR static Future<Void> GetTeam_EvaluateSourceTeam() {
+		Reference<IReplicationPolicy> policy = makeReference<PolicyAcross>(1, "zoneid", makeReference<PolicyOne>());
+		state int processSize = 4;
+		state int teamSize = 1;
+		state std::unique_ptr<DDTeamCollection> collection = testTeamCollection(teamSize, policy, processSize);
+
+		collection->teamPivots.lastPivotsUpdate = -100;
+
+		int64_t capacity = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 20, loadBytes = 90 * 1024 * 1024;
+		GetStorageMetricsReply high_s_high_r;
+		high_s_high_r.capacity.bytes = capacity;
+		high_s_high_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_high_r.load.bytes = loadBytes;
+		high_s_high_r.load.opsReadPerKSecond = 7000 * 1000;
+
+		GetStorageMetricsReply high_s_low_r;
+		high_s_low_r.capacity.bytes = capacity;
+		high_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		high_s_low_r.load.bytes = loadBytes;
+		high_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		GetStorageMetricsReply low_s_low_r;
+		low_s_low_r.capacity.bytes = capacity;
+		low_s_low_r.available.bytes = SERVER_KNOBS->MIN_AVAILABLE_SPACE * 5;
+		low_s_low_r.load.bytes = loadBytes * 2;
+		low_s_low_r.load.opsReadPerKSecond = 100 * 1000;
+
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_reevaluation_enabled",
+		                                                          KnobValueRef::create(bool{ true }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("dd_strict_cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.6 }));
+		IKnobCollection::getMutableGlobalKnobCollection().setKnob("cpu_pivot_ratio",
+		                                                          KnobValueRef::create(double{ 0.9 }));
+
+		HealthMetrics::StorageStats low_cpu, mid_cpu, high_cpu;
+		low_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 60;
+		mid_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT - 40;
+		high_cpu.cpuUsage = SERVER_KNOBS->MAX_DEST_CPU_PERCENT;
+
+		// high available space, low cpu, high read (in pool)
+		collection->addTeam(std::set<UID>({ UID(1, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(1, 0)]->setMetrics(high_s_high_r);
+		collection->server_info[UID(1, 0)]->setStorageStats(low_cpu);
+		// high available space, mid cpu, low read (in pool)
+		collection->addTeam(std::set<UID>({ UID(2, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(2, 0)]->setMetrics(high_s_low_r);
+		collection->server_info[UID(2, 0)]->setStorageStats(mid_cpu);
+		// low available space, low cpu, low read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(3, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(3, 0)]->setStorageStats(low_cpu);
+		collection->server_info[UID(3, 0)]->setMetrics(low_s_low_r);
+		// high available space, high cpu, high read (not in pool)
+		collection->addTeam(std::set<UID>({ UID(4, 0) }), IsInitialTeam::True);
+		collection->server_info[UID(4, 0)]->setMetrics(high_s_high_r);
+		collection->server_info[UID(4, 0)]->setStorageStats(high_cpu);
+
+		collection->disableBuildingTeams();
+		collection->setCheckTeamDelay();
+
+		// Case 1: Return source team even if it asks for TeamSelect::WANT_TRUE_BEST
+		TeamSelect sourceSelect(TeamSelect::WANT_TRUE_BEST);
+		sourceSelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest sourceReq(sourceSelect,
+		                               PreferLowerDiskUtil::True,
+		                               TeamMustHaveShards::False,
+		                               PreferLowerReadUtil::True,
+		                               ForReadBalance::True);
+		sourceReq.src = std::vector{ UID(1, 0) };
+
+		wait(collection->getTeam(sourceReq));
+		const auto [sourceTeam, found1] = sourceReq.reply.getFuture().get();
+		ASSERT(sourceTeam.present());
+		ASSERT_EQ(sourceTeam.get()->getServerIDs(), std::vector<UID>{ UID(1, 0) });
+
+		// CASE 2: Don't return source team because its CPU is beyond pivot values
+		TeamSelect bestSelect(TeamSelect::WANT_TRUE_BEST);
+		bestSelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest bestReq(bestSelect,
+		                             PreferLowerDiskUtil::True,
+		                             TeamMustHaveShards::False,
+		                             PreferLowerReadUtil::True,
+		                             ForReadBalance::True);
+		bestReq.src = std::vector{ UID(4, 0) };
+		wait(collection->getTeam(bestReq));
+		const auto [bestTeam, found2] = bestReq.reply.getFuture().get();
+		ASSERT(bestTeam.present());
+		ASSERT_EQ(bestTeam.get()->getServerIDs(), std::vector<UID>{ UID(2, 0) });
+
+		// CASE 3: Don't return source team because its load bytes is greater than pivot values
+		TeamSelect anySelect(TeamSelect::ANY);
+		anySelect.setForRelocateShard(ForRelocateShard::True);
+		state GetTeamRequest anyReq(anySelect,
+		                            PreferLowerDiskUtil::True,
+		                            TeamMustHaveShards::False,
+		                            PreferLowerReadUtil::True,
+		                            ForReadBalance::True);
+		anyReq.src = std::vector{ UID(3, 0) };
+		wait(collection->getTeam(anyReq));
+		const auto [anyTeam, found3] = anyReq.reply.getFuture().get();
+		ASSERT(anyTeam.present());
+		ASSERT_NE(anyTeam.get()->getServerIDs(), std::vector<UID>{ UID(3, 0) });
+
 		return Void();
 	}
 };
@@ -1010,5 +1118,10 @@ TEST_CASE("/DataDistribution/StorageWiggler/NextIdWithTSS") {
 
 TEST_CASE("/DataDistribution/GetTeam/CutOffByCpu") {
 	wait(DDTeamCollectionUnitTest::GetTeam_CutOffByCpu());
+	return Void();
+}
+
+TEST_CASE("/DataDistribution/GetTeam/EvaluateSourceTeam") {
+	wait(DDTeamCollectionUnitTest::GetTeam_EvaluateSourceTeam());
 	return Void();
 }

@@ -39,8 +39,8 @@ ACTOR Future<Void> tssQuarantineList(Reference<IDatabase> db) {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 			// Hold the reference to the standalone's memory
-			state ThreadFuture<RangeResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
-			RangeResult result = wait(safeThreadFutureToFuture(resultFuture));
+			state ThreadFuture<RangeReadResult> resultFuture = tr->getRange(tssQuarantineKeys, CLIENT_KNOBS->TOO_MANY);
+			RangeReadResult result = wait(safeThreadFutureToFuture(resultFuture));
 			// shouldn't have many quarantined TSSes
 			ASSERT(!result.more);
 			printf("Found %d quarantined TSS processes%s\n", result.size(), result.size() == 0 ? "." : ":");

@@ -38,7 +38,7 @@ struct TagThrottleApiWorkload : TestWorkload {
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		DatabaseContext::debugUseTags = true;
+		cx->debugUseTags = true;
 		return Void();
 	}
 

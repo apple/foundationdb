@@ -23,7 +23,7 @@ public:
 				try {
 					tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 					tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
-					RangeResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
+					RangeReadResult results = wait(tr.getRange(configKeys, CLIENT_KNOBS->TOO_MANY));
 					ASSERT(!results.more && results.size() < CLIENT_KNOBS->TOO_MANY);
 
 					self->configuration.fromKeyValues((VectorRef<KeyValueRef>)results);

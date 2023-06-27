@@ -646,19 +646,6 @@ Future<REPLY_TYPE(Request)> loadBalance(
 
 			firstRequestEndpoint = Optional<uint64_t>();
 		} else if (firstRequestData.isValid()) {
-			// Issue a second request, the first one is taking a long time.
-			if (distance == LBDistance::DISTANT) {
-				TraceEvent("LBDistant2nd")
-				    .suppressFor(0.1)
-				    .detail("Distance", (int)distance)
-				    .detail("BackOff", backoff)
-				    .detail("TriedAllOptions", triedAllOptions)
-				    .detail("Alternatives", alternatives->description())
-				    .detail("Token", stream->getEndpoint().token)
-				    .detail("Total", alternatives->size())
-				    .detail("Best", alternatives->countBest())
-				    .detail("Attempts", numAttempts);
-			}
 			secondRequestData.startRequest(backoff, triedAllOptions, stream, request, model, alternatives, channel);
 
 			loop choose {

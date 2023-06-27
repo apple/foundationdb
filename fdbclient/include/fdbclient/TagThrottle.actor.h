@@ -285,9 +285,9 @@ Future<std::vector<TagThrottleInfo>> getRecommendedTags(Reference<DB> db, int li
 			} else if (enableAuto.get()) {
 				return std::vector<TagThrottleInfo>();
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f =
+			state typename DB::TransactionT::template FutureT<RangeReadResult> f =
 			    tr->getRange(KeyRangeRef(tagThrottleAutoKeysPrefix, tagThrottleKeys.end), limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeReadResult throttles = wait(safeThreadFutureToFuture(f));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
@@ -314,10 +314,10 @@ getThrottledTags(Reference<DB> db, int limit, ContainsRecommended containsRecomm
 				wait(delay(CLIENT_KNOBS->DEFAULT_BACKOFF));
 				continue;
 			}
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(
+			state typename DB::TransactionT::template FutureT<RangeReadResult> f = tr->getRange(
 			    reportAuto.get() ? tagThrottleKeys : KeyRangeRef(tagThrottleKeysPrefix, tagThrottleAutoKeysPrefix),
 			    limit);
-			RangeResult throttles = wait(safeThreadFutureToFuture(f));
+			RangeReadResult throttles = wait(safeThreadFutureToFuture(f));
 			std::vector<TagThrottleInfo> results;
 			for (auto throttle : throttles) {
 				results.push_back(TagThrottleInfo(TagThrottleKey::fromKey(throttle.key),
@@ -385,8 +385,8 @@ Future<bool> unthrottleMatchingThrottles(Reference<DB> db,
 		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		try {
 			// holds memory of the RangeResult
-			state typename DB::TransactionT::template FutureT<RangeResult> f = tr->getRange(begin, end, 1000);
-			state RangeResult tags = wait(safeThreadFutureToFuture(f));
+			state typename DB::TransactionT::template FutureT<RangeReadResult> f = tr->getRange(begin, end, 1000);
+			state RangeReadResult tags = wait(safeThreadFutureToFuture(f));
 			state uint64_t unthrottledTags = 0;
 			uint64_t manualUnthrottledTags = 0;
 			for (auto tag : tags) {
@@ -596,21 +596,21 @@ Future<Void> enableAuto(Reference<DB> db, bool enabled) {
 	}
 }
 
-class TagQuotaValue {
+class ThroughputQuotaValue {
 public:
 	int64_t reservedQuota{ 0 };
 	int64_t totalQuota{ 0 };
 	bool isValid() const;
 	Tuple pack() const;
-	static TagQuotaValue unpack(Tuple const& val);
-	bool operator==(TagQuotaValue const&) const;
+	static ThroughputQuotaValue unpack(Tuple const& val);
+	bool operator==(ThroughputQuotaValue const&) const;
 };
 
 Key getTagQuotaKey(TransactionTagRef);
 
 template <class Tr>
 void setTagQuota(Reference<Tr> tr, TransactionTagRef tag, int64_t reservedQuota, int64_t totalQuota) {
-	TagQuotaValue tagQuotaValue;
+	ThroughputQuotaValue tagQuotaValue;
 	tagQuotaValue.reservedQuota = reservedQuota;
 	tagQuotaValue.totalQuota = totalQuota;
 	if (!tagQuotaValue.isValid()) {

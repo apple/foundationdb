@@ -46,18 +46,21 @@ struct TransactionWrapper : public ReferenceCounted<TransactionWrapper> {
 	virtual Future<ValueReadResult> get(KeyRef& key) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	virtual Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) = 0;
+	virtual Future<RangeReadResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) = 0;
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	virtual Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) = 0;
+	virtual Future<RangeReadResult> getRange(KeySelectorRef& begin,
+	                                         KeySelectorRef& end,
+	                                         int limit,
+	                                         Reverse reverse) = 0;
 
-	virtual Future<MappedRangeResult> getMappedRange(KeySelector& begin,
-	                                                 KeySelector& end,
-	                                                 Key& mapper,
-	                                                 GetRangeLimits limits,
-	                                                 int matchIndex,
-	                                                 Snapshot snapshot,
-	                                                 Reverse reverse) = 0;
+	virtual Future<MappedRangeReadResult> getMappedRange(KeySelector& begin,
+	                                                     KeySelector& end,
+	                                                     Key& mapper,
+	                                                     GetRangeLimits limits,
+	                                                     int matchIndex,
+	                                                     Snapshot snapshot,
+	                                                     Reverse reverse) = 0;
 
 	// Gets the key from the database specified by a given key selector
 	virtual Future<KeyReadResult> getKey(KeySelectorRef& key) = 0;
@@ -115,22 +118,22 @@ struct FlowTransactionWrapper : public TransactionWrapper {
 	Future<ValueReadResult> get(KeyRef& key) override { return transaction.get(key); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
+	Future<RangeReadResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
 		return transaction.getRange(keys, limit, Snapshot::False, reverse);
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
+	Future<RangeReadResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
 		return transaction.getRange(begin, end, limit, Snapshot::False, reverse);
 	}
 
-	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
-	                                         KeySelector& end,
-	                                         Key& mapper,
-	                                         GetRangeLimits limits,
-	                                         int matchIndex,
-	                                         Snapshot snapshot,
-	                                         Reverse reverse) override {
+	Future<MappedRangeReadResult> getMappedRange(KeySelector& begin,
+	                                             KeySelector& end,
+	                                             Key& mapper,
+	                                             GetRangeLimits limits,
+	                                             int matchIndex,
+	                                             Snapshot snapshot,
+	                                             Reverse reverse) override {
 		return transaction.getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse);
 	}
 
@@ -191,22 +194,22 @@ struct ThreadTransactionWrapper : public TransactionWrapper {
 	Future<ValueReadResult> get(KeyRef& key) override { return unsafeThreadFutureToFuture(transaction->get(key)); }
 
 	// Gets a range of key-value pairs from the database specified by a key range
-	Future<RangeResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
+	Future<RangeReadResult> getRange(KeyRangeRef& keys, int limit, Reverse reverse) override {
 		return unsafeThreadFutureToFuture(transaction->getRange(keys, limit, Snapshot::False, reverse));
 	}
 
 	// Gets a range of key-value pairs from the database specified by a pair of key selectors
-	Future<RangeResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
+	Future<RangeReadResult> getRange(KeySelectorRef& begin, KeySelectorRef& end, int limit, Reverse reverse) override {
 		return unsafeThreadFutureToFuture(transaction->getRange(begin, end, limit, Snapshot::False, reverse));
 	}
 
-	Future<MappedRangeResult> getMappedRange(KeySelector& begin,
-	                                         KeySelector& end,
-	                                         Key& mapper,
-	                                         GetRangeLimits limits,
-	                                         int matchIndex,
-	                                         Snapshot snapshot,
-	                                         Reverse reverse) override {
+	Future<MappedRangeReadResult> getMappedRange(KeySelector& begin,
+	                                             KeySelector& end,
+	                                             Key& mapper,
+	                                             GetRangeLimits limits,
+	                                             int matchIndex,
+	                                             Snapshot snapshot,
+	                                             Reverse reverse) override {
 		return unsafeThreadFutureToFuture(
 		    transaction->getMappedRange(begin, end, mapper, limits, matchIndex, snapshot, reverse));
 	}

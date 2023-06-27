@@ -80,6 +80,9 @@ public:
 	int64_t CHANGE_FEED_STREAM_MIN_BYTES;
 	double CHANGE_FEED_START_INTERVAL;
 	bool CHANGE_FEED_COALESCE_LOCATIONS;
+	int64_t CHANGE_FEED_CACHE_FLUSH_BYTES;
+	double CHANGE_FEED_CACHE_EXPIRE_TIME;
+	int64_t CHANGE_FEED_CACHE_LIMIT_BYTES;
 
 	int MAX_BATCH_SIZE;
 	double GRV_BATCH_TIMEOUT;
@@ -180,7 +183,6 @@ public:
 	int RESTORE_DISPATCH_ADDTASK_SIZE;
 	int RESTORE_DISPATCH_BATCH_SIZE;
 	int RESTORE_WRITE_TX_SIZE;
-	int RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 	int APPLY_MAX_LOCK_BYTES;
 	int APPLY_MIN_LOCK_BYTES;
 	int APPLY_BLOCK_SIZE;
@@ -273,6 +275,12 @@ public:
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
+	// Maximum number of concurrently running GRV request batchers supported
+	int MAX_GRV_BATCHERS;
+	// If a GRV batcher is idle for this duration, expire it
+	double GRV_BATCHER_EXPIRATION_TIMEOUT;
+	// Interval at which GRV batchers are checked for expiration
+	double GRV_BATCHER_CLEANING_INTERVAL;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -282,6 +290,7 @@ public:
 	int BG_MAX_GRANULE_PARALLELISM;
 	int BG_TOO_MANY_GRANULES;
 	int64_t BLOB_METADATA_REFRESH_INTERVAL;
+	bool DETERMINISTIC_BLOB_METADATA;
 	bool ENABLE_BLOB_GRANULE_FILE_LOGICAL_SIZE;
 
 	// The coordinator key/value in storage server might be inconsistent to the value stored in the cluster file.
@@ -309,7 +318,6 @@ public:
 	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
 	// dropped. This Knob should ONLY be used in simulation for testing purposes
 	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
-	bool ENABLE_CONFIGURABLE_ENCRYPTION;
 	int ENCRYPT_HEADER_FLAGS_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;

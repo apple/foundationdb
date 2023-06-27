@@ -43,11 +43,11 @@ ACTOR Future<std::pair<Standalone<VectorRef<KeyValueRef>>, Version>> readDatabas
 			Version ver = wait(tr.getReadVersion());
 			readVersion = ver;
 
-			state PromiseStream<RangeResult> results;
+			state PromiseStream<RangeReadResult> results;
 			state Future<Void> stream = tr.getRangeStream(results, normalKeys, GetRangeLimits());
 
 			loop {
-				RangeResult res = waitNext(results.getFuture());
+				RangeReadResult res = waitNext(results.getFuture());
 				output.arena().dependsOn(res.arena());
 				output.append(output.arena(), res.begin(), res.size());
 			}

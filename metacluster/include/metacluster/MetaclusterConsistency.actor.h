@@ -60,9 +60,10 @@ private:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-				state typename transaction_future_type<typename DB::TransactionT, RangeResult>::type
+				state typename transaction_future_type<typename DB::TransactionT, RangeReadResult>::type
 				    systemTenantSubspaceKeysFuture = tr->getRange(prefixRange(TenantMetadata::subspace()), 2);
-				RangeResult systemTenantSubspaceKeys = wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
+				RangeReadResult systemTenantSubspaceKeys =
+				    wait(safeThreadFutureToFuture(systemTenantSubspaceKeysFuture));
 
 				// The only key in the `\xff` tenant subspace should be the tenant id prefix
 				ASSERT(systemTenantSubspaceKeys.size() == 1);
@@ -82,6 +83,7 @@ private:
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
 		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
 		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+		ASSERT(!data.maxRestoreId.present());
 
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);
