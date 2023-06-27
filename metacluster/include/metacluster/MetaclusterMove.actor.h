@@ -252,49 +252,58 @@ struct StartTenantMovementImpl {
 		return splitPoints;
 	}
 
-	static Future<Void> storeTenantSplitPoints(StartTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr,
-	                                           TenantName tenantName,
-	                                           Standalone<VectorRef<KeyRef>> splitPoints) {
-		bool first = true;
-		KeyRef lastKey;
-		for (auto& key : splitPoints) {
-			if (first) {
-				lastKey = key;
-				first = false;
-				continue;
-			}
-			metadata::management::emergency_movement::splitPointsMap().set(
-			    tr, Tuple::makeTuple(self->tenantGroup, self->moveRecord.runId.toString(), tenantName, lastKey), key);
-			lastKey = key;
-		}
-
-		return Void();
-	}
-
-	ACTOR static Future<Void> storeAllTenantsSplitPoints(StartTenantMovementImpl* self,
-	                                                     Reference<typename DB::TransactionT> tr) {
+	ACTOR static Future<std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>>>
+	getAllTenantSplitPointsFromSource(StartTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
 		state std::vector<Future<Standalone<VectorRef<KeyRef>>>> getSplitPointFutures;
-		state std::vector<Future<Standalone<VectorRef<KeyRef>>>> storeSplitPointFutures;
-
 		ASSERT(self->tenantsInGroup.size());
 		for (auto& tenantPair : self->tenantsInGroup) {
 			TenantName tenantName = tenantPair.first;
 			getSplitPointFutures.push_back(getTenantSplitPointsFromSource(self, tenantName));
 		}
 		wait(waitForAll(getSplitPointFutures));
-
+		state std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>> result;
 		state int index = 0;
 		state size_t iterLen = self->tenantsInGroup.size();
-		state std::vector<Future<Void>> completeFutures;
-		ASSERT(getSplitPointFutures.size() == iterLen);
 		for (; index < iterLen; index++) {
-			TenantName tName = self->tenantsInGroup[index].first;
-			auto splitPoints = getSplitPointFutures[index].get();
-			completeFutures.push_back(self->srcCtx.runManagementTransaction(
-			    [self = self, tenantName = tName, splitPoints = splitPoints](Reference<typename DB::TransactionT> tr) {
-				    return storeTenantSplitPoints(self, tr, tenantName, splitPoints);
-			    }));
+			state TenantName tName = self->tenantsInGroup[index].first;
+			state Standalone<VectorRef<KeyRef>> splitPoints = getSplitPointFutures[index].get();
+			auto resultPair = std::make_pair(tName, splitPoints);
+			result.push_back(resultPair);
+		}
+		return result;
+	}
+
+	static Future<Void> storeTenantSplitPoints(StartTenantMovementImpl* self,
+	                                           Reference<typename DB::TransactionT> tr,
+	                                           TenantName tenantName,
+	                                           Standalone<VectorRef<KeyRef>> splitPoints) {
+		bool first = true;
+		KeyRef lastKey;
+		TraceEvent("BreakpointSplitPointSize").detail("Size", splitPoints.size());
+		for (auto& key : splitPoints) {
+			if (first) {
+				lastKey = key;
+				first = false;
+				continue;
+			}
+			auto tupleKey = Tuple::makeTuple(self->tenantGroup, self->moveRecord.runId.toString(), tenantName, lastKey);
+			TraceEvent("BreakpointStoreSplitPoint")
+			    .detail("TupleKey", Tuple::tupleToString(tupleKey))
+			    .detail("NextKey", key);
+			metadata::management::emergency_movement::splitPointsMap().set(tr, tupleKey, key);
+			lastKey = key;
+		}
+
+		return Void();
+	}
+
+	ACTOR static Future<Void> storeAllTenantsSplitPoints(
+	    StartTenantMovementImpl* self,
+	    Reference<typename DB::TransactionT> tr,
+	    std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>> allSplitPoints) {
+		state std::vector<Future<Void>> completeFutures;
+		for (const auto& [tName, splitPoints] : allSplitPoints) {
+			completeFutures.push_back(storeTenantSplitPoints(self, tr, tName, splitPoints));
 		}
 		wait(waitForAll(completeFutures));
 		TenantName firstTenant = self->tenantsInGroup[0].first;
@@ -333,14 +342,18 @@ struct StartTenantMovementImpl {
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return updateMoveRecordState(tr, metadata::management::MovementState::START_CREATE, self->tenantGroup);
 		}));
-		std::vector<Future<std::pair<Optional<TenantMapEntry>, bool>>> createFutures;
+		state std::vector<Future<std::pair<Optional<TenantMapEntry>, bool>>> createFutures;
+		Optional<int64_t> optionalMaxId = wait(TenantMetadata::lastTenantId().get(tr));
+		state int64_t maxId = optionalMaxId.present() ? optionalMaxId.get() : 0;
 		for (auto& tenantPair : self->tenantsInGroup) {
+			maxId = std::max(tenantPair.second, maxId);
 			TenantMapEntry entry(tenantPair.second, tenantPair.first, self->tenantGroup);
 			entry.tenantLockState = TenantAPI::TenantLockState::LOCKED;
 			entry.tenantLockId = self->moveRecord.runId;
 			createFutures.push_back(TenantAPI::createTenantTransaction(tr, entry, ClusterType::METACLUSTER_DATA));
 		}
 		wait(waitForAll(createFutures));
+		TenantMetadata::lastTenantId().set(tr, maxId);
 		return Void();
 	}
 
@@ -362,8 +375,15 @@ struct StartTenantMovementImpl {
 			    [self = self](Reference<typename DB::TransactionT> tr) { return storeVersionToManagement(self, tr); }));
 		}
 
+		state std::vector<std::pair<TenantName, Standalone<VectorRef<KeyRef>>>> allSplitPoints =
+		    wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+			    return getAllTenantSplitPointsFromSource(self, tr);
+		    }));
+
 		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return storeAllTenantsSplitPoints(self, tr); }));
+		    [self = self, allSplitPoints = allSplitPoints](Reference<typename DB::TransactionT> tr) {
+			    return storeAllTenantsSplitPoints(self, tr, allSplitPoints);
+		    }));
 
 		wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return getSourceQuotas(self, tr); }));
@@ -438,7 +458,12 @@ struct SwitchTenantMovementImpl {
 			wait(store(srcRange, safeThreadFutureToFuture(srcFuture)) &&
 			     store(dstRange, safeThreadFutureToFuture(dstFuture)));
 			if (srcRange != dstRange) {
-				TraceEvent("TenantMoveSwitchDataMismatch").detail("TenantName", tName);
+				TraceEvent("TenantMoveSwitchDataMismatch")
+				    .detail("TenantName", tName)
+				    .detail("Begin", begin)
+				    .detail("End", end)
+				    .detail("SrcSize", srcRange.size())
+				    .detail("DstSize", dstRange.size());
 				throw invalid_tenant_move();
 			}
 
@@ -465,8 +490,6 @@ struct SwitchTenantMovementImpl {
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
 		}));
-		state int rangeLimit = CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER;
-		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
 
 		// container of range-based for with continuation must be a state variable
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
@@ -475,7 +498,7 @@ struct SwitchTenantMovementImpl {
 			state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 			state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
 			state ThreadFuture<Standalone<VectorRef<KeyRangeRef>>> resultFutureSrc =
-			    srcTenant->listBlobbifiedRanges(allKeys, rangeLimit);
+			    srcTenant->listBlobbifiedRanges(normalKeys, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER);
 			state Standalone<VectorRef<KeyRangeRef>> blobRanges = wait(safeThreadFutureToFuture(resultFutureSrc));
 			// Blobbifying ranges is an idempotent operation
 			// If retrying, re-blobbify all ranges
@@ -757,22 +780,65 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	static Future<Void> deleteSourceData(FinishTenantMovementImpl* self, TenantName tName) {
-		Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
-		Reference<ITransaction> srcTr = srcTenant->createTransaction();
-		srcTr->clear(normalKeys);
+	ACTOR static Future<Void> deleteSourceData(FinishTenantMovementImpl* self, TenantName tenantName) {
+		// attempt to get around memory issues
+		state TenantName tName = tenantName;
+		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
+		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
+		state KeyRangeRef clearKeys(""_sr, "\xff"_sr);
+		try {
+			srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			// srcTr->clear(normalKeys);
+			srcTr->clear(clearKeys);
+			TraceEvent("BreakpointD1");
+			wait(safeThreadFutureToFuture(srcTr->commit()));
+			TraceEvent("BreakpointD2");
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(srcTr->onError(e)));
+		}
+		TraceEvent("BreakpointD3");
+
+		// state Reference<ITenant> srcTenant2 = self->srcCtx.dataClusterDb->openTenant(tName);
+		// state Reference<ITransaction> srcTr2 = srcTenant->createTransaction();
+		// try {
+		// 	srcTr2->setOption(FDBTransactionOptions::LOCK_AWARE);
+		// 	state ThreadFuture<RangeReadResult> resultFuture2 = srcTr2->getRange(normalKeys, 100000);
+		// 	state RangeReadResult result2 = wait(safeThreadFutureToFuture(resultFuture2));
+		// 	TraceEvent("BreakpointReadAfterDelete").detail("TenantName", tName).detail("ResultSize", result2.size());
+		// 	for (const auto& [k, v] : result2) {
+		// 		TraceEvent("BreakpointAfterKVs").detail("TenantName", tName).detail("Key", k).detail("Value", v);
+		// 	}
+		// } catch (Error& e) {
+		// 	wait(safeThreadFutureToFuture(srcTr2->onError(e)));
+		// }
+		return Void();
+	}
+
+	ACTOR static Future<Void> deleteAllSourceData(FinishTenantMovementImpl* self) {
+		state std::vector<Future<Void>> deleteDataFutures;
+		for (auto& tenantPair : self->tenantsInGroup) {
+			TenantName tName = tenantPair.first;
+			int64_t tId = tenantPair.second;
+			TraceEvent("BreakpointDeleteSrcData1").detail("TenantName", tName).detail("TenantId", tId);
+			deleteDataFutures.push_back(deleteSourceData(self, tName));
+			TraceEvent("BreakpointDeleteSrcData2").detail("TenantName", tName).detail("TenantId", tId);
+		}
+		wait(waitForAll(deleteDataFutures));
+		TraceEvent("BreakpointDeleteSrcData3");
 		return Void();
 	}
 
 	ACTOR static Future<Void> deleteSourceTenants(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
-		std::vector<Future<Void>> deleteFutures;
+		state std::vector<Future<Void>> deleteFutures;
 		for (auto& tenantPair : self->tenantsInGroup) {
-			TenantName tName = tenantPair.first;
+			// TenantName tName = tenantPair.first;
 			int64_t tId = tenantPair.second;
-			deleteSourceData(self, tName);
 			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, tId, ClusterType::METACLUSTER_DATA));
 		}
+
+		TraceEvent("BreakpointDeleteSrcTenants1");
 		wait(waitForAll(deleteFutures));
+		TraceEvent("BreakpointDeleteSrcTenants2");
 		return Void();
 	}
 
@@ -847,6 +913,9 @@ struct FinishTenantMovementImpl {
 		wait(purgeSourceBlobRanges(self));
 
 		TraceEvent("Breakpoint8");
+		wait(deleteAllSourceData(self));
+
+		TraceEvent("Breakpoint8.1");
 		wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
 
@@ -989,21 +1058,38 @@ struct AbortTenantMovementImpl {
 		return Void();
 	}
 
-	static Future<Void> deleteDestinationData(AbortTenantMovementImpl* self, TenantName tName) {
-		Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
-		Reference<ITransaction> dstTr = dstTenant->createTransaction();
-		dstTr->clear(normalKeys);
+	// TODO: update to match deleteSourceData
+	ACTOR static Future<Void> deleteDestinationData(AbortTenantMovementImpl* self, TenantName tName) {
+		state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
+		state Reference<ITransaction> dstTr = dstTenant->createTransaction();
+		try {
+			dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+			dstTr->clear(normalKeys);
+			wait(safeThreadFutureToFuture(dstTr->commit()));
+		} catch (Error& e) {
+			wait(safeThreadFutureToFuture(dstTr->onError(e)));
+		}
+		return Void();
+	}
+
+	ACTOR static Future<Void> deleteAllDestinationData(AbortTenantMovementImpl* self) {
+		state std::vector<Future<Void>> deleteDataFutures;
+		for (auto& tenantPair : self->tenantsInGroup) {
+			TenantName tName = tenantPair.first;
+			deleteDataFutures.push_back(deleteDestinationData(self, tName));
+		}
+		wait(waitForAll(deleteDataFutures));
 		return Void();
 	}
 
 	ACTOR static Future<Void> deleteDestinationTenants(AbortTenantMovementImpl* self, Reference<ITransaction> tr) {
-		std::vector<Future<Void>> deleteFutures;
+		state std::vector<Future<Void>> deleteFutures;
+
 		for (auto& tenantPair : self->tenantsInGroup) {
-			TenantName tName = tenantPair.first;
 			int64_t tId = tenantPair.second;
-			deleteDestinationData(self, tName);
 			deleteFutures.push_back(TenantAPI::deleteTenantTransaction(tr, tId, ClusterType::METACLUSTER_DATA));
 		}
+
 		wait(waitForAll(deleteFutures));
 		return Void();
 	}
@@ -1135,6 +1221,7 @@ struct AbortTenantMovementImpl {
 			                                               Reference<typename DB::TransactionT> tr) {
 				return checkValidDelete(self, tr, srcEntries, dstEntries);
 			}));
+			wait(deleteAllDestinationData(self));
 			wait(self->dstCtx.runDataClusterTransaction(
 			    [self = self](Reference<ITransaction> tr) { return deleteDestinationTenants(self, tr); }));
 		}
