@@ -64,8 +64,7 @@ fdb::Database fdbOpenDatabase(const char* clusterFilePath) {
 	} catch (const fdb::Error& e) {
 		fdbCheck(e);
 	}
-	// Not reachable
-	return fdb::Database();
+	UNREACHABLE();
 }
 
 fdb::Error waitFuture(fdb::Future& f) {
