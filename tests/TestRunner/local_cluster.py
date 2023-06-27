@@ -279,7 +279,6 @@ knob_min_trace_severity=5
                 encrypt_config = "\n".join(
                     [
                         "knob_kms_connector_type=FDBPerfKmsConnector",
-                        "knob_enable_configurable_encryption=true",
                     ]
                 )
             f.write(
