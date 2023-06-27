@@ -313,6 +313,10 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
+	if (currentOwner == dataDistributionModeLock) {
+		return Void(); // ignore if client.setDDMode() takes the DDLock
+	}
+
 	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
@@ -350,7 +354,12 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
-		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner");
+		TraceEvent(SevDebug, "AuditUtilConflictWithNewOwner")
+		    .detail("CurrentOwner", currentOwner.toString())
+		    .detail("PrevOwner", lock.prevOwner.toString())
+		    .detail("PrevWrite", lock.prevWrite.toString())
+		    .detail("MyOwner", lock.myOwner.toString());
+
 		throw movekeys_conflict(); // need a new name
 	}
 }
