@@ -44,7 +44,10 @@
 extern "C" {
 #endif
 
+#ifdef __clang__
 #include <stdatomic.h>
+#endif
+
 #include <stddef.h>
 #include <signal.h>
 #include <sys/types.h>
