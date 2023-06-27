@@ -325,24 +325,6 @@ private:
 	                                       const fdb::native::FDBBGTenantPrefix* tenantPrefix,
 	                                       const GranuleFilePointerRefT* snapshotFile);
 
-	template <>
-	fdb::ReadRangeResult parseSnapshotFile<fdb::GranuleFilePointerRef>(
-	    fdb::Transaction tx,
-	    fdb::BytesRef snapshotData,
-	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
-	    const fdb::GranuleFilePointerRef* snapshotFile) {
-		return tx.parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
-	}
-
-	template <>
-	fdb::ReadRangeResult parseSnapshotFile<fdb::GranuleFilePointerRefV1>(
-	    fdb::Transaction tx,
-	    fdb::BytesRef snapshotData,
-	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
-	    const fdb::GranuleFilePointerRefV1* snapshotFile) {
-		return tx.parseSnapshotFileV1(snapshotData, tenantPrefix, &snapshotFile->encryption_ctx);
-	}
-
 	template <class GranuleFilePointerRefT>
 	void validateSnapshotData(std::shared_ptr<ITransactionContext> ctx,
 	                          fdb::native::FDBReadBlobGranuleContext& bgCtx,
@@ -387,24 +369,6 @@ private:
 	                                          fdb::BytesRef deltaData,
 	                                          const fdb::native::FDBBGTenantPrefix* tenantPrefix,
 	                                          const GranuleFilePointerRefT* deltaFile);
-
-	template <>
-	fdb::ReadBGMutationsResult parseDeltaFile<fdb::GranuleFilePointerRef>(
-	    fdb::Transaction tx,
-	    fdb::BytesRef deltaData,
-	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
-	    const fdb::GranuleFilePointerRef* deltaFile) {
-		return tx.parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
-	}
-
-	template <>
-	fdb::ReadBGMutationsResult parseDeltaFile<fdb::GranuleFilePointerRefV1>(
-	    fdb::Transaction tx,
-	    fdb::BytesRef deltaData,
-	    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
-	    const fdb::GranuleFilePointerRefV1* deltaFile) {
-		return tx.parseDeltaFileV1(deltaData, tenantPrefix, &deltaFile->encryption_ctx);
-	}
 
 	template <class GranuleFilePointerRefT>
 	void validateDeltaData(std::shared_ptr<ITransactionContext> ctx,
@@ -694,6 +658,42 @@ private:
 		}
 	}
 };
+
+template <>
+fdb::ReadRangeResult ApiBlobGranuleCorrectnessWorkload::parseSnapshotFile<fdb::GranuleFilePointerRef>(
+    fdb::Transaction tx,
+    fdb::BytesRef snapshotData,
+    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+    const fdb::GranuleFilePointerRef* snapshotFile) {
+	return tx.parseSnapshotFile(snapshotData, tenantPrefix, snapshotFile->encryption_ctx);
+}
+
+template <>
+fdb::ReadRangeResult ApiBlobGranuleCorrectnessWorkload::parseSnapshotFile<fdb::GranuleFilePointerRefV1>(
+    fdb::Transaction tx,
+    fdb::BytesRef snapshotData,
+    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+    const fdb::GranuleFilePointerRefV1* snapshotFile) {
+	return tx.parseSnapshotFileV1(snapshotData, tenantPrefix, &snapshotFile->encryption_ctx);
+}
+
+template <>
+fdb::ReadBGMutationsResult ApiBlobGranuleCorrectnessWorkload::parseDeltaFile<fdb::GranuleFilePointerRef>(
+    fdb::Transaction tx,
+    fdb::BytesRef deltaData,
+    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+    const fdb::GranuleFilePointerRef* deltaFile) {
+	return tx.parseDeltaFile(deltaData, tenantPrefix, deltaFile->encryption_ctx);
+}
+
+template <>
+fdb::ReadBGMutationsResult ApiBlobGranuleCorrectnessWorkload::parseDeltaFile<fdb::GranuleFilePointerRefV1>(
+    fdb::Transaction tx,
+    fdb::BytesRef deltaData,
+    const fdb::native::FDBBGTenantPrefix* tenantPrefix,
+    const fdb::GranuleFilePointerRefV1* deltaFile) {
+	return tx.parseDeltaFileV1(deltaData, tenantPrefix, &deltaFile->encryption_ctx);
+}
 
 WorkloadFactory<ApiBlobGranuleCorrectnessWorkload> ApiBlobGranuleCorrectnessWorkloadFactory(
     "ApiBlobGranuleCorrectness");
