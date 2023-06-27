@@ -399,32 +399,35 @@ RUN curl -Ls https://github.com/facebook/rocksdb/archive/refs/tags/v7.10.2.tar.g
 # maintain and does build serialization.
 RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     source /opt/rh/rh-python38/enable && \
-    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2 -o boost_1_78_0.tar.bz2 && \
-    echo "8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc  boost_1_78_0.tar.bz2" > boost-sha.txt && \
+    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.82.0/source/boost_1_82_0.tar.bz2 -o boost_1_82_0.tar.bz2 && \
+    echo "a6e1ab9b0860e6a2881dd7b21fe9f737a095e5f33a3a874afc6a345228597ee6  boost_1_82_0.tar.bz2" > boost-sha.txt && \
     sha256sum --quiet -c boost-sha.txt && \
-    mkdir -p /opt/boost_1_78_0 && \
-    tar --strip-components 1 --no-same-owner --directory /opt/boost_1_78_0 -xjf boost_1_78_0.tar.bz2 && \
-    cd /opt/boost_1_78_0 && \
+    mkdir -p /opt/boost_1_82_0 && \
+    tar --strip-components 1 --no-same-owner --directory /opt/boost_1_82_0 -xjf boost_1_82_0.tar.bz2 && \
+    cd /opt/boost_1_82_0 && \
     ./bootstrap.sh --with-libraries=all && \
-    ./b2 link=static cxxflags="-std=c++14 -fPIC" --prefix=/opt/boost_1_78_0 -j32 install &&\
-    rm -rf /opt/boost_1_78_0/libs && \
+    ./b2 link=static cxxflags="-std=c++17 -fPIC" --prefix=/opt/boost_1_82_0 -j32 install &&\
+    rm -rf /opt/boost_1_82_0/libs && \
     rm -rf /tmp/*
+
 
 # install Boost to /opt, using clang to compile the library
 # Boost::context depends on some C++11 features, e.g. std::call_once; however,
 # gcc and clang are using different ABIs, thus a gcc-built Boost::context is
 # not linkable to clang objects.
+# 
+# Bug with b2 4.9.4 and clang, need to force the target triplet: https://github.com/bfgroup/b2/issues/183 
 RUN source /opt/rh/devtoolset-${DEVTOOLSET_VERSION}/enable && \
     source /opt/rh/rh-python38/enable && \
-    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.78.0/source/boost_1_78_0.tar.bz2 -o boost_1_78_0.tar.bz2 && \
-    echo "8681f175d4bdb26c52222665793eef08490d7758529330f98d3b29dd0735bccc  boost_1_78_0.tar.bz2" > boost-sha.txt && \
+    curl -Ls https://boostorg.jfrog.io/artifactory/main/release/1.82.0/source/boost_1_82_0.tar.bz2 -o boost_1_82_0.tar.bz2 && \
+    echo "a6e1ab9b0860e6a2881dd7b21fe9f737a095e5f33a3a874afc6a345228597ee6  boost_1_82_0.tar.bz2" > boost-sha.txt && \
     sha256sum --quiet -c boost-sha.txt && \
-    mkdir -p /opt/boost_1_78_0_clang && \
-    tar --strip-components 1 --no-same-owner --directory /opt/boost_1_78_0_clang -xjf boost_1_78_0.tar.bz2 && \
-    cd /opt/boost_1_78_0_clang && \
+    mkdir -p /opt/boost_1_82_0_clang && \
+    tar --strip-components 1 --no-same-owner --directory /opt/boost_1_82_0_clang -xjf boost_1_82_0.tar.bz2 && \
+    cd /opt/boost_1_82_0_clang && \
     ./bootstrap.sh --with-toolset=clang --with-libraries=all && \
-    ./b2 link=static cxxflags="-std=c++14 -stdlib=libc++ -nostdlib++ -fPIC" linkflags="-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi" --prefix=/opt/boost_1_78_0_clang -j32 install && \
-    rm -rf /opt/boost_1_78_0_clang/libs && \
+    ./b2 link=static cxxflags="-std=c++17 -stdlib=libc++ -nostdlib++ -fPIC --target=x86_64-unknown-linux-gnu" linkflags="-stdlib=libc++ -nostdlib++ -static-libgcc -lc++ -lc++abi" --prefix=/opt/boost_1_82_0_clang -j32 install && \
+    rm -rf /opt/boost_1_82_0_clang/libs && \
     rm -rf /tmp/*
 
 # jemalloc (needed for FDB after 6.3)
