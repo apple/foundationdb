@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+import json
 import os
 from pathlib import Path
+import subprocess
 import platform
 import shutil
 import stat
@@ -11,9 +13,8 @@ from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from test_util import random_alphanum_string
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
-FDB_DOWNLOAD_ROOT = "s3://sfc-eng-jenkins/foundationdb/release/builds/"
-LOCAL_OLD_BINARY_REPO = "/opt/foundationdb/old/"
-MAX_DOWNLOAD_ATTEMPTS = 5
+FDB_DOWNLOAD_BUCKET = "sfc-eng-jenkins"
+FDB_DOWNLOAD_PREFIX = "foundationdb/release/builds"
 
 
 def make_executable_path(path):
@@ -40,31 +41,64 @@ class FdbBinaryDownloader:
             self.platform
         )
         self.download_dir = self.build_dir.joinpath("tmp", "old_binaries")
-        self.local_binary_repo = Path(LOCAL_OLD_BINARY_REPO)
-        if not self.local_binary_repo.exists():
-            self.local_binary_repo = None
+        self.available_releases = None
 
-    # Check if the binaries for the given version are available in the local old binaries repository
-    def version_in_local_repo(self, version):
-        return (self.local_binary_repo is not None) and (
-            self.local_binary_repo.joinpath(version).exists()
+    def load_available_releases(self):
+        cmd = [
+            "aws",
+            "s3api",
+            "list-objects",
+            "--delimiter",
+            "/",
+            "--query",
+            "CommonPrefixes[].Prefix",
+            "--bucket",
+            FDB_DOWNLOAD_BUCKET,
+            "--prefix",
+            "{}/{}/".format(FDB_DOWNLOAD_PREFIX, self.platform),
+        ]
+        res = subprocess.run(cmd, stdout=subprocess.PIPE)
+        assert (
+            res.returncode == 0
+        ), "Failed to load downloadable versions. Error: {}, Command: {}".format(
+            res.returncode, cmd
         )
+        self.available_releases = [key.split("/")[-2] for key in json.loads(res.stdout)]
+
+    def latest_release_for(self, version):
+        if self.available_releases is None:
+            self.load_available_releases()
+
+        release = "snowflake-{}".format(version)
+        if release in self.available_releases:
+            return release
+
+        rc_prefix = "snowflake-{}-rc".format(version)
+        release_candidates = [
+            int(v[len(rc_prefix) :])
+            for v in self.available_releases
+            if v.startswith(rc_prefix)
+        ]
+        assert (
+            len(release_candidates) > 0
+        ), "No releases available for version {}".format(version)
+        release = rc_prefix + str(max(release_candidates))
+        assert release in self.available_releases
+        return release
 
     def binary_path(self, version, bin_name):
         if is_local_build_version(version):
             return self.build_dir.joinpath("bin", bin_name)
-        elif self.version_in_local_repo(version):
-            return self.local_binary_repo.joinpath(
-                version, "bin", "{}-{}".format(bin_name, version)
-            )
         else:
-            return self.download_dir.joinpath(version, bin_name)
+            return self.download_dir.joinpath(
+                self.latest_release_for(version), bin_name
+            )
 
     def lib_dir(self, version):
         if is_local_build_version(version):
             return self.build_dir.joinpath("lib")
         else:
-            return self.download_dir.joinpath(version)
+            return self.download_dir.joinpath(self.latest_release_for(version))
 
     def lib_path(self, version):
         return self.lib_dir(version).joinpath("libfdb_c.so")
@@ -73,7 +107,8 @@ class FdbBinaryDownloader:
     def download_old_binary(
         self, version, target_bin_name, remote_bin_name, make_executable
     ):
-        local_file = self.download_dir.joinpath(version, target_bin_name)
+        release = self.latest_release_for(version)
+        local_file = self.download_dir.joinpath(release, target_bin_name)
         if local_file.exists():
             return
 
@@ -83,10 +118,14 @@ class FdbBinaryDownloader:
         local_file_tmp = Path(
             "{}.{}".format(str(local_file), random_alphanum_string(8))
         )
-        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
         relpath = "bin" if make_executable else "lib"
-        remote_file = "{}{}/snowflake-{}/{}/{}".format(
-            FDB_DOWNLOAD_ROOT, self.platform, version, relpath, remote_bin_name
+        remote_file = "s3://{}/{}/{}/{}/{}/{}".format(
+            FDB_DOWNLOAD_BUCKET,
+            FDB_DOWNLOAD_PREFIX,
+            self.platform,
+            release,
+            relpath,
+            remote_bin_name,
         )
 
         print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
@@ -99,28 +138,6 @@ class FdbBinaryDownloader:
         if make_executable:
             make_executable_path(local_file)
 
-    # Copy a client library file from the local old binaries repository
-    # The file needs to be renamed to libfdb_c.so, because it is loaded with this name by fdbcli
-    def copy_clientlib_from_local_repo(self, version):
-        dest_lib_file = self.download_dir.joinpath(version, "libfdb_c.so")
-        if dest_lib_file.exists():
-            return
-        # Avoid race conditions in case of parallel test execution by first copying to a temporary file
-        # and then renaming it atomically
-        dest_file_tmp = Path(
-            "{}.{}".format(str(dest_lib_file), random_alphanum_string(8))
-        )
-        src_lib_file = self.local_binary_repo.joinpath(
-            version, "lib", "libfdb_c-{}.so".format(version)
-        )
-        assert (
-            src_lib_file.exists()
-        ), "Missing file {} in the local old binaries repository".format(src_lib_file)
-        self.download_dir.joinpath(version).mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_lib_file, dest_file_tmp)
-        os.rename(dest_file_tmp, dest_lib_file)
-        assert dest_lib_file.exists(), "{} does not exist".format(dest_lib_file)
-
     # Download client library of the given version
     def download_client_library(self, version):
         return self.download_old_binary(version, "libfdb_c.so", "libfdb_c.so", False)
@@ -128,10 +145,6 @@ class FdbBinaryDownloader:
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self, version):
         if is_local_build_version(version):
-            return
-
-        if self.version_in_local_repo(version):
-            self.copy_clientlib_from_local_repo(version)
             return
 
         self.download_old_binary(version, "fdbserver", "fdbserver", True)

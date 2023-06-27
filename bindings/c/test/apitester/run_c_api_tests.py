@@ -102,6 +102,9 @@ def run_tester(args, cluster, test_file):
         str(log_dir),
     ]
 
+    if args.run_with_gdb:
+        cmd = ["gdb", "--args"] + cmd
+
     if args.external_client_library is not None:
         external_client_library = Path(args.external_client_library).resolve()
         cmd += ["--external-client-library", external_client_library]
@@ -288,6 +291,9 @@ def parse_args(argv):
         "--disable-log-dump",
         help="Do not dump logs on error",
         action="store_true",
+    )
+    parser.add_argument(
+        "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
     )
 
     return parser.parse_args(argv)

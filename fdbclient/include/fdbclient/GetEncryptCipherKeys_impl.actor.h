@@ -37,6 +37,8 @@
 
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+#define DEBUG_GET_CIPHER false
+
 template <class T>
 Optional<EncryptKeyProxyInterface> _getEncryptKeyProxyInterface(const Reference<AsyncVar<T> const>& db) {
 	if constexpr (std::is_same_v<T, ClientDBInfo>) {
@@ -62,9 +64,13 @@ Future<Void> _onEncryptKeyProxyChange(Reference<AsyncVar<T> const> db) {
 			break;
 		}
 	}
-	TraceEvent("GetEncryptCipherKeysEncryptKeyProxyChanged")
-	    .detail("PreviousProxyId", previousProxyId.orDefault(UID()))
-	    .detail("CurrentProxyId", currentProxyId.orDefault(UID()));
+
+	if (DEBUG_GET_CIPHER) {
+		TraceEvent(SevDebug, "GetEncryptCipherKeysEncryptKeyProxyChanged")
+		    .detail("PreviousProxyId", previousProxyId.orDefault(UID()))
+		    .detail("CurrentProxyId", currentProxyId.orDefault(UID()));
+	}
+
 	return Void();
 }
 
@@ -75,7 +81,10 @@ Future<EKPGetLatestBaseCipherKeysReply> _getUncachedLatestEncryptCipherKeys(Refe
 	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetLatestEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
+		if (DEBUG_GET_CIPHER) {
+			TraceEvent(SevDebug, "GetLatestEncryptCipherKeysEncryptKeyProxyNotPresent")
+			    .detail("UsageType", toString(usageType));
+		}
 		return Never();
 	}
 	request.reply.reset();
@@ -177,7 +186,10 @@ Future<EKPGetBaseCipherKeysByIdsReply> _getUncachedEncryptCipherKeys(Reference<A
 	Optional<EncryptKeyProxyInterface> proxy = _getEncryptKeyProxyInterface(db);
 	if (!proxy.present()) {
 		// Wait for onEncryptKeyProxyChange.
-		TraceEvent("GetEncryptCipherKeysEncryptKeyProxyNotPresent").detail("UsageType", toString(usageType));
+		if (DEBUG_GET_CIPHER) {
+			TraceEvent(SevDebug, "GetEncryptCipherKeysEncryptKeyProxyNotPresent")
+			    .detail("UsageType", toString(usageType));
+		}
 		return Never();
 	}
 	request.reply.reset();

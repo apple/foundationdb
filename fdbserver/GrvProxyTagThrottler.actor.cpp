@@ -33,7 +33,7 @@ namespace {
 // Using multiple tags or both tags and a tenant group can lead to unexpected
 // behavior, because some tags will be ignored when throttling on proxies.
 // In this case, SevWarnAlways trace event is logged.
-TransactionTag getSingleTag(GetReadVersionRequest const& req) {
+ThrottlingId getSingleTag(GetReadVersionRequest const& req) {
 	ASSERT(req.isTagged());
 	if (req.tenantGroup.present()) {
 		if (!req.tags.empty()) {
@@ -43,7 +43,7 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 			    .detail("UsingTenantGroup", req.tenantGroup.get())
 			    .detail("FirstTag", req.tags.begin()->first);
 		}
-		return req.tenantGroup.get();
+		return ThrottlingIdRef::fromTenantGroup(req.tenantGroup.get());
 	} else {
 		auto const& tag = req.tags.begin()->first;
 		if (req.tags.size() > 1) {
@@ -52,7 +52,7 @@ TransactionTag getSingleTag(GetReadVersionRequest const& req) {
 			    .detail("NumTags", req.tags.size())
 			    .detail("UsingTag", tag);
 		}
-		return tag;
+		return ThrottlingIdRef::fromTag(tag);
 	}
 }
 
@@ -106,7 +106,7 @@ GrvProxyTagThrottler::GrvProxyTagThrottler(double maxThrottleDuration)
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_PROXY_LOGGING_INTERVAL,
                     SERVER_KNOBS->GLOBAL_TAG_THROTTLING_MAX_TAGS_TRACKED) {}
 
-void GrvProxyTagThrottler::updateRates(TransactionTagMap<double> const& newRates) {
+void GrvProxyTagThrottler::updateRates(ThrottlingIdMap<double> const& newRates) {
 	for (const auto& [tag, rate] : newRates) {
 		auto it = queues.find(tag);
 		if (it == queues.end()) {
@@ -164,7 +164,7 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 	std::priority_queue<TagQueueHandle, std::vector<TagQueueHandle>, std::greater<TagQueueHandle>> pqOfQueues;
 
 	// Track transactions released for each tag
-	std::vector<std::pair<TransactionTag, uint32_t>> transactionsReleased;
+	std::vector<std::pair<ThrottlingId, uint32_t>> transactionsReleased;
 	transactionsReleased.reserve(queues.size());
 	auto const transactionsReleasedInitialCapacity = transactionsReleased.capacity();
 
@@ -236,7 +236,7 @@ void GrvProxyTagThrottler::releaseTransactions(double elapsed,
 
 	// End release windows for all tag queues
 	{
-		TransactionTagMap<uint32_t> transactionsReleasedMap;
+		ThrottlingIdMap<uint32_t> transactionsReleasedMap;
 		for (const auto& [tag, count] : transactionsReleased) {
 			transactionsReleasedMap[tag] = count;
 		}
@@ -364,8 +364,8 @@ TEST_CASE("/GrvProxyTagThrottler/Simple") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 10.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingId::fromTag("sampleTag"_sr)] = 10.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
@@ -384,8 +384,8 @@ TEST_CASE("/GrvProxyTagThrottler/MultiClient") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 30.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingIdRef::fromTag("sampleTag"_sr)] = 30.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
@@ -410,9 +410,9 @@ TEST_CASE("/GrvProxyTagThrottler/MultiTag") {
 	state TagSet tagSet2;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		TransactionTagMap<double> rates;
-		rates["sampleTag1"_sr] = 10.0;
-		rates["sampleTag2"_sr] = 10.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingIdRef::fromTag("sampleTag1"_sr)] = 10.0;
+		rates[ThrottlingIdRef::fromTag("sampleTag2"_sr)] = 10.0;
 		throttler.updateRates(rates);
 	}
 	tagSet1.addTag("sampleTag1"_sr);
@@ -435,8 +435,8 @@ TEST_CASE("/GrvProxyTagThrottler/Batch") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 10.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingIdRef::fromTag("sampleTag"_sr)] = 10.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
@@ -455,8 +455,8 @@ TEST_CASE("/GrvProxyTagThrottler/Cleanup1") {
 	GrvProxyTagThrottler throttler(5.0);
 	for (int i = 0; i < 1000; ++i) {
 		auto const tag = getRandomTag();
-		TransactionTagMap<double> rates;
-		rates[tag] = 10.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingIdRef::fromTag(tag)] = 10.0;
 		throttler.updateRates(rates);
 		ASSERT_EQ(throttler.size(), 1);
 	}
@@ -473,7 +473,7 @@ TEST_CASE("/GrvProxyTagThrottler/Cleanup2") {
 		throttler.addRequest(req);
 	}
 	ASSERT_EQ(throttler.size(), 1);
-	throttler.updateRates(TransactionTagMap<double>{});
+	throttler.updateRates(ThrottlingIdMap<double>{});
 	ASSERT_EQ(throttler.size(), 1);
 	{
 		Deque<GetReadVersionRequest> outBatchPriority;
@@ -481,7 +481,7 @@ TEST_CASE("/GrvProxyTagThrottler/Cleanup2") {
 		throttler.releaseTransactions(0.1, outBatchPriority, outDefaultPriority);
 	}
 	// Calling updates cleans up the queues in throttler
-	throttler.updateRates(TransactionTagMap<double>{});
+	throttler.updateRates(ThrottlingIdMap<double>{});
 	ASSERT_EQ(throttler.size(), 0);
 	return Void();
 }
@@ -510,8 +510,8 @@ TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
 	state TagSet tagSet;
 	state TransactionTagMap<uint32_t> counters;
 	{
-		TransactionTagMap<double> rates;
-		rates["sampleTag"_sr] = 10.0;
+		ThrottlingIdMap<double> rates;
+		rates[ThrottlingIdRef::fromTag("sampleTag"_sr)] = 10.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);

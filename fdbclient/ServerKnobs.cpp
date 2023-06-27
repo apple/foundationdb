@@ -116,6 +116,10 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( ENABLE_DETAILED_TLOG_POP_TRACE,                      false ); if ( randomize && BUGGIFY ) ENABLE_DETAILED_TLOG_POP_TRACE = true;
 	init( PEEK_BATCHING_EMPTY_MSG,                             false ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG = true;
 	init( PEEK_BATCHING_EMPTY_MSG_INTERVAL,                    0.001 ); if ( randomize && BUGGIFY ) PEEK_BATCHING_EMPTY_MSG_INTERVAL = 0.01;
+	init( DYNAMIC_EMPTY_VERSION_WAIT,    EMPTY_VERSION_WAIT_LOG_ONLY );
+	init( SS_EMPTY_VERSION_WAIT_LESS_SKEW_STAT,                false ); 
+	init( SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL,               0.001 ); 
+	init( SS_EMPTY_VERSION_WAIT_QUEUE_MAX_LENGTH,               1000 ); 
 	init( POP_FROM_LOG_DELAY,                                      1 ); if ( randomize && BUGGIFY ) POP_FROM_LOG_DELAY = 0;
 	init( TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS,             120 );
 
@@ -169,12 +173,11 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD,           960 ); if( randomize && BUGGIFY ) PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD = 360; // Set as the lowest priority
 
 	// Data distribution
-	init( AVAILABLE_SPACE_PIVOT_RATIO,                           0.5 );
+	init( LOAD_BYTES_PIVOT_RATIO,                        	     0.5 );
 	init( CPU_PIVOT_RATIO,                                       0.9 );
 	// In order to make sure GetTeam has enough eligible destination team:
-	ASSERT_GT(AVAILABLE_SPACE_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
+	ASSERT_GT(LOAD_BYTES_PIVOT_RATIO + CPU_PIVOT_RATIO, 1.0 );
 	// For dd re-evaluatioin
-	init( DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO,                 0.5 ); if( randomize && BUGGIFY ) DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO = deterministicRandom()->random01() * 0.4 + 0.3;
 	init( DD_STRICT_CPU_PIVOT_RATIO,                             0.9 ); if( randomize && BUGGIFY ) DD_STRICT_CPU_PIVOT_RATIO = deterministicRandom()->random01() * 0.45 + 0.5;
 	init( DD_REEVALUATION_ENABLED,                              false); if( isSimulated ) DD_REEVALUATION_ENABLED = deterministicRandom()->coinflip();
 	// In simulation, the CPU percent of every storage server is hard-coded as 100.0%. It is difficult to test pivot CPU in normal simulation. TODO: add mock DD Test case for it.

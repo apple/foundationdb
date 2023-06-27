@@ -43,10 +43,10 @@ class ThroughputQuotaWorkload : public TestWorkload {
 		    .detail("TenantGroup", printable(name))
 		    .detail("ReservedQuota", reservedQuota)
 		    .detail("TotalQuota", totalQuota);
-		ThrottleApi::TagQuotaValue tagQuotaValue;
-		tagQuotaValue.reservedQuota = reservedQuota;
-		tagQuotaValue.totalQuota = totalQuota;
-		TenantMetadata::throughputQuota().set(tr, name, tagQuotaValue);
+		ThrottleApi::ThroughputQuotaValue throughputQuotaValue;
+		throughputQuotaValue.reservedQuota = reservedQuota;
+		throughputQuotaValue.totalQuota = totalQuota;
+		TenantMetadata::throughputQuota().set(tr, name, throughputQuotaValue);
 	}
 
 	ACTOR static Future<Void> setup(ThroughputQuotaWorkload* self, Database cx) {
@@ -78,7 +78,7 @@ public:
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		DatabaseContext::debugUseTags = true;
+		cx->debugUseTags = true;
 		return clientId ? Void() : setup(this, cx);
 	}
 	Future<Void> start(Database const& cx) override { return Void(); }

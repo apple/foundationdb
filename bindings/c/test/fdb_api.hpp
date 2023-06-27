@@ -44,7 +44,9 @@ namespace fdb {
 // hide C API to discourage mixing C/C++ API
 namespace native {
 #include <foundationdb/fdb_c.h>
-}
+#include <foundationdb/fdb_c_internal.h>
+#include <foundationdb/fdb_c_requests.h>
+} // namespace native
 
 using ByteString = std::basic_string<uint8_t>;
 using BytesRef = std::basic_string_view<uint8_t>;
@@ -54,6 +56,16 @@ using KeyRef = BytesRef;
 using Value = ByteString;
 using ValueRef = BytesRef;
 
+struct KeyRangeRef : native::FDBKeyRange {
+	KeyRef beginKey() const noexcept { return KeyRef(native::FDBKeyRange::begin_key, begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(native::FDBKeyRange::end_key, end_key_length); }
+};
+
+struct KeyValueRef : native::FDBKeyValue {
+	KeyRef key() const noexcept { return KeyRef(native::FDBKeyValue::key, key_length); }
+	ValueRef value() const noexcept { return ValueRef(native::FDBKeyValue::value, value_length); }
+};
+
 struct KeyValue {
 	Key key;
 	Value value;
@@ -62,6 +74,37 @@ struct KeyRange {
 	Key beginKey;
 	Key endKey;
 };
+
+template <class T>
+class VectorRef {
+public:
+	VectorRef(T* data, int size) : m_data(data), m_size(size) {}
+	VectorRef() = default;
+	VectorRef(const VectorRef& r) = default;
+	VectorRef(VectorRef&& r) noexcept = default;
+	VectorRef& operator=(const VectorRef& r) = default;
+	VectorRef& operator=(VectorRef&& r) noexcept = default;
+
+	int size() { return m_size; }
+	T* begin() { return m_data; }
+	T* end() { return m_data + m_size; }
+	T& front() { return *begin(); }
+	T& back() { return end()[-1]; }
+	T& operator[](int i) { return m_data[i]; }
+
+	const T* begin() const { return m_data; }
+	const T* end() const { return m_data + m_size; }
+	T const& front() const { return *begin(); }
+	T const& back() const { return end()[-1]; }
+	int size() const { return m_size; }
+	bool empty() const { return m_size == 0; }
+	const T& operator[](int i) const { return m_data[i]; }
+
+private:
+	T* m_data;
+	int m_size;
+};
+
 struct GranuleSummary {
 	KeyRange keyRange;
 	int64_t snapshotVersion;
@@ -70,8 +113,8 @@ struct GranuleSummary {
 	int64_t deltaSize;
 
 	GranuleSummary(const native::FDBGranuleSummary& nativeSummary) {
-		keyRange.beginKey = fdb::Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
-		keyRange.endKey = fdb::Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
+		keyRange.beginKey = Key(nativeSummary.key_range.begin_key, nativeSummary.key_range.begin_key_length);
+		keyRange.endKey = Key(nativeSummary.key_range.end_key, nativeSummary.key_range.end_key_length);
 		snapshotVersion = nativeSummary.snapshot_version;
 		snapshotSize = nativeSummary.snapshot_size;
 		deltaVersion = nativeSummary.delta_version;
@@ -79,68 +122,50 @@ struct GranuleSummary {
 	}
 };
 
-struct GranuleFilePointer {
-	ByteString filename;
-	int64_t offset;
-	int64_t length;
-	int64_t fullFileLength;
-	int64_t fileVersion;
+// fdb_future_readbg_get_descriptions
 
-	// just keep raw data structures to pass to callbacks
-	native::FDBBGEncryptionCtx encryptionCtx;
+struct GranuleFilePointerRef : public native::FDBBGFilePointerV2 {
+	GranuleFilePointerRef(const GranuleFilePointerRef&) = delete;
+	BytesRef filename() const noexcept { return BytesRef(filename_ptr, filename_length); }
+};
 
-	GranuleFilePointer(const native::FDBBGFilePointer& nativePointer) {
-		filename = fdb::Key(nativePointer.filename_ptr, nativePointer.filename_length);
-		offset = nativePointer.file_offset;
-		length = nativePointer.file_length;
-		fullFileLength = nativePointer.full_file_length;
-		fileVersion = nativePointer.file_version;
-		encryptionCtx = nativePointer.encryption_ctx;
+struct GranuleMutationRef : public native::FDBBGMutation {
+	ByteString param1() const noexcept { return ByteString(param1_ptr, param1_length); }
+	ByteString param2() const noexcept { return ByteString(param2_ptr, param2_length); }
+};
+
+struct GranuleDescriptionRef : native::FDBBGFileDescriptionV2 {
+	GranuleDescriptionRef(const GranuleDescriptionRef&) = delete;
+	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
+	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(key_range.end_key, key_range.end_key_length); }
+	GranuleFilePointerRef* snapshotFile() const noexcept { return (GranuleFilePointerRef*)snapshot_file_pointer; }
+	VectorRef<GranuleFilePointerRef*> deltaFiles() const noexcept {
+		return VectorRef<GranuleFilePointerRef*>((GranuleFilePointerRef**)delta_files, delta_file_count);
+	}
+	VectorRef<GranuleMutationRef*> memoryMutations() const noexcept {
+		return VectorRef<GranuleMutationRef*>((GranuleMutationRef**)memory_mutations, memory_mutation_count);
 	}
 };
 
-struct GranuleMutation {
-	native::FDBBGMutationType type;
-	int64_t version;
-	ByteString param1;
-	ByteString param2;
-
-	GranuleMutation(const native::FDBBGMutation& nativeMutation) {
-		type = static_cast<native::FDBBGMutationType>(nativeMutation.type);
-		version = nativeMutation.version;
-		param1 = ByteString(nativeMutation.param1_ptr, nativeMutation.param1_length);
-		param2 = ByteString(nativeMutation.param2_ptr, nativeMutation.param2_length);
-	}
+struct GranuleFilePointerRefV1 : public native::FDBBGFilePointerV1 {
+	GranuleFilePointerRefV1(const GranuleFilePointerRefV1&) = delete;
+	BytesRef filename() const noexcept { return BytesRef(filename_ptr, filename_length); }
 };
 
-struct GranuleDescription {
-	KeyRange keyRange;
-	std::optional<GranuleFilePointer> snapshotFile;
-	std::vector<GranuleFilePointer> deltaFiles;
-	std::vector<GranuleMutation> memoryMutations;
-
-	// just keep raw data structures to pass to callbacks
-	native::FDBBGTenantPrefix tenantPrefix;
-
-	GranuleDescription(const native::FDBBGFileDescription& nativeDesc) {
-		keyRange.beginKey = fdb::Key(nativeDesc.key_range.begin_key, nativeDesc.key_range.begin_key_length);
-		keyRange.endKey = fdb::Key(nativeDesc.key_range.end_key, nativeDesc.key_range.end_key_length);
-		if (nativeDesc.snapshot_present) {
-			snapshotFile = GranuleFilePointer(nativeDesc.snapshot_file_pointer);
-		}
-		if (nativeDesc.delta_file_count > 0) {
-			deltaFiles.reserve(nativeDesc.delta_file_count);
-			for (int i = 0; i < nativeDesc.delta_file_count; i++) {
-				deltaFiles.emplace_back(nativeDesc.delta_files[i]);
-			}
-		}
-		if (nativeDesc.memory_mutation_count > 0) {
-			memoryMutations.reserve(nativeDesc.memory_mutation_count);
-			for (int i = 0; i < nativeDesc.memory_mutation_count; i++) {
-				memoryMutations.emplace_back(nativeDesc.memory_mutations[i]);
-			}
-		}
-		tenantPrefix = nativeDesc.tenant_prefix;
+struct GranuleDescriptionRefV1 : native::FDBBGFileDescriptionV1 {
+	GranuleDescriptionRefV1(const GranuleDescriptionRefV1&) = delete;
+	const KeyRangeRef& keyRange() const noexcept { return (KeyRangeRef&)key_range; }
+	KeyRef beginKey() const noexcept { return KeyRef(key_range.begin_key, key_range.begin_key_length); }
+	KeyRef endKey() const noexcept { return KeyRef(key_range.end_key, key_range.end_key_length); }
+	GranuleFilePointerRefV1* snapshotFile() const noexcept {
+		return snapshot_present ? (GranuleFilePointerRefV1*)&snapshot_file_pointer : nullptr;
+	}
+	VectorRef<GranuleFilePointerRefV1> deltaFiles() const noexcept {
+		return VectorRef<GranuleFilePointerRefV1>((GranuleFilePointerRefV1*)delta_files, delta_file_count);
+	}
+	VectorRef<GranuleMutationRef> memoryMutations() const noexcept {
+		return VectorRef<GranuleMutationRef>((GranuleMutationRef*)memory_mutations, memory_mutation_count);
 	}
 };
 
@@ -222,6 +247,101 @@ private:
 	CodeType err;
 };
 
+[[noreturn]] inline void throwError(std::string_view preamble, Error err) {
+	auto msg = std::string(preamble);
+	msg.append(err.what());
+	throw std::runtime_error(msg);
+}
+
+template <class DataT, class WrapperT>
+class Result {
+public:
+	using DataType = DataT;
+	using WrapperType = WrapperT;
+	Result(DataType* r) {
+		if (r) {
+			resRef = std::shared_ptr<DataType>(r, destroy);
+		}
+	}
+	Result() noexcept : Result(nullptr) {}
+	Result(const Result&) noexcept = default;
+	Result(Result&&) noexcept = default;
+	Result& operator=(const Result&) noexcept = default;
+	Result& operator=(Result&&) noexcept = default;
+
+	bool valid() const noexcept { return resRef != nullptr; }
+
+	explicit operator bool() const noexcept { return valid(); }
+
+	DataType* data() const {
+		assert(valid());
+		return resRef.get();
+	}
+
+	native::FDBResult* getPtr() const { return (native::FDBResult*)resRef.get(); }
+
+	static WrapperType create(DataType* r) {
+		WrapperType res;
+		((Result<DataType, WrapperType>&)res) = Result<DataType, WrapperType>(r);
+		return res;
+	}
+
+private:
+	std::shared_ptr<DataType> resRef;
+	static void destroy(DataType* res) { fdb_result_destroy((native::FDBResult*)res); }
+};
+
+class ReadBlobGranulesDescriptionResult
+  : public Result<native::FDBReadBGDescriptionResult, ReadBlobGranulesDescriptionResult> {
+public:
+	VectorRef<GranuleDescriptionRef*> descs() const noexcept {
+		return VectorRef<GranuleDescriptionRef*>((GranuleDescriptionRef**)data()->desc_arr, data()->desc_count);
+	}
+};
+
+using ReadBlobGranulesDescriptionResultV1 = VectorRef<GranuleDescriptionRefV1>;
+
+class ReadRangeResult : public Result<native::FDBReadRangeResult, ReadRangeResult> {
+public:
+	using KeyValueRefArray = std::tuple<KeyValueRef const*, int, bool>;
+
+	Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
+		auto out_more_native = native::fdb_bool_t{};
+		auto& [out_kv, out_count, out_more] = out;
+		auto err_raw = native::fdb_result_get_keyvalue_array(
+		    getPtr(), reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
+		out_more = out_more_native != 0;
+		return Error(err_raw);
+	}
+
+	KeyValueRefArray getKeyValueArray() const {
+		auto ret = KeyValueRefArray{};
+		if (auto err = getKeyValueArrayNothrow(ret))
+			throwError("ERROR: result_get_keyvalue_array(): ", err);
+		return ret;
+	}
+};
+
+class ReadBGMutationsResult : public Result<native::FDBReadBGMutationsResult, ReadBGMutationsResult> {
+public:
+	Error getGranuleMutationArrayNothrow(VectorRef<GranuleMutationRef>& out) const noexcept {
+		const native::FDBBGMutation* out_mutations = nullptr;
+		int out_count = 0;
+		auto err_raw = native::fdb_result_get_bg_mutations_array(getPtr(), &out_mutations, &out_count);
+		if (!err_raw) {
+			out = VectorRef<GranuleMutationRef>((GranuleMutationRef*)out_mutations, out_count);
+		}
+		return Error(err_raw);
+	}
+
+	VectorRef<GranuleMutationRef> getGranuleMutationArray() const {
+		VectorRef<GranuleMutationRef> ret;
+		if (auto err = getGranuleMutationArrayNothrow(ret))
+			throwError("ERROR: result_get_keyvalue_array(): ", err);
+		return ret;
+	}
+};
+
 /* Traits of value types held by ready futures.
    Holds type and value extraction function. */
 namespace future_var {
@@ -270,10 +390,7 @@ struct StringArray {
 		return Error(native::fdb_future_get_string_array(f, &out_strings, &out_count));
 	}
 };
-struct KeyValueRef : native::FDBKeyValue {
-	fdb::KeyRef key() const noexcept { return fdb::KeyRef(native::FDBKeyValue::key, key_length); }
-	fdb::ValueRef value() const noexcept { return fdb::ValueRef(native::FDBKeyValue::value, value_length); }
-};
+
 struct KeyValueRefArray {
 	using Type = std::tuple<KeyValueRef const*, int, bool>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -285,10 +402,7 @@ struct KeyValueRefArray {
 		return Error(err);
 	}
 };
-struct KeyRangeRef : native::FDBKeyRange {
-	fdb::KeyRef beginKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::begin_key, begin_key_length); }
-	fdb::KeyRef endKey() const noexcept { return fdb::KeyRef(native::FDBKeyRange::end_key, end_key_length); }
-};
+
 struct KeyRangeRefArray {
 	using Type = std::tuple<KeyRangeRef const*, int>;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
@@ -320,49 +434,33 @@ struct GranuleSummaryRefArray {
 	}
 };
 
-// fdb_future_readbg_get_descriptions
-
-struct GranuleDescriptionRef : native::FDBBGFileDescription {
-	fdb::KeyRef beginKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.begin_key,
-		                   native::FDBBGFileDescription::key_range.begin_key_length);
-	}
-	fdb::KeyRef endKey() const noexcept {
-		return fdb::KeyRef(native::FDBBGFileDescription::key_range.end_key,
-		                   native::FDBBGFileDescription::key_range.end_key_length);
-	}
-};
-
-struct GranuleDescriptionRefArray {
-	using Type = std::tuple<GranuleDescriptionRef*, int>;
+struct ReadBlobGranulesDescriptionResultV1 {
+	using Type = fdb::ReadBlobGranulesDescriptionResultV1;
 	static Error extract(native::FDBFuture* f, Type& out) noexcept {
-		auto& [out_desc, out_count] = out;
-		auto err = native::fdb_future_readbg_get_descriptions(
-		    f, reinterpret_cast<native::FDBBGFileDescription**>(&out_desc), &out_count);
+		native::FDBBGFileDescriptionV1* descs;
+		int desc_cnt;
+		auto err = native::fdb_future_readbg_get_descriptions_v1(f, &descs, &desc_cnt);
+		out = Type((GranuleDescriptionRefV1*)descs, desc_cnt);
 		return Error(err);
 	}
 };
 
-struct GranuleMutationRef : native::FDBBGMutation {
-	fdb::KeyRef param1() const noexcept {
-		return fdb::BytesRef(native::FDBBGMutation::param1_ptr, native::FDBBGMutation::param1_length);
-	}
-	fdb::KeyRef param2() const noexcept {
-		return fdb::BytesRef(native::FDBBGMutation::param2_ptr, native::FDBBGMutation::param2_length);
+template <class ResType>
+struct Result {
+	using Type = ResType;
+	static Error extract(native::FDBFuture* f, Type& out) noexcept {
+		typename ResType::DataType* res;
+		auto err = native::fdb_future_get_result(f, (native::FDBResult**)&res);
+		if (!err) {
+			out = ResType::create(res);
+		}
+		return Error(err);
 	}
 };
 
-struct GranuleMutationRefArray {
-	using Type = std::tuple<GranuleMutationRef const*, int>;
-};
+using ReadBlobGranulesDescriptionResult = Result<fdb::ReadBlobGranulesDescriptionResult>;
 
 } // namespace future_var
-
-[[noreturn]] inline void throwError(std::string_view preamble, Error err) {
-	auto msg = std::string(preamble);
-	msg.append(err.what());
-	throw std::runtime_error(msg);
-}
 
 inline int maxApiVersion() {
 	return native::fdb_get_max_api_version();
@@ -434,50 +532,6 @@ inline Error stop() {
 class Transaction;
 class Database;
 
-class Result {
-	friend class Transaction;
-	std::shared_ptr<native::FDBResult> r;
-
-	Result(native::FDBResult* result) {
-		if (result)
-			r = std::shared_ptr<native::FDBResult>(result, &native::fdb_result_destroy);
-	}
-
-public:
-	using KeyValueRefArray = future_var::KeyValueRefArray::Type;
-	using GranuleMutationRefArray = future_var::GranuleMutationRefArray::Type;
-
-	Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
-		auto out_more_native = native::fdb_bool_t{};
-		auto& [out_kv, out_count, out_more] = out;
-		auto err_raw = native::fdb_result_get_keyvalue_array(
-		    r.get(), reinterpret_cast<const native::FDBKeyValue**>(&out_kv), &out_count, &out_more_native);
-		out_more = out_more_native != 0;
-		return Error(err_raw);
-	}
-
-	KeyValueRefArray getKeyValueArray() const {
-		auto ret = KeyValueRefArray{};
-		if (auto err = getKeyValueArrayNothrow(ret))
-			throwError("ERROR: result_get_keyvalue_array(): ", err);
-		return ret;
-	}
-
-	Error getGranuleMutationArrayNothrow(GranuleMutationRefArray& out) const noexcept {
-		auto& [out_mutations, out_count] = out;
-		auto err_raw = native::fdb_result_get_bg_mutations_array(
-		    r.get(), reinterpret_cast<const native::FDBBGMutation**>(&out_mutations), &out_count);
-		return Error(err_raw);
-	}
-
-	GranuleMutationRefArray getGranuleMutationArray() const {
-		auto ret = GranuleMutationRefArray{};
-		if (auto err = getGranuleMutationArrayNothrow(ret))
-			throwError("ERROR: result_get_keyvalue_array(): ", err);
-		return ret;
-	}
-};
-
 class Future {
 protected:
 	friend class Transaction;
@@ -519,7 +573,9 @@ protected:
 public:
 	Future() noexcept : Future(nullptr) {}
 	Future(const Future&) noexcept = default;
+	Future(Future&&) noexcept = default;
 	Future& operator=(const Future&) noexcept = default;
+	Future& operator=(Future&&) noexcept = default;
 
 	bool valid() const noexcept { return f != nullptr; }
 
@@ -581,6 +637,7 @@ class TypedFuture : public Future {
 	using Future::get;
 	using Future::getNothrow;
 	using Future::then;
+	TypedFuture(Future&& f) noexcept : Future(f) {}
 	TypedFuture(const Future& f) noexcept : Future(f) {}
 
 public:
@@ -744,12 +801,12 @@ public:
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), rangeLimit);
 	}
 
-	Result readBlobGranules(KeyRef begin,
-	                        KeyRef end,
-	                        int64_t begin_version,
-	                        int64_t read_version,
-	                        native::FDBReadBlobGranuleContext context) {
-		return Result(native::fdb_transaction_read_blob_granules(
+	ReadRangeResult readBlobGranules(KeyRef begin,
+	                                 KeyRef end,
+	                                 int64_t begin_version,
+	                                 int64_t read_version,
+	                                 native::FDBReadBlobGranuleContext context) {
+		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_transaction_read_blob_granules(
 		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), begin_version, read_version, context));
 	}
 
@@ -765,33 +822,56 @@ public:
 		return native::fdb_transaction_watch(tr.get(), key.data(), intSize(key));
 	}
 
-	TypedFuture<future_var::GranuleDescriptionRefArray> readBlobGranulesDescription(KeyRef begin,
-	                                                                                KeyRef end,
-	                                                                                int64_t beginVersion,
-	                                                                                int64_t readVersion,
-	                                                                                int64_t* readVersionOut) {
-		return native::fdb_transaction_read_blob_granules_description(tr.get(),
-		                                                              begin.data(),
-		                                                              intSize(begin),
-		                                                              end.data(),
-		                                                              intSize(end),
-		                                                              beginVersion,
-		                                                              readVersion,
-		                                                              readVersionOut);
+	TypedFuture<future_var::ReadBlobGranulesDescriptionResult> readBlobGranulesDescription(KeyRef begin,
+	                                                                                       KeyRef end,
+	                                                                                       int64_t beginVersion,
+	                                                                                       int64_t readVersion) {
+		return native::fdb_transaction_read_blob_granules_description_v2(
+		    tr.get(), begin.data(), intSize(begin), end.data(), intSize(end), beginVersion, readVersion);
 	}
 
-	Result parseSnapshotFile(BytesRef fileData,
-	                         native::FDBBGTenantPrefix const* tenantPrefix,
-	                         native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return Result(
-		    native::fdb_readbg_parse_snapshot_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	TypedFuture<future_var::ReadBlobGranulesDescriptionResultV1> readBlobGranulesDescriptionV1(
+	    KeyRef begin,
+	    KeyRef end,
+	    int64_t beginVersion,
+	    int64_t readVersion,
+	    int64_t* readVersionOut) {
+		return native::fdb_transaction_read_blob_granules_description_v1(tr.get(),
+		                                                                 begin.data(),
+		                                                                 intSize(begin),
+		                                                                 end.data(),
+		                                                                 intSize(end),
+		                                                                 beginVersion,
+		                                                                 readVersion,
+		                                                                 readVersionOut);
 	}
 
-	Result parseDeltaFile(BytesRef fileData,
-	                      native::FDBBGTenantPrefix const* tenantPrefix,
-	                      native::FDBBGEncryptionCtx const* encryptionCtx) {
-		return Result(
-		    native::fdb_readbg_parse_delta_file(fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	ReadRangeResult parseSnapshotFile(BytesRef fileData,
+	                                  native::FDBBGTenantPrefix const* tenantPrefix,
+	                                  native::FDBBGEncryptionCtxV2 const* encryptionCtx) {
+		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_readbg_parse_snapshot_file_v2(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	}
+
+	ReadRangeResult parseSnapshotFileV1(BytesRef fileData,
+	                                    native::FDBBGTenantPrefix const* tenantPrefix,
+	                                    native::FDBBGEncryptionCtxV1 const* encryptionCtx) {
+		return ReadRangeResult::create((native::FDBReadRangeResult*)native::fdb_readbg_parse_snapshot_file_v1(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	}
+
+	ReadBGMutationsResult parseDeltaFile(BytesRef fileData,
+	                                     native::FDBBGTenantPrefix const* tenantPrefix,
+	                                     native::FDBBGEncryptionCtxV2 const* encryptionCtx) {
+		return ReadBGMutationsResult::create((native::FDBReadBGMutationsResult*)native::fdb_readbg_parse_delta_file_v2(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
+	}
+
+	ReadBGMutationsResult parseDeltaFileV1(BytesRef fileData,
+	                                       native::FDBBGTenantPrefix const* tenantPrefix,
+	                                       native::FDBBGEncryptionCtxV1 const* encryptionCtx) {
+		return ReadBGMutationsResult::create((native::FDBReadBGMutationsResult*)native::fdb_readbg_parse_delta_file_v1(
+		    fileData.data(), intSize(fileData), tenantPrefix, encryptionCtx));
 	}
 
 	TypedFuture<future_var::None> commit() { return native::fdb_transaction_commit(tr.get()); }
