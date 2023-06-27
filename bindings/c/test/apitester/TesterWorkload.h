@@ -133,14 +133,14 @@ protected:
 	// Report a workload error. The workload will be considered as failed
 	template <typename... Args>
 	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-		log::error("{}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+		log::error("{:<24}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
 		newErrorReported();
 	}
 
 	// Log an info message annotated with the workload Id
 	template <typename... Args>
 	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
-		log::info("{}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+		log::info("{:<24}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
 	}
 
 	// Confirm a successfull progress check
@@ -199,6 +199,10 @@ protected:
 
 	// Workload is in progress (intialized, but not completed)
 	std::atomic<bool> inProgress;
+
+	// Info on last reported stats
+	TimePoint lastStatsTime;
+	int lastTxCompleted;
 };
 
 // Workload manager

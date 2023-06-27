@@ -81,11 +81,12 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
   : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false) {
+    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false), lastTxCompleted(0) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
 	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
 	workloadId = fmt::format("{}{}", config.name, clientId);
+	lastStatsTime = timeNow();
 }
 
 void WorkloadBase::init(WorkloadManager* manager) {
@@ -94,7 +95,16 @@ void WorkloadBase::init(WorkloadManager* manager) {
 }
 
 void WorkloadBase::printStats() {
-	info("{} transactions completed", numTxCompleted.load());
+	int completed = numTxCompleted.load();
+	int started = numTxStarted.load();
+	TimePoint now = timeNow();
+	info("progress: {:>4} total, {:>3} last {:.1f}s, {:>2} pending",
+	     started,
+	     completed - lastTxCompleted,
+	     microsecToSec(timeElapsedInUs(lastStatsTime, now)),
+	     started - completed);
+	lastStatsTime = now;
+	lastTxCompleted = completed;
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
