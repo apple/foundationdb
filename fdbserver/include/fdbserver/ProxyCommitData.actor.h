@@ -70,7 +70,7 @@ struct ProxyStats {
 	Version lastCommitVersionAssigned;
 
 	LatencySample commitLatencySample;
-	LatencySample encryptionLatencySample;
+	LatencySample encryptionLatencySampleNS;
 	LatencyBands commitLatencyBands;
 
 	// Ratio of tlogs receiving empty commit messages.
@@ -141,10 +141,10 @@ struct ProxyStats {
 	                        id,
 	                        SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
 	                        SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
-	    encryptionLatencySample("CommitEncryptionLatencyMetrics",
-	                            id,
-	                            SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
-	                            SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
+	    encryptionLatencySampleNS("CommitEncryptionLatencyMetricsNS",
+	                              id,
+	                              SERVER_KNOBS->LATENCY_METRICS_LOGGING_INTERVAL,
+	                              SERVER_KNOBS->LATENCY_SKETCH_ACCURACY),
 	    commitLatencyBands("CommitLatencyBands", id, SERVER_KNOBS->STORAGE_LOGGING_DELAY),
 	    commitBatchingEmptyMessageRatio("CommitBatchingEmptyMessageRatio",
 	                                    id,

@@ -20,7 +20,6 @@
 
 #ifndef FLOW_FDBCLIENT_COMMITTRANSACTION_H
 #define FLOW_FDBCLIENT_COMMITTRANSACTION_H
-#include <utility>
 #pragma once
 
 #include "fdbclient/BlobCipher.h"
@@ -181,7 +180,7 @@ struct MutationRef {
 	MutationRef encrypt(TextAndHeaderCipherKeys cipherKeys,
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
-	                    double* encryptTime = nullptr) const {
+	                    double* encryptTimeNS = nullptr) const {
 		uint8_t iv[AES_256_IV_LENGTH] = { 0 };
 		deterministicRandom()->randomBytes(iv, AES_256_IV_LENGTH);
 		BinaryWriter bw(AssumeVersion(ProtocolVersion::withEncryptionAtRest()));
@@ -199,8 +198,8 @@ struct MutationRef {
 		StringRef payload;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef header;
-			payload =
-			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTime);
+			payload = cipher.encrypt(
+			    static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTimeNS);
 			Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
 			arena.dependsOn(headerStr.arena());
 			serializedHeader = headerStr;
@@ -272,13 +271,13 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr,
-	                    double* decryptTime = nullptr) const {
+	                    double* decryptTimeNS = nullptr) const {
 		StringRef plaintext;
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
 			DecryptBlobCipherAes256Ctr cipher(
 			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
-			plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTime);
+			plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTimeNS);
 		} else {
 			const BlobCipherEncryptHeader* header = encryptionHeader();
 			DecryptBlobCipherAes256Ctr cipher(
@@ -298,9 +297,9 @@ struct MutationRef {
 	                    Arena& arena,
 	                    BlobCipherMetrics::UsageType usageType,
 	                    StringRef* buf = nullptr,
-	                    double* decryptTime = nullptr) const {
+	                    double* decryptTimeNS = nullptr) const {
 		TextAndHeaderCipherKeys textAndHeaderKeys = getCipherKeys(cipherKeys);
-		return decrypt(textAndHeaderKeys, arena, usageType, buf, decryptTime);
+		return decrypt(textAndHeaderKeys, arena, usageType, buf, decryptTimeNS);
 	}
 
 	TextAndHeaderCipherKeys getCipherKeys(

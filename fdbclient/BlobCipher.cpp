@@ -1118,7 +1118,7 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
                                               const int plaintextLen,
                                               BlobCipherEncryptHeaderRef* headerRef,
                                               Arena& arena,
-                                              double* encryptTime) {
+                                              double* encryptTimeNS) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1149,11 +1149,13 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 
 	// Ensure encryption header authToken details sanity
 	ASSERT(isEncryptHeaderAuthTokenDetailsValid(authTokenMode, authTokenAlgo));
-	double encryptTimeV = 0;
 	updateEncryptHeader(ciphertext, plaintextLen, headerRef);
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
-		encryptTimeV = int64_t((timer_monotonic() - startTime) * 1e9);
-		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += encryptTimeV;
+		double encryptTime = int64_t((timer_monotonic() - startTime) * 1e9);
+		BlobCipherMetrics::counters(usageType).encryptCPUTimeNS += encryptTime;
+		if (encryptTimeNS) {
+			*encryptTimeNS = encryptTime;
+		}
 	}
 
 	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
@@ -1163,9 +1165,6 @@ StringRef EncryptBlobCipherAes265Ctr::encrypt(const uint8_t* plaintext,
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	           "ConfigurableEncryption: Encryption with AES_CMAC Auth token generation");
 
-	if (encryptTime) {
-		*encryptTime = encryptTimeV;
-	}
 	return encryptBuf.substr(0, plaintextLen);
 }
 
@@ -1455,7 +1454,7 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
                                               const int ciphertextLen,
                                               const BlobCipherEncryptHeaderRef& headerRef,
                                               Arena& arena,
-                                              double* decryptTime) {
+                                              double* decryptTimeNS) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1483,10 +1482,12 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 		throw encrypt_ops_error();
 	}
 
-	double decryptTimeV = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
-		decryptTimeV = int64_t((timer_monotonic() - startTime) * 1e9);
-		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += decryptTimeV;
+		double decryptTime = int64_t((timer_monotonic() - startTime) * 1e9);
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += decryptTime;
+		if (decryptTimeNS) {
+			*decryptTimeNS = decryptTime;
+		}
 	}
 
 	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
@@ -1496,9 +1497,6 @@ StringRef DecryptBlobCipherAes256Ctr::decrypt(const uint8_t* ciphertext,
 	CODE_PROBE(authTokenAlgo == EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC,
 	           "ConfigurableEncryption: Decryption with AES_CMAC Auth token generation");
 
-	if (decryptTime) {
-		*decryptTime = decryptTimeV;
-	}
 	return decrypted.substr(0, ciphertextLen);
 }
 
@@ -1686,7 +1684,8 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 
 void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
                                                 const int ciphertextLen,
-                                                const BlobCipherEncryptHeaderRef& headerRef) {
+                                                const BlobCipherEncryptHeaderRef& headerRef,
+                                                double* decryptTimeNS) {
 	double startTime = 0.0;
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
 		startTime = timer_monotonic();
@@ -1713,7 +1712,11 @@ void DecryptBlobCipherAes256Ctr::decryptInplace(uint8_t* ciphertext,
 	}
 
 	if (CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING) {
-		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += int64_t((timer_monotonic() - startTime) * 1e9);
+		double decryptTime = int64_t((timer_monotonic() - startTime) * 1e9);
+		BlobCipherMetrics::counters(usageType).decryptCPUTimeNS += decryptTime;
+		if (decryptTimeNS) {
+			*decryptTimeNS = decryptTime;
+		}
 	}
 
 	CODE_PROBE(authTokenMode == EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_NONE,
