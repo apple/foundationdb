@@ -55,13 +55,13 @@ Random& Random::get() {
 bool Random::randomBool(double trueRatio) {
 	return std::uniform_real_distribution<double>(0.0, 1.0)(random) <= trueRatio;
 }
-
+namespace log {
 Logger& Logger::get() {
 	static Logger logger;
 	return logger;
 }
 
-void Logger::logMessage(Logger::Level lvl, std::string_view msg) {
+void Logger::logMessage(log::Level lvl, std::string_view msg) {
 	if (lvl < level) {
 		return;
 	}
@@ -93,8 +93,10 @@ void Logger::logMessage(Logger::Level lvl, std::string_view msg) {
 	fflush(stderr);
 }
 
+} // namespace log
+
 void print_internal_error(const char* msg, const char* file, int line) {
-	Logger::error(fmt::format("Assertion {} failed @ {}:{}", msg, file, line));
+	log::error("Assertion {} failed @ {}:{}", msg, file, line);
 }
 
 std::optional<fdb::Value> copyValueRef(fdb::future_var::ValueRef::Type value) {
@@ -182,7 +184,7 @@ void TmpFile::write(std::string_view data) {
 
 void TmpFile::remove() {
 	if (!std::filesystem::remove(std::filesystem::path(filename))) {
-		Logger::warn(fmt::format("Failed to remove file {}", filename));
+		log::warn("Failed to remove file {}", filename);
 	}
 }
 

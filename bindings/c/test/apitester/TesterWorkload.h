@@ -130,11 +130,18 @@ protected:
 	                   std::optional<fdb::BytesRef> tenant = std::optional<fdb::BytesRef>(),
 	                   bool failOnError = true);
 
-	// Log an error message, increase error counter
-	void error(const std::string& msg);
+	// Report a workload error. The workload will be considered as failed
+	template <typename... Args>
+	void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		log::error("{}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+		newErrorReported();
+	}
 
-	// Log an info message
-	void info(const std::string& msg);
+	// Log an info message annotated with the workload Id
+	template <typename... Args>
+	void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+		log::info("{}: {}", workloadId, fmt::format(fmt_str, std::forward<Args>(args)...));
+	}
 
 	// Confirm a successfull progress check
 	void confirmProgress();
@@ -151,6 +158,9 @@ private:
 	// Decrease scheduled task counter, notify the workload manager
 	// that the task is done if no more tasks schedule
 	void scheduledTaskDone();
+
+	// Update workload status after new workload error logged
+	void newErrorReported();
 
 	// Keep track of tasks scheduled by the workload
 	// End workload when this number falls to 0

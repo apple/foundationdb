@@ -150,9 +150,9 @@ public:
 		// can enter DONE state and handle it
 
 		if (retriedErrors.size() >= LARGE_NUMBER_OF_RETRIES) {
-			Logger::warn(fmt::format("Transaction succeeded after {} retries on errors: {}",
-			                         retriedErrors.size(),
-			                         fmt::join(retriedErrorCodes(), ", ")));
+			log::warn("Transaction succeeded after {} retries on errors: {}",
+			          retriedErrors.size(),
+			          fmt::join(retriedErrorCodes(), ", "));
 		}
 
 		if (transactional) {
@@ -300,14 +300,13 @@ protected:
 		retriedErrors.push_back(lastErr);
 		if (retryLimit == 0 || retriedErrors.size() <= retryLimit) {
 			if (retriedErrors.size() == LARGE_NUMBER_OF_RETRIES) {
-				Logger::warn(fmt::format("Transaction already retried {} times, on errors: {}",
-				                         retriedErrors.size(),
-				                         fmt::join(retriedErrorCodes(), ", ")));
+				log::warn("Transaction already retried {} times, on errors: {}",
+				          retriedErrors.size(),
+				          fmt::join(retriedErrorCodes(), ", "));
 			}
 			return true;
 		}
-		Logger::error(fmt::format("Transaction retry limit reached. Retried on errors: {}",
-		                          fmt::join(retriedErrorCodes(), ", ")));
+		log::error("Transaction retry limit reached. Retried on errors: {}", fmt::join(retriedErrorCodes(), ", "));
 		transactionFailed(lastErr);
 		return false;
 	}
@@ -453,11 +452,11 @@ protected:
 		err = f.error();
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			Logger::warn(fmt::format("Long waiting time on a future: {:.3f}s, return code {} ({}), commit called: {}",
-			                         microsecToSec(waitTimeUs),
-			                         err.code(),
-			                         err.what(),
-			                         commitCalled));
+			log::warn("Long waiting time on a future: {:.3f}s, return code {} ({}), commit called: {}",
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what(),
+			          commitCalled);
 		}
 		if (err.code() == error_code_transaction_cancelled) {
 			return;
@@ -482,11 +481,11 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(start);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb::Error err3 = onErrorFuture.error();
-			Logger::warn(fmt::format("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})",
-			                         onErrorArg.code(),
-			                         microsecToSec(waitTimeUs),
-			                         err3.code(),
-			                         err3.what()));
+			log::warn("Long waiting time on onError({}) future: {:.3f}s, return code {} ({})",
+			          onErrorArg.code(),
+			          microsecToSec(waitTimeUs),
+			          err3.code(),
+			          err3.what());
 		}
 		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
 		scheduler->schedule([thisRef]() { thisRef->handleOnErrorResult(); });
@@ -540,10 +539,10 @@ protected:
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onFutureReady(f);
 		} catch (std::exception& err) {
-			Logger::error(fmt::format("Unexpected exception in callback {}", err.what()));
+			log::error("Unexpected exception in callback {}", err.what());
 			abort();
 		} catch (...) {
-			Logger::error(fmt::format("Unknown error in callback"));
+			log::error("Unknown error in callback");
 			abort();
 		}
 	}
@@ -565,10 +564,10 @@ protected:
 		fdb::Error err = f.error();
 		auto waitTimeUs = timeElapsedInUs(cbInfo.startTime, endTime);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
-			Logger::warn(fmt::format("Long waiting time on a future: {:.3f}s, return code {} ({})",
-			                         microsecToSec(waitTimeUs),
-			                         err.code(),
-			                         err.what()));
+			log::warn("Long waiting time on a future: {:.3f}s, return code {} ({})",
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what());
 		}
 		if (err.code() == error_code_transaction_cancelled || cbInfo.cancelled) {
 			return;
@@ -602,10 +601,10 @@ protected:
 			AsyncTransactionContext* txCtx = (AsyncTransactionContext*)param;
 			txCtx->onErrorReady(f);
 		} catch (std::exception& err) {
-			Logger::error(fmt::format("Unexpected exception in callback {}", err.what()));
+			log::error("Unexpected exception in callback {}", err.what());
 			abort();
 		} catch (...) {
-			Logger::error(fmt::format("Unknown error in callback"));
+			log::error("Unknown error in callback");
 			abort();
 		}
 	}
@@ -614,11 +613,11 @@ protected:
 		auto waitTimeUs = timeElapsedInUs(onErrorCallTimePoint);
 		if (waitTimeUs > LONG_WAIT_TIME_US) {
 			fdb::Error err = onErrorFuture.error();
-			Logger::warn(fmt::format("Long waiting time on onError({}): {:.3f}s, return code {} ({})",
-			                         onErrorArg.code(),
-			                         microsecToSec(waitTimeUs),
-			                         err.code(),
-			                         err.what()));
+			log::warn("Long waiting time on onError({}): {:.3f}s, return code {} ({})",
+			          onErrorArg.code(),
+			          microsecToSec(waitTimeUs),
+			          err.code(),
+			          err.what());
 		}
 		injectRandomSleep();
 		auto thisRef = onErrorThisRef;

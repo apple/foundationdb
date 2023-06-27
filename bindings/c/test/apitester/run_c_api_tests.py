@@ -77,6 +77,8 @@ def run_tester(args, cluster, test_file):
         "--log",
         "--log-dir",
         str(log_dir),
+        "--verbosity",
+        args.logging_level,
     ]
 
     if args.run_with_gdb:

@@ -94,7 +94,7 @@ void WorkloadBase::init(WorkloadManager* manager) {
 }
 
 void WorkloadBase::printStats() {
-	info(fmt::format("{} transactions completed", numTxCompleted.load()));
+	info("{} transactions completed", numTxCompleted.load());
 }
 
 void WorkloadBase::schedule(TTaskFct task) {
@@ -150,10 +150,10 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 		    } else {
 			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
 			    if (failOnError) {
-				    error(msg);
+				    error("{}", msg);
 				    failed = true;
 			    } else {
-				    info(msg);
+				    info("{}", msg);
 				    cont();
 			    }
 		    }
@@ -164,15 +164,10 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	    maxTxTimeoutMs > 0);
 }
 
-void WorkloadBase::info(const std::string& msg) {
-	Logger::info(fmt::format("{}: {}", workloadId, msg));
-}
-
-void WorkloadBase::error(const std::string& msg) {
-	Logger::error(fmt::format("{}: {}", workloadId, msg));
+void WorkloadBase::newErrorReported() {
 	numErrors++;
 	if (numErrors > maxErrors && !failed) {
-		Logger::error(fmt::format("{}: Stopping workload after {} errors", workloadId, numErrors));
+		log::error("{}: Stopping workload after {} errors", workloadId, numErrors);
 		failed = true;
 	}
 }
@@ -181,7 +176,7 @@ void WorkloadBase::scheduledTaskDone() {
 	if (--tasksScheduled == 0) {
 		inProgress = false;
 		if (numErrors > 0) {
-			error(fmt::format("Workload failed with {} errors", numErrors.load()));
+			error("Workload failed with {} errors", numErrors.load());
 		} else {
 			info("Workload successfully completed");
 		}
@@ -198,7 +193,7 @@ void WorkloadBase::confirmProgress() {
 void WorkloadManager::add(std::shared_ptr<IWorkload> workload, TTaskFct cont) {
 	std::unique_lock<std::mutex> lock(mutex);
 	workloads[workload.get()] = WorkloadInfo{ workload, cont, workload->getControlIfc(), false };
-	Logger::info(fmt::format("Workload {} added", workload->getWorkloadId()));
+	log::info("Workload {} added", workload->getWorkloadId());
 }
 
 void WorkloadManager::run() {
@@ -224,9 +219,9 @@ void WorkloadManager::run() {
 		outputPipe.close();
 	}
 	if (failed()) {
-		Logger::error(fmt::format("{} workloads failed", numWorkloadsFailed));
+		log::error("{} workloads failed", numWorkloadsFailed);
 	} else {
-		Logger::info("All workloads succesfully completed");
+		log::info("All workloads succesfully completed");
 	}
 }
 
@@ -256,13 +251,13 @@ void WorkloadManager::openControlPipes(const std::string& inputPipeName, const s
 		ctrlInputThread = std::thread(&WorkloadManager::readControlInput, this, inputPipeName);
 	}
 	if (!outputPipeName.empty()) {
-		Logger::info(fmt::format("Opening pipe {} for writing", outputPipeName));
+		log::info("Opening pipe {} for writing", outputPipeName);
 		outputPipe.open(outputPipeName, std::ofstream::out);
 	}
 }
 
 void WorkloadManager::readControlInput(std::string pipeName) {
-	Logger::info(fmt::format("Opening pipe {} for reading", pipeName));
+	log::info("Opening pipe {} for reading", pipeName);
 	// Open in binary mode and read char-by-char to avoid
 	// any kind of buffering
 	FILE* f = fopen(pipeName.c_str(), "rb");
@@ -280,7 +275,7 @@ void WorkloadManager::readControlInput(std::string pipeName) {
 		if (line.empty()) {
 			continue;
 		}
-		Logger::info(fmt::format("Received {} command", line));
+		log::info("Received {} command", line);
 		if (line == "STOP") {
 			handleStopCommand();
 		} else if (line == "CHECK") {
