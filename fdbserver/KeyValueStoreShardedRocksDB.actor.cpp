@@ -2312,6 +2312,9 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 		void action(AddShardAction& a) {
 			auto s = a.shard->init();
 			if (!s.ok()) {
+				TraceEvent(SevError, "AddShardError")
+				    .detail("Status", status.ToString())
+				    .detail("ShardId", a.shard->id);
 				a.done.sendError(statusToError(s));
 				return;
 			}
@@ -2437,6 +2440,7 @@ struct ShardedRocksDBKeyValueStore : IKeyValueStore {
 			std::vector<std::pair<uint32_t, KeyRange>> deletes;
 			auto s = doCommit(a.writeBatch.get(), a.db, &deletes, a.getHistograms);
 			if (!s.ok()) {
+				TraceEvent(SevError, "CommitError").detail("Status", status.ToString());
 				a.done.sendError(statusToError(s));
 				return;
 			}
