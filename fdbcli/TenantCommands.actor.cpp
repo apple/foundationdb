@@ -350,32 +350,26 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 	fmt::print("The tenant with ID `{}' has been deleted\n", printable(tokens[2]).c_str());
 	return true;
 }
-constexpr char usageMessage[] =
+constexpr char moveTenantUsageMessage[] =
     "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
     "Helps orchestrate the move of a tenant group across 2 data clusters in a metacluster.\n"
     "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement"
-    "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n";
+    "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n"
+    "The abort command will fail if there are any unlocked tenants in the group.";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
-		fmt::print(usageMessage);
+		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
-	state TenantGroupName tenantGroup = tokens[3];
-	state ClusterName srcCluster = tokens[4];
-	state ClusterName dstCluster = tokens[5];
-	if (srcCluster == dstCluster) {
-		fmt::print(usageMessage);
-		return false;
-	}
+	TenantGroupName tenantGroup = tokens[3];
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
 	try {
 		wait(metacluster::startTenantMovement(db, tenantGroup, srcCluster, dstCluster));
 	} catch (Error& e) {
-		if (e.code() == error_code_invalid_tenant_move) {
-			fmt::print(stderr, "ERROR: {}\n", e.what());
-			return false;
-		}
-		throw e;
+		fmt::print(stderr, "ERROR: {}\n", e.what());
+		return false;
 	}
 
 	return true;
@@ -383,51 +377,72 @@ ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<S
 
 ACTOR Future<bool> tenantMoveSwitchCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
-		fmt::print(usageMessage);
+		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
 	state std::vector<std::string> messages;
-	wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
+	try {
+		wait(metacluster::switchTenantMovement(db, tenantGroup, srcCluster, dstCluster, &messages));
+	} catch (Error& e) {
+		fmt::print(stderr, "ERROR: {}\n", e.what());
+		return false;
+	}
 
 	return true;
 }
 
 ACTOR Future<bool> tenantMoveFinishCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
-		fmt::print(usageMessage);
+		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
-	wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	try {
+		wait(metacluster::finishTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	} catch (Error& e) {
+		fmt::print(stderr, "ERROR: {}\n", e.what());
+		return false;
+	}
 
 	return true;
 }
 
 ACTOR Future<bool> tenantMoveAbortCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {
-		fmt::print(usageMessage);
+		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
 	TenantGroupName tenantGroup = tokens[3];
 	ClusterName srcCluster = tokens[4];
 	ClusterName dstCluster = tokens[5];
-	wait(metacluster::abortTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	try {
+		wait(metacluster::abortTenantMovement(db, tenantGroup, srcCluster, dstCluster));
+	} catch (Error& e) {
+		fmt::print(stderr, "ERROR: {}\n", e.what());
+		return false;
+	}
 
 	return true;
 }
 
 ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() < 6) {
-		fmt::print(usageMessage);
+		fmt::print(moveTenantUsageMessage);
 		return false;
 	}
 	StringRef step = tokens[2];
 	state bool result = false;
+	ClusterName srcCluster = tokens[4];
+	ClusterName dstCluster = tokens[5];
+	if (srcCluster == dstCluster) {
+		fmt::print(moveTenantUsageMessage);
+		return false;
+	}
 	if (step == "start"_sr) {
 		wait(store(result, tenantMoveStartCommand(db, tokens)));
 	} else if (step == "switch"_sr) {
@@ -437,7 +452,7 @@ ACTOR Future<bool> tenantMoveCommand(Reference<IDatabase> db, std::vector<String
 	} else if (step == "abort"_sr) {
 		wait(store(result, tenantMoveAbortCommand(db, tokens)));
 	} else {
-		fmt::print(stderr, usageMessage);
+		fmt::print(stderr, moveTenantUsageMessage);
 		return false;
 	}
 	return result;
@@ -1160,6 +1175,11 @@ std::vector<const char*> tenantHintGenerator(std::vector<StringRef> const& token
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else if (tokencmp(tokens[1], "unlock") && tokens.size() < 4) {
 		static std::vector<const char*> opts = { "<NAME>", "<UID>" };
+		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
+	} else if (tokencmp(tokens[1], "move") && tokens.size() < 6) {
+		static std::vector<const char*> opts = {
+			"<start|switch|finish|abort>", "TENANT_GROUP", "SOURCE_CLUSTER", "DESTINATION_CLUSTER"
+		};
 		return std::vector<const char*>(opts.begin() + tokens.size() - 2, opts.end());
 	} else {
 		return {};
