@@ -40,7 +40,8 @@ void GrvProxyTagThrottler::TagQueue::setRate(double rate) {
 	if (rateInfo.present()) {
 		rateInfo.get().setRate(rate);
 	} else {
-		rateInfo = GrvTransactionRateInfo(rate);
+		rateInfo = GrvTransactionRateInfo(
+		    SERVER_KNOBS->TAG_THROTTLE_RATE_WINDOW, SERVER_KNOBS->TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET, rate);
 	}
 }
 
