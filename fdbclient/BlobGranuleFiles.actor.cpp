@@ -314,8 +314,14 @@ struct IndexBlockRef {
 		    BlobCipherMetrics::BLOB_GRANULE);
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef;
-			buffer = encryptor.encrypt(
-			    serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+			if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+				buffer = StringRef(serializedBuff.contents().begin(), serializedBuff.contents().size());
+				arena.dependsOn(serializedBuff.arena());
+				encryptor.encryptInplace(mutateString(buffer), buffer.size(), &headerRef);
+			} else {
+				buffer = encryptor.encrypt(
+				    serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+			}
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			arena.dependsOn(serialized.arena());
 			encryptHeaderRef = serialized;
@@ -352,7 +358,12 @@ struct IndexBlockRef {
 			                                     eKeys.headerCipherKey,
 			                                     cipherKeysCtx.ivRef.begin(),
 			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
+			if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+				decrypted = StringRef(idxRef.buffer.begin(), idxRef.buffer.size());
+				decryptor.decryptInplace(mutateString(decrypted), decrypted.size(), headerRef);
+			} else {
+				decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
+			}
 		} else {
 			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
 			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
@@ -456,7 +467,11 @@ struct IndexBlobGranuleFileChunkRef {
 		    BlobCipherMetrics::BLOB_GRANULE);
 		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
 			BlobCipherEncryptHeaderRef headerRef;
-			chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+			if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+				encryptor.encryptInplace(mutateString(chunkRef.buffer), chunkRef.buffer.size(), &headerRef);
+			} else {
+				chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+			}
 			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
 			arena.dependsOn(serialized.arena());
 			chunkRef.encryptHeaderRef = serialized;
@@ -495,7 +510,12 @@ struct IndexBlobGranuleFileChunkRef {
 			                                     eKeys.headerCipherKey,
 			                                     cipherKeysCtx.ivRef.begin(),
 			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
+			if (FLOW_KNOBS->ENCRYPT_INPLACE_ENABLED) {
+				decrypted = StringRef(chunkRef.buffer.begin(), chunkRef.buffer.size());
+				decryptor.decryptInplace(mutateString(decrypted), decrypted.size(), headerRef);
+			} else {
+				decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
+			}
 		} else {
 			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
 			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
