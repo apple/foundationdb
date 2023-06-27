@@ -255,7 +255,10 @@ struct eio_req {
 	long int3; /* chown, fchown: gid; rename, link: working directory of new name */
 	int errorno; /* errno value on syscall return */
 
-#if ATOMIC_CHAR_LOCK_FREE
+	// g++ doesn't currently support use of atomic_uchar from <stdatomic.h>. This is expected to change with c++23. An
+	// alternate workaround is to use different headers in C++ and C (atomic vs stdatomic.h) and a "using namespace std"
+	// statement, but this seems safer given that we don't use g++ except for valgrind.
+#if defined(__clang__) && ATOMIC_CHAR_LOCK_FREE
 	// Use an atomic type because this can be accessed from multiple threads.
 	// Based on the use of sig_atomic_t below, this is guarded by ATOMIC_CHAR_LOCK_FREE
 	// for signal safety
