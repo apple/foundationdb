@@ -833,8 +833,12 @@ ACTOR static Future<Void> transactionStarter(GrvProxyInterface proxy,
 
 	state int64_t transactionCount = 0;
 	state int64_t batchTransactionCount = 0;
-	state GrvTransactionRateInfo normalRateInfo(10);
-	state GrvTransactionRateInfo batchRateInfo(0);
+	state GrvTransactionRateInfo normalRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                            SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                            /*rate=*/10);
+	state GrvTransactionRateInfo batchRateInfo(SERVER_KNOBS->START_TRANSACTION_RATE_WINDOW,
+	                                           SERVER_KNOBS->START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,
+	                                           /*rate=*/0);
 
 	state Deque<GetReadVersionRequest> systemQueue;
 	state Deque<GetReadVersionRequest> defaultQueue;

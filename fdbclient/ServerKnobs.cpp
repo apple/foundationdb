@@ -557,7 +557,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
 	init( START_TRANSACTION_RATE_WINDOW,                         2.0 );
+	init( TAG_THROTTLE_RATE_WINDOW,                              2.0 );
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
+	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                  10.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 	init( TENANT_ID_REQUEST_MAX_QUEUE_SIZE,                      1e6 );
