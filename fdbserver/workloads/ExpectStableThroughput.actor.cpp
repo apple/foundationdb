@@ -16,6 +16,8 @@ class ExpectStableThroughputWorkload : public TestWorkload {
 	double errorTolerance;
 	Key testKey;
 	int numActors;
+	double startTime;
+	double warmupTime;
 
 	ACTOR static Future<Void> runTransaction(ExpectStableThroughputWorkload* self, Database cx) {
 		state Transaction tr(cx);
@@ -23,8 +25,10 @@ class ExpectStableThroughputWorkload : public TestWorkload {
 			try {
 				tr.setOption(FDBTransactionOptions::AUTO_THROTTLE_TAG, self->throttlingTag);
 				wait(success(tr.get(self->testKey)));
-				self->totalCost += tr.getTotalCost();
-				self->throttledDuration += tr.getTagThrottledDuration();
+				if (now() > self->startTime + self->warmupTime) {
+					self->totalCost += tr.getTotalCost();
+					self->throttledDuration += tr.getTagThrottledDuration();
+				}
 				return Void();
 			} catch (Error& e) {
 				if (e.code() == error_code_proxy_tag_throttled) {
@@ -50,6 +54,7 @@ public:
 		errorTolerance = getOption(options, "errorTolerance"_sr, 0.2);
 		testKey = getOption(options, "testKey"_sr, "testKey"_sr);
 		numActors = getOption(options, "numActors"_sr, 100);
+		warmupTime = getOption(options, "warmupTime"_sr, 10.0);
 	}
 
 	Future<Void> setup(Database const& cx) override { return Void(); }
@@ -58,11 +63,12 @@ public:
 		if (clientId != 0) {
 	  return Void();
 		}
+		startTime = now();
 		std::vector<Future<Void>> clients;
 		for (int i = 0; i < numActors; ++i) {
 	  clients.push_back(runClient(this, cx));
 		}
-		return success(timeout(waitForAll(clients), testDuration));
+		return success(timeout(waitForAll(clients), warmupTime + testDuration));
 	}
 
 	Future<bool> check(Database const& cx) override {
