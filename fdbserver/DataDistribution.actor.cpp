@@ -978,7 +978,7 @@ ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
 		    .detail("Tag", verAndTag.second);
 
 		wait(prepareBlobRestore(cx,
-		                        &(context->lock),
+		                        std::make_shared<MoveKeysLock>(context->lock),
 		                        context->ddEnabledState.get(),
 		                        context->id(),
 		                        req.keys,
