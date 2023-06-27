@@ -71,18 +71,20 @@ public:
 		}
 		auto const expectedTotalCost =
 		    testDuration * expectedThroughputPagesRate * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
-		TraceEvent("CheckingStableThroughput")
-		    .detail("ExpectedTotalCost", expectedTotalCost)
-		    .detail("ErrorTolerance", errorTolerance)
-		    .detail("TotalCost", totalCost)
-		    .detail("ThrottledDuration", throttledDuration)
-		    .detail("TagThrottledErrors", tagThrottledErrors);
 		bool const passed = (static_cast<double>(expectedTotalCost) * (1.0 - errorTolerance) <= totalCost) &&
 		                    (totalCost <= static_cast<double>(expectedTotalCost) * (1.0 + errorTolerance));
-		ASSERT(passed);
+		auto const severity = passed ? SevInfo : SevError;
+		TraceEvent(severity, "CheckingStableThroughput")
+		    .detail("ExpectedTotalCost", expectedTotalCost)
+		    .detail("ErrorTolerance", errorTolerance)
+		    .detail("TotalCost", totalCost);
 		return passed;
 	}
-	void getMetrics(std::vector<PerfMetric>&) override {}
+	void getMetrics(std::vector<PerfMetric>& m) override {
+		m.emplace_back("Total Cost", totalCost, Averaged::False);
+		m.emplace_back("TagThrottled Errors", tagThrottledErrors, Averaged::False);
+		m.emplace_back("Total Throttling Duration", throttledDuration, Averaged::False);
+	}
 
 	void disableFailureInjectionWorkloads(std::set<std::string>& out) const override { out.emplace("Attrition"); }
 };
