@@ -1187,18 +1187,16 @@ struct BusyThrottlingIdInfo {
 	constexpr static FileIdentifier file_identifier = 4528694;
 	ThrottlingId throttlingId;
 	double rate{ 0.0 };
-	double fractionalBusyness{ 0.0 };
 
 	BusyThrottlingIdInfo() = default;
-	BusyThrottlingIdInfo(ThrottlingId const& throttlingId, double rate, double fractionalBusyness)
-	  : throttlingId(throttlingId), rate(rate), fractionalBusyness(fractionalBusyness) {}
+	BusyThrottlingIdInfo(ThrottlingId const& throttlingId, double rate) : throttlingId(throttlingId), rate(rate) {}
 
 	bool operator<(BusyThrottlingIdInfo const& rhs) const { return rate < rhs.rate; }
 	bool operator>(BusyThrottlingIdInfo const& rhs) const { return rate > rhs.rate; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, throttlingId, rate, fractionalBusyness);
+		serializer(ar, throttlingId, rate);
 	}
 };
 
