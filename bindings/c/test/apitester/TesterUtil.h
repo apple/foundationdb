@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include <string_view>
 #ifndef APITESTER_UTIL_H
 #define APITESTER_UTIL_H
 
@@ -85,6 +86,41 @@ public:
 
 	std::mt19937 random;
 };
+
+namespace log {
+enum class Level { ERROR, WARN, INFO, DEBUG };
+
+class Logger {
+public:
+	static Logger& get();
+
+	void setLevel(log::Level lvl) { level = lvl; }
+	void logMessage(log::Level lvl, std::string_view msg);
+
+private:
+	Logger() : level(log::Level::INFO) {}
+	log::Level level;
+};
+
+template <typename... Args>
+static void error(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	Logger::get().logMessage(Level::ERROR, fmt::format(fmt_str, std::forward<Args>(args)...));
+}
+
+template <typename... Args>
+static void warn(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	Logger::get().logMessage(Level::WARN, fmt::format(fmt_str, std::forward<Args>(args)...));
+}
+template <typename... Args>
+static void info(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	Logger::get().logMessage(Level::INFO, fmt::format(fmt_str, std::forward<Args>(args)...));
+}
+template <typename... Args>
+static void debug(const fmt::format_string<Args...>& fmt_str, Args&&... args) {
+	Logger::get().logMessage(Level::DEBUG, fmt::format(fmt_str, std::forward<Args>(args)...));
+}
+
+} // namespace log
 
 class TesterError : public std::runtime_error {
 public:

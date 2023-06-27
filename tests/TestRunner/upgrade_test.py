@@ -2,6 +2,7 @@
 
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 import glob
+import logging
 import os
 from pathlib import Path
 import random
@@ -14,7 +15,9 @@ import time
 from binary_download import FdbBinaryDownloader
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster
-from test_util import random_alphanum_string
+from test_util import random_alphanum_string, get_logger, initialize_logger_level
+
+logger = get_logger()
 
 TENANT_API_VERSION = 720
 
@@ -44,7 +47,7 @@ def version_before(ver_str1, ver_str2):
 
 def random_sleep(min_sec, max_sec):
     time_sec = random.uniform(min_sec, max_sec)
-    print("Sleeping for {0:.3f}s".format(time_sec))
+    logger.info("Sleeping for {0:.3f}s".format(time_sec))
     time.sleep(time_sec)
 
 
@@ -128,12 +131,12 @@ class UpgradeTest:
             retries += 1
             status = self.cluster.get_status()
             if "processes" not in status["cluster"]:
-                print("Health check: no processes found. Retrying")
+                logger.info("Health check: no processes found. Retrying")
                 time.sleep(1)
                 continue
             num_proc = len(status["cluster"]["processes"])
             if num_proc != self.cluster.process_number:
-                print(
+                logger.info(
                     "Health check: {} of {} processes found. Retrying".format(
                         num_proc, self.cluster.process_number
                     )
@@ -150,7 +153,7 @@ class UpgradeTest:
                 ), "Process version: expected: {}, actual: {}".format(
                     expected_version, proc_ver
                 )
-            print("Health check: OK")
+            logger.info("Health check: OK")
             return
         assert False, "Health check: Failed"
 
@@ -174,15 +177,15 @@ class UpgradeTest:
 
     # Upgrade the cluster to the given version
     def upgrade_to(self, version):
-        print("Upgrading to version {}".format(version))
+        logger.info("Upgrading to version {}".format(version))
         self.cluster.stop_cluster()
         self.configure_version(version)
         self.cluster.ensure_ports_released()
         self.cluster.start_cluster()
-        print("Upgraded to {}".format(version))
+        logger.info("Upgraded to {}".format(version))
 
     def __enter__(self):
-        print("Starting cluster version {}".format(self.cluster_version))
+        logger.info("Starting cluster version {}".format(self.cluster_version))
         self.cluster.start_cluster()
         self.cluster.create_database(
             enable_tenants=(self.api_version >= TENANT_API_VERSION)
@@ -243,7 +246,7 @@ class UpgradeTest:
                     "--blob-granule-local-file-path",
                     str(self.cluster.data.joinpath("fdbblob")) + "/",
                 ]
-            print(
+            logger.info(
                 "Executing test command: {}".format(
                     " ".join([str(c) for c in cmd_args])
                 )
@@ -256,15 +259,17 @@ class UpgradeTest:
             self.tester_proc = None
 
             if self.tester_retcode != 0:
-                print("Tester failed with return code {}".format(self.tester_retcode))
+                logger.error(
+                    "Tester failed with return code {}".format(self.tester_retcode)
+                )
         except Exception:
-            print("Execution of test workload failed")
-            print(traceback.format_exc())
+            logger.error("Execution of test workload failed")
+            logger.error(traceback.format_exc())
         finally:
             # If the tester failed to initialize, other threads of the test may stay
             # blocked on trying to open the named pipes
             if self.ctrl_pipe is None or self.output_pipe is None:
-                print(
+                logger.error(
                     "Tester failed before initializing named pipes. Aborting the test"
                 )
                 os._exit(1)
@@ -275,32 +280,35 @@ class UpgradeTest:
         os.write(self.ctrl_pipe, b"CHECK\n")
         self.progress_event.wait(None if RUN_WITH_GDB else PROGRESS_CHECK_TIMEOUT_SEC)
         if self.progress_event.is_set():
-            print("Progress check: OK")
+            logger.info("Progress check: OK")
         else:
-            assert False, "Progress check failed after upgrade to version {}".format(
-                self.cluster_version
+            logger.error(
+                "Progress check failed after upgrade to version {}".format(
+                    self.cluster_version
+                )
             )
+            os._exit(1)
 
     # The main function of a thread for reading and processing
     # the notifications received from the tester
     def output_pipe_reader(self):
         try:
-            print("Opening pipe {} for reading".format(self.output_pipe_path))
+            logger.info("Opening pipe {} for reading".format(self.output_pipe_path))
             self.output_pipe = open(self.output_pipe_path, "r")
             for line in self.output_pipe:
                 msg = line.strip()
-                print("Received {}".format(msg))
+                logger.info("Received {}".format(msg))
                 if msg == "CHECK_OK":
                     self.progress_event.set()
             self.output_pipe.close()
         except Exception as e:
-            print("Error while reading output pipe", e)
-            print(traceback.format_exc())
+            logger.error("Error while reading output pipe: {}".format(e))
+            logger.error(traceback.format_exc())
 
     # Execute the upgrade test workflow according to the specified
     # upgrade path: perform the upgrade steps and check success after each step
     def exec_upgrade_test(self):
-        print("Opening pipe {} for writing".format(self.input_pipe_path))
+        logger.info("Opening pipe {} for writing".format(self.input_pipe_path))
         self.ctrl_pipe = os.open(self.input_pipe_path, os.O_WRONLY)
         try:
             self.health_check()
@@ -328,11 +336,11 @@ class UpgradeTest:
             try:
                 if dump_stacks:
                     os.system("pstack {}".format(self.tester_proc.pid))
-                print("Killing the tester process")
+                logger.info("Killing the tester process")
                 self.tester_proc.kill()
                 workload_thread.join(5)
             except Exception:
-                print("Failed to kill the tester process")
+                logger.error("Failed to kill the tester process")
 
     # The main method implementing the test:
     # - Start a thread for generating the workload using a tester binary
@@ -351,8 +359,8 @@ class UpgradeTest:
             self.exec_upgrade_test()
             test_retcode = 0
         except Exception:
-            print("Upgrade test failed")
-            print(traceback.format_exc())
+            logger.error("Upgrade test failed")
+            logger.error(traceback.format_exc())
             self.kill_tester_if_alive(workload_thread, False)
         finally:
             workload_thread.join(5)
@@ -384,26 +392,26 @@ class UpgradeTest:
         )
 
         if len(sev30s) == 0:
-            print("No warnings found in logs")
+            logger.info("No warnings found in logs")
         else:
-            print(
+            logger.warning(
                 ">>>>>>>>>>>>>>>>>>>> Found {} severity 30 events (warnings):".format(
                     len(sev30s)
                 )
             )
             for line in sev30s[:limit]:
-                print(line)
+                logger.warning(line)
 
     # Dump the last cluster configuration and cluster logs
     def dump_cluster_logs(self):
         for etc_file in glob.glob(os.path.join(self.cluster.etc, "*")):
-            print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
+            logger.info(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(etc_file))
             with open(etc_file, "r") as f:
-                print(f.read())
+                logger.info(f.read())
         for log_file in glob.glob(os.path.join(self.cluster.log, "*")):
-            print(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
+            logger.info(">>>>>>>>>>>>>>>>>>>> Contents of {}:".format(log_file))
             with open(log_file, "r") as f:
-                print(f.read())
+                logger.info(f.read())
 
 
 if __name__ == "__main__":
@@ -466,10 +474,19 @@ if __name__ == "__main__":
     parser.add_argument(
         "--run-with-gdb", help="Execute the tester binary from gdb", action="store_true"
     )
+    parser.add_argument(
+        "--logging-level",
+        type=str,
+        default="INFO",
+        choices=["ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Specifies the level of detail in the tester output (default='INFO').",
+    )
     args = parser.parse_args()
+    initialize_logger_level(args.logging_level)
+
     if args.process_number == 0:
         args.process_number = random.randint(1, 5)
-        print("Testing with {} processes".format(args.process_number))
+        logger.info("Testing with {} processes".format(args.process_number))
 
     assert len(args.upgrade_path) > 0, "Upgrade path must be specified"
 
@@ -478,10 +495,10 @@ if __name__ == "__main__":
 
     errcode = 1
     with UpgradeTest(args) as test:
-        print("log-dir: {}".format(test.log))
-        print("etc-dir: {}".format(test.etc))
-        print("data-dir: {}".format(test.data))
-        print("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
+        logger.info("log-dir: {}".format(test.log))
+        logger.info("etc-dir: {}".format(test.etc))
+        logger.info("data-dir: {}".format(test.data))
+        logger.info("cluster-file: {}".format(test.etc.joinpath("fdb.cluster")))
         errcode = test.exec_test(args)
         if not test.cluster.check_cluster_logs():
             errcode = 1 if errcode == 0 else errcode

@@ -71,13 +71,13 @@ private:
 			double now = std::chrono::duration_cast<std::chrono::duration<double>>(
 			                 std::chrono::system_clock::now().time_since_epoch())
 			                 .count();
-			info(fmt::format("{0}) {1}: [{2} - {3}) {4}: {5}",
-			                 now,
-			                 opName,
-			                 fdb::toCharsRef(keyRange.beginKey),
-			                 fdb::toCharsRef(keyRange.endKey),
-			                 debugTenantStr(tenantId),
-			                 message));
+			info("{0}) {1}: [{2} - {3}) {4}: {5}",
+			     now,
+			     opName,
+			     fdb::toCharsRef(keyRange.beginKey),
+			     fdb::toCharsRef(keyRange.endKey),
+			     debugTenantStr(tenantId),
+			     message);
 		}
 	}
 
@@ -119,30 +119,29 @@ private:
 				    std::vector<fdb::KeyValue> expected =
 				        stores[tenantId].getRange(keyRange.beginKey, keyRange.endKey, stores[tenantId].size(), false);
 				    if (results->size() != expected.size()) {
-					    error(fmt::format("randomReadOp result size mismatch. expected: {0} actual: {1}",
-					                      expected.size(),
-					                      results->size()));
+					    error("randomReadOp result size mismatch. expected: {0} actual: {1}",
+					          expected.size(),
+					          results->size());
 				    }
 				    ASSERT(results->size() == expected.size());
 
 				    for (int i = 0; i < results->size(); i++) {
 					    if ((*results)[i].key != expected[i].key) {
-						    error(fmt::format("randomReadOp key mismatch at {0}/{1}. expected: {2} actual: {3}",
-						                      i,
-						                      results->size(),
-						                      fdb::toCharsRef(expected[i].key),
-						                      fdb::toCharsRef((*results)[i].key)));
+						    error("randomReadOp key mismatch at {0}/{1}. expected: {2} actual: {3}",
+						          i,
+						          results->size(),
+						          fdb::toCharsRef(expected[i].key),
+						          fdb::toCharsRef((*results)[i].key));
 					    }
 					    ASSERT((*results)[i].key == expected[i].key);
 
 					    if ((*results)[i].value != expected[i].value) {
-						    error(fmt::format(
-						        "randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
-						        i,
-						        results->size(),
-						        fdb::toCharsRef(expected[i].key),
-						        fdb::toCharsRef(expected[i].value),
-						        fdb::toCharsRef((*results)[i].value)));
+						    error("randomReadOp value mismatch at {}/{}. key: {} expected: {:.80} actual: {:.80}",
+						          i,
+						          results->size(),
+						          fdb::toCharsRef(expected[i].key),
+						          fdb::toCharsRef(expected[i].value),
+						          fdb::toCharsRef((*results)[i].value));
 					    }
 					    ASSERT((*results)[i].value == expected[i].value);
 				    }
@@ -222,28 +221,28 @@ private:
 
 	void validateRanges(std::shared_ptr<std::vector<fdb::KeyRange>> results, fdb::KeyRange keyRange) {
 		if (results->size() == 0) {
-			error(fmt::format("ValidateRanges: [{0} - {1}): No ranges returned!",
-			                  fdb::toCharsRef(keyRange.beginKey),
-			                  fdb::toCharsRef(keyRange.endKey)));
+			error("ValidateRanges: [{0} - {1}): No ranges returned!",
+			      fdb::toCharsRef(keyRange.beginKey),
+			      fdb::toCharsRef(keyRange.endKey));
 		}
 		ASSERT(results->size() > 0);
 		if (results->front().beginKey > keyRange.beginKey || results->back().endKey < keyRange.endKey) {
-			error(fmt::format("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
-			                  fdb::toCharsRef(keyRange.beginKey),
-			                  fdb::toCharsRef(keyRange.endKey),
-			                  fdb::toCharsRef(results->front().beginKey),
-			                  fdb::toCharsRef(results->back().endKey)));
+			error("ValidateRanges: [{0} - {1}): Incomplete range(s) returned [{2} - {3})!",
+			      fdb::toCharsRef(keyRange.beginKey),
+			      fdb::toCharsRef(keyRange.endKey),
+			      fdb::toCharsRef(results->front().beginKey),
+			      fdb::toCharsRef(results->back().endKey));
 		}
 		ASSERT(results->front().beginKey <= keyRange.beginKey);
 		ASSERT(results->back().endKey >= keyRange.endKey);
 		for (int i = 0; i < results->size(); i++) {
 			// no empty or inverted ranges
 			if ((*results)[i].beginKey >= (*results)[i].endKey) {
-				error(fmt::format("ValidateRanges: [{0} - {1}): Empty/inverted range [{2} - {3})",
-				                  fdb::toCharsRef(keyRange.beginKey),
-				                  fdb::toCharsRef(keyRange.endKey),
-				                  fdb::toCharsRef((*results)[i].beginKey),
-				                  fdb::toCharsRef((*results)[i].endKey)));
+				error("ValidateRanges: [{0} - {1}): Empty/inverted range [{2} - {3})",
+				      fdb::toCharsRef(keyRange.beginKey),
+				      fdb::toCharsRef(keyRange.endKey),
+				      fdb::toCharsRef((*results)[i].beginKey),
+				      fdb::toCharsRef((*results)[i].endKey));
 			}
 			ASSERT((*results)[i].beginKey < (*results)[i].endKey);
 		}
@@ -251,11 +250,11 @@ private:
 		for (int i = 1; i < results->size(); i++) {
 			// ranges contain entire requested key range
 			if ((*results)[i].beginKey != (*results)[i - 1].endKey) {
-				error(fmt::format("ValidateRanges: [{0} - {1}): Non-covered range [{2} - {3})",
-				                  fdb::toCharsRef(keyRange.beginKey),
-				                  fdb::toCharsRef(keyRange.endKey),
-				                  fdb::toCharsRef((*results)[i - 1].endKey),
-				                  fdb::toCharsRef((*results)[i].endKey)));
+				error("ValidateRanges: [{0} - {1}): Non-covered range [{2} - {3})",
+				      fdb::toCharsRef(keyRange.beginKey),
+				      fdb::toCharsRef(keyRange.endKey),
+				      fdb::toCharsRef((*results)[i - 1].endKey),
+				      fdb::toCharsRef((*results)[i].endKey));
 			}
 			ASSERT((*results)[i].beginKey == (*results)[i - 1].endKey);
 		}
@@ -477,7 +476,7 @@ private:
 		// validate snapshot file
 		ASSERT(desc->snapshotFile());
 		if (BG_API_DEBUG_VERBOSE) {
-			info(fmt::format("Loading snapshot file {0}\n", fdb::toCharsRef(desc->snapshotFile()->filename())));
+			info("Loading snapshot file {0}", fdb::toCharsRef(desc->snapshotFile()->filename()));
 		}
 		validateSnapshotData(ctx, bgCtx, desc->snapshotFile(), desc->keyRange(), &desc->tenant_prefix, prevFileVersion);
 
