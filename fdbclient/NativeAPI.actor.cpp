@@ -7131,14 +7131,18 @@ void Transaction::setOption(FDBTransactionOptions::Option option, Optional<Strin
 		trState->options.readTags.addTag(value.get());
 		break;
 
-	case FDBTransactionOptions::SPAN_PARENT:
+	case FDBTransactionOptions::TRACE_PARENT: {
 		validateOptionValuePresent(value);
-		if (value.get().size() != 33) {
+		Optional<SpanContext> parent = SpanContext::fromString(value.get().toString());
+		if (!parent.present()) {
 			throw invalid_option_value();
 		}
-		CODE_PROBE(true, "Adding link in FDBTransactionOptions::SPAN_PARENT");
-		span.setParent(BinaryReader::fromStringRef<SpanContext>(value.get(), IncludeVersion()));
+		CODE_PROBE(true, "Adding link in FDBTransactionOptions::TRACE_PARENT");
+		span.setParent(parent.get());
+		trState->spanContext = span.context;
+		tr.spanContext = span.context;
 		break;
+	}
 
 	case FDBTransactionOptions::REPORT_CONFLICTING_KEYS:
 		validateOptionValueNotPresent(value);

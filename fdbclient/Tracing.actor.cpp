@@ -347,6 +347,30 @@ void openTracer(TracerType type) {
 
 ITracer::~ITracer() {}
 
+std::string SpanContext::toString() const {
+	return format("00-%016llx%016llx-%016llx-%02x", traceID.first(), traceID.second(), spanID, m_Flags);
+}
+
+Optional<SpanContext> SpanContext::fromString(const std::string& s) {
+	if (s.size() != 2 + 1 + 32 + 1 + 16 + 1 + 2) {
+		return Optional<SpanContext>();
+	}
+	uint64_t traceID0 = 0, traceID1 = 0;
+	uint64_t spanID = 0;
+	TraceFlags flags = TraceFlags::unsampled;
+	int r = sscanf(
+	    s.c_str(), "00-%16" SCNx64 "%16" SCNx64 "-%16" SCNx64 "-%2" SCNx8, &traceID0, &traceID1, &spanID, &flags);
+	if (r != 4) {
+		return Optional<SpanContext>();
+	}
+	UID traceID = UID(traceID0, traceID1);
+	if (traceID == UID(0, 0) || spanID == 0) {
+		// both traceID and spanID have to be non-zero according to the spec
+		return Optional<SpanContext>();
+	}
+	return SpanContext(traceID, spanID, flags);
+}
+
 Span& Span::operator=(Span&& o) {
 	if (begin > 0.0 && context.isSampled()) {
 		end = g_network->now();
@@ -381,6 +405,30 @@ Span::~Span() {
 		g_tracer->trace(*this);
 	}
 }
+
+TEST_CASE("/flow/Tracing/SpanContext/StringRoundtrip") {
+	TraceFlags flags = static_cast<TraceFlags>(deterministicRandom()->randomInt(0, 2));
+	SpanContext expectedContext(deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), flags);
+	SpanContext parsedContext = SpanContext::fromString(expectedContext.toString()).get();
+	ASSERT_EQ(expectedContext.traceID, parsedContext.traceID);
+	ASSERT_EQ(expectedContext.spanID, parsedContext.spanID);
+	ASSERT_EQ(expectedContext.m_Flags, parsedContext.m_Flags);
+
+	return Void();
+};
+
+TEST_CASE("/flow/Tracing/SpanContext/StringParseError") {
+	ASSERT(SpanContext::fromString("00-00000000000000000000000000000001-0000000000000001-01").present());
+	ASSERT(
+	    !SpanContext::fromString("01-00000000000000000000000000000001-0000000000000001-01").present()); // wrong version
+	ASSERT(!SpanContext::fromString("00-00000000000000000000000000000000-0000000000000000-00").present()); // all zeros
+	ASSERT(!SpanContext::fromString("").present()); // empty string
+	ASSERT(!SpanContext::fromString("00-000000000-00000-00").present()); // too short
+	ASSERT(
+	    !SpanContext::fromString("00-0000000000000000000000000000000g-000000000000000g-00").present()); // non-hex chars
+
+	return Void();
+};
 
 TEST_CASE("/flow/Tracing/CreateOTELSpan") {
 	// Sampling disabled, no parent.

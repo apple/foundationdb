@@ -185,6 +185,9 @@ protected:
 	int minTxTimeoutMs;
 	int maxTxTimeoutMs;
 
+	// Whether to enable distributed tracing for transactions.
+	bool enableTransactionTracing;
+
 	// Workload identifier, consisting of workload name and client ID
 	std::string workloadId;
 

@@ -28,6 +28,7 @@
 #include "fdbrpc/TenantInfo.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Tracing.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -155,10 +156,12 @@ struct CycleWorkload : TestWorkload, CycleMembers<MultiTenancy> {
 				state int r = deterministicRandom()->randomInt(0, self->nodeCount);
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() <= self->traceParentProbability) {
-					state Span span("CycleClient"_loc);
+					state Span span(SpanContext(deterministicRandom()->randomUniqueID(),
+					                            deterministicRandom()->randomUInt64(),
+					                            TraceFlags::sampled),
+					                "CycleClient"_loc);
 					TraceEvent("CycleTracingTransaction", span.context.traceID).log();
-					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, IncludeVersion()));
+					tr.setOption(FDBTransactionOptions::TRACE_PARENT, span.context.toString());
 				}
 				while (true) {
 					try {

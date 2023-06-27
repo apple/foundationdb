@@ -124,6 +124,7 @@ logdir = {logdir}
 {custom_config}
 {use_future_protocol_version}
 knob_min_trace_severity=5
+tracer = log_file
 # logsize = 10MiB
 # maxlogssize = 100MiB
 # machine-id =
