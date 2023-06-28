@@ -22,7 +22,7 @@ logger = get_logger()
 TENANT_API_VERSION = 720
 
 CLUSTER_ACTIONS = ["wiggle"]
-HEALTH_CHECK_TIMEOUT_SEC = 5
+HEALTH_CHECK_TIMEOUT_SEC = 60
 PROGRESS_CHECK_TIMEOUT_SEC = 30
 TESTER_STATS_INTERVAL_SEC = 5
 TRANSACTION_RETRY_LIMIT = 100
@@ -127,17 +127,18 @@ class UpgradeTest:
     # server processes and their versions are as expected
     def health_check(self, timeout_sec=HEALTH_CHECK_TIMEOUT_SEC):
         retries = 0
+        status = ""
         while retries < timeout_sec:
             retries += 1
             status = self.cluster.get_status()
             if "processes" not in status["cluster"]:
-                logger.info("Health check: no processes found. Retrying")
+                logger.info("Health check: no processes found. Waiting...")
                 time.sleep(1)
                 continue
             num_proc = len(status["cluster"]["processes"])
             if num_proc != self.cluster.process_number:
                 logger.info(
-                    "Health check: {} of {} processes found. Retrying".format(
+                    "Health check: {} of {} processes found. Waiting...".format(
                         num_proc, self.cluster.process_number
                     )
                 )
@@ -153,8 +154,26 @@ class UpgradeTest:
                 ), "Process version: expected: {}, actual: {}".format(
                     expected_version, proc_ver
                 )
+            if not status["client"]["database_status"]["healthy"]:
+                logger.info("Health check: Database not healthy yet. Waiting...")
+                time.sleep(1)
+                continue
+            dd_state = status["cluster"]["data"]["state"]["name"]
+            if dd_state != "healthy":
+                logger.info(
+                    "Health check: Data distribution in state {}. Waiting...".format(
+                        dd_state
+                    )
+                )
+                time.sleep(1)
+                continue
+            if not status["cluster"]["bounce_impact"]["can_clean_bounce"]:
+                logger.info("Health check: Cluster still recovering. Waiting...")
+                time.sleep(1)
+                continue
             logger.info("Health check: OK")
             return
+        print(str(status))
         assert False, "Health check: Failed"
 
     # Create and save a cluster configuration for the given version
