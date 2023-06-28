@@ -159,6 +159,21 @@ private:
 		if (tenantMode != TenantMode::REQUIRED) {
 			return Void();
 		}
+		CODE_PROBE(true, "Data or standalone cluster with tenant_mode=required");
+		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
+				wait(
+				    store(tenantMapEntries,
+				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT_EQ(tenantMapEntries.results.size(), self->tenantData.tenantMap.size());
+				break;
+			} catch (Error& error) {
+				wait(safeThreadFutureToFuture(tr->onError(error)));
+			}
+		}
 		return Void();
 	}
 
@@ -170,6 +185,24 @@ private:
 		    });
 		TenantMode tenantMode = wait(tenantModeFuture);
 		ASSERT(g_network->isSimulated() || tenantMode == TenantMode::DISABLED);
+		if (tenantMode != TenantMode::REQUIRED) {
+			return Void();
+		}
+		CODE_PROBE(true, "Management cluster with tenant_mode=required");
+		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
+				wait(
+				    store(tenantMapEntries,
+				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
+				ASSERT_EQ(tenantMapEntries.results.size(), 0);
+				break;
+			} catch (Error& error) {
+				wait(safeThreadFutureToFuture(tr->onError(error)));
+			}
+		}
 		return Void();
 	}
 
