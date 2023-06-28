@@ -461,6 +461,25 @@ struct SwitchTenantMovementImpl {
 		return Void();
 	}
 
+	ACTOR static Future<RangeReadResult> readTenantData(Reference<ITransaction> tr,
+	                                                    KeyRef begin,
+	                                                    KeyRef end,
+	                                                    int64_t limit) {
+		state ThreadFuture<RangeReadResult> resultFuture;
+		state RangeReadResult result;
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
+				resultFuture = tr->getRange(KeyRangeRef(begin, end), limit);
+				wait(store(result, safeThreadFutureToFuture(resultFuture)));
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
+		return result;
+	}
+
 	ACTOR static Future<Void> checkTenantData(SwitchTenantMovementImpl* self, TenantName tName) {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 		state Reference<ITenant> dstTenant = self->dstCtx.dataClusterDb->openTenant(tName);
@@ -470,17 +489,11 @@ struct SwitchTenantMovementImpl {
 		state KeyRef end = "\xff"_sr;
 		// what should limit be?
 		state int64_t limit = 100000;
-		state ThreadFuture<RangeReadResult> srcFuture;
-		state ThreadFuture<RangeReadResult> dstFuture;
 		state RangeReadResult srcRange;
 		state RangeReadResult dstRange;
 		loop {
-			srcTr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
-			dstTr->setOption(FDBTransactionOptions::Option::LOCK_AWARE);
-			srcFuture = srcTr->getRange(KeyRangeRef(begin, end), limit);
-			dstFuture = dstTr->getRange(KeyRangeRef(begin, end), limit);
-			wait(store(srcRange, safeThreadFutureToFuture(srcFuture)) &&
-			     store(dstRange, safeThreadFutureToFuture(dstFuture)));
+			wait(store(srcRange, readTenantData(srcTr, begin, end, limit)) &&
+			     store(dstRange, readTenantData(dstTr, begin, end, limit)));
 			if (srcRange != dstRange) {
 				TraceEvent("TenantMoveSwitchDataMismatch")
 				    .detail("TenantName", tName)
@@ -617,17 +630,23 @@ struct SwitchTenantMovementImpl {
 
 	ACTOR static Future<Void> run(SwitchTenantMovementImpl* self) {
 		wait(self->dstCtx.initializeContext());
+
+		TraceEvent("BreakpointSwitch1");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return checkMoveRecord(self, tr); }));
 
+		TraceEvent("BreakpointSwitch2");
 		wait(checkAllTenantData(self));
 
+		TraceEvent("BreakpointSwitch3");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return applyHybridRanges(self, tr); }));
 
+		TraceEvent("BreakpointSwitch4");
 		wait(self->srcCtx.runManagementTransaction(
 		    [self = self](Reference<typename DB::TransactionT> tr) { return switchMetadataToDestination(self, tr); }));
 
+		TraceEvent("BreakpointSwitch5");
 		return Void();
 	}
 
