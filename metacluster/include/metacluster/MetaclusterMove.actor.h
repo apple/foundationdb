@@ -250,14 +250,13 @@ struct StartTenantMovementImpl {
 	                                                                                  TenantName tenantName) {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
 		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
-		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
 		// chunkSize = 100MB
 		state int64_t chunkSize = 100000000;
 		state Standalone<VectorRef<KeyRef>> splitPoints;
 		loop {
 			try {
 				state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture =
-				    srcTr->getRangeSplitPoints(allKeys, chunkSize);
+				    srcTr->getRangeSplitPoints(normalKeys, chunkSize);
 				wait(store(splitPoints, safeThreadFutureToFuture(resultFuture)));
 				break;
 			} catch (Error& e) {
@@ -814,18 +813,13 @@ struct FinishTenantMovementImpl {
 		state TenantName tName = tenantName;
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
-		state KeyRangeRef clearKeys(""_sr, "\xff"_sr);
 		try {
 			srcTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			// srcTr->clear(normalKeys);
-			srcTr->clear(clearKeys);
-			TraceEvent("BreakpointD1");
+			srcTr->clear(normalKeys);
 			wait(safeThreadFutureToFuture(srcTr->commit()));
-			TraceEvent("BreakpointD2");
 		} catch (Error& e) {
 			wait(safeThreadFutureToFuture(srcTr->onError(e)));
 		}
-		TraceEvent("BreakpointD3");
 
 		// state Reference<ITenant> srcTenant2 = self->srcCtx.dataClusterDb->openTenant(tName);
 		// state Reference<ITransaction> srcTr2 = srcTenant->createTransaction();
