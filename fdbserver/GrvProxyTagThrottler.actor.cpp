@@ -499,9 +499,9 @@ TEST_CASE("/GrvProxyTagThrottler/Fifo") {
 // Tests that while throughput is low, the tag throttler
 // does not accumulate too much budget.
 //
-// A server is setup to server 10 transactions per second,
+// A server is setup to server 100 transactions per second,
 // then runs idly for 60 seconds. Then a client starts
-// and attempts 20 transactions per second for 60 seconds.
+// and attempts 200 transactions per second for 60 seconds.
 // The server throttles the client to only achieve
 // 10 transactions per second during this 60 second window.
 // If the throttler is allowed to accumulate budget indefinitely
@@ -512,16 +512,16 @@ TEST_CASE("/GrvProxyTagThrottler/LimitedIdleBudget") {
 	state TransactionTagMap<uint32_t> counters;
 	{
 		ThrottlingIdMap<double> rates;
-		rates[ThrottlingIdRef::fromTag("sampleTag"_sr)] = 10.0;
+		rates[ThrottlingIdRef::fromTag("sampleTag"_sr)] = 100.0;
 		throttler.updateRates(rates);
 	}
 	tagSet.addTag("sampleTag"_sr);
 
 	state Future<Void> server = mockServer(&throttler);
 	wait(delay(60.0));
-	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 20.0, &counters);
+	state Future<Void> client = mockClient(&throttler, TransactionPriority::DEFAULT, tagSet, 1, 200.0, &counters);
 	wait(timeout(client && server, 60.0, Void()));
 	TraceEvent("TagQuotaTest_LimitedIdleBudget").detail("Counter", counters["sampleTag"_sr]);
-	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 10.0));
+	ASSERT(isNear(counters["sampleTag"_sr], 60.0 * 100.0));
 	return Void();
 }
