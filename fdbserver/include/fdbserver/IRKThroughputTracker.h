@@ -17,21 +17,21 @@ public:
 	virtual double getThroughput(ThrottlingId const&) const = 0;
 };
 
-enum class OpType {
-	READ,
-	WRITE,
-};
-
 // The ServerThroughputTracker class is responsible for tracking
 // every throttlingId's reported throughput across all storage servers
 class ServerThroughputTracker : public IRKThroughputTracker {
+	enum class OpType {
+		READ,
+		WRITE,
+	};
+
 	class ThroughputCounters {
 		Smoother readThroughput;
 		Smoother writeThroughput;
 
 	public:
 		ThroughputCounters();
-		void updateThroughput(double newThroughput, OpType opType);
+		void updateThroughput(double newThroughput, OpType);
 		double getThroughput() const;
 	};
 

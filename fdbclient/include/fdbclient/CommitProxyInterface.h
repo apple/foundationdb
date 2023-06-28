@@ -750,20 +750,6 @@ struct GlobalConfigRefreshRequest {
 	}
 };
 
-struct ReportThroughputRequest {
-	constexpr static FileIdentifier file_identifier = 8192740;
-	ThrottlingIdMap<uint64_t> throughput;
-	ReplyPromise<Void> reply;
-
-	ReportThroughputRequest() = default;
-	explicit ReportThroughputRequest(ThrottlingIdMap<uint64_t>&& throughput) : throughput(std::move(throughput)) {}
-
-	template <class Ar>
-	void serialize(Ar& ar) {
-		serializer(ar, throughput, reply);
-	}
-};
-
 // Instantiated in CommitProxyInterface.cpp
 extern template class GetEncryptCipherKeys<ClientDBInfo>;
 

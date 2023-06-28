@@ -7339,7 +7339,6 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 }
 
 Optional<ThrottlingId> TransactionState::getThrottlingId() {
-	Optional<TenantGroupName> tenantGroup;
 	if (tenant().present() && tenant().get()->tenantGroup().present()) {
 		return ThrottlingIdRef::fromTenantGroup(tenant().get()->tenantGroup().get());
 	} else if (options.throttlingTag.present()) {

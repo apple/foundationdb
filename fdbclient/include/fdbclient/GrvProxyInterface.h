@@ -21,9 +21,25 @@
 #ifndef FDBCLIENT_GRVPROXYINTERFACE_H
 #define FDBCLIENT_GRVPROXYINTERFACE_H
 #pragma once
+
+#include "fdbclient/ThrottlingId.h"
 #include "flow/FileIdentifier.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
+
+struct ReportThroughputRequest {
+	constexpr static FileIdentifier file_identifier = 8192740;
+	ThrottlingIdMap<uint64_t> throughput;
+	ReplyPromise<Void> reply;
+
+	ReportThroughputRequest() = default;
+	explicit ReportThroughputRequest(ThrottlingIdMap<uint64_t>&& throughput) : throughput(std::move(throughput)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, throughput, reply);
+	}
+};
 
 // GrvProxy is proxy primarily specializing on serving GetReadVersion. It also
 // serves health metrics since it communicates with RateKeeper to gather health
