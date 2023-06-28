@@ -40,14 +40,13 @@ class ThrottlingCounterImpl {
 		    topKReaders;
 		for (auto const& [readerId, cost] : intervalCosts) {
 			auto const rate = cost / elapsed;
-			auto const fractionalBusyness = std::min(1.0, cost / intervalTotalCost);
 			if (rate < minRateTracked) {
 				continue;
 			} else if (topKReaders.size() < maxReadersTracked) {
-				topKReaders.emplace(readerId, rate, fractionalBusyness);
+				topKReaders.emplace(readerId, rate);
 			} else if (topKReaders.top().rate < rate) {
 				topKReaders.pop();
-				topKReaders.emplace(readerId, rate, fractionalBusyness);
+				topKReaders.emplace(readerId, rate);
 			}
 		}
 		std::vector<BusyThrottlingIdInfo> result;
@@ -95,15 +94,13 @@ public:
 				}
 				TraceEvent("BusiestReader", thisServerID)
 				    .detail("ThrottlingId", busiestReader.throttlingId)
-				    .detail("Cost", busiestReader.rate)
-				    .detail("FractionalBusyness", busiestReader.fractionalBusyness);
+				    .detail("Cost", busiestReader.rate);
 			}
 
 			for (const auto& busyReader : previousBusiestReaders) {
 				TraceEvent("BusyReader", thisServerID)
 				    .detail("ThrottlingId", busyReader.throttlingId)
-				    .detail("Cost", busyReader.rate)
-				    .detail("FractionalBusyness", busyReader.fractionalBusyness);
+				    .detail("Cost", busyReader.rate);
 			}
 		}
 

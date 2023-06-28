@@ -486,12 +486,10 @@ public:
 	StorageQueueInfo getStorageQueueInfo() const {
 		StorageQueueInfo result(id, LocalityData({}, Value(id.toString()), {}, {}));
 		for (const auto& [throttlingId, readCost] : readCosts) {
-			double fractionalBusyness{ 0.0 }; // unused for quota throttling
-			result.busiestReaders.emplace_back(throttlingId, readCost.smoothRate(), fractionalBusyness);
+			result.busiestReaders.emplace_back(throttlingId, readCost.smoothRate());
 		}
 		for (const auto& [throttlingId, writeCost] : writeCosts) {
-			double fractionalBusyness{ 0.0 }; // unused for quota throttling
-			result.busiestWriters.emplace_back(throttlingId, writeCost.smoothRate(), fractionalBusyness);
+			result.busiestWriters.emplace_back(throttlingId, writeCost.smoothRate());
 		}
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *

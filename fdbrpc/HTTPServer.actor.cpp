@@ -21,6 +21,7 @@
 #include "fdbrpc/HTTP.h"
 #include "flow/IRandom.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "fdbrpc/simulator.h"
 #include "fdbrpc/SimulatorProcessInfo.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
