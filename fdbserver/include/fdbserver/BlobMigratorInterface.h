@@ -36,7 +36,7 @@ struct BlobMigratorInterface {
 	StorageServerInterface ssi;
 
 	BlobMigratorInterface() {}
-	BlobMigratorInterface(const struct LocalityData& l, UID id) : uniqueID(id), locality(l) {
+	BlobMigratorInterface(const struct LocalityData& l, UID id) : locality(l), uniqueID(id) {
 		ssi.locality = l;
 		// The second 8 bytes of all blob migration interface id is fixed
 		ASSERT(id.second() == file_identifier);

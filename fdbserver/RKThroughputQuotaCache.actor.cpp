@@ -22,7 +22,7 @@ public:
 					state KeyBackedRangeResult<std::pair<TenantGroupName, ThrottleApi::ThroughputQuotaValue>>
 					    tenantGroupQuotas = wait(TenantMetadata::throughputQuota().getRange(
 					        tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
-					TraceEvent("GlobalTagThrottler_ReadCurrentQuotas", self->id)
+					TraceEvent("RKThroughputQuotaCache_ReadCurrentQuotas", self->id)
 					    .detail("TagQuotasSize", tagQuotas.size())
 					    .detail("TenantGroupQuotasSize", tenantGroupQuotas.results.size());
 					self->quotas.clear();
@@ -32,14 +32,12 @@ public:
 						    ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(kv.value));
 					}
 					for (auto const& [groupName, quota] : tenantGroupQuotas.results) {
-						// For now tenant group quotas override tag quotas.
-						// TODO: In the future, these two types of quotas should not conflict.
 						self->quotas[ThrottlingId::fromTenantGroup(groupName)] = quota;
 					}
 					wait(delay(5.0));
 					break;
 				} catch (Error& e) {
-					TraceEvent("GlobalTagThrottler_MonitoringChangesError", self->id).error(e);
+					TraceEvent("RKThroughputQuotaCacheError", self->id).error(e);
 					wait(tr->onError(e));
 				}
 			}

@@ -40,14 +40,13 @@ class ThrottlingCounterImpl {
 		    topKReaders;
 		for (auto const& [readerId, cost] : intervalCosts) {
 			auto const rate = cost / elapsed;
-			auto const fractionalBusyness = std::min(1.0, cost / intervalTotalCost);
 			if (rate < minRateTracked) {
 				continue;
 			} else if (topKReaders.size() < maxReadersTracked) {
-				topKReaders.emplace(readerId, rate, fractionalBusyness);
+				topKReaders.emplace(readerId, rate);
 			} else if (topKReaders.top().rate < rate) {
 				topKReaders.pop();
-				topKReaders.emplace(readerId, rate, fractionalBusyness);
+				topKReaders.emplace(readerId, rate);
 			}
 		}
 		std::vector<BusyThrottlingIdInfo> result;
@@ -63,18 +62,16 @@ public:
 	  : thisServerID(thisServerID), maxReadersTracked(maxReadersTracked), minRateTracked(minRateTracked),
 	    busiestReaderEventHolder(makeReference<EventCacheHolder>(thisServerID.toString() + "/BusiestReader")) {}
 
-	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
+	// Tenant groups take priority over tags if both are available
+	void addRequest(Optional<TransactionTag> const& tag, Optional<TenantGroupName> const& tenantGroup, int64_t bytes) {
 		auto const cost = getReadOperationCost(bytes);
 		intervalTotalCost += cost;
-		if (tags.present()) {
-			for (auto const& tag : tags.get()) {
-				CODE_PROBE(true, "Tracking transaction tag in ThrottlingCounter");
-				intervalCosts[ThrottlingIdRef::fromTag(tag)] += cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
-			}
-		}
 		if (tenantGroup.present()) {
 			CODE_PROBE(true, "Tracking tenant group in ThrottlingCounter");
 			intervalCosts[ThrottlingIdRef::fromTenantGroup(tenantGroup.get())] += cost;
+		} else if (tag.present()) {
+			CODE_PROBE(true, "Tracking transaction tag in ThrottlingCounter");
+			intervalCosts[ThrottlingIdRef::fromTag(tag.get())] += cost / CLIENT_KNOBS->READ_TAG_SAMPLE_RATE;
 		}
 	}
 
@@ -97,15 +94,13 @@ public:
 				}
 				TraceEvent("BusiestReader", thisServerID)
 				    .detail("ThrottlingId", busiestReader.throttlingId)
-				    .detail("Cost", busiestReader.rate)
-				    .detail("FractionalBusyness", busiestReader.fractionalBusyness);
+				    .detail("Cost", busiestReader.rate);
 			}
 
 			for (const auto& busyReader : previousBusiestReaders) {
 				TraceEvent("BusyReader", thisServerID)
 				    .detail("ThrottlingId", busyReader.throttlingId)
-				    .detail("Cost", busyReader.rate)
-				    .detail("FractionalBusyness", busyReader.fractionalBusyness);
+				    .detail("Cost", busyReader.rate);
 			}
 		}
 
@@ -122,10 +117,10 @@ ThrottlingCounter::ThrottlingCounter(UID thisServerID, int maxReadersTracked, do
 
 ThrottlingCounter::~ThrottlingCounter() = default;
 
-void ThrottlingCounter::addRequest(Optional<TagSet> const& tags,
+void ThrottlingCounter::addRequest(Optional<TransactionTag> const& tag,
                                    Optional<TenantGroupName> const& tenantGroup,
                                    int64_t bytes) {
-	return impl->addRequest(tags, tenantGroup, bytes);
+	return impl->addRequest(tag, tenantGroup, bytes);
 }
 
 void ThrottlingCounter::startNewInterval() {

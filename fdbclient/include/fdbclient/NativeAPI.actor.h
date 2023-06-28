@@ -168,8 +168,7 @@ struct TransactionOptions {
 
 	TransactionPriority priority;
 
-	TagSet tags; // All tags set on transaction
-	TagSet readTags; // Tags that can be sent with read requests
+	Optional<TransactionTag> throttlingTag;
 
 	// update clear function if you add a new field
 
@@ -551,7 +550,7 @@ public:
 
 	Reference<TransactionState> trState;
 	std::vector<Reference<Watch>> watches;
-	TagSet const& getTags() const;
+	Optional<TransactionTag> const& getTag() const&;
 	Span span;
 
 	// used in template functions as returned Future type

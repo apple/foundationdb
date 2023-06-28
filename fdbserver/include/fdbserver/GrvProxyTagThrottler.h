@@ -21,7 +21,7 @@
 #pragma once
 
 #include "fdbclient/CommitProxyInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbserver/GrvTransactionRateInfo.h"
 #include "fdbserver/LatencyBandsMap.h"
 
@@ -44,7 +44,7 @@ class GrvProxyTagThrottler {
 		uint64_t sequenceNumber;
 
 		explicit DelayedRequest(GetReadVersionRequest const& req)
-		  : req(req), startTime(now()), sequenceNumber(++lastSequenceNumber) {}
+		  : startTime(now()), req(req), sequenceNumber(++lastSequenceNumber) {}
 
 		void updateProxyTagThrottledDuration(LatencyBandsMap&);
 		bool isMaxThrottled(double maxThrottleDuration) const;

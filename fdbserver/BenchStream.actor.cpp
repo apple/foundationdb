@@ -42,7 +42,8 @@ ACTOR static Future<Void> benchStreamActor(benchmark::State* benchState) {
 			stream.send(key);
 		}
 		for (i = 0; i < items; ++i) {
-			Key receivedKey = waitNext(stream.getFuture());
+			Key _receivedKey = waitNext(stream.getFuture());
+			Key& receivedKey = const_cast<Key&>(_receivedKey);
 			benchmark::DoNotOptimize(receivedKey);
 		}
 	}

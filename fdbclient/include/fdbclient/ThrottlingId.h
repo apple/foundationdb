@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/TenantName.h"
 #include "flow/Arena.h"
 

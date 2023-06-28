@@ -78,21 +78,11 @@ struct GetRateInfoReply {
 	double batchTransactionRate;
 	double leaseDuration;
 	HealthMetrics healthMetrics;
-
-	// Depending on the value of SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES,
-	// one of these fields may be populated
-	Optional<PrioritizedThrottlingIdMap<ClientTagThrottleLimits>> clientThrottledTags;
 	Optional<ThrottlingIdMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar,
-		           transactionRate,
-		           batchTransactionRate,
-		           leaseDuration,
-		           healthMetrics,
-		           clientThrottledTags,
-		           proxyThrottledTags);
+		serializer(ar, transactionRate, batchTransactionRate, leaseDuration, healthMetrics, proxyThrottledTags);
 	}
 };
 

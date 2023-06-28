@@ -233,8 +233,8 @@ public:
 	                         int64_t epoch,
 	                         int64_t seqNo,
 	                         Optional<BlobGranuleCipherKeysCtx> cipherKeysCtx)
-	  : segmentNo_(1), blobConn_(blobConn), epoch_(epoch), seqNo_(seqNo), closed_(false), totalRows_(0),
-	    logicalSize_(0), totalBytes_(0), cipherKeysCtx_(cipherKeysCtx) {}
+	  : blobConn_(blobConn), epoch_(epoch), seqNo_(seqNo), segmentNo_(1), totalRows_(0), logicalSize_(0),
+	    totalBytes_(0), closed_(false), cipherKeysCtx_(cipherKeysCtx) {}
 
 	// Append a new row to the splitter
 	void append(KeyValueRef row) {
