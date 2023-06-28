@@ -648,9 +648,6 @@ public:
 	template <class VarTraits>
 	Error getNothrow(typename VarTraits::Type& var) const noexcept {
 		assert(valid());
-		if (auto err = error()) {
-			return err;
-		}
 		return VarTraits::extract(f.get(), var);
 	}
 
