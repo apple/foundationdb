@@ -51,24 +51,37 @@ double ServerThroughputTracker::ThroughputCounters::getThroughput() const {
 
 ServerThroughputTracker::~ServerThroughputTracker() = default;
 
-void ServerThroughputTracker::update(StorageQueueInfo const& ss) {
-	auto& throttlingIdToThroughputCounters = throughput[ss.id];
-	std::unordered_set<ThrottlingId, HashThrottlingId> busyReaders, busyWriters;
-	for (const auto& busyReader : ss.busiestReaders) {
-		busyReaders.insert(busyReader.throttlingId);
-		throttlingIdToThroughputCounters[busyReader.throttlingId].updateThroughput(busyReader.rate, OpType::READ);
-	}
-	for (const auto& busyWriter : ss.busiestWriters) {
-		busyWriters.insert(busyWriter.throttlingId);
-		throttlingIdToThroughputCounters[busyWriter.throttlingId].updateThroughput(busyWriter.rate, OpType::WRITE);
-	}
-
-	for (auto& [throttlingId, throughputCounters] : throttlingIdToThroughputCounters) {
-		if (!busyReaders.count(throttlingId)) {
-			throughputCounters.updateThroughput(0.0, OpType::READ);
+void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) {
+	std::unordered_set<UID> seenStorageServerIds;
+	for (auto it = sqInfos.begin(); it != sqInfos.end(); ++it) {
+		auto const& ss = it->value;
+		seenStorageServerIds.insert(ss.id);
+		std::unordered_set<ThrottlingId> seenReadThrottlingIds, seenWriteThrottlingIds;
+		auto& throttlingIdToThroughputCounters = throughput[ss.id];
+		for (const auto& busyReader : ss.busiestReaders) {
+			seenReadThrottlingIds.insert(busyReader.throttlingId);
+			throttlingIdToThroughputCounters[busyReader.throttlingId].updateThroughput(busyReader.rate, OpType::READ);
 		}
-		if (!busyWriters.count(throttlingId)) {
-			throughputCounters.updateThroughput(0.0, OpType::WRITE);
+		for (const auto& busyWriter : ss.busiestWriters) {
+			seenWriteThrottlingIds.insert(busyWriter.throttlingId);
+			throttlingIdToThroughputCounters[busyWriter.throttlingId].updateThroughput(busyWriter.rate, OpType::WRITE);
+		}
+
+		for (auto& [throttlingId, throughputCounters] : throttlingIdToThroughputCounters) {
+			if (!seenReadThrottlingIds.count(throttlingId)) {
+				throughputCounters.updateThroughput(0, OpType::READ);
+			}
+			if (!seenWriteThrottlingIds.count(throttlingId)) {
+				throughputCounters.updateThroughput(0, OpType::WRITE);
+			}
+		}
+	}
+	for (auto& [ssId, throttlingIdToThroughputCounters] : throughput) {
+		if (!seenStorageServerIds.count(ssId)) {
+			for (auto& [_, throughputCounters] : throttlingIdToThroughputCounters) {
+				throughputCounters.updateThroughput(0, OpType::READ);
+				throughputCounters.updateThroughput(0, OpType::WRITE);
+			}
 		}
 	}
 }
