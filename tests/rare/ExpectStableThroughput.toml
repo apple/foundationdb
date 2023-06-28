@@ -10,10 +10,13 @@ testTitle='ExpectStableThroughput'
   testName='ThroughputQuota'
   nameRepresentsTenantGroup=false
   name='testTag'
-  totalQuotaInPages=100
+  totalQuotaInPages=1000
 
   [[test.workload]]
   testName='ExpectStableThroughput'
   throttlingTag='testTag'
-  expectedThroughputPagesRate=100
+  expectedThroughputPagesRate=1000
   errorTolerance=0.3
+  numActors=100
+  attemptedTransactionRatePerActor=4
+  opsPerTransaction=5
