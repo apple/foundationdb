@@ -42,10 +42,11 @@
 //      known).
 //
 // Total: Refers to the total quota specified by clients through the quota throttling API. The sum of the
-//        costs of all operations (cluster-wide) with a particular throttling ID cannot exceed the throttling ID's specified
-//        total quota, even if the cluster has no saturated processes.
+//        costs of all operations (cluster-wide) with a particular throttling ID cannot exceed the throttling ID's
+//        specified total quota, even if the cluster has no saturated processes.
 //
-// Desired TPS: Assuming that a throttling ID is able to achieve its total quota, this is the TPS it would be able to perform.
+// Desired TPS: Assuming that a throttling ID is able to achieve its total quota, this is the TPS it would be able to
+// perform.
 //
 // Reserved: Refers to the reserved quota specified by clients through the quota throttling API. As long as the
 //           sum of the costs of all operations (cluster-wide) with a particular throttling ID is not above the
