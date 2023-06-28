@@ -351,7 +351,8 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLockWhenPrepareBlobRestore(Transaction* tr, std::shared_ptr<MoveKeysLock> lock) {
+ACTOR static Future<Void> checkPersistentMoveKeysLockWhenPrepareBlobRestore(Transaction* tr,
+                                                                            std::shared_ptr<MoveKeysLock> lock) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));

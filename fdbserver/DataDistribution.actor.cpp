@@ -98,6 +98,7 @@ struct DDAudit {
 	int64_t overallIssuedDoAuditCount;
 	int64_t overallCompleteDoAuditCount;
 	AsyncVar<int> remainingBudgetForAuditTasks;
+	Promise<Void> errorOut;
 
 	inline void setAuditRunActor(Future<Void> actor) { auditActor = actor; }
 	inline Future<Void> getAuditRunActor() { return auditActor; }
@@ -1911,8 +1912,10 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("Range", audit->coreState.range)
 		    .detail("RetryCount", currentRetryCount)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
+		audit->errorOut.send(Void());
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled) {
+			audit->errorOut.send(Void());
 			throw e;
 		}
 		TraceEvent(SevDebug, "DDAuditStorageCoreError", self->ddId)
@@ -1924,10 +1927,12 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 		    .detail("Range", audit->coreState.range)
 		    .detail("IsReady", self->auditInitialized.getFuture().isReady());
 		if (e.code() == error_code_movekeys_conflict) {
-			throw e; // throw to DD and DD will restart
+			audit->errorOut.sendError(e); // throw to DD and DD will restart
 		} else if (e.code() == error_code_audit_storage_cancelled) {
+			audit->errorOut.send(Void());
 			// do nothing, silently quit
 		} else if (audit->retryCount < SERVER_KNOBS->AUDIT_RETRY_COUNT_MAX && e.code() != error_code_not_implemented) {
+			audit->errorOut.send(Void());
 			audit->retryCount++;
 			audit->actors.clear(true);
 			TraceEvent(SevVerbose, "DDAuditStorageCoreRetry", self->ddId)
@@ -1946,6 +1951,7 @@ ACTOR Future<Void> auditStorageCore(Reference<DataDistributor> self,
 			                        audit->coreState.id); // remove audit
 			runAuditStorage(self, audit->coreState, audit->retryCount, "auditStorageCoreRetry");
 		} else {
+			audit->errorOut.send(Void());
 			try {
 				audit->coreState.setPhase(AuditPhase::Failed);
 				wait(persistAuditState(self->txnProcessor->context(),
@@ -2017,6 +2023,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("Context", context);
 	addAuditToAuditMap(self, audit);
+	self->addActor.send(audit->errorOut.getFuture());
 	audit->setAuditRunActor(
 	    auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), context, audit->retryCount));
 	return;
