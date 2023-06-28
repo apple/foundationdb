@@ -1,6 +1,3 @@
-[[knobs]]
-enable_configurable_encryption = true
-
 [[test]]
 testTitle = 'BlobCipherUnitTest'
 useDB = false
