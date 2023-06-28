@@ -6,6 +6,17 @@
 
 #include "flow/actorcompiler.h" // This must be the last include
 
+// This workload is meant to be run with the ThroughputQuotaWorklaod.
+// The ThroughputQuotaWorkload sets a total quota, and then this workload runs
+// with tagged transactions for a long duration, attempting to achieve a higher
+// throughput than the specified quota. The check phase of this workload then
+// verifies that the achieved throughput is near the total quota.
+//
+// TODO:
+//   - Test write workloads
+//   - Randomize the number of operations per transaction
+//   - Test multi-page operations
+//   - Test using tenant groups rather than tags
 class ExpectStableThroughputWorkload : public TestWorkload {
 	// Metrics:
 	uint64_t totalCost{ 0 };
@@ -50,7 +61,7 @@ class ExpectStableThroughputWorkload : public TestWorkload {
 				return Void();
 			} catch (Error& e) {
 				self->finishTransaction(tr);
-				if (e.code() == error_code_proxy_tag_throttled) {
+				if (e.code() == error_code_proxy_tag_throttled && now() > self->startTime + self->warmupTime) {
 					++self->tagThrottledErrors;
 				}
 				wait(tr.onError(e));
