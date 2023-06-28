@@ -1,0 +1,692 @@
+Cached signature mismatch for lastBuilt:packages/bin/fdbserver:10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, running command
+++ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && ps -U jfu -u jfu u --no-headers'
+Cached signature match for buildDirVersion.10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, skipping command
+Cached signature match for lastDevFetch, skipping command
+Cached signature mismatch for lastDevCheckUpdate, running command
+++ cd /Users/jfu/fdb_snowflake
+++ git rev-list origin/main -1 HEAD fdbdev
++ cd /Users/jfu/fdb_snowflake
++ git merge-base --is-ancestor 811950fcb7a8245cc9b778c6c22ec4afc6783283 HEAD
+Cached signature updated for lastDevCheckUpdate to 56266363
+WARNING: UNTRACKED FILE WILL NOT BE SYNC'd: val.txt
+WARNING: UNTRACKED FILE WILL NOT BE SYNC'd: val2.txt
+Cached signature mismatch for sourceSync.10.174.224.254:/mnt/ephemeral/jfu/frostdb, running command
++ cd /Users/jfu/frostdb
++ git ls-files
++ cd /Users/jfu/frostdb
++ git ls-tree --full-tree -r --name-only HEAD
++ rsync --compress --progress -e 'ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '\''-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p'\'' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022' -iar --no-o --no-g --delete --ignore-missing-args --delete-missing-args --delete-excluded --include-from=- '--exclude=*' /Users/jfu/frostdb/ 10.174.224.254:/mnt/ephemeral/jfu/frostdb/
++ echo -e '/.git/\n/.git/objects/\n/.git/HEAD\n/.git/refs/\n/.git/refs/**\n/.git/packed-refs'
+sending incremental file list
+.d..t....... ./
+<f.st....... fdbclient/MultiVersionTransaction.actor.cpp
+            700   0%    0.00kB/s    0:00:00          152,130 100%   24.07MB/s    0:00:00 (xfr#1, ir-chk=1048/2494)
+Cached signature updated for sourceSync.10.174.224.254:/mnt/ephemeral/jfu/frostdb to 3c9c2dac7b82811ec879c52e3f4b05cf
+Cached signature match for cmake.10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, skipping command
++ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && docker run --init --name fdbdev-$(id -un)-29296 -v /mnt/ephemeral/jfu:/mnt/ephemeral/jfu -w /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 --cap-add=SYS_PTRACE --privileged --rm --security-opt seccomp=unconfined -e CCACHE_DIR -e CCACHE_BASEDIR -e CCACHE_MAXSIZE -e CCACHE_UMASK -e LD_LIBRARY_PATH=/usr/local/lib -e LD_LIBRARY_PATH=/usr/local/lib/x86_64-unknown-linux-gnu -i -u $(id -u):$(id -g) -v $HOME:$HOME -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro -v /mnt/ephemeral/ccache:/mnt/ephemeral/ccache -v /mnt/ephemeral/joshua:/mnt/ephemeral/joshua -v /mnt/ephemeral/oldbinaries:/app/deploy/global_data/oldBinaries/ 937559181915.dkr.ecr.us-west-2.amazonaws.com/frostdb/devel:centos7-latest-amd64 scl enable devtoolset-11 rh-python38 rh-ruby27 -- bash -i -c '\''ninja -C /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 packages/bin/fdbserver'\'''
+bash: no job control in this shell
+ninja: Entering directory `/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64'
+[0/2] Re-checking globbed directories...
+[1/5] Compile actor: MultiVersionTransaction.actor.cpp
+[2/5] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/MultiVersionTransaction.actor.g.cpp.o
+[3/5] Linking CXX static library lib/libfdbclient.a
+[4/5] Linking CXX executable bin/fdbserver
+[5/5] Stripping symbols from fdbserver
+Cached signature updated for lastBuilt:packages/bin/fdbserver:10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 to ab1aa514ca5e68c6eed0e636095421a4
++ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 -t 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && docker run --init -it --name fdbdev-$(id -un)-14798 -v /mnt/ephemeral/jfu:/mnt/ephemeral/jfu -w /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 --cap-add=SYS_PTRACE --privileged --rm --security-opt seccomp=unconfined -e CCACHE_DIR -e CCACHE_BASEDIR -e CCACHE_MAXSIZE -e CCACHE_UMASK -e LD_LIBRARY_PATH=/usr/local/lib -e LD_LIBRARY_PATH=/usr/local/lib/x86_64-unknown-linux-gnu -i -u $(id -u):$(id -g) -v $HOME:$HOME -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro -v /mnt/ephemeral/ccache:/mnt/ephemeral/ccache -v /mnt/ephemeral/joshua:/mnt/ephemeral/joshua -v /mnt/ephemeral/oldbinaries:/app/deploy/global_data/oldBinaries/ 937559181915.dkr.ecr.us-west-2.amazonaws.com/frostdb/devel:centos7-latest-amd64 scl enable devtoolset-11 rh-python38 rh-ruby27 -- bash -i -c '\''mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec && cd /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec && rm -rf trace.* bin packages tests && ln -s /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/bin bin && ln -s /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/packages packages && ln -s /mnt/ephemeral/jfu/frostdb/tests tests && valgrind bin/fdbserver -r simulation -f tests/slow/MetaclusterMove.toml -s 2234738715 -b off --crash --trace_format json'\'''
+==46== Memcheck, a memory error detector
+==46== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
+==46== Using Valgrind-3.17.0 and LibVEX; rerun with -h for copyright info
+==46== Command: bin/fdbserver -r simulation -f tests/slow/MetaclusterMove.toml -s 2234738715 -b off --crash --trace_format json
+==46== 
+Random seed is 2234738715...
+DeterministicRandom successfully bound to OpenSSL RNG
+Datacenter 0: 3/12 machines, 1/1 coordinators
+sim http machines = 2
+Datacenter 1: 3/12 machines, 0/1 coordinators
+sim http machines = 3
+Datacenter 2: 3/12 machines, 0/1 coordinators
+sim http machines = 1
+Datacenter 3: 3/12 machines, 0/1 coordinators
+sim http machines = 1
+Process 2.1.1.3 run http server
+SimHTTPServer protecting 2.1.1.3:2
+FDBD joined cluster.
+Process 2.3.1.3 run http server
+Process 2.2.1.3 run http server
+Process 2.1.1.4 run http server
+Process 2.2.1.3 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+Process 2.1.1.3 run http server
+Process 2.0.1.5 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+Process 2.0.1.4 run http server
+Process 2.0.1.5 run http server
+Process 2.1.1.4 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+Process 2.1.1.5 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+Process 2.0.1.4 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+Process 2.1.1.5 run http server
+FDBD joined cluster.
+Process 2.3.1.3 run http server
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+FDBD joined cluster.
+startingConfiguration:new backup_worker_enabled:=0 blob_granules_enabled:=0 commit_proxies:=3 encryption_at_rest_mode=domain_aware grv_proxies:=1 log_engine=ssd-2 log_spill:=2 log_version:=6 logs:=3 perpetual_storage_wiggle:=0 proxies:=4 triple regions=[{"datacenters":[{"id":"0","priority":2},{"id":"2","priority":1,"satellite":1,"satellite_logs":6}],"satellite_logs":4,"satellite_redundancy_mode":"one_satellite_single"}] remote_single resolvers:=1 storage_engine=ssd-redwood-1 storage_migration_type=disabled tenant_mode=required_experimental usable_regions:=1 start
+useDB: true
+Simulated Cluster Topology:
+===========================
+    zoneId: 1b291be58a67b9e362e9c53642f0d355
+      machineId: 1b291be58a67b9e362e9c53642f0d355
+        Address: 3.4.3.5:1
+          Class: test
+          Name: Server
+    zoneId: 542b3e2f86fa35918ceb9934f40ea006
+      machineId: c58fcfa811ce29b0338ea57ed1132211
+        Address: 1.1.1.1:1
+          Class: test
+          Name: TestSystem
+    zoneId: a3f1b40e4e8da3a089fdd8cda6e315a1
+      machineId: a3f1b40e4e8da3a089fdd8cda6e315a1
+        Address: 3.4.3.2:1
+          Class: test
+          Name: Server
+    zoneId: ba772a346396e43d8e9ea34c5996b157
+      machineId: ba772a346396e43d8e9ea34c5996b157
+        Address: 3.4.3.4:1
+          Class: test
+          Name: Server
+    zoneId: d7a84ad17ff4413d4382a70c20554e32
+      machineId: d7a84ad17ff4413d4382a70c20554e32
+        Address: 3.4.3.1:1
+          Class: test
+          Name: Server
+    zoneId: eadf1b6bc4af1c8173a996c86ede3740
+      machineId: eadf1b6bc4af1c8173a996c86ede3740
+        Address: 3.4.3.3:1
+          Class: test
+          Name: Server
+dcId: 0
+  dataHallId: 0
+    zoneId: 2119b5ef1fa3d9434f41049194b95bac
+      machineId: beb199ad075bf09dcd980c942aba3173
+        Address: 2.0.1.0:1
+          Class: unset
+          Name: Server
+        Address: 2.0.1.0:2
+          Class: unset
+          Name: Server
+    zoneId: 246db32045ce3ad2ed348b9b9dd54a0b
+      machineId: 887a111b6e0e9edd4dca8c2d59249e5b
+        Address: 6.0.1.2:1
+          Class: unset
+          Name: Server
+      machineId: 948bed685acdbcc960fa285b0686cbd4
+        Address: 4.0.1.2:1
+          Class: unset
+          Name: Server
+      machineId: f9eac67c8d0ae51ab28fd09ccc827bed
+        Address: 5.0.1.2:1
+          Class: unset
+          Name: Server
+    zoneId: 3ac7595b1b4fb015ac33c013417f62f1
+      machineId: b6a43a0d2d3b7af1241746c689fd1baf
+        Address: 5.0.1.5:1
+          Class: sim_http_server
+          Name: Server
+      machineId: cae6af30e0c995682a23fe5c15da8809
+        Address: 4.0.1.5:1
+          Class: sim_http_server
+          Name: Server
+      machineId: f859917d5d1d24340e822589c0d2d5c8
+        Address: 6.0.1.5:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 565ce8980e4b0710148db6cd9f994d09
+      machineId: ab9d91e274b9c36c712793a2a0e72c80
+        Address: 2.0.1.1:2
+          Class: unset
+          Name: Server
+        Address: 2.0.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: 5e0483f9331f2948b087d2d91cdb39f4
+      machineId: 3ae91195388090cdbb453206f39c6044
+        Address: 2.0.1.4:1
+          Class: sim_http_server
+          Name: Server
+        Address: 2.0.1.4:2
+          Class: sim_http_server
+          Name: Server
+    zoneId: 6124ff70c21989e0f5f93c6bae52d632
+      machineId: 36a43cc809ae0f069cee96068b204879
+        Address: 2.0.1.5:2
+          Class: sim_http_server
+          Name: Server
+        Address: 2.0.1.5:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 61cfef2d46aafd113840e355da4dcb11
+      machineId: c149e64eb096bb919c880efeb3ac2abe
+        Address: 2.0.1.3:1
+          Class: storage_cache
+          Name: Server
+        Address: 2.0.1.3:2
+          Class: storage_cache
+          Name: Server
+    zoneId: 7cfa7d06d0a153bb04730b8e41049741
+      machineId: 9b4a0ba6617c5534f88b6043d0d72df8
+        Address: 5.0.1.1:1
+          Class: unset
+          Name: Server
+      machineId: d22afa288978ed32e08825c32feb4ebb
+        Address: 6.0.1.1:1
+          Class: unset
+          Name: Server
+      machineId: ebe0c800bba3c76f996b763beda3b2a2
+        Address: 4.0.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: ad618195d152eb2e55687bde11fe71bd
+      machineId: 117bc303e692aa04fb55b435fdc7e756
+        Address: 2.0.1.2:1
+          Class: unset
+          Name: Server
+        Address: 2.0.1.2:2
+          Class: unset
+          Name: Server
+    zoneId: bb852de643f943106ce3cf2a94593084
+      machineId: 45d39f4cfab67e9ad04bf13d49d64ea9
+        Address: 6.0.1.3:1
+          Class: storage_cache
+          Name: Server
+      machineId: e4659ccd01c541ff0ca4c9cf11877e39
+        Address: 4.0.1.3:1
+          Class: storage_cache
+          Name: Server
+      machineId: f2959c6c19eb7b3a74be4e37cb25fb20
+        Address: 5.0.1.3:1
+          Class: storage_cache
+          Name: Server
+    zoneId: d5be469a7266464a3a5c59b52563b255
+      machineId: 76cabfd32794277e2fbe521e0bcce0a3
+        Address: 5.0.1.0:1
+          Class: unset
+          Name: Server
+      machineId: aece59ebb680e5a828e841d16ff94213
+        Address: 6.0.1.0:1
+          Class: unset
+          Name: Server
+      machineId: dff18b8bc1b34ed7cdc17bf504ff42f0
+        Address: 4.0.1.0:1
+          Class: unset
+          Name: Server
+    zoneId: d62f0591419ba5ad2a5c45426e7fc6e6
+      machineId: 24839832417572adcb965f274a467e82
+        Address: 6.0.1.4:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 5ac9007563c6c348dcd93923d04137bb
+        Address: 4.0.1.4:1
+          Class: sim_http_server
+          Name: Server
+      machineId: ad24ad186bd52dd6339048208de841c1
+        Address: 5.0.1.4:1
+          Class: sim_http_server
+          Name: Server
+dcId: 1
+  dataHallId: 1
+    zoneId: 66e461cfab9de6c1de6123e238923535
+      machineId: 4108edaaefec65ab12b877a96f073077
+        Address: 2.1.1.5:2
+          Class: sim_http_server
+          Name: Server
+        Address: 2.1.1.5:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 6a00c29bb75ec0053030d640b08eb2e6
+      machineId: 2d3874fb0e983a3ce460b6cbca78e3f2
+        Address: 4.1.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: d306f37ae29915772e22de0fd2595b45
+        Address: 5.1.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: fede51e38285dba1a91762778e330449
+        Address: 6.1.1.3:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 71a3c7d949ee1e8f697b1ae09a96e148
+      machineId: cd3ed3a2a59ae03d4eabc9da47e25e17
+        Address: 2.1.1.4:2
+          Class: sim_http_server
+          Name: Server
+        Address: 2.1.1.4:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 7967e6d1bb151a4aa56ae47b0f3524d1
+      machineId: 4fae0f1509c0d8689c8f7d10b641cda2
+        Address: 2.1.1.1:2
+          Class: unset
+          Name: Server
+        Address: 2.1.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: 79736ea1218fdf59f51ec20fc416a262
+      machineId: 3bf7117e0b20ad7866692fcd9609bc99
+        Address: 2.1.1.3:1
+          Class: sim_http_server
+          Name: Server
+        Address: 2.1.1.3:2
+          Class: sim_http_server
+          Name: Server
+    zoneId: 8976e1d41b61755d9d5c190f31afd817
+      machineId: 19c1a95b6547a064fdf017b44104ba59
+        Address: 2.1.1.0:1
+          Class: unset
+          Name: Server
+        Address: 2.1.1.0:2
+          Class: unset
+          Name: Server
+    zoneId: 9ff478b1c241b6ed8cd53c2914af6c18
+      machineId: 0947be370e33bc1519e7ffe613a7065b
+        Address: 4.1.1.5:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 633c16ee59a6cc2bdb15482405af9a0c
+        Address: 5.1.1.5:1
+          Class: sim_http_server
+          Name: Server
+      machineId: e2b23fdd818f75813d23476370d1ed67
+        Address: 6.1.1.5:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: a30a90f66e766a18ada7283c4da41eae
+      machineId: bc30c97b4774311a680049f950df1bed
+        Address: 2.1.1.2:2
+          Class: unset
+          Name: Server
+        Address: 2.1.1.2:1
+          Class: unset
+          Name: Server
+    zoneId: a6f6c5ed08bb542f5a80e8234f58e862
+      machineId: 0cf879f0cfa1c5770df3d2fbd6344104
+        Address: 6.1.1.2:1
+          Class: unset
+          Name: Server
+      machineId: 2b0ca8b475df5349ce81b0909174e945
+        Address: 5.1.1.2:1
+          Class: unset
+          Name: Server
+      machineId: 5f3ab93397fbe1155a5fcd06a53fd2e3
+        Address: 4.1.1.2:1
+          Class: unset
+          Name: Server
+    zoneId: abb632119cd0148f8978ba15a1d52fb4
+      machineId: 34aeaefadc057177d0614fcf9f292d84
+        Address: 4.1.1.4:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 86c5be57f86670e8723339f500d1c5f5
+        Address: 6.1.1.4:1
+          Class: sim_http_server
+          Name: Server
+      machineId: f77e012fa71401f4e341cc27de30540d
+        Address: 5.1.1.4:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: d49cd6391ce23cc3b319cd9e9c96c771
+      machineId: 7703dd52c00894a3a986474e42f4a5f4
+        Address: 5.1.1.0:1
+          Class: unset
+          Name: Server
+      machineId: 9c3fa19ba4bd293524d48ed922f3f3af
+        Address: 4.1.1.0:1
+          Class: unset
+          Name: Server
+      machineId: ba53ffe7993153a215d5aa8cae19a65c
+        Address: 6.1.1.0:1
+          Class: unset
+          Name: Server
+    zoneId: d5edc0c55b1d84c92a2c8099411b5ad2
+      machineId: 77cc8acf049edb7bc380804d943799c3
+        Address: 5.1.1.1:1
+          Class: unset
+          Name: Server
+      machineId: 9d706c58e57c2c990d43e74e188d71db
+        Address: 6.1.1.1:1
+          Class: unset
+          Name: Server
+      machineId: f1eebe5a1fa6bf4e5f502e6fe6840232
+        Address: 4.1.1.1:1
+          Class: unset
+          Name: Server
+dcId: 2
+  dataHallId: 2
+    zoneId: 0335747fc1f4c86307e22b32cf47561a
+      machineId: a3d3d0961a02177571f46a4ed88c42eb
+        Address: 2.2.1.2:1
+          Class: unset
+          Name: Server
+        Address: 2.2.1.2:2
+          Class: unset
+          Name: Server
+    zoneId: 0e5c02907a469949f09bb8d22ac0ee9e
+      machineId: e34b96e6ad9e051c7854bec53095b19b
+        Address: 2.2.1.0:1
+          Class: unset
+          Name: Server
+        Address: 2.2.1.0:2
+          Class: unset
+          Name: Server
+    zoneId: 1e6fb414c3ffc0aeef9a015aae14cd3f
+      machineId: a23a879ad84c37fdd7d19c85d9691990
+        Address: 4.2.1.2:1
+          Class: unset
+          Name: Server
+      machineId: e15d37b6210ab7533bf9fe28b513a058
+        Address: 6.2.1.2:1
+          Class: unset
+          Name: Server
+      machineId: eca25133aa009993670de2465860d34a
+        Address: 5.2.1.2:1
+          Class: unset
+          Name: Server
+    zoneId: 1e8d347309c128a3a1632293490e0f54
+      machineId: efbc0dad33bf9e1772e88399ea579a02
+        Address: 2.2.1.3:2
+          Class: sim_http_server
+          Name: Server
+        Address: 2.2.1.3:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 82e8e0da41c540f7067a3bac5e4cc3f3
+      machineId: 0d8516de040f0ed1c63a585ca90e68ab
+        Address: 4.2.1.0:1
+          Class: unset
+          Name: Server
+      machineId: bdc0f4b43af3c7145fbcef6f84e430c2
+        Address: 6.2.1.0:1
+          Class: unset
+          Name: Server
+      machineId: ff48e518877a97a78840cc35c851b80e
+        Address: 5.2.1.0:1
+          Class: unset
+          Name: Server
+    zoneId: d3abe1be54861ea173807ea17eaad21f
+      machineId: 8872e483e4e55f4a38fabae2bdbd28f4
+        Address: 2.2.1.1:2
+          Class: unset
+          Name: Server
+        Address: 2.2.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: ec8262584264f7b5deeeb44dc001c807
+      machineId: 1a8176c2250f2a2cfa17fafea5a6cc52
+        Address: 5.2.1.1:1
+          Class: unset
+          Name: Server
+      machineId: 3a5a16e6b1656cb6114eb3a671c719a5
+        Address: 6.2.1.1:1
+          Class: unset
+          Name: Server
+      machineId: 8056163d60593d85f2017f374463faf3
+        Address: 4.2.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: ed9c1fb92b5b4e1f31c4537f86609b7a
+      machineId: 398bb638ff417e08100d0f21d2d662a0
+        Address: 4.2.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 64c28aa1a666b82fd5b684321e000212
+        Address: 5.2.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 81580f32c72c273e3f9535307b3ab7cd
+        Address: 6.2.1.3:1
+          Class: sim_http_server
+          Name: Server
+dcId: 3
+  dataHallId: 3
+    zoneId: 362dca92eb9dff5ff092108cd0af5006
+      machineId: 6b61303d1edd9e4a28a2429be77eb6b3
+        Address: 2.3.1.2:1
+          Class: unset
+          Name: Server
+        Address: 2.3.1.2:2
+          Class: unset
+          Name: Server
+    zoneId: 39818c46ae9a9218ca3184f1358aaea4
+      machineId: 81a6f858b2b95fe1e896475265b38932
+        Address: 2.3.1.1:1
+          Class: unset
+          Name: Server
+        Address: 2.3.1.1:2
+          Class: unset
+          Name: Server
+    zoneId: 51f7fffea6d92c03a5c530e435a93b51
+      machineId: 12dafe800ab1c1e5777e928521dfaed9
+        Address: 6.3.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 8097f3d36b0a7d35afb7890bf252490a
+        Address: 4.3.1.3:1
+          Class: sim_http_server
+          Name: Server
+      machineId: 98b230db7649ff25550c91c2ec7b9bed
+        Address: 5.3.1.3:1
+          Class: sim_http_server
+          Name: Server
+    zoneId: 52b39c95d8d5473c38d6b56a901177f9
+      machineId: 75d4598a4ae1811df2d6379d428dbbdf
+        Address: 5.3.1.2:1
+          Class: unset
+          Name: Server
+      machineId: c57868de21f929ec10084e27a1138a1d
+        Address: 6.3.1.2:1
+          Class: unset
+          Name: Server
+      machineId: e9f57dcaf6bd7c264ec4be4f96c3c9ec
+        Address: 4.3.1.2:1
+          Class: unset
+          Name: Server
+    zoneId: a97c5c32d17ddc74de42f3019cd4db13
+      machineId: 0aa5dd439cf57b485055c2d984638c86
+        Address: 2.3.1.3:1
+          Class: sim_http_server
+          Name: Server
+        Address: 2.3.1.3:2
+          Class: sim_http_server
+          Name: Server
+    zoneId: bddbbf0627497e3af60e2de75a1f8a38
+      machineId: 0aa1b9405b906584267b263141b94fd0
+        Address: 5.3.1.0:1
+          Class: unset
+          Name: Server
+      machineId: 77acb30a95ac5d6019e153a9f8348624
+        Address: 6.3.1.0:1
+          Class: unset
+          Name: Server
+      machineId: e95a9812bf00af6c8c630c8e3a4fe173
+        Address: 4.3.1.0:1
+          Class: unset
+          Name: Server
+    zoneId: c0b1a55eda19593f38748f1113de2cca
+      machineId: 0efe1b273d47c50710d70741582bdb76
+        Address: 6.3.1.1:1
+          Class: unset
+          Name: Server
+      machineId: 67736836e128331c22556d6477716d93
+        Address: 5.3.1.1:1
+          Class: unset
+          Name: Server
+      machineId: b31c7ca495bf781061513fc2e164efb6
+        Address: 4.3.1.1:1
+          Class: unset
+          Name: Server
+    zoneId: d457b4aff035a7cca60a2d4c25a0acfa
+      machineId: 3f2f9ec8e4871ecb3e7967ec896cce58
+        Address: 2.3.1.0:1
+          Class: unset
+          Name: Server
+        Address: 2.3.1.0:2
+          Class: unset
+          Name: Server
+setting up test (ChangeConfig)...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+running test (ChangeConfig)...
+ChangeConfig complete
+ChangeConfig complete
+ChangeConfig complete
+ChangeConfig complete
+ChangeConfig complete
+ChangeConfig complete
+checking test (ChangeConfig)...
+fetching metrics (ChangeConfig)...
+Set perpetual_storage_wiggle=0 ...
+Set perpetual_storage_wiggle=0 Done.
+Run test:MetaclusterMoveTest start
+setting up test (MetaclusterMoveTest)...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+running test (MetaclusterMoveTest)...
+MetaclusterMove complete
+MetaclusterMove complete
+MetaclusterMove complete
+MetaclusterMove complete
+MetaclusterMove complete
+MetaclusterMoveTest complete
+checking test (MetaclusterMoveTest)...
+fetching metrics (MetaclusterMoveTest)...
+setting up test (ConsistencyCheck)...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Test received trigger for setup...
+Set perpetual_storage_wiggle=0 ...
+Set perpetual_storage_wiggle=0 Done.
+running test (ConsistencyCheck)...
+ConsistencyCheck complete
+ConsistencyCheck complete
+ConsistencyCheck complete
+ConsistencyCheck complete
+ConsistencyCheck complete
+ConsistencyCheck complete
+checking test (ConsistencyCheck)...
+fetching metrics (ConsistencyCheck)...
+5 test clients passed; 0 test clients failed
+Run test:MetaclusterMoveTest Done.
+
+1 tests passed; 0 tests failed.
+Waiting for DD to end...
+Set perpetual_storage_wiggle=0 ...
+Set perpetual_storage_wiggle=0 Done.
+
+Unseed: 12239
+Elapsed: 155.641949 simsec, 320.645750 real seconds
+==46== 
+==46== HEAP SUMMARY:
+==46==     in use at exit: 395,780,397 bytes in 559,475 blocks
+==46==   total heap usage: 39,124,265 allocs, 38,564,790 frees, 6,646,262,546 bytes allocated
+==46== 
+==46== LEAK SUMMARY:
+==46==    definitely lost: 196,073 bytes in 1,535 blocks
+==46==    indirectly lost: 0 bytes in 0 blocks
+==46==      possibly lost: 3,784,907 bytes in 880 blocks
+==46==    still reachable: 391,799,417 bytes in 557,060 blocks
+==46==                       of which reachable via heuristic:
+==46==                         stdstring          : 6,537,645 bytes in 44,478 blocks
+==46==                         length64           : 46,393,296 bytes in 37,467 blocks
+==46==                         newarray           : 94 bytes in 3 blocks
+==46==                         multipleinheritance: 1,024 bytes in 1 blocks
+==46==         suppressed: 0 bytes in 0 blocks
+==46== Rerun with --leak-check=full to see details of leaked memory
+==46== 
+==46== For lists of detected and suppressed errors, rerun with: -s
+==46== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
+Shared connection to 10.174.224.254 closed.
++ rsync --compress --progress -e 'ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '\''-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p'\'' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022' --ignore-missing-args '10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec/trace.*' .
+trace.0.0.0.0.46.1687991053.GHYIOi.0.1.json
+              0   0%    0.00kB/s    0:00:00       15,530,827 100%   50.21MB/s    0:00:00 (xfr#1, to-chk=1/2)
+trace.0.0.0.0.46.1687991053.GHYIOi.0.2.json
+              0   0%    0.00kB/s    0:00:00        7,019,972 100%   14.52MB/s    0:00:00 (xfr#2, to-chk=0/2)
