@@ -224,7 +224,7 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdbCheck(fdb::selectApiVersionNothrow(FDB_API_VERSION));
+	fdb::selectApiVersion(FDB_API_VERSION);
 	if (argc >= 3) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {
@@ -236,7 +236,7 @@ int main(int argc, char** argv) {
 	doctest::Context context;
 	context.applyCommandLine(argc, argv);
 
-	fdbCheck(fdb::network::setupNothrow());
+	fdb::network::setup();
 	std::thread network_thread{ [] { fdbCheck(fdb::network::run()); } };
 
 	db = fdb::Database(argv[1]);
