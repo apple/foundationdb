@@ -142,7 +142,7 @@ struct StartTenantMovementImpl {
 
 	// Parameters filled in during the run
 	std::vector<std::pair<TenantName, int64_t>> tenantsInGroup;
-	Optional<ThrottleApi::TagQuotaValue> tagQuota;
+	Optional<ThrottleApi::ThroughputQuotaValue> tagQuota;
 	Optional<int64_t> storageQuota;
 
 	StartTenantMovementImpl(Reference<DB> managementDb, TenantGroupName tenantGroup, ClusterName src, ClusterName dst)
@@ -319,7 +319,7 @@ struct StartTenantMovementImpl {
 	ACTOR static Future<Void> getSourceQuotas(StartTenantMovementImpl* self, Reference<ITransaction> tr) {
 		state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(self->tenantGroup));
 		ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
-		self->tagQuota = v.map([](Value val) { return ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(val)); });
+		self->tagQuota = v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
 		Optional<int64_t> optionalQuota = wait(TenantMetadata::storageQuota().get(tr, self->tenantGroup));
 		self->storageQuota = optionalQuota;
 		return Void();
