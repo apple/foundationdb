@@ -204,9 +204,9 @@ private:
 					            // 4. Assert expectation.
 					            auto expected = opFunc(val1, val2);
 					            if (*result != expected) {
-						            error(fmt::format("testAtomicOp expected: {} actual: {}",
-						                              fdb::toCharsRef(expected),
-						                              fdb::toCharsRef(*result)));
+						            error("testAtomicOp expected: {} actual: {}",
+						                  fdb::toCharsRef(expected),
+						                  fdb::toCharsRef(*result));
 						            ASSERT(false);
 					            }
 					            schedule(cont);

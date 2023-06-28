@@ -68,7 +68,6 @@ function(compile_boost)
                        --with-toolset=${BOOST_TOOLSET}
     BUILD_COMMAND      ${B2_COMMAND}
                        link=static
-                       cflags=--target=x86_64-unknown-linux-gnu  # Bug with b2 4.9.4 and clang: https://github.com/bfgroup/b2/issues/183
                        ${COMPILE_BOOST_BUILD_ARGS}
                        --prefix=${BOOST_INSTALL_DIR}
                        ${USER_CONFIG_FLAG} install
@@ -81,6 +80,23 @@ function(compile_boost)
                        "${BOOST_INSTALL_DIR}/lib/libboost_iostreams.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_serialization.a"
                        "${BOOST_INSTALL_DIR}/lib/libboost_system.a")
+
+
+  # There is a bug in B2 version 4.9.4 that ships with boost 1.82 that breaks clang builds on linux. 
+  # https://github.com/bfgroup/b2/issues/183
+  # Download and use B2 4.8.2 instead
+  if(CLANG)
+    ExternalProject_Add_Step( 
+      "${COMPILE_BOOST_TARGET}Project" 
+      B2
+      DEPENDEES          download 
+      DEPENDERS          configure
+      ALWAYS             TRUE
+      COMMENT            "Downloading b2"
+      WORKING_DIRECTORY  <SOURCE_DIR>
+      COMMAND            curl -Ls https://github.com/bfgroup/b2/archive/refs/tags/4.8.2.tar.gz -o b2-4.8.2.tar.gz && 
+                         tar --strip-components 1 --no-same-owner -C tools/build -xf b2-4.8.2.tar.gz )
+  endif()
 
   add_library(${COMPILE_BOOST_TARGET}_context STATIC IMPORTED)
   add_dependencies(${COMPILE_BOOST_TARGET}_context ${COMPILE_BOOST_TARGET}Project)

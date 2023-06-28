@@ -353,17 +353,9 @@ ACTOR static Future<Void> decodeBackupLogValue(Arena* arena,
 				state EncryptCipherDomainId domainId = logValue.encryptDomainId();
 				Reference<AsyncVar<ClientDBInfo> const> dbInfo = cx->clientInfo;
 				try {
-					if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-						TextAndHeaderCipherKeys cipherKeys =
-						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-						        dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-					} else {
-						TextAndHeaderCipherKeys cipherKeys =
-						    wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
-						        dbInfo, *logValue.encryptionHeader(), BlobCipherMetrics::RESTORE));
-						logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
-					}
+					TextAndHeaderCipherKeys cipherKeys = wait(GetEncryptCipherKeys<ClientDBInfo>::getEncryptCipherKeys(
+					    dbInfo, logValue.configurableEncryptionHeader(), BlobCipherMetrics::RESTORE));
+					logValue = logValue.decrypt(cipherKeys, tempArena, BlobCipherMetrics::RESTORE);
 				} catch (Error& e) {
 					// It's possible a tenant was deleted and the encrypt key fetch failed
 					TraceEvent(SevWarnAlways, "MutationLogRestoreEncryptKeyFetchFailed")

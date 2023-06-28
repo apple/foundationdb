@@ -653,17 +653,17 @@ public:
 	Version version;
 	Future<Version> watch_impl;
 	Promise<Version> versionPromise;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<UID> debugID;
 	int64_t tenantId;
 
 	ServerWatchMetadata(Key key,
 	                    Optional<Value> value,
 	                    Version version,
-	                    Optional<TagSet> tags,
+	                    Optional<TransactionTag> throttlingTag,
 	                    Optional<UID> debugID,
 	                    int64_t tenantId)
-	  : key(key), value(value), version(version), tags(tags), debugID(debugID), tenantId(tenantId) {}
+	  : key(key), value(value), version(version), throttlingTag(throttlingTag), debugID(debugID), tenantId(tenantId) {}
 };
 
 struct BusiestWriteTagContext {
@@ -2319,7 +2319,7 @@ ACTOR Future<Void> getValueQ(StorageServer* data, GetValueRequest req) {
 
 	// Key size is not included in "BytesQueried", but still contributes to cost,
 	// so it must be accounted for here.
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, req.key.size() + resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, req.key.size() + resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -2378,7 +2378,7 @@ ACTOR Future<Version> watchWaitForValueChange(StorageServer* data, SpanContext p
 			           "Starting watch loop with latestVersion > data->version",
 			           probe::decoration::rare);
 			GetValueRequest getReq(
-			    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
+			    span.context, TenantInfo(), metadata->key, latest, metadata->throttlingTag, options, VersionVector());
 			state Future<Void> getValue = getValueQ(
 			    data, getReq); // we are relying on the delay zero at the top of getValueQ, if removed we need one here
 			GetValueReply reply = wait(getReq.reply.getFuture());
@@ -3855,7 +3855,7 @@ ACTOR Future<GetValueReqAndResultRef> quickGetValue(StorageServer* data,
 			                    pOriginalReq->tenantInfo,
 			                    key,
 			                    version,
-			                    pOriginalReq->tags,
+			                    pOriginalReq->throttlingTag,
 			                    pOriginalReq->options,
 			                    VersionVector());
 			// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
@@ -4551,7 +4551,7 @@ ACTOR Future<Void> getKeyValuesQ(StorageServer* data, GetKeyValuesRequest req)
 		data->sendErrorWithPenalty(req.reply, e, data->getPenalty());
 	}
 
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, resultSize);
 	++data->counters.finishedQueries;
 
 	double duration = g_network->timer() - req.requestTime();
@@ -4603,7 +4603,7 @@ ACTOR Future<GetRangeReqAndResultRef> quickGetKeyValues(
 		req.limitBytes = SERVER_KNOBS->QUICK_GET_KEY_VALUES_LIMIT_BYTES;
 		req.options = pOriginalReq->options;
 		// TODO: tweak priorities in req.options.get().type?
-		req.tags = pOriginalReq->tags;
+		req.throttlingTag = pOriginalReq->throttlingTag;
 		req.ssLatestCommitVersions = VersionVector();
 
 		// Note that it does not use readGuard to avoid server being overloaded here. Throttling is enforced at the
@@ -4819,7 +4819,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			req.limit = limit;
 			req.limitBytes = limitBytes;
 			req.version = version;
-			req.tags = TagSet();
+			req.throttlingTag = {};
 			fs.push_back(remoteServer.getKeyValues.getReplyUnlessFailedFor(req, 2, 0));
 
 			GetKeyValuesRequest localReq;
@@ -4829,7 +4829,7 @@ ACTOR Future<Void> validateRangeAgainstServer(StorageServer* data,
 			localReq.limit = limit;
 			localReq.limitBytes = limitBytes;
 			localReq.version = version;
-			localReq.tags = TagSet();
+			localReq.throttlingTag = {};
 			data->actors.add(getKeyValuesQ(data, localReq));
 			fs.push_back(errorOr(localReq.reply.getFuture()));
 			std::vector<ErrorOr<GetKeyValuesReply>> reps = wait(getAll(fs));
@@ -6051,9 +6051,9 @@ ACTOR Future<Void> getKeyQ(StorageServer* data, GetKeyRequest req) {
 	}
 
 	// SOMEDAY: The size reported here is an undercount of the bytes read due to the fact that we have to scan for the
-	// key It would be more accurate to count all the read bytes, but it's not critical because this function is only
+	// key. It would be more accurate to count all the read bytes, but it's not critical because this function is only
 	// used if read-your-writes is disabled
-	data->throttlingCounter.addRequest(req.tags, tenantGroup, resultSize);
+	data->throttlingCounter.addRequest(req.throttlingTag, tenantGroup, resultSize);
 
 	++data->counters.finishedQueries;
 
@@ -10573,7 +10573,7 @@ void setAssignedStatus(StorageServer* self, KeyRangeRef keys, bool nowAssigned) 
 }
 
 void StorageServerDisk::clearRange(KeyRangeRef keys) {
-	storage->clear(keys, &data->metrics);
+	storage->clear(keys);
 	++(*kvClearRanges);
 	if (keys.singleKeyRange()) {
 		++(*kvClearSingleKey);
@@ -10590,7 +10590,7 @@ void StorageServerDisk::writeMutation(MutationRef mutation) {
 		storage->set(KeyValueRef(mutation.param1, mutation.param2));
 		*kvCommitLogicalBytes += mutation.expectedSize();
 	} else if (mutation.type == MutationRef::ClearRange) {
-		storage->clear(KeyRangeRef(mutation.param1, mutation.param2), &data->metrics);
+		storage->clear(KeyRangeRef(mutation.param1, mutation.param2));
 		++(*kvClearRanges);
 		if (KeyRangeRef(mutation.param1, mutation.param2).singleKeyRange()) {
 			++(*kvClearSingleKey);
@@ -10631,7 +10631,7 @@ void StorageServerDisk::writeMutations(const VectorRef<MutationRef>& mutations,
 			storage->set(KeyValueRef(m.param1, m.param2));
 			*kvCommitLogicalBytes += m.expectedSize();
 		} else if (m.type == MutationRef::ClearRange) {
-			storage->clear(KeyRangeRef(m.param1, m.param2), &data->metrics);
+			storage->clear(KeyRangeRef(m.param1, m.param2));
 			++(*kvClearRanges);
 			if (KeyRangeRef(m.param1, m.param2).singleKeyRange()) {
 				++(*kvClearSingleKey);
@@ -11015,7 +11015,7 @@ ACTOR Future<bool> restoreDurableState(StorageServer* data, IKeyValueStore* stor
 				++data->counters.kvSystemClearRanges;
 				// TODO(alexmiller): Figure out how to selectively enable spammy data distribution events.
 				// DEBUG_KEY_RANGE("clearInvalidVersion", invalidVersion, clearRange);
-				storage->clear(clearRange, &data->metrics);
+				storage->clear(clearRange);
 				++data->counters.kvSystemClearRanges;
 				data->byteSampleApplyClear(clearRange, invalidVersion);
 			}
@@ -11515,7 +11515,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		// case 1: no watch set for the current key
 		if (!metadata.isValid()) {
 			metadata = makeReference<ServerWatchMetadata>(
-			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+			    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
 			                               metadata->versionPromise);
@@ -11525,7 +11525,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 		else if (metadata->value == req.value) {
 			if (req.version > metadata->version) {
 				metadata->version = req.version;
-				metadata->tags = req.tags;
+				metadata->throttlingTag = req.throttlingTag;
 				metadata->debugID = req.debugID;
 			}
 			self->actors.add(watchValueSendReply(self, req, metadata->versionPromise.getFuture(), span.context));
@@ -11537,7 +11537,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 			metadata->watch_impl.cancel();
 
 			metadata = makeReference<ServerWatchMetadata>(
-			    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+			    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 			KeyRef key = self->setWatchMetadata(metadata);
 			metadata->watch_impl = forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
 			                               metadata->versionPromise);
@@ -11557,8 +11557,13 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 					state Version latest = self->version.get();
 					options.debugID = metadata->debugID;
 
-					GetValueRequest getReq(
-					    span.context, TenantInfo(), metadata->key, latest, metadata->tags, options, VersionVector());
+					GetValueRequest getReq(span.context,
+					                       TenantInfo(),
+					                       metadata->key,
+					                       latest,
+					                       metadata->throttlingTag,
+					                       options,
+					                       VersionVector());
 					state Future<Void> getValue = getValueQ(self, getReq);
 					GetValueReply reply = wait(getReq.reply.getFuture());
 					metadata = self->getWatchMetadata(req.key.contents(), req.tenantInfo.tenantId);
@@ -11571,7 +11576,7 @@ ACTOR Future<Void> serveWatchValueRequestsImpl(StorageServer* self, FutureStream
 
 					if (reply.value == req.value) { // valSS == valreq
 						metadata = makeReference<ServerWatchMetadata>(
-						    req.key, req.value, req.version, req.tags, req.debugID, req.tenantInfo.tenantId);
+						    req.key, req.value, req.version, req.throttlingTag, req.debugID, req.tenantInfo.tenantId);
 						KeyRef key = self->setWatchMetadata(metadata);
 						metadata->watch_impl =
 						    forward(watchWaitForValueChange(self, span.context, key, req.tenantInfo.tenantId),
@@ -12454,7 +12459,7 @@ static void versionedMapBound(benchmark::State& benchState) {
 	int64_t dataSize = benchState.range(1);
 	StorageServer::VersionedData data;
 	Arena arena;
-	ValueOrClearToRef value = ValueOrClearToRef::value(StringRef("fixed_value"));
+	ValueOrClearToRef value = ValueOrClearToRef::value("fixed_value"_sr);
 	// only insert half of the keys, so when we bench search (lower_bound/upper_bound), it could test the cases that
 	// the key exist and non-exist
 	RandomKeySetGenerator keyGen(dataSize * 2, "10..20/a..z");

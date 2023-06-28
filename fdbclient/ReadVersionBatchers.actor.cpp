@@ -14,8 +14,7 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
                                                                   uint32_t transactionCount,
                                                                   TransactionPriority priority,
                                                                   uint32_t flags,
-                                                                  TransactionTagMap<uint32_t> tags,
-                                                                  Optional<TenantGroupName> tenantGroup,
+                                                                  Optional<ThrottlingId> throttlingId,
                                                                   Optional<UID> debugID) {
 	state Span span("NAPI:getConsistentReadVersion"_loc, parentSpan);
 
@@ -29,8 +28,7 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 			                                priority,
 			                                cx->ssVersionVectorCache.getMaxVersion(),
 			                                flags,
-			                                tags,
-			                                tenantGroup,
+			                                throttlingId,
 			                                debugID);
 			state Future<Void> onProxiesChanged = cx->onProxiesChanged();
 
@@ -46,22 +44,6 @@ ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext pa
 				                               cx->taskID))) {
 					CODE_PROBE(v.proxyTagThrottledDuration > 0.0,
 					           "getConsistentReadVersion received GetReadVersionReply delayed by proxy tag throttling");
-					if (tags.size() != 0) {
-						auto& priorityThrottledTags = cx->throttledTags[priority];
-						for (auto& tag : tags) {
-							auto itr = v.tagThrottleInfo.find(tag.first);
-							if (itr == v.tagThrottleInfo.end()) {
-								CODE_PROBE(true, "Removing client throttle");
-								priorityThrottledTags.erase(tag.first);
-							} else {
-								CODE_PROBE(true, "Setting client throttle");
-								auto result = priorityThrottledTags.try_emplace(tag.first, itr->second);
-								if (!result.second) {
-									result.first->second.update(itr->second);
-								}
-							}
-						}
-					}
 
 					if (debugID.present())
 						g_traceBatch.addEvent(
@@ -99,11 +81,10 @@ class Batcher {
 	struct VersionRequest {
 		SpanContext spanContext;
 		Promise<GetReadVersionReply> reply;
-		TagSet tags;
 		Optional<UID> debugID;
 
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
-		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
+		VersionRequest(SpanContext spanContext, Optional<UID> debugID = {})
+		  : spanContext(spanContext), debugID(debugID) {}
 	};
 
 	int outstandingRequests = 0;
@@ -115,7 +96,7 @@ class Batcher {
 	                                             DatabaseContext* cx,
 	                                             TransactionPriority priority,
 	                                             uint32_t flags,
-	                                             Optional<TenantGroupName> tenantGroup) {
+	                                             Optional<ThrottlingId> throttlingId) {
 		state std::vector<Promise<GetReadVersionReply>> requests;
 		state PromiseStream<Future<Void>> addActor;
 		state Future<Void> collection = actorCollection(addActor.getFuture(), &self->outstandingRequests);
@@ -137,8 +118,6 @@ class Batcher {
 		    Histogram::getHistogram("GrvBatcher"_sr, "ClientGrvReplyLatency"_sr, Histogram::Unit::milliseconds);
 		state double lastRequestTime = now();
 
-		state TransactionTagMap<uint32_t> tags;
-
 		// dynamic batching
 		state PromiseStream<double> replyTimes;
 		state double batchTime = 0;
@@ -155,9 +134,6 @@ class Batcher {
 					}
 					span.addLink(req.spanContext);
 					requests.push_back(req.reply);
-					for (auto tag : req.tags) {
-						++tags[tag];
-					}
 
 					if (requests.size() == CLIENT_KNOBS->MAX_BATCH_SIZE) {
 						send_batch = true;
@@ -194,12 +170,11 @@ class Batcher {
 
 				Future<Void> batch = incrementalBroadcastWithError(
 				    getConsistentReadVersion(
-				        span.context, cx, count, priority, flags, std::move(tags), tenantGroup, std::move(debugID)),
+				        span.context, cx, count, priority, flags, throttlingId, std::move(debugID)),
 				    std::move(requests),
 				    CLIENT_KNOBS->BROADCAST_BATCH_SIZE);
 
 				span = Span("NAPI:readVersionBatcher"_loc);
-				tags.clear();
 				debugID = Optional<UID>();
 				requests.clear();
 				addActor.send(batch);
@@ -209,9 +184,9 @@ class Batcher {
 	}
 
 public:
-	Future<GetReadVersionReply> getReadVersion(SpanContext spanContext, TagSet tags, Optional<UID> debugId) {
+	Future<GetReadVersionReply> getReadVersion(SpanContext spanContext, Optional<UID> debugId) {
 		lastRequestTime = now();
-		auto const req = VersionRequest(spanContext, tags, debugId);
+		auto const req = VersionRequest(spanContext, debugId);
 		stream.send(req);
 		return req.reply.getFuture();
 	}
@@ -219,9 +194,9 @@ public:
 	void startActor(Database cx,
 	                TransactionPriority priority,
 	                uint32_t flags,
-	                Optional<TenantGroupName> const& tenantGroup) {
+	                Optional<ThrottlingId> const& throttlingId) {
 		if (!actor.isValid()) {
-			actor = readVersionBatcher(this, cx.getPtr(), priority, flags, tenantGroup);
+			actor = readVersionBatcher(this, cx.getPtr(), priority, flags, throttlingId);
 		}
 	}
 
@@ -281,13 +256,13 @@ public:
 	                                           uint32_t flags,
 	                                           Optional<TenantGroupName> const& tenantGroup,
 	                                           SpanContext spanContext,
-	                                           TagSet tags,
+	                                           Optional<TransactionTag> tag,
 	                                           Optional<UID> debugID) {
 		Optional<ThrottlingId> throttlingId;
 		if (tenantGroup.present()) {
 			throttlingId = ThrottlingIdRef::fromTenantGroup(tenantGroup.get());
-		} else if (tags.size()) {
-			throttlingId = ThrottlingIdRef::fromTag(*tags.begin());
+		} else if (tag.present()) {
+			throttlingId = ThrottlingIdRef::fromTag(tag.get());
 		}
 		Index index(flags, throttlingId);
 		auto it = batchers.find(index);
@@ -299,8 +274,8 @@ public:
 			it = batchers.try_emplace(index).first;
 		}
 		auto& batcher = it->second;
-		batcher.startActor(cx, priority, flags, tenantGroup);
-		return batcher.getReadVersion(spanContext, tags, debugID);
+		batcher.startActor(cx, priority, flags, throttlingId);
+		return batcher.getReadVersion(spanContext, debugID);
 	}
 };
 
@@ -309,9 +284,9 @@ Future<GetReadVersionReply> ReadVersionBatchers::getReadVersion(Database cx,
                                                                 uint32_t flags,
                                                                 Optional<TenantGroupName> const& tenantGroup,
                                                                 SpanContext context,
-                                                                TagSet tags,
+                                                                Optional<TransactionTag> const& tag,
                                                                 Optional<UID> debugID) {
-	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tags, debugID);
+	return impl->getReadVersion(cx, priority, flags, tenantGroup, context, tag, debugID);
 }
 
 ReadVersionBatchers::ReadVersionBatchers(int capacity, double expirationTimeout, double expirationCheckInterval)

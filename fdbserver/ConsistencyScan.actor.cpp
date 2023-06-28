@@ -33,7 +33,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.actor.h"
@@ -193,7 +193,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	req.limit = 1e4;
 	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	req.version = version;
-	req.tags = TagSet();
+	req.throttlingTag = {};
 
 	// buggify read limits in simulation
 	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
@@ -1287,7 +1287,7 @@ ACTOR Future<bool> getKeyLocations(Database cx,
 				req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 				req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 				req.version = version;
-				req.tags = TagSet();
+				req.throttlingTag = {};
 
 				// Try getting the shard locations from the key servers
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;

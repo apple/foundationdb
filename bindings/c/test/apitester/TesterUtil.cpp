@@ -19,6 +19,8 @@
  */
 
 #include "TesterUtil.h"
+#include "fmt/core.h"
+#include "fmt/chrono.h"
 #include <cstdio>
 #include <algorithm>
 #include <ctype.h>
@@ -26,6 +28,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <sstream>
 
 namespace FdbApiTester {
 
@@ -52,10 +55,48 @@ Random& Random::get() {
 bool Random::randomBool(double trueRatio) {
 	return std::uniform_real_distribution<double>(0.0, 1.0)(random) <= trueRatio;
 }
+namespace log {
+Logger& Logger::get() {
+	static Logger logger;
+	return logger;
+}
+
+void Logger::logMessage(log::Level lvl, std::string_view msg) {
+	if (lvl < level) {
+		return;
+	}
+	const char* lvlLabel = "";
+	switch (lvl) {
+	case Level::ERROR:
+		lvlLabel = "ERROR";
+		break;
+	case Level::WARN:
+		lvlLabel = "WARN";
+		break;
+	case Level::INFO:
+		lvlLabel = "INFO";
+		break;
+	case Level::DEBUG:
+		lvlLabel = "DEBUG";
+		break;
+	}
+	using namespace std::chrono;
+	auto time = system_clock::now();
+	// Format in form:
+	// [INFO] 2023-06-26T19:29:18.253 A log message
+	fmt::print(stderr,
+	           "[{}] {:%FT%H:%M:}{:%S} {}\n",
+	           lvlLabel,
+	           time,
+	           duration_cast<milliseconds>(time.time_since_epoch()),
+	           msg);
+	fflush(stderr);
+}
+
+} // namespace log
 
 void print_internal_error(const char* msg, const char* file, int line) {
-	fprintf(stderr, "Assertion %s failed @ %s %d:\n", msg, file, line);
-	fflush(stderr);
+	log::error("Assertion {} failed @ {}:{}", msg, file, line);
 }
 
 std::optional<fdb::Value> copyValueRef(fdb::future_var::ValueRef::Type value) {
@@ -129,21 +170,21 @@ void TmpFile::create(std::string_view dir, std::string_view prefix) {
 	// Create an empty tmp file
 	std::fstream tmpFile(filename, std::fstream::out);
 	if (!tmpFile.good()) {
-		throw TesterError(fmt::format("Failed to create temporary file {}\n", filename));
+		throw TesterError(fmt::format("Failed to create temporary file {}", filename));
 	}
 }
 
 void TmpFile::write(std::string_view data) {
 	std::ofstream ofs(filename, std::fstream::out | std::fstream::binary);
 	if (!ofs.good()) {
-		throw TesterError(fmt::format("Failed to write to the temporary file {}\n", filename));
+		throw TesterError(fmt::format("Failed to write to the temporary file {}", filename));
 	}
 	ofs.write(data.data(), data.size());
 }
 
 void TmpFile::remove() {
 	if (!std::filesystem::remove(std::filesystem::path(filename))) {
-		fmt::print(stderr, "Failed to remove file {}\n", filename);
+		log::warn("Failed to remove file {}", filename);
 	}
 }
 
