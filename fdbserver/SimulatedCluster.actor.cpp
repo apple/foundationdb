@@ -1682,12 +1682,6 @@ void SimulationConfig::setEncryptionAtRestMode(const TestConfig& testConfig) {
 		}
 		r -= probability[mode];
 	}
-	if (available[EncryptionAtRestMode::DOMAIN_AWARE]) {
-		encryptionMode = EncryptionAtRestMode::DOMAIN_AWARE;
-	} else if (available[EncryptionAtRestMode::CLUSTER_AWARE]) {
-		encryptionMode = EncryptionAtRestMode::CLUSTER_AWARE;
-	}
-
 	TraceEvent("SimulatedClusterEncryptionMode").detail("Mode", encryptionMode.toString());
 	CODE_PROBE(encryptionMode == EncryptionAtRestMode::DISABLED, "Disabled encryption in simulation");
 	CODE_PROBE(encryptionMode == EncryptionAtRestMode::CLUSTER_AWARE, "Enabled cluster-aware encryption in simulation");
