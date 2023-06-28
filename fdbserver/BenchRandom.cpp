@@ -24,7 +24,8 @@
 
 static void bench_random(benchmark::State& state) {
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(deterministicRandom()->random01());
+		double result = deterministicRandom()->random01();
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }

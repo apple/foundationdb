@@ -21,7 +21,7 @@
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 namespace {

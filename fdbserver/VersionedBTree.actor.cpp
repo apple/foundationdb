@@ -5080,8 +5080,8 @@ public:
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
-	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0),
+	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)), m_name(name), m_logID(logID) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);

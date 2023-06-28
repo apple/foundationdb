@@ -287,6 +287,8 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( MAX_GRV_BATCHERS,                        1000 );
 	init( GRV_BATCHER_EXPIRATION_TIMEOUT,          60.0 );
 	init( GRV_BATCHER_CLEANING_INTERVAL,            5.0 );
+	init( TRACK_THROUGHPUT_ON_CLIENTS,            false ); if( randomize && BUGGIFY ) TRACK_THROUGHPUT_ON_CLIENTS = true;
+	init( CLIENT_THROUGHPUT_REPORT_INTERVAL,        1.0 );
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );

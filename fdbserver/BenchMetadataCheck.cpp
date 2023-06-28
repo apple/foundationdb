@@ -40,7 +40,8 @@ static const std::array<MutationRef, 5> mutations = {
 static void bench_check_metadata1(benchmark::State& state) {
 	const auto& m = mutations[state.range(0)];
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(KeyRangeRef(m.param1, m.param2).intersects(systemKeys));
+		bool result = KeyRangeRef(m.param1, m.param2).intersects(systemKeys);
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }
@@ -48,7 +49,8 @@ static void bench_check_metadata1(benchmark::State& state) {
 static void bench_check_metadata2(benchmark::State& state) {
 	const auto& m = mutations[state.range(0)];
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0]);
+		bool result = m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0];
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetItemsProcessed(static_cast<long>(state.iterations()));
 }

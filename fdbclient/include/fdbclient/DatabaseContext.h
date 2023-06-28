@@ -38,6 +38,7 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/ThroughputTracker.h"
 #include "fdbclient/VersionVector.h"
 #include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
@@ -79,57 +80,13 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
 using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
-class ClientTagThrottleData : NonCopyable {
-private:
-	double tpsRate;
-	double expiration;
-	double lastCheck;
-	bool rateSet = false;
-
-	Smoother smoothRate;
-	Smoother smoothReleased;
-
-public:
-	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
-	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
-	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
-		ASSERT(tpsRate >= 0);
-		smoothRate.reset(tpsRate);
-	}
-
-	void update(ClientTagThrottleLimits const& limits) {
-		ASSERT(limits.tpsRate >= 0);
-		this->tpsRate = limits.tpsRate;
-
-		if (!rateSet || expired()) {
-			rateSet = true;
-			smoothRate.reset(limits.tpsRate);
-		} else {
-			smoothRate.setTotal(limits.tpsRate);
-		}
-
-		expiration = limits.expiration;
-	}
-
-	void addReleased(int released) { smoothReleased.addDelta(released); }
-
-	bool expired() const { return expiration <= now(); }
-
-	void updateChecked() { lastCheck = now(); }
-
-	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
-
-	double throttleDuration() const;
-};
-
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
 	const Version version;
-	const TagSet tags;
+	const Optional<TransactionTag> throttlingTag;
 	const SpanContext spanContext;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
@@ -139,13 +96,13 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                Key key,
 	                Optional<Value> value,
 	                Version version,
-	                TagSet tags,
+	                Optional<TransactionTag> throttlingTag,
 	                SpanContext spanContext,
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
-	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), throttlingTag(throttlingTag),
+	    spanContext(spanContext), taskID(taskID), debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
@@ -485,8 +442,6 @@ public:
 
 	explicit DatabaseContext(const Error& err);
 
-	void expireThrottles();
-
 	UID dbId;
 
 	// Key DB-specific information
@@ -566,8 +521,6 @@ public:
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
-
-	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 
 	CounterCollection cc;
 
@@ -672,7 +625,6 @@ public:
 	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
-	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 
@@ -712,7 +664,7 @@ public:
 	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
 	                             int deprecatedVersion = -1);
 
-	bool debugUseTags = false;
+	bool debugUseTag = false;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
 	// Cache of the latest commit versions of storage servers.
@@ -770,6 +722,8 @@ public:
 
 		return clientInfo->get().tenantMode;
 	}
+
+	void addCost(ThrottlingId const&, uint64_t bytes);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
@@ -833,6 +787,9 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	ThroughputTracker throughputTracker;
+	Future<Void> throughputTrackerFuture;
 
 	void initializeSpecialCounters();
 };

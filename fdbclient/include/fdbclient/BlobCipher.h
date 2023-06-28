@@ -981,8 +981,8 @@ private:
 	Optional<Reference<BlobCipherKey>> headerCipherKeyOpt;
 	EncryptAuthTokenMode authTokenMode;
 	uint8_t iv[AES_256_IV_LENGTH];
-	BlobCipherMetrics::UsageType usageType;
 	EncryptAuthTokenAlgo authTokenAlgo;
+	BlobCipherMetrics::UsageType usageType;
 };
 
 // This interface enable data block decryption. An invocation to decrypt() would generate

@@ -97,7 +97,11 @@ add_subdirectory(
   ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-build
   EXCLUDE_FROM_ALL
 )
-target_include_directories(fdbserver PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
+
+set_target_properties(benchmark PROPERTIES COMPILE_OPTIONS "")
+set_target_properties(benchmark_main PROPERTIES COMPILE_OPTIONS "")
+
+target_include_directories(fdbserver SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/googlebenchmark-src/include)
 target_link_libraries(fdbserver PRIVATE benchmark)
 if(FLOW_USE_ZSTD)
    target_include_directories(fdbserver PRIVATE ${ZSTD_LIB_INCLUDE_DIR})
