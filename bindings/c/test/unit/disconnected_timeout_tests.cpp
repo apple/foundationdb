@@ -39,16 +39,6 @@ void fdbCheck(const fdb::Error& err) {
 	}
 }
 
-fdb::Database fdbOpenDatabase(const char* clusterFilePath) {
-	try {
-		return fdb::Database(clusterFilePath);
-	} catch (const fdb::Error& e) {
-		fdbCheck(e);
-	}
-	// Not reachable
-	return fdb::Database();
-}
-
 static fdb::Database db;
 static fdb::Database timeoutDb;
 
@@ -70,7 +60,7 @@ TEST_CASE("500ms_transaction_timeout") {
 	auto tr = db.createTransaction();
 
 	int64_t timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto grvFuture = tr.getReadVersion();
 	auto err = waitFuture(grvFuture);
@@ -86,7 +76,7 @@ TEST_CASE("500ms_transaction_timeout_after_op") {
 	auto grvFuture = tr.getReadVersion();
 
 	int64_t timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1031);
@@ -99,11 +89,11 @@ TEST_CASE("500ms_transaction_timeout_before_op_2000ms_after") {
 	auto tr = db.createTransaction();
 
 	int64_t timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto grvFuture = tr.getReadVersion();
 	timeout = 2000;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1031);
@@ -116,11 +106,11 @@ TEST_CASE("2000ms_transaction_timeout_before_op_500ms_after") {
 	auto tr = db.createTransaction();
 
 	int64_t timeout = 2000;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto grvFuture = tr.getReadVersion();
 	timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1031);
@@ -131,7 +121,7 @@ TEST_CASE("500ms_database_timeout") {
 	auto start = std::chrono::steady_clock::now();
 
 	int64_t timeout = 500;
-	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+	timeoutDb.setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout);
 
 	auto tr = timeoutDb.createTransaction();
 
@@ -146,12 +136,12 @@ TEST_CASE("2000ms_database_timeout_500ms_transaction_timeout") {
 	auto start = std::chrono::steady_clock::now();
 
 	int64_t timeout = 2000;
-	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+	timeoutDb.setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout);
 
 	auto tr = timeoutDb.createTransaction();
 
 	timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto grvFuture = tr.getReadVersion();
 	auto err = waitFuture(grvFuture);
@@ -164,12 +154,12 @@ TEST_CASE("500ms_database_timeout_2000ms_transaction_timeout_with_reset") {
 	auto start = std::chrono::steady_clock::now();
 
 	int64_t dbTimeout = 500;
-	fdbCheck(timeoutDb.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, dbTimeout));
+	timeoutDb.setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, dbTimeout);
 
 	auto tr = timeoutDb.createTransaction();
 
 	int64_t trTimeout = 2000;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, trTimeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, trTimeout);
 
 	tr.reset();
 
@@ -193,7 +183,7 @@ TEST_CASE("transaction_reset_cancels_with_timeout") {
 	auto tr = db.createTransaction();
 
 	int64_t timeout = 500;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	auto grvFuture = tr.getReadVersion();
 	tr.reset();
@@ -203,28 +193,17 @@ TEST_CASE("transaction_reset_cancels_with_timeout") {
 }
 
 TEST_CASE("transaction_destruction_cancels_without_timeout") {
-	fdb::Future grvFuture;
-	{
-		// This block forces the transaction to be destroyed when tr goes
-		// out of scope
-		auto tr = db.createTransaction();
-		grvFuture = tr.getReadVersion();
-	}
-
+	auto tr = fdb::Transaction();
+	auto grvFuture = tr.getReadVersion();
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1025);
 }
 
 TEST_CASE("transaction_destruction_cancels_with_timeout") {
-	fdb::Future grvFuture;
-	{
-		// This block forces the transaction to be destroyed after tr
-		// goes out of scope
-		auto tr = db.createTransaction();
-		int64_t timeout = 500;
-		tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout);
-		grvFuture = tr.getReadVersion();
-	}
+	auto tr = fdb::Transaction();
+	int64_t timeout = 500;
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
+	auto grvFuture = tr.getReadVersion();
 
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1025);
@@ -234,7 +213,7 @@ TEST_CASE("transaction_set_timeout_and_destroy_repeatedly") {
 	for (int i = 0; i < 1000; ++i) {
 		auto tr = db.createTransaction();
 		int64_t timeout = 500;
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+		tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 	}
 }
 
@@ -249,9 +228,8 @@ int main(int argc, char** argv) {
 	if (argc >= 3) {
 		std::string externalClientLibrary = argv[2];
 		if (externalClientLibrary.substr(0, 2) != "--") {
-			fdbCheck(fdb::network::setOptionNothrow(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT, ""));
-			fdbCheck(fdb::network::setOptionNothrow(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
-			                                        externalClientLibrary));
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT, "");
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, externalClientLibrary);
 		}
 	}
 
@@ -261,8 +239,8 @@ int main(int argc, char** argv) {
 	fdbCheck(fdb::network::setupNothrow());
 	std::thread network_thread{ [] { fdbCheck(fdb::network::run()); } };
 
-	db = fdbOpenDatabase(argv[1]);
-	timeoutDb = fdbOpenDatabase(argv[1]);
+	db = fdb::Database(argv[1]);
+	timeoutDb = fdb::Database(argv[1]);
 
 	int res = context.run();
 
