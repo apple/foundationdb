@@ -22,7 +22,7 @@
 
 #include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tenant.h"
 
 // Tracks the read throughput of different throttling ids, and periodically (triggered by a call
@@ -36,7 +36,7 @@ public:
 	~ThrottlingCounter();
 
 	// Update counters tracking the busyness of each tag in the current interval
-	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);
+	void addRequest(Optional<TransactionTag> const& tag, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);
 
 	// Save current set of busy tags and reset counters for next interval
 	void startNewInterval();

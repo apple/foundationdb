@@ -34,6 +34,6 @@ public:
 	                                           uint32_t flags,
 	                                           Optional<TenantGroupName> const&,
 	                                           SpanContext,
-	                                           TagSet,
+	                                           Optional<TransactionTag> const&,
 	                                           Optional<UID> debugID);
 };

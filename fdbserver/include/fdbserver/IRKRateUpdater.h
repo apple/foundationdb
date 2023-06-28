@@ -28,11 +28,11 @@ public:
 	virtual limitReason_t getLimitReason() const = 0;
 	virtual void update(class IRKMetricsTracker const&,
 	                    class IRKRateServer const&,
-	                    class ITagThrottler const&,
 	                    class IRKConfigurationMonitor const&,
 	                    class IRKRecoveryTracker const&,
 	                    Deque<double> const& actualTpsHistory,
-	                    class IRKBlobMonitor&) = 0;
+	                    class IRKBlobMonitor&,
+	                    int throttledTags) = 0;
 
 	// In simulation, after a certain period of time has passed,
 	// we expect blob worker lag to be low, and fail an assertion
@@ -73,11 +73,11 @@ public:
 
 	void update(class IRKMetricsTracker const&,
 	            class IRKRateServer const&,
-	            class ITagThrottler const&,
 	            class IRKConfigurationMonitor const&,
 	            class IRKRecoveryTracker const&,
 	            Deque<double> const& actualTpsHistory,
-	            class IRKBlobMonitor&) override;
+	            class IRKBlobMonitor&,
+	            int throttledTags) override;
 
 	HealthMetrics const& getHealthMetrics() const& override;
 };
