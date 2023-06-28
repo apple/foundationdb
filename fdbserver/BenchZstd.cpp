@@ -200,7 +200,8 @@ static void bench_zstd_compress_stream(benchmark::State& state) {
 static void bench_zstd_decompress(benchmark::State& state) {
 	auto level = state.range(0);
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(decompress(COMPRESSED[level]));
+		auto result = decompress(COMPRESSED[level]);
+		benchmark::DoNotOptimize(result);
 	}
 	state.SetBytesProcessed(UNCOMPRESSED.size() * static_cast<long>(state.iterations()));
 }
@@ -210,7 +211,8 @@ static void bench_zstd_decompress_stream(benchmark::State& state) {
 	ZSTD_DStream* dstream = ZSTD_createDStream();
 	ZSTD_initDStream(dstream);
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(decompressAsStream(COMPRESSED[level], dstream));
+		auto result = decompressAsStream(COMPRESSED[level], dstream);
+		benchmark::DoNotOptimize(result);
 	}
 	ZSTD_freeDStream(dstream);
 	state.SetBytesProcessed(UNCOMPRESSED.size() * static_cast<long>(state.iterations()));

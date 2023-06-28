@@ -201,11 +201,11 @@ FDB_BOOLEAN_PARAM(Filtered);
 class LatencyBands {
 	std::map<double, std::unique_ptr<Counter>> bands;
 	std::unique_ptr<Counter> filteredCount;
-	std::function<void(TraceEvent&)> decorator;
 
 	std::string name;
 	UID id;
 	double loggingInterval;
+	std::function<void(TraceEvent&)> decorator;
 
 	std::unique_ptr<CounterCollection> cc;
 	Future<Void> logger;

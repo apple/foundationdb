@@ -102,15 +102,16 @@ struct BlobWorkerStats {
 	    oldFeedSnapshots("OldFeedSnapshots", cc), blockInFlightSnapshots("BlockInFlightSnapshots", cc),
 	    numRangesAssigned(0), mutationBytesBuffered(0), activeReadRequests(0), activeMutationStreamRequests(0),
 	    granulesPendingSplitCheck(0), minimumCFVersion(0), cfVersionLag(0), notAtLatestChangeFeeds(0),
-	    lastResidentMemory(0), snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
-	                                                          id,
-	                                                          sampleLoggingInterval,
-	                                                          fileOpLatencySketchAccuracy),
+	    lastResidentMemory(0), estimatedMaxResidentMemory(0),
+	    snapshotBlobWriteLatencySample("SnapshotBlobWriteMetrics",
+	                                   id,
+	                                   sampleLoggingInterval,
+	                                   fileOpLatencySketchAccuracy),
 	    deltaBlobWriteLatencySample("DeltaBlobWriteMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    reSnapshotLatencySample("GranuleResnapshotMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
 	    readLatencySample("GranuleReadLatencyMetrics", id, sampleLoggingInterval, requestLatencySketchAccuracy),
 	    deltaUpdateSample("DeltaUpdateMetrics", id, sampleLoggingInterval, fileOpLatencySketchAccuracy),
-	    estimatedMaxResidentMemory(0), initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
+	    initialSnapshotLock(initialSnapshotLock), resnapshotBudget(resnapshotBudget),
 	    deltaWritesBudget(deltaWritesBudget) {
 		specialCounter(cc, "NumRangesAssigned", [this]() { return this->numRangesAssigned; });
 		specialCounter(cc, "MutationBytesBuffered", [this]() { return this->mutationBytesBuffered; });

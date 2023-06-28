@@ -207,7 +207,6 @@ const std::set<int> transactionRetryableErrors = { error_code_not_committed,
 	                                               error_code_grv_proxy_memory_limit_exceeded,
 	                                               error_code_process_behind,
 	                                               error_code_batch_transaction_throttled,
-	                                               error_code_tag_throttled,
 	                                               error_code_proxy_tag_throttled,
 	                                               // maybe committed error
 	                                               error_code_cluster_version_changed,

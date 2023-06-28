@@ -49,7 +49,8 @@ static void bench_add_idempotency_ids(benchmark::State& state) {
 	for (auto _ : state) {
 		buildIdempotencyIdMutations(
 		    trs, idempotencyKVBuilder, commitVersion++, committed, committedValue, locked, [](const KeyValue&) {
-			    benchmark::DoNotOptimize(0);
+			    int result = 0;
+			    benchmark::DoNotOptimize(result);
 		    });
 	}
 	state.counters["TimePerTransaction"] = benchmark::Counter(

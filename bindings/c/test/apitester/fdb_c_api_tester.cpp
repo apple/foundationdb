@@ -59,6 +59,7 @@ enum TesterOptionId {
 	OPT_TLS_KEY_FILE,
 	OPT_TLS_CA_FILE,
 	OPT_RETAIN_CLIENT_LIB_COPIES,
+	OPT_VERBOSITY
 };
 
 CSimpleOpt::SOption TesterOptionDefs[] = //
@@ -87,6 +88,8 @@ CSimpleOpt::SOption TesterOptionDefs[] = //
 	  { OPT_TLS_KEY_FILE, "--tls-key-file", SO_REQ_SEP },
 	  { OPT_TLS_CA_FILE, "--tls-ca-file", SO_REQ_SEP },
 	  { OPT_RETAIN_CLIENT_LIB_COPIES, "--retain-client-lib-copies", SO_NONE },
+	  { OPT_VERBOSITY, "-V", SO_REQ_SEP },
+	  { OPT_VERBOSITY, "--verbosity", SO_REQ_SEP },
 	  SO_END_OF_OPTIONS };
 
 void printProgramUsage(const char* execName) {
@@ -138,6 +141,8 @@ void printProgramUsage(const char* execName) {
 	       "                 Path to file containing TLS CA certificate\n"
 	       "  --retain-client-lib-copies\n"
 	       "                 Retain temporary external client library copies\n"
+	       "  -V, --verbosity LEVEL\n"
+	       "                 Set verbosity level, one of [ERROR, WARNING, INFO, DEBUG] (default: INFO)\n"
 	       "  -h, --help     Display this help and exit.\n",
 	       FDB_API_VERSION);
 }
@@ -157,6 +162,23 @@ void processIntOption(const std::string& optionName, const std::string& value, i
 	if (res < minValue || res > maxValue) {
 		throw TesterError(fmt::format("Value for {} must be between {} and {}", optionName, minValue, maxValue));
 	}
+}
+
+bool setVerbosityLevel(std::string_view levelStr) {
+	log::Level level;
+	if (levelStr == "ERROR") {
+		level = log::Level::ERROR;
+	} else if (levelStr == "WARNING") {
+		level = log::Level::WARN;
+	} else if (levelStr == "INFO") {
+		level = log::Level::INFO;
+	} else if (levelStr == "DEBUG") {
+		level = log::Level::DEBUG;
+	} else {
+		return false;
+	}
+	log::Logger::get().setLevel(level);
+	return true;
 }
 
 bool processArg(TesterOptions& options, const CSimpleOpt& args) {
@@ -230,6 +252,12 @@ bool processArg(TesterOptions& options, const CSimpleOpt& args) {
 	case OPT_RETAIN_CLIENT_LIB_COPIES:
 		options.retainClientLibCopies = true;
 		break;
+	case OPT_VERBOSITY:
+		if (!setVerbosityLevel(args.OptionArg())) {
+			fmt::print(stderr, "ERROR: Unrecognized verbosity level `{}'\n", args.OptionArg());
+			return false;
+		}
+		break;
 	}
 	return true;
 }
@@ -260,7 +288,7 @@ bool parseArgs(TesterOptions& options, int argc, char** argv) {
 
 void fdb_check(fdb::Error e, std::string_view msg, fdb::Error::CodeType expectedError = error_code_success) {
 	if (e.code()) {
-		fmt::print(stderr, "{}, Error: {}({})\n", msg, e.code(), e.what());
+		log::error("{}, Error: {}({})", msg, e.code(), e.what());
 		std::abort();
 	}
 }
@@ -309,6 +337,7 @@ void applyNetworkOptions(TesterOptions& options) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_ENABLE_RUN_LOOP_PROFILING);
 	}
 
+	fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISTRIBUTED_CLIENT_TRACER, "log_file");
 	if (options.trace) {
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_ENABLE, options.traceDir);
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_TRACE_FORMAT, options.traceFormat);
@@ -332,7 +361,7 @@ void applyNetworkOptions(TesterOptions& options) {
 	}
 
 	for (auto knob : options.testSpec.knobs) {
-		fmt::print(stderr, "Setting knob {}={}\n", knob.first.c_str(), knob.second.c_str());
+		log::info("Setting knob {}={}", knob.first.c_str(), knob.second.c_str());
 		fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_KNOB,
 		                        fmt::format("{}={}", knob.first.c_str(), knob.second.c_str()));
 	}
@@ -392,8 +421,7 @@ bool runWorkloads(TesterOptions& options) {
 			// a deadlock.
 			int minClientThreads = maxSelfBlockingFutures + 1;
 			if (numClientThreads < minClientThreads) {
-				fmt::print(
-				    stderr, "WARNING: Adjusting minClientThreads from {} to {}\n", numClientThreads, minClientThreads);
+				log::warn("WARNING: Adjusting minClientThreads from {} to {}", numClientThreads, minClientThreads);
 				numClientThreads = minClientThreads;
 			}
 		}
@@ -418,7 +446,7 @@ bool runWorkloads(TesterOptions& options) {
 		workloadMgr.run();
 		return !workloadMgr.failed();
 	} catch (const std::exception& err) {
-		fmt::print(stderr, "ERROR: {}\n", err.what());
+		log::error("ERROR: {}", err.what());
 		return false;
 	}
 }
@@ -447,12 +475,12 @@ int main(int argc, char** argv) {
 			retCode = 1;
 		}
 
-		fprintf(stderr, "Stopping FDB network thread\n");
+		log::info("Stopping FDB network thread");
 		fdb_check(fdb::network::stop(), "Failed to stop FDB thread");
 		network_thread.join();
-		fprintf(stderr, "FDB network thread successfully stopped\n");
+		log::info("FDB network thread successfully stopped");
 	} catch (const std::exception& err) {
-		fmt::print(stderr, "ERROR: {}\n", err.what());
+		log::error("ERROR: {}", err.what());
 		retCode = 1;
 	}
 	return retCode;

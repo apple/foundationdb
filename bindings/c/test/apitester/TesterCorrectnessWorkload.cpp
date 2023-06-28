@@ -85,11 +85,10 @@ private:
 					        auto expected = stores[tenantId].get((*kvPairs)[i].key);
 					        auto actual = (*results)[i];
 					        if (actual != expected) {
-						        error(
-						            fmt::format("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-						                        fdb::toCharsRef((*kvPairs)[i].key),
-						                        fdb::toCharsRef(expected),
-						                        fdb::toCharsRef(actual)));
+						        error("randomCommitReadOp mismatch. key: {} expected: {:.80} actual: {:.80}",
+						              fdb::toCharsRef((*kvPairs)[i].key),
+						              fdb::toCharsRef(expected),
+						              fdb::toCharsRef(actual));
 						        ASSERT(false);
 					        }
 				        }
@@ -127,10 +126,10 @@ private:
 			    for (int i = 0; i < keys->size(); i++) {
 				    auto expected = stores[tenantId].get((*keys)[i]);
 				    if ((*results)[i] != expected) {
-					    error(fmt::format("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
-					                      fdb::toCharsRef((*keys)[i]),
-					                      fdb::toCharsRef(expected),
-					                      fdb::toCharsRef((*results)[i])));
+					    error("randomGetOp mismatch. key: {} expected: {:.80} actual: {:.80}",
+					          fdb::toCharsRef((*keys)[i]),
+					          fdb::toCharsRef(expected),
+					          fdb::toCharsRef((*results)[i]));
 				    }
 			    }
 			    schedule(cont);
@@ -189,13 +188,13 @@ private:
 					    actual = stores[tenantId].endKey();
 				    }
 				    if (actual != expected) {
-					    error(fmt::format("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {} "
-					                      "actual: {}",
-					                      fdb::toCharsRef(key),
-					                      selector.orEqual,
-					                      selector.offset,
-					                      fdb::toCharsRef(expected),
-					                      fdb::toCharsRef(actual)));
+					    error("randomGetKeyOp mismatch. key: {}, orEqual: {}, offset: {}, expected: {} "
+					          "actual: {}",
+					          fdb::toCharsRef(key),
+					          selector.orEqual,
+					          selector.offset,
+					          fdb::toCharsRef(expected),
+					          fdb::toCharsRef(actual));
 				    }
 			    }
 			    schedule(cont);
@@ -243,20 +242,19 @@ private:
 		    [this, begin, end, results, cont, tenantId]() {
 			    auto expected = stores[tenantId].getRange(begin, end, results->size() + 10, false);
 			    if (results->size() != expected.size()) {
-				    error(fmt::format("randomGetRangeOp mismatch. expected {} keys, actual {} keys",
-				                      expected.size(),
-				                      results->size()));
+				    error("randomGetRangeOp mismatch. expected {} keys, actual {} keys",
+				          expected.size(),
+				          results->size());
 			    } else {
 				    auto expected_kv = expected.begin();
 				    for (auto actual_kv : *results) {
 					    if (actual_kv.key != expected_kv->key || actual_kv.value != expected_kv->value) {
-						    error(fmt::format(
-						        "randomGetRangeOp mismatch. expected key: {} actual key: {} expected value: "
-						        "{:.80} actual value: {:.80}",
-						        fdb::toCharsRef(expected_kv->key),
-						        fdb::toCharsRef(actual_kv.key),
-						        fdb::toCharsRef(expected_kv->value),
-						        fdb::toCharsRef(actual_kv.value)));
+						    error("randomGetRangeOp mismatch. expected key: {} actual key: {} expected value: "
+						          "{:.80} actual value: {:.80}",
+						          fdb::toCharsRef(expected_kv->key),
+						          fdb::toCharsRef(actual_kv.key),
+						          fdb::toCharsRef(expected_kv->value),
+						          fdb::toCharsRef(actual_kv.value));
 					    }
 					    expected_kv++;
 				    }

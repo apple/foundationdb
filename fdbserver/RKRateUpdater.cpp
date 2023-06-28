@@ -2,8 +2,12 @@
  * RateUpdater.cpp
  */
 
+#include "fdbserver/IRKBlobMonitor.h"
+#include "fdbserver/IRKConfigurationMonitor.h"
+#include "fdbserver/IRKMetricsTracker.h"
+#include "fdbserver/IRKRateServer.h"
 #include "fdbserver/IRKRateUpdater.h"
-#include "fdbserver/TagThrottler.h"
+#include "fdbserver/Knobs.h"
 #include "flow/UnitTest.h"
 
 RKRateUpdater::RKRateUpdater(UID ratekeeperId, RatekeeperLimits const& limits)
@@ -13,11 +17,11 @@ RKRateUpdater::~RKRateUpdater() = default;
 
 void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
                            IRKRateServer const& rateServer,
-                           ITagThrottler const& tagThrottler,
                            IRKConfigurationMonitor const& configurationMonitor,
                            IRKRecoveryTracker const& recoveryTracker,
                            Deque<double> const& actualTpsHistory,
-                           IRKBlobMonitor& blobMonitor) {
+                           IRKBlobMonitor& blobMonitor,
+                           int throttledTags) {
 	// double controlFactor = ;  // dt / eFoldingTime
 	double actualTps = getActualTps(rateServer, metricsTracker);
 
@@ -625,11 +629,7 @@ void RKRateUpdater::update(IRKMetricsTracker const& metricsTracker,
 		    .detail("LimitingStorageServerVersionLag", limitingVersionLag)
 		    .detail("WorstStorageServerDurabilityLag", worstDurabilityLag)
 		    .detail("LimitingStorageServerDurabilityLag", limitingDurabilityLag)
-		    .detail("TagsAutoThrottled", tagThrottler.autoThrottleCount())
-		    .detail("TagsAutoThrottledBusyRead", tagThrottler.busyReadersCount())
-		    .detail("TagsAutoThrottledBusyWrite", tagThrottler.busyWritersCount())
-		    .detail("TagsManuallyThrottled", tagThrottler.manualThrottleCount())
-		    .detail("AutoThrottlingEnabled", tagThrottler.isAutoThrottlingEnabled())
+		    .detail("TagsAutoThrottled", throttledTags)
 		    .trackLatest(name);
 	}
 }

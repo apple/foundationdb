@@ -622,6 +622,22 @@ std::pair<Key, Version> decodeChangeFeedDurableKey(ValueRef const& key);
 const Value changeFeedDurableValue(Standalone<VectorRef<MutationRef>> const& mutations, Version knownCommittedVersion);
 std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableValue(ValueRef const& value);
 
+extern const KeyRangeRef changeFeedCacheKeys;
+extern const KeyRef changeFeedCachePrefix;
+
+const Value changeFeedCacheKey(Key const& prefix, Key const& feed, KeyRange const& range, Version version);
+std::tuple<Key, KeyRange, Version> decodeChangeFeedCacheKey(Key const& prefix, ValueRef const& key);
+const Value changeFeedCacheValue(Standalone<VectorRef<MutationsAndVersionRef>> const& mutations);
+Standalone<VectorRef<MutationsAndVersionRef>> decodeChangeFeedCacheValue(ValueRef const& value);
+
+extern const KeyRangeRef changeFeedCacheFeedKeys;
+extern const KeyRef changeFeedCacheFeedPrefix;
+
+const Value changeFeedCacheFeedKey(Key const& prefix, Key const& feed, KeyRange const& range);
+std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key);
+const Value changeFeedCacheFeedValue(Version const& version, Version const& popped);
+std::pair<Version, Version> decodeChangeFeedCacheFeedValue(ValueRef const& value);
+
 // Configuration database special keys
 extern const KeyRef configTransactionDescriptionKey;
 extern const KeyRange globalConfigKnobKeys;
