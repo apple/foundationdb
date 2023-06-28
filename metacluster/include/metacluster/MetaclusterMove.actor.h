@@ -226,8 +226,15 @@ struct StartTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> getVersionFromSource(StartTenantMovementImpl* self, Reference<ITransaction> tr) {
-		state ThreadFuture<Version> resultFuture = tr->getReadVersion();
-		wait(store(self->moveRecord.version, safeThreadFutureToFuture(resultFuture)));
+		loop {
+			try {
+				state ThreadFuture<Version> resultFuture = tr->getReadVersion();
+				wait(store(self->moveRecord.version, safeThreadFutureToFuture(resultFuture)));
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
 		return Void();
 	}
 
@@ -246,8 +253,17 @@ struct StartTenantMovementImpl {
 		state KeyRange allKeys = KeyRangeRef(""_sr, "\xff"_sr);
 		// chunkSize = 100MB
 		state int64_t chunkSize = 100000000;
-		state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture = srcTr->getRangeSplitPoints(allKeys, chunkSize);
-		state Standalone<VectorRef<KeyRef>> splitPoints = wait(safeThreadFutureToFuture(resultFuture));
+		state Standalone<VectorRef<KeyRef>> splitPoints;
+		loop {
+			try {
+				state ThreadFuture<Standalone<VectorRef<KeyRef>>> resultFuture =
+				    srcTr->getRangeSplitPoints(allKeys, chunkSize);
+				wait(store(splitPoints, safeThreadFutureToFuture(resultFuture)));
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(srcTr->onError(e)));
+			}
+		}
 
 		return splitPoints;
 	}
@@ -317,11 +333,20 @@ struct StartTenantMovementImpl {
 	}
 
 	ACTOR static Future<Void> getSourceQuotas(StartTenantMovementImpl* self, Reference<ITransaction> tr) {
-		state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(self->tenantGroup));
-		ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
-		self->tagQuota = v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
-		Optional<int64_t> optionalQuota = wait(TenantMetadata::storageQuota().get(tr, self->tenantGroup));
-		self->storageQuota = optionalQuota;
+		loop {
+			try {
+				state ThreadFuture<ValueReadResult> resultFuture =
+				    tr->get(ThrottleApi::getTagQuotaKey(self->tenantGroup));
+				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
+				self->tagQuota =
+				    v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
+				Optional<int64_t> optionalQuota = wait(TenantMetadata::storageQuota().get(tr, self->tenantGroup));
+				self->storageQuota = optionalQuota;
+				break;
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
 		return Void();
 	}
 
@@ -769,13 +794,17 @@ struct FinishTenantMovementImpl {
 
 	ACTOR static Future<Void> checkDestinationVersion(FinishTenantMovementImpl* self, Reference<ITransaction> tr) {
 		loop {
-			state ThreadFuture<Version> resultFuture = tr->getReadVersion();
-			state Version destVersion;
-			wait(store(destVersion, safeThreadFutureToFuture(resultFuture)));
-			if (destVersion > self->moveRecord.version) {
-				break;
+			try {
+				state ThreadFuture<Version> resultFuture = tr->getReadVersion();
+				state Version destVersion;
+				wait(store(destVersion, safeThreadFutureToFuture(resultFuture)));
+				if (destVersion > self->moveRecord.version) {
+					break;
+				}
+				wait(delay(1.0));
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
 			}
-			wait(delay(1.0));
 		}
 		return Void();
 	}
