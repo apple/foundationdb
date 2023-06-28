@@ -2016,11 +2016,10 @@ void MultiVersionTenant::TenantState::updateTenant() {
 	}
 
 	tenantUpdater = mapThreadFuture<Void, Void>(currentDb.onChange, [self](ErrorOr<Void> result) {
-		if (result.isError()) {
-			throw result.getError();
+		if (!result.isError()) {
+			self->updateTenant();
 		}
-		self->updateTenant();
-		return Void();
+		return result;
 	});
 }
 
