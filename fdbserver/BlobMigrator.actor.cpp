@@ -67,7 +67,7 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 
 // BlobMigrator offers APIs to migrate data from blob storage to storage server. It implements a minimal set of
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
-class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
+class BlobMigrator final : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
 public:
 	BlobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : interf_(interf), actors_(false), dbInfo_(dbInfo) {

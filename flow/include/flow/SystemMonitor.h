@@ -46,7 +46,7 @@ struct SystemMonitorMachineState {
 	                          IPAddress const& ip,
 	                          std::string const& fdbVersion)
 	  : folder(folder), dcId(dcId), zoneId(zoneId), machineId(machineId), datahallId(datahallId), ip(ip),
-	    monitorStartTime(0), fdbVersion(fdbVersion) {}
+	    fdbVersion(fdbVersion), monitorStartTime(0) {}
 };
 
 void initializeSystemMonitorMachineState(SystemMonitorMachineState machineState);

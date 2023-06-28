@@ -579,7 +579,7 @@ struct EncryptedRangeFileWriter : public IRangeFileWriter {
 	                         Optional<Reference<TenantEntryCache<Void>>> tenantCache,
 	                         Reference<IBackupFile> file = Reference<IBackupFile>(),
 	                         int blockSize = 0)
-	  : cx(cx), arena(arena), file(file), encryptMode(encryptMode), tenantCache(tenantCache), blockSize(blockSize),
+	  : cx(cx), arena(arena), encryptMode(encryptMode), file(file), tenantCache(tenantCache), blockSize(blockSize),
 	    blockEnd(0), fileVersion(BACKUP_AGENT_ENCRYPTED_SNAPSHOT_FILE_VERSION) {
 		buffer = makeString(blockSize);
 		wPtr = mutateString(buffer);

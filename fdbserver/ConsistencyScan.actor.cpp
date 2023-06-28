@@ -85,7 +85,7 @@ struct ConsistencyScanMemoryState : public ReferenceCounted<ConsistencyScanMemor
 	ConsistencyScanStats stats;
 
 	explicit ConsistencyScanMemoryState(Reference<AsyncVar<ServerDBInfo> const> dbInfo, UID csId)
-	  : dbInfo(dbInfo), csId(csId), stats(csId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
+	  : csId(csId), dbInfo(dbInfo), stats(csId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 };
 
 // TODO: test the test and write a canary key that the storage servers intentionally get wrong
