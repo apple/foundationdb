@@ -1512,7 +1512,7 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
                                  int _apiVersion,
                                  IsSwitchable switchable,
                                  Optional<TenantName> defaultTenant)
-  : dbId(deterministicRandom()->randomUniqueID()), lockAware(lockAware), switchable(switchable),
+  : lockAware(lockAware), switchable(switchable), dbId(deterministicRandom()->randomUniqueID()),
     connectionRecord(connectionRecord), proxyProvisional(false), clientLocality(clientLocality),
     enableLocalityLoadBalance(enableLocalityLoadBalance), defaultTenant(defaultTenant),
     readVersionBatchers(CLIENT_KNOBS->MAX_GRV_BATCHERS,
@@ -1871,9 +1871,9 @@ DatabaseContext::DatabaseContext(const Error& err)
     feedMergeStreamStarts("FeedMergeStreamStarts", ccFeed), feedErrors("FeedErrors", ccFeed),
     feedNonRetriableErrors("FeedNonRetriableErrors", ccFeed), feedPops("FeedPops", ccFeed),
     feedPopsFallback("FeedPopsFallback", ccFeed), latencies(), readLatencies(), commitLatencies(), GRVLatencies(),
-    mutationsPerCommit(), bytesPerCommit(), sharedStatePtr(nullptr), transactionTracingSample(false),
-    smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
-    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())), outstandingWatches(0) {
+    mutationsPerCommit(), bytesPerCommit(), outstandingWatches(0), sharedStatePtr(nullptr),
+    transactionTracingSample(false), smoothMidShardSize(CLIENT_KNOBS->SHARD_STAT_SMOOTH_AMOUNT),
+    connectToDatabaseEventCacheHolder(format("ConnectToDatabase/%s", dbId.toString().c_str())) {
 	initializeSpecialCounters();
 }
 
@@ -2878,10 +2878,10 @@ AddressExclusion AddressExclusion::parse(StringRef const& key) {
 	}
 }
 
-Tenant::Tenant(Database cx, TenantName name) : lookupFuture(cx->lookupTenant(name)), name(name) {}
+Tenant::Tenant(Database cx, TenantName name) : name(name), lookupFuture(cx->lookupTenant(name)) {}
 Tenant::Tenant(int64_t id) : lookupFuture(id) {}
 Tenant::Tenant(Future<TenantLookupInfo> tenantLookupInfo, Optional<TenantName> name)
-  : lookupFuture(tenantLookupInfo), name(name) {}
+  : name(name), lookupFuture(tenantLookupInfo) {}
 
 int64_t Tenant::id() const {
 	ASSERT(lookupFuture.isReady());

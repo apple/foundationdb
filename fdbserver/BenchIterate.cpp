@@ -51,8 +51,8 @@ static void bench_iterate(benchmark::State& state) {
 	ListImpl mutations;
 	populate(mutations, items, size, kv.key, kv.value);
 	for (auto _ : state) {
-		for (const auto& mutation : mutations) {
-			benchmark::DoNotOptimize(mutation);
+		for (const MutationRef& mutation : mutations) {
+			benchmark::DoNotOptimize(const_cast<MutationRef&>(mutation));
 		}
 	}
 	state.SetItemsProcessed(items * static_cast<long>(state.iterations()));

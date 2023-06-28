@@ -222,9 +222,9 @@ LatencySample::LatencySample(std::string name,
                              double loggingInterval,
                              double accuracy,
                              bool skipTraceOnSilentInterval)
-  : name(name), IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), id(id), sampleEmit(now()), sketch(accuracy),
-    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)),
-    skipTraceOnSilentInterval(skipTraceOnSilentInterval) {
+  : IMetric(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)), name(name), id(id), sampleEmit(now()), sketch(accuracy),
+    skipTraceOnSilentInterval(skipTraceOnSilentInterval),
+    latencySampleEventHolder(makeReference<EventCacheHolder>(id.toString() + "/" + name)) {
 	logger = recurring([this]() { logSample(); }, loggingInterval);
 	p50id = deterministicRandom()->randomUniqueID();
 	p90id = deterministicRandom()->randomUniqueID();

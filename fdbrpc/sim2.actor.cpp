@@ -71,10 +71,10 @@ thread_local ISimulator::ProcessInfo* ISimulator::currentProcess = nullptr;
 
 ISimulator::ISimulator()
   : desiredCoordinators(1), physicalDatacenters(1), processesPerMachine(0), listenersPerProcess(1), usableRegions(1),
-    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED), isStopped(false),
-    lastConnectionFailure(0), connectionFailuresDisableDuration(0), speedUpSimulation(false),
-    backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType), allSwapsDisabled(false),
-    blobGranulesEnabled(false) {}
+    allowLogSetKills(true), tssMode(TSSMode::Disabled), configDBType(ConfigDBType::DISABLED),
+    blobGranulesEnabled(false), isStopped(false), lastConnectionFailure(0), connectionFailuresDisableDuration(0),
+    speedUpSimulation(false), backupAgents(BackupAgentType::WaitForType), drAgents(BackupAgentType::WaitForType),
+    allSwapsDisabled(false) {}
 ISimulator::~ISimulator() = default;
 
 bool simulator_should_inject_fault(const char* context, const char* file, int line, int error_code) {
@@ -2535,7 +2535,7 @@ public:
 		Promise<Void> promise;
 		ProcessInfo* machine;
 		explicit PromiseTask(ProcessInfo* machine) : machine(machine) {}
-		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : machine(machine), promise(std::move(promise)) {}
+		PromiseTask(ProcessInfo* machine, Promise<Void>&& promise) : promise(std::move(promise)), machine(machine) {}
 	};
 
 	void execTask(struct PromiseTask& t) {
