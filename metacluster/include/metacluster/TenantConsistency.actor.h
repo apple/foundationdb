@@ -151,20 +151,16 @@ private:
 
 	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
 	    TenantConsistencyCheck<DB, StandardTenantTypes>* self) {
-		Future<TenantMode> tenantModeFuture =
+		state Future<TenantMode> tenantModeFuture =
 		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
 			    return TenantAPI::getTenantModeAndCheckClusterType(tr);
 		    });
-		TenantMode tenantMode = wait(tenantModeFuture);
-		if (tenantMode != TenantMode::REQUIRED) {
-			return Void();
-		}
-		CODE_PROBE(true, "Data or standalone cluster with tenant_mode=required");
+
+		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
 		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
 				wait(
 				    store(tenantMapEntries,
 				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
@@ -173,6 +169,43 @@ private:
 			} catch (Error& error) {
 				wait(safeThreadFutureToFuture(tr->onError(error)));
 			}
+		}
+
+		TenantMode tenantMode = wait(tenantModeFuture);
+		if (tenantMode != TenantMode::REQUIRED) {
+			return Void();
+		}
+		CODE_PROBE(true, "Data or standalone cluster with tenant_mode=required");
+
+		int64_t prevId = -1;
+		Key prevPrefix;
+		Key prevGapStart;
+		std::vector<KeyRangeRef> gaps;
+		for (const auto& [id, entry] : tenantMapEntries.results) {
+			ASSERT(id > prevId);
+			ASSERT_EQ(TenantAPI::idToPrefix(id), entry.prefix);
+			if (prevId >= 0) {
+				ASSERT(entry.prefix.compare(prevPrefix) > 0);
+			}
+			gaps.emplace_back(prevGapStart, entry.prefix);
+			prevGapStart = keyAfter(entry.prefix);
+			prevId = id;
+			prevPrefix = TenantAPI::idToPrefix(prevId);
+		}
+		gaps.emplace_back(prevGapStart, "\xff"_sr);
+		state std::vector<Future<RangeReadResult>> rangeReadFutures;
+		for (const auto& gap : gaps) {
+			Future<RangeReadResult> f =
+			    runTransaction(self->tenantData.db, [gap](Reference<typename DB::TransactionT> tr) {
+				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				    return safeThreadFutureToFuture(tr->getRange(gap, 1));
+			    });
+			rangeReadFutures.emplace_back(f);
+		}
+		wait(waitForAll(rangeReadFutures));
+		for (auto f : rangeReadFutures) {
+			ASSERT(f.isReady());
+			ASSERT(f.get().empty());
 		}
 		return Void();
 	}
