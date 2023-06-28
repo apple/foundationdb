@@ -21,9 +21,25 @@
 #ifndef FDBCLIENT_GRVPROXYINTERFACE_H
 #define FDBCLIENT_GRVPROXYINTERFACE_H
 #pragma once
+
+#include "fdbclient/ThrottlingId.h"
 #include "flow/FileIdentifier.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbclient/FDBTypes.h"
+
+struct ReportThroughputRequest {
+	constexpr static FileIdentifier file_identifier = 8192740;
+	ThrottlingIdMap<uint64_t> throughput;
+	ReplyPromise<Void> reply;
+
+	ReportThroughputRequest() = default;
+	explicit ReportThroughputRequest(ThrottlingIdMap<uint64_t>&& throughput) : throughput(std::move(throughput)) {}
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, throughput, reply);
+	}
+};
 
 // GrvProxy is proxy primarily specializing on serving GetReadVersion. It also
 // serves health metrics since it communicates with RateKeeper to gather health
@@ -44,6 +60,7 @@ struct GrvProxyInterface {
 	RequestStream<ReplyPromise<Void>> waitFailure; // reports heartbeat to master.
 	RequestStream<struct GetHealthMetricsRequest> getHealthMetrics;
 	PublicRequestStream<struct GlobalConfigRefreshRequest> refreshGlobalConfig;
+	RequestStream<struct ReportThroughputRequest> reportThroughput;
 
 	UID id() const { return getConsistentReadVersion.getEndpoint().token; }
 	std::string toString() const { return id().shortString(); }
@@ -62,6 +79,8 @@ struct GrvProxyInterface {
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(2));
 			refreshGlobalConfig = PublicRequestStream<struct GlobalConfigRefreshRequest>(
 			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(3));
+			reportThroughput = RequestStream<struct ReportThroughputRequest>(
+			    getConsistentReadVersion.getEndpoint().getAdjustedEndpoint(4));
 		}
 	}
 
@@ -71,6 +90,7 @@ struct GrvProxyInterface {
 		streams.push_back(waitFailure.getReceiver());
 		streams.push_back(getHealthMetrics.getReceiver());
 		streams.push_back(refreshGlobalConfig.getReceiver());
+		streams.push_back(reportThroughput.getReceiver());
 		FlowTransport::transport().addEndpoints(streams);
 	}
 };
