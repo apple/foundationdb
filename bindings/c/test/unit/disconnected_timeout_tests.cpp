@@ -193,18 +193,21 @@ TEST_CASE("transaction_reset_cancels_with_timeout") {
 }
 
 TEST_CASE("transaction_destruction_cancels_without_timeout") {
-	auto tr = fdb::Transaction();
+	auto tr = db.createTransaction();
 	auto grvFuture = tr.getReadVersion();
+	// Force the destruction of the original transaction
+	tr = fdb::Transaction();
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1025);
 }
 
 TEST_CASE("transaction_destruction_cancels_with_timeout") {
-	auto tr = fdb::Transaction();
+	auto tr = db.createTransaction();
 	int64_t timeout = 500;
 	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 	auto grvFuture = tr.getReadVersion();
-
+	// Force the destruction of the original transaction
+	tr = fdb::Transaction();
 	auto err = waitFuture(grvFuture);
 	CHECK(err.code() == 1025);
 }
