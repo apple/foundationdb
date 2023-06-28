@@ -30,7 +30,6 @@
 #include <cassert>
 #include <cmath>
 #include "flow/Error.h"
-#include "flow/UnitTest.h"
 
 // A namespace for fast log() computation.
 namespace fastLogger {

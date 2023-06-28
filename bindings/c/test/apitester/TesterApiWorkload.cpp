@@ -385,7 +385,7 @@ void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
 		    fdb::Key begin(1, '\x00');
 		    fdb::Key end(1, '\xff');
 
-		    info(fmt::format("setup: blobbifying {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+		    info("setup: blobbifying {}: [\\x00 - \\xff)", debugTenantStr(tenantId));
 
 		    // wait for blobbification before returning
 		    fdb::Future f = ctx->dbOps()->blobbifyRangeBlocking(begin, end).eraseType();
@@ -396,7 +396,7 @@ void ApiWorkload::blobbifyTenant(std::optional<int> tenantId,
 		    });
 	    },
 	    [=]() {
-		    info(fmt::format("setup: blobbify done {}: [\\x00 - \\xff)\n", debugTenantStr(tenantId)));
+		    info("setup: blobbify done {}: [\\x00 - \\xff)", debugTenantStr(tenantId));
 		    if (blobbifiedCount->fetch_sub(1) == 1) {
 			    schedule(cont);
 		    }

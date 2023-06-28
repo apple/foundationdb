@@ -597,7 +597,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limit = 1e4;
 					req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 					req.version = version;
-					req.tags = TagSet();
+					req.throttlingTag = {};
 					req.options = ReadOptions(debugRandom()->randomUniqueID());
 					DisabledTraceEvent("CCD", req.options.get().debugID.get()).detail("Version", version);
 
@@ -838,7 +838,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 					req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 					req.version = version;
-					req.tags = TagSet();
+					req.throttlingTag = {};
 
 					// Fetch key/values from storage servers
 					// Here we read from all storage servers and make sure results are consistent
