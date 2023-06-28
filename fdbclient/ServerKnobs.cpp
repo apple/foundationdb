@@ -548,7 +548,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Commit CommitProxy and GRV CommitProxy
+	// Commit Proxy and GRV Proxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
