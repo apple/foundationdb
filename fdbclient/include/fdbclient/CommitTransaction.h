@@ -152,28 +152,19 @@ struct MutationRef {
 
 	EncryptCipherDomainId encryptDomainId() const {
 		ASSERT(isEncrypted());
-		return CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION ? configurableEncryptionHeader().getDomainId()
-		                                                    : encryptionHeader()->cipherTextDetails.encryptDomainId;
+		return configurableEncryptionHeader().getDomainId();
 	}
 
 	void updateEncryptCipherDetails(std::unordered_set<BlobCipherDetails>& cipherDetails) {
 		ASSERT(isEncrypted());
 
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-			EncryptHeaderCipherDetails details = header.getCipherDetails();
-			ASSERT(details.textCipherDetails.isValid());
-			cipherDetails.insert(details.textCipherDetails);
-			if (details.headerCipherDetails.present()) {
-				ASSERT(details.headerCipherDetails.get().isValid());
-				cipherDetails.insert(details.headerCipherDetails.get());
-			}
-		} else {
-			const BlobCipherEncryptHeader* header = encryptionHeader();
-			cipherDetails.insert(header->cipherTextDetails);
-			if (header->cipherHeaderDetails.isValid()) {
-				cipherDetails.insert(header->cipherHeaderDetails);
-			}
+		BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+		EncryptHeaderCipherDetails details = header.getCipherDetails();
+		ASSERT(details.textCipherDetails.isValid());
+		cipherDetails.insert(details.textCipherDetails);
+		if (details.headerCipherDetails.present()) {
+			ASSERT(details.headerCipherDetails.get().isValid());
+			cipherDetails.insert(details.headerCipherDetails.get());
 		}
 	}
 
@@ -196,20 +187,12 @@ struct MutationRef {
 
 		StringRef serializedHeader;
 		StringRef payload;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef header;
-			payload = cipher.encrypt(
-			    static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTimeNS);
-			Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
-			arena.dependsOn(headerStr.arena());
-			serializedHeader = headerStr;
-		} else {
-			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
-			serializedHeader = StringRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
-			// Non-configurable encryption does not support getting encryption CPU time
-			payload =
-			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-		}
+		BlobCipherEncryptHeaderRef header;
+		payload =
+		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptTimeNS);
+		Standalone<StringRef> headerStr = BlobCipherEncryptHeaderRef::toStringRef(header);
+		arena.dependsOn(headerStr.arena());
+		serializedHeader = headerStr;
 		return MutationRef(Encrypted, serializedHeader, payload);
 	}
 
@@ -242,22 +225,12 @@ struct MutationRef {
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    usageType);
 
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef header;
-			auto payload = cipher.encrypt(
-			    static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptionTime);
-			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
-			arena.dependsOn(serializedHeader.arena());
-			return MutationRef(Encrypted, serializedHeader, payload);
-		} else {
-			BlobCipherEncryptHeader* header = new (arena) BlobCipherEncryptHeader;
-			StringRef serializedHeader =
-			    StringRef(reinterpret_cast<const uint8_t*>(header), sizeof(BlobCipherEncryptHeader));
-			StringRef payload =
-			    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), header, arena)->toStringRef();
-			// Non-configurable encryption does not support getting encryption CPU time
-			return MutationRef(Encrypted, serializedHeader, payload);
-		}
+		BlobCipherEncryptHeaderRef header;
+		auto payload =
+		    cipher.encrypt(static_cast<const uint8_t*>(bw.getData()), bw.getLength(), &header, arena, encryptionTime);
+		Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(header);
+		arena.dependsOn(serializedHeader.arena());
+		return MutationRef(Encrypted, serializedHeader, payload);
 	}
 
 	MutationRef encryptMetadata(const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>& cipherKeys,
@@ -273,17 +246,10 @@ struct MutationRef {
 	                    StringRef* buf = nullptr,
 	                    double* decryptTimeNS = nullptr) const {
 		StringRef plaintext;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-			DecryptBlobCipherAes256Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
-			plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTimeNS);
-		} else {
-			const BlobCipherEncryptHeader* header = encryptionHeader();
-			DecryptBlobCipherAes256Ctr cipher(
-			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header->iv, usageType);
-			plaintext = cipher.decrypt(param2.begin(), param2.size(), *header, arena)->toStringRef();
-		}
+		const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+		DecryptBlobCipherAes256Ctr cipher(
+		    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, header.getIV(), usageType);
+		plaintext = cipher.decrypt(param2.begin(), param2.size(), header, arena, decryptTimeNS);
 		if (buf != nullptr) {
 			*buf = plaintext;
 		}
@@ -313,21 +279,15 @@ struct MutationRef {
 			return iter->second;
 		};
 		TextAndHeaderCipherKeys textAndHeaderKeys;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
-			EncryptHeaderCipherDetails cipherDetails = header.getCipherDetails();
-			ASSERT(cipherDetails.textCipherDetails.isValid());
-			textAndHeaderKeys.cipherTextKey = getCipherKey(cipherDetails.textCipherDetails);
-			if (cipherDetails.headerCipherDetails.present()) {
-				ASSERT(cipherDetails.headerCipherDetails.get().isValid());
-				textAndHeaderKeys.cipherHeaderKey = getCipherKey(cipherDetails.headerCipherDetails.get());
-			} else {
-				ASSERT(!FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
-			}
+		const BlobCipherEncryptHeaderRef header = configurableEncryptionHeader();
+		EncryptHeaderCipherDetails cipherDetails = header.getCipherDetails();
+		ASSERT(cipherDetails.textCipherDetails.isValid());
+		textAndHeaderKeys.cipherTextKey = getCipherKey(cipherDetails.textCipherDetails);
+		if (cipherDetails.headerCipherDetails.present()) {
+			ASSERT(cipherDetails.headerCipherDetails.get().isValid());
+			textAndHeaderKeys.cipherHeaderKey = getCipherKey(cipherDetails.headerCipherDetails.get());
 		} else {
-			const BlobCipherEncryptHeader* header = encryptionHeader();
-			textAndHeaderKeys.cipherHeaderKey = getCipherKey(header->cipherHeaderDetails);
-			textAndHeaderKeys.cipherTextKey = getCipherKey(header->cipherTextDetails);
+			ASSERT(!FLOW_KNOBS->ENCRYPT_HEADER_AUTH_TOKEN_ENABLED);
 		}
 		return textAndHeaderKeys;
 	}

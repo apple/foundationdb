@@ -23,6 +23,7 @@
 
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/FDBTypes.h"
+#include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/fdbrpc.h"
 #include "fdbrpc/Locality.h"
 
@@ -80,8 +81,8 @@ struct GetRateInfoReply {
 
 	// Depending on the value of SERVER_KNOBS->ENFORCE_TAG_THROTTLING_ON_PROXIES,
 	// one of these fields may be populated
-	Optional<PrioritizedTransactionTagMap<ClientTagThrottleLimits>> clientThrottledTags;
-	Optional<TransactionTagMap<double>> proxyThrottledTags;
+	Optional<PrioritizedThrottlingIdMap<ClientTagThrottleLimits>> clientThrottledTags;
+	Optional<ThrottlingIdMap<double>> proxyThrottledTags;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -102,7 +103,7 @@ struct GetRateInfoRequest {
 	int64_t batchReleasedTransactions;
 	Version version;
 
-	TransactionTagMap<uint64_t> throttledTagCounts;
+	ThrottlingIdMap<uint64_t> throttledTagCounts;
 	bool detailed;
 	ReplyPromise<struct GetRateInfoReply> reply;
 
@@ -111,7 +112,7 @@ struct GetRateInfoRequest {
 	                   int64_t totalReleasedTransactions,
 	                   int64_t batchReleasedTransactions,
 	                   Version version,
-	                   TransactionTagMap<uint64_t> throttledTagCounts,
+	                   ThrottlingIdMap<uint64_t> throttledTagCounts,
 	                   bool detailed)
 	  : requesterID(requesterID), totalReleasedTransactions(totalReleasedTransactions),
 	    batchReleasedTransactions(batchReleasedTransactions), version(version), throttledTagCounts(throttledTagCounts),

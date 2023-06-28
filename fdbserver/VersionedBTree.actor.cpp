@@ -2656,7 +2656,7 @@ public:
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			CODE_PROBE(true, "DWALPager update page while it is being written");
+			CODE_PROBE(true, "DWALPager update page while it is being written", probe::decoration::rare);
 			cacheEntry.writeFuture =
 			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
@@ -5815,7 +5815,8 @@ private:
 		// a and b must be consecutive pages from the same array of records
 		static bool shiftItem(PageToBuild& a, PageToBuild& b, int deltaSize, int kvBytes) {
 			if (a.count < 2) {
-				CODE_PROBE(true, "Redwood skip page balancing since the left page has only 1 item");
+				CODE_PROBE(
+				    true, "Redwood skip page balancing since the left page has only 1 item", probe::decoration::rare);
 				return false;
 			}
 

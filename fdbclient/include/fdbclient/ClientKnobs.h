@@ -275,6 +275,12 @@ public:
 	double GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO;
 	// Maximum duration that a transaction can be tag throttled by proxy before being rejected
 	double PROXY_MAX_TAG_THROTTLE_DURATION;
+	// Maximum number of concurrently running GRV request batchers supported
+	int MAX_GRV_BATCHERS;
+	// If a GRV batcher is idle for this duration, expire it
+	double GRV_BATCHER_EXPIRATION_TIMEOUT;
+	// Interval at which GRV batchers are checked for expiration
+	double GRV_BATCHER_CLEANING_INTERVAL;
 
 	// busyness reporting
 	double BUSYNESS_SPIKE_START_THRESHOLD;
@@ -312,7 +318,6 @@ public:
 	// key_not_found errors for. If TenantInfo::INVALID_TENANT is contained within the list then no tenants will be
 	// dropped. This Knob should ONLY be used in simulation for testing purposes
 	std::string SIMULATION_EKP_TENANT_IDS_TO_DROP;
-	bool ENABLE_CONFIGURABLE_ENCRYPTION;
 	int ENCRYPT_HEADER_FLAGS_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION;
 	int ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;

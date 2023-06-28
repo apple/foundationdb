@@ -434,20 +434,16 @@ public:
 			                                  BlobCipherMetrics::KV_REDWOOD);
 			Arena arena;
 
-			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-				BlobCipherEncryptHeaderRef headerRef;
-				cipher.encryptInplace(payload, len, &headerRef);
+			BlobCipherEncryptHeaderRef headerRef;
+			cipher.encryptInplace(payload, len, &headerRef);
 
-				Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
-				ASSERT(serializedHeader.size() <= BlobCipherEncryptHeader::headerSize);
-				memcpy(h->encryptionHeaderBuf, serializedHeader.begin(), serializedHeader.size());
-				if (serializedHeader.size() < BlobCipherEncryptHeader::headerSize) {
-					memset(h->encryptionHeaderBuf + serializedHeader.size(),
-					       0,
-					       BlobCipherEncryptHeader::headerSize - serializedHeader.size());
-				}
-			} else {
-				cipher.encryptInplace(payload, len, &h->encryption);
+			Standalone<StringRef> serializedHeader = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+			ASSERT(serializedHeader.size() <= BlobCipherEncryptHeader::headerSize);
+			memcpy(h->encryptionHeaderBuf, serializedHeader.begin(), serializedHeader.size());
+			if (serializedHeader.size() < BlobCipherEncryptHeader::headerSize) {
+				memset(h->encryptionHeaderBuf + serializedHeader.size(),
+				       0,
+				       BlobCipherEncryptHeader::headerSize - serializedHeader.size());
 			}
 
 			if constexpr (encodingType == AESEncryption) {
@@ -456,7 +452,6 @@ public:
 		}
 
 		static BlobCipherEncryptHeaderRef getEncryptionHeaderRef(const void* header) {
-			ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 			const Header* h = reinterpret_cast<const Header*>(header);
 			return BlobCipherEncryptHeaderRef::fromStringRef(
 			    StringRef(h->encryptionHeaderBuf, headerSize - (h->encryptionHeaderBuf - (const uint8_t*)h)));
@@ -475,20 +470,10 @@ public:
 				}
 			}
 			Arena arena;
-			if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-				BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
-				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
-				                                  cipherKeys.cipherHeaderKey,
-				                                  headerRef.getIV(),
-				                                  BlobCipherMetrics::KV_REDWOOD);
-				cipher.decryptInplace(payload, len, headerRef, decryptTimeNS);
-			} else {
-				DecryptBlobCipherAes256Ctr cipher(cipherKeys.cipherTextKey,
-				                                  cipherKeys.cipherHeaderKey,
-				                                  h->encryption.iv,
-				                                  BlobCipherMetrics::KV_REDWOOD);
-				cipher.decryptInplace(payload, len, h->encryption);
-			}
+			BlobCipherEncryptHeaderRef headerRef = getEncryptionHeaderRef(header);
+			DecryptBlobCipherAes256Ctr cipher(
+			    cipherKeys.cipherTextKey, cipherKeys.cipherHeaderKey, headerRef.getIV(), BlobCipherMetrics::KV_REDWOOD);
+			cipher.decryptInplace(payload, len, headerRef, decryptTimeNS);
 		}
 	};
 

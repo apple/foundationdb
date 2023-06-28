@@ -285,6 +285,12 @@ public:
 		return all([cpuThreshold](IDataDistributionTeam const& team) { return team.hasLowerCpu(cpuThreshold); });
 	}
 
+	bool hasLowerLoadBytes(int64_t thresholdBytes, double inflightPenalty) const override {
+		return all([thresholdBytes, inflightPenalty](IDataDistributionTeam const& team) {
+			return team.hasLowerLoadBytes(thresholdBytes, inflightPenalty);
+		});
+	}
+
 	int64_t getMinAvailableSpace(bool includeInFlight = true) const override {
 		int64_t result = std::numeric_limits<int64_t>::max();
 		for (const auto& team : teams) {

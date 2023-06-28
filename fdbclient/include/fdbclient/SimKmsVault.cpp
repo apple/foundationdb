@@ -29,6 +29,7 @@
 #include "flow/FastRef.h"
 #include "flow/IRandom.h"
 #include "flow/network.h"
+#include "flow/UnitTest.h"
 
 // The credentials may be allowed to change, but the storage locations and partitioning cannot change, even across
 // restarts. Keep it as global static state in simulation.

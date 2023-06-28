@@ -37,6 +37,7 @@
 #include "flow/IRandom.h"
 #include "flow/Knobs.h"
 #include "flow/Trace.h"
+#include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 using DomIdVec = std::vector<EncryptCipherDomainId>;

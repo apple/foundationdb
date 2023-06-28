@@ -7,7 +7,7 @@ simBackupAgents=BackupToDB
 
     testName=Cycle
     nodeCount=30000
-    transactionsPerSecond=2500.0
+    transactionsPerSecond=1000.0
     testDuration=30.0
     expectedRate=0
 

@@ -20,6 +20,7 @@
 
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/NativeAPI.actor.h"
+#include "fdbclient/Tracing.h"
 #include "fdbserver/TesterInterface.actor.h"
 #include "fdbserver/workloads/workloads.actor.h"
 #include "fdbserver/workloads/BulkSetup.actor.h"
@@ -175,10 +176,12 @@ struct MiniCycleWorkload : TestWorkload {
 				    deterministicRandom()->randomInt(self->beginKey(self->clientId), self->endKey(self->clientId) - 1);
 				state Transaction tr(cx);
 				if (deterministicRandom()->random01() >= self->traceParentProbability) {
-					state Span span("MiniCycleClient"_loc);
+					state Span span(SpanContext(deterministicRandom()->randomUniqueID(),
+					                            deterministicRandom()->randomUInt64(),
+					                            TraceFlags::sampled),
+					                "MiniCycleClient"_loc);
 					TraceEvent("MiniCycleTracingTransaction", span.context.traceID).log();
-					tr.setOption(FDBTransactionOptions::SPAN_PARENT,
-					             BinaryWriter::toValue(span.context, Unversioned()));
+					tr.setOption(FDBTransactionOptions::TRACE_PARENT, span.context.toString());
 				}
 				while (true) {
 					try {

@@ -21,6 +21,7 @@
 #ifndef DatabaseContext_h
 #define DatabaseContext_h
 #include "fdbclient/Notified.h"
+#include "fdbclient/ReadVersionBatchers.h"
 #include "flow/ApiVersion.h"
 #include "flow/FastAlloc.h"
 #include "flow/FastRef.h"
@@ -508,24 +509,7 @@ public:
 	// key-space is used.
 	Optional<TenantName> defaultTenant;
 
-	struct VersionRequest {
-		SpanContext spanContext;
-		Promise<GetReadVersionReply> reply;
-		TagSet tags;
-		Optional<UID> debugID;
-
-		VersionRequest(SpanContext spanContext, TagSet tags = TagSet(), Optional<UID> debugID = {})
-		  : spanContext(spanContext), tags(tags), debugID(debugID) {}
-	};
-
-	// Transaction start request batching
-	struct VersionBatcher {
-		PromiseStream<VersionRequest> stream;
-		Future<Void> actor;
-	};
-
-	using VersionBatcherIndex = std::pair<uint32_t, Optional<TenantGroupName>>;
-	std::map<VersionBatcherIndex, VersionBatcher> versionBatcher;
+	ReadVersionBatchers readVersionBatchers;
 
 	AsyncTrigger connectionFileChangedTrigger;
 
@@ -728,7 +712,7 @@ public:
 	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
 	                             int deprecatedVersion = -1);
 
-	static bool debugUseTags;
+	bool debugUseTags = false;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
 	// Cache of the latest commit versions of storage servers.

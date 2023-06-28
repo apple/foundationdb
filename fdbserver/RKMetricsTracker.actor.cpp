@@ -112,7 +112,7 @@ public:
 				if (change.second.present()) {
 					if (!change.second.get().isTss()) {
 
-						auto& a = storageServerTrackers[change.first];
+						auto& a = storageServerTrackers[id];
 						a = Future<Void>();
 						a = splitError(trackStorageServerQueueInfo(self, change.second.get()), err);
 
@@ -120,8 +120,8 @@ public:
 					}
 				} else {
 					storageServerTrackers.erase(id);
-
 					self->storageServerInterfaces.erase(id);
+					self->storageQueueInfo.erase(id);
 				}
 			}
 			when(wait(err.getFuture())) {}
@@ -200,6 +200,7 @@ public:
 			when(wait(self->dbInfo->onChange())) {
 				if (tlogInterfs != self->dbInfo->get().logSystemConfig.allLocalLogs()) {
 					tlogInterfs = self->dbInfo->get().logSystemConfig.allLocalLogs();
+					self->tlogQueueInfo.clear();
 					tlogTrackers = std::vector<Future<Void>>();
 					for (auto tli : tlogInterfs) {
 						tlogTrackers.push_back(splitError(trackTLogQueueInfo(self, tli), err));
@@ -301,11 +302,11 @@ void StorageQueueInfo::update(StorageQueuingMetricsReply const& reply, Smoother&
 		smoothLatestVersion.setTotal(reply.version);
 	}
 
-	busiestReadTags = reply.busiestTags;
+	busiestReaders = reply.busiestReaders;
 }
 
 UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
-	busiestWriteTags.clear();
+	busiestWriters.clear();
 	TransactionTag busiestTag;
 	TransactionCommitCostEstimation maxCost;
 	double maxRate = 0, maxBusyness = 0;
@@ -321,7 +322,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		// TraceEvent("RefreshSSCommitCost").detail("TotalWriteCost", totalWriteCost).detail("TotalWriteOps",totalWriteOps);
 		ASSERT_GT(totalWriteCosts, 0);
 		maxBusyness = double(maxCost.getCostSum()) / totalWriteCosts;
-		busiestWriteTags.emplace_back(busiestTag, maxRate, maxBusyness);
+		busiestWriters.emplace_back(ThrottlingId::fromTag(busiestTag), maxRate, maxBusyness);
 	}
 
 	UpdateCommitCostRequest updateCommitCostRequest{ ratekeeperID,
@@ -331,7 +332,7 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 		                                             maxCost.getOpsSum(),
 		                                             maxCost.getCostSum(),
 		                                             totalWriteCosts,
-		                                             !busiestWriteTags.empty(),
+		                                             !busiestWriters.empty(),
 		                                             ReplyPromise<Void>() };
 
 	// reset statistics

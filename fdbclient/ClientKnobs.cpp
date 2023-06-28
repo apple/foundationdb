@@ -284,6 +284,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLING_PAGE_SIZE,                4096 ); if( randomize && BUGGIFY ) TAG_THROTTLING_PAGE_SIZE = 4096;
 	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            4.0 );
 	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
+	init( MAX_GRV_BATCHERS,                        1000 );
+	init( GRV_BATCHER_EXPIRATION_TIMEOUT,          60.0 );
+	init( GRV_BATCHER_CLEANING_INTERVAL,            5.0 );
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
@@ -313,7 +316,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,        true );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
-	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );

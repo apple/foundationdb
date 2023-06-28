@@ -135,28 +135,28 @@ Key ThrottleApi::getTagQuotaKey(TransactionTagRef tag) {
 	return tag.withPrefix(tagQuotaPrefix);
 }
 
-bool ThrottleApi::TagQuotaValue::isValid() const {
+bool ThrottleApi::ThroughputQuotaValue::isValid() const {
 	return reservedQuota <= totalQuota && reservedQuota >= 0;
 }
 
-Tuple ThrottleApi::TagQuotaValue::pack() const {
+Tuple ThrottleApi::ThroughputQuotaValue::pack() const {
 	return Tuple::makeTuple(reservedQuota, totalQuota);
 }
 
-ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::unpack(Tuple const& tuple) {
+ThrottleApi::ThroughputQuotaValue ThrottleApi::ThroughputQuotaValue::unpack(Tuple const& tuple) {
 	if (tuple.size() != 2) {
 		throw invalid_throttle_quota_value();
 	}
-	TagQuotaValue result;
+	ThroughputQuotaValue result;
 	try {
 		result.reservedQuota = tuple.getInt(0);
 		result.totalQuota = tuple.getInt(1);
 	} catch (Error& e) {
-		TraceEvent(SevWarnAlways, "TagQuotaValueFailedToDeserialize").error(e);
+		TraceEvent(SevWarnAlways, "ThroughputQuotaValueFailedToDeserialize").error(e);
 		throw invalid_throttle_quota_value();
 	}
 	if (!result.isValid()) {
-		TraceEvent(SevWarnAlways, "TagQuotaValueInvalidQuotas")
+		TraceEvent(SevWarnAlways, "ThrougputQuotaValueInvalidQuotas")
 		    .detail("ReservedQuota", result.reservedQuota)
 		    .detail("TotalQuota", result.totalQuota);
 		throw invalid_throttle_quota_value();
@@ -164,7 +164,7 @@ ThrottleApi::TagQuotaValue ThrottleApi::TagQuotaValue::unpack(Tuple const& tuple
 	return result;
 }
 
-bool ThrottleApi::TagQuotaValue::operator==(ThrottleApi::TagQuotaValue const& rhs) const {
+bool ThrottleApi::ThroughputQuotaValue::operator==(ThrottleApi::ThroughputQuotaValue const& rhs) const {
 	return reservedQuota == rhs.reservedQuota && totalQuota == rhs.totalQuota;
 }
 
