@@ -75,12 +75,15 @@ private:
 
 template <class T>
 class PTreeFinger {
-	using PTreeFingerEntry = PTree<T> const*;
+public:
 	// This finger size supports trees with up to exp(96/4.3) ~= 4,964,514,749 entries.
 	// The number 4.3 comes from here: https://en.wikipedia.org/wiki/Random_binary_tree#The_longest_path
 	// see also: check().
-	static constexpr size_t N = 96;
-	PTreeFingerEntry entries_[N];
+	static constexpr size_t kFingerSizeUpperBound = 96;
+
+private:
+	using PTreeFingerEntry = PTree<T> const*;
+	PTreeFingerEntry entries_[kFingerSizeUpperBound];
 	size_t size_ = 0;
 	size_t bound_sz_ = 0;
 
@@ -113,12 +116,12 @@ public:
 
 	void resize(size_t sz) {
 		size_ = sz;
-		ASSERT(size_ < N);
+		ASSERT(size_ < kFingerSizeUpperBound);
 	}
 
 	void push_back(PTree<T> const* node) {
 		entries_[size_++] = { node };
-		ASSERT(size_ < N);
+		ASSERT(size_ < kFingerSizeUpperBound);
 	}
 
 	void push_for_bound(PTree<T> const* node, bool less) {
@@ -281,20 +284,55 @@ T get(PTreeFinger<T>& f) {
 
 // Modifies p to point to a PTree with x inserted
 template <class T>
-void insert(Reference<PTree<T>>& p, Version at, const T& x) {
-	if (!p) {
-		p = makeReference<PTree<T>>(x, at);
-	} else {
-		int c = ::compare(x, p->data);
+void insert(Reference<PTree<T>>& root, Version at, const T& x) {
+	// Construct a finger to the insertion point, tracking the directions taken
+	PTreeFinger<T> finger;
+	bool direction[finger.kFingerSizeUpperBound];
+	int directionEnd = 0;
+	finger.push_back(root.getPtr());
+	for (;;) {
+		auto* back = finger.back();
+		if (back == nullptr) {
+			break;
+		}
+		int c = ::compare(x, back->data);
 		if (c == 0) {
-			p = makeReference<PTree<T>>(p->priority, x, p->left(at), p->right(at), at);
+			break;
+		} else if (c > 0) {
+			finger.push_back(back->right(at).getPtr());
+			direction[directionEnd++] = true;
 		} else {
-			const bool direction = !(c < 0);
-			Reference<PTree<T>> child = p->child(direction, at);
-			insert(child, at, x);
-			p = update(p, direction, child, at);
-			if (p->child(direction, at)->priority > p->priority)
-				rotate(p, at, !direction);
+			finger.push_back(back->left(at).getPtr());
+			direction[directionEnd++] = false;
+		}
+	}
+
+	// Perform insertion and propagate modifications (from insertion and rotations) to the root
+	auto node = finger.back() != nullptr ? Reference<PTree<T>>::addRef(const_cast<PTree<T>*>(finger.back()))
+	                                     : Reference<PTree<T>>();
+	auto* before = node.getPtr();
+	if (!node) {
+		node = makeReference<PTree<T>>(x, at);
+	} else {
+		node = makeReference<PTree<T>>(node->priority, x, node->left(at), node->right(at), at);
+	}
+	for (;;) {
+		if (before == node.getPtr()) {
+			// Done propagating copies
+			return;
+		}
+		if (finger.size() == 1) {
+			// Propagate copy to root
+			root = std::move(node);
+			return;
+		}
+		finger.pop_back();
+		auto parent = Reference<PTree<T>>::addRef(const_cast<PTree<T>*>(finger.back()));
+		const bool dir = direction[--directionEnd];
+		// Prepare for next iteration
+		node = update(parent, dir, node, at);
+		if (node->child(dir, at)->priority > node->priority) {
+			rotate(node, at, !dir);
 		}
 	}
 }
