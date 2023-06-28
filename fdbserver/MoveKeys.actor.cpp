@@ -302,17 +302,17 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock* lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
-	if (currentOwner == lock.prevOwner) {
+	if (currentOwner == lock->prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-		if (lastWrite != lock.prevWrite) {
+		if (lastWrite != lock->prevWrite) {
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			throw movekeys_conflict();
 		}
@@ -320,21 +320,21 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 		// Take the lock
 		if (isWrite) {
 			BinaryWriter wrMyOwner(Unversioned());
-			wrMyOwner << lock.myOwner;
+			wrMyOwner << lock->myOwner;
 			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
 			BinaryWriter wrLastWrite(Unversioned());
 			UID lastWriter = deterministicRandom()->randomUniqueID();
 			wrLastWrite << lastWriter;
 			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
 			TraceEvent("CheckMoveKeysLock")
-			    .detail("PrevOwner", lock.prevOwner.toString())
-			    .detail("PrevWrite", lock.prevWrite.toString())
-			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("PrevOwner", lock->prevOwner.toString())
+			    .detail("PrevWrite", lock->prevWrite.toString())
+			    .detail("MyOwner", lock->myOwner.toString())
 			    .detail("Writer", lastWriter.toString());
 		}
 
 		return Void();
-	} else if (currentOwner == lock.myOwner) {
+	} else if (currentOwner == lock->myOwner) {
 		if (isWrite) {
 			// Touch the lock, preventing overlapping attempts to take it
 			BinaryWriter wrLastWrite(Unversioned());
@@ -351,49 +351,9 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLockWhenPrepareBlobRestore(Transaction* tr, MoveKeysLock* lock) {
-	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
-
-	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
-	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-
-	if (currentOwner == lock->prevOwner) {
-		// Check that the previous owner hasn't touched the lock since we took it
-		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
-		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-		if (lastWrite != lock->prevWrite) {
-			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
-			throw movekeys_conflict();
-		}
-
-		// Take the lock
-		BinaryWriter wrMyOwner(Unversioned());
-		wrMyOwner << lock->myOwner;
-		tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
-		BinaryWriter wrLastWrite(Unversioned());
-		UID lastWriter = deterministicRandom()->randomUniqueID();
-		wrLastWrite << lastWriter;
-		tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
-		TraceEvent("CheckMoveKeysLock")
-		    .detail("PrevOwner", lock->prevOwner.toString())
-		    .detail("PrevWrite", lock->prevWrite.toString())
-		    .detail("MyOwner", lock->myOwner.toString())
-		    .detail("Writer", lastWriter.toString());
-
-		return Void();
-	} else if (currentOwner == lock->myOwner) {
-		// Touch the lock, preventing overlapping attempts to take it
-		BinaryWriter wrLastWrite(Unversioned());
-		wrLastWrite << deterministicRandom()->randomUniqueID();
-		tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
-		// Make this transaction self-conflicting so the database will not execute it twice with the same write key
-		tr->makeSelfConflicting();
-
-		return Void();
-	} else {
-		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
-		throw movekeys_conflict();
-	}
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
+	wait(checkPersistentMoveKeysLock(tr, &lock, isWrite));
+	return Void();
 }
 
 Future<Void> checkMoveKeysLock(Transaction* tr,
@@ -3391,7 +3351,7 @@ ACTOR Future<Void> prepareBlobRestore(Database occ,
 		tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 		tr.setOption(FDBTransactionOptions::LOCK_AWARE);
 		try {
-			wait(checkPersistentMoveKeysLockWhenPrepareBlobRestore(&tr, lock));
+			wait(checkPersistentMoveKeysLock(&tr, lock));
 			UID currentOwnerId = wait(BlobGranuleRestoreConfig().lock().getD(&tr));
 			if (currentOwnerId != bmId) {
 				CODE_PROBE(true, "Blob migrator replaced in prepareBlobRestore");
