@@ -1134,7 +1134,8 @@ bool isDegradedPeer(const UpdateWorkerHealthRequest& lastReq, const NetworkAddre
 UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
                                             const LocalityData& locality,
                                             Reference<AsyncVar<ServerDBInfo> const> dbInfo,
-                                            const UpdateWorkerHealthRequest& lastReq) {
+                                            const UpdateWorkerHealthRequest& lastReq,
+                                            Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	const auto& allPeers = FlowTransport::transport().getAllPeers();
 
 	// Check remote log router connectivity only when remote TLogs are recruited and in use.
@@ -1153,7 +1154,7 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 	}
 
 	if (workerLocation == None) {
-		// This worker doesn't need to monitor anything if it is in remote satellite.
+		// This worker doesn't need to monitor anything if it is not in transaction system or in remote satellite.
 		return req;
 	}
 
@@ -1247,6 +1248,24 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 				    .detail("ConnectionFailureCount", peer->connectFailedCount);
 				disconnectedPeer = true;
 			}
+		} else if (enablePrimaryTxnSystemHealthCheck->get() &&
+		           (addressInDbAndPrimaryDc(address, dbInfo) || addressInDbAndPrimarySatelliteDc(address, dbInfo))) {
+			if (peer->connectFailedCount >= SERVER_KNOBS->PEER_DEGRADATION_CONNECTION_FAILURE_COUNT) {
+				TraceEvent("HealthMonitorDetectDegradedPeer")
+				    .detail("WorkerLocation", workerLocation)
+				    .detail("Peer", address)
+				    .detail("ExtensiveConnectivityCheck", true)
+				    .detail("Elapsed", now() - lastLoggedTime)
+				    .detail("Disconnected", true)
+				    .detail("MinLatency", peer->pingLatencies.min())
+				    .detail("MaxLatency", peer->pingLatencies.max())
+				    .detail("MeanLatency", peer->pingLatencies.mean())
+				    .detail("MedianLatency", peer->pingLatencies.median())
+				    .detail("PingCount", peer->pingLatencies.getPopulationSize())
+				    .detail("PingTimeoutCount", peer->timeoutCount)
+				    .detail("ConnectionFailureCount", peer->connectFailedCount);
+				disconnectedPeer = true;
+			}
 		}
 
 		if (disconnectedPeer) {
@@ -1309,13 +1328,16 @@ UpdateWorkerHealthRequest doPeerHealthCheck(const WorkerInterface& interf,
 ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFullInterface>> const> ccInterface,
                                  WorkerInterface interf,
                                  LocalityData locality,
-                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo) {
+                                 Reference<AsyncVar<ServerDBInfo> const> dbInfo,
+                                 Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck) {
 	state UpdateWorkerHealthRequest req;
 	loop {
 		Future<Void> nextHealthCheckDelay = Never();
-		if (dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS && ccInterface->get().present()) {
+		if ((dbInfo->get().recoveryState >= RecoveryState::ACCEPTING_COMMITS ||
+		     enablePrimaryTxnSystemHealthCheck->get()) &&
+		    ccInterface->get().present()) {
 			nextHealthCheckDelay = delay(SERVER_KNOBS->WORKER_HEALTH_MONITOR_INTERVAL);
-			req = doPeerHealthCheck(interf, locality, dbInfo, req);
+			req = doPeerHealthCheck(interf, locality, dbInfo, req, enablePrimaryTxnSystemHealthCheck);
 
 			if (!req.disconnectedPeers.empty() || !req.degradedPeers.empty() || !req.recoveredPeers.empty()) {
 				if (g_network->isSimulated()) {
@@ -1340,6 +1362,7 @@ ACTOR Future<Void> healthMonitor(Reference<AsyncVar<Optional<ClusterControllerFu
 			when(wait(nextHealthCheckDelay)) {}
 			when(wait(ccInterface->onChange())) {}
 			when(wait(dbInfo->onChange())) {}
+			when(wait(enablePrimaryTxnSystemHealthCheck->onChange())) {}
 		}
 	}
 }
@@ -2082,6 +2105,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 	state Reference<AsyncVar<std::set<std::string>>> issues(new AsyncVar<std::set<std::string>>());
 
 	state Future<Void> updateClusterIdFuture;
+	state Reference<AsyncVar<bool>> enablePrimaryTxnSystemHealthCheck = makeReference<AsyncVar<bool>>(false);
 
 	if (FLOW_KNOBS->ENABLE_CHAOS_FEATURES) {
 		TraceEvent(SevInfo, "ChaosFeaturesEnabled");
@@ -2442,7 +2466,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 		}
 
 		if (SERVER_KNOBS->ENABLE_WORKER_HEALTH_MONITOR) {
-			errorForwarders.add(healthMonitor(ccInterface, interf, locality, dbInfo));
+			errorForwarders.add(
+			    healthMonitor(ccInterface, interf, locality, dbInfo, enablePrimaryTxnSystemHealthCheck));
 		}
 
 		loop choose {
