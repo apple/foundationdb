@@ -169,6 +169,18 @@ private:
 	// Number of errors logged
 	std::atomic<int> numErrors;
 
+	// Info on last reported stats
+	TimePoint lastStatsTime;
+	int lastTxCompleted;
+
+	// Context of the pending transaction (may be not set)
+	std::mutex pendingTxMutex;
+	std::shared_ptr<ITransactionContext> pendingTx;
+
+	enum class Action { None, BeginTransaction, ScheduleTask, Continuation };
+	// Last performed action by the workload
+	std::atomic<Action> lastAction;
+
 protected:
 	// Client ID assigned to the workload (a number from 0 to numClients-1)
 	int clientId;
@@ -199,10 +211,6 @@ protected:
 
 	// Workload is in progress (intialized, but not completed)
 	std::atomic<bool> inProgress;
-
-	// Info on last reported stats
-	TimePoint lastStatsTime;
-	int lastTxCompleted;
 };
 
 // Workload manager

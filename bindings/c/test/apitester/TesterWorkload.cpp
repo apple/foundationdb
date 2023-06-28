@@ -26,6 +26,7 @@
 #include <cstdlib>
 #include <memory>
 #include <fmt/format.h>
+#include <mutex>
 #include <vector>
 #include <iostream>
 #include <cstdio>
@@ -80,8 +81,9 @@ bool WorkloadConfig::getBoolOption(const std::string& name, bool defaultVal) con
 }
 
 WorkloadBase::WorkloadBase(const WorkloadConfig& config)
-  : manager(nullptr), tasksScheduled(0), numErrors(0), clientId(config.clientId), numClients(config.numClients),
-    failed(false), numTxCompleted(0), numTxStarted(0), inProgress(false), lastTxCompleted(0) {
+  : manager(nullptr), tasksScheduled(0), numErrors(0), lastTxCompleted(0), lastAction(Action::None),
+    clientId(config.clientId), numClients(config.numClients), failed(false), numTxCompleted(0), numTxStarted(0),
+    inProgress(false) {
 	maxErrors = config.getIntOption("maxErrors", 10);
 	minTxTimeoutMs = config.getIntOption("minTxTimeoutMs", 0);
 	maxTxTimeoutMs = config.getIntOption("maxTxTimeoutMs", 0);
@@ -98,11 +100,34 @@ void WorkloadBase::printStats() {
 	int completed = numTxCompleted.load();
 	int started = numTxStarted.load();
 	TimePoint now = timeNow();
-	info("progress: {:>4} total, {:>3} last {:.1f}s, {:>2} pending",
+	const char* actionStr;
+	switch (lastAction) {
+	case Action::None:
+		actionStr = "none";
+		break;
+	case Action::BeginTransaction:
+		actionStr = "begintx";
+		break;
+	case Action::ScheduleTask:
+		actionStr = "schedule";
+		break;
+	case Action::Continuation:
+		actionStr = "cont";
+		break;
+	}
+	info("Progress: {:>4} total, {:>3} in last {:.1f}s, pending tx {}, last action: {}",
 	     started,
 	     completed - lastTxCompleted,
 	     microsecToSec(timeElapsedInUs(lastStatsTime, now)),
-	     started - completed);
+	     started - completed,
+	     actionStr);
+	// If there was no progress, print the status of the pending transaction
+	if (completed - lastTxCompleted == 0) {
+		std::lock_guard<std::mutex> lock(pendingTxMutex);
+		if (pendingTx) {
+			info("TX status: {}", pendingTx->getTransactionStatus());
+		}
+	}
 	lastStatsTime = now;
 	lastTxCompleted = completed;
 }
@@ -113,6 +138,7 @@ void WorkloadBase::schedule(TTaskFct task) {
 		return;
 	}
 	tasksScheduled++;
+	lastAction = Action::ScheduleTask;
 	manager->scheduler->schedule([this, task]() {
 		task();
 		scheduledTaskDone();
@@ -145,7 +171,8 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	}
 	tasksScheduled++;
 	numTxStarted++;
-	manager->txExecutor->execute( //
+	lastAction = Action::BeginTransaction;
+	auto ctx = manager->txExecutor->execute( //
 	    [this, transactional, cont, startFct](auto ctx) {
 		    if (transactional && maxTxTimeoutMs > 0) {
 			    int timeoutMs = Random::get().randomInt(minTxTimeoutMs, maxTxTimeoutMs);
@@ -155,7 +182,12 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	    },
 	    [this, cont, failOnError](fdb::Error err) {
 		    numTxCompleted++;
+		    {
+			    std::lock_guard<std::mutex> lock(pendingTxMutex);
+			    pendingTx = {};
+		    }
 		    if (err.code() == error_code_success) {
+			    lastAction = Action::Continuation;
 			    cont();
 		    } else {
 			    std::string msg = fmt::format("Transaction failed with error: {} ({})", err.code(), err.what());
@@ -172,6 +204,10 @@ void WorkloadBase::doExecute(TOpStartFct startFct,
 	    tenant,
 	    transactional,
 	    maxTxTimeoutMs > 0);
+	{
+		std::lock_guard<std::mutex> lock(pendingTxMutex);
+		pendingTx = ctx;
+	}
 }
 
 void WorkloadBase::newErrorReported() {
@@ -185,6 +221,7 @@ void WorkloadBase::newErrorReported() {
 void WorkloadBase::scheduledTaskDone() {
 	if (--tasksScheduled == 0) {
 		inProgress = false;
+		lastAction = Action::None;
 		if (numErrors > 0) {
 			error("Workload failed with {} errors", numErrors.load());
 		} else {

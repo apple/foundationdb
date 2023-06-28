@@ -183,6 +183,7 @@ public:
 			return;
 		}
 		txState = TxState::ON_ERROR;
+		retriedErrors.push_back(err);
 		lock.unlock();
 
 		// No need to hold the lock from here on, because ON_ERROR state is handled sequentially, and
@@ -208,6 +209,21 @@ public:
 		} else {
 			transactionFailed(err);
 		}
+	}
+
+	std::string getTransactionStatus() override {
+		std::unique_lock<std::mutex> lock(mutex);
+		const char* stateStr;
+		if (txState == TxState::DONE) {
+			stateStr = "done";
+		} else if (txState == TxState::ON_ERROR) {
+			stateStr = "onerror";
+		} else if (commitCalled) {
+			stateStr = "commit";
+		} else {
+			stateStr = "read";
+		}
+		return fmt::format("{}, retried on [{}]", stateStr, fmt::join(retriedErrorCodes(), ", "));
 	}
 
 protected:
@@ -297,7 +313,6 @@ protected:
 	// Checks if a transaction can be retried. Fails the transaction if the check fails
 	bool canRetry(fdb::Error lastErr) {
 		ASSERT(txState == TxState::ON_ERROR);
-		retriedErrors.push_back(lastErr);
 		if (retryLimit == 0 || retriedErrors.size() <= retryLimit) {
 			if (retriedErrors.size() == LARGE_NUMBER_OF_RETRIES) {
 				log::warn("Transaction already retried {} times, on errors: {}",
@@ -382,7 +397,7 @@ protected:
 	bool commitCalled;
 
 	// A history of errors on which the transaction was retried
-	// used only in ON_ERROR and DONE states (no need for mutex)
+	// Must be accessed under mutex, expect when being read in ON_ERROR & DONE states
 	std::vector<fdb::Error> retriedErrors;
 
 	// blob granule base path
@@ -515,6 +530,18 @@ public:
 	                           tenantName,
 	                           transactional,
 	                           restartOnTimeout) {}
+
+	std::string getTransactionStatus() override {
+		std::string baseStatus = TransactionContextBase::getTransactionStatus();
+		std::unique_lock<std::mutex> lock(mutex);
+		int numCancelled = 0;
+		for (auto& iter : callbackMap) {
+			if (iter.second.cancelled) {
+				numCancelled++;
+			}
+		}
+		return fmt::format("{}, {} callbacks, {} cancelled", baseStatus, callbackMap.size(), numCancelled);
+	}
 
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
@@ -726,11 +753,11 @@ public:
 
 	const TransactionExecutorOptions& getOptions() override { return options; }
 
-	void execute(TOpStartFct startFct,
-	             TOpContFct cont,
-	             std::optional<fdb::BytesRef> tenantName,
-	             bool transactional,
-	             bool restartOnTimeout) override {
+	std::shared_ptr<ITransactionContext> execute(TOpStartFct startFct,
+	                                             TOpContFct cont,
+	                                             std::optional<fdb::BytesRef> tenantName,
+	                                             bool transactional,
+	                                             bool restartOnTimeout) override {
 		try {
 			std::shared_ptr<ITransactionContext> ctx;
 			if (options.blockOnFutures) {
@@ -755,9 +782,11 @@ public:
 				                                                restartOnTimeout);
 			}
 			startFct(ctx);
+			return ctx;
 		} catch (...) {
 			cont(fdb::Error(error_code_operation_failed));
 		}
+		return {};
 	}
 
 	std::string getClusterFileForErrorInjection() override {
