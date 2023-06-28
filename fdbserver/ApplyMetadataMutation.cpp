@@ -103,9 +103,9 @@ public:
 	                           const std::unordered_map<EncryptCipherDomainId, Reference<BlobCipherKey>>* cipherKeys_,
 	                           EncryptionAtRestMode encryptMode)
 	  : spanContext(spanContext_), dbgid(resolverData_.dbgid), arena(resolverData_.arena), mutations(mutations_),
-	    txnStateStore(resolverData_.txnStateStore),
-	    toCommit(resolverData_.toCommit), cipherKeys(cipherKeys_), confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem),
-	    popVersion(resolverData_.popVersion), keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache), encryptMode(encryptMode), 
+	    txnStateStore(resolverData_.txnStateStore), toCommit(resolverData_.toCommit), cipherKeys(cipherKeys_),
+	    confChange(resolverData_.confChanges), logSystem(resolverData_.logSystem), popVersion(resolverData_.popVersion),
+	    keyInfo(resolverData_.keyInfo), storageCache(resolverData_.storageCache), encryptMode(encryptMode),
 	    initialCommit(resolverData_.initialCommit), forResolver(true) {
 		if (encryptMode.isEncryptionEnabled()) {
 			ASSERT(cipherKeys != nullptr);
