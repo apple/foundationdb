@@ -351,38 +351,37 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLockWhenPrepareBlobRestore(Transaction* tr,
-                                                                            std::shared_ptr<MoveKeysLock> lock) {
+ACTOR static Future<Void> checkPersistentMoveKeysLockWhenPrepareBlobRestore(Transaction* tr, MoveKeysLock* lock) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
-	if (currentOwner == lock.get()->prevOwner) {
+	if (currentOwner == lock->prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-		if (lastWrite != lock.get()->prevWrite) {
+		if (lastWrite != lock->prevWrite) {
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			throw movekeys_conflict();
 		}
 
 		// Take the lock
 		BinaryWriter wrMyOwner(Unversioned());
-		wrMyOwner << lock.get()->myOwner;
+		wrMyOwner << lock->myOwner;
 		tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
 		BinaryWriter wrLastWrite(Unversioned());
 		UID lastWriter = deterministicRandom()->randomUniqueID();
 		wrLastWrite << lastWriter;
 		tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
 		TraceEvent("CheckMoveKeysLock")
-		    .detail("PrevOwner", lock.get()->prevOwner.toString())
-		    .detail("PrevWrite", lock.get()->prevWrite.toString())
-		    .detail("MyOwner", lock.get()->myOwner.toString())
+		    .detail("PrevOwner", lock->prevOwner.toString())
+		    .detail("PrevWrite", lock->prevWrite.toString())
+		    .detail("MyOwner", lock->myOwner.toString())
 		    .detail("Writer", lastWriter.toString());
 
 		return Void();
-	} else if (currentOwner == lock.get()->myOwner) {
+	} else if (currentOwner == lock->myOwner) {
 		// Touch the lock, preventing overlapping attempts to take it
 		BinaryWriter wrLastWrite(Unversioned());
 		wrLastWrite << deterministicRandom()->randomUniqueID();
@@ -3377,7 +3376,7 @@ Future<Void> assignKeysToServer(UID traceId, TrType tr, KeyRangeRef keys, UID se
 }
 
 ACTOR Future<Void> prepareBlobRestore(Database occ,
-                                      std::shared_ptr<MoveKeysLock> lock,
+                                      MoveKeysLock* lock,
                                       const DDEnabledState* ddEnabledState,
                                       UID traceId,
                                       KeyRangeRef keys,
