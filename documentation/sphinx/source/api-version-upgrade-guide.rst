@@ -17,7 +17,11 @@ API version 710300
 General
 -------
 
-* No changes are needed
+* The transaction option ``use_grv_cache`` must be used in combination with the network option ``disable_client_bypass`` to ensure the shared state is initialized in an environment that uses the multi-version client API.
+
+* The new behavior of ``fdb_setup_network`` is to fail with an error if at least one external client fails to initialize. The old behavior was to ignore the failures to setup network on external clients as long as at least one client could be initialized successfully (the local client or at least one external client if the local client is disabled). The old behavior can be restored by setting the network option ``ignore_external_client_failures``.
+
+* Special keys ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` are removed in 71.2 and the functionalities they provide are now covered by the global configuration module.
 
 .. _api-version-upgrade-guide-710200:
 
@@ -27,7 +31,7 @@ API version 710200
 General
 -------
 
-* Special keys ``\xff\xff/management/profiling/<client_txn_sample_rate|client_txn_size_limit>`` are removed in 71.2 and the functionalities they provide are now covered by the global configuration module.
+* No changes are needed
 
 .. _api-version-upgrade-guide-710:
 
