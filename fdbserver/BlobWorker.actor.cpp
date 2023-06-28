@@ -2148,6 +2148,26 @@ struct WriteAmpTarget {
 	int getBytesBeforeCompact() { return bytesBeforeCompact; }
 };
 
+ACTOR Future<Key> getTenantPrefix(Reference<BlobWorkerData> bwData, KeyRange keyRange) {
+	state int retryCount = 0;
+	if (SERVER_KNOBS->BG_METADATA_SOURCE != "tenant") {
+		return Key();
+	}
+	loop {
+		state Reference<GranuleTenantData> data;
+		wait(store(data, bwData->tenantData.getDataForGranule(keyRange)));
+		if (data.isValid()) {
+			return data->entry.prefix;
+		} else {
+			CODE_PROBE(true, "Get prefix for unknown tenant");
+			retryCount++;
+			TraceEvent(retryCount <= 10 ? SevDebug : SevWarn, "BlobWorkerUnknownTenantPrefix", bwData->id)
+			    .detail("KeyRange", keyRange);
+			wait(delay(0.1));
+		}
+	}
+}
+
 // updater for a single granule
 // TODO: this is getting kind of large. Should try to split out this actor if it continues to grow?
 ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
@@ -2330,7 +2350,9 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                      metadata->keyRange,
 			                                                      bwData->changeFeedStreamReplyBufferSize,
 			                                                      false,
-			                                                      { ReadType::NORMAL, CacheResult::True });
+			                                                      { ReadType::NORMAL, CacheResult::True },
+			                                                      false,
+			                                                      getTenantPrefix(bwData, metadata->keyRange));
 
 		} else {
 			readOldChangeFeed = false;
@@ -2340,7 +2362,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                   MAX_VERSION,
 			                                                   metadata->keyRange,
 			                                                   bwData->changeFeedStreamReplyBufferSize,
-			                                                   false);
+			                                                   false,
+			                                                   { ReadType::NORMAL, CacheResult::False },
+			                                                   false,
+			                                                   getTenantPrefix(bwData, metadata->keyRange));
 			// in case previous worker died before popping the latest version, start another pop
 			if (startState.previousDurableVersion != invalidVersion) {
 				ASSERT(startState.previousDurableVersion + 1 >= startState.changeFeedStartVersion);
@@ -2506,7 +2531,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 				                                                   MAX_VERSION,
 				                                                   metadata->keyRange,
 				                                                   bwData->changeFeedStreamReplyBufferSize,
-				                                                   false);
+				                                                   false,
+				                                                   { ReadType::NORMAL, CacheResult::False },
+				                                                   false,
+				                                                   getTenantPrefix(bwData, metadata->keyRange));
 
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
@@ -2644,15 +2672,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										ASSERT(oldCFKey.present());
 										// because several feeds will be reading the same version range of this change
 										// feed at the same time, set cache result to true
-										oldChangeFeedFuture =
-										    bwData->db->getChangeFeedStream(cfData,
-										                                    oldCFKey.get(),
-										                                    cfRollbackVersion + 1,
-										                                    startState.changeFeedStartVersion,
-										                                    metadata->keyRange,
-										                                    bwData->changeFeedStreamReplyBufferSize,
-										                                    false,
-										                                    { ReadType::NORMAL, CacheResult::True });
+										oldChangeFeedFuture = bwData->db->getChangeFeedStream(
+										    cfData,
+										    oldCFKey.get(),
+										    cfRollbackVersion + 1,
+										    startState.changeFeedStartVersion,
+										    metadata->keyRange,
+										    bwData->changeFeedStreamReplyBufferSize,
+										    false,
+										    { ReadType::NORMAL, CacheResult::True },
+										    false,
+										    getTenantPrefix(bwData, metadata->keyRange));
 
 									} else {
 										if (cfRollbackVersion + 1 < startState.changeFeedStartVersion) {
@@ -2662,14 +2692,17 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										}
 										ASSERT(cfRollbackVersion + 1 >= startState.changeFeedStartVersion);
 
-										changeFeedFuture =
-										    bwData->db->getChangeFeedStream(cfData,
-										                                    cfKey,
-										                                    cfRollbackVersion + 1,
-										                                    MAX_VERSION,
-										                                    metadata->keyRange,
-										                                    bwData->changeFeedStreamReplyBufferSize,
-										                                    false);
+										changeFeedFuture = bwData->db->getChangeFeedStream(
+										    cfData,
+										    cfKey,
+										    cfRollbackVersion + 1,
+										    MAX_VERSION,
+										    metadata->keyRange,
+										    bwData->changeFeedStreamReplyBufferSize,
+										    false,
+										    { ReadType::NORMAL, CacheResult::False },
+										    false,
+										    getTenantPrefix(bwData, metadata->keyRange));
 									}
 
 									// Start actors BEFORE setting new change feed data to ensure the change
@@ -5590,6 +5623,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 			wait(self->storage->init());
 			self->storage->set(KeyValueRef(persistID, BinaryWriter::toValue(self->id, Unversioned())));
 			wait(self->storage->commit());
+			cx->setStorage(self->storage);
 			TraceEvent("BlobWorkerStorageInitComplete", self->id).log();
 		}
 
@@ -5676,6 +5710,7 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 	try {
 		wait(self->storage->init());
 		wait(self->storage->commit());
+		cx->setStorage(self->storage);
 		state UID previous = wait(restorePersistentState(self));
 
 		if (recovered.canBeSet()) {

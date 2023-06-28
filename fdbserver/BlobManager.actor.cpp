@@ -4089,7 +4089,9 @@ int numExistingBWOnAddr(Reference<BlobManagerData> self, const AddressExclusion&
 }
 
 // Tries to recruit a blob worker on the candidateWorker process
-ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, RecruitBlobWorkerReply candidateWorker) {
+ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self,
+                                        RecruitBlobWorkerReply candidateWorker,
+                                        DatabaseConfiguration config) {
 	const NetworkAddress& netAddr = candidateWorker.worker.stableAddress();
 	AddressExclusion workerAddr(netAddr.ip, netAddr.port);
 	self->recruitingStream.set(self->recruitingStream.get() + 1);
@@ -4103,6 +4105,7 @@ ACTOR Future<Void> initializeBlobWorker(Reference<BlobManagerData> self, Recruit
 		initReq.reqId = deterministicRandom()->randomUniqueID();
 		initReq.interfaceId = interfaceId;
 		initReq.storeType = (KeyValueStoreType::StoreType)(SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
+		initReq.encryptMode = config.encryptionAtRestMode;
 
 		// acknowledge that this worker is currently being recruited on
 		self->recruitingLocalities.insert(candidateWorker.worker.stableAddress());
@@ -4189,6 +4192,8 @@ ACTOR Future<Void> blobWorkerRecruiter(
 		}
 	}
 
+	state DatabaseConfiguration config = wait(getDatabaseConfiguration(self->db, true));
+
 	loop {
 		try {
 			state RecruitBlobWorkerRequest recruitReq;
@@ -4234,7 +4239,7 @@ ACTOR Future<Void> blobWorkerRecruiter(
 				// when we get back a worker we can use, we will try to initialize a blob worker onto that
 				// process
 				when(RecruitBlobWorkerReply candidateWorker = wait(fCandidateWorker)) {
-					self->addActor.send(initializeBlobWorker(self, candidateWorker));
+					self->addActor.send(initializeBlobWorker(self, candidateWorker, config));
 				}
 
 				// when the CC changes, so does the request stream so we need to restart recruiting here
@@ -6220,6 +6225,39 @@ TEST_CASE("/blobmanager/updateranges") {
 	ASSERT(kbrRanges[1].second);
 	ASSERT(kbrRanges[2].first == rangeCToEnd);
 	ASSERT(!kbrRanges[2].second);
+
+	return Void();
+}
+
+TEST_CASE("/blobmanager/objectwriter") {
+	InitializeBlobWorkerRequest initReq1;
+	initReq1.reqId = deterministicRandom()->randomUniqueID();
+	initReq1.interfaceId = deterministicRandom()->randomUniqueID();
+	initReq1.storeType = (KeyValueStoreType::StoreType)(SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
+	initReq1.encryptMode = EncryptionAtRestMode::DOMAIN_AWARE;
+
+	InitializeBlobWorkerRequestOld initReq2;
+	initReq2.reqId = deterministicRandom()->randomUniqueID();
+	initReq2.interfaceId = deterministicRandom()->randomUniqueID();
+	initReq2.storeType = (KeyValueStoreType::StoreType)(SERVER_KNOBS->BLOB_WORKER_STORE_TYPE);
+
+	Value newReq = ObjectWriter::toValue(initReq1, Unversioned());
+	Value oldReq = ObjectWriter::toValue(initReq2, Unversioned());
+
+	InitializeBlobWorkerRequest decode1 =
+	    ObjectReader::fromStringRef<InitializeBlobWorkerRequest>(oldReq, Unversioned());
+	InitializeBlobWorkerRequestOld decode2 =
+	    ObjectReader::fromStringRef<InitializeBlobWorkerRequestOld>(newReq, Unversioned());
+
+	ASSERT(decode1.reqId == initReq2.reqId);
+	ASSERT(decode1.interfaceId == initReq2.interfaceId);
+	ASSERT(decode1.storeType == initReq2.storeType);
+	printf("%d %d\n", decode1.encryptMode.mode, EncryptionAtRestMode().mode);
+	ASSERT(decode1.encryptMode == EncryptionAtRestMode());
+
+	ASSERT(decode2.reqId == initReq1.reqId);
+	ASSERT(decode2.interfaceId == initReq1.interfaceId);
+	ASSERT(decode2.storeType == initReq1.storeType);
 
 	return Void();
 }
