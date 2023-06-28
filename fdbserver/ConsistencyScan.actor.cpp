@@ -871,6 +871,8 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								}
 							}
 
+							// throttle always includes replicated bytes read in total read bytes for throttling
+							totalReadBytesFromStorageServers += replicatedBytesReadThisLoop;
 							if (!failedRequest.present() && !newErrors) {
 								ASSERT(firstValidServer.present());
 								GetKeyValuesReply rangeResult = keyValueFutures[firstValidServer.get()].get().get();
@@ -929,7 +931,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 								ASSERT(failedRequest.get().code() != error_code_operation_cancelled);
 								// don't include replicated bytes this loop in metrics to avoid getting replication
 								// factor wrong, but make sure we stil throttle based on it
-								totalReadBytesFromStorageServers += replicatedBytesReadThisLoop + 100000;
+								totalReadBytesFromStorageServers += 100000;
 								break;
 							}
 
@@ -956,7 +958,6 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 						memState->stats.logicalBytesScanned += logicalBytesRead;
 						memState->stats.replicatedBytesRead += replicatedBytesRead;
 
-						totalReadBytesFromStorageServers += replicatedBytesRead;
 						if (DEBUG_SCAN_PROGRESS) {
 							TraceEvent(SevDebug, "ConsistencyScanProgressScanRangeEnd", memState->csId)
 							    .detail("BytesRead", logicalBytesRead)
