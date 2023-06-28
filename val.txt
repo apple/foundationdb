@@ -1,2219 +1,0 @@
-Cached signature mismatch for lastBuilt:packages/bin/fdbserver:10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, running command
-++ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && ps -U jfu -u jfu u --no-headers'
-Cached signature match for buildDirVersion.10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, skipping command
-Cached signature mismatch for lastDevFetch, running command
-+ cd /Users/jfu/fdb_snowflake
-+ git fetch
-Cached signature updated for lastDevFetch to 468884
-Cached signature mismatch for lastDevCheckUpdate, running command
-++ cd /Users/jfu/fdb_snowflake
-++ git rev-list origin/main -1 HEAD fdbdev
-+ cd /Users/jfu/fdb_snowflake
-+ git merge-base --is-ancestor 811950fcb7a8245cc9b778c6c22ec4afc6783283 HEAD
-Cached signature updated for lastDevCheckUpdate to 56266109
-WARNING: UNTRACKED FILE WILL NOT BE SYNC'd: val.txt
-Cached signature mismatch for sourceSync.10.174.224.254:/mnt/ephemeral/jfu/frostdb, running command
-+ cd /Users/jfu/frostdb
-+ git ls-files
-+ cd /Users/jfu/frostdb
-+ git ls-tree --full-tree -r --name-only HEAD
-+ rsync --compress --progress -e 'ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '\''-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p'\'' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022' -iar --no-o --no-g --delete --ignore-missing-args --delete-missing-args --delete-excluded --include-from=- '--exclude=*' /Users/jfu/frostdb/ 10.174.224.254:/mnt/ephemeral/jfu/frostdb/
-+ echo -e '/.git/\n/.git/objects/\n/.git/HEAD\n/.git/refs/\n/.git/refs/**\n/.git/packed-refs'
-sending incremental file list
-.d..t....... ./
-.d..t....... .git/
-<f.st....... .git/HEAD
-             50 100%    0.00kB/s    0:00:00               50 100%    0.00kB/s    0:00:00 (xfr#1, ir-chk=1006/1041)
-.d..t....... bindings/c/
-<f.st....... bindings/c/fdb_c.cpp
-            700   0%   40.21kB/s    0:00:01           74,042 100%    3.72MB/s    0:00:00 (xfr#2, ir-chk=1099/1490)
-.d..t....... bindings/c/test/apitester/
-<f..t....... bindings/c/test/apitester/TesterTransactionExecutor.cpp
-            700   2%   34.18kB/s    0:00:00           28,236 100%    1.28MB/s    0:00:00 (xfr#3, ir-chk=1053/1490)
-*deleting   contrib/TestHarness2/test_harness/__pycache__/version.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/valgrind.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/summarize.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/run.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/results.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/joshua.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/fdb.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/config.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/__init__.cpython-38.pyc
-*deleting   contrib/TestHarness2/test_harness/__pycache__/
-.d..t....... cmake/
-<f.st....... cmake/ConfigureCompiler.cmake
-            700   4%   19.53kB/s    0:00:00           16,748 100%  454.32kB/s    0:00:00 (xfr#4, ir-chk=1087/1916)
-.d..t....... contrib/TestHarness2/test_harness/
-*deleting   design/throughput-quotas.md
-*deleting   fdbclient/include/fdbclient/TagThrottle.h
-*deleting   fdbserver/QuotaThrottler.actor.cpp
-*deleting   fdbserver/include/fdbserver/QuotaThrottler.h
-.d..t....... contrib/rapidjson/rapidjson/
-<f.st....... contrib/rapidjson/rapidjson/document.h
-            700   0%    4.50kB/s    0:00:23          106,543 100%  666.96kB/s    0:00:00 (xfr#5, ir-chk=1159/2227)
-.d..t....... design/
-<f++++++++++ design/global-tag-throttling.md
-         10,967 100%   68.22kB/s    0:00:00           10,967 100%   68.22kB/s    0:00:00 (xfr#6, ir-chk=1080/2227)
-.d..t....... documentation/sphinx/source/
-<f.st....... documentation/sphinx/source/administration.rst
-            700   1%    4.30kB/s    0:00:12           54,894 100%  330.91kB/s    0:00:00 (xfr#7, ir-chk=1105/2295)
-<f.st....... documentation/sphinx/source/client-design.rst
-            700  32%    4.19kB/s    0:00:00            2,168 100%   12.99kB/s    0:00:00 (xfr#8, ir-chk=1082/2295)
-<f.st....... documentation/sphinx/source/command-line-interface.rst
-            700   1%    4.19kB/s    0:00:08           36,547 100%  216.31kB/s    0:00:00 (xfr#9, ir-chk=1080/2295)
-<f.st....... documentation/sphinx/source/ha-write-path.rst
-            700   4%    4.14kB/s    0:00:03           17,250 100%  101.48kB/s    0:00:00 (xfr#10, ir-chk=1059/2295)
-<f.st....... documentation/sphinx/source/operations.rst
-            700  33%    4.12kB/s    0:00:00            2,105 100%   12.38kB/s    0:00:00 (xfr#11, ir-chk=1043/2295)
-<f++++++++++ documentation/sphinx/source/transaction-tagging.rst
-          5,714 100%   33.41kB/s    0:00:00            5,714 100%   33.41kB/s    0:00:00 (xfr#12, ir-chk=1012/2295)
-.d..t....... fdbcli/
-<f.st....... fdbcli/QuotaCommand.actor.cpp
-            700  10%    4.00kB/s    0:00:01            6,396 100%   36.31kB/s    0:00:00 (xfr#13, ir-chk=1035/2408)
-<f.st....... fdbcli/TenantCommands.actor.cpp
-            700   1%    3.97kB/s    0:00:11           46,009 100%  259.71kB/s    0:00:00 (xfr#14, ir-chk=1029/2408)
-<f++++++++++ fdbcli/ThrottleCommand.actor.cpp
-         15,132 100%   84.93kB/s    0:00:00           15,132 100%   84.93kB/s    0:00:00 (xfr#15, ir-chk=1027/2408)
-<f.st....... fdbcli/fdbcli.actor.cpp
-            700   0%    3.93kB/s    0:00:20           82,291 100%  451.47kB/s    0:00:00 (xfr#16, ir-chk=1022/2408)
-.d..t....... fdbclient/
-<f..t....... fdbclient/ClientStatusReport.cpp
-            700  12%    3.74kB/s    0:00:01            5,684 100%   30.33kB/s    0:00:00 (xfr#17, ir-chk=1076/2494)
-<f..t....... fdbclient/FileBackupAgent.actor.cpp
-            700   0%    3.74kB/s    0:01:17          289,129 100%    1.41MB/s    0:00:00 (xfr#18, ir-chk=1062/2494)
-<f.st....... fdbclient/NativeAPI.actor.cpp
-            700   0%    3.49kB/s    0:02:15          473,878 100%    2.09MB/s    0:00:00 (xfr#19, ir-chk=1045/2494)
-<f.st....... fdbclient/ReadVersionBatchers.actor.cpp
-          4,245  32%   19.10kB/s    0:00:00           12,883 100%   57.98kB/s    0:00:00 (xfr#20, ir-chk=1038/2494)
-<f.st....... fdbclient/ServerKnobs.cpp
-            700   0%    3.15kB/s    0:00:33          106,067 100%  468.69kB/s    0:00:00 (xfr#21, ir-chk=1032/2494)
-<f.st....... fdbclient/TagThrottle.actor.cpp
-            700  11%    3.09kB/s    0:00:01            6,063 100%   26.79kB/s    0:00:00 (xfr#22, ir-chk=1024/2494)
-.d..t....... fdbclient/include/fdbclient/
-<f..t....... fdbclient/include/fdbclient/BlobCipher.h
-            700   1%    2.99kB/s    0:00:14           45,167 100%  190.95kB/s    0:00:00 (xfr#23, ir-chk=1189/2698)
-<f.st....... fdbclient/include/fdbclient/BlobWorkerCommon.h
-            700   9%    2.96kB/s    0:00:02            7,378 100%   31.19kB/s    0:00:00 (xfr#24, ir-chk=1180/2698)
-<f.st....... fdbclient/include/fdbclient/CommitProxyInterface.h
-            700   2%    2.96kB/s    0:00:08           27,318 100%  114.99kB/s    0:00:00 (xfr#25, ir-chk=1167/2698)
-<f.st....... fdbclient/include/fdbclient/DatabaseContext.h
-            700   1%    2.95kB/s    0:00:12           36,608 100%  153.43kB/s    0:00:00 (xfr#26, ir-chk=1158/2698)
-<f.st....... fdbclient/include/fdbclient/EncryptKeyProxyInterface.h
-            700   6%    2.92kB/s    0:00:03           10,804 100%   45.09kB/s    0:00:00 (xfr#27, ir-chk=1157/2698)
-<f.st....... fdbclient/include/fdbclient/NativeAPI.actor.h
-            700   2%    2.92kB/s    0:00:10           30,371 100%  126.21kB/s    0:00:00 (xfr#28, ir-chk=1121/2698)
-<f.st....... fdbclient/include/fdbclient/ReadVersionBatchers.h
-            700  36%    2.91kB/s    0:00:00            1,907 100%    7.92kB/s    0:00:00 (xfr#29, ir-chk=1111/2698)
-<f.st....... fdbclient/include/fdbclient/ReadYourWrites.h
-            700   5%    2.91kB/s    0:00:04           12,599 100%   52.13kB/s    0:00:00 (xfr#30, ir-chk=1110/2698)
-<f.st....... fdbclient/include/fdbclient/ServerKnobs.h
-            700   1%    2.90kB/s    0:00:19           57,553 100%  235.16kB/s    0:00:00 (xfr#31, ir-chk=1103/2698)
-<f.st....... fdbclient/include/fdbclient/StorageServerInterface.h
-            700   1%    2.86kB/s    0:00:14           42,575 100%  172.52kB/s    0:00:00 (xfr#32, ir-chk=1092/2698)
-<f++++++++++ fdbclient/include/fdbclient/TagThrottle.actor.h
-         20,410 100%   82.70kB/s    0:00:00           20,410 100%   82.70kB/s    0:00:00 (xfr#33, ir-chk=1087/2698)
-<f.st....... fdbclient/include/fdbclient/Tenant.h
-            700   7%    2.84kB/s    0:00:03            9,656 100%   38.97kB/s    0:00:00 (xfr#34, ir-chk=1085/2698)
-<f.st....... fdbclient/include/fdbclient/TenantData.actor.h
-            700   8%    2.81kB/s    0:00:02            8,562 100%   34.41kB/s    0:00:00 (xfr#35, ir-chk=1084/2698)
-<f.st....... fdbclient/include/fdbclient/TenantManagement.actor.h
-            700   1%    2.81kB/s    0:00:13           37,494 100%  149.45kB/s    0:00:00 (xfr#36, ir-chk=1082/2698)
-<f.st....... fdbclient/include/fdbclient/ThrottlingId.h
-          1,406  80%    5.60kB/s    0:00:00            1,750 100%    6.98kB/s    0:00:00 (xfr#37, ir-chk=1078/2698)
-.d..t....... fdbrpc/
-<f.st....... fdbrpc/HTTPServer.actor.cpp
-            700   4%    2.79kB/s    0:00:05           16,359 100%   64.94kB/s    0:00:00 (xfr#38, ir-chk=1035/2698)
-<f..t....... fdbrpc/Stats.actor.cpp
-            700   6%    2.78kB/s    0:00:03           11,461 100%   45.50kB/s    0:00:00 (xfr#39, ir-chk=1021/2698)
-<f..t....... fdbrpc/sim2.actor.cpp
-            700   0%    2.78kB/s    0:00:43          120,652 100%  467.56kB/s    0:00:00 (xfr#40, ir-chk=1015/2698)
-.d..t....... fdbrpc/include/fdbrpc/
-<f..t....... fdbrpc/include/fdbrpc/HTTP.h
-            700  10%    2.69kB/s    0:00:02            6,911 100%   26.57kB/s    0:00:00 (xfr#41, ir-chk=1044/2752)
-<f..t....... fdbrpc/include/fdbrpc/Stats.h
-            700   8%    2.69kB/s    0:00:02            7,992 100%   30.61kB/s    0:00:00 (xfr#42, ir-chk=1022/2752)
-<f.st....... fdbrpc/include/fdbrpc/simulator.h
-            700   3%    2.68kB/s    0:00:06           19,062 100%   73.00kB/s    0:00:00 (xfr#43, ir-chk=1006/2752)
-.d..t....... fdbserver/
-<f..t....... fdbserver/ApplyMetadataMutation.cpp
-            700   1%    2.58kB/s    0:00:20           53,004 100%  193.86kB/s    0:00:00 (xfr#44, to-chk=1158/2926)
-<f.st....... fdbserver/BenchEncrypt.cpp
-            700   7%    2.56kB/s    0:00:03            9,488 100%   34.57kB/s    0:00:00 (xfr#45, to-chk=1153/2926)
-<f.st....... fdbserver/BenchGrvProxyTagThrottler.cpp
-          1,092 100%    3.98kB/s    0:00:00            1,092 100%    3.98kB/s    0:00:00 (xfr#46, to-chk=1152/2926)
-<f.st....... fdbserver/BenchHash.cpp
-            700  32%    2.55kB/s    0:00:00            2,163 100%    7.88kB/s    0:00:00 (xfr#47, to-chk=1151/2926)
-<f.st....... fdbserver/BenchIdempotencyIds.cpp
-            700  31%    2.55kB/s    0:00:00            2,197 100%    8.01kB/s    0:00:00 (xfr#48, to-chk=1149/2926)
-<f.st....... fdbserver/BenchIterate.cpp
-            700  29%    2.55kB/s    0:00:00            2,340 100%    8.53kB/s    0:00:00 (xfr#49, to-chk=1148/2926)
-<f.st....... fdbserver/BenchMem.cpp
-            700  45%    2.55kB/s    0:00:00            1,530 100%    5.58kB/s    0:00:00 (xfr#50, to-chk=1147/2926)
-<f.st....... fdbserver/BenchMetadataCheck.cpp
-            700  30%    2.54kB/s    0:00:00            2,283 100%    8.29kB/s    0:00:00 (xfr#51, to-chk=1146/2926)
-<f.st....... fdbserver/BenchRandom.cpp
-            700  66%    2.54kB/s    0:00:00            1,054 100%    3.83kB/s    0:00:00 (xfr#52, to-chk=1142/2926)
-<f.st....... fdbserver/BenchStream.actor.cpp
-            700  37%    2.54kB/s    0:00:00            1,870 100%    6.76kB/s    0:00:00 (xfr#53, to-chk=1139/2926)
-<f.st....... fdbserver/BenchTimer.cpp
-            700  54%    2.53kB/s    0:00:00            1,291 100%    4.67kB/s    0:00:00 (xfr#54, to-chk=1137/2926)
-<f.st....... fdbserver/BenchZstd.cpp
-            700   8%    2.53kB/s    0:00:03            8,721 100%   31.54kB/s    0:00:00 (xfr#55, to-chk=1134/2926)
-<f..t....... fdbserver/BlobManifest.actor.cpp
-            700   1%    2.53kB/s    0:00:16           41,417 100%  148.15kB/s    0:00:00 (xfr#56, to-chk=1128/2926)
-<f.st....... fdbserver/BlobMigrator.actor.cpp
-            700   2%    2.50kB/s    0:00:11           30,709 100%  109.45kB/s    0:00:00 (xfr#57, to-chk=1127/2926)
-<f.st....... fdbserver/CMakeLists.txt
-            700  18%    2.49kB/s    0:00:01            3,853 100%   13.68kB/s    0:00:00 (xfr#58, to-chk=1124/2926)
-<f.st....... fdbserver/CommitProxyServer.actor.cpp
-            700   0%    2.49kB/s    0:01:05          164,359 100%  567.16kB/s    0:00:00 (xfr#59, to-chk=1121/2926)
-<f.st....... fdbserver/ConsistencyScan.actor.cpp
-            700   0%    2.42kB/s    0:00:36           88,554 100%  301.32kB/s    0:00:00 (xfr#60, to-chk=1116/2926)
-<f.st....... fdbserver/DDTeamCollection.actor.cpp
-            700   0%    2.37kB/s    0:01:36          230,781 100%  753.75kB/s    0:00:00 (xfr#61, to-chk=1111/2926)
-<f++++++++++ fdbserver/GlobalTagThrottler.actor.cpp
-         32,768  62%  106.67kB/s    0:00:00           52,808 100%  171.90kB/s    0:00:00 (xfr#62, to-chk=1104/2926)
-<f.st....... fdbserver/GrvProxyServer.actor.cpp
-            700   1%    2.28kB/s    0:00:22           51,736 100%  167.30kB/s    0:00:00 (xfr#63, to-chk=1103/2926)
-<f.st....... fdbserver/GrvProxyTagThrottler.actor.cpp
-            700   3%    2.26kB/s    0:00:08           19,394 100%   62.51kB/s    0:00:00 (xfr#64, to-chk=1102/2926)
-<f.st....... fdbserver/MetricClient.actor.cpp
-            700  13%    2.25kB/s    0:00:01            5,074 100%   16.30kB/s    0:00:00 (xfr#65, to-chk=1082/2926)
-<f.st....... fdbserver/QuietDatabase.actor.cpp
-            700   1%    2.25kB/s    0:00:21           48,782 100%  155.68kB/s    0:00:00 (xfr#66, to-chk=1072/2926)
-<f.st....... fdbserver/RKMetricsTracker.actor.cpp
-            700   4%    2.23kB/s    0:00:06           15,257 100%   48.53kB/s    0:00:00 (xfr#67, to-chk=1066/2926)
-<f.st....... fdbserver/RKRateServer.actor.cpp
-          4,034  86%   12.83kB/s    0:00:00            4,652 100%   14.80kB/s    0:00:00 (xfr#68, to-chk=1065/2926)
-<f.st....... fdbserver/RKRateUpdater.cpp
-          1,960   6%    6.23kB/s    0:00:04           31,090 100%   98.58kB/s    0:00:00 (xfr#69, to-chk=1064/2926)
-<f.st....... fdbserver/RKRateUpdaterTesting.actor.cpp
-          1,280   4%    4.05kB/s    0:00:06           29,568 100%   93.15kB/s    0:00:00 (xfr#70, to-chk=1063/2926)
-<f.st....... fdbserver/RKThroughputQuotaCache.actor.cpp
-            700  19%    2.21kB/s    0:00:01            3,600 100%   11.34kB/s    0:00:00 (xfr#71, to-chk=1061/2926)
-<f.st....... fdbserver/Ratekeeper.actor.cpp
-            700   6%    2.20kB/s    0:00:04           10,547 100%   33.12kB/s    0:00:00 (xfr#72, to-chk=1060/2926)
-<f..t....... fdbserver/Resolver.actor.cpp
-            700   1%    2.20kB/s    0:00:16           36,021 100%  112.39kB/s    0:00:00 (xfr#73, to-chk=1055/2926)
-<f++++++++++ fdbserver/RkTagThrottleCollection.cpp
-         13,293 100%   41.47kB/s    0:00:00           13,293 100%   41.47kB/s    0:00:00 (xfr#74, to-chk=1045/2926)
-<f.st....... fdbserver/Status.actor.cpp
-            700   0%    2.18kB/s    0:01:13          160,221 100%  488.96kB/s    0:00:00 (xfr#75, to-chk=1034/2926)
-<f..t....... fdbserver/StorageMetrics.actor.cpp
-            700   1%    2.14kB/s    0:00:16           36,127 100%  109.91kB/s    0:00:00 (xfr#76, to-chk=1032/2926)
-<f++++++++++ fdbserver/TagThrottler.actor.cpp
-         10,435 100%   31.75kB/s    0:00:00           10,435 100%   31.75kB/s    0:00:00 (xfr#77, to-chk=1027/2926)
-<f.st....... fdbserver/ThrottlingCounter.actor.cpp
-            700  10%    2.13kB/s    0:00:02            6,977 100%   21.16kB/s    0:00:00 (xfr#78, to-chk=1025/2926)
-<f..t....... fdbserver/VersionedBTree.actor.cpp
-            700   0%    2.12kB/s    0:03:32          452,526 100%    1.26MB/s    0:00:00 (xfr#79, to-chk=1023/2926)
-<f.st....... fdbserver/storageserver.actor.cpp
-            720   0%    2.05kB/s    0:04:16          526,992 100%    1.37MB/s    0:00:00 (xfr#80, to-chk=1015/2926)
-.d..t....... fdbserver/include/fdbserver/
-<f..t....... fdbserver/include/fdbserver/BlobMigratorInterface.h
-            700  27%    1.86kB/s    0:00:00            2,506 100%    6.67kB/s    0:00:00 (xfr#81, to-chk=998/2926)
-<f..t....... fdbserver/include/fdbserver/DataDistribution.actor.h
-            700   2%    1.86kB/s    0:00:13           25,468 100%   67.58kB/s    0:00:00 (xfr#82, to-chk=980/2926)
-<f.st....... fdbserver/include/fdbserver/GrvProxyTagThrottler.h
-            700  21%    1.85kB/s    0:00:01            3,192 100%    8.45kB/s    0:00:00 (xfr#83, to-chk=974/2926)
-<f.st....... fdbserver/include/fdbserver/IRKMetricsTracker.h
-          1,406  20%    3.72kB/s    0:00:01            6,805 100%   18.01kB/s    0:00:00 (xfr#84, to-chk=964/2926)
-<f.st....... fdbserver/include/fdbserver/IRKRateServer.h
-            700  19%    1.85kB/s    0:00:01            3,664 100%    9.70kB/s    0:00:00 (xfr#85, to-chk=963/2926)
-<f.st....... fdbserver/include/fdbserver/IRKRateUpdater.h
-            700  25%    1.85kB/s    0:00:01            2,700 100%    7.15kB/s    0:00:00 (xfr#86, to-chk=962/2926)
-<f.st....... fdbserver/include/fdbserver/IRKThroughputQuotaCache.h
-          1,412  67%    3.73kB/s    0:00:00            2,084 100%    5.50kB/s    0:00:00 (xfr#87, to-chk=960/2926)
-<f.st....... fdbserver/include/fdbserver/MockGlobalState.h
-            700   4%    1.85kB/s    0:00:08           16,381 100%   43.24kB/s    0:00:00 (xfr#88, to-chk=943/2926)
-<f.st....... fdbserver/include/fdbserver/ProxyCommitData.actor.h
-            700   4%    1.84kB/s    0:00:07           15,070 100%   39.56kB/s    0:00:00 (xfr#89, to-chk=935/2926)
-<f.st....... fdbserver/include/fdbserver/RESTSimKmsVault.h
-            700  39%    1.84kB/s    0:00:00            1,758 100%    4.62kB/s    0:00:00 (xfr#90, to-chk=931/2926)
-<f.st....... fdbserver/include/fdbserver/Ratekeeper.h
-            700  25%    1.84kB/s    0:00:01            2,793 100%    7.33kB/s    0:00:00 (xfr#91, to-chk=929/2926)
-<f.st....... fdbserver/include/fdbserver/RatekeeperInterface.h
-            700  13%    1.83kB/s    0:00:02            5,262 100%   13.78kB/s    0:00:00 (xfr#92, to-chk=928/2926)
-<f++++++++++ fdbserver/include/fdbserver/RkTagThrottleCollection.h
-          3,620 100%    9.48kB/s    0:00:00            3,620 100%    9.48kB/s    0:00:00 (xfr#93, to-chk=912/2926)
-<f++++++++++ fdbserver/include/fdbserver/TagThrottler.h
-          4,708 100%   12.29kB/s    0:00:00            4,708 100%   12.29kB/s    0:00:00 (xfr#94, to-chk=890/2926)
-<f.st....... fdbserver/include/fdbserver/ThrottlingCounter.h
-            700  39%    1.83kB/s    0:00:00            1,774 100%    4.63kB/s    0:00:00 (xfr#95, to-chk=887/2926)
-.d..t....... fdbserver/include/fdbserver/workloads/
-<f.st....... fdbserver/include/fdbserver/workloads/BulkSetup.actor.h
-            700   4%    1.83kB/s    0:00:07           14,394 100%   37.48kB/s    0:00:00 (xfr#96, to-chk=873/2926)
-.d..t....... fdbserver/workloads/
-<f.st....... fdbserver/workloads/BlobRestoreWorkload.actor.cpp
-            700   4%    1.82kB/s    0:00:08           15,858 100%   41.19kB/s    0:00:00 (xfr#97, to-chk=844/2926)
-<f.st....... fdbserver/workloads/ConsistencyCheck.actor.cpp
-            700   0%    1.81kB/s    0:00:41           76,069 100%  195.49kB/s    0:00:00 (xfr#98, to-chk=828/2926)
-<f.st....... fdbserver/workloads/FuzzApiCorrectness.actor.cpp
-            700   1%    1.80kB/s    0:00:34           63,111 100%  161.34kB/s    0:00:00 (xfr#99, to-chk=808/2926)
-<f.st....... fdbserver/workloads/HTTPKeyValueStore.actor.cpp
-            700   4%    1.78kB/s    0:00:08           15,166 100%   38.67kB/s    0:00:00 (xfr#100, to-chk=804/2926)
-<f++++++++++ fdbserver/workloads/MetaclusterMoveWorkload.actor.cpp
-         32,365 100%   82.31kB/s    0:00:00           32,365 100%   82.31kB/s    0:00:00 (xfr#101, to-chk=782/2926)
-<f.st....... fdbserver/workloads/ReadWrite.actor.cpp
-            700   2%    1.78kB/s    0:00:17           32,572 100%   82.62kB/s    0:00:00 (xfr#102, to-chk=757/2926)
-<f++++++++++ fdbserver/workloads/TagThrottleApi.actor.cpp
-          9,545 100%   24.15kB/s    0:00:00            9,545 100%   24.15kB/s    0:00:00 (xfr#103, to-chk=729/2926)
-<f.st....... fdbserver/workloads/ThroughputQuota.actor.cpp
-            700  20%    1.77kB/s    0:00:01            3,378 100%    8.55kB/s    0:00:00 (xfr#104, to-chk=718/2926)
-<f.st....... fdbserver/workloads/ThroughputQuotaCache.actor.cpp
-          1,406  21%    3.56kB/s    0:00:01            6,441 100%   16.30kB/s    0:00:00 (xfr#105, to-chk=717/2926)
-<f.st....... fdbserver/workloads/TooManyGrvBatchers.actor.cpp
-            700  31%    1.77kB/s    0:00:00            2,231 100%    5.63kB/s    0:00:00 (xfr#106, to-chk=715/2926)
-<f++++++++++ fdbserver/workloads/WriteTagThrottling.actor.cpp
-         14,264 100%   35.99kB/s    0:00:00           14,264 100%   35.99kB/s    0:00:00 (xfr#107, to-chk=700/2926)
-.d..t....... flow/
-<f.st....... flow/ActorCollection.actor.cpp
-            700  10%    1.76kB/s    0:00:03            6,476 100%   16.30kB/s    0:00:00 (xfr#108, to-chk=698/2926)
-<f.st....... flow/Arena.cpp
-            700   2%    1.76kB/s    0:00:17           31,639 100%   79.22kB/s    0:00:00 (xfr#109, to-chk=695/2926)
-<f.st....... flow/Error.cpp
-            700   9%    1.75kB/s    0:00:03            7,396 100%   18.47kB/s    0:00:00 (xfr#110, to-chk=686/2926)
-<f.st....... flow/TDMetric.cpp
-            700   6%    1.75kB/s    0:00:06           11,662 100%   29.13kB/s    0:00:00 (xfr#111, to-chk=655/2926)
-<f.st....... flow/flow.cpp
-            700   3%    1.74kB/s    0:00:12           22,303 100%   55.56kB/s    0:00:00 (xfr#112, to-chk=643/2926)
-.d..t....... flow/include/flow/
-<f..t....... flow/include/flow/OTELMetrics.h
-            700   8%    1.74kB/s    0:00:04            7,823 100%   19.44kB/s    0:00:00 (xfr#113, to-chk=565/2926)
-<f..t....... flow/include/flow/SystemMonitor.h
-            700   9%    1.74kB/s    0:00:03            7,329 100%   18.21kB/s    0:00:00 (xfr#114, to-chk=549/2926)
-<f.st....... flow/include/flow/TDMetric.actor.h
-            700   1%    1.74kB/s    0:00:29           51,308 100%  126.53kB/s    0:00:00 (xfr#115, to-chk=548/2926)
-<f.st....... flow/include/flow/error_definitions.h
-            700   2%    1.73kB/s    0:00:16           29,899 100%   73.36kB/s    0:00:00 (xfr#116, to-chk=530/2926)
-<f.st....... flow/include/flow/flow.h
-            700   1%    1.72kB/s    0:00:25           44,621 100%  108.94kB/s    0:00:00 (xfr#117, to-chk=528/2926)
-.d..t....... metacluster/
-<f.st....... metacluster/MetaclusterMetadata.cpp
-            700  12%    1.71kB/s    0:00:02            5,595 100%   13.66kB/s    0:00:00 (xfr#118, to-chk=515/2926)
-.d..t....... metacluster/include/metacluster/
-<f..t....... metacluster/include/metacluster/CreateTenant.actor.h
-            700   3%    1.71kB/s    0:00:10           18,282 100%   44.52kB/s    0:00:00 (xfr#119, to-chk=507/2926)
-<f.st....... metacluster/include/metacluster/Metacluster.h
-            700  27%    1.70kB/s    0:00:01            2,548 100%    6.21kB/s    0:00:00 (xfr#120, to-chk=498/2926)
-<f.st....... metacluster/include/metacluster/MetaclusterConsistency.actor.h
-            700   4%    1.70kB/s    0:00:09           16,460 100%   39.99kB/s    0:00:00 (xfr#121, to-chk=497/2926)
-<f.st....... metacluster/include/metacluster/MetaclusterData.actor.h
-            700   5%    1.70kB/s    0:00:07           12,702 100%   30.86kB/s    0:00:00 (xfr#122, to-chk=496/2926)
-<f.st....... metacluster/include/metacluster/MetaclusterMetadata.h
-            700  10%    1.70kB/s    0:00:03            6,373 100%   15.44kB/s    0:00:00 (xfr#123, to-chk=494/2926)
-<f++++++++++ metacluster/include/metacluster/MetaclusterMove.actor.h
-         32,768  54%   79.40kB/s    0:00:00           60,439 100%  146.10kB/s    0:00:00 (xfr#124, to-chk=492/2926)
-<f.st....... metacluster/include/metacluster/MetaclusterOperationContext.actor.h
-            700   5%    1.69kB/s    0:00:07           13,396 100%   32.30kB/s    0:00:00 (xfr#125, to-chk=491/2926)
-.d..t....... tests/
-<f.st....... tests/CMakeLists.txt
-            700   2%    1.69kB/s    0:00:17           31,028 100%   74.63kB/s    0:00:00 (xfr#126, to-chk=420/2926)
-.d..t....... tests/rare/
-<f++++++++++ tests/rare/TransactionTagApiCorrectness.toml
-            664 100%    1.44kB/s    0:00:00              664 100%    1.44kB/s    0:00:00 (xfr#127, to-chk=176/2926)
-<f++++++++++ tests/rare/TransactionTagSwizzledApiCorrectness.toml
-          1,224 100%    2.65kB/s    0:00:00            1,224 100%    2.65kB/s    0:00:00 (xfr#128, to-chk=175/2926)
-<f++++++++++ tests/rare/WriteTagThrottling.toml
-            815 100%    1.76kB/s    0:00:00              815 100%    1.76kB/s    0:00:00 (xfr#129, to-chk=174/2926)
-.d..t....... tests/slow/
-<f++++++++++ tests/slow/MetaclusterMove.toml
-            346 100%    0.75kB/s    0:00:00              346 100%    0.75kB/s    0:00:00 (xfr#130, to-chk=56/2926)
-Cached signature updated for sourceSync.10.174.224.254:/mnt/ephemeral/jfu/frostdb to 6e8f8b322d959c65629ba34d79717e5b
-Cached signature mismatch for cmake.10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64, running command
-+ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && docker run --init --name fdbdev-$(id -un)-7495 -v /mnt/ephemeral/jfu:/mnt/ephemeral/jfu -w /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 --cap-add=SYS_PTRACE --privileged --rm --security-opt seccomp=unconfined -e CCACHE_DIR -e CCACHE_BASEDIR -e CCACHE_MAXSIZE -e CCACHE_UMASK -e LD_LIBRARY_PATH=/usr/local/lib -e LD_LIBRARY_PATH=/usr/local/lib/x86_64-unknown-linux-gnu -i -u $(id -u):$(id -g) -v $HOME:$HOME -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro -v /mnt/ephemeral/ccache:/mnt/ephemeral/ccache -v /mnt/ephemeral/joshua:/mnt/ephemeral/joshua -v /mnt/ephemeral/oldbinaries:/app/deploy/global_data/oldBinaries/ 937559181915.dkr.ecr.us-west-2.amazonaws.com/frostdb/devel:centos7-latest-amd64 scl enable devtoolset-11 rh-python38 rh-ruby27 -- bash -i -c '\''rm -f CMakeCache.txt && cmake -GNinja -S /mnt/ephemeral/jfu/frostdb -B /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ -DALLOC_INSTRUMENTATION=OFF -DBUILD_AWS_BACKUP=ON -DCMAKE_BUILD_TYPE=Release -DFDB_RELEASE=OFF -DFORCE_BOOST_BUILD=ON -DRELATIVE_DEBUG_PATHS=OFF -DRUN_JUNIT_TESTS=ON -DRUN_JAVA_INTEGRATION_TESTS=ON -DSSD_ROCKSDB_EXPERIMENTAL=OFF -DTEST_PACKAGE_EXCLUDE=VersionVector -DUSE_DTRACE=ON -DUSE_GPERFTOOLS=OFF -DUSE_ASAN=OFF -DUSE_GCOV=OFF -DUSE_LTO=OFF -DUSE_MSAN=OFF -DUSE_TSAN=OFF -DUSE_UBSAN=OFF -DUSE_VALGRIND=ON'\'''
-bash: no job control in this shell
--- The C compiler identification is GNU 11.2.1
--- The CXX compiler identification is GNU 11.2.1
--- The ASM compiler identification is GNU
--- Found assembler: /opt/rh/devtoolset-11/root/usr/bin/gcc
--- Detecting C compiler ABI info
--- Detecting C compiler ABI info - done
--- Check for working C compiler: /opt/rh/devtoolset-11/root/usr/bin/gcc - skipped
--- Detecting C compile features
--- Detecting C compile features - done
--- Detecting CXX compiler ABI info
--- Detecting CXX compiler ABI info - done
--- Check for working CXX compiler: /opt/rh/devtoolset-11/root/usr/bin/g++ - skipped
--- Detecting CXX compile features
--- Detecting CXX compile features - done
--- /mnt/ephemeral/jfu/frostdb /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64
--- Performing Test CMAKE_HAVE_LIBC_PTHREAD
--- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Failed
--- Check if compiler accepts -pthread
--- Check if compiler accepts -pthread - yes
--- Found Threads: TRUE  
--- Looking for stdatomic.h
--- Looking for stdatomic.h - found
--- Looking for DTRACE_PROBE
--- Looking for DTRACE_PROBE - found
--- Looking for aligned_alloc
--- Looking for aligned_alloc - found
--- Has aligned_alloc: 1
--- Found Valgrind: /usr/local/include/valgrind  
--- Found OpenSSL: /usr/local/lib64/libcrypto.a (found version "1.1.1m")  
--- Found Python3: /opt/rh/rh-python38/root/usr/bin/python3.8 (found version "3.8.13") found components: Interpreter 
--- Found JNI: /usr/lib/jvm/java/include (Required is at least version "1.8") found components: AWT JVM 
--- Found Java: /usr/bin/java (found suitable version "11.0.19", minimum required is "1.8") found components: Development 
--- Current git version 785927f1766c47cac4383a81ef9d07244ca39cbe
--- FDB_INSTALL_DIRS -> BIN;SBIN;LIB;FDBMONITOR;INCLUDE;ETC;LOG;DATA;BACKUPAGENT
--- A sanitizer is enabled, need to build boost from source
--- Use gcc to build boost
--- Module support is disabled.
--- Version: 8.1.1
--- Build type: Release
--- CXX_STANDARD: 20
--- Performing Test has_std_20_flag
--- Performing Test has_std_20_flag - Success
--- Performing Test has_std_2a_flag
--- Performing Test has_std_2a_flag - Success
--- Performing Test SUPPORTS_USER_DEFINED_LITERALS
--- Performing Test SUPPORTS_USER_DEFINED_LITERALS - Success
--- Performing Test FMT_HAS_VARIANT
--- Performing Test FMT_HAS_VARIANT - Success
--- Required features: cxx_variadic_templates
--- Looking for strtod_l
--- Looking for strtod_l - not found
--- ZSTD VERSION: 1.5.2
--- Performing Test CXX_FLAG_STD_CPLUSPLUS11
--- Performing Test CXX_FLAG_STD_CPLUSPLUS11 - Success
--- Performing Test C_FLAG_STD_C99
--- Performing Test C_FLAG_STD_C99 - Success
--- Performing Test C_FLAG_WALL
--- Performing Test C_FLAG_WALL - Success
--- Performing Test CXX_FLAG_WALL
--- Performing Test CXX_FLAG_WALL - Success
--- Performing Test C_FLAG_WEXTRA
--- Performing Test C_FLAG_WEXTRA - Success
--- Performing Test CXX_FLAG_WEXTRA
--- Performing Test CXX_FLAG_WEXTRA - Success
--- Performing Test C_FLAG_WUNDEF
--- Performing Test C_FLAG_WUNDEF - Success
--- Performing Test CXX_FLAG_WUNDEF
--- Performing Test CXX_FLAG_WUNDEF - Success
--- Performing Test C_FLAG_WSHADOW
--- Performing Test C_FLAG_WSHADOW - Success
--- Performing Test CXX_FLAG_WSHADOW
--- Performing Test CXX_FLAG_WSHADOW - Success
--- Performing Test C_FLAG_WCAST_ALIGN
--- Performing Test C_FLAG_WCAST_ALIGN - Success
--- Performing Test CXX_FLAG_WCAST_ALIGN
--- Performing Test CXX_FLAG_WCAST_ALIGN - Success
--- Performing Test C_FLAG_WCAST_QUAL
--- Performing Test C_FLAG_WCAST_QUAL - Success
--- Performing Test CXX_FLAG_WCAST_QUAL
--- Performing Test CXX_FLAG_WCAST_QUAL - Success
--- Performing Test C_FLAG_WSTRICT_PROTOTYPES
--- Performing Test C_FLAG_WSTRICT_PROTOTYPES - Success
--- CMAKE_INSTALL_PREFIX: /usr/local
--- CMAKE_INSTALL_LIBDIR: lib64
--- ZSTD_LEGACY_SUPPORT not defined!
--- ZSTD_MULTITHREAD_SUPPORT is enabled
--- FDB version is 8.0.0
--- FDB package name is 8.0
--- Configuring done (0.0s)
--- Generating done (0.0s)
--- Build files have been written to: /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-download
-[1/14] Performing update step for 'googlebenchmark'
-[2/14] No patch step for 'googlebenchmark'
-[3/14] No configure step for 'googlebenchmark'
-[4/14] No build step for 'googlebenchmark'
-[5/14] No install step for 'googlebenchmark'
-[6/14] No test step for 'googlebenchmark'
-[7/14] Completed 'googlebenchmark'
-[8/14] Performing update step for 'googletest'
-[9/14] No patch step for 'googletest'
-[10/14] No configure step for 'googletest'
-[11/14] No build step for 'googletest'
-[12/14] No install step for 'googletest'
-[13/14] No test step for 'googletest'
-[14/14] Completed 'googletest'
--- Failed to find LLVM FileCheck
--- Found Git: /usr/local/bin/git (found version "2.30.0") 
--- git version: v1.8.0 normalized to 1.8.0
--- Version: 1.8.0
--- Looking for shm_open in rt
--- Looking for shm_open in rt - found
--- Performing Test HAVE_CXX_FLAG_WALL
--- Performing Test HAVE_CXX_FLAG_WALL - Success
--- Performing Test HAVE_CXX_FLAG_WEXTRA
--- Performing Test HAVE_CXX_FLAG_WEXTRA - Success
--- Performing Test HAVE_CXX_FLAG_WSHADOW
--- Performing Test HAVE_CXX_FLAG_WSHADOW - Success
--- Performing Test HAVE_CXX_FLAG_WFLOAT_EQUAL
--- Performing Test HAVE_CXX_FLAG_WFLOAT_EQUAL - Success
--- Performing Test HAVE_CXX_FLAG_WERROR
--- Performing Test HAVE_CXX_FLAG_WERROR - Success
--- Performing Test HAVE_CXX_FLAG_WSUGGEST_OVERRIDE
--- Performing Test HAVE_CXX_FLAG_WSUGGEST_OVERRIDE - Success
--- Performing Test HAVE_CXX_FLAG_PEDANTIC
--- Performing Test HAVE_CXX_FLAG_PEDANTIC - Success
--- Performing Test HAVE_CXX_FLAG_PEDANTIC_ERRORS
--- Performing Test HAVE_CXX_FLAG_PEDANTIC_ERRORS - Success
--- Performing Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32
--- Performing Test HAVE_CXX_FLAG_WSHORTEN_64_TO_32 - Failed
--- Performing Test HAVE_CXX_FLAG_FSTRICT_ALIASING
--- Performing Test HAVE_CXX_FLAG_FSTRICT_ALIASING - Success
--- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS
--- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED_DECLARATIONS - Success
--- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED
--- Performing Test HAVE_CXX_FLAG_WNO_DEPRECATED - Success
--- Performing Test HAVE_CXX_FLAG_WSTRICT_ALIASING
--- Performing Test HAVE_CXX_FLAG_WSTRICT_ALIASING - Success
--- Performing Test HAVE_CXX_FLAG_WD654
--- Performing Test HAVE_CXX_FLAG_WD654 - Failed
--- Performing Test HAVE_CXX_FLAG_WTHREAD_SAFETY
--- Performing Test HAVE_CXX_FLAG_WTHREAD_SAFETY - Failed
--- Performing Test HAVE_CXX_FLAG_COVERAGE
--- Performing Test HAVE_CXX_FLAG_COVERAGE - Success
--- Compiling and running to test HAVE_STD_REGEX
--- Performing Test HAVE_STD_REGEX -- success
--- Compiling and running to test HAVE_GNU_POSIX_REGEX
--- Performing Test HAVE_GNU_POSIX_REGEX -- failed to compile
--- Compiling and running to test HAVE_POSIX_REGEX
--- Performing Test HAVE_POSIX_REGEX -- success
--- Compiling and running to test HAVE_STEADY_CLOCK
--- Performing Test HAVE_STEADY_CLOCK -- success
--- Compiling and running to test HAVE_PTHREAD_AFFINITY
--- Performing Test HAVE_PTHREAD_AFFINITY -- failed to compile
--- Adding Client test single_process_fdbcli_tests
--- Adding Client test multi_process_fdbcli_tests
--- Adding Client test single_process_external_client_fdbcli_tests
--- Adding Client test multi_process_external_client_fdbcli_tests
--- Adding Client test metacluster_fdbcli_tests
--- Use old fdb at /opt/foundationdb/old/7.1.23/bin/fdbserver-7.1.23
--- ADDING SIMULATOR TEST 0 BGServerCommonUnit
--- ADDING SIMULATOR TEST 1 BlobGranuleFileUnit
--- ADDING SIMULATOR TEST 2 BlobManagerUnit
--- ADDING SIMULATOR TEST 3 SimpleExternalTest
--- ADDING SIMULATOR TEST 4 StorageServerInterface
--- ADDING SIMULATOR TEST 5 SystemData
--- ADDING SIMULATOR TEST 6 fast/AtomicBackupCorrectness
--- ADDING SIMULATOR TEST 7 fast/AtomicBackupToDBCorrectness
--- ADDING SIMULATOR TEST 8 fast/AtomicOps
--- ADDING SIMULATOR TEST 9 fast/AtomicOpsApiCorrectness
--- ADDING SIMULATOR TEST 10 fast/AuthzSecurity
--- ADDING SIMULATOR TEST 11 fast/AuthzSecurityWithBlobGranules
--- ADDING SIMULATOR TEST 12 fast/AutomaticIdempotency
--- ADDING SIMULATOR TEST 13 fast/BackupCorrectness
--- ADDING SIMULATOR TEST 14 fast/BackupCorrectnessWithEKPKeyFetchFailures
--- ADDING SIMULATOR TEST 15 fast/BackupCorrectnessWithTenantDeletion
--- ADDING SIMULATOR TEST 16 fast/EncryptedBackupCorrectness
--- ADDING SIMULATOR TEST 17 fast/BackupCorrectnessClean
--- ADDING SIMULATOR TEST 18 fast/BackupToDBCorrectness
--- ADDING SIMULATOR TEST 19 fast/BackupToDBCorrectnessClean
--- ADDING SIMULATOR TEST 20 fast/BlobGranuleVerifyAtomicOps
--- ADDING SIMULATOR TEST 21 fast/BlobGranuleVerifyCycle
--- ADDING SIMULATOR TEST 22 fast/BlobGranuleVerifySmall
--- ADDING SIMULATOR TEST 23 fast/BlobGranuleVerifySmallClean
--- ADDING SIMULATOR TEST 24 fast/BlobRestoreBasic
--- ADDING SIMULATOR TEST 25 fast/BlobRestoreLarge
--- ADDING SIMULATOR TEST 26 fast/BlobRestoreToVersion
--- ADDING SIMULATOR TEST 27 fast/BlobRestoreTenantMode
--- ADDING SIMULATOR TEST 28 fast/CacheTest
--- ADDING SIMULATOR TEST 29 fast/CloggedSideband
--- ADDING SIMULATOR TEST 30 fast/ConfigureLocked
--- ADDING SIMULATOR TEST 31 fast/ConfigIncrement
--- ADDING SIMULATOR TEST 32 fast/ConfigIncrementChangeCoordinators
--- ADDING SIMULATOR TEST 33 fast/ConfigIncrementWithKills
--- ADDING SIMULATOR TEST 34 fast/ConstrainedRandomSelector
--- ADDING SIMULATOR TEST 35 fast/CycleAndLock
--- ADDING SIMULATOR TEST 36 fast/CycleTest
--- ADDING SIMULATOR TEST 37 fast/ChangeFeeds
--- ADDING SIMULATOR TEST 38 fast/ChangeFeedOperations
--- ADDING SIMULATOR TEST 39 fast/ChangeFeedOperationsMove
--- ADDING SIMULATOR TEST 40 fast/DataLossRecovery
--- ADDING SIMULATOR TEST 41 fast/EncryptionOps
--- ADDING SIMULATOR TEST 42 fast/EncryptKeyProxyTest
--- ADDING SIMULATOR TEST 43 fast/FuzzApiCorrectness
--- ADDING SIMULATOR TEST 44 fast/FuzzApiCorrectnessClean
--- ADDING SIMULATOR TEST 45 fast/HTTPKeyValueStore
--- ADDING SIMULATOR TEST 46 fast/IncrementalBackup
--- ADDING SIMULATOR TEST 47 fast/IncrementalBackupWithEKPKeyFetchFailures
--- ADDING SIMULATOR TEST 48 fast/IncrementalBackupWithTenantDeletion
--- ADDING SIMULATOR TEST 49 fast/IncrementTest
--- ADDING SIMULATOR TEST 50 fast/InventoryTestAlmostReadOnly
--- ADDING SIMULATOR TEST 51 fast/InventoryTestSomeWrites
--- ADDING SIMULATOR TEST 52 fast/KillRegionCycle
--- ADDING SIMULATOR TEST 53 fast/LocalRatekeeper
--- ADDING SIMULATOR TEST 54 fast/LongStackWriteDuringRead
--- ADDING SIMULATOR TEST 55 fast/LowLatency
--- ADDING SIMULATOR TEST 56 fast/MemoryLifetime
--- ADDING SIMULATOR TEST 57 fast/MoveKeysCycle
--- ADDING SIMULATOR TEST 58 fast/MutationLogReaderCorrectness
--- ADDING SIMULATOR TEST 59 fast/GetEstimatedRangeSize
--- ADDING SIMULATOR TEST 60 fast/GetMappedRange
--- ADDING SIMULATOR TEST 61 fast/PerpetualWiggleStats
--- ADDING SIMULATOR TEST 62 fast/PrivateEndpoints
--- ADDING SIMULATOR TEST 63 fast/ProtocolVersion
--- ADDING SIMULATOR TEST 64 fast/RandomSelector
--- ADDING SIMULATOR TEST 65 fast/RandomUnitTests
--- ADDING SIMULATOR TEST 66 fast/ReportConflictingKeys
--- ADDING SIMULATOR TEST 67 fast/SelectorCorrectness
--- ADDING SIMULATOR TEST 68 fast/Sideband
--- ADDING SIMULATOR TEST 69 fast/SidebandSingle
--- ADDING SIMULATOR TEST 70 fast/SidebandWithStatus
--- ADDING SIMULATOR TEST 71 fast/SimpleAtomicAdd
--- ADDING SIMULATOR TEST 72 fast/SpecialKeySpaceCorrectness
--- ADDING SIMULATOR TEST 73 fast/SpecialKeySpaceRobustness
--- ADDING SIMULATOR TEST 74 fast/StreamingRangeRead
--- ADDING SIMULATOR TEST 75 fast/SwizzledRollbackSideband
--- ADDING SIMULATOR TEST 76 fast/SystemRebootTestCycle
--- ADDING SIMULATOR TEST 77 fast/TaskBucketCorrectness
--- ADDING SIMULATOR TEST 78 fast/TenantCycle
--- ADDING SIMULATOR TEST 79 fast/TenantCycleTokenless
--- ADDING SIMULATOR TEST 80 fast/TenantEntryCache
--- ADDING SIMULATOR TEST 81 fast/TenantLock
--- ADDING SIMULATOR TEST 82 fast/RawTenantAccessClean
--- ADDING SIMULATOR TEST 83 fast/TimeKeeperCorrectness
--- ADDING SIMULATOR TEST 84 fast/TxnStateStoreCycleTest
--- ADDING SIMULATOR TEST 85 fast/UDP
--- ADDING SIMULATOR TEST 86 fast/Unreadable
--- ADDING SIMULATOR TEST 87 fast/VersionStamp
--- ADDING SIMULATOR TEST 88 fast/Watches
--- ADDING SIMULATOR TEST 89 fast/WriteDuringRead
--- ADDING SIMULATOR TEST 90 fast/WriteDuringReadClean
--- ADDING UNIT TEST 91 noSim/RandomUnitTests
--- ADDING SIMULATOR TEST 92 fast/IDDTxnProcessorMoveKeys
--- ADDING SIMULATOR TEST 93 fast/MockDDReadWrite
--- ADDING SIMULATOR TEST 94 rare/BlobGranuleRanges
--- ADDING SIMULATOR TEST 95 rare/BlobGranuleRangesChangeLog
--- ADDING SIMULATOR TEST 96 rare/BlobGranuleMergeBoundaries
--- ADDING SIMULATOR TEST 97 rare/CheckRelocation
--- ADDING SIMULATOR TEST 98 rare/ClogTlog
--- ADDING SIMULATOR TEST 99 rare/ClogUnclog
--- ADDING SIMULATOR TEST 100 rare/CloggedCycleWithKills
--- ADDING SIMULATOR TEST 101 rare/ConfigDBUnitTest
--- ADDING SIMULATOR TEST 102 rare/ConflictRangeCheck
--- ADDING SIMULATOR TEST 103 rare/ConflictRangeRYOWCheck
--- ADDING SIMULATOR TEST 104 rare/CycleRollbackClogged
--- ADDING SIMULATOR TEST 105 rare/CycleWithKills
--- ADDING SIMULATOR TEST 106 rare/CycleWithDeadHall
--- ADDING SIMULATOR TEST 107 rare/DataDistributionMetrics
--- ADDING SIMULATOR TEST 108 rare/DcLag
--- ADDING SIMULATOR TEST 109 rare/HighContentionPrefixAllocator
--- ADDING SIMULATOR TEST 110 rare/InventoryTestHeavyWrites
--- ADDING SIMULATOR TEST 111 rare/LargeApiCorrectness
--- ADDING SIMULATOR TEST 112 rare/LargeApiCorrectnessStatus
--- ADDING SIMULATOR TEST 113 rare/RYWDisable
--- ADDING SIMULATOR TEST 114 rare/RandomReadWriteTest
--- ADDING SIMULATOR TEST 115 rare/ReadSkewReadWrite
--- ADDING SIMULATOR TEST 116 rare/SpecificUnitTests
--- ADDING SIMULATOR TEST 117 rare/StorageQuotaTest
--- ADDING SIMULATOR TEST 118 rare/SwizzledLargeApiCorrectness
--- ADDING SIMULATOR TEST 119 rare/RedwoodCorrectnessBTree
--- ADDING SIMULATOR TEST 120 rare/RedwoodDeltaTree
--- ADDING SIMULATOR TEST 121 rare/TagThroughputQuota
--- ADDING SIMULATOR TEST 122 rare/TenantGroupThroughputQuota
--- ADDING SIMULATOR TEST 123 rare/Throttling
--- ADDING SIMULATOR TEST 124 rare/ThroughputQuotaCache
--- ADDING SIMULATOR TEST 125 rare/TooManyGrvBatchers
--- ADDING SIMULATOR TEST 126 rare/TransactionCost
--- ADDING SIMULATOR TEST 127 rare/TransactionTagApiCorrectness
--- ADDING SIMULATOR TEST 128 rare/TransactionTagSwizzledApiCorrectness
--- ADDING SIMULATOR TEST 129 rare/WriteTagThrottling
--- ADDING SIMULATOR TEST 130 rare/StatusBuilderPerf
--- ADDING SIMULATOR TEST 131 rare/TLogVersionMessagesOverheadFactor
--- ADDING SIMULATOR TEST 132 restarting/from_5.0.0_until_6.3.0/CycleTestRestart-1
--- ADDING SIMULATOR TEST 134 restarting/from_5.0.0_until_6.3.0/StorefrontTestRestart-1
--- ADDING SIMULATOR TEST 136 restarting/from_5.1.7_until_6.3.0/DrUpgradeRestart-1
--- ADDING SIMULATOR TEST 138 restarting/from_5.2.0_until_6.3.0/ClientTransactionProfilingCorrectness-1
--- ADDING SIMULATOR TEST 140 restarting/from_6.3.13_until_71.2.0/ClientTransactionProfilingCorrectness-1
--- ADDING SIMULATOR TEST 142 restarting/from_6.3.13_until_71.2.0/CycleTestRestart-1
--- ADDING SIMULATOR TEST 144 restarting/from_6.3.13_until_71.2.0/StorefrontTestRestart-1
--- ADDING SIMULATOR TEST 146 restarting/from_6.3.13_until_71.2.0/DrUpgradeRestart-1
--- ADDING SIMULATOR TEST 148 restarting/from_7.0.0_until_7.1.0/UpgradeAndBackupRestore-1
--- ADDING SIMULATOR TEST 150 restarting/from_7.1.0_until_71.2.0/ConfigureTestRestart-1
--- ADDING SIMULATOR TEST 152 restarting/from_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1
--- ADDING SIMULATOR TEST 154 restarting/from_7.1.0_until_71.2.0/UpgradeAndBackupRestore-1
--- ADDING SIMULATOR TEST 156 restarting/from_71.2.0_until_71.3.0/ConfigureTestRestart-1
--- ADDING SIMULATOR TEST 158 restarting/from_71.2.0_until_71.3.0/ConfigureStorageMigrationTestRestart-1
--- ADDING SIMULATOR TEST 160 restarting/from_71.2.0_until_71.3.0/DrUpgradeRestart-1
--- ADDING SIMULATOR TEST 162 restarting/from_71.2.0_until_71.3.0/ClientTransactionProfilingCorrectness-1
--- ADDING SIMULATOR TEST 164 restarting/from_71.2.0_until_71.3.0/CycleTestRestart-1
--- ADDING SIMULATOR TEST 166 restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-1
--- ADDING SIMULATOR TEST 168 restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-1
--- ADDING SIMULATOR TEST 170 restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-1
--- ADDING SIMULATOR TEST 172 restarting/from_71.3.0/ConfigureTestRestart-1
--- ADDING SIMULATOR TEST 174 restarting/from_71.3.0/ConfigureStorageMigrationTestRestart-1
--- ADDING SIMULATOR TEST 176 restarting/from_71.3.0/DrUpgradeRestart-1
--- ADDING SIMULATOR TEST 178 restarting/from_71.3.0/UpgradeAndBackupRestore-1
--- ADDING SIMULATOR TEST 180 restarting/from_71.3.0/BlobGranuleRestartCycle-1
--- ADDING SIMULATOR TEST 182 restarting/from_71.3.0/BlobGranuleRestartLarge-1
--- ADDING SIMULATOR TEST 184 restarting/from_71.3.0/ClientTransactionProfilingCorrectness-1
--- ADDING SIMULATOR TEST 186 restarting/from_71.3.0/CycleTestRestart-1
--- ADDING SIMULATOR TEST 188 restarting/from_71.3.0/BlobGranuleRestartCorrectness-1
--- ADDING SIMULATOR TEST 190 restarting/from_71.3.0/SnapCycleRestart-1
--- ADDING SIMULATOR TEST 192 restarting/from_71.3.0/SnapIncrementalRestore-1
--- ADDING SIMULATOR TEST 194 restarting/from_71.3.0/SnapTestAttrition-1
--- ADDING SIMULATOR TEST 196 restarting/from_71.3.0/SnapTestSimpleRestart-1
--- ADDING SIMULATOR TEST 198 restarting/from_71.3.0/SnapTestRestart-1
--- ADDING SIMULATOR TEST 200 restarting/from_71.3.0/StorefrontTestRestart-1
--- ADDING SIMULATOR TEST 202 slow/ApiCorrectness
--- ADDING SIMULATOR TEST 203 slow/ApiCorrectnessAtomicRestore
--- ADDING SIMULATOR TEST 204 slow/ApiCorrectnessSwitchover
--- ADDING SIMULATOR TEST 205 slow/BlobGranuleVerifyLarge
--- ADDING SIMULATOR TEST 206 slow/BlobGranuleVerifyLargeClean
--- ADDING SIMULATOR TEST 207 slow/BlobGranuleVerifyBalance
--- ADDING SIMULATOR TEST 208 slow/BlobGranuleVerifyBalanceClean
--- ADDING SIMULATOR TEST 209 slow/BlobGranuleCorrectnessClean
--- ADDING SIMULATOR TEST 210 slow/BlobGranuleCorrectness
--- ADDING SIMULATOR TEST 211 slow/BlobGranuleApiCorrectness
--- ADDING SIMULATOR TEST 212 slow/ClogWithRollbacks
--- ADDING SIMULATOR TEST 213 slow/CloggedCycleTest
--- ADDING SIMULATOR TEST 214 slow/CloggedStorefront
--- ADDING SIMULATOR TEST 215 slow/CommitBug
--- ADDING SIMULATOR TEST 216 slow/ConfigureTest
--- ADDING SIMULATOR TEST 217 slow/ConfigureStorageMigrationTest
--- ADDING SIMULATOR TEST 218 slow/CycleRollbackPlain
--- ADDING SIMULATOR TEST 219 slow/DDBalanceAndRemove
--- ADDING SIMULATOR TEST 220 slow/DDBalanceAndRemoveStatus
--- ADDING SIMULATOR TEST 221 slow/DifferentClustersSameRV
--- ADDING SIMULATOR TEST 222 slow/DiskFailureCycle
--- ADDING SIMULATOR TEST 223 slow/FastTriggeredWatches
--- ADDING LONG RUNNING TEST 224 slow/LongRunning
--- ADDING SIMULATOR TEST 225 slow/LowLatencyWithFailures
--- ADDING SIMULATOR TEST 226 slow/MetaclusterManagement
--- ADDING SIMULATOR TEST 227 slow/MetaclusterManagementConcurrency
--- ADDING SIMULATOR TEST 228 slow/MetaclusterMove
--- ADDING SIMULATOR TEST 229 slow/MetaclusterRecovery
--- ADDING SIMULATOR TEST 230 slow/MoveKeysClean
--- ADDING SIMULATOR TEST 231 slow/MoveKeysSideband
--- ADDING SIMULATOR TEST 232 slow/RyowCorrectness
--- ADDING SIMULATOR TEST 233 slow/Serializability
--- ADDING SIMULATOR TEST 234 slow/SharedBackupCorrectness
--- ADDING SIMULATOR TEST 235 slow/SharedBackupToDBCorrectness
--- ADDING SIMULATOR TEST 236 slow/SharedDefaultBackupCorrectness
--- ADDING SIMULATOR TEST 237 slow/StorefrontTest
--- ADDING SIMULATOR TEST 238 slow/SwizzledApiCorrectness
--- ADDING SIMULATOR TEST 239 slow/SwizzledCycleTest
--- ADDING SIMULATOR TEST 240 slow/SwizzledDdBalance
--- ADDING SIMULATOR TEST 241 slow/SwizzledRollbackTimeLapse
--- ADDING SIMULATOR TEST 242 slow/SwizzledRollbackTimeLapseIncrement
--- ADDING SIMULATOR TEST 243 slow/SwizzledTenantManagement
--- ADDING SIMULATOR TEST 244 slow/SwizzledTenantManagementMetacluster
--- ADDING SIMULATOR TEST 245 slow/TenantCapacityLimits
--- ADDING SIMULATOR TEST 246 slow/TenantManagement
--- ADDING SIMULATOR TEST 247 slow/TenantManagementConcurrency
--- ADDING SIMULATOR TEST 248 slow/VersionStampBackupToDB
--- ADDING SIMULATOR TEST 249 slow/VersionStampSwitchover
--- ADDING SIMULATOR TEST 250 slow/WriteDuringReadAtomicRestore
--- ADDING SIMULATOR TEST 251 slow/WriteDuringReadSwitchover
--- ADDING SIMULATOR TEST 252 slow/ddbalance
--- ADDING SIMULATOR TEST 253 negative/ResolverIgnoreTooOld
--- ADDING SIMULATOR TEST 254 negative/ResolverIgnoreReads
--- ADDING SIMULATOR TEST 255 negative/ResolverIgnoreWrites
--- ADDING SIMULATOR TEST 256 negative/StorageCorruption
--- ADDING SIMULATOR TEST 257 status/invalid_proc_addresses
--- ADDING SIMULATOR TEST 258 status/local_6_machine_no_replicas_remain
--- ADDING SIMULATOR TEST 259 status/separate_1_of_3_coordinators_remain
--- ADDING SIMULATOR TEST 260 status/separate_2_of_3_coordinators_remain
--- ADDING SIMULATOR TEST 261 status/separate_cannot_write_cluster_file
--- ADDING SIMULATOR TEST 262 status/separate_idle
--- ADDING SIMULATOR TEST 263 status/separate_initializing
--- ADDING SIMULATOR TEST 264 status/separate_no_coordinators
--- ADDING SIMULATOR TEST 265 status/separate_no_database
--- ADDING SIMULATOR TEST 266 status/separate_no_servers
--- ADDING SIMULATOR TEST 267 status/separate_not_enough_servers
--- ADDING SIMULATOR TEST 268 status/single_process_too_many_config_params
--- Adding Client test fdb_c_setup_tests
--- Adding Client test fdb_c_unit_tests
--- Adding Client test fdb_c_unit_tests_version_510
--- Adding Client test trace_partial_file_suffix_test
--- Adding Client test fdb_c_external_client_unit_tests
--- Adding unavailable client test disconnected_timeout_unit_tests
--- Adding unavailable client test disconnected_timeout_external_client_unit_tests
--- Building fat jar to /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/packages
-CMake Warning at bindings/java/CMakeLists.txt:304 (message):
-  Cannot run java tests with sanitizer builds
-
-
--- Add html target
--- Port is 14244
--- =========================================
---    Components Build Overview 
--- =========================================
--- Build Bindings (depends on Python):   ON
--- Build C Bindings:                     ON
--- Build Python Bindings:                ON
--- Build Java Bindings:                  ON
--- Build Go bindings:                    OFF
--- Build Ruby bindings:                  ON
--- Build Documentation (make html):      ON
--- Build Python sdist (make package):    ON
--- Configure CTest (depends on Python):  ON
--- Build with RocksDB:                   OFF
--- Build with AWS SDK:                   ON
--- =========================================
--- CPACK_COMPONENTS_ALL Unspecified;clients-deb;clients-el7;clients-tgz;clients-versioned;server-deb;server-el7;server-tgz;server-versioned
--- Configuring done (5.0s)
--- Generating done (0.2s)
--- Build files have been written to: /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64
-CMake Warning:
-  Manually-specified variables were not used by the project:
-
-    FORCE_BOOST_BUILD
-
-
-Cached signature updated for cmake.10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 to 134911706f157b789be94875fbd87485
-+ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && docker run --init --name fdbdev-$(id -un)-22655 -v /mnt/ephemeral/jfu:/mnt/ephemeral/jfu -w /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 --cap-add=SYS_PTRACE --privileged --rm --security-opt seccomp=unconfined -e CCACHE_DIR -e CCACHE_BASEDIR -e CCACHE_MAXSIZE -e CCACHE_UMASK -e LD_LIBRARY_PATH=/usr/local/lib -e LD_LIBRARY_PATH=/usr/local/lib/x86_64-unknown-linux-gnu -i -u $(id -u):$(id -g) -v $HOME:$HOME -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro -v /mnt/ephemeral/ccache:/mnt/ephemeral/ccache -v /mnt/ephemeral/joshua:/mnt/ephemeral/joshua -v /mnt/ephemeral/oldbinaries:/app/deploy/global_data/oldBinaries/ 937559181915.dkr.ecr.us-west-2.amazonaws.com/frostdb/devel:centos7-latest-amd64 scl enable devtoolset-11 rh-python38 rh-ruby27 -- bash -i -c '\''ninja -C /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 packages/bin/fdbserver'\'''
-ninja: Entering directory `/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64'
-bash: no job control in this shell
-[0/2] Re-checking globbed directories...
-[1/635] Building ASM object contrib/crc32/CMakeFiles/crc32.dir/crc32.S.o
-[2/635] Building C object contrib/crc32/CMakeFiles/crc32.dir/crc32_wrapper.c.o
-[3/635] Building ASM object contrib/folly_memcpy/CMakeFiles/folly_memcpy.dir/folly_memcpy.S.o
-[4/635] Building C object contrib/md5/CMakeFiles/md5.dir/md5.c.o
-[5/635] Building C object contrib/libb64/CMakeFiles/libb64.dir/cdecode.c.o
-[6/635] Building C object contrib/libb64/CMakeFiles/libb64.dir/cencode.c.o
-[7/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/debug.c.o
-[8/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/threading.c.o
-[9/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/zstd_common.c.o
-[10/635] Building ASM object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/decompress/huf_decompress_amd64.S.o
-[11/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_compress_literals.c.o
-[12/635] Linking ASM static library lib/libfolly_memcpy.a
-[13/635] Linking C static library lib/libmd5.a
-[14/635] Linking C static library lib/liblibb64.a
-[15/635] Compile actor: MetricClient.actor.cpp
-[16/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/error_private.c.o
-[17/635] Compile actor: TagThrottle.actor.cpp
-[18/635] Compile actor: include/flow/TDMetric.actor.h
-[19/635] Compile actor: BenchStream.actor.cpp
-[20/635] Compile actor: HTTPServer.actor.cpp
-[21/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/decompress/zstd_ddict.c.o
-[22/635] Compile actor: Stats.actor.cpp
-[23/635] Compile actor: ActorCollection.actor.cpp
-/mnt/ephemeral/jfu/frostdb/flow/ActorCollection.actor.cpp:164: warning: ACTOR failedActor does not contain a wait() statement
-[24/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/hist.c.o
-[25/635] Compile actor: include/fdbclient/NativeAPI.actor.h
-[26/635] Compile actor: include/fdbclient/TagThrottle.actor.h
-[27/635] Compile actor: include/fdbclient/TenantData.actor.h
-[28/635] Compile actor: GlobalTagThrottler.actor.cpp
-[29/635] Compile actor: StorageMetrics.actor.cpp
-[30/635] Compile actor: include/fdbserver/ProxyCommitData.actor.h
-[31/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/pool.c.o
-[32/635] Compile actor: ReadVersionBatchers.actor.cpp
-[33/635] Compile actor: GrvProxyServer.actor.cpp
-[34/635] Compile actor: RKRateServer.actor.cpp
-[35/635] Compile actor: Ratekeeper.actor.cpp
-[36/635] Compile actor: TagThrottler.actor.cpp
-[37/635] Compile actor: include/fdbserver/DataDistribution.actor.h
-[38/635] Compile actor: sim2.actor.cpp
-[39/635] Compile actor: include/fdbclient/TenantManagement.actor.h
-[40/635] Compile actor: RKMetricsTracker.actor.cpp
-[41/635] Compile actor: RKThroughputQuotaCache.actor.cpp
-[42/635] Compile actor: ThrottlingCounter.actor.cpp
-[43/635] Compile actor: workloads/ThroughputQuota.actor.cpp
-[44/635] Building CXX object flow/CMakeFiles/flow.dir/FaultInjection.cpp.o
-[45/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/xxhash.c.o
-[46/635] Compile actor: BlobMigrator.actor.cpp
-[47/635] Compile actor: GrvProxyTagThrottler.actor.cpp
-[48/635] Compile actor: RKRateUpdaterTesting.actor.cpp
-[49/635] Compile actor: Resolver.actor.cpp
-[50/635] Compile actor: workloads/TagThrottleApi.actor.cpp
-[51/635] Compile actor: workloads/ThroughputQuotaCache.actor.cpp
-[52/635] Compile actor: workloads/TooManyGrvBatchers.actor.cpp
-[53/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_compress_sequences.c.o
-[54/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_compress_superblock.c.o
-[55/635] Compile actor: BlobManifest.actor.cpp
-[56/635] Compile actor: include/fdbserver/workloads/BulkSetup.actor.h
-[57/635] Compile actor: workloads/WriteTagThrottling.actor.cpp
-[58/635] Compile actor: include/metacluster/CreateTenant.actor.h
-[59/635] Compile actor: include/metacluster/MetaclusterConsistency.actor.h
-[60/635] Building CXX object flow/CMakeFiles/flow.dir/LinkTest.cpp.o
-[61/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/entropy_common.c.o
-[62/635] Compile actor: workloads/BlobRestoreWorkload.actor.cpp
-[63/635] Compile actor: workloads/FuzzApiCorrectness.actor.cpp
-[64/635] Compile actor: include/metacluster/MetaclusterData.actor.h
-[65/635] Building CXX object flow/CMakeFiles/flow.dir/version.cpp.o
-[66/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/fse_compress.c.o
-[67/635] Compile actor: ConsistencyScan.actor.cpp
-[68/635] Compile actor: workloads/ReadWrite.actor.cpp
-[69/635] Compile actor: QuietDatabase.actor.cpp
-[70/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_ldm.c.o
-[71/635] Compile actor: include/metacluster/MetaclusterMove.actor.h
-[72/635] Building C object flow/CMakeFiles/flow.dir/Hash3.c.o
-[73/635] Compile actor: include/metacluster/MetaclusterOperationContext.actor.h
-[74/635] Compile actor: workloads/ConsistencyCheck.actor.cpp
-[75/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/dictBuilder/cover.c.o
-[76/635] Compile actor: workloads/HTTPKeyValueStore.actor.cpp
-[77/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/dictBuilder/zdict.c.o
-[78/635] Compile actor: CommitProxyServer.actor.cpp
-[79/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstdmt_compress.c.o
-[80/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/LinkTest.cpp.o
-[81/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/dictBuilder/fastcover.c.o
-[82/635] Compile actor: DDTeamCollection.actor.cpp
-[83/635] Building C object fdbrpc/CMakeFiles/coro.dir/libcoroutine/Common.c.o
-[84/635] Compile actor: workloads/MetaclusterMoveWorkload.actor.cpp
-[85/635] Building C object fdbrpc/CMakeFiles/eio.dir/libeio/eio.c.o
-[86/635] Compile actor: Status.actor.cpp
-[87/635] Compile actor: FileBackupAgent.actor.cpp
-[88/635] Building C object fdbrpc/CMakeFiles/coro.dir/libcoroutine/context.c.o
-[89/635] Linking C static library lib/libeio.a
-[90/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/check.cc.o
-[91/635] Building C object fdbrpc/CMakeFiles/coro.dir/libcoroutine/Coro.c.o
-[92/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/timers.cc.o
-[93/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/common/fse_decompress.c.o
-[94/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/decompress/zstd_decompress.c.o
-[95/635] Compile actor: VersionedBTree.actor.cpp
-[96/635] Compile actor: NativeAPI.actor.cpp
-[97/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/huf_compress.c.o
-[98/635] Compile actor: storageserver.actor.cpp
-[99/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/benchmark_name.cc.o
-[100/635] Building CXX object contrib/fmt-8.1.1/CMakeFiles/fmt.dir/src/os.cc.o
-[101/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/reporter.cc.o
-[102/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/string_util.cc.o
-[103/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/commandlineflags.cc.o
-[104/635] Building CXX object contrib/stacktrace/CMakeFiles/stacktrace.dir/stacktrace.amalgamation.cpp.o
-[105/635] Building CXX object contrib/crc32/CMakeFiles/crc32.dir/crc32c.cpp.o
-[106/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/colorprint.cc.o
-[107/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/benchmark_api_internal.cc.o
-[108/635] Linking CXX static library lib/libstacktrace.a
-[109/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/dictBuilder/divsufsort.c.o
-[110/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/statistics.cc.o
-[111/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/counter.cc.o
-[112/635] Linking CXX static library lib/libcrc32.a
-[113/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/sysinfo.cc.o
-[114/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/json_reporter.cc.o
-[115/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/perf_counters.cc.o
-[116/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/decompress/zstd_decompress_block.c.o
-[117/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/console_reporter.cc.o
-[118/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_fast.c.o
-[119/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/csv_reporter.cc.o
-[120/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_double_fast.c.o
-[121/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_compress.c.o
-[122/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/decompress/huf_decompress.c.o
-[123/635] Building CXX object flow/CMakeFiles/flow.dir/SignalSafeUnwind.cpp.o
-[124/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/complexity.cc.o
-[125/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_opt.c.o
-[126/635] Building CXX object flow/CMakeFiles/flow.dir/ThreadPrimitives.cpp.o
-[127/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/benchmark_runner.cc.o
-[128/635] Building CXX object flow/CMakeFiles/flow.dir/__/contrib/boost_zstd/zstd.cpp.o
-[129/635] Building CXX object flow/CMakeFiles/flow.dir/ProtocolVersion.cpp.o
-[130/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/LinkTest.cpp.o
-[131/635] Building CXX object flow/CMakeFiles/flow.dir/SimBugInjector.cpp.o
-[132/635] Building C object flow/CMakeFiles/flow.dir/xxhash.c.o
-[133/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/benchmark.cc.o
-[134/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Base64Encode.cpp.o
-[135/635] Building CXX object flow/CMakeFiles/flow.dir/DeterministicRandom.cpp.o
-[136/635] Building CXX object flow/CMakeFiles/flow.dir/CodeProbe.cpp.o
-[137/635] Building CXX object flow/CMakeFiles/flow.dir/PKey.cpp.o
-[138/635] Building CXX object flow/CMakeFiles/flow.dir/WriteOnlySet.actor.g.cpp.o
-[139/635] Building CXX object flow/CMakeFiles/flow.dir/Net2Packet.cpp.o
-[140/635] Building CXX object flow/CMakeFiles/flow.dir/MkCert.cpp.o
-[141/635] Building CXX object contrib/fmt-8.1.1/CMakeFiles/fmt.dir/src/format.cc.o
-[142/635] Linking CXX static library lib/libfmt.a
-[143/635] Building CXX object flow/CMakeFiles/flow.dir/CompressionUtils.cpp.o
-[144/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/ActorFuzzUnitTest.cpp.o
-[145/635] Building CXX object flow/CMakeFiles/flow.dir/CompressedInt.actor.g.cpp.o
-[146/635] Building CXX object flow/CMakeFiles/flow.dir/FastAlloc.cpp.o
-[147/635] Building CXX object flow/CMakeFiles/flow.dir/ActorCollection.actor.g.cpp.o
-[148/635] Building CXX object flow/CMakeFiles/flow.dir/XmlTraceLogFormatter.cpp.o
-[149/635] Building CXX object flow/CMakeFiles/flow.dir/Profiler.actor.g.cpp.o
-[150/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Locality.cpp.o
-[151/635] Building C object _deps/zstd-build/lib/CMakeFiles/libzstd_static.dir/__/__/zstd-src/lib/compress/zstd_lazy.c.o
-[152/635] Building CXX object fdbserver/googlebenchmark-build/src/CMakeFiles/benchmark.dir/benchmark_register.cc.o
-[153/635] Linking C static library lib/libzstd.a
-[154/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/DDSketchTest.actor.g.cpp.o
-[155/635] Building CXX object flow/CMakeFiles/flow.dir/IThreadPoolTest.actor.g.cpp.o
-[156/635] Building CXX object flow/CMakeFiles/flow.dir/JsonTraceLogFormatter.cpp.o
-[157/635] Building CXX object flow/CMakeFiles/flow.dir/test_memcpy.cpp.o
-[158/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/AsyncFileWriteChecker.cpp.o
-[159/635] Building CXX object flow/CMakeFiles/flow.dir/Error.cpp.o
-[160/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/TraceFileIO.cpp.o
-[161/635] Building CXX object flow/CMakeFiles/flow.dir/Deque.cpp.o
-[162/635] Building CXX object flow/CMakeFiles/flow.dir/WipedString.cpp.o
-[163/635] Building CXX object flow/CMakeFiles/flow.dir/ArenaString.cpp.o
-[164/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/ReplicationTypes.cpp.o
-[165/635] Building CXX object flow/CMakeFiles/flow.dir/FileTraceLogWriter.cpp.o
-[166/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/HealthMonitor.actor.g.cpp.o
-[167/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Base64Decode.cpp.o
-[168/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/AnnotateActor.cpp.o
-[169/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Replication.cpp.o
-[170/635] Building CXX object flow/CMakeFiles/flow.dir/TDMetric.cpp.o
-[171/635] Building CXX object flow/CMakeFiles/flow.dir/StreamCipher.cpp.o
-[172/635] Building CXX object flow/CMakeFiles/flow.dir/ThreadHelper.actor.g.cpp.o
-[173/635] Building CXX object flow/CMakeFiles/flow.dir/UnitTest.cpp.o
-[174/635] Building CXX object flow/CMakeFiles/flow.dir/genericactors.actor.g.cpp.o
-[175/635] Building CXX object flow/CMakeFiles/flow.dir/EncryptUtils.cpp.o
-[176/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/AsyncFileEncrypted.actor.g.cpp.o
-[177/635] Building CXX object flow/CMakeFiles/flow.dir/ProcessEvents.cpp.o
-[178/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ApiRequest.cpp.o
-[179/635] Building C object fdbclient/CMakeFiles/fdbclient.dir/zipf.c.o
-[180/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/FailureMonitor.actor.g.cpp.o
-[181/635] Building CXX object flow/CMakeFiles/flow.dir/Histogram.cpp.o
-[182/635] Building CXX object flow/CMakeFiles/flow.dir/SystemMonitor.cpp.o
-[183/635] Linking CXX static library lib/libbenchmark.a
-[184/635] Building CXX object flow/CMakeFiles/flow.dir/IAsyncFile.actor.g.cpp.o
-[185/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/ReplicationPolicy.cpp.o
-[186/635] Building CXX object flow/CMakeFiles/flow.dir/serialize.cpp.o
-[187/635] Building CXX object flow/CMakeFiles/flow.dir/Knobs.cpp.o
-[188/635] Building CXX object flow/CMakeFiles/flow.dir/flow.cpp.o
-[189/635] Building CXX object flow/CMakeFiles/flow.dir/Arena.cpp.o
-[190/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Stats.actor.g.cpp.o
-[191/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/AsyncTaskThread.actor.g.cpp.o
-[192/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/JsonBuilder.cpp.o
-[193/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/sha1/SHA1.cpp.o
-[194/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/NameLineage.cpp.o
-[195/635] Building CXX object flow/CMakeFiles/flow.dir/test_memcpy_perf.cpp.o
-[196/635] Building CXX object flow/CMakeFiles/flow.dir/IThreadPool.cpp.o
-[197/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TupleVersionstamp.cpp.o
-[198/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/JsonWebKeySet.cpp.o
-[199/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/LoadBalance.actor.g.cpp.o
-[200/635] Building CXX object flow/CMakeFiles/flow.dir/network.cpp.o
-[201/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/FDBAWSCredentialsProvider.cpp.o
-[202/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchMem.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp: In function ‘void bench_memcmp(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp:35:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = int; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   35 |                 benchmark::DoNotOptimize(memcmp(b1.get(), b2.get(), kLength));
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp:24:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp: In function ‘void bench_memcpy(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp:46:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = void*; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   46 |                 benchmark::DoNotOptimize(memcpy(b2.get(), b1.get(), kLength));
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchMem.cpp:24:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[203/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/IPAllowList.cpp.o
-[204/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/TokenSign.cpp.o
-[205/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ConfigKnobs.cpp.o
-[206/635] Building CXX object flow/CMakeFiles/flow.dir/IndexedSet.cpp.o
-[207/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/ActorFuzz.actor.g.cpp.o
-[208/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/StackLineage.cpp.o
-[209/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/sim_validation.cpp.o
-[210/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ParallelStream.actor.g.cpp.o
-[211/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchRandom.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchRandom.cpp: In function ‘void bench_random(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchRandom.cpp:27:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = double; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   27 |                 benchmark::DoNotOptimize(deterministicRandom()->random01());
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchRandom.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[212/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/QueueModel.cpp.o
-[213/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchRef.cpp.o
-[214/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchTimer.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp: In function ‘void bench_timer(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp:27:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = double; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   27 |                 benchmark::DoNotOptimize(timer());
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp: In function ‘void bench_timer_monotonic(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp:34:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = double; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   34 |                 benchmark::DoNotOptimize(timer_monotonic());
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchTimer.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[215/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/TokenCache.actor.g.cpp.o
-[216/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Schemas.cpp.o
-[217/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TransactionLineage.cpp.o
-[218/635] Building CXX object flow/CMakeFiles/flow.dir/TLSConfig.actor.g.cpp.o
-[219/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClientKnobCollection.cpp.o
-[220/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/AsyncFileCached.actor.g.cpp.o
-[221/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/ReplicationUtils.cpp.o
-[222/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Subspace.cpp.o
-[223/635] Building CXX object flow/CMakeFiles/flow.dir/Hostname.actor.g.cpp.o
-[224/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/IKnobCollection.cpp.o
-[225/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/HTTPServer.actor.g.cpp.o
-[226/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchZstd.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp: In function ‘void bench_zstd_decompress(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp:203:41: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = std::pair<std::unique_ptr<char []>, long unsigned int>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-  203 |                 benchmark::DoNotOptimize(decompress(COMPRESSED[level]));
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp: In function ‘void bench_zstd_decompress_stream(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp:213:41: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = std::pair<std::unique_ptr<char []>, long unsigned int>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-  213 |                 benchmark::DoNotOptimize(decompressAsStream(COMPRESSED[level], dstream));
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchZstd.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[227/635] Building CXX object flow/CMakeFiles/flow.dir/flat_buffers.cpp.o
-[228/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobMetadataUtils.cpp.o
-[229/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/FDBOptions.g.cpp.o
-[230/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchIONet2.actor.g.cpp.o
-[231/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/RandomKeyValueUtils.cpp.o
-[232/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/AsyncFileS3BlobStore.actor.g.cpp.o
-[233/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/SimExternalConnection.actor.g.cpp.o
-[234/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/HTTP.actor.g.cpp.o
-[235/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchHash.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp: In function ‘void hash(const KeyRef&, size_t) [with HashType hashType = HashType::CRC32C; KeyRef = StringRef; size_t = long unsigned int]’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp:49:33: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = unsigned int; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   49 |         benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
-      |         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp: In function ‘void hash(const KeyRef&, size_t) [with HashType hashType = HashType::XXHash3; KeyRef = StringRef; size_t = long unsigned int]’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp:54:33: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = long unsigned int; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   54 |         benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
-      |         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchHash.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[236/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Tuple.cpp.o
-[237/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/FluentDSampleIngestor.cpp.o
-[238/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchNet2.actor.g.cpp.o
-[239/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/dsltest.actor.g.cpp.o
-[240/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ActorLineageProfiler.cpp.o
-[241/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/MetaclusterRegistration.cpp.o
-[242/635] Building CXX object flow/CMakeFiles/flow.dir/Trace.cpp.o
-[243/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Atomic.cpp.o
-[244/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchPriorityMultiLock.actor.g.cpp.o
-[245/635] Building CXX object flow/CMakeFiles/flow.dir/Platform.actor.g.cpp.o
-[246/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobGranuleCommon.cpp.o
-[247/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/RESTClient.actor.g.cpp.o
-[248/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/RestoreInterface.cpp.o
-[249/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchmarkGlobalData.cpp.o
-[250/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ServerKnobCollection.cpp.o
-[251/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchCallback.actor.g.cpp.o
-[252/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/VersionedMap.cpp.o
-[253/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TestKnobCollection.cpp.o
-[254/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/AsyncFileNonDurable.actor.g.cpp.o
-[255/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/RESTUtils.actor.g.cpp.o
-[256/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchSamples.cpp.o
-[257/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ThrottlingId.cpp.o
-[258/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/VersionVector.cpp.o
-[259/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/include/fdbclient/SimKmsVault.cpp.o
-[260/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchStream.actor.g.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp: In member function ‘int {anonymous}::BenchStreamActorActorState<BenchStreamActorActor>::a_body1loopBody1loopBody1cont1(const Key&, int)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp:46:48: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = Standalone<StringRef>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   46 |                         benchmark::DoNotOptimize(receivedKey);
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp: In instantiation of ‘int {anonymous}::BenchStreamActorActorState<BenchStreamActorActor>::a_body1loopBody1loopBody1cont1(const Key&, int) [with BenchStreamActorActor = {anonymous}::BenchStreamActorActor; Key = Standalone<StringRef>]’:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/BenchStream.actor.g.cpp:221:45:   required from ‘int {anonymous}::BenchStreamActorActorState<BenchStreamActorActor>::a_body1loopBody1loopBody1when1(const Key&, int) [with BenchStreamActorActor = {anonymous}::BenchStreamActorActor; Key = Standalone<StringRef>]’
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/BenchStream.actor.g.cpp:242:34:   required from ‘void {anonymous}::BenchStreamActorActorState<BenchStreamActorActor>::a_callback_fire(ActorSingleCallback<BenchStreamActorActor, 0, Standalone<StringRef> >*, const Key&) [with BenchStreamActorActor = {anonymous}::BenchStreamActorActor; Key = Standalone<StringRef>]’
-/mnt/ephemeral/jfu/frostdb/flow/include/flow/flow.h:1447:49:   required from ‘void ActorSingleCallback<ActorType, CallbackNumber, ValueType>::fire(const ValueType&) [with ActorType = {anonymous}::BenchStreamActorActor; int CallbackNumber = 0; ValueType = Standalone<StringRef>]’
-/mnt/ephemeral/jfu/frostdb/flow/include/flow/flow.h:1443:7:   required from here
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp:46:48: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = Standalone<StringRef>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   46 |                         benchmark::DoNotOptimize(receivedKey);
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchStream.actor.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[261/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Tracing.actor.g.cpp.o
-[262/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchEncrypt.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp: In function ‘void bench_encrypt(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp:54:49: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = Standalone<StringRef>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   54 |                         benchmark::DoNotOptimize(encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize));
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp: In function ‘void bench_decrypt(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp:73:49: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = Standalone<StringRef>; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   73 |                         benchmark::DoNotOptimize(
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~~^
-   74 |                             Standalone<StringRef>(decryptor.decrypt(encrypted.begin() + chunk * chunkSize, chunkSize, arena)));
-      |                             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchEncrypt.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[263/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchVersionVector.cpp.o
-[264/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchPopulate.cpp.o
-[265/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchIterate.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp: In instantiation of ‘void bench_iterate(benchmark::State&) [with ListImpl = Standalone<VectorRef<MutationRef> >]’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:61:1:   required from here
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:55:49: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = MutationRef; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   55 |                         benchmark::DoNotOptimize(mutation);
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp: In instantiation of ‘void bench_iterate(benchmark::State&) [with ListImpl = Standalone<MutationListRef>]’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:64:1:   required from here
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:55:49: warning: ‘typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = MutationRef; typename std::enable_if<((! std::is_trivially_copyable<_Tp>::value) || (sizeof (Tp) > sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   55 |                         benchmark::DoNotOptimize(mutation);
-      |                         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchIterate.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:496:5: note: declared here
-  496 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[266/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/FlowTests.actor.g.cpp.o
-[267/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchVersionVectorSerialization.cpp.o
-[268/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ApiRequestHandler.actor.g.cpp.o
-[269/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/FlowTransport.actor.g.cpp.o
-[270/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/FDBTypes.cpp.o
-[271/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClientKnobs.cpp.o
-[272/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClusterConnectionMemoryRecord.actor.g.cpp.o
-[273/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobGranuleApiImpl.actor.g.cpp.o
-[274/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/IConfigTransaction.cpp.o
-[275/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/Net2FileSystem.cpp.o
-[276/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClusterConnectionFile.actor.g.cpp.o
-[277/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/LocalClientAPI.cpp.o
-[278/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobConnectionProvider.cpp.o
-[279/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/DatabaseContext.cpp.o
-[280/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClusterConnectionKey.actor.g.cpp.o
-[281/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobCipher.cpp.o
-[282/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/AuditUtils.actor.g.cpp.o
-[283/635] Building C object contrib/sqlite/CMakeFiles/sqlite.dir/sqlite3.amalgamation.c.o
-[284/635] Linking C static library lib/libsqlite.a
-[285/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/StorageServerInterface.cpp.o
-[286/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/CoordinationInterface.cpp.o
-[287/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/MutationLogReader.actor.g.cpp.o
-[288/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/KeyRangeMap.actor.g.cpp.o
-[289/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobGranuleReader.actor.g.cpp.o
-[290/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ResolverBug.cpp.o
-[291/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BackupContainerLocalDirectory.actor.g.cpp.o
-[292/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/GrvTransactionRateInfo.actor.g.cpp.o
-[293/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TenantManagement.actor.g.cpp.o
-[294/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/DataDistributionConfig.actor.g.cpp.o
-[295/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/MetricClient.actor.g.cpp.o
-[296/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RocksDBLogForwarder.actor.g.cpp.o
-[297/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ClientStatusReport.cpp.o
-[298/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchMetadataCheck.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp: In function ‘void bench_check_metadata1(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp:43:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = bool; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   43 |                 benchmark::DoNotOptimize(KeyRangeRef(m.param1, m.param2).intersects(systemKeys));
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp: In function ‘void bench_check_metadata2(benchmark::State&)’:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp:51:41: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = bool; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   51 |                 benchmark::DoNotOptimize(m.param2.size() > 1 && m.param2[0] == systemKeys.begin[0]);
-      |                 ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchMetadataCheck.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[299/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchBlobDelta.actor.g.cpp.o
-[300/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ISingleThreadTransaction.cpp.o
-[301/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchThrottlingCounter.cpp.o
-[302/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KnobProtectiveGroups.cpp.o
-[303/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/IdempotencyId.actor.g.cpp.o
-[304/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchIdempotencyIds.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIdempotencyIds.cpp: In lambda function:
-/mnt/ephemeral/jfu/frostdb/fdbserver/BenchIdempotencyIds.cpp:52:53: warning: ‘typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type benchmark::DoNotOptimize(const Tp&) [with Tp = int; typename std::enable_if<(std::is_trivially_copyable<_Tp>::value && (sizeof (Tp) <= sizeof (Tp*)))>::type = void]’ is deprecated: The const-ref version of this method can permit undesired compiler optimizations in benchmarks [-Wdeprecated-declarations]
-   52 |                             benchmark::DoNotOptimize(0);
-      |                             ~~~~~~~~~~~~~~~~~~~~~~~~^~~
-In file included from /mnt/ephemeral/jfu/frostdb/fdbserver/BenchIdempotencyIds.cpp:21:
-/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/fdbserver/googlebenchmark-src/include/benchmark/benchmark.h:485:5: note: declared here
-  485 |     DoNotOptimize(Tp const& value) {
-      |     ^~~~~~~~~~~~~
-[305/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/DatabaseConfiguration.cpp.o
-[306/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BenchGrvProxyTagThrottler.cpp.o
-[307/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TagThrottle.actor.g.cpp.o
-[308/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ConfigTransactionInterface.cpp.o
-[309/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RESTKmsConnectorUtils.cpp.o
-[310/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BackupContainerS3BlobStore.actor.g.cpp.o
-[311/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LatencyBandsMap.actor.g.cpp.o
-[312/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BackupContainer.actor.g.cpp.o
-[313/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/WriteMap.cpp.o
-[314/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/RYWIterator.cpp.o
-[315/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/IPager.cpp.o
-[316/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/Tenant.cpp.o
-[317/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/GlobalConfig.actor.g.cpp.o
-[318/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/SigStack.cpp.o
-[319/635] Building CXX object flow/CMakeFiles/flow.dir/Net2.actor.g.cpp.o
-[320/635] Linking CXX static library lib/libflow.a
-[321/635] Linking CXX static library lib/libcoro.a
-[322/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobConnectionProviderTest.actor.g.cpp.o
-[323/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KeyValueStoreCompressTestData.actor.g.cpp.o
-[324/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKRecoveryTracker.actor.g.cpp.o
-[325/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/VersionedBTreeDebug.cpp.o
-[326/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RESTSimKmsVault.actor.g.cpp.o
-[327/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ReadVersionBatchers.actor.g.cpp.o
-/mnt/ephemeral/jfu/frostdb/fdbclient/ReadVersionBatchers.actor.cpp:254:7: warning: ‘ReadVersionBatchersImpl’ has a field ‘ReadVersionBatchersImpl::batchers’ whose type uses the anonymous namespace [-Wsubobject-linkage]
-  254 | class ReadVersionBatchersImpl {
-      |       ^~~~~~~~~~~~~~~~~~~~~~~
-[328/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KeyValueStoreRocksDB.actor.g.cpp.o
-[329/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/S3BlobStore.actor.g.cpp.o
-[330/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ServerKnobs.cpp.o
-[331/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LogSystemConfig.cpp.o
-[332/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreUtil.actor.g.cpp.o
-[333/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BlobGranuleFiles.actor.g.cpp.o
-[334/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/GrvProxyTagThrottler.actor.g.cpp.o
-[335/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KeyValueStoreShardedRocksDB.actor.g.cpp.o
-[336/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/MutationTracking.cpp.o
-[337/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/OnDemandStore.actor.g.cpp.o
-[338/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/VFSAsync.cpp.o
-[339/635] Building CXX object fdbrpc/CMakeFiles/fdbrpc.dir/sim2.actor.g.cpp.o
-[340/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DiskQueue.actor.g.cpp.o
-[341/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ConfigFollowerInterface.cpp.o
-[342/635] Linking CXX static library lib/libfdbrpc.a
-[343/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RkTagThrottleCollection.cpp.o
-[344/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LatencyBandConfig.cpp.o
-[345/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/TaskBucket.actor.g.cpp.o
-[346/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/WaitFailure.actor.g.cpp.o
-[347/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BackupProgress.actor.g.cpp.o
-[348/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BackupContainerFileSystem.actor.g.cpp.o
-[349/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ThreadSafeTransaction.cpp.o
-[350/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKThroughputQuotaCache.actor.g.cpp.o
-[351/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LocalConfiguration.actor.g.cpp.o
-[352/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RocksDBCheckpointUtils.actor.g.cpp.o
-[353/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KeyValueStoreSQLite.actor.g.cpp.o
-[354/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/SimKmsConnector.actor.g.cpp.o
-[355/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RESTKmsConnector.actor.g.cpp.o
-[356/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ShardsAffectedByTeamFailure.cpp.o
-[357/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/SkipList.cpp.o
-[358/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ServerCheckpoint.actor.g.cpp.o
-[359/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/SimpleConfigTransaction.actor.g.cpp.o
-[360/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobRestoreController.actor.g.cpp.o
-[361/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/IConfigConsumer.cpp.o
-[362/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/MetricLogger.actor.g.cpp.o
-[363/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/networktest.actor.g.cpp.o
-[364/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ThrottlingCounter.actor.g.cpp.o
-[365/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobGranuleValidation.actor.g.cpp.o
-[366/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobGranuleServerCommon.actor.g.cpp.o
-[367/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/StorageMetrics.actor.g.cpp.o
-[368/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ReadYourWrites.actor.g.cpp.o
-[369/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/FDBExecHelper.actor.g.cpp.o
-[370/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LogSystem.cpp.o
-[371/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LogSystemDiskQueueAdapter.actor.g.cpp.o
-[372/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/BackupAgentBase.actor.g.cpp.o
-[373/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ConfigNode.actor.g.cpp.o
-[374/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreCommon.actor.g.cpp.o
-[375/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreRoleCommon.actor.g.cpp.o
-[376/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/pubsub.actor.g.cpp.o
-[377/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/MultiVersionTransaction.actor.g.cpp.o
-[378/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ResolutionBalancer.actor.g.cpp.o
-[379/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/DatabaseBackupAgent.actor.g.cpp.o
-[380/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/GlobalTagThrottler.actor.g.cpp.o
-[381/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreWorkerInterface.actor.g.cpp.o
-[382/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RoleLineage.actor.g.cpp.o
-[383/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/StatusClient.actor.g.cpp.o
-[384/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/PaxosConfigTransaction.actor.g.cpp.o
-[385/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AsyncFile.cpp.o
-[386/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKRateUpdaterTesting.actor.g.cpp.o
-[387/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AsyncFileWrite.actor.g.cpp.o
-[388/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKRateUpdater.cpp.o
-[389/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ApiWorkload.actor.g.cpp.o
-[390/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKRateServer.actor.g.cpp.o
-[391/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AsyncFileRead.actor.g.cpp.o
-[392/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreApplier.actor.g.cpp.o
-[393/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LogSystemPeekCursor.actor.g.cpp.o
-[394/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackgroundSelectors.actor.g.cpp.o
-[395/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AsyncFileCorrectness.actor.g.cpp.o
-[396/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TagThrottler.actor.g.cpp.o
-[397/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LeaderElection.actor.g.cpp.o
-[398/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupToBlob.actor.g.cpp.o
-[399/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AutomaticIdempotencyWorkload.actor.g.cpp.o
-[400/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobFailureInjection.actor.g.cpp.o
-[401/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupToDBAbort.actor.g.cpp.o
-[402/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/SpecialKeySpace.actor.g.cpp.o
-[403/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreWorker.actor.g.cpp.o
-[404/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BulkLoad.actor.g.cpp.o
-[405/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TenantCache.actor.g.cpp.o
-[406/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Cache.actor.g.cpp.o
-[407/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/PaxosConfigConsumer.actor.g.cpp.o
-[408/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/SystemData.cpp.o
-[409/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AtomicRestore.actor.g.cpp.o
-[410/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AtomicSwitchover.actor.g.cpp.o
-[411/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ClogSingleConnection.actor.g.cpp.o
-[412/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/CommitBugCheck.actor.g.cpp.o
-[413/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ConfigIncrement.actor.g.cpp.o
-[414/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/SimpleConfigConsumer.actor.g.cpp.o
-[415/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ApiCorrectness.actor.g.cpp.o
-[416/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DDShardTracker.actor.g.cpp.o
-[417/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TSSMappingUtil.actor.g.cpp.o
-[418/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ConfigDatabaseUnitTests.actor.g.cpp.o
-[419/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ConflictRange.actor.g.cpp.o
-[420/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DDBalance.actor.g.cpp.o
-[421/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/ManagementAPI.actor.g.cpp.o
-[422/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/CoordinatedState.actor.g.cpp.o
-[423/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DiskDurabilityTest.actor.g.cpp.o
-[424/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DataDistributionMetrics.actor.g.cpp.o
-[425/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DummyWorkload.actor.g.cpp.o
-[426/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DiskDurability.actor.g.cpp.o
-[427/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/CreateTenant.actor.g.cpp.o
-[428/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ClearSingleRange.actor.g.cpp.o
-[429/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ApplyMetadataMutation.cpp.o
-[430/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreLoader.actor.g.cpp.o
-[431/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/EncryptionOps.actor.g.cpp.o
-[432/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RestoreController.actor.g.cpp.o
-[433/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/FastTriggeredWatches.actor.g.cpp.o
-[434/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ConfigBroadcaster.actor.g.cpp.o
-[435/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AtomicOpsApiCorrectness.actor.g.cpp.o
-[436/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ExternalWorkload.actor.g.cpp.o
-[437/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/FileSystem.actor.g.cpp.o
-[438/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ClientTransactionProfileCorrectness.actor.g.cpp.o
-[439/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/HighContentionPrefixAllocatorWorkload.actor.g.cpp.o
-[440/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupToDBUpgrade.actor.g.cpp.o
-[441/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/GetMappedRange.actor.g.cpp.o
-[442/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupToDBCorrectness.actor.g.cpp.o
-[443/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/HTTPKeyValueStore.actor.g.cpp.o
-[444/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DDMetricsExclude.actor.g.cpp.o
-[445/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DcLag.actor.g.cpp.o
-[446/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DifferentClustersSameRV.actor.g.cpp.o
-[447/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupCorrectness.actor.g.cpp.o
-[448/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LockDatabase.actor.g.cpp.o
-[449/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LockDatabaseFrequently.actor.g.cpp.o
-[450/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/IncrementalBackup.actor.g.cpp.o
-[451/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LowLatency.actor.g.cpp.o
-[452/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DDRelocationQueue.actor.g.cpp.o
-[453/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ChangeConfig.actor.g.cpp.o
-[454/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/CommitProxyInterface.cpp.o
-[455/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AtomicOps.actor.g.cpp.o
-[456/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/GetRangeStream.actor.g.cpp.o
-[457/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MemoryKeyValueStore.cpp.o
-[458/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/MockGlobalState.actor.g.cpp.o
-[459/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/HealthMetricsApi.actor.g.cpp.o
-[460/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/MoveKeys.actor.g.cpp.o
-[461/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TCInfo.actor.g.cpp.o
-[462/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/fdbserver.actor.g.cpp.o
-[463/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MetricLogging.actor.g.cpp.o
-[464/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BackupAndParallelRestoreCorrectness.actor.g.cpp.o
-[465/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DDTxnProcessor.actor.g.cpp.o
-[466/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BulkLoadWithTenants.actor.g.cpp.o
-[467/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/GetEstimatedRangeSize.actor.g.cpp.o
-[468/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MutationLogReaderCorrectness.actor.g.cpp.o
-[469/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DDTeamCollectionUnitTests.actor.g.cpp.o
-[470/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/IndexScan.actor.g.cpp.o
-[471/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ClogTlog.actor.g.cpp.o
-[472/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/SimulatedCluster.actor.g.cpp.o
-[473/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DataLossRecovery.actor.g.cpp.o
-[474/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobGranuleMergeBoundariesWorkload.actor.g.cpp.o
-[475/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Inventory.actor.g.cpp.o
-[476/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ProtocolVersion.actor.g.cpp.o
-[477/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/FuzzApiCorrectness.actor.g.cpp.o
-[478/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RYWDisable.actor.g.cpp.o
-[479/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RandomClogging.actor.g.cpp.o
-[480/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ChangeFeedOperations.actor.g.cpp.o
-[481/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ChangeFeeds.actor.g.cpp.o
-[482/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/QueuePush.actor.g.cpp.o
-[483/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RYWPerformance.actor.g.cpp.o
-[484/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MemoryLifetime.actor.g.cpp.o
-[485/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LeakTLogInterface.actor.g.cpp.o
-[486/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ReadAfterWrite.actor.g.cpp.o
-[487/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobGranuleVerifier.actor.g.cpp.o
-[488/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Mako.actor.g.cpp.o
-[489/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ParallelRestore.actor.g.cpp.o
-[490/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/MonitorLeader.actor.g.cpp.o
-[491/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RestoreBackup.actor.g.cpp.o
-[492/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SaveAndKill.actor.g.cpp.o
-[493/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SimpleAtomicAdd.actor.g.cpp.o
-[494/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SidebandSingle.actor.g.cpp.o
-[495/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Cycle.actor.g.cpp.o
-[496/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SlowTaskWorkload.actor.g.cpp.o
-[497/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RawTenantAccessWorkload.actor.g.cpp.o
-[498/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DDMetrics.actor.g.cpp.o
-[499/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LocalRatekeeper.actor.g.cpp.o
-[500/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RyowCorrectness.actor.g.cpp.o
-[501/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/AuthzSecurity.actor.g.cpp.o
-[502/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/KillRegion.actor.g.cpp.o
-[503/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/PubSubMultiples.actor.g.cpp.o
-[504/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Serializability.actor.g.cpp.o
-[505/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StatusWorkload.actor.g.cpp.o
-[506/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/Coordination.actor.g.cpp.o
-[507/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/FileBackupAgent.actor.g.cpp.o
-[508/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/PrivateEndpoints.actor.g.cpp.o
-[509/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RestoreFromBlob.actor.g.cpp.o
-[510/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SpecialKeySpaceRobustness.actor.g.cpp.o
-[511/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Increment.actor.g.cpp.o
-[512/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SubmitBackup.actor.g.cpp.o
-[513/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ConfigureDatabase.actor.g.cpp.o
-[514/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MockDDTest.actor.g.cpp.o
-[515/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobGranuleRangesWorkload.actor.g.cpp.o
-[516/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RandomSelector.actor.g.cpp.o
-[517/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/coroimpl/CoroFlowCoro.actor.g.cpp.o
-[518/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RemoveServersSafely.actor.g.cpp.o
-[519/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TagThrottleApi.actor.g.cpp.o
-[520/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ThroughputQuota.actor.g.cpp.o
-[521/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TaskBucketCorrectness.actor.g.cpp.o
-[522/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TimeKeeperCorrectness.actor.g.cpp.o
-[523/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TenantLock.actor.g.cpp.o
-[524/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SelectorCorrectness.actor.g.cpp.o
-[525/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Throttling.actor.g.cpp.o
-[526/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ThroughputQuotaCache.actor.g.cpp.o
-[527/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SnapTest.actor.g.cpp.o
-[528/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TransactionCost.actor.g.cpp.o
-[529/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Sideband.actor.g.cpp.o
-[530/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/UnitPerf.actor.g.cpp.o
-[531/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StorageCorruption.actor.g.cpp.o
-[532/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/UnitTests.actor.g.cpp.o
-[533/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/LogMetrics.actor.g.cpp.o
-[534/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/PerpetualWiggleStatsWorkload.actor.g.cpp.o
-[535/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StorageQuota.actor.g.cpp.o
-[536/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StorageServerCheckpointRestoreTest.actor.g.cpp.o
-[537/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SuspendProcesses.actor.g.cpp.o
-[538/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StreamingRead.actor.g.cpp.o
-[539/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Watches.actor.g.cpp.o
-[540/635] Building CXX object metacluster/CMakeFiles/metacluster.dir/Metacluster.cpp.o
-[541/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MiniCycle.actor.g.cpp.o
-[542/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/UDPWorkload.actor.g.cpp.o
-[543/635] Building CXX object metacluster/CMakeFiles/metacluster.dir/MetaclusterMetadata.cpp.o
-[544/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WatchesSameKeyCorrectness.actor.g.cpp.o
-[545/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ThreadSafety.actor.g.cpp.o
-[546/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Throughput.actor.g.cpp.o
-[547/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TooManyGrvBatchers.actor.g.cpp.o
-[548/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Unreadable.actor.g.cpp.o
-[549/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/IKeyValueStore.cpp.o
-[550/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TenantEntryCacheWorkload.actor.g.cpp.o
-[551/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/IDDTxnProcessorApiCorrectness.actor.g.cpp.o
-[552/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/LogRouter.actor.g.cpp.o
-[553/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/workloads.actor.g.cpp.o
-[554/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ReadHotDetection.actor.g.cpp.o
-[555/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKBlobMonitor.actor.g.cpp.o
-[556/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/VersionStamp.actor.g.cpp.o
-[557/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WriteDuringRead.actor.g.cpp.o
-[558/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ReportConflictingKeys.actor.g.cpp.o
-[559/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WatchAndWait.actor.g.cpp.o
-[560/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SkewedReadWrite.actor.g.cpp.o
-[561/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MockDDTrackerShardEvaluator.actor.g.cpp.o
-[562/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKConfigurationMonitor.actor.g.cpp.o
-[563/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MockDDReadWrite.actor.g.cpp.o
-[564/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ValidateStorage.actor.g.cpp.o
-[565/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/Ratekeeper.actor.g.cpp.o
-[566/635] Building CXX object metacluster/CMakeFiles/metacluster.dir/MetaclusterMetrics.actor.g.cpp.o
-[567/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/SpecialKeySpaceCorrectness.actor.g.cpp.o
-[568/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/EncryptKeyProxy.actor.g.cpp.o
-[569/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobMigrator.actor.g.cpp.o
-[570/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/KeyValueStoreMemory.actor.g.cpp.o
-[571/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WriteTagThrottling.actor.g.cpp.o
-[572/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobManifest.actor.g.cpp.o
-[573/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RKMetricsTracker.actor.g.cpp.o
-[574/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Ping.actor.g.cpp.o
-[575/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Storefront.actor.g.cpp.o
-[576/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TenantCapacityLimits.actor.g.cpp.o
-[577/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/Resolver.actor.g.cpp.o
-[578/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/PhysicalShardMove.actor.g.cpp.o
-[579/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WriteBandwidth.actor.g.cpp.o
-[580/635] Building CXX object metacluster/CMakeFiles/metacluster.dir/MetaclusterUtil.actor.g.cpp.o
-[581/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/RandomMoveKeys.actor.g.cpp.o
-[582/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/GrvProxyServer.actor.g.cpp.o
-[583/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BackupWorker.actor.g.cpp.o
-[584/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TriggerRecovery.actor.g.cpp.o
-[585/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/StreamingRangeRead.actor.g.cpp.o
-[586/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/OldTLogServer_4_6.actor.g.cpp.o
-[587/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MetaclusterManagementConcurrencyWorkload.actor.g.cpp.o
-[588/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/StorageCache.actor.g.cpp.o
-[589/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/masterserver.actor.g.cpp.o
-[590/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/OldTLogServer_6_0.actor.g.cpp.o
-[591/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RemoteIKeyValueStore.actor.g.cpp.o
-[592/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/CpuProfiler.actor.g.cpp.o
-[593/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobRestoreWorkload.actor.g.cpp.o
-[594/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ClientWorkload.actor.g.cpp.o
-[595/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/DiskFailureInjection.actor.g.cpp.o
-[596/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/OldTLogServer_6_2.actor.g.cpp.o
-[597/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/EncryptKeyProxyTest.actor.g.cpp.o
-[598/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TenantManagementConcurrencyWorkload.actor.g.cpp.o
-[599/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/QuietDatabase.actor.g.cpp.o
-[600/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TLogServer.actor.g.cpp.o
-[601/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobWorker.actor.g.cpp.o
-[602/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ConsistencyScan.actor.g.cpp.o
-[603/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/KVStoreTest.actor.g.cpp.o
-[604/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/RecruiterUnitTests.actor.g.cpp.o
-[605/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ConsistencyCheck.actor.g.cpp.o
-[606/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ClusterRecovery.actor.g.cpp.o
-[607/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/BlobGranuleCorrectnessWorkload.actor.g.cpp.o
-[608/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MetaclusterMoveWorkload.actor.g.cpp.o
-[609/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MetaclusterRestoreWorkload.actor.g.cpp.o
-[610/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DataDistribution.actor.g.cpp.o
-[611/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MachineAttrition.actor.g.cpp.o
-[612/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ResolverBug.actor.g.cpp.o
-[613/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/Recruiter.actor.g.cpp.o
-[614/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/TagPartitionedLogSystem.actor.g.cpp.o
-[615/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/CommitProxyServer.actor.g.cpp.o
-[616/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/DDTeamCollection.actor.g.cpp.o
-[617/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Performance.actor.g.cpp.o
-[618/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TenantManagementWorkload.actor.g.cpp.o
-[619/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/Status.actor.g.cpp.o
-[620/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/MetaclusterManagementWorkload.actor.g.cpp.o
-[621/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/BlobManager.actor.g.cpp.o
-[622/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/VersionedBTree.actor.g.cpp.o
-[623/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/TargetedKill.actor.g.cpp.o
-[624/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/WorkerErrors.actor.g.cpp.o
-[625/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/storageserver.actor.g.cpp.o
-[626/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/ClusterController.actor.g.cpp.o
-[627/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/ReadWrite.actor.g.cpp.o
-[628/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/tester.actor.g.cpp.o
-[629/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/workloads/Rollback.actor.g.cpp.o
-[630/635] Building CXX object fdbclient/CMakeFiles/fdbclient.dir/NativeAPI.actor.g.cpp.o
-[631/635] Linking CXX static library lib/libfdbclient.a
-[632/635] Linking CXX static library lib/libmetacluster.a
-[633/635] Building CXX object fdbserver/CMakeFiles/fdbserver.dir/worker.actor.g.cpp.o
-[634/635] Linking CXX executable bin/fdbserver
-[635/635] Stripping symbols from fdbserver
-Cached signature updated for lastBuilt:packages/bin/fdbserver:10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 to c5ed0b97a485b0988f844dc2b8415df6
-+ ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022 -t 10.174.224.254 'export CCACHE_BASEDIR=/mnt/ephemeral/jfu/frostdb && export CCACHE_DIR=/mnt/ephemeral/ccache && export CCACHE_MAXSIZE=500G && export CCACHE_UMASK=002 && umask 0022 && mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 && docker run --init -it --name fdbdev-$(id -un)-9571 -v /mnt/ephemeral/jfu:/mnt/ephemeral/jfu -w /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64 --cap-add=SYS_PTRACE --privileged --rm --security-opt seccomp=unconfined -e CCACHE_DIR -e CCACHE_BASEDIR -e CCACHE_MAXSIZE -e CCACHE_UMASK -e LD_LIBRARY_PATH=/usr/local/lib -e LD_LIBRARY_PATH=/usr/local/lib/x86_64-unknown-linux-gnu -i -u $(id -u):$(id -g) -v $HOME:$HOME -v /etc/group:/etc/group:ro -v /etc/passwd:/etc/passwd:ro -v /mnt/ephemeral/ccache:/mnt/ephemeral/ccache -v /mnt/ephemeral/joshua:/mnt/ephemeral/joshua -v /mnt/ephemeral/oldbinaries:/app/deploy/global_data/oldBinaries/ 937559181915.dkr.ecr.us-west-2.amazonaws.com/frostdb/devel:centos7-latest-amd64 scl enable devtoolset-11 rh-python38 rh-ruby27 -- bash -i -c '\''mkdir -p -m 755 /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec && cd /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec && rm -rf trace.* bin packages tests && ln -s /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/bin bin && ln -s /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/packages packages && ln -s /mnt/ephemeral/jfu/frostdb/tests tests && valgrind bin/fdbserver -r simulation -f tests/slow/MetaclusterMove.toml -s 2234738715 -b off --crash --trace_format json'\'''
-==47== Memcheck, a memory error detector
-==47== Copyright (C) 2002-2017, and GNU GPL'd, by Julian Seward et al.
-==47== Using Valgrind-3.17.0 and LibVEX; rerun with -h for copyright info
-==47== Command: bin/fdbserver -r simulation -f tests/slow/MetaclusterMove.toml -s 2234738715 -b off --crash --trace_format json
-==47== 
-Random seed is 2234738715...
-DeterministicRandom successfully bound to OpenSSL RNG
-Datacenter 0: 3/12 machines, 1/1 coordinators
-sim http machines = 2
-Datacenter 1: 3/12 machines, 0/1 coordinators
-sim http machines = 3
-Datacenter 2: 3/12 machines, 0/1 coordinators
-sim http machines = 1
-Datacenter 3: 3/12 machines, 0/1 coordinators
-sim http machines = 1
-Process 2.1.1.3 run http server
-SimHTTPServer protecting 2.1.1.3:2
-FDBD joined cluster.
-Process 2.3.1.3 run http server
-Process 2.2.1.3 run http server
-Process 2.1.1.4 run http server
-Process 2.2.1.3 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-Process 2.1.1.3 run http server
-Process 2.0.1.5 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-Process 2.0.1.4 run http server
-Process 2.0.1.5 run http server
-Process 2.1.1.4 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-Process 2.1.1.5 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-Process 2.0.1.4 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-Process 2.1.1.5 run http server
-FDBD joined cluster.
-Process 2.3.1.3 run http server
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-FDBD joined cluster.
-startingConfiguration:new backup_worker_enabled:=0 blob_granules_enabled:=0 commit_proxies:=3 encryption_at_rest_mode=domain_aware grv_proxies:=1 log_engine=ssd-2 log_spill:=2 log_version:=6 logs:=3 perpetual_storage_wiggle:=0 proxies:=4 triple regions=[{"datacenters":[{"id":"0","priority":2},{"id":"2","priority":1,"satellite":1,"satellite_logs":6}],"satellite_logs":4,"satellite_redundancy_mode":"one_satellite_single"}] remote_single resolvers:=1 storage_engine=ssd-redwood-1 storage_migration_type=disabled tenant_mode=required_experimental usable_regions:=1 start
-useDB: true
-Simulated Cluster Topology:
-===========================
-    zoneId: 1b291be58a67b9e362e9c53642f0d355
-      machineId: 1b291be58a67b9e362e9c53642f0d355
-        Address: 3.4.3.5:1
-          Class: test
-          Name: Server
-    zoneId: 542b3e2f86fa35918ceb9934f40ea006
-      machineId: c58fcfa811ce29b0338ea57ed1132211
-        Address: 1.1.1.1:1
-          Class: test
-          Name: TestSystem
-    zoneId: a3f1b40e4e8da3a089fdd8cda6e315a1
-      machineId: a3f1b40e4e8da3a089fdd8cda6e315a1
-        Address: 3.4.3.2:1
-          Class: test
-          Name: Server
-    zoneId: ba772a346396e43d8e9ea34c5996b157
-      machineId: ba772a346396e43d8e9ea34c5996b157
-        Address: 3.4.3.4:1
-          Class: test
-          Name: Server
-    zoneId: d7a84ad17ff4413d4382a70c20554e32
-      machineId: d7a84ad17ff4413d4382a70c20554e32
-        Address: 3.4.3.1:1
-          Class: test
-          Name: Server
-    zoneId: eadf1b6bc4af1c8173a996c86ede3740
-      machineId: eadf1b6bc4af1c8173a996c86ede3740
-        Address: 3.4.3.3:1
-          Class: test
-          Name: Server
-dcId: 0
-  dataHallId: 0
-    zoneId: 2119b5ef1fa3d9434f41049194b95bac
-      machineId: beb199ad075bf09dcd980c942aba3173
-        Address: 2.0.1.0:1
-          Class: unset
-          Name: Server
-        Address: 2.0.1.0:2
-          Class: unset
-          Name: Server
-    zoneId: 246db32045ce3ad2ed348b9b9dd54a0b
-      machineId: 887a111b6e0e9edd4dca8c2d59249e5b
-        Address: 6.0.1.2:1
-          Class: unset
-          Name: Server
-      machineId: 948bed685acdbcc960fa285b0686cbd4
-        Address: 4.0.1.2:1
-          Class: unset
-          Name: Server
-      machineId: f9eac67c8d0ae51ab28fd09ccc827bed
-        Address: 5.0.1.2:1
-          Class: unset
-          Name: Server
-    zoneId: 3ac7595b1b4fb015ac33c013417f62f1
-      machineId: b6a43a0d2d3b7af1241746c689fd1baf
-        Address: 5.0.1.5:1
-          Class: sim_http_server
-          Name: Server
-      machineId: cae6af30e0c995682a23fe5c15da8809
-        Address: 4.0.1.5:1
-          Class: sim_http_server
-          Name: Server
-      machineId: f859917d5d1d24340e822589c0d2d5c8
-        Address: 6.0.1.5:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 565ce8980e4b0710148db6cd9f994d09
-      machineId: ab9d91e274b9c36c712793a2a0e72c80
-        Address: 2.0.1.1:2
-          Class: unset
-          Name: Server
-        Address: 2.0.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: 5e0483f9331f2948b087d2d91cdb39f4
-      machineId: 3ae91195388090cdbb453206f39c6044
-        Address: 2.0.1.4:1
-          Class: sim_http_server
-          Name: Server
-        Address: 2.0.1.4:2
-          Class: sim_http_server
-          Name: Server
-    zoneId: 6124ff70c21989e0f5f93c6bae52d632
-      machineId: 36a43cc809ae0f069cee96068b204879
-        Address: 2.0.1.5:2
-          Class: sim_http_server
-          Name: Server
-        Address: 2.0.1.5:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 61cfef2d46aafd113840e355da4dcb11
-      machineId: c149e64eb096bb919c880efeb3ac2abe
-        Address: 2.0.1.3:1
-          Class: storage_cache
-          Name: Server
-        Address: 2.0.1.3:2
-          Class: storage_cache
-          Name: Server
-    zoneId: 7cfa7d06d0a153bb04730b8e41049741
-      machineId: 9b4a0ba6617c5534f88b6043d0d72df8
-        Address: 5.0.1.1:1
-          Class: unset
-          Name: Server
-      machineId: d22afa288978ed32e08825c32feb4ebb
-        Address: 6.0.1.1:1
-          Class: unset
-          Name: Server
-      machineId: ebe0c800bba3c76f996b763beda3b2a2
-        Address: 4.0.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: ad618195d152eb2e55687bde11fe71bd
-      machineId: 117bc303e692aa04fb55b435fdc7e756
-        Address: 2.0.1.2:1
-          Class: unset
-          Name: Server
-        Address: 2.0.1.2:2
-          Class: unset
-          Name: Server
-    zoneId: bb852de643f943106ce3cf2a94593084
-      machineId: 45d39f4cfab67e9ad04bf13d49d64ea9
-        Address: 6.0.1.3:1
-          Class: storage_cache
-          Name: Server
-      machineId: e4659ccd01c541ff0ca4c9cf11877e39
-        Address: 4.0.1.3:1
-          Class: storage_cache
-          Name: Server
-      machineId: f2959c6c19eb7b3a74be4e37cb25fb20
-        Address: 5.0.1.3:1
-          Class: storage_cache
-          Name: Server
-    zoneId: d5be469a7266464a3a5c59b52563b255
-      machineId: 76cabfd32794277e2fbe521e0bcce0a3
-        Address: 5.0.1.0:1
-          Class: unset
-          Name: Server
-      machineId: aece59ebb680e5a828e841d16ff94213
-        Address: 6.0.1.0:1
-          Class: unset
-          Name: Server
-      machineId: dff18b8bc1b34ed7cdc17bf504ff42f0
-        Address: 4.0.1.0:1
-          Class: unset
-          Name: Server
-    zoneId: d62f0591419ba5ad2a5c45426e7fc6e6
-      machineId: 24839832417572adcb965f274a467e82
-        Address: 6.0.1.4:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 5ac9007563c6c348dcd93923d04137bb
-        Address: 4.0.1.4:1
-          Class: sim_http_server
-          Name: Server
-      machineId: ad24ad186bd52dd6339048208de841c1
-        Address: 5.0.1.4:1
-          Class: sim_http_server
-          Name: Server
-dcId: 1
-  dataHallId: 1
-    zoneId: 66e461cfab9de6c1de6123e238923535
-      machineId: 4108edaaefec65ab12b877a96f073077
-        Address: 2.1.1.5:2
-          Class: sim_http_server
-          Name: Server
-        Address: 2.1.1.5:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 6a00c29bb75ec0053030d640b08eb2e6
-      machineId: 2d3874fb0e983a3ce460b6cbca78e3f2
-        Address: 4.1.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: d306f37ae29915772e22de0fd2595b45
-        Address: 5.1.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: fede51e38285dba1a91762778e330449
-        Address: 6.1.1.3:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 71a3c7d949ee1e8f697b1ae09a96e148
-      machineId: cd3ed3a2a59ae03d4eabc9da47e25e17
-        Address: 2.1.1.4:2
-          Class: sim_http_server
-          Name: Server
-        Address: 2.1.1.4:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 7967e6d1bb151a4aa56ae47b0f3524d1
-      machineId: 4fae0f1509c0d8689c8f7d10b641cda2
-        Address: 2.1.1.1:2
-          Class: unset
-          Name: Server
-        Address: 2.1.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: 79736ea1218fdf59f51ec20fc416a262
-      machineId: 3bf7117e0b20ad7866692fcd9609bc99
-        Address: 2.1.1.3:1
-          Class: sim_http_server
-          Name: Server
-        Address: 2.1.1.3:2
-          Class: sim_http_server
-          Name: Server
-    zoneId: 8976e1d41b61755d9d5c190f31afd817
-      machineId: 19c1a95b6547a064fdf017b44104ba59
-        Address: 2.1.1.0:1
-          Class: unset
-          Name: Server
-        Address: 2.1.1.0:2
-          Class: unset
-          Name: Server
-    zoneId: 9ff478b1c241b6ed8cd53c2914af6c18
-      machineId: 0947be370e33bc1519e7ffe613a7065b
-        Address: 4.1.1.5:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 633c16ee59a6cc2bdb15482405af9a0c
-        Address: 5.1.1.5:1
-          Class: sim_http_server
-          Name: Server
-      machineId: e2b23fdd818f75813d23476370d1ed67
-        Address: 6.1.1.5:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: a30a90f66e766a18ada7283c4da41eae
-      machineId: bc30c97b4774311a680049f950df1bed
-        Address: 2.1.1.2:2
-          Class: unset
-          Name: Server
-        Address: 2.1.1.2:1
-          Class: unset
-          Name: Server
-    zoneId: a6f6c5ed08bb542f5a80e8234f58e862
-      machineId: 0cf879f0cfa1c5770df3d2fbd6344104
-        Address: 6.1.1.2:1
-          Class: unset
-          Name: Server
-      machineId: 2b0ca8b475df5349ce81b0909174e945
-        Address: 5.1.1.2:1
-          Class: unset
-          Name: Server
-      machineId: 5f3ab93397fbe1155a5fcd06a53fd2e3
-        Address: 4.1.1.2:1
-          Class: unset
-          Name: Server
-    zoneId: abb632119cd0148f8978ba15a1d52fb4
-      machineId: 34aeaefadc057177d0614fcf9f292d84
-        Address: 4.1.1.4:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 86c5be57f86670e8723339f500d1c5f5
-        Address: 6.1.1.4:1
-          Class: sim_http_server
-          Name: Server
-      machineId: f77e012fa71401f4e341cc27de30540d
-        Address: 5.1.1.4:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: d49cd6391ce23cc3b319cd9e9c96c771
-      machineId: 7703dd52c00894a3a986474e42f4a5f4
-        Address: 5.1.1.0:1
-          Class: unset
-          Name: Server
-      machineId: 9c3fa19ba4bd293524d48ed922f3f3af
-        Address: 4.1.1.0:1
-          Class: unset
-          Name: Server
-      machineId: ba53ffe7993153a215d5aa8cae19a65c
-        Address: 6.1.1.0:1
-          Class: unset
-          Name: Server
-    zoneId: d5edc0c55b1d84c92a2c8099411b5ad2
-      machineId: 77cc8acf049edb7bc380804d943799c3
-        Address: 5.1.1.1:1
-          Class: unset
-          Name: Server
-      machineId: 9d706c58e57c2c990d43e74e188d71db
-        Address: 6.1.1.1:1
-          Class: unset
-          Name: Server
-      machineId: f1eebe5a1fa6bf4e5f502e6fe6840232
-        Address: 4.1.1.1:1
-          Class: unset
-          Name: Server
-dcId: 2
-  dataHallId: 2
-    zoneId: 0335747fc1f4c86307e22b32cf47561a
-      machineId: a3d3d0961a02177571f46a4ed88c42eb
-        Address: 2.2.1.2:1
-          Class: unset
-          Name: Server
-        Address: 2.2.1.2:2
-          Class: unset
-          Name: Server
-    zoneId: 0e5c02907a469949f09bb8d22ac0ee9e
-      machineId: e34b96e6ad9e051c7854bec53095b19b
-        Address: 2.2.1.0:1
-          Class: unset
-          Name: Server
-        Address: 2.2.1.0:2
-          Class: unset
-          Name: Server
-    zoneId: 1e6fb414c3ffc0aeef9a015aae14cd3f
-      machineId: a23a879ad84c37fdd7d19c85d9691990
-        Address: 4.2.1.2:1
-          Class: unset
-          Name: Server
-      machineId: e15d37b6210ab7533bf9fe28b513a058
-        Address: 6.2.1.2:1
-          Class: unset
-          Name: Server
-      machineId: eca25133aa009993670de2465860d34a
-        Address: 5.2.1.2:1
-          Class: unset
-          Name: Server
-    zoneId: 1e8d347309c128a3a1632293490e0f54
-      machineId: efbc0dad33bf9e1772e88399ea579a02
-        Address: 2.2.1.3:2
-          Class: sim_http_server
-          Name: Server
-        Address: 2.2.1.3:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 82e8e0da41c540f7067a3bac5e4cc3f3
-      machineId: 0d8516de040f0ed1c63a585ca90e68ab
-        Address: 4.2.1.0:1
-          Class: unset
-          Name: Server
-      machineId: bdc0f4b43af3c7145fbcef6f84e430c2
-        Address: 6.2.1.0:1
-          Class: unset
-          Name: Server
-      machineId: ff48e518877a97a78840cc35c851b80e
-        Address: 5.2.1.0:1
-          Class: unset
-          Name: Server
-    zoneId: d3abe1be54861ea173807ea17eaad21f
-      machineId: 8872e483e4e55f4a38fabae2bdbd28f4
-        Address: 2.2.1.1:2
-          Class: unset
-          Name: Server
-        Address: 2.2.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: ec8262584264f7b5deeeb44dc001c807
-      machineId: 1a8176c2250f2a2cfa17fafea5a6cc52
-        Address: 5.2.1.1:1
-          Class: unset
-          Name: Server
-      machineId: 3a5a16e6b1656cb6114eb3a671c719a5
-        Address: 6.2.1.1:1
-          Class: unset
-          Name: Server
-      machineId: 8056163d60593d85f2017f374463faf3
-        Address: 4.2.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: ed9c1fb92b5b4e1f31c4537f86609b7a
-      machineId: 398bb638ff417e08100d0f21d2d662a0
-        Address: 4.2.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 64c28aa1a666b82fd5b684321e000212
-        Address: 5.2.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 81580f32c72c273e3f9535307b3ab7cd
-        Address: 6.2.1.3:1
-          Class: sim_http_server
-          Name: Server
-dcId: 3
-  dataHallId: 3
-    zoneId: 362dca92eb9dff5ff092108cd0af5006
-      machineId: 6b61303d1edd9e4a28a2429be77eb6b3
-        Address: 2.3.1.2:1
-          Class: unset
-          Name: Server
-        Address: 2.3.1.2:2
-          Class: unset
-          Name: Server
-    zoneId: 39818c46ae9a9218ca3184f1358aaea4
-      machineId: 81a6f858b2b95fe1e896475265b38932
-        Address: 2.3.1.1:1
-          Class: unset
-          Name: Server
-        Address: 2.3.1.1:2
-          Class: unset
-          Name: Server
-    zoneId: 51f7fffea6d92c03a5c530e435a93b51
-      machineId: 12dafe800ab1c1e5777e928521dfaed9
-        Address: 6.3.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 8097f3d36b0a7d35afb7890bf252490a
-        Address: 4.3.1.3:1
-          Class: sim_http_server
-          Name: Server
-      machineId: 98b230db7649ff25550c91c2ec7b9bed
-        Address: 5.3.1.3:1
-          Class: sim_http_server
-          Name: Server
-    zoneId: 52b39c95d8d5473c38d6b56a901177f9
-      machineId: 75d4598a4ae1811df2d6379d428dbbdf
-        Address: 5.3.1.2:1
-          Class: unset
-          Name: Server
-      machineId: c57868de21f929ec10084e27a1138a1d
-        Address: 6.3.1.2:1
-          Class: unset
-          Name: Server
-      machineId: e9f57dcaf6bd7c264ec4be4f96c3c9ec
-        Address: 4.3.1.2:1
-          Class: unset
-          Name: Server
-    zoneId: a97c5c32d17ddc74de42f3019cd4db13
-      machineId: 0aa5dd439cf57b485055c2d984638c86
-        Address: 2.3.1.3:1
-          Class: sim_http_server
-          Name: Server
-        Address: 2.3.1.3:2
-          Class: sim_http_server
-          Name: Server
-    zoneId: bddbbf0627497e3af60e2de75a1f8a38
-      machineId: 0aa1b9405b906584267b263141b94fd0
-        Address: 5.3.1.0:1
-          Class: unset
-          Name: Server
-      machineId: 77acb30a95ac5d6019e153a9f8348624
-        Address: 6.3.1.0:1
-          Class: unset
-          Name: Server
-      machineId: e95a9812bf00af6c8c630c8e3a4fe173
-        Address: 4.3.1.0:1
-          Class: unset
-          Name: Server
-    zoneId: c0b1a55eda19593f38748f1113de2cca
-      machineId: 0efe1b273d47c50710d70741582bdb76
-        Address: 6.3.1.1:1
-          Class: unset
-          Name: Server
-      machineId: 67736836e128331c22556d6477716d93
-        Address: 5.3.1.1:1
-          Class: unset
-          Name: Server
-      machineId: b31c7ca495bf781061513fc2e164efb6
-        Address: 4.3.1.1:1
-          Class: unset
-          Name: Server
-    zoneId: d457b4aff035a7cca60a2d4c25a0acfa
-      machineId: 3f2f9ec8e4871ecb3e7967ec896cce58
-        Address: 2.3.1.0:1
-          Class: unset
-          Name: Server
-        Address: 2.3.1.0:2
-          Class: unset
-          Name: Server
-setting up test (ChangeConfig)...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-running test (ChangeConfig)...
-ChangeConfig complete
-ChangeConfig complete
-ChangeConfig complete
-ChangeConfig complete
-ChangeConfig complete
-ChangeConfig complete
-checking test (ChangeConfig)...
-fetching metrics (ChangeConfig)...
-Set perpetual_storage_wiggle=0 ...
-Set perpetual_storage_wiggle=0 Done.
-Run test:MetaclusterMoveTest start
-setting up test (MetaclusterMoveTest)...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-Test received trigger for setup...
-running test (MetaclusterMoveTest)...
-MetaclusterMove complete
-MetaclusterMove complete
-MetaclusterMove complete
-MetaclusterMove complete
-terminate called without an active exception
-SIGNAL: Aborted (6)
-Trace: addr2line -e fdbserver.debug -p -C -f -i 0x97ad630 0x3cda0c3 0x3d2e550 0x3c5a7b8 0x3c6e3d0 0x5328a70 0x11352be 0x99dc555
-==47== 
-==47== Process terminating with default action of signal 6 (SIGABRT): dumping core
-==47==    at 0x99F0387: raise (in /usr/lib64/libc-2.17.so)
-==47==    by 0x99F1A77: abort (in /usr/lib64/libc-2.17.so)
-==47==    by 0x10F45A7: __gnu_cxx::__verbose_terminate_handler() [clone .cold] (in /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/bin/fdbserver)
-==47==    by 0x595B4E9: __cxxabiv1::__terminate(void (*)()) (in /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/bin/fdbserver)
-==47==    by 0x595B554: std::terminate() (in /mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/bin/fdbserver)
-==47==    by 0x4A8F7D2: MultiVersionTenant::delref() (MultiVersionTransaction.actor.cpp:1906)
-==47==    by 0x3CDA0C2: delref<ITenant> (FastRef.h:95)
-==47==    by 0x3CDA0C2: ~Reference (FastRef.h:126)
-==47==    by 0x3CDA0C2: metacluster::internal::StartTenantMovementImpl<IDatabase>::GetTenantSplitPointsFromSourceActorState<metacluster::internal::StartTenantMovementImpl<IDatabase>::GetTenantSplitPointsFromSourceActor>::~GetTenantSplitPointsFromSourceActorState() (MetaclusterMove.actor.g.h:2379)
-==47==    by 0x3D2E54F: a_body1cont1 (MetaclusterMove.actor.g.h:2410)
-==47==    by 0x3D2E54F: a_body1cont1 (MetaclusterMove.actor.g.h:2404)
-==47==    by 0x3D2E54F: a_body1break1 (MetaclusterMove.actor.g.h:2451)
-==47==    by 0x3D2E54F: a_body1loopBody1cont2 (MetaclusterMove.actor.g.h:2492)
-==47==    by 0x3D2E54F: a_body1loopBody1when1 (MetaclusterMove.actor.g.h:2504)
-==47==    by 0x3D2E54F: a_callback_fire (MetaclusterMove.actor.g.h:2525)
-==47==    by 0x3D2E54F: ActorCallback<metacluster::internal::StartTenantMovementImpl<IDatabase>::GetTenantSplitPointsFromSourceActor, 0, Void>::fire(Void const&) (flow.h:1431)
-==47==    by 0x3C5A7B7: finishSendAndDelPromiseRef (flow.h:811)
-==47==    by 0x3C5A7B7: a_body1cont1 (genericactors.actor.g.h:5937)
-==47==    by 0x3C5A7B7: a_body1when1 (genericactors.actor.g.h:5956)
-==47==    by 0x3C5A7B7: a_callback_fire (genericactors.actor.g.h:5977)
-==47==    by 0x3C5A7B7: ActorCallback<(anonymous namespace)::MapActor<Standalone<VectorRef<StringRef, (VecSerStrategy)0> >, Future<Void> store<Standalone<VectorRef<StringRef, (VecSerStrategy)0> >, Standalone<VectorRef<StringRef, (VecSerStrategy)0> > >(Standalone<VectorRef<StringRef, (VecSerStrategy)0> >&, Future<Standalone<VectorRef<StringRef, (VecSerStrategy)0> > >)::{lambda(Standalone<VectorRef<StringRef, (VecSerStrategy)0> > const&)#1}>, 0, Standalone<VectorRef<StringRef, (VecSerStrategy)0> > >::fire(Standalone<VectorRef<StringRef, (VecSerStrategy)0> > const&) (flow.h:1431)
-==47==    by 0x3C6E3CF: finishSendAndDelPromiseRef (flow.h:811)
-==47==    by 0x3C6E3CF: a_body1cont1 (ThreadHelper.actor.g.h:1322)
-==47==    by 0x3C6E3CF: a_body1cont3 (ThreadHelper.actor.g.h:1430)
-==47==    by 0x3C6E3CF: a_body1cont2 (ThreadHelper.actor.g.h:1354)
-==47==    by 0x3C6E3CF: a_body1when1 (ThreadHelper.actor.g.h:1366)
-==47==    by 0x3C6E3CF: a_callback_fire (ThreadHelper.actor.g.h:1387)
-==47==    by 0x3C6E3CF: ActorCallback<(anonymous namespace)::SafeThreadFutureToFutureImplActor<Standalone<VectorRef<StringRef, (VecSerStrategy)0> > >, 0, Void>::fire(Void const&) (flow.h:1431)
-==47==    by 0x5328A6F: send<Void> (flow.h:777)
-==47==    by 0x5328A6F: send<Void> (flow.h:1016)
-==47==    by 0x5328A6F: execTask (sim2.actor.cpp:2547)
-==47==    by 0x5328A6F: Sim2::runLoop(Sim2*) (sim2.actor.cpp:1354)
-==47==    by 0x11352BD: main (fdbserver.actor.cpp:2205)
-==47== 
-==47== HEAP SUMMARY:
-==47==     in use at exit: 396,595,632 bytes in 562,142 blocks
-==47==   total heap usage: 27,587,089 allocs, 27,024,947 frees, 4,747,917,304 bytes allocated
-==47== 
-==47== LEAK SUMMARY:
-==47==    definitely lost: 208,194 bytes in 1,547 blocks
-==47==    indirectly lost: 8 bytes in 1 blocks
-==47==      possibly lost: 3,789,574 bytes in 890 blocks
-==47==    still reachable: 392,597,856 bytes in 559,704 blocks
-==47==                       of which reachable via heuristic:
-==47==                         stdstring          : 6,359,670 bytes in 38,792 blocks
-==47==                         length64           : 46,353,624 bytes in 37,453 blocks
-==47==                         newarray           : 120 bytes in 4 blocks
-==47==                         multipleinheritance: 1,024 bytes in 1 blocks
-==47==         suppressed: 0 bytes in 0 blocks
-==47== Rerun with --leak-check=full to see details of leaked memory
-==47== 
-==47== For lists of detected and suppressed errors, rerun with: -s
-==47== ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)
-Aborted
-Shared connection to 10.174.224.254 closed.
-+ rsync --compress --progress -e 'ssh -F /dev/null -oHostKeyAlgorithms=ssh-rsa-cert-v01@openssh.com -oPubkeyAcceptedAlgorithms=ssh-rsa-cert-v01@openssh.com '\''-oProxyCommand=tsh --proxy tproxy.sfc-teleport-nonprod.aws.reg.snowflakecomputing.com ssh --cluster sfc-eng %h nc localhost %p'\'' -oControlPath=/tmp/ssh_%r@%h:%p -oTCPKeepAlive=yes -oControlMaster=auto -oControlPersist=5m -oStrictHostKeyChecking=accept-new -p 3022' --ignore-missing-args '10.174.224.254:/mnt/ephemeral/jfu/build/frostdb.linux.gcc.x86_64/exec/trace.*' .
-trace.0.0.0.0.47.1687983669.GHYIOi.0.1.json
-              0   0%    0.00kB/s    0:00:00       15,527,873 100%   28.53MB/s    0:00:00 (xfr#1, to-chk=1/2)
-trace.0.0.0.0.47.1687983669.GHYIOi.0.2.json
-              0   0%    0.00kB/s    0:00:00        2,497,333 100%    4.04MB/s    0:00:00 (xfr#2, to-chk=0/2)
