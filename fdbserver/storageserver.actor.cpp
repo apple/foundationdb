@@ -6699,6 +6699,16 @@ ACTOR Future<Void> tryGetRangeFromBlob(PromiseStream<RangeResult> results,
 		state int i;
 		for (i = 0; i < chunks.size(); ++i) {
 			state KeyRangeRef chunkRange = chunks[i].keyRange;
+			// Chunk is empty if no snapshot file. Skip it
+			if (!chunks[i].snapshotFile.present()) {
+				TraceEvent("SkipBlobChunk")
+				    .detail("Chunk", chunks[i].keyRange)
+				    .detail("Version", chunks[i].includedVersion);
+				RangeResult rows;
+				results.send(rows);
+				rows.readThrough = KeyRef(rows.arena(), std::min(chunkRange.end, keys.end));
+				continue;
+			}
 			state Reference<BlobConnectionProvider> blobConn = wait(loadBStoreForTenant(tenantData, chunkRange));
 			state RangeResult rows = wait(readBlobGranule(chunks[i], keys, 0, fetchVersion, blobConn));
 
