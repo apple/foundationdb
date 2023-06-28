@@ -78,7 +78,7 @@ public:
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		DatabaseContext::debugUseTags = true;
+		cx->debugUseTags = true;
 		return clientId ? Void() : setup(this, cx);
 	}
 	Future<Void> start(Database const& cx) override { return Void(); }
