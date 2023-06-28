@@ -22,6 +22,7 @@
 #include "flow/OTELMetrics.h"
 #include "flow/TDMetric.actor.h"
 #include "flow/flow.h"
+#include "include/flow/TDMetric.actor.h"
 #include <cctype>
 #include <cstddef>
 #include <string>
@@ -35,6 +36,8 @@ template <>
 const StringRef BoolMetric::metricType = "Bool"_sr;
 template <>
 const StringRef StringMetric::metricType = "String"_sr;
+template <class T>
+const StringRef ContinuousMetric<T>::metricType = "INVALID"_sr;
 
 std::string reduceFilename(std::string const& filename) {
 	std::string r = filename;

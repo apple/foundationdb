@@ -7,8 +7,6 @@
 #include "fdbclient/ReadVersionBatchers.h"
 #include "flow/actorcompiler.h" // must be last include
 
-namespace {
-
 ACTOR static Future<GetReadVersionReply> getConsistentReadVersion(SpanContext parentSpan,
                                                                   DatabaseContext* cx,
                                                                   uint32_t transactionCount,
@@ -248,8 +246,6 @@ public:
 struct HashIndex {
 	size_t operator()(Index const& index) const { return index.hash(); }
 };
-
-} // namespace
 
 class ReadVersionBatchersImpl {
 	std::unordered_map<Index, Batcher, HashIndex> batchers;
