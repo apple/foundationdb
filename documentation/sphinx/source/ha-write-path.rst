@@ -43,8 +43,6 @@ Tag is an overloaded term in FDB. In the early history of FDB, a tag is a number
 
 * As FDB scales and we work to reduce the recovery time, a special tag for transaction state store (txnStateStore) is introduced;
 
-* FDB also have transaction tags which are used for transaction throttling, not for the tag-partitioned log system mentioned in this article. See :ref:`transaction-tagging`
-
 To distinguish the types of tags used for different purposes at different locations (primary DC or remote DC), we introduce Tag structure, which has two fields:
 
 * locality (int8_t): When it is non-negative value, it decides which DC id the tag is used in. For example, if it is 0, it means the tag is used in primary DC and the tag’s id represents a storage server and is used for primary tLogs to index by storage servers. When it is negative, it decides which types of tags the tag belongs to. For example, if it is -2, it is a log router tag, and its id is used to decide which log router the tagged mutation should be sent to. The definition of all localities are in FDBTypes.h and you can easily find it if you search tagLocalitySpecial in the file.

@@ -308,15 +308,13 @@ struct ProxyCommitData {
 		latencyBandConfig = newLatencyBandConfig;
 	}
 
-	void updateSSTagCost(const UID& id, const TagSet& tagSet, MutationRef m, uint64_t cost) {
+	void updateSSTagCost(const UID& id, const TransactionTag& throttlingTag, MutationRef m, uint64_t cost) {
 		auto [it, _] = ssTrTagCommitCost.try_emplace(id, TransactionTagMap<TransactionCommitCostEstimation>());
 
-		for (auto& tag : tagSet) {
-			auto& costItem = it->second[tag];
-			if (m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
-				costItem.opsSum++;
-				costItem.costSum += cost;
-			}
+		auto& costItem = it->second[throttlingTag];
+		if (m.isAtomicOp() || m.type == MutationRef::Type::SetValue || m.type == MutationRef::Type::ClearRange) {
+			costItem.opsSum++;
+			costItem.costSum += cost;
 		}
 	}
 
