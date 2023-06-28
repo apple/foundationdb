@@ -1391,11 +1391,13 @@ UpdateCommitCostRequest StorageQueueInfo::refreshCommitCost(double elapsed) {
 
 Optional<double> StorageQueueInfo::getTagThrottlingRatio(int64_t storageTargetBytes, int64_t storageSpringBytes) const {
 	auto const storageQueue = getStorageQueueBytes();
-	if (storageQueue < storageTargetBytes - storageSpringBytes) {
-		return {};
+	// TODO: Remove duplicate calculation from Ratekeeper::updateRate
+	double inverseResult = std::min(
+	    2.0, (storageQueue - storageTargetBytes + storageSpringBytes) / static_cast<double>(storageSpringBytes));
+	if (inverseResult > 0) {
+		return 1.0 / inverseResult;
 	} else {
-		return std::max(
-		    0.0, static_cast<double>((storageTargetBytes + storageSpringBytes) - storageQueue) / storageSpringBytes);
+		return {};
 	}
 }
 

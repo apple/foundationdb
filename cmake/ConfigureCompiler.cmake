@@ -168,6 +168,13 @@ else()
 
   add_compile_options(-fno-omit-frame-pointer)
 
+  if(CLANG)
+    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
+    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
+    # to use a version that has a fix.
+    add_compile_options(-gdwarf-4)
+  endif()
+
   if(FULL_DEBUG_SYMBOLS OR CMAKE_BUILD_TYPE STREQUAL "Debug")
     # Configure with FULL_DEBUG_SYMBOLS=ON to generate all symbols for debugging with gdb
     # Also generating full debug symbols in release builds. CPack will strip them out
@@ -176,13 +183,6 @@ else()
   else()
     # Generating minimal debug symbols by default. They are sufficient for testing purposes
     add_compile_options(-ggdb1)
-  endif()
-
-  if(CLANG)
-    # The default DWARF 5 format does not play nicely with GNU Binutils 2.39 and earlier, resulting
-    # in tools like addr2line omitting line numbers. We can consider removing this once we are able 
-    # to use a version that has a fix.
-    add_compile_options(-gdwarf-4)
   endif()
 
   if(NOT FDB_RELEASE)

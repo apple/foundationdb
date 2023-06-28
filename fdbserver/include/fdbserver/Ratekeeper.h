@@ -72,7 +72,7 @@ public:
 	StorageQueuingMetricsReply lastReply;
 	bool acceptingRequests;
 	limitReason_t limitReason;
-	std::vector<StorageQueuingMetricsReply::TagInfo> busiestReadTags, busiestWriteTags;
+	std::vector<BusyTagInfo> busiestReadTags, busiestWriteTags;
 
 	StorageQueueInfo(const UID& id, const LocalityData& locality);
 	StorageQueueInfo(const UID& rateKeeperID, const UID& id, const LocalityData& locality);

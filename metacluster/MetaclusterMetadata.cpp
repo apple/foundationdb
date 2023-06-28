@@ -25,13 +25,76 @@
 
 namespace metacluster::metadata {
 
+Tuple RestoreId::pack() const {
+	return tuple;
+}
+RestoreId RestoreId::unpack(Tuple tuple) {
+	return RestoreId(tuple);
+}
+
+bool RestoreId::replaces(Versionstamp const& versionstamp) {
+	return uid.isValid() || this->versionstamp >= versionstamp;
+}
+
+bool RestoreId::operator==(RestoreId const& other) const {
+	return uid == other.uid && versionstamp == other.versionstamp;
+}
+bool RestoreId::operator!=(RestoreId const& other) const {
+	return !(*this == other);
+}
+
+Future<Void> RestoreId::onSet() {
+	if (uid.isValid()) {
+		return Void();
+	} else {
+		return map(versionstampFuture, [this](Versionstamp versionstamp) {
+			this->versionstamp = versionstamp;
+			tuple = Tuple::makeTuple(BinaryWriter::toValue<UID>(uid, Unversioned()),
+			                         TupleVersionstamp(versionstamp.version, versionstamp.batchNumber));
+			return Void();
+		});
+	}
+}
+
+std::string RestoreId::toString() const {
+	return fmt::format("{}.{}", uid.toString(), versionstamp.toString());
+}
+
+RestoreId::RestoreId(UID uid) : uid(uid) {
+	if (uid.isValid()) {
+		// This is used to simulate the behavior of older versions
+		ASSERT(g_network->isSimulated());
+		tuple = Tuple::makeTuple(BinaryWriter::toValue<UID>(uid, Unversioned()));
+	} else {
+		tuple = Tuple::makeTuple(BinaryWriter::toValue<UID>(uid, Unversioned()), TupleVersionstamp());
+	}
+}
+
+RestoreId::RestoreId(Tuple tuple) : tuple(tuple) {
+	uid = BinaryReader::fromStringRef<UID>(tuple.getString(0), Unversioned());
+
+	if (tuple.size() == 2) {
+		ASSERT(!uid.isValid());
+		TupleVersionstamp tupleVersionstamp = tuple.getVersionstamp(1);
+		ASSERT(tupleVersionstamp.getUserVersion() == 0);
+		versionstamp = Versionstamp(tupleVersionstamp.getVersion(), tupleVersionstamp.getBatchNumber());
+	} else {
+		CODE_PROBE(true, "Processing a UID-based restore ID");
+	}
+}
+
 KeyBackedSet<UID>& registrationTombstones() {
 	static KeyBackedSet<UID> instance("\xff/metacluster/registrationTombstones"_sr);
 	return instance;
 }
 
-KeyBackedMap<ClusterName, UID>& activeRestoreIds() {
-	static KeyBackedMap<ClusterName, UID> instance("\xff/metacluster/activeRestoreIds"_sr);
+KeyBackedMap<ClusterName, RestoreId>& activeRestoreIds() {
+	static KeyBackedMap<ClusterName, RestoreId> instance("\xff/metacluster/activeRestoreIds"_sr);
+	return instance;
+}
+
+KeyBackedProperty<Versionstamp> maxRestoreId() {
+	static KeyBackedProperty<Versionstamp> instance("\xff/metacluster/maxRestoreId"_sr);
 	return instance;
 }
 

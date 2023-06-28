@@ -26,6 +26,7 @@
 #include "fdbclient/PImpl.h"
 #include "fdbserver/ConfigFollowerInterface.h"
 #include "fdbserver/ConfigBroadcastInterface.h"
+#include "fdbserver/Knobs.h"
 
 class ConfigNode : public ReferenceCounted<ConfigNode> {
 	PImpl<class ConfigNodeImpl> impl;

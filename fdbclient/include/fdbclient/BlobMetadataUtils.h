@@ -25,21 +25,41 @@
 #include "flow/FileIdentifier.h"
 
 using BlobMetadataDomainId = int64_t;
+using BlobMetadataLocationId = int64_t;
 
 /*
- * There are 3 cases for blob metadata.
- *  1. A non-partitioned blob store. baseUrl is set, and partitions is empty. Files will be written with this prefix.
- *  2. A sub-path partitioned blob store. baseUrl is set, and partitions contains 2 or more sub-paths. Files will be
- * written with a prefix of the base url and then one of the sub-paths.
- *  3. A separate-storage-location partitioned blob store. baseUrl is NOT set, and partitions contains 2 or more full
- * fdb blob urls. Files will be written with one of the partition prefixes.
+ * There are 2 cases for blob metadata. These are all represented fundamentally in the same input schema.
+ *  1. A non-partitioned blob store. Files will be written with the specified location.
+ *  2. A partitioned blob store. Files will be written with one of the partition's locationId prefixes.
  * Partitioning is desired in blob stores such as s3 that can run into metadata hotspotting issues.
  */
+
+// FIXME: do internal deduping of locations based on location id
+struct BlobMetadataLocationRef {
+	BlobMetadataLocationId locationId;
+	StringRef path;
+
+	BlobMetadataLocationRef() {}
+	BlobMetadataLocationRef(Arena& arena, const BlobMetadataLocationRef& from)
+	  : locationId(from.locationId), path(arena, from.path) {}
+
+	explicit BlobMetadataLocationRef(Arena& ar, BlobMetadataLocationId locationId, StringRef path)
+	  : locationId(locationId), path(ar, path) {}
+	explicit BlobMetadataLocationRef(BlobMetadataLocationId locationId, StringRef path)
+	  : locationId(locationId), path(path) {}
+
+	int expectedSize() const { return sizeof(BlobMetadataLocationRef) + path.size(); }
+
+	template <class Ar>
+	void serialize(Ar& ar) {
+		serializer(ar, locationId, path);
+	}
+};
+
 struct BlobMetadataDetailsRef {
 	constexpr static FileIdentifier file_identifier = 6685526;
 	BlobMetadataDomainId domainId;
-	Optional<StringRef> base;
-	VectorRef<StringRef> partitions;
+	VectorRef<BlobMetadataLocationRef> locations;
 
 	// cache options
 	double refreshAt;
@@ -47,39 +67,30 @@ struct BlobMetadataDetailsRef {
 
 	BlobMetadataDetailsRef() {}
 	BlobMetadataDetailsRef(Arena& arena, const BlobMetadataDetailsRef& from)
-	  : domainId(from.domainId), partitions(arena, from.partitions), refreshAt(from.refreshAt),
-	    expireAt(from.expireAt) {
-		if (from.base.present()) {
-			base = StringRef(arena, from.base.get());
-		}
-	}
+	  : domainId(from.domainId), locations(arena, from.locations), refreshAt(from.refreshAt), expireAt(from.expireAt) {}
 
 	explicit BlobMetadataDetailsRef(Arena& ar,
 	                                BlobMetadataDomainId domainId,
-	                                Optional<StringRef> baseLocation,
-	                                VectorRef<StringRef> partitions,
+	                                VectorRef<BlobMetadataLocationRef> locations,
 	                                double refreshAt,
 	                                double expireAt)
-	  : domainId(domainId), partitions(ar, partitions), refreshAt(refreshAt), expireAt(expireAt) {
-		if (baseLocation.present()) {
-			base = StringRef(ar, baseLocation.get());
-		}
+	  : domainId(domainId), locations(ar, locations), refreshAt(refreshAt), expireAt(expireAt) {
+		ASSERT(!locations.empty());
 	}
 
 	explicit BlobMetadataDetailsRef(BlobMetadataDomainId domainId,
-	                                Optional<StringRef> base,
-	                                VectorRef<StringRef> partitions,
+	                                VectorRef<BlobMetadataLocationRef> locations,
 	                                double refreshAt,
 	                                double expireAt)
-	  : domainId(domainId), base(base), partitions(partitions), refreshAt(refreshAt), expireAt(expireAt) {}
-
-	int expectedSize() const {
-		return sizeof(BlobMetadataDetailsRef) + (base.present() ? base.get().size() : 0) + partitions.expectedSize();
+	  : domainId(domainId), locations(locations), refreshAt(refreshAt), expireAt(expireAt) {
+		ASSERT(!locations.empty());
 	}
+
+	int expectedSize() const { return sizeof(BlobMetadataDetailsRef) + locations.expectedSize(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, domainId, base, partitions, refreshAt, expireAt);
+		serializer(ar, domainId, locations, refreshAt, expireAt);
 	}
 };
 

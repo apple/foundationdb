@@ -37,6 +37,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/GenericTransactionHelper.h"
 #include "fdbclient/Subspace.h"
+#include "fdbclient/TupleVersionstamp.h"
 #include "flow/ObjectSerializer.h"
 #include "flow/Platform.h"
 #include "flow/genericactors.actor.h"
@@ -62,7 +63,7 @@
 // Since TupleCodec is a struct, partial specialization can be used, such as the std::pair
 // partial specialization below allowing any std::pair<T1,T2> where T1 and T2 are already
 // supported by TupleCodec.
-template <typename T>
+template <typename T, typename Enabled = void>
 struct TupleCodec {
 	static inline Standalone<StringRef> pack(T const& val) { return val.pack().pack(); }
 	static inline T unpack(Standalone<StringRef> const& val) { return T::unpack(Tuple::unpack(val)); }
@@ -84,6 +85,15 @@ inline Standalone<StringRef> TupleCodec<int64_t>::pack(int64_t const& val) {
 }
 template <>
 inline int64_t TupleCodec<int64_t>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getInt(0);
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<int>::pack(int const& val) {
+	return Tuple::makeTuple(val).pack();
+}
+template <>
+inline int TupleCodec<int>::unpack(Standalone<StringRef> const& val) {
 	return Tuple::unpack(val).getInt(0);
 }
 
@@ -112,6 +122,26 @@ inline Standalone<StringRef> TupleCodec<UID>::pack(UID const& val) {
 template <>
 inline UID TupleCodec<UID>::unpack(Standalone<StringRef> const& val) {
 	return BinaryReader::fromStringRef<UID>(TupleCodec<Standalone<StringRef>>::unpack(val), Unversioned());
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp const& val) {
+	return Tuple::makeTuple(val).pack();
+}
+template <>
+inline TupleVersionstamp TupleCodec<TupleVersionstamp>::unpack(Standalone<StringRef> const& val) {
+	return Tuple::unpack(val).getVersionstamp(0);
+}
+
+template <>
+inline Standalone<StringRef> TupleCodec<Versionstamp>::pack(Versionstamp const& val) {
+	return TupleCodec<TupleVersionstamp>::pack(TupleVersionstamp(val.version, val.batchNumber));
+}
+template <>
+inline Versionstamp TupleCodec<Versionstamp>::unpack(Standalone<StringRef> const& val) {
+	TupleVersionstamp vs = TupleCodec<TupleVersionstamp>::unpack(val);
+	ASSERT(vs.getUserVersion() == 0);
+	return Versionstamp(vs.getVersion(), vs.getBatchNumber());
 }
 
 // This is backward compatible with TupleCodec<Standalone<StringRef>>
@@ -171,6 +201,16 @@ inline KeyRange TupleCodec<KeyRange>::unpack(Standalone<StringRef> const& val) {
 	Tuple t = Tuple::unpack(val);
 	return KeyRangeRef(t.getString(0), t.getString(1));
 }
+
+template <class Enum>
+struct TupleCodec<Enum, std::enable_if_t<std::is_enum_v<Enum>>> {
+	static inline Standalone<StringRef> pack(Enum const& val) {
+		return Tuple::makeTuple(static_cast<int64_t>(val)).pack();
+	}
+	static inline Enum unpack(Standalone<StringRef> const& val) {
+		return static_cast<Enum>(Tuple::unpack(val).getInt(0));
+	}
+};
 
 struct NullCodec {
 	static Standalone<StringRef> pack(Standalone<StringRef> val) { return val; }
@@ -518,20 +558,6 @@ public:
 	typedef KeyBackedProperty<ValueType, ValueCodec> SingleRecordProperty;
 	typedef TypedKeySelector<KeyType, KeyCodec> KeySelector;
 
-	template <class DB>
-	Future<RangeResultType> getRange(Optional<KeyType> const& begin,
-	                                 Optional<KeyType> const& end,
-	                                 int limit,
-	                                 Reference<DB> db,
-	                                 Snapshot snapshot = Snapshot::False,
-	                                 Reverse reverse = Reverse::False) const {
-		return runTransaction(db, [=, this](Reference<typename DB::TransactionT> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-			tr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			return this->getRange(tr, begin, end, limit, snapshot, reverse);
-		});
-	}
-
 	// If end is not present one key past the end of the map is used.
 	template <class Transaction>
 	Future<RangeResultType> getRange(Transaction tr,
@@ -540,25 +566,34 @@ public:
 	                                 int limit,
 	                                 Snapshot snapshot = Snapshot::False,
 	                                 Reverse reverse = Reverse::False) const {
-		Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
-		Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
-		    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+		if constexpr (is_transaction_creator<Transaction>) {
+			return runTransaction(tr, [=, self = *this](decltype(tr->createTransaction()) tr) {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				return self.getRange(tr, begin, end, limit, snapshot, reverse);
+			});
+		} else {
+			Key beginKey = begin.present() ? packKey(begin.get()) : subspace.begin;
+			Key endKey = end.present() ? packKey(end.get()) : subspace.end;
 
-		return holdWhile(
-		    getRangeFuture,
-		    map(safeThreadFutureToFuture(getRangeFuture),
-		        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
-			        RangeResultType rangeResult;
-			        for (int i = 0; i < kvs.size(); ++i) {
-				        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
-				        ValueType val = valueCodec.unpack(kvs[i].value);
-				        rangeResult.results.push_back(PairType(key, val));
-			        }
-			        rangeResult.more = kvs.more;
-			        return rangeResult;
-		        }));
+			typename transaction_future_type<Transaction, RangeResult>::type getRangeFuture =
+			    tr->getRange(KeyRangeRef(beginKey, endKey), GetRangeLimits(limit), snapshot, reverse);
+
+			return holdWhile(
+			    getRangeFuture,
+			    map(safeThreadFutureToFuture(getRangeFuture),
+			        [prefix = subspace.begin, valueCodec = valueCodec](RangeResult const& kvs) -> RangeResultType {
+				        RangeResultType rangeResult;
+				        for (int i = 0; i < kvs.size(); ++i) {
+					        KeyType key = KeyCodec::unpack(kvs[i].key.removePrefix(prefix));
+					        ValueType val = valueCodec.unpack(kvs[i].value);
+					        rangeResult.results.push_back(PairType(key, val));
+				        }
+				        rangeResult.more = kvs.more;
+				        return rangeResult;
+			        }));
+		}
 	}
 
 	ACTOR template <class Transaction>
@@ -755,6 +790,16 @@ public:
 		Key k = packKey(key);
 		Value v = packValue(val);
 		tr->atomicOp(k, v, type);
+		if (trigger.present()) {
+			trigger->update(tr);
+		}
+	}
+
+	template <class Transaction>
+	void setVersionstamp(Transaction tr, KeyType const& key, ValueType const& val, int offset = 0) {
+		Key k = packKey(key);
+		Value v = packValue(val).withSuffix(StringRef(reinterpret_cast<uint8_t*>(&offset), 4));
+		tr->atomicOp(k, v, MutationRef::SetVersionstampedValue);
 		if (trigger.present()) {
 			trigger->update(tr);
 		}

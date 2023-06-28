@@ -8,7 +8,6 @@ storageEngineExcludeTypes = [4, 5]
 
 [[knobs]]
 bg_consistency_check_enabled = 0
-blob_manifest_backup = true
 shard_encode_location_metadata = false
 bw_throttling_enabled = false
 
@@ -46,7 +45,7 @@ clearAfterTest = false
     [[test.workload]]
     testName = 'ReadWrite'
     testDuration = 60.0
-    transactionsPerSecond = 200
+    transactionsPerSecond = 100
     writesPerTransactionA = 5
     readsPerTransactionA = 1
     writesPerTransactionB = 10

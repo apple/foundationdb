@@ -168,6 +168,7 @@ public:
 	bool logTraceEventMetrics;
 
 	void initMetrics() {
+		ASSERT(!isOpen());
 		SevErrorNames.init("TraceEvents.SevError"_sr);
 		SevWarnAlwaysNames.init("TraceEvents.SevWarnAlways"_sr);
 		SevWarnNames.init("TraceEvents.SevWarn"_sr);
@@ -428,9 +429,8 @@ public:
 		}
 	}
 
-	void log(int severity, const char* name, UID id, uint64_t event_ts) {
-		if (!logTraceEventMetrics)
-			return;
+	void logMetrics(int severity, const char* name, UID id, uint64_t event_ts) {
+		ASSERT(TraceEvent::isNetworkThread() && logTraceEventMetrics);
 
 		EventMetricHandle<TraceEventNameID>* m = nullptr;
 		switch (severity) {
@@ -779,7 +779,8 @@ void openTraceFile(const Optional<NetworkAddress>& na,
                    std::string baseOfBase,
                    std::string logGroup,
                    std::string identifier,
-                   std::string tracePartialFileSuffix) {
+                   std::string tracePartialFileSuffix,
+                   InitializeTraceMetrics initializeTraceMetrics) {
 	if (g_traceLog.isOpen())
 		return;
 
@@ -806,6 +807,10 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 		baseName = format("%s.0.0.0.0.%d", baseOfBase.c_str(), ::getpid());
 	}
 
+	if (initializeTraceMetrics) {
+		g_traceLog.initMetrics();
+	}
+
 	g_traceLog.open(directory,
 	                baseName,
 	                logGroup,
@@ -817,10 +822,6 @@ void openTraceFile(const Optional<NetworkAddress>& na,
 
 	uncancellable(recurring(&flushTraceFile, FLOW_KNOBS->TRACE_FLUSH_INTERVAL, TaskPriority::FlushTrace));
 	g_traceBatch.dump();
-}
-
-void initTraceEventMetrics() {
-	g_traceLog.initMetrics();
 }
 
 void closeTraceFile() {
@@ -1322,17 +1323,17 @@ void BaseTraceEvent::log() {
 
 				if (g_traceLog.isOpen()) {
 					// Log Metrics
-					if (g_traceLog.logTraceEventMetrics && isNetworkThread()) {
+					if (isNetworkThread() && g_traceLog.logTraceEventMetrics) {
 						// Get the persistent Event Metric representing this trace event and push the fields (details)
-						// accumulated in *this to it and then log() it. Note that if the event metric is disabled it
-						// won't actually be logged BUT any new fields added to it will be registered. If the event IS
-						// logged, a timestamp will be returned, if not then 0.  Either way, pass it through to be used
-						// if possible in the Sev* event metrics.
+						// accumulated in *this to it and then logMetrics() it. Note that if the event metric is
+						// disabled it won't actually be logged BUT any new fields added to it will be registered. If
+						// the event IS logged, a timestamp will be returned, if not then 0.  Either way, pass it
+						// through to be used if possible in the Sev* event metrics.
 
 						uint64_t event_ts =
 						    DynamicEventMetric::getOrCreateInstance(format("TraceEvent.%s", type), StringRef(), true)
 						        ->setFieldsAndLogFrom(tmpEventMetric.get());
-						g_traceLog.log(severity, type, id, event_ts);
+						g_traceLog.logMetrics(severity, type, id, event_ts);
 					}
 				}
 			}

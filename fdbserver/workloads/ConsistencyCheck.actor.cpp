@@ -326,6 +326,15 @@ struct ConsistencyCheckWorkload : TestWorkload {
 					bool coordinatorsCorrect = wait(self->checkCoordinators(cx));
 					if (!coordinatorsCorrect)
 						self->testFailure("Coordinators incorrect");
+
+					bool consistencyScanStopped = wait(self->checkConsistencyScan(cx));
+					if (!consistencyScanStopped)
+						self->testFailure("Consistency scan active");
+
+					// FIXME: re-enable this check!
+					// bool singleSingletons = self->checkSingleSingletons(self, configuration);
+					// if (!singleSingletons)
+					// 	self->testFailure("Cluster has multiple instances of a singleton!");
 				}
 
 				// Get a list of key servers; verify that the TLogs and master all agree about who the key servers are
@@ -367,7 +376,6 @@ struct ConsistencyCheckWorkload : TestWorkload {
 						                          true,
 						                          self->rateLimitMax,
 						                          CLIENT_KNOBS->CONSISTENCY_CHECK_ONE_ROUND_TARGET_COMPLETION_TIME,
-						                          KeyRef(),
 						                          &self->success));
 
 						// Cache consistency check
@@ -1273,6 +1281,7 @@ struct ConsistencyCheckWorkload : TestWorkload {
 		for (int i = 0; i < all.size(); i++) {
 			if (all[i]->isReliable() && all[i]->name == std::string("Server") &&
 			    all[i]->startingClass != ProcessClass::TesterClass &&
+			    all[i]->startingClass != ProcessClass::SimHTTPServerClass &&
 			    all[i]->protocolVersion == g_network->protocolVersion()) {
 				if (!workerAddresses.count(all[i]->address)) {
 					TraceEvent("ConsistencyCheck_WorkerMissingFromList").detail("Addr", all[i]->address);
@@ -1624,9 +1633,104 @@ struct ConsistencyCheckWorkload : TestWorkload {
 			return false;
 		}
 
+		// Check ConsistencyScan
+		if (db.consistencyScan.present() &&
+		    (!nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address()) ||
+		     nonExcludedWorkerProcessMap[db.consistencyScan.get().address()].processClass.machineClassFitness(
+		         ProcessClass::ConsistencyScan) > fitnessLowerBound)) {
+			TraceEvent("ConsistencyCheck_ConsistencyScanNotBest")
+			    .detail("BestConsistencyScanFitness", fitnessLowerBound)
+			    .detail("ExistingConsistencyScanFitness",
+			            nonExcludedWorkerProcessMap.count(db.consistencyScan.get().address())
+			                ? nonExcludedWorkerProcessMap[db.consistencyScan.get().address()]
+			                      .processClass.machineClassFitness(ProcessClass::ConsistencyScan)
+			                : -1);
+			return false;
+		}
+
 		// TODO: Check Tlog
 
 		return true;
+	}
+
+	// returns true if stopped, false otherwise
+	ACTOR Future<bool> checkConsistencyScan(Database cx) {
+		if (!g_network->isSimulated()) {
+			return true;
+		}
+		state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(cx);
+		state ConsistencyScanState cs;
+		loop {
+			try {
+				SystemDBWriteLockedNow(cx.getReference())->setOptions(tr);
+				ConsistencyScanState::Config config = wait(cs.config().getD(tr));
+				return !config.enabled;
+			} catch (Error& e) {
+				wait(tr->onError(e));
+			}
+		}
+	}
+
+	bool checkSingleSingleton(std::vector<ISimulator::ProcessInfo*> const& allProcesses,
+	                          TraceEvent& ev,
+	                          std::string const& role,
+	                          int expectedCount) {
+		// FIXME: this doesn't actually check that there aren't multiple of the same role running on the same process
+		// either
+		int count = 0;
+		for (int i = 0; i < allProcesses.size(); i++) {
+			if (g_simulator->hasRole(allProcesses[i]->address, role)) {
+				count++;
+				ev.detail(role + std::to_string(count), allProcesses[i]->address.toString());
+			}
+		}
+		ev.detail(role + "Count", count).detail(role + "ExpectedCount", expectedCount);
+		if (count != expectedCount) {
+			fmt::print("ConsistencyCheck failure: incorrect number {0} of singleton {1} running (expected {2})\n",
+			           count,
+			           role,
+			           expectedCount);
+		}
+		return count == expectedCount;
+	}
+
+	// checks that there is only one instance of each singleton running in the cluster in simulation
+	bool checkSingleSingletons(ConsistencyCheckWorkload* self, DatabaseConfiguration config) {
+		if (!g_network->isSimulated()) {
+			return true;
+		}
+
+		CODE_PROBE(self->performQuiescentChecks, "Checking for single singletons");
+
+		std::vector<ISimulator::ProcessInfo*> allProcesses = g_simulator->getAllProcesses();
+
+		bool success = true;
+		TraceEvent ev("CheckSingletons");
+
+		success &= self->checkSingleSingleton(allProcesses, ev, "Ratekeeper", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "DataDistributor", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "ConsistencyScan", 1);
+		success &= self->checkSingleSingleton(allProcesses, ev, "BlobManager", config.blobGranulesEnabled ? 1 : 0);
+
+		// FIXME: add blob migrator once it's always on
+		// success &= self->checkSingleSingleton(allProcesses, ev, "BlobMigrator", TODO ? 1 : 0);
+
+		success &= self->checkSingleSingleton(
+		    allProcesses,
+		    ev,
+		    "EncryptKeyProxy",
+		    config.encryptionAtRestMode.isEncryptionEnabled() || SERVER_KNOBS->ENABLE_REST_KMS_COMMUNICATION ? 1 : 0);
+
+		if (!success) {
+			// TODO REMOVE
+			fmt::print("ConsistencyCheck singletons: roles map:\n");
+			for (int i = 0; i < allProcesses.size(); i++) {
+				fmt::print(
+				    "{0}: {1}\n", allProcesses[i]->address.toString(), g_simulator->getRoles(allProcesses[i]->address));
+			}
+		}
+
+		return success;
 	}
 };
 

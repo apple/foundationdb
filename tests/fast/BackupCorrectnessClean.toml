@@ -7,21 +7,21 @@ simBackupAgents = 'BackupToFile'
 
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 500.0
+    transactionsPerSecond = 250.0
     testDuration = 20.0
     expectedRate = 0
     keyPrefix = 'a'
 
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 500.0
+    transactionsPerSecond = 250.0
     testDuration = 30.0
     expectedRate = 0
     keyPrefix = 'A'
 
     [[test.workload]]
     testName = 'Cycle'
-    transactionsPerSecond = 500.0
+    transactionsPerSecond = 250.0
     testDuration = 40.0
     expectedRate = 0
     keyPrefix = 'm'

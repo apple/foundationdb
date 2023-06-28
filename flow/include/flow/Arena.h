@@ -20,8 +20,6 @@
 
 #ifndef FLOW_ARENA_H
 #define FLOW_ARENA_H
-#include <array>
-#include <iterator>
 #pragma once
 
 #include "flow/BooleanParam.h"
@@ -34,7 +32,9 @@
 #include "flow/Optional.h"
 #include "flow/Traceable.h"
 #include <algorithm>
+#include <array>
 #include <boost/functional/hash.hpp>
+#include <iterator>
 #include <stdint.h>
 #include <string_view>
 #include <string>
@@ -1097,7 +1097,7 @@ public:
 		m_size--;
 	}
 
-	void pop_front(int count) {
+	void pop_front(int count = 1) {
 		VPS::invalidate();
 		count = std::min(m_size, count);
 

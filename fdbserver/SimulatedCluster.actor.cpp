@@ -55,6 +55,7 @@
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IConnection.h"
+#include "fdbserver/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -357,6 +358,9 @@ class TestConfig : public BasicTestConfig {
 			if (attrib == "blobGranulesEnabled") {
 				blobGranulesEnabled = strcmp(value.c_str(), "true") == 0;
 			}
+			if (attrib == "simHTTPServerEnabled") {
+				simHTTPServerEnabled = strcmp(value.c_str(), "true") == 0;
+			}
 			if (attrib == "allowDefaultTenant") {
 				allowDefaultTenant = strcmp(value.c_str(), "true") == 0;
 			}
@@ -431,6 +435,7 @@ public:
 	Optional<std::string> config;
 	bool blobGranulesEnabled = false;
 	bool randomlyRenameZoneId = false;
+	bool simHTTPServerEnabled = true;
 
 	bool allowDefaultTenant = true;
 	bool allowCreatingTenants = true;
@@ -508,6 +513,7 @@ public:
 		    .add("configDB", &configDBType)
 		    .add("extraMachineCountDC", &extraMachineCountDC)
 		    .add("blobGranulesEnabled", &blobGranulesEnabled)
+		    .add("simHTTPServerEnabled", &simHTTPServerEnabled)
 		    .add("allowDefaultTenant", &allowDefaultTenant)
 		    .add("allowCreatingTenants", &allowCreatingTenants)
 		    .add("randomlyRenameZoneId", &randomlyRenameZoneId)
@@ -642,7 +648,37 @@ ACTOR Future<Void> runDr(Reference<IClusterConnectionRecord> connRecord) {
 	throw internal_error();
 }
 
-enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
+ACTOR Future<Void> runSimHTTPServer() {
+	TraceEvent("SimHTTPServerStarting");
+	state Reference<HTTP::SimServerContext> context = makeReference<HTTP::SimServerContext>();
+	g_simulator->addSimHTTPProcess(context);
+
+	try {
+		wait(context->actors.getResult());
+	} catch (Error& e) {
+		TraceEvent("SimHTTPServerDied").errorUnsuppressed(e);
+		context->stop();
+		g_simulator->removeSimHTTPProcess();
+		throw e;
+	}
+	throw internal_error();
+}
+
+// enum AgentMode { AgentNone = 0, AgentOnly = 1, AgentAddition = 2 };
+// FIXME: could do this as bit flags of (fdbd) (backup agent) (http) etc... if the space gets more complicated
+enum ProcessMode { FDBDOnly = 0, BackupAgentOnly = 1, FDBDAndBackupAgent = 2, SimHTTPServer = 3 };
+
+bool processRunBackupAgent(ProcessMode mode) {
+	return mode == BackupAgentOnly || mode == FDBDAndBackupAgent;
+}
+
+bool processRunFDBD(ProcessMode mode) {
+	return mode == FDBDOnly || mode == FDBDAndBackupAgent;
+}
+
+bool processRunHTTPServer(ProcessMode mode) {
+	return mode == SimHTTPServer;
+}
 
 // SOMEDAY: when a process can be rebooted in isolation from the other on that machine,
 //  a loop{} will be needed around the waiting on simulatedFDBD(). For now this simply
@@ -660,7 +696,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
                                                          ClusterConnectionString connStr,
                                                          ClusterConnectionString otherConnStr,
                                                          bool useSeedFile,
-                                                         AgentMode runBackupAgents,
+                                                         ProcessMode processMode,
                                                          std::string whitelistBinPaths,
                                                          ProtocolVersion protocolVersion,
                                                          ConfigDBType configDBType,
@@ -713,7 +749,8 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			    .detail("DataHall", localities.dataHallId())
 			    .detail("Address", process->address.toString())
 			    .detail("Excluded", process->excluded)
-			    .detail("UsingSSL", sslEnabled);
+			    .detail("UsingSSL", sslEnabled)
+			    .detail("ProcessMode", processMode);
 			TraceEvent("ProgramStart")
 			    .detail("Cycles", cycles)
 			    .detail("RandomId", randomId)
@@ -731,10 +768,9 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 			try {
 				// SOMEDAY: test lower memory limits, without making them too small and causing the database to stop
 				// making progress
-				FlowTransport::createInstance(processClass == ProcessClass::TesterClass || runBackupAgents == AgentOnly,
-				                              1,
-				                              WLTOKEN_RESERVED_COUNT,
-				                              &allowList);
+				bool client = processClass == ProcessClass::TesterClass || processMode == BackupAgentOnly ||
+				              processMode == SimHTTPServer;
+				FlowTransport::createInstance(client, 1, WLTOKEN_RESERVED_COUNT, &allowList);
 				for (const auto& p : g_simulator->authKeys) {
 					FlowTransport::transport().addPublicKey(p.first, p.second.toPublic());
 				}
@@ -745,7 +781,7 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					NetworkAddress n(ip, listenPort, true, sslEnabled && listenPort == port);
 					futures.push_back(FlowTransport::transport().bind(n, n));
 				}
-				if (runBackupAgents != AgentOnly) {
+				if (processRunFDBD(processMode)) {
 					futures.push_back(fdbd(connRecord,
 					                       localities,
 					                       processClass,
@@ -760,9 +796,13 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					                       {},
 					                       configDBType));
 				}
-				if (runBackupAgents != AgentNone) {
+				if (processRunBackupAgent(processMode)) {
 					futures.push_back(runBackup(connRecord));
 					futures.push_back(runDr(connRecord));
+				}
+				if (processRunHTTPServer(processMode)) {
+					fmt::print("Process {0} run http server\n", ip.toString());
+					futures.push_back(runSimHTTPServer());
 				}
 
 				futures.push_back(success(onShutdown));
@@ -775,6 +815,10 @@ ACTOR Future<ISimulator::KillType> simulatedFDBDRebooter(Reference<IClusterConne
 					TraceEvent("RebootProcessAndSwitchLateReboot").detail("Address", process->address);
 					g_simulator->switchCluster(process->address);
 					process->shutdownSignal.send(ISimulator::KillType::RebootProcessAndSwitch);
+					// Need to set the rebooting flag to true to keep the same behavior as MachineAttrition
+					// Otherwise, a protected process, like a coordinator process can execute this code path but the
+					// rebooting flag is still false, which breaks the assertion in g_simulator->destroyProcess
+					process->rebooting = true;
 				}
 				wait(waitForAny(futures));
 			} catch (Error& e) {
@@ -924,7 +968,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
                                     std::string baseFolder,
                                     bool restarting,
                                     bool useSeedFile,
-                                    AgentMode runBackupAgents,
+                                    ProcessMode processMode,
                                     bool sslOnly,
                                     std::string whitelistBinPaths,
                                     ProtocolVersion protocolVersion,
@@ -969,8 +1013,9 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 				myFolders.push_back(joinPath(baseFolder, thisFolder));
 				platform::createDirectory(myFolders[i]);
 
-				if (!useSeedFile)
+				if (!useSeedFile) {
 					writeFile(joinPath(myFolders[i], "fdb.cluster"), connStr.toString());
+				}
 			}
 		}
 
@@ -978,13 +1023,22 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 			state std::vector<Future<ISimulator::KillType>> processes;
 			for (int i = 0; i < ips.size(); i++) {
 				std::string path = joinPath(myFolders[i], "fdb.cluster");
-				Reference<IClusterConnectionRecord> clusterFile(
-				    useSeedFile ? new ClusterConnectionFile(path, connStr.toString())
-				                : new ClusterConnectionFile(path));
+				ProcessMode ipProcessMode =
+				    processMode == BackupAgentOnly ? (i == ips.size() - 1 ? BackupAgentOnly : FDBDOnly) : processMode;
+
+				// for some reason http servers are having issues with seed files which doesn't matter because they
+				// don't use the db
+				Reference<IClusterConnectionRecord> clusterFile;
+				if (ipProcessMode != SimHTTPServer) {
+					// Fall back to use seed string if fdb.cluster not present
+					// It can happen when a process failed before it persisted the connection string to disk
+					clusterFile = Reference<IClusterConnectionRecord>(
+					    useSeedFile || !fileExists(path) ? new ClusterConnectionFile(path, connStr.toString())
+					                                     : new ClusterConnectionFile(path));
+				}
 				const int listenPort = i * listenPerProcess + 1;
-				AgentMode agentMode =
-				    runBackupAgents == AgentOnly ? (i == ips.size() - 1 ? AgentOnly : AgentNone) : runBackupAgents;
-				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && agentMode == AgentNone) {
+
+				if (g_simulator->hasDiffProtocolProcess && !g_simulator->setDiffProtocol && ipProcessMode == FDBDOnly) {
 					processes.push_back(simulatedFDBDRebooter(clusterFile,
 					                                          ips[i],
 					                                          sslEnabled,
@@ -998,7 +1052,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          connStr,
 					                                          otherConnStr,
 					                                          useSeedFile,
-					                                          agentMode,
+					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          protocolVersion,
 					                                          configDBType,
@@ -1018,7 +1072,7 @@ ACTOR Future<Void> simulatedMachine(ClusterConnectionString connStr,
 					                                          connStr,
 					                                          otherConnStr,
 					                                          useSeedFile,
-					                                          agentMode,
+					                                          ipProcessMode,
 					                                          whitelistBinPaths,
 					                                          g_network->protocolVersion(),
 					                                          configDBType,
@@ -1388,7 +1442,7 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 			                     baseFolder,
 			                     true,
 			                     i == useSeedForMachine,
-			                     AgentAddition,
+			                     processClass == ProcessClass::SimHTTPServerClass ? SimHTTPServer : FDBDAndBackupAgent,
 			                     usingSSL && (listenersPerProcess == 1 || processClass == ProcessClass::TesterClass),
 			                     whitelistBinPaths,
 			                     protocolVersion,
@@ -1418,21 +1472,14 @@ ACTOR Future<Void> restartSimulatedSystem(std::vector<Future<Void>>* systemActor
 }
 
 // Configuration details compiled in a structure used when setting up a simulated cluster
-struct SimulationConfig {
+struct SimulationConfig : public BasicSimulationConfig {
 	explicit SimulationConfig(const TestConfig& testConfig);
 	ISimulator::ExtraDatabaseMode extraDatabaseMode;
 	int extraDatabaseCount;
 	bool generateFearless;
 
-	DatabaseConfiguration db;
-
 	void set_config(std::string config);
 
-	// Simulation layout
-	int datacenters;
-	int replication_type;
-	int machine_count; // Total, not per DC.
-	int processes_per_machine;
 	int coordinators;
 
 private:
@@ -2080,7 +2127,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+	if (!testConfig.singleRegion &&
+	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
 	setMachineCount(testConfig);
@@ -2113,6 +2161,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	*tenantMode = simconfig.db.tenantMode;
+
+	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
+		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
+	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
@@ -2388,12 +2440,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		// TODO: caching disabled for this merge
 		int storageCacheMachines = dc == 0 ? 1 : 0;
 		int blobWorkerMachines = 0;
+		int simHTTPMachines = 0;
 		if (testConfig.blobGranulesEnabled) {
 			int blobWorkerProcesses = 1 + deterministicRandom()->randomInt(0, NUM_EXTRA_BW_MACHINES + 1);
 			blobWorkerMachines = std::max(1, blobWorkerProcesses / processesPerMachine);
 		}
+		if (testConfig.simHTTPServerEnabled) {
+			simHTTPMachines = deterministicRandom()->randomInt(1, 4);
+			fmt::print("sim http machines = {0}\n", simHTTPMachines);
+		}
 
-		int totalMachines = machines + storageCacheMachines + blobWorkerMachines;
+		int totalMachines = machines + storageCacheMachines + blobWorkerMachines + simHTTPMachines;
 		int useSeedForMachine = deterministicRandom()->randomInt(0, totalMachines);
 		Standalone<StringRef> zoneId;
 		Standalone<StringRef> newZoneId;
@@ -2424,9 +2481,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				}
 			}
 
-			// FIXME: hack to add machines specifically to test storage cache and blob workers
-			// TODO: caching disabled for this merge
+			// FIXME: hack to add machines specifically to test storage cache and blob workers and http server
 			// `machines` here is the normal (non-temporary) machines that totalMachines comprises of
+			int processCount = processesPerMachine;
+			ProcessMode processMode = requiresExtraDBMachines ? BackupAgentOnly : FDBDAndBackupAgent;
 			if (machine >= machines) {
 				if (storageCacheMachines > 0 && dc == 0) {
 					processClass = ProcessClass(ProcessClass::StorageCacheClass, ProcessClass::CommandLineSource);
@@ -2434,12 +2492,17 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 				} else if (blobWorkerMachines > 0) { // add blob workers to every DC
 					processClass = ProcessClass(ProcessClass::BlobWorkerClass, ProcessClass::CommandLineSource);
 					blobWorkerMachines--;
+				} else if (simHTTPMachines > 0) {
+					processClass = ProcessClass(ProcessClass::SimHTTPServerClass, ProcessClass::CommandLineSource);
+					processCount = 1;
+					processMode = SimHTTPServer;
+					simHTTPMachines--;
 				}
 			}
 
 			std::vector<IPAddress> ips;
 			ips.reserve(processesPerMachine);
-			for (int i = 0; i < processesPerMachine; i++) {
+			for (int i = 0; i < processCount; i++) {
 				ips.push_back(
 				    makeIPAddressForSim(useIPv6, { 2, dc, deterministicRandom()->randomInt(1, i + 2), machine }));
 			}
@@ -2461,7 +2524,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 			                     baseFolder,
 			                     false,
 			                     machine == useSeedForMachine,
-			                     requiresExtraDBMachines ? AgentOnly : AgentAddition,
+			                     processMode,
 			                     sslOnly,
 			                     whitelistBinPaths,
 			                     protocolVersion,
@@ -2483,23 +2546,23 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 
 					LocalityData localities(Optional<Standalone<StringRef>>(), newZoneId, newMachineId, dcUID);
 					localities.set("data_hall"_sr, dcUID);
-					systemActors->push_back(
-					    reportErrors(simulatedMachine(ClusterConnectionString(extraDatabase),
-					                                  conn,
-					                                  extraIps,
-					                                  sslEnabled,
-					                                  localities,
-					                                  processClass,
-					                                  baseFolder,
-					                                  false,
-					                                  machine == useSeedForMachine,
-					                                  testConfig.extraDatabaseBackupAgents ? AgentAddition : AgentNone,
-					                                  sslOnly,
-					                                  whitelistBinPaths,
-					                                  protocolVersion,
-					                                  configDBType,
-					                                  true),
-					                 "SimulatedMachine"));
+					systemActors->push_back(reportErrors(
+					    simulatedMachine(ClusterConnectionString(extraDatabase),
+					                     conn,
+					                     extraIps,
+					                     sslEnabled,
+					                     localities,
+					                     processClass,
+					                     baseFolder,
+					                     false,
+					                     machine == useSeedForMachine,
+					                     testConfig.extraDatabaseBackupAgents ? FDBDAndBackupAgent : FDBDOnly,
+					                     sslOnly,
+					                     whitelistBinPaths,
+					                     protocolVersion,
+					                     configDBType,
+					                     true),
+					    "SimulatedMachine"));
 					++cluster;
 				}
 			}
@@ -2541,7 +2604,7 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 		                                  baseFolder,
 		                                  false,
 		                                  i == useSeedForMachine,
-		                                  AgentNone,
+		                                  FDBDOnly,
 		                                  sslOnly,
 		                                  whitelistBinPaths,
 		                                  protocolVersion,
@@ -2782,12 +2845,11 @@ ACTOR void setupAndRun(std::string dataFolder,
 	ASSERT(false);
 }
 
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
+BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {
 	TestConfig config(testConfig);
 	if (!rocksDBEnabled) {
 		config.storageEngineExcludeTypes.push_back(4);
 		config.storageEngineExcludeTypes.push_back(5);
 	}
-	SimulationConfig simConf(config);
-	return simConf.db;
+	return SimulationConfig(config);
 }

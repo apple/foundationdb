@@ -138,24 +138,31 @@ This command controls a native data consistency scan role that is automatically 
 
 The syntax is
 
-``consistencyscan [ off | on [maxRate <RATE>] [targetInterval <INTERVAL>] [restart <RESTART>] ]``
+``consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval <SECONDS>]``
 
-* ``off`` will disable the consistency scan
+* ``on`` enables the scan.
 
-* ``on`` will enable the scan and can be accompanied by additional options shown above
+* ``off`` disables the scan but keeps the current cycle's progress so it will resume later if enabled again.
 
-  * ``RATE`` - sets the maximum read speed of the scan in bytes/s.
+* ``restart`` will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when it is re-enabled.
 
-  * ``INTERVAL`` - sets the target completion time, in seconds, for each full pass over all data in the cluster.  Scan speed will target this interval with a hard limit of RATE.
+* ``stats`` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to expose the stats which are also in status json.
 
-  * ``RESTART`` - a 1 or 0 and controls whether the process should restart from the beginning of userspace on startup or not.  This should normally be set to 0 which will resume progress from the last time the scan was running.
+* ``clearstats`` will clear all of the stats for the consistency scan but otherwise leave the configuration as is. This can be used to clear errors or reset stat counts, for example.
 
-The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan_info``.
+* ``maxRate <BYTES_PER_SECOND>`` sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.
+
+* ``targetInterval <SECONDS>`` sets the target interval for the scan to SECONDS.  The scan will adjust speed to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND.
+
+The consistency scan role publishes its configuration and metrics in Status JSON under the path ``.cluster.consistency_scan``.
+
+For more details, see :ref:`consistency-scan`.
 
 consistencycheck
 ----------------
 
-Note: This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command to control FDB's internal consistency scan role instead.
+.. note::
+   This command exists for backward compatibility, it is suggested to use the ``consistencyscan`` command above to control FDB's internal consistency scan role instead.
 
 This command controls a key which controls behavior of any externally configured consistency check roles.  You must be running an ``fdbserver`` process with the ``consistencycheck`` role to perform consistency checking.
 

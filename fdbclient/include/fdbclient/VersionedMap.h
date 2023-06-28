@@ -51,14 +51,14 @@ struct PTree : public ReferenceCounted<PTree<T>>, FastAllocated<PTree<T>>, NonCo
 	bool replacedPointer;
 	T data;
 
-	Reference<PTree> child(bool which, Version at) const {
+	const Reference<PTree>& child(bool which, Version at) const {
 		if (updated && lastUpdateVersion <= at && which == replacedPointer)
 			return pointer[2];
 		else
 			return pointer[which];
 	}
-	Reference<PTree> left(Version at) const { return child(false, at); }
-	Reference<PTree> right(Version at) const { return child(true, at); }
+	const Reference<PTree>& left(Version at) const { return child(false, at); }
+	const Reference<PTree>& right(Version at) const { return child(true, at); }
 
 	PTree(const T& data, Version ver) : lastUpdateVersion(ver), updated(false), data(data) {
 		priority = deterministicRandom()->randomUInt32();
@@ -533,17 +533,15 @@ void split(Reference<PTree<T>> p, const X& x, Reference<PTree<T>>& left, Referen
 }
 
 template <class T>
-void rotate(Reference<PTree<T>>& p, Version at, bool right) {
-	auto r = p->child(!right, at);
-
-	auto n1 = r->child(!right, at);
-	auto n2 = r->child(right, at);
-	auto n3 = p->child(right, at);
-
-	auto newC = update(p, !right, n2, at);
-	newC = update(newC, right, n3, at);
-	p = update(r, !right, n1, at);
-	p = update(p, right, newC, at);
+void rotate(Reference<PTree<T>>& n, Version at, bool right) {
+	auto l = n->child(!right, at);
+	n = update(l, right, update(n, !right, l->child(right, at), at), at);
+	// Diagram for right = true
+	//   n      l
+	//  /        \
+	// l    ->    n
+	//  \        /
+	//   x      x
 }
 
 template <class T>

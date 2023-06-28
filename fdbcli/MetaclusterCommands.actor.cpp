@@ -540,8 +540,11 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 			metaclusterName = registrationEntry.get().metaclusterName.toString();
 
 			ASSERT(ClusterType::METACLUSTER_MANAGEMENT == clusterType);
-			std::map<ClusterName, metacluster::DataClusterMetadata> clusters =
+			state std::map<ClusterName, metacluster::DataClusterMetadata> clusters =
 			    wait(metacluster::listClustersTransaction(tr, ""_sr, "\xff"_sr, CLIENT_KNOBS->MAX_DATA_CLUSTERS));
+			Optional<int64_t> optionalIdPrefix = wait(TenantMetadata::tenantIdPrefix().get(tr));
+			ASSERT(optionalIdPrefix.present());
+			int64_t tenantIdPrefix = optionalIdPrefix.get();
 			auto capacityNumbers = metacluster::util::metaclusterCapacity(clusters);
 			if (useJson) {
 				json_spirit::mObject obj;
@@ -553,6 +556,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 				metaclusterObj[msgDataClustersKey] = static_cast<int>(clusters.size());
 				metaclusterObj[msgCapacityKey] = capacityNumbers.first.toJson();
 				metaclusterObj[msgAllocatedKey] = capacityNumbers.second.toJson();
+				metaclusterObj[msgTenantIdPrefixKey] = tenantIdPrefix;
 
 				obj[msgMetaclusterKey] = metaclusterObj;
 				fmt::print("{}\n",
@@ -561,6 +565,7 @@ ACTOR Future<bool> metaclusterStatusCommand(Reference<IDatabase> db, std::vector
 				fmt::print("  number of data clusters: {}\n", clusters.size());
 				fmt::print("  tenant group capacity: {}\n", capacityNumbers.first.numTenantGroups);
 				fmt::print("  allocated tenant groups: {}\n", capacityNumbers.second.numTenantGroups);
+				fmt::print("  tenant id prefix: {}\n", tenantIdPrefix);
 			}
 			return true;
 		} catch (Error& e) {

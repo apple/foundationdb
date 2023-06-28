@@ -31,6 +31,7 @@
 #include <map>
 #include <set>
 #include <type_traits>
+#include "flow/BooleanParam.h"
 #include "flow/IRandom.h"
 #include "flow/Error.h"
 #include "flow/ITrace.h"
@@ -38,6 +39,8 @@
 
 #define TRACE_DEFAULT_ROLL_SIZE (10 << 20)
 #define TRACE_DEFAULT_MAX_LOGS_SIZE (10 * TRACE_DEFAULT_ROLL_SIZE)
+
+FDB_BOOLEAN_PARAM(InitializeTraceMetrics);
 
 inline int fastrand() {
 	static int g_seed = 0;
@@ -532,8 +535,8 @@ void openTraceFile(const Optional<NetworkAddress>& na,
                    std::string baseOfBase = "trace",
                    std::string logGroup = "default",
                    std::string identifier = "",
-                   std::string tracePartialFileSuffix = "");
-void initTraceEventMetrics();
+                   std::string tracePartialFileSuffix = "",
+                   InitializeTraceMetrics initializeTraceMetrics = InitializeTraceMetrics::False);
 void closeTraceFile();
 bool traceFileIsOpen();
 void flushTraceFileVoid();

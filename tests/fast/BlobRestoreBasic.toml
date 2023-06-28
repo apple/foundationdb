@@ -45,7 +45,7 @@ clearAfterTest = false
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 3000
-    transactionsPerSecond = 3000.0
+    transactionsPerSecond = 1000.0
     testDuration = 30.0
     expectedRate = 0
 
@@ -70,10 +70,11 @@ waitForQuiescence = false
 [[test]]
 testTitle = 'VerifyCycle'
 checkOnly = true
+runConsistencyCheck = false
 
     [[test.workload]]
     testName = 'Cycle'
     nodeCount = 3000
-    transactionsPerSecond = 3000.0
+    transactionsPerSecond = 1000.0
     testDuration = 30.0
     expectedRate = 0

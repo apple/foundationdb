@@ -11,7 +11,7 @@ import sys
 from threading import Thread, Event
 import traceback
 import time
-from binary_download import FdbBinaryDownloader
+from binary_download import FdbBinaryDownloader, is_local_build_version
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 from local_cluster import LocalCluster
 from test_util import random_alphanum_string
@@ -57,10 +57,12 @@ class UpgradeTest:
         assert self.tester_bin.exists(), "{} does not exist".format(self.tester_bin)
         self.upgrade_path = args.upgrade_path
         self.used_versions = set(self.upgrade_path).difference(set(CLUSTER_ACTIONS))
+        self.downloader = FdbBinaryDownloader(args.build_dir)
+        if not self.necessary_binaries_available():
+            return
+        self.download_old_binaries()
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         self.tmp_dir.mkdir(parents=True)
-        self.downloader = FdbBinaryDownloader(args.build_dir)
-        self.download_old_binaries()
         self.create_external_lib_dir()
         self.testing_future_version = FUTURE_VERSION in self.upgrade_path
         self.future_version_client_lib_path = (
@@ -99,6 +101,13 @@ class UpgradeTest:
         self.output_pipe = None
         self.ctrl_pipe = None
         self.determine_api_version()
+
+    # Check if necessary binaries are available for ndownload
+    def necessary_binaries_available(self):
+        return (
+            all(is_local_build_version(version) for version in self.used_versions)
+            or self.downloader.old_binaries_available
+        )
 
     # Download all old binaries required for testing the specified upgrade path
     def download_old_binaries(self):
@@ -477,7 +486,12 @@ if __name__ == "__main__":
         RUN_WITH_GDB = True
 
     errcode = 1
-    with UpgradeTest(args) as test:
+    test = UpgradeTest(args)
+    if not test.necessary_binaries_available():
+        print("Skipping the test because necessary binaries are not available")
+        sys.exit(0)
+
+    with test:
         print("log-dir: {}".format(test.log))
         print("etc-dir: {}".format(test.etc))
         print("data-dir: {}".format(test.data))

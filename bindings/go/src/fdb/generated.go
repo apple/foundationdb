@@ -213,6 +213,11 @@ func (o NetworkOptions) SetTLSPassword(param string) error {
 	return o.setOpt(54, []byte(param))
 }
 
+// Prevent client from connecting to a non-TLS endpoint by throwing network connection failed error.
+func (o NetworkOptions) SetTLSDisablePlaintextConnection() error {
+	return o.setOpt(55, nil)
+}
+
 // Disables the multi-version client API and instead uses the local client directly. Must be set before setting up the network.
 func (o NetworkOptions) SetDisableMultiVersionClientApi() error {
 	return o.setOpt(60, nil)

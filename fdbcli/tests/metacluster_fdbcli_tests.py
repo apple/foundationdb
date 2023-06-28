@@ -117,6 +117,8 @@ def metacluster_register(
         raise Exception(err)
 
 
+# Returns the tenant_id_prefix since it is randomly generated
+# and we want to validate it in the status test
 @enable_logging()
 def setup_metacluster(
     logger, management_cluster, data_clusters, max_tenant_groups_per_cluster
@@ -140,6 +142,7 @@ def setup_metacluster(
         )
         cluster_names_to_files[name] = cf
     assert len(cluster_names_to_files) == len(data_clusters) + 1
+    return tenant_id_prefix
 
 
 def metacluster_status(cluster_file):
@@ -169,12 +172,15 @@ def create_tenant(
     tenant,
     tenant_group=None,
     assigned_cluster=None,
+    ignore_capacity_limit=False,
 ):
     command = "tenant create {}".format(tenant)
     if tenant_group:
         command = command + " tenant_group={}".format(tenant_group)
     if assigned_cluster:
         command = command + " assigned_cluster={}".format(assigned_cluster)
+    if ignore_capacity_limit:
+        command = command + " ignore_capacity_limit"
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
 
@@ -201,12 +207,15 @@ def configure_tenant(
     tenant,
     tenant_group=None,
     assigned_cluster=None,
+    tenant_state=None,
 ):
     command = "tenant configure {}".format(tenant)
     if tenant_group:
         command = command + " tenant_group={}".format(tenant_group)
     if assigned_cluster:
         command = command + " assigned_cluster={}".format(assigned_cluster)
+    if tenant_state:
+        command = command + " tenant_state={}".format(tenant_state)
 
     _, output, err = run_fdbcli_command(management_cluster_file, command)
     return output, err
@@ -422,7 +431,7 @@ def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
     num_clusters = len(cluster_files)
     logger.debug("Setting up a metacluster")
     auto_assignment = ["enabled"] * (num_clusters - 1)
-    setup_metacluster(
+    tenant_id_prefix = setup_metacluster(
         [cluster_files[0], management_cluster_name],
         list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
         max_tenant_groups_per_cluster=max_tenant_groups_per_cluster,
@@ -432,9 +441,12 @@ def clusters_status_test(logger, cluster_files, max_tenant_groups_per_cluster):
 number of data clusters: {}
   tenant group capacity: {}
   allocated tenant groups: 0
+  tenant id prefix: {}
 """
     expected = expected.format(
-        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+        num_clusters - 1,
+        (num_clusters - 1) * max_tenant_groups_per_cluster,
+        tenant_id_prefix,
     ).strip()
     output = metacluster_status(cluster_files[0])
     assert expected == output
@@ -447,6 +459,86 @@ number of data clusters: {}
             name, management_cluster_name
         )
         assert expected == output
+
+
+@enable_logging()
+def create_tenants_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+    logger.debug("Verified")
+    num_clusters = len(cluster_files)
+    logger.debug("Setting up a metacluster")
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster=1,
+    )
+
+    # On data_cluster[0]
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group=None,
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant1",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant11",
+        tenant_group="group1",
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+    )
+    assert (
+        err
+        == "ERROR: Cluster does not have capacity to perform the specified operation (2141)"
+    )
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant12",
+        tenant_group=None,
+        assigned_cluster=data_cluster_names[0],
+        ignore_capacity_limit=True,
+    )
+    assert len(err) == 0
+    output, err = create_tenant(
+        cluster_files[0],
+        "tenant13",
+        tenant_group="group1",
+        assigned_cluster=None,
+        ignore_capacity_limit=True,
+    )
+    assert (
+        err
+        == "ERROR: `ignore_capacity_limit' can only be used if `assigned_cluster' is set."
+    )
+
+    all_tenants = get_tenant_names(cluster_files[0])
+    assert all_tenants == ["tenant1", "tenant11", "tenant12"]
+
+    clear_all_tenants(cluster_files[0])
+    cleanup_after_test(cluster_files[0], data_cluster_names)
 
 
 @enable_logging()
@@ -575,13 +667,62 @@ def configure_tenants_test_disableClusterAssignment(logger, cluster_files):
 
 
 @enable_logging()
+def configure_tenants_test_disableConfigureTenantState(logger, cluster_files):
+    tenants = [{"name": "tenant1"}, {"name": "tenant2"}]
+    logger.debug("Tenants to create: {}".format(tenants))
+    setup_tenants(cluster_files[0], tenants)
+    output, err = list_tenants(cluster_files[0])
+    assert "1. tenant1\n  2. tenant2" == output
+    names = get_tenant_names(cluster_files[0])
+    assert ["tenant1", "tenant2"] == names
+    # Once we reach here, the tenants have been created successfully
+    logger.debug("Tenants created: {}".format(tenants))
+    disallowed_states = [
+        "registering",
+        "removing",
+        '"updating configuration"',
+        "renaming",
+        "error",
+    ]
+    for tenant_state in disallowed_states:
+        out, err = configure_tenant(
+            cluster_files[0],
+            "tenant1",
+            tenant_state=tenant_state,
+        )
+        expected_err_msg = str()
+        if tenant_state != '"updating configuration"':
+            expected_err_msg = "ERROR: only support setting tenant state back to `ready', but `{}' given.".format(
+                tenant_state
+            )
+        else:
+            expected_err_msg = "ERROR: only support setting tenant state back to `ready', but `updating configuration' given."
+        assert err == expected_err_msg
+
+    # Cannot configure tenant state together with other configurations
+    out, err = configure_tenant(
+        cluster_files[0], "tenant2", tenant_state="ready", tenant_group="group1"
+    )
+    assert err == "ERROR: Tenant configuration is invalid (2140)"
+    out, err = configure_tenant(cluster_files[0], "tenant2", tenant_state="ready")
+    assert len(err) == 0
+    clear_all_tenants(cluster_files[0])
+    logger.debug("Tenants cleared")
+
+
+@enable_logging()
 def test_main(logger):
     logger.debug("Tests start")
     register_and_configure_data_clusters_test(cluster_files)
 
+    create_tenants_test(cluster_files)
+
     clusters_status_test(cluster_files, max_tenant_groups_per_cluster=5)
 
     configure_tenants_test_disableClusterAssignment(cluster_files)
+
+    configure_tenants_test_disableConfigureTenantState(cluster_files)
+
     list_tenants_test(cluster_files)
 
     delete_tenants_test(cluster_files)

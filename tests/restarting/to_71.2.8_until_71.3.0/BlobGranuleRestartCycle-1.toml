@@ -1,0 +1,74 @@
+# Blob Granules are only upgrade-able as of snowflake/release-71.2.3 and tests were only added as of 71.2.8
+
+[configuration]
+testClass = "BlobGranuleRestart"
+blobGranulesEnabled = true
+allowDefaultTenant = false
+injectTargetedSSRestart = true
+injectSSDelay = true
+storageEngineExcludeTypes = [4, 5]
+# encryption and tenants are not compatible between 71.2 and 71.3
+encryptModes = ['disabled']
+tenantModes=['disabled']
+simHTTPServerEnabled=false
+
+[[ knobs ]]
+# url was updated to correct default location under simfdb after 71.2, use old location
+bg_url = "file://fdbblob/"
+# logical size and change log features are new in 71.3
+enable_blob_granule_file_logical_size=false
+bg_use_blob_range_change_log = false
+# compression wasn't enabled anywhere in 71.2 but also GZIP support was removed in 71.3
+enable_blob_granule_compression=false
+blob_granule_compression_filter="NONE"
+
+[[test]]
+testTitle = 'BlobGranuleRestartCycle'
+clearAfterTest=false
+
+    [[test.workload]]
+    testName = 'Cycle'
+    transactionsPerSecond = 500.0
+    nodeCount = 2500
+    testDuration = 30.0
+    expectedRate = 0
+
+    [[test.workload]]
+    testName = 'BlobGranuleVerifier'
+    testDuration = 30.0
+    # don't delete state after test
+    clearAndMergeCheck = false
+    doForcePurge = false
+    initAtEnd = false
+
+    [[test.workload]]
+    testName = 'RandomClogging'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Rollback'
+    meanDelay = 30.0
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'Attrition'
+    machinesToKill = 10
+    machinesToLeave = 3
+    reboot = true
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName = 'BlobFailureInjection'
+    testDuration = 30.0
+
+    [[test.workload]]
+    testName='SaveAndKill'
+    restartInfoLocation='simfdb/restartInfo.ini'
+    testDuration=30.0

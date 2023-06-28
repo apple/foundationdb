@@ -30,9 +30,45 @@
 struct BlobGranuleBackupConfig : public KeyBackedClass {
 	BlobGranuleBackupConfig(KeyRef prefix = SystemKey("\xff\x02/bgbackup/"_sr)) : KeyBackedClass(prefix) {}
 
-	KeyBackedProperty<bool> enabled() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<bool> enabled() { return { subspace.pack(__FUNCTION__sr), trigger, TupleCodec<bool>() }; }
 	KeyBackedProperty<std::string> manifestUrl() { return subspace.pack(__FUNCTION__sr); }
 	KeyBackedProperty<std::string> mutationLogsUrl() { return subspace.pack(__FUNCTION__sr); }
+
+	KeyBackedProperty<int64_t> lastFlushTs() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> lastFlushVersion() { return subspace.pack(__FUNCTION__sr); }
+};
+
+// Defines blob restore state
+enum BlobRestorePhase {
+	UNINIT = 0,
+	INIT = 1,
+	STARTING_MIGRATOR = 2,
+	LOADING_MANIFEST = 3,
+	LOADED_MANIFEST = 4,
+	COPYING_DATA = 5,
+	APPLYING_MLOGS = 6,
+	DONE = 7,
+	ERROR = 8,
+	MAX = 9
+};
+
+struct BlobGranuleRestoreConfig : public KeyBackedClass {
+	BlobGranuleRestoreConfig(KeyRef prefix = SystemKey("\xff\x02/bgrestore/"_sr)) : KeyBackedClass(prefix) {}
+
+	KeyBackedProperty<UID> uid() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::string> manifestUrl() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::string> mutationLogsUrl() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<Version> targetVersion() { return subspace.pack(__FUNCTION__sr); }
+
+	KeyBackedProperty<BlobRestorePhase> phase() {
+		return { subspace.pack(__FUNCTION__sr), trigger, TupleCodec<BlobRestorePhase>() };
+	}
+	KeyBackedProperty<int> progress() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedProperty<std::string> error() { return subspace.pack(__FUNCTION__sr); }
+	KeyBackedMap<BlobRestorePhase, int64_t> phaseStartTs() { return subspace.pack(__FUNCTION__sr); };
+	KeyBackedProperty<UID> lock() { return subspace.pack(__FUNCTION__sr); }
+	// Begin version to apply mutation logs
+	KeyBackedProperty<Version> beginVersion() { return subspace.pack(__FUNCTION__sr); }
 };
 
 #endif

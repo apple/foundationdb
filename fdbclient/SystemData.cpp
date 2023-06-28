@@ -909,8 +909,6 @@ const KeyRef perpetualStorageWigglePrefix("\xff/storageWiggle/"_sr);
 
 const KeyRef triggerDDTeamInfoPrintKey("\xff/triggerDDTeamInfoPrint"_sr);
 
-const KeyRef consistencyScanInfoKey = "\xff/consistencyScanInfo"_sr;
-
 const KeyRef encryptionAtRestModeConfKey("\xff/conf/encryption_at_rest_mode"_sr);
 const KeyRef tenantModeConfKey("\xff/conf/tenant_mode"_sr);
 
@@ -1363,6 +1361,79 @@ std::pair<Standalone<VectorRef<MutationRef>>, Version> decodeChangeFeedDurableVa
 	return std::make_pair(mutations, knownCommittedVersion);
 }
 
+const KeyRangeRef changeFeedCacheKeys("\xff\xff/cc/"_sr, "\xff\xff/cc0"_sr);
+const KeyRef changeFeedCachePrefix = changeFeedCacheKeys.begin;
+
+const Value changeFeedCacheKey(Key const& prefix, Key const& feed, KeyRange const& range, Version version) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(prefix);
+	wr.serializeBytes(changeFeedCachePrefix);
+	wr << feed;
+	wr << range;
+	wr << bigEndian64(version);
+	return wr.toValue();
+}
+std::tuple<Key, KeyRange, Version> decodeChangeFeedCacheKey(KeyRef const& prefix, ValueRef const& key) {
+	Key feed;
+	KeyRange range;
+	Version version;
+	BinaryReader reader(key.removePrefix(prefix).removePrefix(changeFeedCachePrefix),
+	                    AssumeVersion(ProtocolVersion::withChangeFeed()));
+	reader >> feed;
+	reader >> range;
+	reader >> version;
+	return std::make_tuple(feed, range, bigEndian64(version));
+}
+
+// The versions of these mutations must be less than or equal to the version in the changeFeedCacheKey
+const Value changeFeedCacheValue(Standalone<VectorRef<MutationsAndVersionRef>> const& mutations) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << mutations;
+	return wr.toValue();
+}
+Standalone<VectorRef<MutationsAndVersionRef>> decodeChangeFeedCacheValue(ValueRef const& value) {
+	Standalone<VectorRef<MutationsAndVersionRef>> mutations;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> mutations;
+	return mutations;
+}
+
+const KeyRangeRef changeFeedCacheFeedKeys("\xff\xff/ccd/"_sr, "\xff\xff/ccd0"_sr);
+const KeyRef changeFeedCacheFeedPrefix = changeFeedCacheFeedKeys.begin;
+
+const Value changeFeedCacheFeedKey(Key const& prefix, Key const& feed, KeyRange const& range) {
+	BinaryWriter wr(AssumeVersion(ProtocolVersion::withChangeFeed()));
+	wr.serializeBytes(changeFeedCacheFeedPrefix);
+	wr << prefix;
+	wr << feed;
+	wr << range;
+	return wr.toValue();
+}
+std::tuple<Key, Key, KeyRange> decodeChangeFeedCacheFeedKey(ValueRef const& key) {
+	Key prefix;
+	Key feed;
+	KeyRange range;
+	BinaryReader reader(key.removePrefix(changeFeedCacheFeedPrefix), AssumeVersion(ProtocolVersion::withChangeFeed()));
+	reader >> prefix;
+	reader >> feed;
+	reader >> range;
+	return std::make_tuple(prefix, feed, range);
+}
+const Value changeFeedCacheFeedValue(Version const& version, Version const& popped) {
+	BinaryWriter wr(IncludeVersion(ProtocolVersion::withChangeFeed()));
+	wr << version;
+	wr << popped;
+	return wr.toValue();
+}
+std::pair<Version, Version> decodeChangeFeedCacheFeedValue(ValueRef const& value) {
+	Version version;
+	Version popped;
+	BinaryReader reader(value, IncludeVersion());
+	reader >> version;
+	reader >> popped;
+	return std::make_pair(version, popped);
+}
+
 const KeyRef configTransactionDescriptionKey = "\xff\xff/description"_sr;
 const KeyRange globalConfigKnobKeys = singleKeyRange("\xff\xff/globalKnobs"_sr);
 const KeyRangeRef configKnobKeys("\xff\xff/knobs/"_sr, "\xff\xff/knobs0"_sr);
@@ -1773,67 +1844,7 @@ UID decodeBlobWorkerAffinityValue(ValueRef const& value) {
 	return id;
 }
 
-const KeyRangeRef blobRestoreCommandKeys("\xff\x02/blobRestoreCommand/"_sr, "\xff\x02/blobRestoreCommand0"_sr);
-
-const Value blobRestoreCommandKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreCommandKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreCommandKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreCommandKeys.begin),
-	                    AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreCommandValueFor(BlobRestoreState restoreState) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << restoreState;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreState> decodeBlobRestoreState(ValueRef const& value) {
-	Standalone<BlobRestoreState> restoreState;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> restoreState;
-	return restoreState;
-}
-
-const KeyRangeRef blobRestoreArgKeys("\xff\x02/blobRestoreArgs/"_sr, "\xff\x02/blobRestoreArgs0"_sr);
-
-const Value blobRestoreArgKeyFor(const KeyRangeRef range) {
-	BinaryWriter wr(AssumeVersion(ProtocolVersion::withBlobGranule()));
-	wr.serializeBytes(blobRestoreArgKeys.begin);
-	wr << range;
-	return wr.toValue();
-}
-
-const KeyRange decodeBlobRestoreArgKeyFor(const KeyRef key) {
-	KeyRange range;
-	BinaryReader reader(key.removePrefix(blobRestoreArgKeys.begin), AssumeVersion(ProtocolVersion::withBlobGranule()));
-	reader >> range;
-	return range;
-}
-
-const Value blobRestoreArgValueFor(BlobRestoreArg args) {
-	BinaryWriter wr(IncludeVersion(ProtocolVersion::withBlobGranule()));
-	wr << args;
-	return wr.toValue();
-}
-
-Standalone<BlobRestoreArg> decodeBlobRestoreArg(ValueRef const& value) {
-	Standalone<BlobRestoreArg> args;
-	BinaryReader reader(value, IncludeVersion());
-	reader >> args;
-	return args;
-}
-
 const Key blobManifestVersionKey = "\xff\x02/blobManifestVersion"_sr;
-const Key blobGranulesLastFlushKey = "\xff\x02/blobGranulesLastFlushTs"_sr;
 
 const KeyRangeRef idempotencyIdKeys("\xff\x02/idmp/"_sr, "\xff\x02/idmp0"_sr);
 const KeyRef idempotencyIdsExpiredVersion("\xff\x02/idmpExpiredVersion"_sr);

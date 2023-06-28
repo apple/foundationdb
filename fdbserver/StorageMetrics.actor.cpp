@@ -22,6 +22,22 @@
 #include "fdbserver/StorageMetrics.actor.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
+CommonStorageCounters::CommonStorageCounters(const std::string& name,
+                                             const std::string& id,
+                                             const StorageServerMetrics* metrics)
+  : cc(name, id), finishedQueries("FinishedQueries", cc), bytesQueried("BytesQueried", cc),
+    bytesFetched("BytesFetched", cc), bytesInput("BytesInput", cc), mutationBytes("MutationBytes", cc),
+    kvFetched("KVFetched", cc), mutations("Mutations", cc), setMutations("SetMutations", cc),
+    clearRangeMutations("ClearRangeMutations", cc) {
+	if (metrics) {
+		specialCounter(cc, "BytesStored", [metrics]() { return metrics->byteSample.getEstimate(allKeys); });
+		specialCounter(cc, "BytesReadSampleCount", [metrics]() { return metrics->bytesReadSample.queue.size(); });
+		specialCounter(cc, "OpsReadSampleCount", [metrics]() { return metrics->opsReadSample.queue.size(); });
+		specialCounter(cc, "BytesWriteSampleCount", [metrics]() { return metrics->bytesWriteSample.queue.size(); });
+		specialCounter(cc, "IopsReadSampleCount", [metrics]() { return metrics->iopsSample.queue.size(); });
+	}
+}
+
 // TODO: update the cost as bytesReadPerKSecond + opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY. The source of
 // this model is Redwood will have a constant cost of seek of each read ops then read the actual data.
 // As by 71.2.8, bytesReadPerKSecond should be larger than opsReadPerKSecond * SERVER_KNOBS->EMPTY_READ_PENALTY because
@@ -87,8 +103,11 @@ StorageMetrics StorageServerMetrics::getMetrics(KeyRangeRef const& keys) const {
 	result.bytesWrittenPerKSecond =
 	    bytesWriteSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	result.iosPerKSecond = iopsSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+
 	result.bytesReadPerKSecond =
 	    bytesReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+	result.opsReadPerKSecond =
+	    opsReadSample.getEstimate(keys) * SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 	return result;
 }
 
@@ -99,7 +118,8 @@ void StorageServerMetrics::notify(const Key& key, StorageMetrics& metrics) {
 	if (g_network->isSimulated()) {
 		CODE_PROBE(metrics.bytesWrittenPerKSecond != 0, "ShardNotifyMetrics bytes");
 		CODE_PROBE(metrics.iosPerKSecond != 0, "ShardNotifyMetrics ios");
-		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead", probe::decoration::rare);
+		CODE_PROBE(metrics.bytesReadPerKSecond != 0, "ShardNotifyMetrics bytesRead");
+		CODE_PROBE(metrics.opsReadPerKSecond != 0, "ShardNotifyMetrics opsRead");
 	}
 
 	double expire = now() + SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL;
@@ -148,7 +168,8 @@ void StorageServerMetrics::notifyBytesReadPerKSecond(const Key& key, int64_t in)
 		notifyMetrics.opsReadPerKSecond = opsReadPerKSecond;
 		auto& v = waitMetricsMap[key];
 		for (int i = 0; i < v.size(); i++) {
-			CODE_PROBE(true, "ShardNotifyMetrics");
+			CODE_PROBE(bytesReadPerKSecond > 0, "ShardNotifyMetrics bytesRead");
+			CODE_PROBE(opsReadPerKSecond > 0, "ShardNotifyMetrics opsRead");
 			v[i].send(notifyMetrics);
 		}
 	}
@@ -163,7 +184,9 @@ void StorageServerMetrics::notifyBytes(
 
 	StorageMetrics notifyMetrics;
 	notifyMetrics.bytes = bytes;
-	for (int i = 0; i < shard.value().size(); i++) {
+	auto size = shard->cvalue().size();
+	for (int i = 0; i < size; i++) {
+		// fmt::print("NotifyBytes {} {}\n", shard->value().size(), shard->range().toString());
 		CODE_PROBE(true, "notifyBytes");
 		shard.value()[i].send(notifyMetrics);
 	}
@@ -208,6 +231,11 @@ void StorageServerMetrics::poll() {
 		StorageMetrics m;
 		m.bytesReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
 		bytesReadSample.poll(waitMetricsMap, m);
+	}
+	{
+		StorageMetrics m;
+		m.opsReadPerKSecond = SERVER_KNOBS->STORAGE_METRICS_AVERAGE_INTERVAL_PER_KSECONDS;
+		opsReadSample.poll(waitMetricsMap, m);
 	}
 	// bytesSample doesn't need polling because we never call addExpire() on it
 }

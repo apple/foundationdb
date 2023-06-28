@@ -1585,7 +1585,7 @@ void endRole(const Role& role, UID id, std::string reason, bool ok, Error e) {
 
 ACTOR Future<Void> traceRole(Role role, UID roleId) {
 	loop {
-		wait(delay(SERVER_KNOBS->WORKER_LOGGING_INTERVAL));
+		wait(delay(SERVER_KNOBS->ROLE_REFRESH_LOGGING_INTERVAL));
 		TraceEvent("Role", roleId).detail("Transition", "Refresh").detail("As", role.roleName);
 	}
 }
@@ -1778,6 +1778,20 @@ ACTOR Future<Void> updateClusterId(UID ccClusterId, Reference<AsyncVar<Optional<
 	return Void();
 }
 
+ACTOR Future<Void> deleteStorageFile(KeyValueStoreType storeType,
+                                     std::string filename,
+                                     UID storeID,
+                                     int64_t memoryLimit,
+                                     Reference<AsyncVar<ServerDBInfo>> dbInfo) {
+	state IKeyValueStore* kvs = openKVStore(storeType, filename, storeID, memoryLimit, false, false, false, dbInfo, {});
+	wait(ready(kvs->init()));
+	TraceEvent("KVSRemoved").detail("Reason", "WorkerRemoved");
+	kvs->dispose();
+	CODE_PROBE(true, "Removed stale disk file");
+	TraceEvent("RemoveStorageDisk").detail("Filename", filename).detail("StoreID", storeID);
+	return Void();
+}
+
 ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbInfo,
                                            std::unordered_map<UID, StorageDiskCleaner>* cleaners,
                                            UID storeID,
@@ -1807,12 +1821,7 @@ ACTOR Future<Void> cleanupStaleStorageDisk(Reference<AsyncVar<ServerDBInfo>> dbI
 			if (e.code() == error_code_worker_removed) {
 				// delete the files on disk
 				if (fileExists(cleaner.filename)) {
-					state IKeyValueStore* kvs = openKVStore(
-					    cleaner.storeType, cleaner.filename, storeID, memoryLimit, false, false, false, dbInfo, {});
-					wait(ready(kvs->init()));
-					kvs->dispose();
-					CODE_PROBE(true, "Removed stale disk file");
-					TraceEvent("RemoveStorageDisk").detail("Filename", cleaner.filename).detail("StoreID", storeID);
+					wait(deleteStorageFile(cleaner.storeType, cleaner.filename, storeID, memoryLimit, dbInfo));
 				}
 
 				// remove the cleaner
@@ -2137,7 +2146,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				logData.back().uid = s.storeID;
 				errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, s.storeID, tl));
 			} else if (s.storedComponent == DiskStore::BlobWorker) {
-				if (blobWorkerFuture.isReady()) {
+				if (blobWorkerFuture.isReady() && SERVER_KNOBS->BLOB_WORKER_DISK_ENABLED) {
 					LocalLineage _;
 					getCurrentLineage()->modify(&RoleLineage::role) = ProcessClass::ClusterRole::BlobWorker;
 
@@ -2165,7 +2174,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                                   false,
 					                                   false,
 					                                   dbInfo,
-					                                   EncryptionAtRestMode());
+					                                   Optional<EncryptionAtRestMode>(),
+					                                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 					filesClosed.add(data->onClosed());
 
 					Promise<Void> recovery;
@@ -2176,16 +2186,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					errorForwarders.add(forwardError(errors, Role::BLOB_WORKER, recruited.id(), bw));
 				} else {
 					CODE_PROBE(true, "Multiple blob workers after reboot", probe::decoration::rare);
-					IKeyValueStore* data = openKVStore(s.storeType,
-					                                   s.filename,
-					                                   UID(),
-					                                   memoryLimit,
-					                                   false,
-					                                   false,
-					                                   false,
-					                                   dbInfo,
-					                                   EncryptionAtRestMode());
-					data->dispose();
+					recoveries.push_back(deleteStorageFile(s.storeType, s.filename, s.storeID, memoryLimit, dbInfo));
 				}
 			}
 		}
@@ -2610,6 +2611,7 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					DUMPTOKEN(recruited.getBaseCipherKeysByIds);
 					DUMPTOKEN(recruited.getLatestBaseCipherKeys);
 					DUMPTOKEN(recruited.getLatestBlobMetadata);
+					DUMPTOKEN(recruited.getHealthStatus);
 
 					Future<Void> encryptKeyProxyProcess = encryptKeyProxyServer(recruited, dbInfo, req.encryptMode);
 					errorForwarders.add(forwardError(
@@ -2844,7 +2846,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 						                   false,
 						                   false,
 						                   dbInfo,
-						                   EncryptionAtRestMode());
+						                   req.encryptMode,
+						                   FLOW_KNOBS->BLOB_WORKER_PAGE_CACHE);
 						filesClosed.add(data->onClosed());
 					}
 
@@ -3143,19 +3146,6 @@ static std::set<int> const& normalWorkerErrors() {
 		s.insert(error_code_invalid_cluster_id);
 	}
 	return s;
-}
-
-ACTOR Future<Void> fileNotFoundToNever(Future<Void> f) {
-	try {
-		wait(f);
-		return Void();
-	} catch (Error& e) {
-		if (e.code() == error_code_file_not_found) {
-			TraceEvent(SevWarn, "ClusterCoordinatorFailed").error(e);
-			return Never();
-		}
-		throw;
-	}
 }
 
 ACTOR Future<Void> printTimeout() {
@@ -3831,10 +3821,7 @@ ACTOR Future<Void> fdbd(Reference<IClusterConnectionRecord> connRecord,
 		// Endpoints should be registered first before any process trying to connect to it.
 		// So coordinationServer actor should be the first one executed before any other.
 		if (coordFolder.size()) {
-			// SOMEDAY: remove the fileNotFound wrapper and make DiskQueue construction safe from errors setting up
-			// their files
-			actors.push_back(
-			    fileNotFoundToNever(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface)));
+			actors.push_back(coordinationServer(coordFolder, connRecord, configNode, configBroadcastInterface));
 		}
 
 		state UID processIDUid = wait(createAndLockProcessIdFile(dataFolder));

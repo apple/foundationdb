@@ -24,6 +24,8 @@ def version_from_str(ver_str):
 
 def api_version_from_str(ver_str):
     ver_tuple = version_from_str(ver_str)
+    if ver_tuple[0] > 70:
+        return ver_tuple[0] * 10000 + ver_tuple[1] * 100
     return ver_tuple[0] * 100 + ver_tuple[1] * 10
 
 
@@ -103,10 +105,13 @@ class FdbCShimTests:
         self.api_test_dir = Path(args.api_test_dir).resolve()
         assert self.api_test_dir.exists(), "{} does not exist".format(self.api_test_dir)
         self.downloader = FdbBinaryDownloader(args.build_dir)
-        self.test_prev_versions = not args.disable_prev_version_tests
+        self.test_prev_versions = (
+            not args.disable_prev_version_tests
+            and self.downloader.old_binaries_available
+        )
         if self.test_prev_versions:
             self.downloader.download_old_binaries(PREV_RELEASE_VERSION)
-            self.downloader.download_old_binaries("7.0.0")
+            self.downloader.download_old_binaries("7.0.1")
 
     def build_c_api_tester_args(self, test_env, test_file):
         test_file_path = self.api_test_dir.joinpath(test_file)
@@ -292,7 +297,7 @@ class FdbCShimTests:
 
                 # Test calling a function that does not exist in the loaded library
                 self.run_c_shim_lib_tester(
-                    "7.0.0",
+                    "7.0.1",
                     test_env,
                     call_set_path=True,
                     api_version=700,

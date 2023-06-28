@@ -42,7 +42,9 @@ class CommitQuorum {
 
 	void updateResult() {
 		if (successful >= ctis.size() / 2 + 1 && result.canBeSet()) {
-			result.send(Void());
+			// Calling send could delete this
+			auto local = this->result;
+			local.send(Void());
 		} else if (failed >= ctis.size() / 2 + 1 && result.canBeSet()) {
 			// Rollforwards could cause a version that didn't have quorum to
 			// commit, so send commit_unknown_result instead of commit_failed.

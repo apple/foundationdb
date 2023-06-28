@@ -37,6 +37,7 @@
 #include "fdbrpc/Locality.h"
 #include "flow/IAsyncFile.h"
 #include "flow/TDMetric.actor.h"
+#include "fdbrpc/HTTP.h"
 #include "fdbrpc/FailureMonitor.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/ReplicationPolicy.h"
@@ -206,6 +207,17 @@ public:
 		return roleText;
 	}
 
+	bool hasRole(NetworkAddress const& address, std::string const& role) const {
+		auto addressIt = roleAddresses.find(address);
+		if (addressIt != roleAddresses.end()) {
+			auto rolesIt = addressIt->second.find(role);
+			if (rolesIt != addressIt->second.end()) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	void clearAddress(NetworkAddress const& address) {
 		clearedAddresses[address]++;
 		TraceEvent("ClearAddress").detail("Address", address).detail("Value", clearedAddresses[address]);
@@ -279,6 +291,12 @@ public:
 	virtual void destroyProcess(ProcessInfo* p) = 0;
 	virtual void destroyMachine(Optional<Standalone<StringRef>> const& machineId) = 0;
 
+	virtual void addSimHTTPProcess(Reference<HTTP::SimServerContext> serverContext) = 0;
+	virtual void removeSimHTTPProcess() = 0;
+	virtual Future<Void> registerSimHTTPServer(std::string hostname,
+	                                           std::string service,
+	                                           Reference<HTTP::IRequestHandler> requestHandler) = 0;
+
 	int desiredCoordinators;
 	int physicalDatacenters;
 	int processesPerMachine;
@@ -340,6 +358,42 @@ public:
 	double injectTargetedBMRestartTime = std::numeric_limits<double>::max();
 	double injectTargetedBWRestartTime = std::numeric_limits<double>::max();
 
+	enum SimConsistencyScanState {
+		DisabledStart = 0,
+		Enabling = 1,
+		Enabled = 2,
+		Enabled_InjectCorruption = 3,
+		Enabled_FoundCorruption = 4,
+		Complete = 5,
+		DisabledEnd = 6
+	};
+	SimConsistencyScanState consistencyScanState = SimConsistencyScanState::DisabledStart;
+
+	// check that validates that the state transition is valid
+	bool updateConsistencyScanState(SimConsistencyScanState expectedCurrent, SimConsistencyScanState desired) {
+		if (consistencyScanState == expectedCurrent && desired > consistencyScanState) {
+			consistencyScanState = desired;
+
+			if (desired == SimConsistencyScanState::Enabled_FoundCorruption) {
+				// reset other metadata
+				consistencyScanInjectedCorruptionType = {};
+				consistencyScanCorruptRequestKey = {};
+				consistencyScanCorruptor = {};
+			}
+
+			return true;
+		}
+		return false;
+	}
+
+	// Inject corruption only in consistency scan reads to ensure scan finds it.
+	enum SimConsistencyScanCorruptionType { FlipMoreFlag = 0, AddToEmpty = 1, RemoveLastRow = 2, ChangeFirstValue = 3 };
+	Optional<SimConsistencyScanCorruptionType> consistencyScanInjectedCorruptionType;
+	Optional<UID> consistencyScanInjectedCorruptionDestination;
+	Optional<bool> doInjectConsistencyScanCorruption;
+	Optional<Standalone<StringRef>> consistencyScanCorruptRequestKey;
+	Optional<std::pair<UID, NetworkAddress>> consistencyScanCorruptor;
+
 	std::unordered_map<Standalone<StringRef>, PrivateKey> authKeys;
 
 	std::set<std::pair<std::string, unsigned>> corruptedBlocks;
@@ -348,6 +402,11 @@ public:
 	// inserted into FDB by the workload. On shutdown, all test generated files (under simfdb/) are scanned to find if
 	// 'plaintext marker' is present.
 	Optional<std::string> dataAtRestPlaintextMarker;
+
+	std::unordered_map<std::string, Reference<HTTP::SimRegisteredHandlerContext>> httpHandlers;
+	std::vector<std::pair<ProcessInfo*, Reference<HTTP::SimServerContext>>> httpServerProcesses;
+	std::set<IPAddress> httpServerIps;
+	bool httpProtected = false;
 
 	flowGlobalType global(int id) const final;
 	void setGlobal(size_t id, flowGlobalType v) final;

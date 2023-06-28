@@ -36,6 +36,7 @@
 #include "flow/IRandom.h"
 #include "flow/ThreadHelper.actor.h"
 #include "flow/flow.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 
 #include "metacluster/Metacluster.h"
 #include "metacluster/MetaclusterConsistency.actor.h"
@@ -100,12 +101,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	int64_t tenantIdPrefix = -1;
 	std::set<int64_t> usedPrefixes;
 	double testDuration;
+	bool useExistingMetacluster;
 
 	MetaclusterManagementWorkload(WorkloadContext const& wcx)
 	  : TestWorkload(wcx), metaclusterCreated(deterministicRandom()->coinflip()) {
 		maxTenants = std::min<int>(1e8 - 1, getOption(options, "maxTenants"_sr, 1000));
 		maxTenantGroups = std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20));
 		testDuration = getOption(options, "testDuration"_sr, 120.0);
+		useExistingMetacluster = getOption(options, "useExistingMetacluster"_sr, false);
 		allowTenantIdPrefixReuse = deterministicRandom()->coinflip();
 		MetaclusterRegistrationEntry::allowUnsupportedRegistrationWrites = true;
 	}
@@ -126,7 +129,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 	Future<Void> setup(Database const& cx) override {
 		if (clientId == 0) {
-			if (g_network->isSimulated() && BUGGIFY) {
+			if (!useExistingMetacluster && g_network->isSimulated() && BUGGIFY) {
 				IKnobCollection::getMutableGlobalKnobCollection().setKnob(
 				    "max_tenants_per_cluster", KnobValueRef::create(int{ deterministicRandom()->randomInt(20, 100) }));
 			}
@@ -138,28 +141,94 @@ struct MetaclusterManagementWorkload : TestWorkload {
 	ACTOR static Future<Void> _setup(Database cx, MetaclusterManagementWorkload* self) {
 		ASSERT(g_simulator->extraDatabases.size() > 0);
 
-		if (self->metaclusterCreated) {
-			self->tenantIdPrefix = self->generateTenantIdPrefix().get();
-			self->usedPrefixes.insert(self->tenantIdPrefix);
+		if (!self->useExistingMetacluster) {
+			if (self->metaclusterCreated) {
+				self->tenantIdPrefix = self->generateTenantIdPrefix().get();
+				self->usedPrefixes.insert(self->tenantIdPrefix);
+			}
+
+			metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
+			    cx,
+			    self->tenantIdPrefix,
+			    Optional<metacluster::DataClusterEntry>(),
+			    metacluster::util::SkipMetaclusterCreation(!self->metaclusterCreated)));
+
+			self->managementDb = simMetacluster.managementDb;
+			for (auto const& [name, db] : simMetacluster.dataDbs) {
+				self->dataDbIndex.push_back(name);
+				self->dataDbs[name] = makeReference<DataClusterData>(db);
+			}
+
+			if (self->metaclusterCreated) {
+				Optional<MetaclusterRegistrationEntry> registration =
+				    wait(metacluster::metadata::metaclusterRegistration().get(self->managementDb));
+				ASSERT(registration.present());
+				self->managementVersion = registration.get().version;
+			}
+		} else {
+			metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
+			    cx, {}, {}, metacluster::util::SkipMetaclusterCreation::True));
+			self->managementDb = simMetacluster.managementDb;
+			wait(loadExistingMetacluster(self));
 		}
 
-		metacluster::util::SimulatedMetacluster simMetacluster = wait(metacluster::util::createSimulatedMetacluster(
-		    cx,
-		    self->tenantIdPrefix,
-		    Optional<metacluster::DataClusterEntry>(),
-		    metacluster::util::SkipMetaclusterCreation(!self->metaclusterCreated)));
+		return Void();
+	}
 
-		self->managementDb = simMetacluster.managementDb;
-		for (auto const& [name, db] : simMetacluster.dataDbs) {
+	ACTOR static Future<Void> loadExistingMetacluster(MetaclusterManagementWorkload* self) {
+		state metacluster::util::MetaclusterData<IDatabase> metaclusterData(self->managementDb);
+		wait(metaclusterData.load());
+
+		self->metaclusterCreated = true;
+		self->managementVersion = metaclusterData.managementMetadata.metaclusterRegistration.get().version;
+		self->tenantIdPrefix = metaclusterData.managementMetadata.tenantIdPrefix.get();
+		self->usedPrefixes.insert(self->tenantIdPrefix);
+
+		for (auto const& [name, metadata] : metaclusterData.managementMetadata.dataClusters) {
+			metacluster::util::MetaclusterData<IDatabase>::DataClusterData dataClusterMetadata =
+			    metaclusterData.dataClusterMetadata[name];
+
 			self->dataDbIndex.push_back(name);
-			self->dataDbs[name] = makeReference<DataClusterData>(db);
+			Reference<DataClusterData> dataDb = makeReference<DataClusterData>(
+			    Database::createSimulatedExtraDatabase(metadata.connectionString.toString()));
+			self->dataDbs[name] = dataDb;
+
+			dataDb->registered = true;
+			dataDb->detached = false;
+			dataDb->tenantGroupCapacity = metadata.entry.capacity.numTenantGroups;
+			dataDb->version = dataClusterMetadata.metaclusterRegistration.get().version;
+			dataDb->autoTenantAssignment = metadata.entry.autoTenantAssignment;
+
+			self->totalTenantGroupCapacity +=
+			    std::max(metadata.entry.capacity.numTenantGroups, metadata.entry.allocated.numTenantGroups);
 		}
 
-		if (self->metaclusterCreated) {
-			Optional<MetaclusterRegistrationEntry> registration =
-			    wait(metacluster::metadata::metaclusterRegistration().get(self->managementDb));
-			ASSERT(registration.present());
-			self->managementVersion = registration.get().version;
+		for (auto const& [id, entry] : metaclusterData.managementMetadata.tenantData.tenantMap) {
+			Reference<TenantTestData> tenantData =
+			    makeReference<TenantTestData>(entry.assignedCluster, entry.tenantGroup);
+			self->createdTenants[entry.tenantName] = tenantData;
+
+			Reference<DataClusterData> dataDb = self->dataDbs[entry.assignedCluster];
+			dataDb->tenants[entry.tenantName] = tenantData;
+
+			tenantData->lockId = entry.tenantLockId;
+			tenantData->lockState = entry.tenantLockState;
+
+			if (!entry.tenantGroup.present()) {
+				self->ungroupedTenants.insert(entry.tenantName);
+				dataDb->ungroupedTenants.insert(entry.tenantName);
+			} else {
+				auto itr = self->tenantGroups.find(entry.tenantGroup.get());
+				if (itr == self->tenantGroups.end()) {
+					itr =
+					    self->tenantGroups
+					        .try_emplace(entry.tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
+					        .first;
+				}
+				auto tenantGroup = itr->second;
+				tenantGroup->tenants.insert(entry.tenantName);
+				dataDb->tenantGroups[entry.tenantGroup.get()] = tenantGroup;
+			}
 		}
 
 		return Void();
@@ -190,6 +259,14 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		                                       dataDb.get()->version <= MetaclusterVersion::MAX_SUPPORTED);
 
 		return managementValid && dataValid;
+	}
+
+	ACTOR static Future<Void> waitForFullyRecovered(MetaclusterManagementWorkload* self) {
+		while (self->dbInfo->get().recoveryState != RecoveryState::FULLY_RECOVERED) {
+			wait(self->dbInfo->onChange());
+		}
+
+		return Void();
 	}
 
 	ACTOR template <class DB>
@@ -259,6 +336,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(registrationEntry.present());
 
 				self->managementVersion = registrationEntry.get().version;
+				wait(waitForFullyRecovered(self));
 			} else {
 				ASSERT(self->metaclusterCreated);
 			}
@@ -399,7 +477,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				ASSERT(clusterName.startsWith("\xff"_sr));
 				return Void();
 			} else if (e.code() == error_code_unsupported_metacluster_version) {
-				ASSERT(!self->isValidVersion(dataDb));
+				// If we reach here, it is either because
+				// 1) the management cluster version is invalid and the registration failed, thus the version is
+				//    meaningless, or
+				// 2) the data cluster is already registered and invalid.
+				// If the data cluster is not registered, we shouldn't check its version.
+				ASSERT(!self->isValidVersion(dataDb->registered ? dataDb : Optional<Reference<DataClusterData>>()));
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
@@ -916,6 +999,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 		state TenantName tenant = self->chooseTenantName();
 		state Optional<TenantGroupName> tenantGroup = self->chooseTenantGroup();
 		state metacluster::AssignClusterAutomatically assignClusterAutomatically(deterministicRandom()->coinflip());
+		state metacluster::IgnoreCapacityLimit ignoreCapacityLimit(deterministicRandom()->coinflip());
 
 		auto itr = self->createdTenants.find(tenant);
 		state bool exists = itr != self->createdTenants.end();
@@ -967,8 +1051,8 @@ struct MetaclusterManagementWorkload : TestWorkload {
 						preferredClusterIndex = deterministicRandom()->randomInt(0, preferredClusters.size());
 						tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
 					}
-					Future<Void> createFuture =
-					    metacluster::createTenant(self->managementDb, tenantMapEntry, assignClusterAutomatically);
+					Future<Void> createFuture = metacluster::createTenant(
+					    self->managementDb, tenantMapEntry, assignClusterAutomatically, ignoreCapacityLimit);
 					Optional<Void> result = wait(timeout(createFuture, deterministicRandom()->randomInt(1, 30)));
 					if (result.present()) {
 						break;
@@ -999,7 +1083,6 @@ struct MetaclusterManagementWorkload : TestWorkload {
 							preferredClusters.erase(preferredClusters.begin() + preferredClusterIndex);
 							preferredClusterIndex = 0;
 							tenantMapEntry.assignedCluster = preferredClusters[preferredClusterIndex];
-
 							continue;
 						}
 
@@ -1024,7 +1107,12 @@ struct MetaclusterManagementWorkload : TestWorkload {
 
 			ASSERT(self->metaclusterCreated);
 			ASSERT(!exists);
-			ASSERT(hasCapacity);
+			ASSERT(ignoreCapacityLimit || hasCapacity);
+			if (!hasCapacity) {
+				ASSERT(!tenantGroupExists);
+				ASSERT(ignoreCapacityLimit);
+			}
+			ASSERT(!ignoreCapacityLimit || !assignClusterAutomatically);
 			ASSERT(entry.tenantGroup == tenantGroup);
 			ASSERT(TenantAPI::getTenantIdPrefix(entry.id) == self->tenantIdPrefix);
 
@@ -1039,18 +1127,26 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			Optional<ClusterName> clusterAssignedToTenantGroup;
 			ASSERT(self->isValidVersion(assignedCluster->second));
 
+			bool allocationAdded = false;
 			if (tenantGroup.present()) {
-				auto tenantGroupData =
-				    self->tenantGroups
-				        .try_emplace(tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster))
-				        .first;
+				auto [tenantGroupData, _allocationAdded] = self->tenantGroups.try_emplace(
+				    tenantGroup.get(), makeReference<TenantGroupData>(entry.assignedCluster));
+
+				allocationAdded = _allocationAdded;
 				ASSERT(tenantGroupData->second->cluster == entry.assignedCluster);
 				clusterAssignedToTenantGroup = tenantGroupData->second->cluster;
 				tenantGroupData->second->tenants.insert(tenant);
 				assignedCluster->second->tenantGroups[tenantGroup.get()] = tenantGroupData->second;
 			} else {
+				allocationAdded = true;
 				self->ungroupedTenants.insert(tenant);
 				assignedCluster->second->ungroupedTenants.insert(tenant);
+			}
+
+			if (allocationAdded &&
+			    assignedCluster->second->ungroupedTenants.size() + assignedCluster->second->tenantGroups.size() >
+			        assignedCluster->second->tenantGroupCapacity) {
+				++self->totalTenantGroupCapacity;
 			}
 
 			// In two cases, we bypass the search on capacity index:
@@ -1061,7 +1157,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			ASSERT(!assignClusterAutomatically || clusterAssignedToTenantGroup.present() ||
 			       assignedCluster->second->autoTenantAssignment == metacluster::AutoTenantAssignment::ENABLED);
 
-			ASSERT(tenantGroupExists ||
+			ASSERT(tenantGroupExists || ignoreCapacityLimit ||
 			       assignedCluster->second->tenantGroupCapacity >=
 			           assignedCluster->second->tenantGroups.size() + assignedCluster->second->ungroupedTenants.size());
 		} catch (Error& e) {
@@ -1073,15 +1169,25 @@ struct MetaclusterManagementWorkload : TestWorkload {
 				return Void();
 			} else if (e.code() == error_code_cluster_no_capacity) {
 				ASSERT(!assignClusterAutomatically);
+				// When trying to create a new tenant, there are several cases in which "cluster_no_capacity" can be
+				// thrown. The only one case in which ignoreCapacityLimit is true is when the number of tenants exceed
+				// a threshold configured via knob. But this is not possible due to the way we pick tenant names in this
+				// test, thus we can have the following assertion.
+				ASSERT(!ignoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_cluster_not_found) {
 				ASSERT(!assignClusterAutomatically);
 				return Void();
 			} else if (e.code() == error_code_invalid_tenant_configuration) {
-				ASSERT(tenantGroup.present());
-				auto itr = self->tenantGroups.find(tenantGroup.get());
-				ASSERT(itr != self->tenantGroups.end());
-				ASSERT(itr->second->cluster != tenantMapEntry.assignedCluster);
+				bool tenantGroupClusterMismatch = false;
+				if (tenantGroup.present()) {
+					auto itr = self->tenantGroups.find(tenantGroup.get());
+					if (itr != self->tenantGroups.end() && itr->second->cluster != tenantMapEntry.assignedCluster) {
+						tenantGroupClusterMismatch = true;
+					}
+				}
+				bool invalidIgnoreCapacityLimit = assignClusterAutomatically && ignoreCapacityLimit;
+				ASSERT(tenantGroupClusterMismatch || invalidIgnoreCapacityLimit);
 				return Void();
 			} else if (e.code() == error_code_invalid_metacluster_operation) {
 				ASSERT(!self->metaclusterCreated);
@@ -1535,6 +1641,7 @@ struct MetaclusterManagementWorkload : TestWorkload {
 			if (self->metaclusterCreated) {
 				self->managementVersion = newVersion;
 				wait(self->setMetaclusterVersion(self->managementDb, self->managementVersion));
+				wait(waitForFullyRecovered(self));
 			}
 		} else {
 			ClusterName clusterName = self->chooseClusterName();

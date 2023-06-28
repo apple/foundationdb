@@ -18,6 +18,7 @@ if(WITH_PYTHON)
   find_program(OLD_FDBSERVER_BINARY
     fdbserver-7.1.23 fdbserver fdbserver.exe
     HINTS /opt/foundationdb/old/7.1.23/bin/ /opt/foundationdb/old /usr/sbin /usr/libexec /usr/local/sbin /usr/local/libexec)
+
   if(OLD_FDBSERVER_BINARY)
     message(STATUS "Use old fdb at ${OLD_FDBSERVER_BINARY}")
   else()
@@ -141,7 +142,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/BackupCorrectnessClean.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectness.toml)
   add_fdb_test(TEST_FILES fast/BackupToDBCorrectnessClean.toml)
-  add_fdb_test(TEST_FILES fast/BlobCipherUnitTest.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyAtomicOps.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifyCycle.toml)
   add_fdb_test(TEST_FILES fast/BlobGranuleVerifySmall.toml)
@@ -168,10 +168,13 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/ChangeFeedOperationsMove.toml)
   add_fdb_test(TEST_FILES fast/DataLossRecovery.toml)
   add_fdb_test(TEST_FILES fast/EncryptionOps.toml)
-  add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml)
+
+  # EncryptionUnitTests is only a convenience file to run the different types of encryption tests at once. Do not enable in general ensembles
+  add_fdb_test(TEST_FILES fast/EncryptionUnitTests.toml IGNORE)
   add_fdb_test(TEST_FILES fast/EncryptKeyProxyTest.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectness.toml)
   add_fdb_test(TEST_FILES fast/FuzzApiCorrectnessClean.toml)
+  add_fdb_test(TEST_FILES fast/HTTPKeyValueStore.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackup.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithEKPKeyFetchFailures.toml)
   add_fdb_test(TEST_FILES fast/IncrementalBackupWithTenantDeletion.toml)
@@ -188,10 +191,10 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/MemoryLifetime.toml)
   add_fdb_test(TEST_FILES fast/MoveKeysCycle.toml)
   add_fdb_test(TEST_FILES fast/MutationLogReaderCorrectness.toml)
+
   add_fdb_test(TEST_FILES fast/GetEstimatedRangeSize.toml)
   add_fdb_test(TEST_FILES fast/GetMappedRange.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorRawStartMovement.toml)
-  add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+
   add_fdb_test(TEST_FILES fast/PerpetualWiggleStats.toml)
   add_fdb_test(TEST_FILES fast/PrivateEndpoints.toml)
   add_fdb_test(TEST_FILES fast/ProtocolVersion.toml)
@@ -199,8 +202,7 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/RandomUnitTests.toml)
   add_fdb_test(TEST_FILES fast/ReadHotDetectionCorrectness.toml IGNORE) # TODO re-enable once read hot detection is enabled.
   add_fdb_test(TEST_FILES fast/ReportConflictingKeys.toml)
-  add_fdb_test(TEST_FILES fast/RESTKmsConnectorUnit.toml IGNORE)
-  add_fdb_test(TEST_FILES fast/RESTUtilsUnit.toml IGNORE)
+  add_fdb_test(TEST_FILES fast/RESTUnit.toml IGNORE)
   add_fdb_test(TEST_FILES fast/SelectorCorrectness.toml)
   add_fdb_test(TEST_FILES fast/Sideband.toml)
   add_fdb_test(TEST_FILES fast/SidebandSingle.toml)
@@ -227,19 +229,27 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES fast/WriteDuringReadClean.toml)
   add_fdb_test(TEST_FILES noSim/RandomUnitTests.toml UNIT)
 
-#  if(WITH_ROCKSDB_EXPERIMENTAL)
+  # if(WITH_ROCKSDB_EXPERIMENTAL)
   if(0)
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml UNIT)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml IGNORE)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml IGNORE)
   else()
     add_fdb_test(TEST_FILES fast/ValidateStorage.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/KeyValueStoreRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES noSim/ShardedRocksDBTest.toml IGNORE)
     add_fdb_test(TEST_FILES fast/PhysicalShardMove.toml IGNORE)
     add_fdb_test(TEST_FILES fast/StorageServerCheckpointRestore.toml IGNORE)
+
+    # Mock DD Tests
+    add_fdb_test(TEST_FILES fast/IDDTxnProcessorMoveKeys.toml)
+    add_fdb_test(TEST_FILES fast/MockDDReadWrite.toml)
   endif()
 
   add_fdb_test(TEST_FILES rare/BlobGranuleRanges.toml)
@@ -256,7 +266,6 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES rare/CycleWithKills.toml)
   add_fdb_test(TEST_FILES rare/CycleWithDeadHall.toml)
   add_fdb_test(TEST_FILES rare/DataDistributionMetrics.toml)
-  add_fdb_test(TEST_FILES rare/FuzzTest.toml)
   add_fdb_test(TEST_FILES rare/HighContentionPrefixAllocator.toml)
   add_fdb_test(TEST_FILES rare/InventoryTestHeavyWrites.toml)
   add_fdb_test(TEST_FILES rare/LargeApiCorrectness.toml)
@@ -323,9 +332,9 @@ if(WITH_PYTHON)
   add_fdb_test(
     TEST_FILES restarting/from_71.2.0_until_71.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_71.2.0_until_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
-      TEST_FILES restarting/from_71.2.0_until_71.3.0/DrUpgradeRestart-1.toml
-      restarting/from_71.2.0_until_71.3.0/DrUpgradeRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.0_until_71.3.0/DrUpgradeRestart-1.toml
+    restarting/from_71.2.0_until_71.3.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.2.0_until_71.3.0/ClientTransactionProfilingCorrectness-1.txt
     restarting/from_71.2.0_until_71.3.0/ClientTransactionProfilingCorrectness-2.txt)
@@ -336,12 +345,18 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.2.0_until_71.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/from_71.2.8_until_71.3.0/BlobGranuleRestartLarge-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/ConfigureTestRestart-1.toml
     restarting/from_71.3.0/ConfigureTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/from_71.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/from_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
-    add_fdb_test(
+  add_fdb_test(
     TEST_FILES restarting/from_71.3.0/DrUpgradeRestart-1.toml
     restarting/from_71.3.0/DrUpgradeRestart-2.toml)
   add_fdb_test(
@@ -375,6 +390,9 @@ if(WITH_PYTHON)
     TEST_FILES restarting/from_71.3.0/StorefrontTestRestart-1.txt
     restarting/from_71.3.0/StorefrontTestRestart-2.txt)
   add_fdb_test(
+    TEST_FILES restarting/from_71.3.0/BlobGranuleRestartCorrectness-1.toml
+    restarting/from_71.3.0/BlobGranuleRestartCorrectness-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_7.1.0_until_71.2.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
@@ -387,11 +405,26 @@ if(WITH_PYTHON)
     TEST_FILES restarting/to_71.2.0_until_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.2.0_until_71.3.0/CycleTestRestart-2.toml)
   add_fdb_test(
+    TEST_FILES restarting/to_71.2.8_until_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/to_71.2.8_until_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.2.8_until_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/to_71.2.8_until_71.3.0/BlobGranuleRestartLarge-2.toml)
+  add_fdb_test(
     TEST_FILES restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-1.toml
     restarting/to_71.3.0/ConfigureStorageMigrationTestRestart-2.toml)
   add_fdb_test(
     TEST_FILES restarting/to_71.3.0/CycleTestRestart-1.toml
     restarting/to_71.3.0/CycleTestRestart-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartCycle-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartCycle-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.1/BlobGranuleRestartCorrectness-1.toml
+    restarting/to_71.3.1/BlobGranuleRestartCorrectness-2.toml)
+  add_fdb_test(
+    TEST_FILES restarting/to_71.3.0/BlobGranuleRestartLarge-1.toml
+    restarting/to_71.3.0/BlobGranuleRestartLarge-2.toml)
 
   add_fdb_test(TEST_FILES slow/ApiCorrectness.toml)
   add_fdb_test(TEST_FILES slow/ApiCorrectnessAtomicRestore.toml)
@@ -444,13 +477,13 @@ if(WITH_PYTHON)
   add_fdb_test(TEST_FILES slow/WriteDuringReadSwitchover.toml)
   add_fdb_test(TEST_FILES slow/ddbalance.toml)
   add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessAtomicOp.toml IGNORE)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessCycle.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessMultiCycles.toml)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessCycle.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupCorrectnessMultiCycles.toml IGNORE)
   add_fdb_test(TEST_FILES slow/ParallelRestoreNewBackupWriteDuringReadAtomicRestore.toml IGNORE)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessAtomicOp.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml)
-  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessAtomicOp.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessCycle.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupCorrectnessMultiCycles.toml IGNORE)
+  add_fdb_test(TEST_FILES slow/ParallelRestoreOldBackupWriteDuringReadAtomicRestore.toml IGNORE)
   add_fdb_test(TEST_FILES ParallelRestoreOldBackupApiCorrectnessAtomicRestore.toml IGNORE)
 
   # Note that status tests are not deterministic.

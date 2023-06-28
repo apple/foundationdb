@@ -18,105 +18,123 @@
  * limitations under the License.
  */
 
+#include <boost/lexical_cast.hpp>
+#include <list>
 #include "fdbcli/fdbcli.actor.h"
-
-#include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/IClientApi.h"
-
-#include "flow/Arena.h"
-#include "flow/FastRef.h"
-#include "flow/ThreadHelper.actor.h"
+#include "fdbclient/ReadYourWrites.h"
+#include "fdbclient/RunTransaction.actor.h"
 #include "fdbclient/ConsistencyScanInterface.actor.h"
+
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 namespace fdb_cli {
 
+ACTOR Future<Void> dumpStats(ConsistencyScanState* cs, Reference<ReadYourWritesTransaction> tr) {
+	state ConsistencyScanState::LifetimeStats statsLifetime;
+	state ConsistencyScanState::RoundStats statsCurrentRound;
+	wait(store(statsLifetime, cs->lifetimeStats().getD(tr)) &&
+	     store(statsCurrentRound, cs->currentRoundStats().getD(tr)));
+	printf(
+	    "Current Round:\n%s\n",
+	    json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON()), json_spirit::pretty_print).c_str());
+	printf("Lifetime:\n%s\n",
+	       json_spirit::write_string(json_spirit::mValue(statsLifetime.toJSON()), json_spirit::pretty_print).c_str());
+	return Void();
+}
+
 ACTOR Future<bool> consistencyScanCommandActor(Database db, std::vector<StringRef> tokens) {
+	// Skip the command token so start at begin+1
+	state std::list<StringRef> args(tokens.begin() + 1, tokens.end());
+
+	state ConsistencyScanState cs = ConsistencyScanState();
 	state Reference<ReadYourWritesTransaction> tr = makeReference<ReadYourWritesTransaction>(db);
-	// Here we do not proceed in a try-catch loop since the transaction is always supposed to succeed.
-	// If not, the outer loop catch block(fdbcli.actor.cpp) will handle the error and print out the error message
-	state int usageError = 0;
-	state ConsistencyScanInfo csInfo = ConsistencyScanInfo();
-	tr->setOption(FDBTransactionOptions::SPECIAL_KEY_SPACE_ENABLE_WRITES);
-	tr->setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+	state bool error = false;
 
-	// Get the exisiting consistencyScanInfo object if present
-	state Optional<Value> consistencyScanInfo = wait(ConsistencyScanInfo::getInfo(tr));
-	wait(tr->commit());
-	if (consistencyScanInfo.present())
-		csInfo = ObjectReader::fromStringRef<ConsistencyScanInfo>(consistencyScanInfo.get(), IncludeVersion());
-	tr->reset();
+	loop {
+		try {
+			SystemDBWriteLockedNow(db.getReference())->setOptions(tr);
 
-	if (tokens.size() == 1) {
-		printf("Consistency Scan Info: %s\n", csInfo.toString().c_str());
-	} else if ((tokens.size() == 2) && tokencmp(tokens[1], "off")) {
-		csInfo.consistency_scan_enabled = false;
-		wait(ConsistencyScanInfo::setInfo(tr, csInfo));
-		wait(tr->commit());
-	} else if ((tokencmp(tokens[1], "on") && tokens.size() > 2)) {
-		csInfo.consistency_scan_enabled = true;
-		state std::vector<StringRef>::iterator t;
-		for (t = tokens.begin() + 2; t != tokens.end(); ++t) {
-			if (tokencmp(t->toString(), "restart")) {
-				if (++t != tokens.end()) {
-					if (tokencmp(t->toString(), "0")) {
-						csInfo.restart = false;
-					} else if (tokencmp(t->toString(), "1")) {
-						csInfo.restart = true;
-					} else {
-						usageError = 1;
-					}
-				} else {
-					usageError = 1;
-				}
-			} else if (tokencmp(t->toString(), "maxRate")) {
-				if (++t != tokens.end()) {
-					char* end;
-					csInfo.max_rate = std::strtod(t->toString().data(), &end);
-					if (!std::isspace(*end) && (*end != '\0')) {
-						fprintf(stderr, "ERROR: %s failed to parse.\n", t->toString().c_str());
-						return false;
-					}
-				} else {
-					usageError = 1;
-				}
-			} else if (tokencmp(t->toString(), "targetInterval")) {
-				if (++t != tokens.end()) {
-					char* end;
-					csInfo.target_interval = std::strtod(t->toString().data(), &end);
-					if (!std::isspace(*end) && (*end != '\0')) {
-						fprintf(stderr, "ERROR: %s failed to parse.\n", t->toString().c_str());
-						return false;
-					}
-				} else {
-					usageError = 1;
-				}
-			} else {
-				usageError = 1;
+			state ConsistencyScanState::Config config = wait(ConsistencyScanState().config().getD(tr));
+
+			if (args.empty()) {
+				printf(
+				    "%s\n",
+				    json_spirit::write_string(json_spirit::mValue(config.toJSON()), json_spirit::pretty_print).c_str());
+				break;
 			}
-		}
 
-		if (!usageError) {
-			wait(ConsistencyScanInfo::setInfo(tr, csInfo));
+			// TODO:  Expose/document additional configuration options
+			// TODO:  Range configuration.
+			while (!error && !args.empty()) {
+				auto next = args.front();
+				args.pop_front();
+				if (next == "on") {
+					config.enabled = true;
+				} else if (next == "off") {
+					config.enabled = false;
+				} else if (next == "restart") {
+					config.minStartVersion = tr->getReadVersion().get();
+				} else if (next == "stats") {
+					wait(dumpStats(&cs, tr));
+				} else if (next == "clearstats") {
+					wait(cs.clearStats(tr));
+				} else if (next == "maxRate") {
+					error = args.empty();
+					if (!error) {
+						config.maxReadByteRate = boost::lexical_cast<int>(args.front().toString());
+						args.pop_front();
+					}
+				} else if (next == "targetInterval") {
+					error = args.empty();
+					if (!error) {
+						config.targetRoundTimeSeconds = boost::lexical_cast<int>(args.front().toString());
+						args.pop_front();
+					}
+				}
+			}
+
+			if (error) {
+				break;
+			}
+			cs.config().set(tr, config);
 			wait(tr->commit());
+			break;
+		} catch (Error& e) {
+			wait(tr->onError(e));
 		}
-	} else {
-		usageError = 1;
 	}
 
-	if (usageError) {
+	if (error) {
 		printUsage(tokens[0]);
 		return false;
 	}
+
 	return true;
 }
 
 CommandFactory consistencyScanFactory(
     "consistencyscan",
-    CommandHelp("consistencyscan <on|off> <restart 0|1> <maxRate val> <targetInterval val>",
-                "enables or disables consistency scan",
-                "Calling this command with `on' enables the consistency scan process to run the scan with given "
-                "arguments and `off' will halt the scan. "
-                "Calling this command with no arguments will display if consistency scan is currently enabled.\n"));
+    CommandHelp(
+        // TODO:  Expose/document additional configuration options
+        "consistencyscan [on|off] [restart] [stats] [clearstats] [maxRate <BYTES_PER_SECOND>] [targetInterval "
+        "<SECONDS>]",
+        "Enables, disables, or sets options for the Consistency Scan role which repeatedly scans "
+        "shard replicas for consistency.",
+        "`on' enables the scan.\n\n"
+        "`off' disables the scan but keeps the current cycle's progress so it will resume later if enabled again.\n\n"
+        "`restart' will end the current scan cycle.  A new cycle will start if the scan is enabled, or later when "
+        "it is enabled.\n\n"
+        "`maxRate <BYTES_PER_SECOND>' sets the maximum scan read speed rate to BYTES_PER_SECOND, post-replication.\n\n"
+        "`targetInterval <SECONDS>' sets the target interval for the scan to SECONDS.  The scan will adjust speed "
+        "to attempt to complete in that amount of time but it will not exceed BYTES_PER_SECOND\n\n"
+        "`stats` dumps the current round and lifetime stats of the consistency scan. It is a convenience method to "
+        "expose the stats which are also in status json.\n\n"
+        "`clearstats` will clear all of the stats for the consistency scan but otherwise leave the configuration as "
+        "is. This can be used to clear errors or reset stat counts, for example.\n\n"
+        "The consistency scan role publishes its configuration and metrics in Status JSON under the path "
+        "`.cluster.consistency_scan'\n"
+        // TODO:  Syntax hint generator
+        ));
 
 } // namespace fdb_cli

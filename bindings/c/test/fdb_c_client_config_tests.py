@@ -14,11 +14,12 @@ from threading import Thread
 import time
 from fdb_version import CURRENT_VERSION, PREV_RELEASE_VERSION, PREV2_RELEASE_VERSION
 from binary_download import FdbBinaryDownloader
-from local_cluster import LocalCluster, PortProvider
+from local_cluster import LocalCluster, PortProvider, TLSConfig
 from test_util import random_alphanum_string
 
 args = None
 downloader = None
+test_prev_versions = False
 
 
 def version_from_str(ver_str):
@@ -38,6 +39,9 @@ class TestCluster(LocalCluster):
     def __init__(
         self,
         version: str,
+        tls_config: TLSConfig = None,
+        mkcert_binary: str = None,
+        disable_server_side_tls: bool = False,
     ):
         self.client_config_tester_bin = Path(args.client_config_tester_bin).resolve()
         assert self.client_config_tester_bin.exists(), "{} does not exist".format(
@@ -48,7 +52,16 @@ class TestCluster(LocalCluster):
         assert self.build_dir.is_dir(), "{} is not a directory".format(args.build_dir)
         self.tmp_dir = self.build_dir.joinpath("tmp", random_alphanum_string(16))
         print("Creating temp dir {}".format(self.tmp_dir), file=sys.stderr)
+
         self.tmp_dir.mkdir(parents=True)
+        if mkcert_binary:
+            self.mkcert_binary = Path(mkcert_binary).resolve()
+        else:
+            self.mkcert_binary = os.path.join(self.build_dir, "bin", "mkcert")
+        assert Path(self.mkcert_binary).exists(), "{} does not exist".format(
+            self.mkcert_binary
+        )
+
         self.version = version
         super().__init__(
             self.tmp_dir,
@@ -56,6 +69,9 @@ class TestCluster(LocalCluster):
             downloader.binary_path(version, "fdbmonitor"),
             downloader.binary_path(version, "fdbcli"),
             1,
+            tls_config=tls_config,
+            mkcert_binary=self.mkcert_binary,
+            disable_server_side_tls=disable_server_side_tls,
         )
         self.set_env_var("LD_LIBRARY_PATH", downloader.lib_dir(version))
 
@@ -99,6 +115,10 @@ class ClientConfigTest:
         self.status_json = None
 
         # Configuration parameters to be set directly as needed
+        self.tls_client_cert_file = None
+        self.tls_client_key_file = None
+        self.tls_client_ca_file = None
+        self.tls_client_disable_plaintext_connection = None
         self.disable_local_client = False
         self.disable_client_bypass = False
         self.ignore_external_client_failures = False
@@ -268,6 +288,18 @@ class ClientConfigTest:
         if self.disable_client_bypass:
             cmd_args += ["--network-option-disable_client_bypass", ""]
 
+        if self.tls_client_cert_file:
+            cmd_args += ["--network-option-tls_cert_path", self.tls_client_cert_file]
+
+        if self.tls_client_key_file:
+            cmd_args += ["--network-option-tls_key_path", self.tls_client_key_file]
+
+        if self.tls_client_ca_file:
+            cmd_args += ["--network-option-tls_ca_path", self.tls_client_ca_file]
+
+        if self.tls_client_disable_plaintext_connection:
+            cmd_args += ["--network-option-tls_disable_plaintext_connection", ""]
+
         if self.external_lib_path is not None:
             cmd_args += ["--external-client-library", self.external_lib_path]
 
@@ -339,6 +371,16 @@ class ClientConfigTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cluster.tear_down()
 
+    def test_disable_plaintext_connection(self):
+        # Local client only; Plaintext connections are disabled in a plaintext cluster; Timeout Expected
+        test = ClientConfigTest(self)
+        test.print_status = True
+        test.tls_client_disable_plaintext_connection = True
+        test.transaction_timeout = 100
+        test.expected_error = 1031  # Timeout
+        test.exec()
+        test.check_healthy_status(False)
+
     def test_local_client_only(self):
         # Local client only
         test = ClientConfigTest(self)
@@ -377,6 +419,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_multiple_external_clients(self):
         # Multiple external clients, normal case
         test = ClientConfigTest(self)
@@ -393,6 +436,7 @@ class ClientConfigTests(unittest.TestCase):
         )
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version(self):
         # Multiple external clients, API version supported by none of them
         test = ClientConfigTest(self)
@@ -402,6 +446,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_no_external_client_support_api_version_ignore(self):
         # Multiple external clients; API version supported by none of them; Ignore failures
         test = ClientConfigTest(self)
@@ -412,6 +457,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2124  # All external clients failed
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version(self):
         # Multiple external clients, API version unsupported by one of othem
         test = ClientConfigTest(self)
@@ -423,6 +469,7 @@ class ClientConfigTests(unittest.TestCase):
         test.expected_error = 2204  # API function missing
         test.exec()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_one_external_client_wrong_api_version_ignore(self):
         # Multiple external clients;  API version unsupported by one of them; Ignore failures
         test = ClientConfigTest(self)
@@ -438,6 +485,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([CURRENT_VERSION])
         test.check_current_client(CURRENT_VERSION)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version
@@ -454,6 +502,7 @@ class ClientConfigTests(unittest.TestCase):
         test.check_available_clients([PREV_RELEASE_VERSION])
         test.check_current_client(None)
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_external_client_not_matching_cluster_version_ignore(self):
         # Trying to connect to a cluster having only
         # an external client with not matching protocol version;
@@ -511,6 +560,7 @@ class ClientConfigTests(unittest.TestCase):
 
 
 # Client configuration tests using a cluster of previous release version
+@unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
 class ClientConfigPrevVersionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -557,6 +607,7 @@ class ClientConfigPrevVersionTests(unittest.TestCase):
 
 # Client configuration tests using a separate cluster for each test
 class ClientConfigSeparateCluster(unittest.TestCase):
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_wait_cluster_to_upgrade(self):
         # Test starting a client incompatible to a cluster and connecting
         # successfuly after cluster upgrade
@@ -583,6 +634,78 @@ class ClientConfigSeparateCluster(unittest.TestCase):
         finally:
             self.cluster.tear_down()
 
+    def test_tls_cluster_tls_client(self):
+        # Test connecting successfully to a TLS-enabled cluster
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=TLSConfig())
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = True
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS client
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_tls_cluster_tls_client_plaintext_disabled(self):
+        # Test connecting successfully to a TLS-enabled cluster with plain-text connections
+        # disabled in a TLS-configured client
+        disable_plaintext_connection = True
+        tls_config = TLSConfig(
+            client_disable_plaintext_connection=disable_plaintext_connection
+        )
+        self.cluster = TestCluster(CURRENT_VERSION, tls_config=tls_config)
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.print_status = True
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = disable_plaintext_connection
+            test.exec()
+            test.check_healthy_status(True)
+        finally:
+            self.cluster.tear_down()
+
+    def test_plaintext_cluster_tls_client_plaintext_connection_disabled(self):
+        # Test connecting succesfully to a plaintext cluster with a TLS-configured client with plaintext connections disabled
+        self.cluster = TestCluster(
+            CURRENT_VERSION, tls_config=TLSConfig(), disable_server_side_tls=True
+        )
+        self.cluster.setup()
+        try:
+            test = ClientConfigTest(self)
+            test.tls_client_cert_file = self.cluster.client_cert_file
+            test.tls_client_key_file = self.cluster.client_key_file
+            test.tls_client_ca_file = self.cluster.client_ca_file
+            test.tls_client_disable_plaintext_connection = True
+            test.transaction_timeout = 100
+            test.expected_error = 1031  # Timeout
+            test.exec()
+        finally:
+            self.cluster.tear_down()
+
 
 # Test client-side tracing
 class ClientTracingTests(unittest.TestCase):
@@ -595,6 +718,7 @@ class ClientTracingTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.cluster.tear_down()
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_normal_case(self):
         # Test trace files created with a default trace configuration
         # in a normal case
@@ -611,12 +735,17 @@ class ClientTracingTests(unittest.TestCase):
             with_ip=True, version=CURRENT_VERSION, thread_idx=0
         )
         self.find_and_check_event(cur_ver_trace, "ClientStart", ["Machine"], [])
+        prev_ver_trace = self.find_trace_file(
+            with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
+        )
+        self.assertIsNotNone(prev_ver_trace)
         # disable because older version does not guarantee trace flush before network::stop() returns
         # prev_ver_trace = self.find_trace_file(
         #     with_ip=True, version=PREV_RELEASE_VERSION, thread_idx=0
         # )
         # self.find_and_check_event(prev_ver_trace, "ClientStart", ["Machine"], [])
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_default_config_error_case(self):
         # Test that no trace files are created with a default configuration
         # when an a client fails to initialize
@@ -652,6 +781,7 @@ class ClientTracingTests(unittest.TestCase):
             cur_ver_trace, "ClientStart", ["Machine"], [], seqno=1
         )
 
+    @unittest.skipUnless(test_prev_versions, "Previous release binaries not available")
     def test_init_on_setup_trace_error_case(self):
         # Test trace files created with trace_initialize_on_setup option
         # when an a client fails to initialize
@@ -793,7 +923,9 @@ if __name__ == "__main__":
     sys.argv[1:] = args.unittest_args
 
     downloader = FdbBinaryDownloader(args.build_dir)
-    downloader.download_old_binaries(PREV_RELEASE_VERSION)
-    downloader.download_old_binaries(PREV2_RELEASE_VERSION)
+    test_prev_versions = downloader.old_binaries_available
+    if test_prev_versions:
+        downloader.download_old_binaries(PREV_RELEASE_VERSION)
+        downloader.download_old_binaries(PREV2_RELEASE_VERSION)
 
     unittest.main(verbosity=2)

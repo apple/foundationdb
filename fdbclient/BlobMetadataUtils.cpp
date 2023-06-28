@@ -57,47 +57,72 @@ std::string buildPartitionPath(const std::string& url, const std::string& partit
 	}
 }
 
-// FIXME: make this (more) deterministic outside of simulation for FDBPerfKmsConnector
 Standalone<BlobMetadataDetailsRef> createRandomTestBlobMetadata(const std::string& baseUrl,
                                                                 BlobMetadataDomainId domainId) {
 	Standalone<BlobMetadataDetailsRef> metadata;
 	metadata.domainId = domainId;
 	// 0 == no partition, 1 == suffix partitioned, 2 == storage location partitioned
-	int type = deterministicRandom()->randomInt(0, 3);
-	int partitionCount = (type == 0) ? 0 : deterministicRandom()->randomInt(2, 12);
+	int type;
+	if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+		type = domainId % 3;
+	} else {
+		type = deterministicRandom()->randomInt(0, 3);
+	}
+	int partitionCount;
+	if (type == 0) {
+		partitionCount = 0;
+	} else if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+		partitionCount = 2 + domainId % 5;
+	} else {
+		partitionCount = deterministicRandom()->randomInt(2, 12);
+	}
+	// guarantee unique location for each domain for now
+	BlobMetadataLocationId locIdBase = domainId * 100;
 	TraceEvent ev(SevDebug, "SimBlobMetadata");
 	ev.detail("DomainId", domainId).detail("TypeNum", type).detail("PartitionCount", partitionCount);
 	if (type == 0) {
 		// single storage location
 		std::string partition = std::to_string(domainId) + "/";
-		metadata.base = StringRef(metadata.arena(), buildPartitionPath(baseUrl, partition));
-		ev.detail("Base", metadata.base);
+		metadata.locations.emplace_back_deep(metadata.arena(), locIdBase, buildPartitionPath(baseUrl, partition));
+		ev.detail("Location", metadata.locations.back().path);
 	}
 	if (type == 1) {
 		// simulate hash prefixing in s3
-		metadata.base = StringRef(metadata.arena(), baseUrl);
-		ev.detail("Base", metadata.base);
 		for (int i = 0; i < partitionCount; i++) {
-			metadata.partitions.push_back_deep(metadata.arena(),
-			                                   deterministicRandom()->randomUniqueID().shortString() + "-" +
-			                                       std::to_string(domainId) + "/");
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+			std::string partitionName;
+			if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+				partitionName = std::to_string(i);
+			} else {
+				partitionName = deterministicRandom()->randomUniqueID().shortString();
+			}
+			std::string partition = partitionName + "-" + std::to_string(domainId) + "/";
+			metadata.locations.emplace_back_deep(
+			    metadata.arena(), locIdBase + i, buildPartitionPath(baseUrl, partition));
+			ev.detail("P" + std::to_string(i), metadata.locations.back().path);
 		}
 	}
 	if (type == 2) {
 		// simulate separate storage location per partition
 		for (int i = 0; i < partitionCount; i++) {
 			std::string partition = std::to_string(domainId) + "_" + std::to_string(i) + "/";
-			metadata.partitions.push_back_deep(metadata.arena(), buildPartitionPath(baseUrl, partition));
-			ev.detail("P" + std::to_string(i), metadata.partitions.back());
+			metadata.locations.emplace_back_deep(
+			    metadata.arena(), locIdBase + i, buildPartitionPath(baseUrl, partition));
+			ev.detail("P" + std::to_string(i), metadata.locations.back().path);
 		}
 	}
 
 	// set random refresh + expire time
-	if (deterministicRandom()->coinflip()) {
-		metadata.refreshAt = now() + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
-		metadata.expireAt =
-		    metadata.refreshAt + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+	bool doExpire = CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA ? domainId % 2 : deterministicRandom()->coinflip();
+	if (doExpire) {
+		if (CLIENT_KNOBS->DETERMINISTIC_BLOB_METADATA) {
+			metadata.refreshAt = now() + CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+			metadata.expireAt = metadata.refreshAt + 0.2 * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+		} else {
+			metadata.refreshAt =
+			    now() + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+			metadata.expireAt =
+			    metadata.refreshAt + deterministicRandom()->random01() * CLIENT_KNOBS->BLOB_METADATA_REFRESH_INTERVAL;
+		}
 	} else {
 		metadata.refreshAt = std::numeric_limits<double>::max();
 		metadata.expireAt = metadata.refreshAt;

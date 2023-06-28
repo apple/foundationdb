@@ -429,5 +429,14 @@ if(NOT OPEN_FOR_IDE)
       org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" "--disable-banner" "-t MultiClient"
       )
 
+    add_fdbclient_test(NAME java-integration-external-client
+      API_TEST_BLOB_GRANULES_ENABLED
+      COMMAND ${Java_JAVA_EXECUTABLE}
+      -classpath "${target_jar}:${integration_jar_path}:${JUNIT_CLASSPATH}"
+      -Djava.library.path=${CMAKE_BINARY_DIR}/lib
+      org.junit.platform.console.ConsoleLauncher "--details=summary" "--class-path=${integration_jar_path}" "--scan-classpath" 
+          "--disable-banner" "-t SupportsExternalClient" "--config=external_client_library=${CMAKE_BINARY_DIR}/bindings/c/libfdb_c_external.so"
+      )
+
   endif()
 endif()

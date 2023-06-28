@@ -218,47 +218,6 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 		OldRead(KeyRange range, Version v, RangeResult oldResult) : range(range), v(v), oldResult(oldResult) {}
 	};
 
-	ACTOR Future<Void> killBlobWorkers(Database cx, BlobGranuleVerifierWorkload* self) {
-		state Transaction tr(cx);
-		state std::set<UID> knownWorkers;
-		state bool first = true;
-		loop {
-			try {
-				RangeResult r = wait(tr.getRange(blobWorkerListKeys, CLIENT_KNOBS->TOO_MANY));
-
-				state std::vector<UID> haltIds;
-				state std::vector<Future<ErrorOr<Void>>> haltRequests;
-				for (auto& it : r) {
-					BlobWorkerInterface interf = decodeBlobWorkerListValue(it.value);
-					if (first) {
-						knownWorkers.insert(interf.id());
-					}
-					if (knownWorkers.count(interf.id())) {
-						haltIds.push_back(interf.id());
-						haltRequests.push_back(interf.haltBlobWorker.tryGetReply(HaltBlobWorkerRequest(1e6, UID())));
-					}
-				}
-				first = false;
-				wait(waitForAll(haltRequests));
-				bool allPresent = true;
-				for (int i = 0; i < haltRequests.size(); i++) {
-					if (haltRequests[i].get().present()) {
-						knownWorkers.erase(haltIds[i]);
-					} else {
-						allPresent = false;
-					}
-				}
-				if (allPresent) {
-					return Void();
-				} else {
-					wait(delay(1.0));
-				}
-			} catch (Error& e) {
-				wait(tr.onError(e));
-			}
-		}
-	}
-
 	// TODO refactor more generally
 	ACTOR Future<Void> loadGranuleMetadataBeforeForcePurge(Database cx, BlobGranuleVerifierWorkload* self) {
 		// load all granule history entries that intersect purged range
@@ -402,6 +361,9 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 						}
 						self->timeTravelReads++;
 					} catch (Error& e) {
+						if (e.code() == error_code_actor_cancelled) {
+							throw;
+						}
 						fmt::print("Error TT: {0}\n", e.name());
 						if (e.code() == error_code_blob_granule_transaction_too_old) {
 							self->timeTravelTooOld++;
@@ -417,7 +379,7 @@ struct BlobGranuleVerifierWorkload : TestWorkload {
 					// reading older than the purge version
 					if (doPurging) {
 						if (self->strictPurgeChecking) {
-							wait(self->killBlobWorkers(cx, self));
+							wait(killBlobWorkers(cx));
 							if (BGV_DEBUG) {
 								fmt::print("BGV Reading post-purge [{0} - {1}) @ {2}\n",
 								           oldRead.range.begin.printable(),
