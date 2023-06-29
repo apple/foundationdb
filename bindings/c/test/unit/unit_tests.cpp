@@ -54,7 +54,7 @@ using namespace std::string_view_literals;
 
 // Trivially construct a BytesRef out of a string literal
 inline fdb::BytesRef operator""_br(const char* str, size_t len) {
-    return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
+	return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
 }
 
 void fdbCheck(const fdb::Error& err) {
@@ -190,16 +190,16 @@ static inline std::string extractString(fdb::native::FDBKey key) {
 }
 
 GetMappedRangeResult getMappedRange(fdb::Transaction& tr,
-                                      fdb::KeySelector begin,
-                                      fdb::KeySelector end,
-                                      fdb::KeyRef mapperName,
-                                      int limit,
-                                      int target_bytes,
-                                      FDBStreamingMode mode,
-                                      int iteration,
-                                      int matchIndex,
-                                      bool snapshot,
-                                      bool reverse) {
+                                    fdb::KeySelector begin,
+                                    fdb::KeySelector end,
+                                    fdb::KeyRef mapperName,
+                                    int limit,
+                                    int target_bytes,
+                                    FDBStreamingMode mode,
+                                    int iteration,
+                                    int matchIndex,
+                                    bool snapshot,
+                                    bool reverse) {
 	auto f1 =
 	    tr.getMappedRange(begin, end, mapperName, limit, target_bytes, mode, iteration, matchIndex, snapshot, reverse);
 	auto err = waitFuture(f1);
@@ -496,8 +496,7 @@ TEST_CASE("cannot read system key") {
 }
 
 TEST_CASE("read system key") {
-	auto value =
-	    getValue("\xff/coordinators"_br, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	auto value = getValue("\xff/coordinators"_br, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	REQUIRE(value.has_value());
 }
 
@@ -841,16 +840,16 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
 	return getMappedRange(tr,
-	                        fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyBegin)),
-	                        fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyEnd)),
-	                        fdb::toBytesRef(mapper),
-	                        /* limit */ 0,
-	                        /* target_bytes */ 0,
-	                        /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-	                        /* iteration */ 0,
-	                        /* matchIndex */ matchIndex,
-	                        /* snapshot */ false,
-	                        /* reverse */ 0);
+	                      fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyBegin)),
+	                      fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyEnd)),
+	                      fdb::toBytesRef(mapper),
+	                      /* limit */ 0,
+	                      /* target_bytes */ 0,
+	                      /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	                      /* iteration */ 0,
+	                      /* matchIndex */ matchIndex,
+	                      /* snapshot */ false,
+	                      /* reverse */ 0);
 }
 
 GetMappedRangeResult getMappedIndexEntries(int beginId,
@@ -1036,16 +1035,16 @@ TEST_CASE("fdb_transaction_getMappedRange_restricted_to_serializable") {
 	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	auto tr = db.createTransaction();
 	auto result = getMappedRange(tr,
-	                               fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
-	                               fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
-	                               fdb::toBytesRef(mapper),
-	                               /* limit */ 0,
-	                               /* target_bytes */ 0,
-	                               /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-	                               /* iteration */ 0,
-	                               /* matchIndex */ MATCH_INDEX_ALL,
-	                               /* snapshot */ true, // Set snapshot to true
-	                               /* reverse */ 0);
+	                             fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
+	                             fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
+	                             fdb::toBytesRef(mapper),
+	                             /* limit */ 0,
+	                             /* target_bytes */ 0,
+	                             /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	                             /* iteration */ 0,
+	                             /* matchIndex */ MATCH_INDEX_ALL,
+	                             /* snapshot */ true, // Set snapshot to true
+	                             /* reverse */ 0);
 	ASSERT(result.err.code() == error_code_unsupported_operation);
 }
 
@@ -1054,16 +1053,16 @@ TEST_CASE("fdb_transaction_getMappedRange_restricted_to_ryw_enable") {
 	auto tr = db.createTransaction();
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE)); // Not disable RYW
 	auto result = getMappedRange(tr,
-	                               fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
-	                               fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
-	                               fdb::toBytesRef(mapper),
-	                               /* limit */ 0,
-	                               /* target_bytes */ 0,
-	                               /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
-	                               /* iteration */ 0,
-	                               /* matchIndex */ MATCH_INDEX_ALL,
-	                               /* snapshot */ false,
-	                               /* reverse */ 0);
+	                             fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
+	                             fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
+	                             fdb::toBytesRef(mapper),
+	                             /* limit */ 0,
+	                             /* target_bytes */ 0,
+	                             /* FDBStreamingMode */ FDB_STREAMING_MODE_WANT_ALL,
+	                             /* iteration */ 0,
+	                             /* matchIndex */ MATCH_INDEX_ALL,
+	                             /* snapshot */ false,
+	                             /* reverse */ 0);
 	ASSERT(result.err.code() == error_code_unsupported_operation);
 }
 
@@ -2682,8 +2681,8 @@ void granule_free_load_fail(int64_t loadId, void* userContext) {
 }
 
 TEST_CASE("Blob Granule Functions") {
-	auto confValue = getValue("\xff/conf/blob_granules_enabled"_br, /* snapshot */ false,
-	                           { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	auto confValue =
+	    getValue("\xff/conf/blob_granules_enabled"_br, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	if (!confValue.has_value() || confValue.value() != "1") {
 		// std::cout << "skipping blob granule test" << std::endl;
 		return;
