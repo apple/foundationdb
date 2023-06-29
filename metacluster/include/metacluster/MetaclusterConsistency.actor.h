@@ -137,6 +137,10 @@ private:
 		int64_t totalTenants = 0;
 		for (auto const& [cluster, clusterTenants] : data.clusterTenantMap) {
 			auto itr = countsMap.find(cluster);
+			TraceEvent("BreakpointCons")
+			    .detail("ClusterName", cluster)
+			    .detail("ClusterTenantsSize", clusterTenants.size())
+			    .detail("ItrSecond", itr == countsMap.end() ? -1 : itr->second);
 			ASSERT((clusterTenants.empty() && itr == countsMap.end()) || itr->second == clusterTenants.size());
 			totalTenants += clusterTenants.size();
 		}

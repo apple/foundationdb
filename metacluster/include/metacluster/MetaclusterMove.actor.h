@@ -527,6 +527,7 @@ struct SwitchTenantMovementImpl {
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
 		}));
+		TraceEvent("TenantMoveAfterSwitchHybrid");
 
 		// container of range-based for with continuation must be a state variable
 		state std::vector<std::pair<TenantName, int64_t>> tenantsInGroup = self->tenantsInGroup;
@@ -571,11 +572,26 @@ struct SwitchTenantMovementImpl {
 
 	ACTOR static Future<Void> switchMetadataToDestination(SwitchTenantMovementImpl* self,
 	                                                      Reference<typename DB::TransactionT> tr) {
-		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
-			return updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup);
-		}));
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
+		TraceEvent("TenantMoveSwitchBegin");
+		// Possible Retry
+		if (self->moveRecord.mState == metadata::management::MovementState::SWITCH_METADATA) {
+			TraceEvent("TenantMoveSwitchBegin2");
+			Tuple indexEntry = Tuple::makeTuple(dstName, self->tenantGroup);
+			bool exists = wait(metadata::management::clusterTenantGroupIndex().exists(tr, indexEntry));
+			if (exists) {
+
+				TraceEvent("TenantMoveSwitchBegin3");
+				return Void();
+			}
+		} else {
+			TraceEvent("TenantMoveSwitchBegin4");
+			wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
+				return updateMoveRecordState(
+				    tr, metadata::management::MovementState::SWITCH_METADATA, self->tenantGroup);
+			}));
+		}
 
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
 		wait(store(tenantMetadataList, metacluster::listTenantMetadataTransaction(tr, self->tenantsInGroup)));
@@ -588,7 +604,10 @@ struct SwitchTenantMovementImpl {
 			if (tenantEntry.assignedCluster != srcName) {
 				TraceEvent(SevError, "TenantMoveSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
+				    .detail("TenantId", tId)
 				    .detail("ExpectedCluster", srcName)
+				    .detail("Src", srcName)
+				    .detail("Dst", dstName)
 				    .detail("EntryCluster", tenantEntry.assignedCluster);
 				self->messages.push_back(fmt::format("Tenant move switch wrong assigned cluster\n"
 				                                     "		expected:	{}\n"
@@ -827,9 +846,7 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	ACTOR static Future<Void> deleteSourceData(FinishTenantMovementImpl* self, TenantName tenantName) {
-		// attempt to get around memory issues
-		state TenantName tName = tenantName;
+	ACTOR static Future<Void> deleteSourceData(FinishTenantMovementImpl* self, TenantName tName) {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tName);
 		state Reference<ITransaction> srcTr = srcTenant->createTransaction();
 		try {
@@ -1014,6 +1031,19 @@ struct AbortTenantMovementImpl {
 		Tuple endTuple =
 		    Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
 		metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple, endTuple);
+
+		// Decrease clusterTenantCount and clusterCapacityIndex of destination here since it was
+		// pre-emptively increased for capacity purposes in the Start step
+		ClusterName dstName = self->dstCtx.clusterName.get();
+
+		DataClusterMetadata clusterMetadata = self->dstCtx.dataClusterMetadata.get();
+		DataClusterEntry updatedEntry = clusterMetadata.entry;
+		updatedEntry.allocated.numTenantGroups--;
+		metacluster::updateClusterMetadata(
+		    tr, dstName, clusterMetadata, Optional<ClusterConnectionString>(), updatedEntry);
+
+		int numTenants = self->tenantsInGroup.size();
+		metadata::management::clusterTenantCount().atomicOp(tr, dstName, -numTenants, MutationRef::AddValue);
 		return Void();
 	}
 
@@ -1167,10 +1197,8 @@ struct AbortTenantMovementImpl {
 		metacluster::updateClusterMetadata(
 		    tr, dstName, dstClusterMetadata, Optional<ClusterConnectionString>(), dstUpdatedEntry);
 
-		// clusterTenantCount() increase tenant count of source, decrease tenant count of destination
-		int numTenants = self->tenantsInGroup.size();
-		metadata::management::clusterTenantCount().atomicOp(tr, srcName, numTenants, MutationRef::AddValue);
-		metadata::management::clusterTenantCount().atomicOp(tr, dstName, -numTenants, MutationRef::AddValue);
+		// clusterTenantCount() is updated for dst at the end of Finish
+		// and updated for src at the beginning of Start
 
 		state std::vector<std::pair<TenantName, MetaclusterTenantMapEntry>> tenantMetadataList;
 		wait(store(tenantMetadataList, metacluster::listTenantMetadataTransaction(tr, self->tenantsInGroup)));
@@ -1184,7 +1212,7 @@ struct AbortTenantMovementImpl {
 				TraceEvent(SevError, "TenantMoveAbortSwitchTenantEntryWrongCluster")
 				    .detail("TenantName", tName)
 				    .detail("TenantId", tId)
-				    .detail("ExpectedCluster", srcName)
+				    .detail("ExpectedCluster", dstName)
 				    .detail("EntryCluster", tenantEntry.assignedCluster);
 				throw invalid_tenant_move();
 			}
@@ -1302,6 +1330,7 @@ struct AbortTenantMovementImpl {
 		wait(self->srcCtx.runManagementTransaction([self = self](Reference<typename DB::TransactionT> tr) {
 			return updateMoveRecordState(tr, metadata::management::MovementState::SWITCH_HYBRID, self->tenantGroup);
 		}));
+		TraceEvent("TenantMoveAfterSwitchHybrid2");
 		wait(abortSwitchHybrid(self));
 		return Void();
 	}
