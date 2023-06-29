@@ -574,7 +574,10 @@ class DDTxnProcessorImpl {
 		}
 	}
 
-	ACTOR static Future<Void> pollMoveKeysLock(Database cx, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
+	ACTOR static Future<Void> pollMoveKeysLock(Database cx,
+	                                           MoveKeysLock lock,
+	                                           const DDEnabledState* ddEnabledState,
+	                                           bool checkWhenDDDisabled) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(cx);
@@ -583,6 +586,17 @@ class DDTxnProcessorImpl {
 				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
 				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 				try {
+					if (checkWhenDDDisabled) {
+						state int ddMode = 1;
+						Optional<Value> ddModeValue = wait(tr.get(dataDistributionModeKey));
+						if (ddModeValue.present()) {
+							BinaryReader rd(ddModeValue.get(), Unversioned());
+							rd >> ddMode;
+						}
+						if (ddMode == 1) {
+							return Void();
+						}
+					}
 					wait(checkMoveKeysLockReadOnly(&tr, lock, ddEnabledState));
 					break;
 				} catch (Error& e) {
@@ -712,8 +726,10 @@ Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddE
 	return DDTxnProcessorImpl::isDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
-	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
+Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock,
+                                              const DDEnabledState* ddEnabledState,
+                                              bool checkWhenDDDisabled) const {
+	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState, checkWhenDDDisabled);
 }
 
 Future<std::pair<Optional<StorageMetrics>, int>> DDTxnProcessor::waitStorageMetrics(

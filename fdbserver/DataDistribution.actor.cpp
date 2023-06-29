@@ -444,6 +444,11 @@ public:
 				ASSERT(!ads.more && ads.size() < CLIENT_KNOBS->TOO_MANY);
 				for (int i = 0; i < ads.size(); ++i) {
 					auto auditState = decodeAuditStorageState(ads[i].value);
+					TraceEvent(SevDebug, "AuditStorageResumeLoad", self->ddId)
+					    .detail("AuditDDID", auditState.ddId)
+					    .detail("AuditType", auditState.getType())
+					    .detail("AuditID", auditState.id)
+					    .detail("AuditPhase", auditState.getPhase());
 					auditStates.push_back(auditState);
 				}
 				break;
@@ -460,20 +465,25 @@ public:
 
 		// Update metadata with current ddId
 		state int retryCount = 0;
+		state MoveKeyLockInfo lockInfo;
 		loop {
 			try {
 				std::vector<Future<Void>> fs;
-				state MoveKeyLockInfo lockInfo;
 				lockInfo.myOwner = self->lock.myOwner;
 				lockInfo.prevOwner = self->lock.prevOwner;
 				lockInfo.prevWrite = self->lock.prevWrite;
-				for (const auto& auditState : auditStates) {
+				for (const auto auditState : auditStates) {
 					// Only running audit will be resumed
 					if (auditState.getPhase() == AuditPhase::Running) {
 						AuditStorageState toUpdate = auditState;
 						toUpdate.ddId = self->ddId;
 						fs.push_back(updateAuditState(
 						    self->txnProcessor->context(), toUpdate, lockInfo, self->context->isDDEnabled()));
+						TraceEvent(SevDebug, "AuditStorageResumeUpdateMetadata", self->ddId)
+						    .detail("AuditType", toUpdate.getType())
+						    .detail("AuditID", toUpdate.id)
+						    .detail("AuditPhase", toUpdate.getPhase())
+						    .detail("NewDDID", toUpdate.ddId);
 					}
 				}
 				wait(waitForAll(fs));
@@ -485,6 +495,7 @@ public:
 				if (retryCount > 50) {
 					TraceEvent(SevWarnAlways, "AuditStorageResumeUnableUpdateMetadata", self->ddId)
 					    .errorUnsuppressed(e);
+					self->auditInitialized.send(Void());
 					return Void();
 				}
 				retryCount++;
@@ -554,6 +565,17 @@ public:
 					continue;
 				}
 				ASSERT(auditState.getPhase() == AuditPhase::Running);
+				if (self->audits.contains(auditState.getType()) &&
+				    self->audits[auditState.getType()].contains(auditState.id)) {
+					// It is possible that the current DD is running this audit
+					// Suppose DDinit re-runs right after a new audit is persisted
+					// For this case, auditResume sees the new audit and resumes it
+					// At this point, the new audit is in the audit map
+					// Meanwhile, existing DDAuditStorage retries (since DD does not restart)
+					// Then, existing DDAuditStorageStart is conflict with auditResume
+					// auditResume cannot see the new audit in the map
+					continue;
+				}
 				TraceEvent(SevDebug, "AuditStorageResume", self->ddId)
 				    .detail("AuditID", auditState.id)
 				    .detail("AuditType", auditState.getType())
@@ -580,6 +602,8 @@ public:
 
 			if (!auditStorageInitialized) {
 				self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
+				// self->addActor.send(self->txnProcessor->pollMoveKeysLock(self->lock,
+				// self->context->ddEnabledState.get(), /*checkWhenDDDisabled*/true));
 				wait(self->resumeStorageAudits(self));
 				TraceEvent("DDAuditStorageResumed", self->ddId).log();
 				auditStorageInitialized = true;
@@ -866,7 +890,7 @@ public:
 	}
 
 	Future<Void> pollMoveKeysLock() const {
-		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get());
+		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get(), /*checkWhenDDDisabled=*/false);
 	}
 
 	Future<bool> isDataDistributionEnabled() const {
@@ -911,10 +935,11 @@ Future<Void> DataDistributor::initTenantCache() {
 	return ddTenantCache.get()->build();
 }
 
-inline void addAuditToAuditMap(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit) {
+inline void addAuditToAuditMap(Reference<DataDistributor> self, std::shared_ptr<DDAudit> audit, std::string context) {
 	AuditType auditType = audit->coreState.getType();
 	UID auditID = audit->coreState.id;
 	TraceEvent(SevDebug, "AuditMapOps", self->ddId)
+	    .detail("Context", context)
 	    .detail("Ops", "addAuditToAuditMap")
 	    .detail("AuditType", auditType)
 	    .detail("AuditID", auditID);
@@ -2027,7 +2052,7 @@ void runAuditStorage(Reference<DataDistributor> self,
 	    .detail("Range", audit->coreState.range)
 	    .detail("AuditType", audit->coreState.getType())
 	    .detail("Context", context);
-	addAuditToAuditMap(self, audit);
+	addAuditToAuditMap(self, audit, context);
 	audit->setAuditRunActor(
 	    auditStorageCore(self, audit->coreState.id, audit->coreState.getType(), context, audit->retryCount));
 	return;
@@ -2111,6 +2136,16 @@ ACTOR Future<UID> launchAudit(Reference<DataDistributor> self, KeyRange auditRan
 			    .detail("Range", auditRange);
 			auditState.id = auditID_;
 			auditID = auditID_;
+			if (self->audits.contains(auditType) && self->audits[auditType].contains(auditID)) {
+				// It is possible that the current DD is running this audit
+				// Suppose DDinit re-runs right after a new audit is persisted
+				// For this case, auditResume sees the new audit and resumes it
+				// At this point, the new audit is in the audit map
+				// Meanwhile, existing DDAuditStorage retries (since DD does not restart)
+				// Then, existing DDAuditStorageStart is conflict with auditResume
+				// auditResume cannot see the new audit in the map
+				return auditID;
+			}
 			runAuditStorage(self, auditState, 0, "LaunchAudit");
 		}
 	} catch (Error& e) {
