@@ -59,15 +59,6 @@ void fdbCheck(const fdb::Error& err) {
 	}
 }
 
-fdb::Database fdbOpenDatabase(const char* clusterFilePath) {
-	try {
-		return fdb::Database(clusterFilePath);
-	} catch (const fdb::Error& e) {
-		fdbCheck(e);
-	}
-	UNREACHABLE();
-}
-
 fdb::Error waitFuture(fdb::Future& f) {
 	fdbCheck(f.blockUntilReady());
 	return f.error();
@@ -193,7 +184,7 @@ static inline std::string extractString(fdb::native::FDBKey key) {
 	return std::string((const char*)key.key, key.key_length);
 }
 
-GetMappedRangeResult get_mapped_range(fdb::Transaction& tr,
+GetMappedRangeResult getMappedRange(fdb::Transaction& tr,
                                       fdb::KeySelector begin,
                                       fdb::KeySelector end,
                                       fdb::KeyRef mapperName,
@@ -844,7 +835,7 @@ GetMappedRangeResult getMappedIndexEntries(int beginId,
 	std::string indexEntryKeyBegin = indexEntryKey(beginId);
 	std::string indexEntryKeyEnd = indexEntryKey(endId);
 
-	return get_mapped_range(tr,
+	return getMappedRange(tr,
 	                        fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyBegin)),
 	                        fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKeyEnd)),
 	                        fdb::toBytesRef(mapper),
@@ -934,7 +925,7 @@ TEST_CASE("tuple_fail_to_append_longer_versionstamp") {
 	UNREACHABLE();
 }
 
-TEST_CASE("fdb_transaction_get_mapped_range") {
+TEST_CASE("fdb_transaction_getMappedRange") {
 	const int TOTAL_RECORDS = 20;
 	fillInRecords(TOTAL_RECORDS);
 
@@ -988,7 +979,7 @@ TEST_CASE("fdb_transaction_get_mapped_range") {
 	}
 }
 
-TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
+TEST_CASE("fdb_transaction_getMappedRange_missing_all_secondary") {
 	const int TOTAL_RECORDS = 20;
 	fillInRecords(TOTAL_RECORDS);
 
@@ -1036,10 +1027,10 @@ TEST_CASE("fdb_transaction_get_mapped_range_missing_all_secondary") {
 	}
 }
 
-TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
+TEST_CASE("fdb_transaction_getMappedRange_restricted_to_serializable") {
 	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	auto tr = db.createTransaction();
-	auto result = get_mapped_range(tr,
+	auto result = getMappedRange(tr,
 	                               fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
 	                               fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
 	                               fdb::toBytesRef(mapper),
@@ -1053,11 +1044,11 @@ TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_serializable") {
 	ASSERT(result.err.code() == error_code_unsupported_operation);
 }
 
-TEST_CASE("fdb_transaction_get_mapped_range_restricted_to_ryw_enable") {
+TEST_CASE("fdb_transaction_getMappedRange_restricted_to_ryw_enable") {
 	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	auto tr = db.createTransaction();
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE)); // Not disable RYW
-	auto result = get_mapped_range(tr,
+	auto result = getMappedRange(tr,
 	                               fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
 	                               fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
 	                               fdb::toBytesRef(mapper),
@@ -1080,7 +1071,7 @@ void assertNotTuple(std::string str) {
 	UNREACHABLE();
 }
 
-TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
+TEST_CASE("fdb_transaction_getMappedRange_fail_on_mapper_not_tuple") {
 	// A string that cannot be parsed as tuple.
 	//
 	///"\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
@@ -1121,9 +1112,7 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -1170,9 +1159,7 @@ TEST_CASE("fdb_transaction_get_range limit") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -1215,9 +1202,7 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -2108,46 +2093,37 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 }
 
 TEST_CASE("invalid trace parent") {
-	fdb::Transaction tr(db);
+	auto tr = db.createTransaction();
 	std::string invalidTraceParent = "invalid";
-	fdb_error_t err = tr.set_option(FDB_TR_OPTION_TRACE_PARENT,
-	                                reinterpret_cast<const uint8_t*>(invalidTraceParent.c_str()),
-	                                invalidTraceParent.size());
-	if (err != 2006) { // invalid_option_value
-		fdb::EmptyFuture f1 = tr.commit();
-		ASSERT_EQ(wait_future(f1), 2006);
+	auto err = tr.setOptionNothrow(FDB_TR_OPTION_TRACE_PARENT, invalidTraceParent);
+	if (err.code() != 2006) { // invalid_option_value
+		auto f1 = tr.commit();
+		ASSERT_EQ(waitFuture(f1).code(), 2006);
 	}
 }
 
 TEST_CASE("trace parent") {
-	fdb::Transaction tr(db);
+	auto tr = db.createTransaction();
 	SpanContext context(
 	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
 
 	std::string traceParent = context.toString();
 
-	fdb_check(tr.set_option(
-	    FDB_TR_OPTION_TRACE_PARENT, reinterpret_cast<const uint8_t*>(traceParent.c_str()), traceParent.size()));
-
+	tr.setOption(FDB_TR_OPTION_TRACE_PARENT, traceParent);
 	while (1) {
-		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
-		                             /* snapshot */ false);
+		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
 
-		fdb_error_t err = wait_future(f1);
+		auto err = waitFuture(f1);
 		if (err) {
-			fdb::EmptyFuture f2 = tr.on_error(err);
-			fdb_check(wait_future(f2));
+			auto f2 = tr.onError(err);
+			fdbCheck(waitFuture(f2));
 			continue;
 		}
 
-		int out_present;
-		char* val;
-		int vallen;
-		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
-
-		REQUIRE(out_present);
-		UID transaction_id = UID::fromString(std::string(val, vallen));
-		ASSERT_EQ(transaction_id, context.traceID);
+		auto output = f1.get();
+		REQUIRE(output.has_value());
+		UID transactionID = UID::fromString(std::string(output->begin(), output->end()));
+		ASSERT_EQ(transactionID, context.traceID);
 		break;
 	}
 }
@@ -2155,9 +2131,9 @@ TEST_CASE("trace parent") {
 TEST_CASE("special-key-space valid transaction ID") {
 	auto value = get_value(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
-	UID transaction_id = UID::fromString(value.value());
-	CHECK(transaction_id.first() > 0);
-	CHECK(transaction_id.second() > 0);
+	UID transactionID = UID::fromString(value.value());
+	CHECK(transactionID.first() > 0);
+	CHECK(transactionID.second() > 0);
 }
 
 TEST_CASE("special-key-space custom transaction ID") {
@@ -2178,8 +2154,8 @@ TEST_CASE("special-key-space custom transaction ID") {
 		std::optional<fdb::ValueRef> value;
 		fdbCheck(f1.getNothrow(value));
 		REQUIRE(value.has_value());
-		UID transaction_id = UID::fromString(std::string(value->begin(), value->end()));
-		CHECK(transaction_id == randomTransactionID);
+		UID transactionID = UID::fromString(std::string(value->begin(), value->end()));
+		CHECK(transactionID == randomTransactionID);
 		break;
 	}
 }
@@ -2203,9 +2179,9 @@ TEST_CASE("special-key-space set transaction ID after write") {
 		fdbCheck(f1.getNothrow(value));
 
 		REQUIRE(value.has_value());
-		UID transaction_id = UID::fromString(std::string(value->begin(), value->end()));
-		CHECK(transaction_id.first() > 0);
-		CHECK(transaction_id.second() > 0);
+		UID transactionID = UID::fromString(std::string(value->begin(), value->end()));
+		CHECK(transactionID.first() > 0);
+		CHECK(transactionID.second() > 0);
 		break;
 	}
 }
@@ -2257,9 +2233,7 @@ TEST_CASE("special-key-space tracing get range") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -2270,9 +2244,9 @@ TEST_CASE("special-key-space tracing get range") {
 		auto tracingBeginTidKey = std::string(out_kv[1].key().begin(), out_kv[1].key().end());
 		CHECK(tracingBeginTidKey == tracingBegin + "transaction_id");
 		auto tracingBeginTidVal = std::string(out_kv[1].value().begin(), out_kv[1].value().end());
-		UID transaction_id = UID::fromString(tracingBeginTidVal);
-		CHECK(transaction_id.first() > 0);
-		CHECK(transaction_id.second() > 0);
+		UID transactionID = UID::fromString(tracingBeginTidVal);
+		CHECK(transactionID.first() > 0);
+		CHECK(transactionID.second() > 0);
 		break;
 	}
 }
@@ -2322,9 +2296,9 @@ TEST_CASE("fdb_database_reboot_worker") {
 	CHECK(statusJson["cluster"]["processes"].MemberCount() == 1);
 	auto processPtr = statusJson["cluster"]["processes"].MemberBegin();
 	CHECK(processPtr->value.HasMember("address"));
-	std::string network_address = processPtr->value["address"].GetString();
+	std::string networkAddress = processPtr->value["address"].GetString();
 	while (1) {
-		auto f = db.rebootWorker(fdb::toBytesRef(network_address), false, 0);
+		auto f = db.rebootWorker(fdb::toBytesRef(networkAddress), false, 0);
 		fdbCheck(waitFuture(f));
 		int64_t successful;
 		fdbCheck(f.getNothrow(successful));
@@ -2601,9 +2575,7 @@ TEST_CASE("Tenant create, access, and delete") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f.getNothrow(output));
-
+		auto output = f.get();
 		auto outKv = std::get<0>(output);
 		auto outCount = std::get<1>(output);
 
@@ -2942,7 +2914,7 @@ int main(int argc, char** argv) {
 	fdbCheck(fdb::network::setupNothrow());
 	std::thread network_thread{ [] { fdbCheck(fdb::network::run()); } };
 
-	db = fdbOpenDatabase(argv[1]);
+	db = fdb::Database(argv[1]);
 	clusterFilePath = std::string(argv[1]);
 	prefix = argv[2];
 	int res = context.run();
