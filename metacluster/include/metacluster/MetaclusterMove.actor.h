@@ -658,8 +658,11 @@ struct SwitchTenantMovementImpl {
 		wait(checkAllTenantData(self));
 
 		TraceEvent("BreakpointSwitch3");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return applyHybridRanges(self, tr); }));
+		// On retry, skip this if we've progressed further
+		if (self->moveRecord.mState != metadata::management::MovementState::SWITCH_METADATA) {
+			wait(self->srcCtx.runManagementTransaction(
+			    [self = self](Reference<typename DB::TransactionT> tr) { return applyHybridRanges(self, tr); }));
+		}
 
 		TraceEvent("BreakpointSwitch4");
 		wait(self->srcCtx.runManagementTransaction(
