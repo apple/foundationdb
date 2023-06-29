@@ -19,6 +19,7 @@
  */
 
 #include "fdbserver/IKeyValueStore.h"
+#include "fdbserver/ServerDBInfo.actor.h"
 #include "flow/ActorCollection.h"
 #include "flow/Error.h"
 #include "flow/Platform.h"

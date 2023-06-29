@@ -41,6 +41,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <rapidjson/document.h>
 #include "doctest.h"
+#include "fdbclient/Tracing.h"
 #include "fdbclient/Tuple.h"
 
 #include "flow/config.h"
@@ -2104,6 +2105,51 @@ TEST_CASE("fdb_transaction_add_conflict_range") {
 	// Double check that failure was achieved and the loop wasn't just broken out
 	// of.
 	CHECK(success);
+}
+
+TEST_CASE("invalid trace parent") {
+	fdb::Transaction tr(db);
+	std::string invalidTraceParent = "invalid";
+	fdb_error_t err = tr.set_option(FDB_TR_OPTION_TRACE_PARENT,
+	                                reinterpret_cast<const uint8_t*>(invalidTraceParent.c_str()),
+	                                invalidTraceParent.size());
+	if (err != 2006) { // invalid_option_value
+		fdb::EmptyFuture f1 = tr.commit();
+		ASSERT_EQ(wait_future(f1), 2006);
+	}
+}
+
+TEST_CASE("trace parent") {
+	fdb::Transaction tr(db);
+	SpanContext context(
+	    deterministicRandom()->randomUniqueID(), deterministicRandom()->randomUInt64(), TraceFlags::unsampled);
+
+	std::string traceParent = context.toString();
+
+	fdb_check(tr.set_option(
+	    FDB_TR_OPTION_TRACE_PARENT, reinterpret_cast<const uint8_t*>(traceParent.c_str()), traceParent.size()));
+
+	while (1) {
+		fdb::ValueFuture f1 = tr.get("\xff\xff/tracing/transaction_id",
+		                             /* snapshot */ false);
+
+		fdb_error_t err = wait_future(f1);
+		if (err) {
+			fdb::EmptyFuture f2 = tr.on_error(err);
+			fdb_check(wait_future(f2));
+			continue;
+		}
+
+		int out_present;
+		char* val;
+		int vallen;
+		fdb_check(f1.get(&out_present, (const uint8_t**)&val, &vallen));
+
+		REQUIRE(out_present);
+		UID transaction_id = UID::fromString(std::string(val, vallen));
+		ASSERT_EQ(transaction_id, context.traceID);
+		break;
+	}
 }
 
 TEST_CASE("special-key-space valid transaction ID") {

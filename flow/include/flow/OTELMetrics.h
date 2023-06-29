@@ -130,8 +130,8 @@ public:
 	double max;
 	DataPointFlags flags;
 	HistogramDataPoint(double error, const std::vector<uint32_t>& s, double _min, double _max, double _sum)
-	  : errorGuarantee(error), recordTime{ now() }, buckets{ s }, count{ buckets.size() }, min{ _min }, max{ _max },
-	    sum{ _sum }, flags{ DataPointFlags::FLAG_NONE } {}
+	  : errorGuarantee(error), buckets{ s }, recordTime{ now() }, count{ buckets.size() }, sum{ _sum }, min{ _min },
+	    max{ _max }, flags{ DataPointFlags::FLAG_NONE } {}
 	HistogramDataPoint& addAttribute(const std::string& key, const std::string& value) {
 		attributes.emplace_back(Attribute(key, value));
 		return *this;

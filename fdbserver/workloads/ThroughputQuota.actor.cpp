@@ -18,7 +18,7 @@
  * limitations under the License.
  */
 
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbserver/workloads/workloads.actor.h"
 
 #include "flow/actorcompiler.h" // This must be the last #include.
@@ -78,7 +78,7 @@ public:
 	}
 
 	Future<Void> setup(Database const& cx) override {
-		cx->debugUseTags = true;
+		cx->debugUseTag = true;
 		return clientId ? Void() : setup(this, cx);
 	}
 	Future<Void> start(Database const& cx) override { return Void(); }

@@ -38,7 +38,9 @@
 #include "fdbclient/KeyRangeMap.h"
 #include "fdbclient/CommitProxyInterface.h"
 #include "fdbclient/SpecialKeySpace.actor.h"
+#include "fdbclient/ThroughputTracker.h"
 #include "fdbclient/VersionVector.h"
+#include "fdbclient/IKeyValueStore.actor.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/MultiInterface.h"
 #include "flow/TDMetric.actor.h"
@@ -78,57 +80,13 @@ struct LocationInfo : MultiInterface<ReferencedInterface<StorageServerInterface>
 using CommitProxyInfo = ModelInterface<CommitProxyInterface>;
 using GrvProxyInfo = ModelInterface<GrvProxyInterface>;
 
-class ClientTagThrottleData : NonCopyable {
-private:
-	double tpsRate;
-	double expiration;
-	double lastCheck;
-	bool rateSet = false;
-
-	Smoother smoothRate;
-	Smoother smoothReleased;
-
-public:
-	ClientTagThrottleData(ClientTagThrottleLimits const& limits)
-	  : tpsRate(limits.tpsRate), expiration(limits.expiration), lastCheck(now()),
-	    smoothRate(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW),
-	    smoothReleased(CLIENT_KNOBS->TAG_THROTTLE_SMOOTHING_WINDOW) {
-		ASSERT(tpsRate >= 0);
-		smoothRate.reset(tpsRate);
-	}
-
-	void update(ClientTagThrottleLimits const& limits) {
-		ASSERT(limits.tpsRate >= 0);
-		this->tpsRate = limits.tpsRate;
-
-		if (!rateSet || expired()) {
-			rateSet = true;
-			smoothRate.reset(limits.tpsRate);
-		} else {
-			smoothRate.setTotal(limits.tpsRate);
-		}
-
-		expiration = limits.expiration;
-	}
-
-	void addReleased(int released) { smoothReleased.addDelta(released); }
-
-	bool expired() const { return expiration <= now(); }
-
-	void updateChecked() { lastCheck = now(); }
-
-	bool canRecheck() const { return lastCheck < now() - CLIENT_KNOBS->TAG_THROTTLE_RECHECK_INTERVAL; }
-
-	double throttleDuration() const;
-};
-
 struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	const TenantInfo tenant;
 	const Key key;
 	const Optional<Value> value;
 
 	const Version version;
-	const TagSet tags;
+	const Optional<TransactionTag> throttlingTag;
 	const SpanContext spanContext;
 	const TaskPriority taskID;
 	const Optional<UID> debugID;
@@ -138,13 +96,13 @@ struct WatchParameters : public ReferenceCounted<WatchParameters> {
 	                Key key,
 	                Optional<Value> value,
 	                Version version,
-	                TagSet tags,
+	                Optional<TransactionTag> throttlingTag,
 	                SpanContext spanContext,
 	                TaskPriority taskID,
 	                Optional<UID> debugID,
 	                UseProvisionalProxies useProvisionalProxies)
-	  : tenant(tenant), key(key), value(value), version(version), tags(tags), spanContext(spanContext), taskID(taskID),
-	    debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
+	  : tenant(tenant), key(key), value(value), version(version), throttlingTag(throttlingTag),
+	    spanContext(spanContext), taskID(taskID), debugID(debugID), useProvisionalProxies(useProvisionalProxies) {}
 };
 
 class WatchMetadata : public ReferenceCounted<WatchMetadata> {
@@ -220,6 +178,44 @@ struct OverlappingChangeFeedsInfo {
 	// for a feed that wasn't present, returns the metadata version it would have been fetched at.
 	Version getFeedMetadataVersion(const KeyRangeRef& feedRange) const;
 };
+
+struct ChangeFeedCacheRange {
+	Key tenantPrefix;
+	Key rangeId;
+	KeyRange range;
+
+	ChangeFeedCacheRange(Key tenantPrefix, Key rangeId, KeyRange range)
+	  : tenantPrefix(tenantPrefix), rangeId(rangeId), range(range) {}
+	ChangeFeedCacheRange(std::tuple<Key, Key, KeyRange> range)
+	  : tenantPrefix(std::get<0>(range)), rangeId(std::get<1>(range)), range(std::get<2>(range)) {}
+
+	bool operator==(const ChangeFeedCacheRange& rhs) const {
+		return tenantPrefix == rhs.tenantPrefix && rangeId == rhs.rangeId && range == rhs.range;
+	}
+};
+
+struct ChangeFeedCacheData : ReferenceCounted<ChangeFeedCacheData> {
+	Version version = -1; // The first version durably stored in the cache
+	Version latest =
+	    -1; // The last version durably store in the cache; this version will not be readable from disk before a commit
+	Version popped = -1; // The popped version of this change feed
+	bool active = false;
+	double inactiveTime = 0;
+};
+
+namespace std {
+template <>
+struct hash<ChangeFeedCacheRange> {
+	static constexpr std::hash<StringRef> hashFunc{};
+	std::size_t operator()(ChangeFeedCacheRange const& range) const {
+		std::size_t seed = 0;
+		boost::hash_combine(seed, hashFunc(range.rangeId));
+		boost::hash_combine(seed, hashFunc(range.range.begin));
+		boost::hash_combine(seed, hashFunc(range.range.end));
+		return seed;
+	}
+};
+} // namespace std
 
 class DatabaseContext : public ReferenceCounted<DatabaseContext>, public FastAllocated<DatabaseContext>, NonCopyable {
 public:
@@ -401,7 +397,8 @@ public:
 	                                 int replyBufferSize = -1,
 	                                 bool canReadPopped = true,
 	                                 ReadOptions readOptions = { ReadType::NORMAL, CacheResult::False },
-	                                 bool encrypted = false);
+	                                 bool encrypted = false,
+	                                 Future<Key> tenantPrefix = Key());
 
 	Future<OverlappingChangeFeedsInfo> getOverlappingChangeFeeds(KeyRangeRef ranges, Version minVersion);
 	Future<Void> popChangeFeedMutations(Key rangeID, Version version);
@@ -444,8 +441,6 @@ public:
 	                         Optional<TenantName> defaultTenant = Optional<TenantName>());
 
 	explicit DatabaseContext(const Error& err);
-
-	void expireThrottles();
 
 	UID dbId;
 
@@ -504,6 +499,17 @@ public:
 	std::unordered_map<UID, ChangeFeedStorageData*> changeFeedUpdaters;
 	std::map<UID, ChangeFeedData*> notAtLatestChangeFeeds;
 
+	IKeyValueStore* storage = nullptr;
+	Future<Void> changeFeedStorageCommitter;
+	Future<Void> initializeChangeFeedCache = Void();
+	int64_t uncommittedCFBytes = 0;
+	Reference<AsyncVar<bool>> commitChangeFeedStorage;
+
+	std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>> changeFeedCaches;
+	std::unordered_map<Key, std::unordered_map<ChangeFeedCacheRange, Reference<ChangeFeedCacheData>>> rangeId_cacheData;
+
+	void setStorage(IKeyValueStore* storage);
+
 	Reference<ChangeFeedStorageData> getStorageData(StorageServerInterface interf);
 	Version getMinimumChangeFeedVersion();
 	void setDesiredChangeFeedVersion(Version v);
@@ -515,8 +521,6 @@ public:
 	std::unordered_map<UID, Tag> ssidTagMapping;
 
 	IsInternal internal; // Only contexts created through the C client and fdbcli are non-internal
-
-	PrioritizedTransactionTagMap<ClientTagThrottleData> throttledTags;
 
 	CounterCollection cc;
 
@@ -621,7 +625,6 @@ public:
 	bool blobGranuleNoMaterialize = false;
 
 	Future<Void> logger;
-	Future<Void> throttleExpirer;
 
 	TaskPriority taskID;
 
@@ -661,7 +664,7 @@ public:
 	                             std::unique_ptr<SpecialKeyRangeReadImpl>&& impl,
 	                             int deprecatedVersion = -1);
 
-	bool debugUseTags = false;
+	bool debugUseTag = false;
 	static const std::vector<std::string> debugTransactionTagChoices;
 
 	// Cache of the latest commit versions of storage servers.
@@ -719,6 +722,8 @@ public:
 
 		return clientInfo->get().tenantMode;
 	}
+
+	void addCost(ThrottlingId const&, uint64_t bytes);
 
 	// used in template functions to create a transaction
 	using TransactionT = ReadYourWritesTransaction;
@@ -782,6 +787,9 @@ private:
 	using WatchCounterMap_t = std::unordered_map<WatchMapKey, WatchCounterMapValue, WatchMapKeyHasher>;
 	// Maps the number of the WatchMapKey being used.
 	WatchCounterMap_t watchCounterMap;
+
+	ThroughputTracker throughputTracker;
+	Future<Void> throughputTrackerFuture;
 
 	void initializeSpecialCounters();
 };

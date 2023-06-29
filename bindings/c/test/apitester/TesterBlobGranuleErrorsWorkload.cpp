@@ -86,11 +86,11 @@ private:
 			    fdb::Error err = res.getKeyValueArrayNothrow(out);
 
 			    if (err.code() == error_code_success) {
-				    error(fmt::format("Operation succeeded in error test!"));
+				    error("Operation succeeded in error test!");
 			    }
 			    ASSERT(err.code() != error_code_success);
 			    if (err.code() != expectedError) {
-				    info(fmt::format("incorrect error. Expected {}, Got {}", expectedError, err.code()));
+				    info("incorrect error. Expected {}, Got {}", expectedError, err.code());
 				    if (err.code() == error_code_blob_granule_transaction_too_old) {
 					    ASSERT(!seenReadSuccess);
 					    ctx->done();
@@ -131,7 +131,7 @@ private:
 			    ctx->continueAfter(
 			        f,
 			        [this, ctx, f]() {
-				        info(fmt::format("unaligned purge got {}", f.error().code()));
+				        info("unaligned purge got {}", f.error().code());
 				        ASSERT(f.error().code() == error_code_unsupported_operation);
 				        ctx->done();
 			        },

@@ -10,11 +10,13 @@ import stat
 from urllib import request
 from fdb_version import CURRENT_VERSION, FUTURE_VERSION
 
-from test_util import random_alphanum_string
+from test_util import random_alphanum_string, get_logger
 
 SUPPORTED_PLATFORMS = ["x86_64", "aarch64"]
 FDB_DOWNLOAD_BUCKET = "sfc-eng-jenkins"
 FDB_DOWNLOAD_PREFIX = "foundationdb/release/builds"
+
+logger = get_logger()
 
 
 def make_executable_path(path):
@@ -128,10 +130,10 @@ class FdbBinaryDownloader:
             remote_bin_name,
         )
 
-        print("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
+        logger.info("Downloading '{}' to '{}'...".format(remote_file, local_file_tmp))
         ret = os.system("aws s3 cp '{}' '{}'".format(remote_file, local_file_tmp))
         assert ret == 0, "Download failed. Return code: {}".format(ret)
-        print("Download complete")
+        logger.info("Download complete")
 
         os.rename(local_file_tmp, local_file)
 
