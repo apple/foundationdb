@@ -953,7 +953,7 @@ public:
 	                              const int plaintextLen,
 	                              BlobCipherEncryptHeader* header,
 	                              Arena&);
-	StringRef encrypt(const uint8_t*, const int, BlobCipherEncryptHeaderRef*, Arena&, double* encryptTimeNS = nullptr);
+	StringRef encrypt(const uint8_t*, const int, BlobCipherEncryptHeaderRef*, Arena&, double* encryptTime = nullptr);
 
 	void encryptInplace(uint8_t* plaintext, const int plaintextLen, BlobCipherEncryptHeader* header);
 
@@ -1004,14 +1004,14 @@ public:
 	                  const int ciphertextLen,
 	                  const BlobCipherEncryptHeaderRef& headerRef,
 	                  Arena&,
-	                  double* decryptTimeNS = nullptr);
+	                  double* decryptTime = nullptr);
 
 	void decryptInplace(uint8_t* ciphertext, const int ciphertextLen, const BlobCipherEncryptHeader& header);
 
 	void decryptInplace(uint8_t* ciphertext,
 	                    const int ciphertextLen,
 	                    const BlobCipherEncryptHeaderRef& headerRef,
-	                    double* decryptTimeNS = nullptr);
+	                    double* decryptTime = nullptr);
 
 private:
 	EVP_CIPHER_CTX* ctx;

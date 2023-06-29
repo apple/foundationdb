@@ -623,7 +623,7 @@ struct CommitBatchContext {
 
 	// If encryption is enabled this value represents the total time (in nanoseconds) that was spent on encryption in
 	// the commit proxy for a given Commit Batch
-	Optional<double> encryptionTimeNS;
+	Optional<double> encryptionTime;
 
 	Optional<UID> debugID;
 
@@ -1744,7 +1744,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
                                           const MutationRef* mutation,
                                           Optional<MutationRef>* encryptedMutationOpt,
                                           Arena* arena,
-                                          double* encryptTimeNS = nullptr) {
+                                          double* encryptTime = nullptr) {
 	static_assert(TenantInfo::INVALID_TENANT == INVALID_ENCRYPT_DOMAIN_ID);
 
 	// WriteMutation routine is responsible for appending mutations to be persisted in TLog, the operation
@@ -1784,7 +1784,7 @@ Future<WriteMutationRefVar> writeMutation(CommitBatchContext* self,
 			ASSERT_NE(domainId, INVALID_ENCRYPT_DOMAIN_ID);
 			ASSERT(self->cipherKeys.count(domainId) > 0);
 			encryptedMutation =
-			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTimeNS);
+			    mutation->encrypt(self->cipherKeys, domainId, *arena, BlobCipherMetrics::TLOG, encryptTime);
 		}
 		ASSERT(encryptedMutation.isEncrypted());
 		CODE_PROBE(true, "encrypting non-metadata mutations");
@@ -2071,9 +2071,9 @@ ACTOR Future<Void> assignMutationsToStorageServers(CommitBatchContext* self) {
 		}
 	}
 
-	ASSERT(CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING || self->encryptionTimeNS == 0);
+	ASSERT(CLIENT_KNOBS->ENABLE_ENCRYPTION_CPU_TIME_LOGGING || self->encryptionTime == 0);
 	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled()) {
-		self->encryptionTimeNS = totalEncryptionTime;
+		self->encryptionTime = totalEncryptionTime;
 	}
 
 	return Void();
@@ -2496,8 +2496,8 @@ ACTOR Future<Void> reply(CommitBatchContext* self) {
 		    ExpectedIdempotencyIdCountForKey{ self->commitVersion, count, highOrderBatchIndex });
 	}
 
-	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled() && self->encryptionTimeNS.present()) {
-		pProxyCommitData->stats.encryptionLatencySampleNS.addMeasurement(self->encryptionTimeNS.get());
+	if (self->pProxyCommitData->encryptMode.isEncryptionEnabled() && self->encryptionTime.present()) {
+		pProxyCommitData->stats.encryptionLatencySample.addMeasurement(self->encryptionTime.get());
 	}
 	++pProxyCommitData->stats.commitBatchOut;
 	pProxyCommitData->stats.txnCommitOut += self->trs.size();

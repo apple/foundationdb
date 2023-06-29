@@ -2855,10 +2855,10 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			double decryptTimeNS = 0;
-			page->postReadPayload(pageID, &decryptTimeNS);
+			double decryptTime = 0;
+			page->postReadPayload(pageID, &decryptTime);
 			if (reason.present() && isReadRequest(reason.get())) {
-				g_redwoodMetrics.metric.readRequestDecryptTimeNS += decryptTimeNS;
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
 			}
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
 			             self->filename.c_str(),
@@ -2942,10 +2942,10 @@ public:
 				ArenaPage::EncryptionKey k = wait(self->keyProvider->getEncryptionKey(page->getEncodingHeader()));
 				page->encryptionKey = k;
 			}
-			double decryptTimeNS = 0;
-			page->postReadPayload(pageIDs.front(), &decryptTimeNS);
+			double decryptTime = 0;
+			page->postReadPayload(pageIDs.front(), &decryptTime);
 			if (reason.present() && isReadRequest(reason.get())) {
-				g_redwoodMetrics.metric.readRequestDecryptTimeNS += decryptTimeNS;
+				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
 			}
 
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p bytes=%d\n",
