@@ -237,7 +237,8 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 		// Stop the differential backup, if enabled
 		if (stopDifferentialDelay) {
 			CODE_PROBE(!stopDifferentialFuture.isReady(),
-			           "Restore starts at specified time - stopDifferential not ready");
+			           "Restore starts at specified time - stopDifferential not ready",
+			           probe::decoration::rare);
 			wait(stopDifferentialFuture);
 			TraceEvent("BARW_DoBackupWaitToDiscontinue", randomID)
 			    .detail("Tag", printable(tag))
@@ -495,7 +496,7 @@ struct BackupAndParallelRestoreCorrectnessWorkload : TestWorkload {
 				}
 			}
 
-			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time");
+			CODE_PROBE(!startRestore.isReady(), "Restore starts at specified time", probe::decoration::rare);
 			wait(startRestore);
 
 			if (lastBackupContainer && self->performRestore) {

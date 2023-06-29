@@ -84,6 +84,9 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( CHANGE_FEED_STREAM_MIN_BYTES,            1e4 ); if( randomize && BUGGIFY ) CHANGE_FEED_STREAM_MIN_BYTES = 1;
 	init( CHANGE_FEED_START_INTERVAL,             20.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_START_INTERVAL = 10.0;
 	init( CHANGE_FEED_COALESCE_LOCATIONS,         true ); if( randomize && BUGGIFY ) CHANGE_FEED_COALESCE_LOCATIONS = false;
+	init( CHANGE_FEED_CACHE_FLUSH_BYTES,          10e6 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_FLUSH_BYTES = deterministicRandom()->randomInt64(1, 1e6);
+	init( CHANGE_FEED_CACHE_EXPIRE_TIME,          60.0 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_EXPIRE_TIME = 1.0;
+	init( CHANGE_FEED_CACHE_LIMIT_BYTES,        500000 ); if( randomize && BUGGIFY ) CHANGE_FEED_CACHE_LIMIT_BYTES = 50000;
 
 	init( MAX_BATCH_SIZE,                         1000 ); if( randomize && BUGGIFY ) MAX_BATCH_SIZE = 1;
 	init( GRV_BATCH_TIMEOUT,                     0.005 ); if( randomize && BUGGIFY ) GRV_BATCH_TIMEOUT = 0.1;
@@ -281,6 +284,11 @@ void ClientKnobs::initialize(Randomize randomize) {
 	init( TAG_THROTTLING_PAGE_SIZE,                4096 ); if( randomize && BUGGIFY ) TAG_THROTTLING_PAGE_SIZE = 4096;
 	init( GLOBAL_TAG_THROTTLING_RW_FUNGIBILITY_RATIO,            4.0 );
 	init( PROXY_MAX_TAG_THROTTLE_DURATION,          5.0 ); if( randomize && BUGGIFY ) PROXY_MAX_TAG_THROTTLE_DURATION = 0.5;
+	init( MAX_GRV_BATCHERS,                        1000 );
+	init( GRV_BATCHER_EXPIRATION_TIMEOUT,          60.0 );
+	init( GRV_BATCHER_CLEANING_INTERVAL,            5.0 );
+	init( TRACK_THROUGHPUT_ON_CLIENTS,            false ); if( randomize && BUGGIFY ) TRACK_THROUGHPUT_ON_CLIENTS = true;
+	init( CLIENT_THROUGHPUT_REPORT_INTERVAL,        1.0 );
 
 	// busyness reporting
 	init( BUSYNESS_SPIKE_START_THRESHOLD,         0.100 );
@@ -310,7 +318,6 @@ void ClientKnobs::initialize(Randomize randomize) {
 
 	init( ENABLE_ENCRYPTION_CPU_TIME_LOGGING,       false );
 	init( SIMULATION_EKP_TENANT_IDS_TO_DROP,         "-1" );
-	init( ENABLE_CONFIGURABLE_ENCRYPTION,            true );
 	init( ENCRYPT_HEADER_FLAGS_VERSION,                 1 );
 	init( ENCRYPT_HEADER_AES_CTR_NO_AUTH_VERSION,       1 );
 	init( ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION, 1 );

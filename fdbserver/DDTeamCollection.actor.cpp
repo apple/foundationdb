@@ -212,7 +212,7 @@ public:
 			}
 
 			// report the pivot values
-			self->updateTeamPivotValues();
+			self->updateTeamPivots(req.inflightPenalty);
 
 			bool foundSrc = false;
 			for (const auto& id : req.src) {
@@ -288,10 +288,10 @@ public:
 				}
 			}
 
-			// When relocating shards, DD would evaluate the CPU & AvailabeSpace of sourceTeam. If
+			// When relocating shards, DD would evaluate the CPU & LoadBytes of sourceTeam. If
 			// both of metrics are below pivot values, we would return the source team to dataDistributionRelocator
 			if (req.teamSelect.isForRelocateShard() && SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-				auto sourceTeam = self->evaluateSourceTeam(req.src);
+				auto sourceTeam = self->evaluateSourceTeam(req.src, req.inflightPenalty);
 				if (sourceTeam.present()) {
 					CODE_PROBE(true, "dd re-evaluation triggered");
 					TraceEvent(SevDebug, "GetTeamReturnSourceTeam", self->distributorId)
@@ -301,8 +301,8 @@ public:
 					    .detail("SourceTeamInfo", sourceTeam.get()->getDesc())
 					    .detail("SourceTeamCpu", sourceTeam.get()->getAverageCPU())
 					    .detail("PivotCpu", self->teamPivots.strictPivotCPU)
-					    .detail("SourceTeamAvailaleSpace", sourceTeam.get()->getMinAvailableSpaceRatio())
-					    .detail("PivotAvailableSpace", self->teamPivots.strictPivotAvailableSpaceRatio);
+					    .detail("SourceTeamLoadBytes", sourceTeam.get()->getLoadBytes(true, req.inflightPenalty))
+					    .detail("PivotLoadBytes", self->teamPivots.pivotLoadBytes);
 					req.reply.send(std::make_pair(sourceTeam, foundSrc));
 					return Void();
 				}
@@ -2906,8 +2906,18 @@ public:
 		loop {
 			try {
 				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				ValueReadResult serverInterfaceValue = wait(tr->get(serverListKeyFor(server->getId())));
+				// The storage server is removed
+				if (!serverInterfaceValue.present()) {
+					TraceEvent("UpdateStorageMetadataNoOp", self->getDistributorId())
+					    .detail("Server", server->getId())
+					    .detail("IsTss", isTss)
+					    .detail("Reason", "Absent server list item");
+					return Void();
+				}
 				Optional<StorageMetadataType> metadata = wait(metadataMap.get(tr, server->getId()));
 				// NOTE: in upgrade testing, there may not be any metadata
+				// TODO: change to ASSERT(metadata.present()) in a release version only supports upgrade from 71.3
 				if (metadata.present()) {
 					data.createdTime = metadata.get().createdTime;
 				}
@@ -3283,35 +3293,26 @@ public:
 	}
 }; // class DDTeamCollectionImpl
 
-void DDTeamCollection::updateAvailableSpacePivots() {
-	std::vector<double> teamAvailableSpace;
-	for (int i = 0; i < teams.size(); ++i) {
-		if (teams[i]->isHealthy()) {
-			teamAvailableSpace.push_back(teams[i]->getMinAvailableSpaceRatio());
-		}
+void DDTeamCollection::updateLoadBytesPivot(std::vector<int64_t>& teamLoadBytes) {
+	if (!teamLoadBytes.empty()) {
+		size_t pivot = teamLoadBytes.size() * SERVER_KNOBS->LOAD_BYTES_PIVOT_RATIO;
+		std::nth_element(teamLoadBytes.begin(), teamLoadBytes.begin() + pivot, teamLoadBytes.end());
+		teamPivots.pivotLoadBytes = teamLoadBytes[pivot];
+	} else {
+		teamPivots.pivotLoadBytes = std::numeric_limits<int64_t>::max();
 	}
+}
 
+void DDTeamCollection::updateMedianAvailableSpacePivot(std::vector<double>& teamAvailableSpace) {
 	if (!teamAvailableSpace.empty()) {
-		ASSERT_LT(SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO, 1.0);
-		size_t pivot = teamAvailableSpace.size() * SERVER_KNOBS->AVAILABLE_SPACE_PIVOT_RATIO;
+		size_t medianPivot = teamAvailableSpace.size() / 2;
 		std::nth_element(
-		    teamAvailableSpace.begin(), teamAvailableSpace.begin() + pivot, teamAvailableSpace.end(), std::greater{});
+		    teamAvailableSpace.begin(), teamAvailableSpace.begin() + medianPivot, teamAvailableSpace.end());
 		teamPivots.pivotAvailableSpaceRatio =
 		    std::max(SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
-		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[pivot]));
-
-		if (SERVER_KNOBS->DD_REEVALUATION_ENABLED) {
-			size_t strictPivot =
-			    teamAvailableSpace.size() * std::min(1.0, SERVER_KNOBS->DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO);
-			std::nth_element(teamAvailableSpace.begin(),
-			                 teamAvailableSpace.begin() + strictPivot,
-			                 teamAvailableSpace.end(),
-			                 std::greater{});
-			teamPivots.strictPivotAvailableSpaceRatio = teamAvailableSpace[strictPivot];
-		}
+		             std::min(SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO, teamAvailableSpace[medianPivot]));
 	} else {
 		teamPivots.pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
-		teamPivots.strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO;
 	}
 
 	if (teamPivots.pivotAvailableSpaceRatio < SERVER_KNOBS->TARGET_AVAILABLE_SPACE_RATIO) {
@@ -3323,15 +3324,7 @@ void DDTeamCollection::updateAvailableSpacePivots() {
 	}
 }
 
-void DDTeamCollection::updateCpuPivots() {
-	std::vector<double> teamAverageCPU;
-	for (int i = 0; i < teams.size(); ++i) {
-		if (teams[i]->isHealthy()) {
-			teamAverageCPU.emplace_back(teams[i]->getAverageCPU());
-			teamPivots.minTeamAvgCPU = std::min(teamPivots.minTeamAvgCPU, teamAverageCPU.back());
-		}
-	}
-
+void DDTeamCollection::updateCpuPivot(std::vector<double>& teamAverageCPU) {
 	if (!teamAverageCPU.empty()) {
 		ASSERT_LT(SERVER_KNOBS->CPU_PIVOT_RATIO, 1.0);
 		size_t pivot = teamAverageCPU.size() * SERVER_KNOBS->CPU_PIVOT_RATIO;
@@ -3356,11 +3349,12 @@ void DDTeamCollection::updateCpuPivots() {
 	}
 }
 
-void DDTeamCollection::updateTeamEligibility() {
+void DDTeamCollection::updateTeamEligibility(const double inflightPenalty) {
 	int healthyCount = 0, lowDiskUtilTotal = 0, lowCpuTotal = 0, allMetricsLow = 0;
 	for (auto& team : teams) {
 		if (team->isHealthy()) {
-			bool lowDiskUtil = team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
+			bool lowDiskUtil = team->hasLowerLoadBytes(teamPivots.pivotLoadBytes, inflightPenalty) &&
+			                   team->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio);
 			bool lowCPU = team->hasLowerCpu(teamPivots.pivotCPU);
 			healthyCount++;
 
@@ -3400,16 +3394,28 @@ void DDTeamCollection::updateTeamEligibility() {
 	    .detail("LowCPUTeam", lowCpuTotal)
 	    .detail("PivotAvailableSpaceRatio", teamPivots.pivotAvailableSpaceRatio)
 	    .detail("PivotCpuRatio", teamPivots.pivotCPU)
-	    .detail("StrictPivotAvailableSpaceRatio", teamPivots.strictPivotAvailableSpaceRatio)
+	    .detail("PivotLoadBytes", teamPivots.pivotLoadBytes)
 	    .detail("StrictPivotCpuRatio", teamPivots.strictPivotCPU);
 }
 
-void DDTeamCollection::updateTeamPivotValues() {
-	if (now() - teamPivots.lastPivotValuesUpdate >= SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
-		updateAvailableSpacePivots();
-		updateCpuPivots();
-		updateTeamEligibility();
-		teamPivots.lastPivotValuesUpdate = now();
+void DDTeamCollection::updateTeamPivots(const double inflightPenalty) {
+	if (now() - teamPivots.lastPivotsUpdate >= SERVER_KNOBS->DD_TEAM_PIVOT_UPDATE_DELAY) {
+		std::vector<double> teamAverageCPU;
+		std::vector<double> teamAvailableSpace;
+		std::vector<int64_t> teamLoadBytes;
+		for (int i = 0; i < teams.size(); i++) {
+			if (teams[i]->isHealthy()) {
+				teamAverageCPU.emplace_back(teams[i]->getAverageCPU());
+				teamPivots.minTeamAvgCPU = std::min(teamPivots.minTeamAvgCPU, teamAverageCPU.back());
+				teamAvailableSpace.push_back(teams[i]->getMinAvailableSpaceRatio());
+				teamLoadBytes.push_back(teams[i]->getLoadBytes(true, inflightPenalty));
+			}
+		}
+		updateCpuPivot(teamAverageCPU);
+		updateMedianAvailableSpacePivot(teamAvailableSpace);
+		updateLoadBytesPivot(teamLoadBytes);
+		updateTeamEligibility(inflightPenalty);
+		teamPivots.lastPivotsUpdate = now();
 	}
 }
 
@@ -3566,10 +3572,12 @@ Optional<Reference<IDataDistributionTeam>> DDTeamCollection::findTeamFromServers
 	return Optional<Reference<IDataDistributionTeam>>();
 }
 
-Optional<Reference<IDataDistributionTeam>> DDTeamCollection::evaluateSourceTeam(const std::vector<UID>& servers) {
+Optional<Reference<IDataDistributionTeam>> DDTeamCollection::evaluateSourceTeam(const std::vector<UID>& servers,
+                                                                                const double inflightPenalty) {
 	auto sourceTeam = findTeamFromServers(servers, /* wantHealthy=*/true);
 	if (sourceTeam.present()) {
-		if (sourceTeam.get()->hasHealthyAvailableSpace(teamPivots.strictPivotAvailableSpaceRatio) &&
+		if (sourceTeam.get()->hasLowerLoadBytes(teamPivots.pivotLoadBytes, inflightPenalty) &&
+		    sourceTeam.get()->hasHealthyAvailableSpace(teamPivots.pivotAvailableSpaceRatio) &&
 		    sourceTeam.get()->hasLowerCpu(teamPivots.strictPivotCPU)) {
 			return sourceTeam;
 		}
@@ -3871,17 +3879,16 @@ bool DDTeamCollection::satisfiesPolicy(const std::vector<Reference<TCServerInfo>
 }
 
 DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
-  : db(params.db), doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(params.lock),
-    output(params.output), unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)),
-    processingWiggle(params.processingWiggle), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
+  : doBuildTeams(true), lastBuildTeamsFailed(false), teamBuilder(Void()), lock(params.lock), output(params.output),
+    unhealthyServers(0), storageWiggler(makeReference<StorageWiggler>(this)), processingWiggle(params.processingWiggle),
+    getAverageShardBytes(params.getAverageShardBytes), shardsAffectedByTeamFailure(params.shardsAffectedByTeamFailure),
     initialFailureReactionDelay(
         delayed(params.readyToStart, SERVER_KNOBS->INITIAL_FAILURE_REACTION_DELAY, TaskPriority::DataDistribution)),
     initializationDoneActor(logOnCompletion(params.readyToStart && initialFailureReactionDelay)), recruitingStream(0),
     restartRecruiting(SERVER_KNOBS->DEBOUNCE_RECRUITING_DELAY), healthyTeamCount(0),
     zeroHealthyTeams(params.zeroHealthyTeams), optimalTeamCount(0), zeroOptimalTeams(true), isTssRecruiting(false),
     includedDCs(params.includedDCs), otherTrackedDCs(params.otherTrackedDCs),
-    processingUnhealthy(params.processingUnhealthy), getAverageShardBytes(params.getAverageShardBytes),
-    readyToStart(params.readyToStart),
+    processingUnhealthy(params.processingUnhealthy), readyToStart(params.readyToStart),
     checkTeamDelay(delay(SERVER_KNOBS->CHECK_TEAM_DELAY, TaskPriority::DataDistribution)), badTeamRemover(Void()),
     checkInvalidLocalities(Void()), wrongStoreTypeRemover(Void()), clearHealthyZoneFuture(true),
     lowestUtilizationTeam(0), highestUtilizationTeam(0), getShardMetrics(params.getShardMetrics),
@@ -3890,7 +3897,7 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
     teamCollectionInfoEventHolder(makeReference<EventCacheHolder>("TeamCollectionInfo")),
     storageServerRecruitmentEventHolder(
         makeReference<EventCacheHolder>("StorageServerRecruitment_" + params.distributorId.toString())),
-    primary(params.primary), distributorId(params.distributorId), underReplication(false),
+    primary(params.primary), distributorId(params.distributorId), underReplication(false), db(params.db),
     configuration(params.configuration), storageServerSet(new LocalityMap<UID>()) {
 
 	if (!primary || configuration.usableRegions == 1) {
@@ -3898,10 +3905,10 @@ DDTeamCollection::DDTeamCollection(DDTeamCollectionInitParams const& params)
 		    .detail("State", "Inactive")
 		    .trackLatest(ddTrackerStartingEventHolder->trackingKey);
 	}
-	teamPivots = { .lastPivotValuesUpdate = 0,
+	teamPivots = { .lastPivotsUpdate = 0,
 		           .pivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
 		           .pivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
-		           .strictPivotAvailableSpaceRatio = SERVER_KNOBS->MIN_AVAILABLE_SPACE_RATIO,
+		           .pivotLoadBytes = std::numeric_limits<int64_t>::max(),
 		           .strictPivotCPU = SERVER_KNOBS->MAX_DEST_CPU_PERCENT,
 		           .minTeamAvgCPU = std::numeric_limits<double>::max() };
 }

@@ -32,7 +32,8 @@ static void bench_memcmp(benchmark::State& state) {
 	b2.get()[kLength - 1] = 1;
 
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(memcmp(b1.get(), b2.get(), kLength));
+		int result = memcmp(b1.get(), b2.get(), kLength);
+		benchmark::DoNotOptimize(result);
 	}
 }
 
@@ -43,7 +44,8 @@ static void bench_memcpy(benchmark::State& state) {
 	memset(b1.get(), 0, kLength);
 
 	for (auto _ : state) {
-		benchmark::DoNotOptimize(memcpy(b2.get(), b1.get(), kLength));
+		void* result = memcpy(b2.get(), b1.get(), kLength);
+		benchmark::DoNotOptimize(result);
 	}
 }
 

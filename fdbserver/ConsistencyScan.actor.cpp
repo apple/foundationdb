@@ -33,7 +33,7 @@
 #include "fdbrpc/simulator.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/ReadYourWrites.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/DataDistributionConfig.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/StorageMetrics.actor.h"
@@ -85,7 +85,7 @@ struct ConsistencyScanMemoryState : public ReferenceCounted<ConsistencyScanMemor
 	ConsistencyScanStats stats;
 
 	explicit ConsistencyScanMemoryState(Reference<AsyncVar<ServerDBInfo> const> dbInfo, UID csId)
-	  : dbInfo(dbInfo), csId(csId), stats(csId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
+	  : csId(csId), dbInfo(dbInfo), stats(csId, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 };
 
 // TODO: test the test and write a canary key that the storage servers intentionally get wrong
@@ -193,7 +193,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	req.limit = 1e4;
 	req.limitBytes = CLIENT_KNOBS->REPLY_BYTE_LIMIT;
 	req.version = version;
-	req.tags = TagSet();
+	req.throttlingTag = {};
 
 	// buggify read limits in simulation
 	if (g_network->isSimulated() && BUGGIFY_WITH_PROB(0.01)) {
@@ -215,7 +215,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 
 	req.options = readOptions;
 
-	DisabledTraceEvent("ConsistencyCheck_ReadDataStart")
+	DisabledTraceEvent("ConsistencyCheck_ReadDataStart", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("Servers", storageServerInterfaces->size());
@@ -237,10 +237,10 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	    storageServerInterfaces->size() > 1 && g_network->isSimulated() && consistencyCheckStartVersion.present() &&
 	    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption &&
 	    g_simulator->consistencyScanCorruptRequestKey.present() && g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get() == myId &&
+	    g_simulator->consistencyScanCorruptor.get().first == myId &&
 	    range.contains(g_simulator->consistencyScanCorruptRequestKey.get());
 	if (expectInjected) {
-		TraceEvent(SevWarnAlways, "ConsistencyScanExpectingInjectedCorruption")
+		TraceEvent(SevWarnAlways, "ConsistencyScanExpectingInjectedCorruption", myId)
 		    .detail("StorageServers", storageServerInterfaces->size())
 		    .detail("ScanState", g_simulator->consistencyScanState)
 		    .detail("CorruptKey", g_simulator->consistencyScanCorruptRequestKey.get())
@@ -258,14 +258,14 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 		// Compare the results with other storage servers
 		if (rangeResult.present() && !rangeResult.get().error.present()) {
 			state GetKeyValuesReply current = rangeResult.get();
-			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream")
+			DisabledTraceEvent("ConsistencyCheck_GetKeyValuesStream", myId)
 			    .detail("DataSize", current.data.size())
 			    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id());
 			*totalReadAmount += current.data.expectedSize();
 			// If we haven't encountered a valid storage server yet, then mark this as the baseline
 			// to compare against
 			if (!firstValidServer->present()) {
-				DisabledTraceEvent("ConsistencyCheck_FirstValidServer").detail("Iter", j);
+				DisabledTraceEvent("ConsistencyCheck_FirstValidServer", myId).detail("Iter", j);
 				*firstValidServer = j;
 				// Compare this shard against the first
 			} else {
@@ -439,7 +439,8 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 					}
 
 					TraceEvent(isExpectedTSSMismatch || isFailed || expectInjected ? SevWarn : SevError,
-					           "ConsistencyCheck_DataInconsistent")
+					           "ConsistencyCheck_DataInconsistent",
+					           myId)
 					    .detail(format("StorageServer%d", j).c_str(), (*storageServerInterfaces)[j].id())
 					    .detail(format("StorageServer%d", firstValidServer->get()).c_str(),
 					            (*storageServerInterfaces)[firstValidServer->get()].id())
@@ -462,7 +463,7 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 						foundInjected = true;
 						CODE_PROBE(true, "consistency check detected injected corruption");
 						// we found the injected corruption, clear the state
-						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption")
+						TraceEvent(SevWarnAlways, "ConsistencyScanFoundInjectedCorruption", myId)
 						    .detail("CorruptionType", g_simulator->consistencyScanInjectedCorruptionType.get())
 						    .detail("Version", req.version);
 						g_simulator->updateConsistencyScanState(
@@ -490,18 +491,16 @@ ACTOR Future<int> consistencyCheckReadData(UID myId,
 	if (expectInjected && !foundInjected) {
 		if (allSucceeded) {
 			// should for sure have found it
-			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption");
+			TraceEvent(SevError, "ConsistencyCheck_ShouldHaveFoundInjectedCorruption", myId);
 		} else {
-			CODE_PROBE(true,
-			           "consistency check potentially missed injected corruption due to failures",
-			           probe::decoration::rare);
+			CODE_PROBE(true, "consistency check potentially missed injected corruption due to failures");
 			TraceEvent(SevInfo, "ConsistencyCheck_MissedCorruptionDueToFailures");
 			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
 			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
 		}
 	}
 
-	DisabledTraceEvent("ConsistencyCheck_ReadDataDone")
+	DisabledTraceEvent("ConsistencyCheck_ReadDataDone", myId)
 	    .detail("Range", range)
 	    .detail("Version", version)
 	    .detail("FirstValidServer", firstValidServer->present() ? firstValidServer->get() : -1);
@@ -793,7 +792,9 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 									}
 								}
 								g_simulator->consistencyScanCorruptRequestKey = corruptKey;
-								g_simulator->consistencyScanCorruptor = memState->csId;
+								std::pair<UID, NetworkAddress> meCorruptor = { memState->csId,
+									                                           g_network->getLocalAddress() };
+								g_simulator->consistencyScanCorruptor = meCorruptor;
 								g_simulator->updateConsistencyScanState(
 								    ISimulator::SimConsistencyScanState::Enabled,
 								    ISimulator::SimConsistencyScanState::Enabled_InjectCorruption);
@@ -988,7 +989,7 @@ ACTOR Future<Void> consistencyScanCore(Database db,
 					//            json_spirit::write_string(json_spirit::mValue(statsCurrentRound.toJSON())));
 					break;
 				} catch (Error& e) {
-					TraceEvent("ConsistencyScan_ScanLoopError", memState->csId).error(e);
+					TraceEvent("ConsistencyScan_ScanLoopError", memState->csId).errorUnsuppressed(e);
 					if (e.code() == error_code_future_version || e.code() == error_code_wrong_shard_server ||
 					    e.code() == error_code_all_alternatives_failed || e.code() == error_code_process_behind) {
 						// sleep for a bit extra
@@ -1109,10 +1110,9 @@ void resetSimCorruptionCheckOnDeath(Reference<ConsistencyScanMemoryState> memSta
 		return;
 	}
 	if (g_simulator->consistencyScanCorruptor.present() &&
-	    g_simulator->consistencyScanCorruptor.get() == memState->csId) {
+	    g_simulator->consistencyScanCorruptor.get().first == memState->csId) {
 		TraceEvent("ConsistencyScan_ResetCorruptionOnDeath");
-		CODE_PROBE(
-		    true, "Consistency Scan skipped corruption check because scan died in the middle", probe::decoration::rare);
+		CODE_PROBE(true, "Consistency Scan skipped corruption check because scan died in the middle");
 		g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
 		                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
 	}
@@ -1132,6 +1132,18 @@ ACTOR Future<Void> consistencyScan(ConsistencyScanInterface csInterf, Reference<
 	if (g_network->isSimulated()) {
 		actors.add(sometimesRandomlyClearStatsInSim(db, memState));
 		// TODO:  Reconfigure cs.rangeConfig() randomly
+
+		// Check if previous consistency scan was terminated without getting actor_cancelled in the middle of a
+		// corruption injection
+		if (g_simulator->consistencyScanCorruptor.present() &&
+		    csInterf.id() != g_simulator->consistencyScanCorruptor.get().first &&
+		    g_simulator->getProcessByAddress(g_simulator->consistencyScanCorruptor.get().second)->failed &&
+		    g_simulator->consistencyScanState == ISimulator::SimConsistencyScanState::Enabled_InjectCorruption) {
+			TraceEvent("ConsistencyScan_ResetCorruptionOnPreviousScanDeath");
+			// noop if state isn't already Enabled_InjectCorruption
+			g_simulator->updateConsistencyScanState(ISimulator::SimConsistencyScanState::Enabled_InjectCorruption,
+			                                        ISimulator::SimConsistencyScanState::Enabled_FoundCorruption);
+		}
 	}
 
 	loop {
@@ -1291,7 +1303,7 @@ ACTOR Future<bool> getKeyLocations(Database cx,
 				req.limit = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT;
 				req.limitBytes = SERVER_KNOBS->MOVE_KEYS_KRM_LIMIT_BYTES;
 				req.version = version;
-				req.tags = TagSet();
+				req.throttlingTag = {};
 
 				// Try getting the shard locations from the key servers
 				state std::vector<Future<ErrorOr<GetKeyValuesReply>>> keyValueFutures;
@@ -1459,6 +1471,30 @@ ACTOR Future<int64_t> getDatabaseSize(Database cx) {
 			wait(tr.onError(e));
 		}
 	}
+}
+
+struct ShardSampleInfo {
+	int estimatedBytes;
+	int bytes;
+	int numKeys;
+	int numSampledKeys;
+	int numSampledKeysWithProb;
+};
+
+inline void traceShardEstimation(TraceEvent& e,
+                                 const ShardSizeBounds& shardBounds,
+                                 KeyRangeRef range,
+                                 const ShardSampleInfo& sampleInfo) {
+	e.detail("Min", shardBounds.min.bytes)
+	    .detail("Max", shardBounds.max.bytes)
+	    .detail("PermittedError", shardBounds.permittedError.bytes)
+	    .detail("Estimate", sampleInfo.estimatedBytes)
+	    .detail("Actual", sampleInfo.bytes)
+	    .detail("ShardBegin", printable(range.begin))
+	    .detail("ShardEnd", printable(range.end))
+	    .detail("NumKeys", sampleInfo.numKeys)
+	    .detail("NumSampledKeys", sampleInfo.numSampledKeys)
+	    .detail("NumSampledKeysWithProb", sampleInfo.numSampledKeysWithProb);
 }
 
 // Checks that the data in each shard is the same on each storage server that it resides on.  Also performs some
@@ -1932,19 +1968,15 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			// normal distribution
 			if (sampledKeysWithProb > 30 && estimateError > failErrorNumStdDev * stdDev) {
 				double numStdDev = estimateError / sqrt(shardVariance);
-				TraceEvent(SevWarn, "ConsistencyCheck_InaccurateShardEstimate")
-				    .detail("Min", shardBounds.min.bytes)
-				    .detail("Max", shardBounds.max.bytes)
-				    .detail("Estimate", sampledBytes)
-				    .detail("Actual", shardBytes)
-				    .detail("NumStdDev", numStdDev)
-				    .detail("Variance", shardVariance)
-				    .detail("StdDev", stdDev)
-				    .detail("ShardBegin", printable(range.begin))
-				    .detail("ShardEnd", printable(range.end))
-				    .detail("NumKeys", shardKeys)
-				    .detail("NumSampledKeys", sampledKeys)
-				    .detail("NumSampledKeysWithProb", sampledKeysWithProb);
+				TraceEvent e(SevWarn, "ConsistencyCheck_InaccurateShardEstimate");
+
+				traceShardEstimation(
+				    e,
+				    shardBounds,
+				    range,
+				    ShardSampleInfo{ sampledBytes, shardBytes, shardKeys, sampledKeys, sampledKeysWithProb });
+
+				e.detail("NumStdDev", numStdDev).detail("Variance", shardVariance).detail("StdDev", stdDev);
 
 				// NOTE: Shard sampling is known to be biased.
 				// Disable this test failure until we have a proper solution.
@@ -1964,21 +1996,19 @@ ACTOR Future<Void> checkDataConsistency(Database cx,
 			if (canSplit && sampledKeys > 5 && performQuiescentChecks && !range.begin.startsWith(keyServersPrefix) &&
 			    (sampledBytes < shardBounds.min.bytes - 3 * shardBounds.permittedError.bytes ||
 			     sampledBytes - firstKeySampledBytes > shardBounds.max.bytes + 3 * shardBounds.permittedError.bytes)) {
-				TraceEvent("ConsistencyCheck_InvalidShardSize")
-				    .detail("Min", shardBounds.min.bytes)
-				    .detail("Max", shardBounds.max.bytes)
-				    .detail("Size", shardBytes)
-				    .detail("EstimatedSize", sampledBytes)
-				    .detail("ShardBegin", printable(range.begin))
-				    .detail("ShardEnd", printable(range.end))
-				    .detail("ShardCount", ranges.size())
-				    .detail("SampledKeys", sampledKeys);
-				testFailure(format("Shard size in quiescent database is too %s",
-				                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
-				            performQuiescentChecks,
-				            success,
-				            failureIsError);
-				return Void();
+				TraceEvent e(SevWarn, "ConsistencyCheck_InvalidShardSize");
+				traceShardEstimation(
+				    e,
+				    shardBounds,
+				    range,
+				    ShardSampleInfo{ sampledBytes, shardBytes, shardKeys, sampledKeys, sampledKeysWithProb });
+				// NOTE: Shard sampling is known to be biased.
+				// Disable this test failure until we have a proper solution.
+				// testFailure(format("Shard size in quiescent database is too %s",
+				//                   (sampledBytes < shardBounds.min.bytes) ? "small" : "large"),
+				//            performQuiescentChecks,
+				//            success,
+				//            failureIsError);
 			}
 		}
 

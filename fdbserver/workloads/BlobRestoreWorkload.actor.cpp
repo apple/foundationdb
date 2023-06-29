@@ -207,7 +207,7 @@ struct BlobRestoreWorkload : TestWorkload {
 			}
 			// TODO need to define more specific error handling
 			if (phase == BlobRestorePhase::ERROR) {
-				auto db = SystemDBWriteLockedNow(cx.getReference());
+				auto db = SystemDBWriteLockedNow(self->extraDb_.getReference());
 				std::string error = wait(BlobGranuleRestoreConfig().error().getD(db));
 				fmt::print("Unexpected restore error code = {}\n", error);
 				return Void();
@@ -357,11 +357,8 @@ struct BlobRestoreWorkload : TestWorkload {
 				}
 				return Void();
 			} catch (Error& e) {
-				if (e.code() != error_code_tag_throttled) {
-					fmt::print("Cannot flush blob ranges {}\n", e.what());
-					throw internal_error();
-				}
-				wait(delay(2));
+				fmt::print("Cannot flush blob ranges {}\n", e.what());
+				throw internal_error();
 			}
 		}
 	}

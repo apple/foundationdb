@@ -27,6 +27,7 @@
 #include "fdbserver/DeltaTree.h"
 #include "fdbserver/IKeyValueStore.h"
 #include "fdbserver/IPager.h"
+#include "fdbserver/IPageEncryptionKeyProvider.actor.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/VersionedBTreeDebug.h"
 #include "fdbserver/WorkerInterface.actor.h"
@@ -2653,11 +2654,11 @@ public:
 		else if (cacheEntry.writing()) {
 			// This is very unlikely, maybe impossible in the current pager use cases
 			// Wait for the previous write to finish, then start new write
-			CODE_PROBE(true, "DWALPager update page while it is being written");
+			CODE_PROBE(true, "DWALPager update page while it is being written", probe::decoration::rare);
 			cacheEntry.writeFuture =
 			    mapAsync(cacheEntry.writeFuture, [=](Void) { return writePhysicalPage(reason, level, pageIDs, data); });
 		} else {
-			CODE_PROBE(true, "DWALPager update cached page", probe::decoration::rare);
+			CODE_PROBE(true, "DWALPager update cached page");
 			cacheEntry.writeFuture = detach(writePhysicalPage(reason, level, pageIDs, data));
 		}
 
@@ -5061,8 +5062,8 @@ public:
 	               EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
 	               Reference<IPageEncryptionKeyProvider> keyProvider = {})
 	  : m_pager(pager), m_db(db), m_expectedEncryptionMode(expectedEncryptionMode), m_encodingType(encodingType),
-	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0), m_name(name),
-	    m_logID(logID), m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)) {
+	    m_enforceEncodingType(false), m_keyProvider(keyProvider), m_pBuffer(nullptr), m_mutationCount(0),
+	    m_pBoundaryVerifier(DecodeBoundaryVerifier::getVerifier(name)), m_name(name), m_logID(logID) {
 		m_pDecodeCacheMemory = m_pager->getPageCachePenaltySource();
 		m_lazyClearActor = 0;
 		m_init = init_impl(this);
@@ -5796,7 +5797,8 @@ private:
 		// a and b must be consecutive pages from the same array of records
 		static bool shiftItem(PageToBuild& a, PageToBuild& b, int deltaSize, int kvBytes) {
 			if (a.count < 2) {
-				CODE_PROBE(true, "Redwood skip page balancing since the left page has only 1 item");
+				CODE_PROBE(
+				    true, "Redwood skip page balancing since the left page has only 1 item", probe::decoration::rare);
 				return false;
 			}
 
@@ -5805,7 +5807,7 @@ private:
 			int bNodeSize = deltaSize + BTreePage::BinaryTree::Node::headerSize(b.largeDeltaTree);
 
 			if (b.bytesLeft < bNodeSize) {
-				CODE_PROBE(true, "Redwood skip page balancing since the right page is full", probe::decoration::rare);
+				CODE_PROBE(true, "Redwood skip page balancing since the right page is full");
 				return false;
 			}
 
@@ -8128,7 +8130,8 @@ public:
 	                     Reference<AsyncVar<ServerDBInfo> const> db,
 	                     Optional<EncryptionAtRestMode> encryptionMode,
 	                     EncodingType encodingType = EncodingType::MAX_ENCODING_TYPE,
-	                     Reference<IPageEncryptionKeyProvider> keyProvider = {})
+	                     Reference<IPageEncryptionKeyProvider> keyProvider = {},
+	                     int64_t pageCacheBytes = 0)
 	  : m_filename(filename), prefetch(SERVER_KNOBS->REDWOOD_KVSTORE_RANGE_PREFETCH) {
 		if (!encryptionMode.present() || encryptionMode.get().isEncryptionEnabled()) {
 			ASSERT(keyProvider.isValid() || db.isValid());
@@ -8137,11 +8140,13 @@ public:
 		int pageSize =
 		    BUGGIFY ? deterministicRandom()->randomInt(1000, 4096 * 4) : SERVER_KNOBS->REDWOOD_DEFAULT_PAGE_SIZE;
 		int extentSize = SERVER_KNOBS->REDWOOD_DEFAULT_EXTENT_SIZE;
-		int64_t pageCacheBytes =
-		    g_network->isSimulated()
-		        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
-		                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
-		        : FLOW_KNOBS->PAGE_CACHE_4K;
+		if (pageCacheBytes <= 0) {
+			pageCacheBytes =
+			    g_network->isSimulated()
+			        ? (BUGGIFY ? deterministicRandom()->randomInt(pageSize, FLOW_KNOBS->BUGGIFY_SIM_PAGE_CACHE_4K)
+			                   : FLOW_KNOBS->SIM_PAGE_CACHE_4K)
+			        : FLOW_KNOBS->PAGE_CACHE_4K;
+		}
 		// Rough size of pages to keep in remap cleanup queue before being cleanup.
 		int64_t remapCleanupWindowBytes =
 		    g_network->isSimulated()
@@ -8237,9 +8242,7 @@ public:
 
 	Future<Void> getErrorNoDelay() const { return m_errorPromise.getFuture() || m_tree->getError(); };
 
-	void clear(KeyRangeRef range,
-	           const StorageServerMetrics* storageMetrics = nullptr,
-	           const Arena* arena = 0) override {
+	void clear(KeyRangeRef range, const Arena* arena = 0) override {
 		debug_printf("CLEAR %s\n", printable(range).c_str());
 		m_tree->clear(range);
 	}
@@ -8454,8 +8457,15 @@ private:
 IKeyValueStore* keyValueStoreRedwoodV1(std::string const& filename,
                                        UID logID,
                                        Reference<AsyncVar<ServerDBInfo> const> db,
-                                       Optional<EncryptionAtRestMode> encryptionMode) {
-	return new KeyValueStoreRedwood(filename, logID, db, encryptionMode);
+                                       Optional<EncryptionAtRestMode> encryptionMode,
+                                       int64_t pageCacheBytes) {
+	return new KeyValueStoreRedwood(filename,
+	                                logID,
+	                                db,
+	                                encryptionMode,
+	                                EncodingType::MAX_ENCODING_TYPE,
+	                                Reference<IPageEncryptionKeyProvider>(),
+	                                pageCacheBytes);
 }
 
 int randomSize(int max) {

@@ -48,8 +48,8 @@ template <class DB>
 class MetaclusterConsistencyCheck {
 private:
 	Reference<DB> managementDb;
-	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 	MetaclusterData<DB> metaclusterData;
+	AllowPartialMetaclusterOperations allowPartialMetaclusterOperations = AllowPartialMetaclusterOperations::True;
 
 	// Note: this check can only be run on metaclusters with a reasonable number of tenants, as should be
 	// the case with the current metacluster simulation workloads
@@ -83,6 +83,7 @@ private:
 		       data.metaclusterRegistration.get().name == data.metaclusterRegistration.get().metaclusterName);
 		ASSERT_GE(data.metaclusterRegistration.get().version, MetaclusterVersion::MIN_SUPPORTED);
 		ASSERT_LE(data.metaclusterRegistration.get().version, MetaclusterVersion::MAX_SUPPORTED);
+		ASSERT(!data.maxRestoreId.present());
 
 		ASSERT_LE(data.dataClusters.size(), CLIENT_KNOBS->MAX_DATA_CLUSTERS);
 		ASSERT_LE(data.tenantData.tenantCount, metaclusterMaxTenants);

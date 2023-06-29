@@ -135,6 +135,8 @@ struct Resolver : ReferenceCounted<Resolver> {
 	ConflictSet* conflictSet;
 	TransientStorageMetricSample iopsSample;
 
+	EncryptionAtRestMode encryptMode;
+
 	// Use LogSystem as backend for txnStateStore. However, the real commit
 	// happens at commit proxies and we never "write" to the LogSystem at
 	// Resolvers.
@@ -186,11 +188,9 @@ struct Resolver : ReferenceCounted<Resolver> {
 
 	Future<Void> logger;
 
-	EncryptionAtRestMode encryptMode;
-
 	Resolver(UID dbgid, int commitProxyCount, int resolverCount, EncryptionAtRestMode encryptMode)
-	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), encryptMode(encryptMode),
-	    version(-1), conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE),
+	  : dbgid(dbgid), commitProxyCount(commitProxyCount), resolverCount(resolverCount), version(-1),
+	    conflictSet(newConflictSet()), iopsSample(SERVER_KNOBS->KEY_BYTES_PER_SAMPLE), encryptMode(encryptMode),
 	    cc("Resolver", dbgid.toString()), resolveBatchIn("ResolveBatchIn", cc),
 	    resolveBatchStart("ResolveBatchStart", cc), resolvedTransactions("ResolvedTransactions", cc),
 	    resolvedBytes("ResolvedBytes", cc), resolvedReadConflictRanges("ResolvedReadConflictRanges", cc),

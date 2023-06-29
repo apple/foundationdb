@@ -34,7 +34,7 @@
 #include "fdbclient/GrvProxyInterface.h"
 #include "fdbclient/IdempotencyId.actor.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/VersionVector.h"
 
 #include "fdbrpc/Stats.h"
@@ -222,7 +222,7 @@ struct CommitTransactionRequest : TimedRequest {
 	uint32_t flags;
 	Optional<UID> debugID;
 	Optional<ClientTrCommitCostEstimation> commitCostEstimation;
-	Optional<TagSet> tagSet;
+	Optional<TransactionTag> throttlingTag;
 	IdempotencyIdRef idempotencyId;
 
 	TenantInfo tenantInfo;
@@ -240,7 +240,7 @@ struct CommitTransactionRequest : TimedRequest {
 		           flags,
 		           debugID,
 		           commitCostEstimation,
-		           tagSet,
+		           throttlingTag,
 		           spanContext,
 		           tenantInfo,
 		           idempotencyId,
@@ -270,7 +270,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 	bool rkDefaultThrottled = false;
 	bool rkBatchThrottled = false;
 
-	TransactionTagMap<ClientTagThrottleLimits> tagThrottleInfo;
 	double proxyTagThrottledDuration{ 0.0 };
 
 	VersionVector ssVersionVectorDelta;
@@ -285,7 +284,6 @@ struct GetReadVersionReply : public BasicLoadBalancedReply {
 		           version,
 		           locked,
 		           metadataVersion,
-		           tagThrottleInfo,
 		           midShardSize,
 		           rkDefaultThrottled,
 		           rkBatchThrottled,
@@ -315,8 +313,7 @@ struct GetReadVersionRequest : TimedRequest {
 	uint32_t flags;
 	TransactionPriority priority;
 
-	TransactionTagMap<uint32_t> tags;
-	Optional<TenantGroupName> tenantGroup;
+	Optional<ThrottlingId> throttlingId;
 
 	// Not serialized, because this field does not need to be sent to master.
 	// It is used for reporting to clients the amount of time spent delayed by
@@ -334,11 +331,10 @@ struct GetReadVersionRequest : TimedRequest {
 	                      TransactionPriority priority,
 	                      Version maxVersion,
 	                      uint32_t flags = 0,
-	                      TransactionTagMap<uint32_t> tags = TransactionTagMap<uint32_t>(),
-	                      Optional<TenantGroupName> const& tenantGroup = Optional<TenantGroupName>(),
+	                      Optional<ThrottlingId> const& throttlingId = Optional<ThrottlingId>(),
 	                      Optional<UID> debugID = Optional<UID>())
-	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority), tags(tags),
-	    tenantGroup(tenantGroup), debugID(debugID), maxVersion(maxVersion) {
+	  : spanContext(spanContext), transactionCount(transactionCount), flags(flags), priority(priority),
+	    throttlingId(throttlingId), debugID(debugID), maxVersion(maxVersion) {
 		flags = flags & ~FLAG_PRIORITY_MASK;
 		switch (priority) {
 		case TransactionPriority::BATCH:
@@ -359,11 +355,9 @@ struct GetReadVersionRequest : TimedRequest {
 
 	bool operator<(GetReadVersionRequest const& rhs) const { return priority < rhs.priority; }
 
-	bool isTagged() const { return !tags.empty() || tenantGroup.present(); }
-
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, transactionCount, flags, tags, debugID, reply, spanContext, maxVersion, tenantGroup);
+		serializer(ar, transactionCount, flags, debugID, reply, spanContext, maxVersion, throttlingId);
 
 		if (ar.isDeserializing) {
 			if ((flags & PRIORITY_SYSTEM_IMMEDIATE) == PRIORITY_SYSTEM_IMMEDIATE) {
