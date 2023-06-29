@@ -626,7 +626,7 @@ void initHelp() {
 	helpMap["usemanagementcluster"] =
 	    CommandHelp("usemanagementcluster",
 	                "connect to the management cluster in the metacluster",
-	                "This command switch the connection to the management cluster, and reset tenant to default."
+	                "This command switches the connection to the management cluster and resets tenant to default."
 	                "User must first connect to a management cluster in order to use this command. ");
 }
 
