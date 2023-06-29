@@ -137,7 +137,7 @@ void insert_data(fdb::Database db, const std::map<std::string, std::string>& dat
 // Get the value associated with `key_name` from the database. Accepts a list
 // of transaction options to apply (values for options not supported). Returns
 // an optional which will be populated with the result if one was found.
-std::optional<std::string> get_value(fdb::KeyRef key, bool snapshot, std::vector<FDBTransactionOption> options) {
+std::optional<std::string> getValue(fdb::KeyRef key, bool snapshot, std::vector<FDBTransactionOption> options) {
 	auto tr = db.createTransaction();
 	while (1) {
 		for (auto& option : options) {
@@ -492,7 +492,7 @@ TEST_CASE("cannot read system key") {
 
 TEST_CASE("read system key") {
 	auto value =
-	    get_value(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	    getValue(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	REQUIRE(value.has_value());
 }
 
@@ -524,7 +524,7 @@ TEST_CASE("write system key") {
 		break;
 	}
 
-	auto value = get_value(syskey, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	auto value = getValue(syskey, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	REQUIRE(value.has_value());
 	CHECK(value->compare("bar") == 0);
 }
@@ -1238,7 +1238,7 @@ TEST_CASE("fdb_transaction_clear") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(!value.has_value());
 }
 
@@ -1270,7 +1270,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(uint8_t(value->data()[0]) > 0);
@@ -1329,18 +1329,18 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_AND") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 96);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 2);
 	CHECK(value->data()[0] == 97);
 	CHECK(value->data()[1] == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 97);
@@ -1398,16 +1398,16 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 99);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("cd") == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 101);
@@ -1476,18 +1476,18 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
 		return;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 0x3);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 2);
 	CHECK(value->data()[0] == 0x3);
 	CHECK(value->data()[1] == 0x64);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 1);
 	CHECK(value->data()[0] == 0x5);
@@ -1511,10 +1511,10 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_COMPARE_AND_CLEAR") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	CHECK(!value.has_value());
 
-	value = get_value(fdb::toBytesRef(key("fdb")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("fdb")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("foundation") == 0);
 }
@@ -1544,10 +1544,10 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
 		break;
 	}
 
-	auto value_foo = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value_foo = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value_foo.has_value());
 
-	auto value_bar = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	auto value_bar = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value_bar.has_value());
 
 	if (potentialCommitCount != 1) {
@@ -1578,15 +1578,15 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("b") == 0);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("aa") == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("c") == 0);
 }
@@ -1611,17 +1611,17 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MIN") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("a") == 0);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->size() == 2);
 	CHECK(value->data()[0] == 'b');
 	CHECK(value->data()[1] == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("b") == 0);
 }
@@ -1646,15 +1646,15 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MAX") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("b") == 0);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("cc") == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("cba") == 0);
 }
@@ -1679,15 +1679,15 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
 		break;
 	}
 
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("a") == 0);
 
-	value = get_value(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("bar")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("aa") == 0);
 
-	value = get_value(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
+	value = getValue(fdb::toBytesRef(key("baz")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("abc") == 0);
 }
@@ -1723,7 +1723,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") 
 
 	REQUIRE(versionstamp.size() > 0);
 	std::string dbKey(prefix + "foo" + versionstamp);
-	auto value = get_value(fdb::toBytesRef(dbKey), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(dbKey), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("bar") == 0);
 }
@@ -1756,7 +1756,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE"
 	}
 
 	REQUIRE(versionstamp.size() > 0);
-	auto value = get_value(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef(key("foo")), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	CHECK(value->compare("bar" + versionstamp) == 0);
 }
@@ -2129,7 +2129,7 @@ TEST_CASE("trace parent") {
 }
 
 TEST_CASE("special-key-space valid transaction ID") {
-	auto value = get_value(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false, {});
+	auto value = getValue(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	UID transactionID = UID::fromString(value.value());
 	CHECK(transactionID.first() > 0);
@@ -2677,7 +2677,7 @@ void granule_free_load_fail(int64_t loadId, void* userContext) {
 }
 
 TEST_CASE("Blob Granule Functions") {
-	auto confValue = get_value(fdb::toBytesRef("\xff/conf/blob_granules_enabled"sv),
+	auto confValue = getValue(fdb::toBytesRef("\xff/conf/blob_granules_enabled"sv),
 	                           /* snapshot */ false,
 	                           { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	if (!confValue.has_value() || confValue.value() != "1") {
@@ -2696,11 +2696,6 @@ TEST_CASE("Blob Granule Functions") {
 	granuleContext.free_load_f = &granule_free_load_fail;
 	granuleContext.debugNoMaterialize = true;
 	granuleContext.granuleParallelism = 1;
-
-	// dummy values
-	// FDBKeyValue const* out_kv;
-	// int out_count;
-	// int out_more;
 
 	auto tr = db.createTransaction();
 	int64_t originalReadVersion = -1;
