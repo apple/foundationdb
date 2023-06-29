@@ -394,6 +394,10 @@ TEST_CASE("fdb_future_get_string_array") {
 			continue;
 		}
 
+		// Note that it is desirable to use binding to retrieve all three
+		// values in one line, i.e. auto [output, strings, count] = f1.get()
+		// However, this runs into issues in the CHECK macro below likely due to
+		// CHECK internally branches out
 		auto output = f1.get();
 		auto strings = std::get<0>(output);
 		auto count = std::get<1>(output);
