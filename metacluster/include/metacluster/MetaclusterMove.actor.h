@@ -954,39 +954,49 @@ struct FinishTenantMovementImpl {
 			    .detail("MoveState", initialMoveState);
 			throw invalid_tenant_move();
 		}
-		TraceEvent("Breakpoint1");
+		if (initialMoveState == metadata::management::MovementState::SWITCH_METADATA) {
+			TraceEvent("Breakpoint1");
 
-		state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-		TraceEvent("Breakpoint2");
-		state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-		TraceEvent("Breakpoint3");
-		wait(self->dstCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
-		TraceEvent("Breakpoint4");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
-			    return checkValidUnlock(self, tr, srcEntries, dstEntries);
-		    }));
-		TraceEvent("Breakpoint5");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
-			    return checkValidDelete(self, tr, srcEntries, dstEntries);
-		    }));
+			state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+			TraceEvent("Breakpoint2");
+			state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+			TraceEvent("Breakpoint3");
+			wait(self->dstCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
+			TraceEvent("Breakpoint4");
+			wait(self->srcCtx.runManagementTransaction([self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+			                                               Reference<typename DB::TransactionT> tr) {
+				return checkValidUnlock(self, tr, srcEntries, dstEntries);
+			}));
+			TraceEvent("Breakpoint5");
+			wait(self->srcCtx.runManagementTransaction([self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+			                                               Reference<typename DB::TransactionT> tr) {
+				return checkValidDelete(self, tr, srcEntries, dstEntries);
+			}));
+		}
 
 		TraceEvent("Breakpoint6");
 		wait(unlockDestinationTenants(self));
 
-		TraceEvent("Breakpoint7");
-		wait(purgeSourceBlobRanges(self));
+		try {
+			TraceEvent("Breakpoint7");
+			wait(purgeSourceBlobRanges(self));
 
-		TraceEvent("Breakpoint8");
-		wait(deleteAllSourceData(self));
+			TraceEvent("Breakpoint8");
+			wait(deleteAllSourceData(self));
 
-		TraceEvent("Breakpoint9");
-		wait(self->srcCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
+			TraceEvent("Breakpoint9");
+			wait(self->srcCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
+		} catch (Error& e) {
+			TraceEvent("TenantMoveFinishDeleteError").error(e);
+			// If tenant is not found, this is a retry and the tenants have been deleted already
+			if (e.code() != error_code_tenant_not_found) {
+				throw e;
+			}
+		}
 
 		TraceEvent("Breakpoint10");
 		wait(self->srcCtx.runManagementTransaction(

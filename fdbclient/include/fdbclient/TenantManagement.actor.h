@@ -378,28 +378,18 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-	TraceEvent("BreakpointDeleteTenantTransaction1").detail("TenantId", tenantId);
 
 	state Future<Optional<TenantMapEntry>> tenantEntryFuture = tryGetTenantTransaction(tr, tenantId);
 	wait(checkTenantMode(tr, clusterType));
 
 	state Optional<TenantMapEntry> tenantEntry = wait(tenantEntryFuture);
 
-	TraceEvent("BreakpointDeleteTenantTransaction2").detail("TenantId", tenantId);
 	if (tenantEntry.present()) {
-		TraceEvent("BreakpointDeleteTenantTransaction3").detail("TenantId", tenantId);
 		state typename transaction_future_type<Transaction, RangeReadResult>::type prefixRangeFuture =
 		    tr->getRange(prefixRange(tenantEntry.get().prefix), 1);
 
 		RangeReadResult contents = wait(safeThreadFutureToFuture(prefixRangeFuture));
 		if (!contents.empty()) {
-			TraceEvent("BreakpointDeleteNonEmpty").detail("Size", contents.size());
-			for (const auto& [k, v] : contents) {
-				TraceEvent("BreakpointDeleteNonEmptyKVs")
-				    .detail("Key", k)
-				    .detail("Value", v)
-				    .detail("Prefix", tenantEntry.get().prefix);
-			}
 			CODE_PROBE(true, "Attempt deletion of non-empty tenant");
 			throw tenant_not_empty();
 		}
@@ -410,10 +400,7 @@ Future<Void> deleteTenantTransaction(Transaction tr,
 		TenantMetadata::tenantCount().atomicOp(tr, -1, MutationRef::AddValue);
 		TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
-		TraceEvent("BreakpointDeleteTenantTransaction4").detail("TenantId", tenantId);
 		if (tenantEntry.get().tenantGroup.present()) {
-
-			TraceEvent("BreakpointDeleteTenantTransaction5").detail("TenantId", tenantId);
 			TenantMetadata::tenantGroupTenantIndex().erase(
 			    tr, Tuple::makeTuple(tenantEntry.get().tenantGroup.get(), tenantEntry.get().tenantName, tenantId));
 			KeyBackedSet<Tuple>::RangeResultType tenantsInGroup =

@@ -739,6 +739,8 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		});
 	}
 
+	// TODO: update the test to run arbitrary stages despite the current state to verify that it doesn’t break anything
+	// (i.e. run switch on a move that has already switched or aborted, etc.)
 	ACTOR static Future<Void> _start(Database cx, MetaclusterMoveWorkload* self) {
 		// Expect an error if the same cluster is picked
 		state ClusterName srcCluster = self->chooseClusterName();
