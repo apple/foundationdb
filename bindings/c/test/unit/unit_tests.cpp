@@ -420,9 +420,7 @@ TEST_CASE("fdb_future_get_string_array") {
 			continue;
 		}
 
-		fdb::future_var::StringArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto strings = std::get<0>(output);
 		auto count = std::get<1>(output);
 
@@ -456,9 +454,7 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 			continue;
 		}
 
-		fdb::future_var::KeyValueRefArray::Type output;
-		fdbCheck(f1.getNothrow(output));
-
+		auto output = f1.get();
 		auto out_kv = std::get<0>(output);
 		auto out_count = std::get<1>(output);
 		auto out_more = std::get<2>(output);
@@ -471,7 +467,7 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 		for (int i = 0; i < out_count; ++i) {
 			auto kv = *out_kv++;
 			auto key = std::string(kv.key().begin(), kv.key().end());
-			auto value = std::string(kv.value().begin(), kv.value().end());
+		      	auto value = std::string(kv.value().begin(), kv.value().end());	
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -1117,7 +1113,7 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
 			auto key = fdb::toCharsRef(kv.key());
-			auto value = fdb::toCharsRef(kv.value());
+		      	auto value = fdb::toCharsRef(kv.value());	
 
 			CHECK(key.compare(it->first) == 0);
 			CHECK(value.compare(it->second) == 0);
@@ -1162,7 +1158,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
 			auto key = std::string(kv.key().begin(), kv.key().end());
-			auto value = std::string(kv.value().begin(), kv.value().end());
+		      	auto value = std::string(kv.value().begin(), kv.value().end());	
+
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -1202,7 +1199,7 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
 			auto key = std::string(kv.key().begin(), kv.key().end());
-			auto value = std::string(kv.value().begin(), kv.value().end());
+		      	auto value = std::string(kv.value().begin(), kv.value().end());	
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -2745,9 +2742,7 @@ TEST_CASE("Blob Granule Functions") {
 			continue;
 		}
 
-		fdb::future_var::KeyRangeRefArray::Type output;
-		fdbCheck(f.getNothrow(output));
-
+		auto output = f.get();
 		auto outKr = std::get<0>(output);
 		auto outCount = std::get<1>(output);
 
@@ -2811,9 +2806,7 @@ TEST_CASE("Blob Granule Functions") {
 			continue;
 		}
 
-		fdb::future_var::GranuleSummaryRefArray::Type out;
-		fdbCheck(f.getNothrow(out));
-
+		auto out = f.get();
 		auto out_summaries = std::get<0>(out);
 		auto out_count = std::get<1>(out);
 
@@ -2861,7 +2854,8 @@ int main(int argc, char** argv) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {
 			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
-			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, externalClientLibrary);
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+			                                        externalClientLibrary);
 		}
 	}
 
