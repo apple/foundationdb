@@ -1327,4 +1327,9 @@ struct std::hash<fdb::Future> {
 	size_t operator()(const fdb::Future& f) const { return std::hash<fdb::native::FDBFuture*>{}(f.nativeHandle()); }
 };
 
+// Trivially construct a BytesRef out of a string literal
+inline fdb::BytesRef operator""_br(const char* str, size_t len) {
+	return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
+}
+
 #endif /*FDB_API_HPP*/

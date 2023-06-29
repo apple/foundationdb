@@ -50,13 +50,6 @@
 
 #include "test/fdb_api.hpp"
 
-using namespace std::string_view_literals;
-
-// Trivially construct a BytesRef out of a string literal
-inline fdb::BytesRef operator""_br(const char* str, size_t len) {
-	return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
-}
-
 void fdbCheck(const fdb::Error& err) {
 	if (err) {
 		std::cerr << err.what() << std::endl;
