@@ -1590,6 +1590,9 @@ DatabaseContext::DatabaseContext(Reference<AsyncVar<Reference<IClusterConnection
 	tssMismatchHandler = handleTssMismatches(this);
 	clientStatusUpdater.actor = clientStatusUpdateActor(this);
 	cacheListMonitor = monitorCacheList(this);
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		throughputTrackerFuture = throughputTracker.run(*this);
+	}
 
 	smoothMidShardSize.reset(CLIENT_KNOBS->INIT_MID_SHARD_BYTES);
 	globalConfig = std::make_unique<GlobalConfig>(this);
@@ -3636,8 +3639,8 @@ ACTOR Future<ValueReadResult> getValue(Reference<TransactionState> trState,
 			}
 			trState->cx->getValueCompleted->latency = timer_int() - startTime;
 			trState->cx->getValueCompleted->log();
-			trState->totalCost +=
-			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0));
+			trState->addReadCost(
+			    getReadOperationCost(key.size() + (reply.value.present() ? reply.value.get().size() : 0)));
 
 			if (getValueID.present()) {
 				g_traceBatch.addEvent("GetValueDebug",
@@ -4508,7 +4511,7 @@ void getRangeFinished(Reference<TransactionState> trState,
                       RangeReadResultFamily result) {
 	int64_t bytes = getRangeResultFamilyBytes(result);
 
-	trState->totalCost += getReadOperationCost(bytes);
+	trState->addReadCost(getReadOperationCost(bytes));
 	trState->cx->transactionBytesRead += bytes;
 	trState->cx->transactionKeysRead += result.size();
 
@@ -5960,7 +5963,7 @@ void Transaction::set(const KeyRef& key, const ValueRef& value, AddConflictRange
 	auto r = singleKeyRange(key, req.arena);
 	auto v = ValueRef(req.arena, value);
 	t.mutations.emplace_back(req.arena, MutationRef::SetValue, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize() + value.expectedSize());
+	trState->addWriteCost(getWriteOperationCost(key.expectedSize() + value.expectedSize()));
 
 	if (addConflictRange) {
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -5990,7 +5993,7 @@ void Transaction::atomicOp(const KeyRef& key,
 	auto v = ValueRef(req.arena, operand);
 
 	t.mutations.emplace_back(req.arena, operationType, r.begin, v);
-	trState->totalCost += getWriteOperationCost(key.expectedSize());
+	trState->addWriteCost(getWriteOperationCost(key.expectedSize()));
 
 	if (addConflictRange && operationType != MutationRef::SetVersionstampedKey)
 		t.write_conflict_ranges.push_back(req.arena, r);
@@ -6025,7 +6028,7 @@ void Transaction::clear(const KeyRangeRef& range, AddConflictRange addConflictRa
 	// NOTE: The throttling cost of each clear is assumed to be one page.
 	// This makes compuation fast, but can be inaccurate and may
 	// underestimate the cost of large clears.
-	trState->totalCost += CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE;
+	trState->addWriteCost(CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE);
 	if (addConflictRange)
 		t.write_conflict_ranges.push_back(req.arena, r);
 }
@@ -6786,6 +6789,8 @@ Future<Void> Transaction::commitMutations() {
 			return Void();
 		}
 
+		trState->flushWriteCost();
+
 		++trState->cx->transactionsCommitStarted;
 
 		if (trState->options.readOnly)
@@ -7338,6 +7343,44 @@ Future<Version> TransactionState::getReadVersion(uint32_t flags) {
 	    cx, options.priority, flags, tenantGroup, derivedSpanContext, options.throttlingTag, versionDebugID);
 	startTime = now();
 	return extractReadVersion(Reference<TransactionState>::addRef(this), location, spanContext, reply, metadataVersion);
+}
+
+Optional<ThrottlingId> TransactionState::getThrottlingId() {
+	if (tenant().present() && tenant().get()->tenantGroup().present()) {
+		return ThrottlingIdRef::fromTenantGroup(tenant().get()->tenantGroup().get());
+	} else if (options.throttlingTag.present()) {
+		return ThrottlingIdRef::fromTag(options.throttlingTag.get());
+	} else {
+		return {};
+	}
+}
+
+void TransactionState::addReadCost(uint64_t bytes) {
+	readCost += bytes;
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS) {
+		auto const throttlingId = getThrottlingId();
+		if (throttlingId.present()) {
+			cx->addCost(throttlingId.get(), bytes);
+		}
+	}
+}
+
+void TransactionState::addWriteCost(uint64_t bytes) {
+	writeCost += bytes;
+}
+
+void TransactionState::flushWriteCost() {
+	if (CLIENT_KNOBS->TRACK_THROUGHPUT_ON_CLIENTS && !flushedWriteCost) {
+		auto const throttlingId = getThrottlingId();
+		if (throttlingId.present()) {
+			cx->addCost(throttlingId.get(), writeCost);
+		}
+		flushedWriteCost = true;
+	}
+}
+
+int64_t TransactionState::getTotalCost() const {
+	return readCost + writeCost;
 }
 
 Optional<Version> Transaction::getCachedReadVersion() const {
@@ -11170,6 +11213,10 @@ ACTOR Future<Void> popChangeFeedMutationsActor(Reference<DatabaseContext> db, Ke
 
 Future<Void> DatabaseContext::popChangeFeedMutations(Key rangeID, Version version) {
 	return popChangeFeedMutationsActor(Reference<DatabaseContext>::addRef(this), rangeID, version);
+}
+
+void DatabaseContext::addCost(ThrottlingId const& throttlingId, uint64_t bytes) {
+	throughputTracker.addCost(throttlingId, bytes);
 }
 
 Reference<DatabaseContext::TransactionT> DatabaseContext::createTransaction() {
