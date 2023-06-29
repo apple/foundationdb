@@ -73,6 +73,18 @@ struct MappedKeyValueRef : native::FDBMappedKeyValue {
 	ValueRef value() const noexcept {
 		return ValueRef(native::FDBMappedKeyValue::value.key, native::FDBMappedKeyValue::value.key_length);
 	}
+	KeyRef rangeBeginKey() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::getRange.begin.key.key, native::FDBMappedKeyValue::getRange.begin.key.key_length);
+	}
+	KeyRef rangeEndKey() const noexcept {
+		return KeyRef(native::FDBMappedKeyValue::getRange.end.key.key, native::FDBMappedKeyValue::getRange.end.key.key_length);
+	}
+	int rangeSize() const noexcept {
+		return native::FDBMappedKeyValue::getRange.m_size;
+	}
+	KeyValueRef rangeKeyValue(int i) const noexcept {
+		return (KeyValueRef&)native::FDBMappedKeyValue::getRange.data[i];
+	}
 };
 
 struct KeyValue {

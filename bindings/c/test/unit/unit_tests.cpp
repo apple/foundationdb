@@ -177,8 +177,8 @@ struct GetMappedRangeResult {
 	fdb::Error err;
 };
 
-static inline std::string extractString(fdb::native::FDBKey key) {
-	return std::string((const char*)key.key, key.key_length);
+static inline std::string extractString(fdb::KeyRef key) {
+	return std::string(key.begin(), key.end());
 }
 
 GetMappedRangeResult getMappedRange(fdb::Transaction& tr,
@@ -209,18 +209,18 @@ GetMappedRangeResult getMappedRange(fdb::Transaction& tr,
 	// std::endl;
 
 	for (int i = 0; i < outCount; ++i) {
-		fdb::native::FDBMappedKeyValue mkv = outMkv[i];
-		auto key = extractString(mkv.key);
-		auto value = extractString(mkv.value);
-		auto begin = extractString(mkv.getRange.begin.key);
-		auto end = extractString(mkv.getRange.end.key);
+		fdb::MappedKeyValueRef mkv = outMkv[i];
+		auto key = extractString(mkv.key());
+		auto value = extractString(mkv.value());
+		auto begin = extractString(mkv.rangeBeginKey());
+		auto end = extractString(mkv.rangeEndKey());
 		//		std::cout << "key:" << key << " value:" << value << " begin:" << begin << " end:" << end << std::endl;
 
 		std::vector<std::pair<std::string, std::string>> range_results;
-		for (int i = 0; i < mkv.getRange.m_size; ++i) {
-			const auto& kv = mkv.getRange.data[i];
-			std::string k((const char*)kv.key, kv.key_length);
-			std::string v((const char*)kv.value, kv.value_length);
+		for (int i = 0; i < mkv.rangeSize(); ++i) {
+			const auto& kv = mkv.rangeKeyValue(i);
+			std::string k(kv.key().begin(), kv.key().end());
+			std::string v(kv.value().begin(), kv.value().end());
 			range_results.emplace_back(k, v);
 			// std::cout << "[" << i << "]" << k << " -> " << v << std::endl;
 		}
