@@ -2328,7 +2328,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 				                         recovery,
 				                         folder,
 				                         degraded,
-				                         activeSharedTLog);
+				                         activeSharedTLog,
+				                         enablePrimaryTxnSystemHealthCheck);
 				recoveries.push_back(recovery.getFuture());
 				activeSharedTLog->set(s.storeID);
 
@@ -2882,7 +2883,8 @@ ACTOR Future<Void> workerServer(Reference<IClusterConnectionRecord> connRecord,
 					                               Promise<Void>(),
 					                               folder,
 					                               degraded,
-					                               activeSharedTLog);
+					                               activeSharedTLog,
+					                               enablePrimaryTxnSystemHealthCheck);
 					tLogCore = handleIOErrors(tLogCore, data, logId);
 					tLogCore = handleIOErrors(tLogCore, queue, logId);
 					errorForwarders.add(forwardError(errors, Role::SHARED_TRANSACTION_LOG, logId, tLogCore));
