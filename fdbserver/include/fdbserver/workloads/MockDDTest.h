@@ -35,8 +35,8 @@ struct MockDDTestWorkload : public TestWorkload {
 	double maxKeyspace = 0.1; // range space
 	int maxByteSize = 1024, minByteSize = 32; // single point value size. The Key size is fixed to 16 bytes
 
-	std::shared_ptr<MockGlobalState> mgs;
-	Reference<DDMockTxnProcessor> mock;
+	// shared by all Mock Workload
+	std::shared_ptr<MockGlobalState> sharedMgs;
 
 	KeyRange getRandomRange(double offset) const;
 	Future<Void> setup(Database const& cx) override;
@@ -60,7 +60,7 @@ protected:
 	int minSpaceKeyCount = 1000, maxSpaceKeyCount = 1000;
 	int linearStride = 10 * (1 << 20), linearStartSize = 10 * (1 << 20);
 
-	MockDDTestWorkload(WorkloadContext const& wcx);
+	explicit MockDDTestWorkload(WorkloadContext const& wcx);
 
 	virtual void populateRandomStrategy();
 	virtual void populateLinearStrategy();

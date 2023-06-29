@@ -46,12 +46,14 @@ inline void hash<HashType::HashLittle2>(const KeyRef& key, size_t length) {
 
 template <>
 inline void hash<HashType::CRC32C>(const KeyRef& key, size_t length) {
-	benchmark::DoNotOptimize(crc32c_append(0xfdbeefdb, key.begin(), length));
+	auto result = crc32c_append(0xfdbeefdb, key.begin(), length);
+	benchmark::DoNotOptimize(result);
 }
 
 template <>
 inline void hash<HashType::XXHash3>(const KeyRef& key, size_t length) {
-	benchmark::DoNotOptimize(XXH3_64bits(key.begin(), length));
+	auto result = XXH3_64bits(key.begin(), length);
+	benchmark::DoNotOptimize(result);
 }
 
 template <HashType hashType>

@@ -56,6 +56,7 @@
 #include "flow/CodeProbeUtils.h"
 #include "fdbserver/SimulatedCluster.h"
 #include "flow/IConnection.h"
+#include "fdbserver/MockGlobalState.h"
 #include "flow/actorcompiler.h" // This must be the last #include.
 
 #undef max
@@ -2153,7 +2154,8 @@ void SimulationConfig::generateNormalConfig(const TestConfig& testConfig) {
 	setEncryptionAtRestMode(testConfig);
 	setStorageEngine(testConfig);
 	setReplicationType(testConfig);
-	if (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5)) {
+	if (!testConfig.singleRegion &&
+	    (generateFearless || (datacenters == 2 && deterministicRandom()->random01() < 0.5))) {
 		setRegions(testConfig);
 	}
 	setMachineCount(testConfig);
@@ -2186,6 +2188,10 @@ void setupSimulatedSystem(std::vector<Future<Void>>* systemActors,
 	// SOMEDAY: this does not test multi-interface configurations
 	SimulationConfig simconfig(testConfig);
 	*tenantMode = simconfig.db.tenantMode;
+
+	if (testConfig.testClass == MOCK_DD_TEST_CLASS) {
+		MockGlobalState::g_mockState()->initializeClusterLayout(simconfig);
+	}
 
 	if (testConfig.logAntiQuorum != -1) {
 		simconfig.db.tLogWriteAntiQuorum = testConfig.logAntiQuorum;
@@ -2748,7 +2754,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 	CODE_PROBE(true, "Simulation start");
 
 	state Optional<TenantName> defaultTenant;
-	state Standalone<VectorRef<TenantNameRef>> tenantsToCreate;
+	state Standalone<VectorRef<TenantNameRef>> extraTenants;
 	state Optional<TenantMode> tenantMode;
 
 	try {
@@ -2800,22 +2806,20 @@ ACTOR void setupAndRun(std::string dataFolder,
 				defaultTenant = "SimulatedDefaultTenant"_sr;
 			}
 		}
-		if (!rebooting) {
-			if (defaultTenant.present() && allowDefaultTenant) {
-				tenantsToCreate.push_back_deep(tenantsToCreate.arena(), defaultTenant.get());
-			}
-			if (allowCreatingTenants && tenantMode != TenantMode::DISABLED && deterministicRandom()->coinflip()) {
-				int numTenants = deterministicRandom()->randomInt(1, 6);
-				for (int i = 0; i < numTenants; ++i) {
-					tenantsToCreate.push_back_deep(tenantsToCreate.arena(),
-					                               TenantNameRef(format("SimulatedExtraTenant%04d", i)));
-				}
+
+		if (!rebooting && allowCreatingTenants && tenantMode != TenantMode::DISABLED &&
+		    deterministicRandom()->coinflip()) {
+			int numTenants = deterministicRandom()->randomInt(1, 6);
+			for (int i = 0; i < numTenants; ++i) {
+				extraTenants.push_back_deep(extraTenants.arena(), TenantNameRef(format("SimulatedExtraTenant%04d", i)));
 			}
 		}
+
 		TraceEvent("SimulatedClusterTenantMode")
 		    .detail("UsingTenant", defaultTenant)
 		    .detail("TenantMode", tenantMode.get().toString())
-		    .detail("TotalTenants", tenantsToCreate.size());
+		    .detail("TotalTenants", extraTenants.size() + (defaultTenant.present() ? 1 : 0));
+
 		std::string clusterFileDir = joinPath(dataFolder, deterministicRandom()->randomUniqueID().toString());
 		platform::createDirectory(clusterFileDir);
 		writeFile(joinPath(clusterFileDir, "fdb.cluster"), connectionString.get().toString());
@@ -2846,7 +2850,7 @@ ACTOR void setupAndRun(std::string dataFolder,
 		                                  LocalityData(),
 		                                  UnitTestParameters(),
 		                                  defaultTenant,
-		                                  tenantsToCreate,
+		                                  extraTenants,
 		                                  rebooting);
 		wait(testConfig.longRunningTest ? runTestsF
 		                                : timeoutError(runTestsF,
@@ -2868,10 +2872,6 @@ ACTOR void setupAndRun(std::string dataFolder,
 	destructed = true;
 	wait(Never());
 	ASSERT(false);
-}
-
-DatabaseConfiguration generateNormalDatabaseConfiguration(const BasicTestConfig& testConfig) {
-	return generateBasicSimulationConfig(testConfig).db;
 }
 
 BasicSimulationConfig generateBasicSimulationConfig(const BasicTestConfig& testConfig) {

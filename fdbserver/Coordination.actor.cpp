@@ -41,6 +41,8 @@
 
 namespace {
 
+const std::string fileCoordinatorPrefix = "coordination-";
+
 class LivenessChecker {
 	double threshold;
 	AsyncVar<double> lastTime;
@@ -174,7 +176,7 @@ ACTOR Future<Void> localGenerationReg(GenerationRegInterface interf, OnDemandSto
 
 TEST_CASE("/fdbserver/Coordination/localGenerationReg/simple") {
 	state GenerationRegInterface reg;
-	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), "coordination-");
+	state OnDemandStore store(params.getDataDir(), deterministicRandom()->randomUniqueID(), fileCoordinatorPrefix);
 	state Future<Void> actor = localGenerationReg(reg, &store);
 	state Key the_key(deterministicRandom()->randomAlphaNumeric(deterministicRandom()->randomInt(0, 10)));
 
@@ -762,7 +764,7 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 	state UID myID = deterministicRandom()->randomUniqueID();
 	state LeaderElectionRegInterface myLeaderInterface(g_network);
 	state GenerationRegInterface myInterface(g_network);
-	state OnDemandStore store(dataFolder, myID, "coordination-");
+	state OnDemandStore store(dataFolder, myID, fileCoordinatorPrefix);
 	state ConfigTransactionInterface configTransactionInterface;
 	state ConfigFollowerInterface configFollowerInterface;
 	state Future<Void> configDatabaseServer = Never();
@@ -783,14 +785,82 @@ ACTOR Future<Void> coordinationServer(std::string dataFolder,
 		     store.getError() || configDatabaseServer);
 		throw internal_error();
 	} catch (Error& e) {
+		state Error err = e;
 		TraceEvent("CoordinationServerError", myID).errorUnsuppressed(e);
-		throw;
+
+		// Handle a rare issue where the coordinator crashes during creation of
+		// its disk queue files. A disk queue consists of two files, created in
+		// the following manner:
+		//
+		//   1. Create two .part files.
+		//   2. Rename each .part file to remove its .part suffix.
+		//
+		// Step 2 can crash in between removing the .part suffix of the first
+		// and second file. If this occurs, the disk queue will refuse to open
+		// on subsequent attempts because it only sees one of its files,
+		// causing a process crash with the file_not_found error. Normally this
+		// behavior is fine, but in simulation it can occasionally cause
+		// problems. Simulation does not take into account injected errors can
+		// cause permanent process death. In most cases this is true. But if
+		// this inconistent disk queue state occurs on a coordinator, the
+		// coordinator will enter a reboot loop, continously failing to open
+		// its disk queue and crashing. If the simulation run has a small
+		// number of processes and another process is colocated with the
+		// coordinator, the run may get stuck because the coordinator crashing
+		// brings the other role offline as well. This has been observed in a
+		// stuck simulation run where a tlog colocated with a coordinator that
+		// ran into this issue meant the tlog replication policy couldn't be
+		// achieved.
+		//
+		// As a short term fix, catch file_not_found and fix inconsistent disk
+		// queue state on the coordinator. In the long term, we should either
+		// modify simulation to consider injected errors as fatal or allow the
+		// coordinator to manually fix disk queue state in real clusters.
+		if (g_network->isSimulated() && g_simulator->speedUpSimulation && e.code() == error_code_file_not_found) {
+			state std::vector<Future<Reference<IAsyncFile>>> fs;
+			fs.reserve(2);
+			for (int i = 0; i < 2; ++i) {
+				std::string file = joinPath(dataFolder, format("%s%d.fdq", fileCoordinatorPrefix.c_str(), i));
+				fs.push_back(
+				    IAsyncFileSystem::filesystem()->open(file,
+				                                         IAsyncFile::OPEN_READWRITE | IAsyncFile::OPEN_UNCACHED |
+				                                             IAsyncFile::OPEN_UNBUFFERED | IAsyncFile::OPEN_LOCK,
+				                                         0));
+			}
+			wait(waitForAllReady(fs));
+
+			// Make sure one of the disk queue files is missing. This should be
+			// the only cause of the file_not_found error.
+			ASSERT(((fs[0].isError() && fs[0].getError().code() == error_code_file_not_found) ||
+			        (fs[1].isError() && fs[1].getError().code() == error_code_file_not_found)) &&
+			       fs[0].isError() != fs[1].isError());
+
+			TraceEvent(SevWarnAlways, "CoordinatorDiskQueueInconsistentState")
+			    .detail("File0Missing", fs[0].isError())
+			    .detail("File1Missing", fs[1].isError());
+			;
+
+			// Remove the remaining disk queue file to allow the coordinator to
+			// create new files on next boot.
+			if (fs[0].isError()) {
+				ASSERT(fs[0].getError().code() == error_code_file_not_found);
+				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "1.fdq"),
+				                                                true));
+			}
+			if (fs[1].isError()) {
+				ASSERT(fs[1].getError().code() == error_code_file_not_found);
+				wait(IAsyncFileSystem::filesystem()->deleteFile(joinPath(dataFolder, fileCoordinatorPrefix + "0.fdq"),
+				                                                true));
+			}
+		}
+
+		throw err;
 	}
 }
 
 ACTOR Future<Void> changeClusterDescription(std::string datafolder, KeyRef newClusterKey, KeyRef oldClusterKey) {
 	state UID myID = deterministicRandom()->randomUniqueID();
-	state OnDemandStore store(datafolder, myID, "coordination-");
+	state OnDemandStore store(datafolder, myID, fileCoordinatorPrefix);
 	RangeResult res = wait(store->readRange(allKeys));
 	// Context, in coordinators' kv-store
 	// cluster description and the random id are always appear together as the clusterKey
@@ -852,7 +922,7 @@ Future<Void> coordChangeClusterKey(std::string dataFolder, KeyRef newClusterKey,
 		std::vector<std::string> returnFiles = platform::listFiles(processDir, "");
 		bool isCoord = false;
 		for (const auto& fileEntry : returnFiles) {
-			if (fileEntry.rfind("coordination-", 0) == 0) {
+			if (fileEntry.rfind(fileCoordinatorPrefix, 0) == 0) {
 				isCoord = true;
 			}
 		}

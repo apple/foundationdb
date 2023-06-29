@@ -5,7 +5,6 @@ tenantModes = ['optional', 'required']
 
 [[knobs]]
 bg_metadata_source = "tenant"
-enable_configurable_encryption = true
 enable_rest_kms_communication = true
 
 [[test]]

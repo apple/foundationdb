@@ -20,8 +20,6 @@
 
 #ifndef FLOW_ARENA_H
 #define FLOW_ARENA_H
-#include <array>
-#include <iterator>
 #pragma once
 
 #include "flow/BooleanParam.h"
@@ -34,7 +32,9 @@
 #include "flow/Optional.h"
 #include "flow/Traceable.h"
 #include <algorithm>
+#include <array>
 #include <boost/functional/hash.hpp>
+#include <iterator>
 #include <stdint.h>
 #include <string_view>
 #include <string>
@@ -99,6 +99,8 @@ FDB_BOOLEAN_PARAM(FastInaccurateEstimate);
 // Tag struct to indicate that the block containing allocated memory needs to be zero-ed out after use
 struct WipeAfterUse {};
 
+struct ArenaBlock;
+
 // An Arena is a custom allocator that consists of a set of ArenaBlocks.  Allocation is performed by bumping a pointer
 // on the most recent ArenaBlock until the block is unable to service the next allocation request.  When the current
 // ArenaBlock is full, a new (larger) one is added to the Arena.  Deallocation is not directly supported.  Instead,
@@ -133,8 +135,14 @@ public:
 
 	bool sameArena(const Arena& other) const { return impl.getPtr() == other.impl.getPtr(); }
 
+	ArenaBlock* getPtr() const { return impl.getPtr(); }
+
+	static Arena addRef(ArenaBlock* ptr);
+
 private:
-	Reference<struct ArenaBlock> impl;
+	Arena(ArenaBlock* ptr) : impl(ptr) {}
+
+	Reference<ArenaBlock> impl;
 };
 
 template <>
@@ -207,6 +215,11 @@ struct ArenaBlock : NonCopyable, ThreadSafeReferenceCounted<ArenaBlock> {
 	void destroyLeaf();
 	static void* operator new(size_t s) = delete;
 };
+
+inline Arena Arena::addRef(ArenaBlock* ptr) {
+	ptr->addref();
+	return Arena(ptr);
+}
 
 inline void* operator new(size_t size, Arena& p) {
 	UNSTOPPABLE_ASSERT(size < std::numeric_limits<int>::max());
@@ -1097,7 +1110,7 @@ public:
 		m_size--;
 	}
 
-	void pop_front(int count) {
+	void pop_front(int count = 1) {
 		VPS::invalidate();
 		count = std::min(m_size, count);
 

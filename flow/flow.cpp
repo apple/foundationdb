@@ -581,9 +581,9 @@ struct TestErrorOrMapClass {
 	ErrorOr<StringRef> errorOrSub(int x) const { return errorOrValue.map<StringRef>(&StringRef::substr, (int)x); }
 
 	TestErrorOrMapClass(StringRef value, Optional<Error> optionalValueError)
-	  : value(value), constValue(value),
-	    errorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
-	                                               : ErrorOr<StringRef>(optionalValueError.get())),
+	  : value(value), errorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
+	                                                             : ErrorOr<StringRef>(optionalValueError.get())),
+	    constValue(value),
 	    constErrorOrValue(!optionalValueError.present() ? ErrorOr<StringRef>(value)
 	                                                    : ErrorOr<StringRef>(optionalValueError.get())) {}
 };

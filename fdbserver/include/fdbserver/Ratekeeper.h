@@ -26,7 +26,7 @@
 #include "fdbclient/DatabaseConfiguration.h"
 #include "fdbclient/DatabaseContext.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbrpc/Smoother.h"
 #include "fdbserver/IRKBlobMonitor.h"
 #include "fdbserver/IRKConfigurationMonitor.h"
@@ -38,6 +38,7 @@
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RatekeeperInterface.h"
 #include "fdbserver/ServerDBInfo.h"
+#include "fdbserver/QuotaThrottler.h"
 #include "fdbserver/TLogInterface.h"
 
 /**
@@ -48,7 +49,7 @@
  *
  * - Calculating cluster-wide rates for each priority and tag. The
  *   responsibility of calculating per-tag rates is handled through
- *   the tagThrottler object.
+ *   the quotaThrottler object.
  *
  * - Serving the RatekeeperInterface. This interface is used to distribute
  *   transaction rates and health metrics to GRV proxies. Commit proxies also
@@ -66,8 +67,8 @@ class Ratekeeper {
 	RKBlobMonitor blobMonitor;
 	RKRateServer rateServer;
 	RKRateUpdater normalRateUpdater, batchRateUpdater;
-	std::unique_ptr<IRKThroughputQuotaCache> quotaCache;
-	std::unique_ptr<class ITagThrottler> tagThrottler;
+	RKThroughputQuotaCache quotaCache;
+	QuotaThrottler quotaThrottler;
 
 	PromiseStream<Future<Void>> addActor;
 
@@ -75,7 +76,7 @@ class Ratekeeper {
 
 	Ratekeeper(UID, Database, Reference<AsyncVar<ServerDBInfo> const>, RatekeeperInterface);
 
-	void tryUpdateAutoTagThrottling();
+	void updateTagThrottling();
 
 public:
 	static Future<Void> run(RatekeeperInterface rkInterf, Reference<AsyncVar<ServerDBInfo> const> dbInfo);

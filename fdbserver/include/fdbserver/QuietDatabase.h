@@ -65,4 +65,7 @@ getStorageWorkers(Database const& cx, Reference<AsyncVar<ServerDBInfo> const> co
 Future<std::vector<WorkerInterface>> getCoordWorkers(Database const& cx,
                                                      Reference<AsyncVar<ServerDBInfo> const> const& dbInfo);
 
+Future<Void> enableConsistencyScanInSim(Database const& db);
+Future<Void> disableConsistencyScanInSim(Database const& db, bool const& waitForCompletion);
+
 #endif

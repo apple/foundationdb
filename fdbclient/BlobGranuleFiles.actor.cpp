@@ -312,20 +312,12 @@ struct IndexBlockRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef headerRef;
-			buffer = encryptor.encrypt(
-			    serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
-			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
-			arena.dependsOn(serialized.arena());
-			encryptHeaderRef = serialized;
-		} else {
-			BlobCipherEncryptHeader header;
-			buffer =
-			    encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &header, arena)
-			        ->toStringRef();
-			encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
-		}
+		BlobCipherEncryptHeaderRef headerRef;
+		buffer =
+		    encryptor.encrypt(serializedBuff.contents().begin(), serializedBuff.contents().size(), &headerRef, arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		arena.dependsOn(serialized.arena());
+		encryptHeaderRef = serialized;
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(buffer.begin(), buffer.size());
@@ -344,24 +336,11 @@ struct IndexBlockRef {
 			TraceEvent(SevDebug, "IndexBlockEncrypt_Before").detail("Chksum", chksum);
 		}
 		StringRef decrypted;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef headerRef =
-			    BlobCipherEncryptHeaderRef::fromStringRef(idxRef.encryptHeaderRef.get());
-			validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
-			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
-			                                     eKeys.headerCipherKey,
-			                                     cipherKeysCtx.ivRef.begin(),
-			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
-		} else {
-			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(idxRef.encryptHeaderRef.get());
-			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
-			                                     eKeys.headerCipherKey,
-			                                     cipherKeysCtx.ivRef.begin(),
-			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), header, arena)->toStringRef();
-		}
+		BlobCipherEncryptHeaderRef headerRef = BlobCipherEncryptHeaderRef::fromStringRef(idxRef.encryptHeaderRef.get());
+		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
+		decrypted = decryptor.decrypt(idxRef.buffer.begin(), idxRef.buffer.size(), headerRef, arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -454,18 +433,11 @@ struct IndexBlobGranuleFileChunkRef {
 		    AES_256_IV_LENGTH,
 		    getEncryptAuthTokenMode(EncryptAuthTokenMode::ENCRYPT_HEADER_AUTH_TOKEN_MODE_SINGLE),
 		    BlobCipherMetrics::BLOB_GRANULE);
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef headerRef;
-			chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
-			Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
-			arena.dependsOn(serialized.arena());
-			chunkRef.encryptHeaderRef = serialized;
-		} else {
-			BlobCipherEncryptHeader header;
-			chunkRef.buffer =
-			    encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &header, arena)->toStringRef();
-			chunkRef.encryptHeaderRef = BlobCipherEncryptHeader::toStringRef(header, arena);
-		}
+		BlobCipherEncryptHeaderRef headerRef;
+		chunkRef.buffer = encryptor.encrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), &headerRef, arena);
+		Standalone<StringRef> serialized = BlobCipherEncryptHeaderRef::toStringRef(headerRef);
+		arena.dependsOn(serialized.arena());
+		chunkRef.encryptHeaderRef = serialized;
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(chunkRef.buffer.begin(), chunkRef.buffer.size());
@@ -487,25 +459,12 @@ struct IndexBlobGranuleFileChunkRef {
 		}
 
 		StringRef decrypted;
-		if (CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION) {
-			BlobCipherEncryptHeaderRef headerRef =
-			    BlobCipherEncryptHeaderRef::fromStringRef(chunkRef.encryptHeaderRef.get());
-			validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
-			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
-			                                     eKeys.headerCipherKey,
-			                                     cipherKeysCtx.ivRef.begin(),
-			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
-		} else {
-			BlobCipherEncryptHeader header = BlobCipherEncryptHeader::fromStringRef(chunkRef.encryptHeaderRef.get());
-			validateEncryptionHeaderDetails(eKeys, header, cipherKeysCtx.ivRef);
-			DecryptBlobCipherAes256Ctr decryptor(eKeys.textCipherKey,
-			                                     eKeys.headerCipherKey,
-			                                     cipherKeysCtx.ivRef.begin(),
-			                                     BlobCipherMetrics::BLOB_GRANULE);
-			decrypted =
-			    decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), header, arena)->toStringRef();
-		}
+		BlobCipherEncryptHeaderRef headerRef =
+		    BlobCipherEncryptHeaderRef::fromStringRef(chunkRef.encryptHeaderRef.get());
+		validateEncryptionHeaderDetails(eKeys, headerRef, cipherKeysCtx.ivRef);
+		DecryptBlobCipherAes256Ctr decryptor(
+		    eKeys.textCipherKey, eKeys.headerCipherKey, cipherKeysCtx.ivRef.begin(), BlobCipherMetrics::BLOB_GRANULE);
+		decrypted = decryptor.decrypt(chunkRef.buffer.begin(), chunkRef.buffer.size(), headerRef, arena);
 
 		if (BG_ENCRYPT_COMPRESS_DEBUG) {
 			XXH64_hash_t chksum = XXH3_64bits(decrypted.begin(), decrypted.size());
@@ -1646,126 +1605,6 @@ RangeResult materializeBlobGranule(const BlobGranuleChunkRef& chunk,
 	}
 
 	return mergeDeltaStreams(chunk, streams, startClears, stats);
-}
-
-struct GranuleLoadFreeHandle : NonCopyable, ReferenceCounted<GranuleLoadFreeHandle> {
-	const ReadBlobGranuleContext* granuleContext;
-	int64_t loadId;
-
-	GranuleLoadFreeHandle(const ReadBlobGranuleContext* granuleContext, int64_t loadId)
-	  : granuleContext(granuleContext), loadId(loadId) {}
-
-	~GranuleLoadFreeHandle() { granuleContext->free_load_f(loadId, granuleContext->userContext); }
-};
-
-struct GranuleLoadIds {
-	Optional<int64_t> snapshotId;
-	std::vector<int64_t> deltaIds;
-	std::vector<Reference<GranuleLoadFreeHandle>> freeHandles;
-};
-
-static void startLoad(const ReadBlobGranuleContext* granuleContext,
-                      const BlobGranuleChunkRef& chunk,
-                      GranuleLoadIds& loadIds) {
-
-	// Start load process for all files in chunk
-	if (chunk.snapshotFile.present()) {
-		std::string snapshotFname = chunk.snapshotFile.get().filename.toString();
-		// FIXME: remove when we implement file multiplexing
-		ASSERT(chunk.snapshotFile.get().offset == 0);
-		ASSERT(chunk.snapshotFile.get().length == chunk.snapshotFile.get().fullFileLength);
-		loadIds.snapshotId = granuleContext->start_load_f(snapshotFname.c_str(),
-		                                                  snapshotFname.size(),
-		                                                  chunk.snapshotFile.get().offset,
-		                                                  chunk.snapshotFile.get().length,
-		                                                  chunk.snapshotFile.get().fullFileLength,
-		                                                  granuleContext->userContext);
-		loadIds.freeHandles.push_back(makeReference<GranuleLoadFreeHandle>(granuleContext, loadIds.snapshotId.get()));
-	}
-	loadIds.deltaIds.reserve(chunk.deltaFiles.size());
-	for (int deltaFileIdx = 0; deltaFileIdx < chunk.deltaFiles.size(); deltaFileIdx++) {
-		std::string deltaFName = chunk.deltaFiles[deltaFileIdx].filename.toString();
-		// FIXME: remove when we implement file multiplexing
-		ASSERT(chunk.deltaFiles[deltaFileIdx].offset == 0);
-		ASSERT(chunk.deltaFiles[deltaFileIdx].length == chunk.deltaFiles[deltaFileIdx].fullFileLength);
-		int64_t deltaLoadId = granuleContext->start_load_f(deltaFName.c_str(),
-		                                                   deltaFName.size(),
-		                                                   chunk.deltaFiles[deltaFileIdx].offset,
-		                                                   chunk.deltaFiles[deltaFileIdx].length,
-		                                                   chunk.deltaFiles[deltaFileIdx].fullFileLength,
-		                                                   granuleContext->userContext);
-		loadIds.deltaIds.push_back(deltaLoadId);
-		loadIds.freeHandles.push_back(makeReference<GranuleLoadFreeHandle>(granuleContext, deltaLoadId));
-	}
-}
-
-ErrorOr<RangeResult> loadAndMaterializeBlobGranules(const Standalone<VectorRef<BlobGranuleChunkRef>>& files,
-                                                    const KeyRangeRef& keyRange,
-                                                    Version beginVersion,
-                                                    Version readVersion,
-                                                    ReadBlobGranuleContext granuleContext,
-                                                    GranuleMaterializeStats& stats) {
-	int64_t parallelism = granuleContext.granuleParallelism;
-	if (parallelism < 1) {
-		parallelism = 1;
-	}
-	if (parallelism >= CLIENT_KNOBS->BG_MAX_GRANULE_PARALLELISM) {
-		parallelism = CLIENT_KNOBS->BG_MAX_GRANULE_PARALLELISM;
-	}
-
-	GranuleLoadIds loadIds[files.size()];
-
-	try {
-		// Kick off first file reads if parallelism > 1
-		for (int i = 0; i < parallelism - 1 && i < files.size(); i++) {
-			startLoad(&granuleContext, files[i], loadIds[i]);
-		}
-		RangeResult results;
-		for (int chunkIdx = 0; chunkIdx < files.size(); chunkIdx++) {
-			// Kick off files for this granule if parallelism == 1, or future granule if parallelism > 1
-			if (chunkIdx + parallelism - 1 < files.size()) {
-				startLoad(&granuleContext, files[chunkIdx + parallelism - 1], loadIds[chunkIdx + parallelism - 1]);
-			}
-
-			RangeResult chunkRows;
-
-			// once all loads kicked off, load data for chunk
-			Optional<StringRef> snapshotData;
-			if (files[chunkIdx].snapshotFile.present()) {
-				snapshotData =
-				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].snapshotId.get(), granuleContext.userContext),
-				              files[chunkIdx].snapshotFile.get().length);
-				if (!snapshotData.get().begin()) {
-					return ErrorOr<RangeResult>(blob_granule_file_load_error());
-				}
-			}
-
-			std::vector<StringRef> deltaData;
-			deltaData.resize(files[chunkIdx].deltaFiles.size());
-			for (int i = 0; i < files[chunkIdx].deltaFiles.size(); i++) {
-				deltaData[i] =
-				    StringRef(granuleContext.get_load_f(loadIds[chunkIdx].deltaIds[i], granuleContext.userContext),
-				              files[chunkIdx].deltaFiles[i].length);
-				// null data is error
-				if (!deltaData[i].begin()) {
-					return ErrorOr<RangeResult>(blob_granule_file_load_error());
-				}
-			}
-
-			// materialize rows from chunk
-			chunkRows = materializeBlobGranule(
-			    files[chunkIdx], keyRange, beginVersion, readVersion, snapshotData, deltaData, stats);
-
-			results.arena().dependsOn(chunkRows.arena());
-			results.append(results.arena(), chunkRows.begin(), chunkRows.size());
-
-			// free once done by forcing FreeHandles to trigger
-			loadIds[chunkIdx].freeHandles.clear();
-		}
-		return ErrorOr<RangeResult>(results);
-	} catch (Error& e) {
-		return ErrorOr<RangeResult>(e);
-	}
 }
 
 // just for client passthrough. reads all key-value pairs from a snapshot file, and all mutations from a delta file

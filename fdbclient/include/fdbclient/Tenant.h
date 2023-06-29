@@ -24,7 +24,7 @@
 
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/KeyBackedTypes.actor.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/VersionedMap.h"
 #include "fdbrpc/TenantInfo.h"
 #include "flow/BooleanParam.h"
@@ -216,7 +216,7 @@ struct TenantMetadataSpecification {
 	KeyBackedObjectMap<TenantGroupName, typename TenantTypes::TenantGroupEntryT, decltype(IncludeVersion()), NullCodec>
 	    tenantGroupMap;
 	KeyBackedMap<TenantGroupName, int64_t> storageQuota;
-	KeyBackedMap<TenantGroupName, ThrottleApi::TagQuotaValue> throughputQuota;
+	KeyBackedMap<TenantGroupName, ThrottleApi::ThroughputQuotaValue> throughputQuota;
 	KeyBackedBinaryValue<Versionstamp> lastTenantModification;
 
 	TenantMetadataSpecification(KeyRef prefix)

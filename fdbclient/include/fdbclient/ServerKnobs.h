@@ -109,10 +109,25 @@ public:
 	double PUSH_STATS_SLOW_RATIO;
 	int TLOG_POP_BATCH_SIZE;
 	double BLOCKING_PEEK_TIMEOUT;
-	bool PEEK_BATCHING_EMPTY_MSG;
-	double PEEK_BATCHING_EMPTY_MSG_INTERVAL;
 	double POP_FROM_LOG_DELAY;
 	double TLOG_PULL_ASYNC_DATA_WARNING_TIMEOUT_SECS;
+
+	// Empty Version Peek Batching
+	bool PEEK_BATCHING_EMPTY_MSG; // Enable tlog empty version peeks batching.
+	double PEEK_BATCHING_EMPTY_MSG_INTERVAL; // Maximum wait time for a batch on tlog side.
+	enum DYNAMIC_EMPTY_VERSION_WAIT_MODE { DISABLED, EMPTY_VERSION_WAIT_LOG_ONLY, EMPTY_VERSION_WAIT };
+	int DYNAMIC_EMPTY_VERSION_WAIT; // Choose from DYNAMIC_EMPTY_VERSION_WAIT_MODE.
+	bool SS_EMPTY_VERSION_WAIT_LESS_SKEW_STAT; // Whether to log non-queue-popping samples in empty version wait window
+	                                           // logging. Enabling this will result in less skewed logging but trace
+	                                           // many more lines.
+	double SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL; // Interval of sampling incoming requests at each storage server for
+	                                              // empty version wait window logging. Sampling too frequently may
+	                                              // incur extra storage server CPU cost and latency penalty for reads.
+	int SS_EMPTY_VERSION_WAIT_QUEUE_MAX_LENGTH; // Max size limit of empty version wait window logging queue. Tlog
+	                                            // samples will be discarded once limit is reached. It is advised to
+	                                            // keep this window big enough to capture tlog sync time window of
+	                                            // multiple times the size of SS_EMPTY_VERSION_WAIT_SAMPLE_INTERVAL
+	                                            // for collected statistics to make sense.AA
 
 	// Data distribution queue
 	double HEALTH_POLL_TIME;
@@ -188,19 +203,17 @@ public:
 	int PRIORITY_ENFORCE_MOVE_OUT_OF_PHYSICAL_SHARD;
 
 	// Data distribution
-	// DD use AVAILABLE_SPACE_PIVOT_RATIO to calculate pivotAvailableSpaceRatio. Given an array that's descend
-	// sorted by available space ratio, the pivot position is AVAILABLE_SPACE_PIVOT_RATIO * team count.
-	// When pivotAvailableSpaceRatio is lower than TARGET_AVAILABLE_SPACE_RATIO, the DD won't move any shard to the team
-	// has available space ratio < pivotAvailableSpaceRatio.
-	double AVAILABLE_SPACE_PIVOT_RATIO;
+	// DD use LOAD_BYTES_PIVOT_RATIO to select pivot position based on load bytes. Given an array that's ascend
+	// sorted by load bytes, the pivot position is LOAD_BYTES_PIVOT_RATIO * healthy team count. DD won't choose a team
+	// as destination team when its load bytes > pivot load bytes.
+	double LOAD_BYTES_PIVOT_RATIO;
+
 	// Given an array that's ascend sorted by CPU percent, the pivot position is CPU_PIVOT_RATIO *
 	// team count. DD won't move shard to teams that has CPU > pivot CPU.
 	double CPU_PIVOT_RATIO;
 	// DD won't move out a shard from its source team, if the utilization of source team meets two criterias:
-	// 1. The available space ratio is above strict pivot space ratio, where using DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO
-	// to calculate pivot space ratio.
-	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU.
-	double DD_STRICT_AVAILABLE_SPACE_PIVOT_RATIO;
+	// 1. The load bytes is below pivot load bytes, where using LOAD_BYTES_PIVOT_RATIO to calculate pivot load bytes
+	// 2. The CPU is below strict pivot CPU, where using DD_STRICT_CPU_PIVOT_RATIO to calculate pivot CPU
 	double DD_STRICT_CPU_PIVOT_RATIO;
 	// DD won't move shard to teams that has CPU > MAX_DEST_CPU_PERCENT
 	double MAX_DEST_CPU_PERCENT;
@@ -709,26 +722,12 @@ public:
 	double TLOG_IGNORE_POP_AUTO_ENABLE_DELAY;
 
 	// Tag throttling
-	int64_t MAX_MANUAL_THROTTLED_TRANSACTION_TAGS;
-	int64_t MAX_AUTO_THROTTLED_TRANSACTION_TAGS;
-	double MIN_TAG_COST;
-	double AUTO_THROTTLE_TARGET_TAG_BUSYNESS;
-	double AUTO_THROTTLE_RAMP_TAG_BUSYNESS;
-	double AUTO_TAG_THROTTLE_RAMP_UP_TIME;
-	double AUTO_TAG_THROTTLE_DURATION;
 	double TAG_THROTTLE_PUSH_INTERVAL;
-	double AUTO_TAG_THROTTLE_START_AGGREGATION_TIME;
-	double AUTO_TAG_THROTTLE_UPDATE_FREQUENCY;
-	double TAG_THROTTLE_EXPIRED_CLEANUP_INTERVAL;
-	bool AUTO_TAG_THROTTLING_ENABLED;
 	// Limit to the number of throttling tags each storage server
 	// will track and send to the ratekeeper
 	int64_t SS_THROTTLE_TAGS_TRACKED;
-	// Use global tag throttling strategy. i.e. throttle based on the cluster-wide
-	// throughput for tags and their associated quotas.
+	// Deprecated (TODO: Remove in 8.1)
 	bool GLOBAL_TAG_THROTTLING;
-	// Enforce tag throttling on proxies rather than on clients
-	bool ENFORCE_TAG_THROTTLING_ON_PROXIES;
 	// Minimum number of transactions per second that the global tag throttler must allow for each tag.
 	// When the measured tps for a tag gets too low, the denominator in the
 	// average cost calculation gets small, resulting in an unstable calculation.
@@ -1149,6 +1148,7 @@ public:
 	int BLOB_RESTORE_MANIFEST_FILE_MAX_SIZE;
 	int BLOB_RESTORE_MANIFEST_RETENTION_MAX;
 	int BLOB_RESTORE_MLOGS_RETENTION_SECS;
+	int BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 	int BLOB_GRANULES_FLUSH_BATCH_SIZE;
 
 	// Blob metadata
@@ -1172,6 +1172,8 @@ public:
 	int REST_KMS_MAX_BLOB_METADATA_REQUEST_VERSION;
 	int REST_KMS_CURRENT_CIPHER_REQUEST_VERSION;
 	int REST_KMS_MAX_CIPHER_REQUEST_VERSION;
+
+	double CONSISTENCY_SCAN_ACTIVE_THROTTLE_RATIO;
 
 	// Idempotency ids
 	double IDEMPOTENCY_ID_IN_MEMORY_LIFETIME;

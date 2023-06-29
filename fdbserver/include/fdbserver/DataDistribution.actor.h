@@ -277,9 +277,9 @@ struct ShardTrackedData {
 
 class PhysicalShardCollection : public ReferenceCounted<PhysicalShardCollection> {
 public:
-	PhysicalShardCollection() : lastTransitionStartTime(now()), requireTransition(false) {}
+	PhysicalShardCollection() : requireTransition(false), lastTransitionStartTime(now()) {}
 	PhysicalShardCollection(Reference<IDDTxnProcessor> db)
-	  : txnProcessor(db), lastTransitionStartTime(now()), requireTransition(false) {}
+	  : txnProcessor(db), requireTransition(false), lastTransitionStartTime(now()) {}
 
 	enum class PhysicalShardCreationTime { DDInit, DDRelocator };
 
@@ -523,20 +523,9 @@ int64_t getMaxShardSize(double dbSizeEstimate);
 
 bool ddLargeTeamEnabled();
 
-#ifndef __INTEL_COMPILER
-#pragma endregion
-#endif
-
-// FIXME(xwang): Delete Old DD Actors once the refactoring is done
-/////////////////////////////// Old DD Actors //////////////////////////////////////
-#ifndef __INTEL_COMPILER
-#pragma region Old DD Actors
-#endif
-
 struct TeamCollectionInterface {
 	PromiseStream<GetTeamRequest> getTeam;
 };
-
 #ifndef __INTEL_COMPILER
 #pragma endregion
 #endif

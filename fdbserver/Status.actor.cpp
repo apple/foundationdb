@@ -2251,15 +2251,11 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		TraceEventFields ratekeeper = f1.get();
 		TraceEventFields batchRatekeeper = f2.get();
 
-		bool autoThrottlingEnabled = ratekeeper.getInt("AutoThrottlingEnabled");
 		double tpsLimit = ratekeeper.getDouble("TPSLimit");
 		double batchTpsLimit = batchRatekeeper.getDouble("TPSLimit");
 		double transPerSec = ratekeeper.getDouble("ReleasedTPS");
 		double batchTransPerSec = ratekeeper.getDouble("ReleasedBatchTPS");
 		int autoThrottledTags = ratekeeper.getInt("TagsAutoThrottled");
-		int autoThrottledTagsBusyRead = ratekeeper.getInt("TagsAutoThrottledBusyRead");
-		int autoThrottledTagsBusyWrite = ratekeeper.getInt("TagsAutoThrottledBusyWrite");
-		int manualThrottledTags = ratekeeper.getInt("TagsManuallyThrottled");
 		int ssCount = ratekeeper.getInt("StorageServers");
 		int tlogCount = ratekeeper.getInt("TLogs");
 		int64_t worstFreeSpaceStorageServer = ratekeeper.getInt64("WorstFreeSpaceStorageServer");
@@ -2295,20 +2291,7 @@ ACTOR static Future<JsonBuilderObject> workloadStatusFetcher(
 		JsonBuilderObject throttledTagsObj;
 		JsonBuilderObject autoThrottledTagsObj;
 		autoThrottledTagsObj["count"] = autoThrottledTags;
-		autoThrottledTagsObj["busy_read"] = autoThrottledTagsBusyRead;
-		autoThrottledTagsObj["busy_write"] = autoThrottledTagsBusyWrite;
-		if (autoThrottlingEnabled) {
-			autoThrottledTagsObj["recommended_only"] = 0;
-		} else {
-			autoThrottledTagsObj["recommended_only"] = 1;
-		}
-
 		throttledTagsObj["auto"] = autoThrottledTagsObj;
-
-		JsonBuilderObject manualThrottledTagsObj;
-		manualThrottledTagsObj["count"] = manualThrottledTags;
-		throttledTagsObj["manual"] = manualThrottledTagsObj;
-
 		(*qos)["throttled_tags"] = throttledTagsObj;
 
 		JsonBuilderObject perfLimit = getPerfLimit(ratekeeper, transPerSec, tpsLimit);
@@ -2446,17 +2429,29 @@ ACTOR static Future<JsonBuilderObject> blobGranulesStatusFetcher(
 
 	statusObj["number_of_blob_workers"] = static_cast<int>(workers.size());
 	try {
-		bool backupEnabled = wait(BlobGranuleBackupConfig().enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
+		state BlobGranuleBackupConfig config;
+		bool backupEnabled = wait(config.enabled().getD(SystemDBWriteLockedNow(cx.getReference())));
 		statusObj["blob_granules_backup_enabled"] = backupEnabled;
+		if (backupEnabled) {
+			std::string manifestUrl = wait(config.manifestUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_manifest_url"] = manifestUrl;
+			std::string mlogsUrl = wait(config.mutationLogsUrl().getD(SystemDBWriteLockedNow(cx.getReference())));
+			statusObj["blob_granules_mlogs_url"] = mlogsUrl;
+		}
 		// Blob manager status
 		if (managerIntf.present()) {
 			Optional<TraceEventFields> fields = wait(timeoutError(
 			    latestEventOnWorker(addressWorkersMap[managerIntf.get().address()], "BlobManagerMetrics"), 2.0));
 			if (fields.present()) {
-				statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
-				statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
-				statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
-				statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+				int64_t lastFlushVersion = fields.get().getUint64("LastFlushVersion");
+				if (lastFlushVersion > 0) {
+					statusObj["last_flush_version"] = fields.get().getUint64("LastFlushVersion");
+					statusObj["last_manifest_dump_ts"] = fields.get().getUint64("LastManifestDumpTs");
+					statusObj["last_manifest_seq_no"] = fields.get().getUint64("LastManifestSeqNo");
+					statusObj["last_manifest_epoch"] = fields.get().getUint64("Epoch");
+					statusObj["last_manifest_size_in_bytes"] = fields.get().getUint64("ManifestSizeInBytes");
+					statusObj["last_truncation_version"] = fields.get().getUint64("LastMLogTruncationVersion");
+				}
 			}
 		}
 
@@ -2519,6 +2514,8 @@ ACTOR static Future<JsonBuilderObject> blobRestoreStatusFetcher(Database db, std
 					statusObj["blob_full_restore_start_ts"] = startTs;
 					std::string error = wait(config.error().getD(&tr));
 					statusObj["blob_full_restore_error"] = error;
+					Version targetVersion = wait(config.targetVersion().getD(&tr));
+					statusObj["blob_full_restore_version"] = targetVersion;
 				}
 				break;
 			} catch (Error& e) {

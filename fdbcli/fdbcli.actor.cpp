@@ -39,7 +39,7 @@
 #include "fdbclient/CoordinationInterface.h"
 #include "fdbclient/FDBOptions.g.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/TenantManagement.actor.h"
 #include "fdbclient/Tuple.h"
 
@@ -2057,13 +2057,6 @@ ACTOR Future<int> cli(CLIOptions opt, LineNoise* plinenoise, Reference<ClusterCo
 						}
 					}
 
-					continue;
-				}
-
-				if (tokencmp(tokens[0], "throttle")) {
-					bool _result = wait(makeInterruptable(throttleCommandActor(db, tokens)));
-					if (!_result)
-						is_error = true;
 					continue;
 				}
 

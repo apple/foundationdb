@@ -35,8 +35,10 @@
 #include "flow/actorcompiler.h"
 
 UDPMetricClient::UDPMetricClient()
-  : socket_fd(-1), model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
-    buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024), .data_size = 0, .buffer_size = 1024 } },
+  : model(knobToMetricModel(FLOW_KNOBS->METRICS_DATA_MODEL)),
+    socket_fd(-1), buf{ MsgpackBuffer{ .buffer = std::make_unique<uint8_t[]>(1024),
+	                                   .data_size = 0,
+	                                   .buffer_size = 1024 } },
     address((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_ADDR : FLOW_KNOBS->OTEL_UDP_EMISSION_ADDR),
     port((model == STATSD) ? FLOW_KNOBS->STATSD_UDP_EMISSION_PORT : FLOW_KNOBS->OTEL_UDP_EMISSION_PORT) {
 	NetworkAddress destAddress = NetworkAddress::parse(address + ":" + std::to_string(port));

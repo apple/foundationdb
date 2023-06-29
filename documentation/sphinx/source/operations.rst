@@ -24,11 +24,11 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
 
 * :doc:`platforms` describes issues on particular platforms that affect the operation of FoundationDB.
 
-* :doc:`transaction-tagging` gives an overview of transaction tagging, including details about throttling particular tags.
-
 * :doc:`tss` gives an overview of the Testing Storage Server feature of FoundationDB, which allows you to safely run an untrusted storage engine in a production cluster.
 
 * :doc:`perpetual-storage-wiggle` gives an overview of Perpetual Storage Wiggle feature about how to use it.
+
+* :doc:`consistency-scan` gives an overview of the ConsistencyScan feature and how to use it.
 
 .. toctree::
  :maxdepth: 2
@@ -44,6 +44,6 @@ Ready to operate an externally accessible FoundationDB cluster? You'll find what
  backups
  disk-snapshot-backup
  platforms
- transaction-tagging
  tss
  perpetual-storage-wiggle
+ consistency-scan

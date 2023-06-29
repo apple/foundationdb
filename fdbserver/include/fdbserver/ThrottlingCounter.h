@@ -1,5 +1,5 @@
 /*
- * TransactionTagCounter.h
+ * ThrottlingCounter.h
  *
  * This source file is part of the FoundationDB open source project
  *
@@ -22,22 +22,25 @@
 
 #include "fdbclient/PImpl.h"
 #include "fdbclient/StorageServerInterface.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tenant.h"
 
-class TransactionTagCounter {
-	PImpl<class TransactionTagCounterImpl> impl;
+// Tracks the read throughput of different throttling ids, and periodically (triggered by a call
+// to startNewInterval) compute the top k busiest readers. The most recently calculated set of
+// k busy readers can be accessed through the getBusiestReaders method.
+class ThrottlingCounter {
+	PImpl<class ThrottlingCounterImpl> impl;
 
 public:
-	TransactionTagCounter(UID thisServerID, int maxTagsTracked, double minRateTracked);
-	~TransactionTagCounter();
+	ThrottlingCounter(UID thisServerID, int maxReadersTracked, double minRateTracked);
+	~ThrottlingCounter();
 
 	// Update counters tracking the busyness of each tag in the current interval
-	void addRequest(Optional<TagSet> const& tags, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);
+	void addRequest(Optional<TransactionTag> const& tag, Optional<TenantGroupName> const& tenantGroup, int64_t bytes);
 
 	// Save current set of busy tags and reset counters for next interval
 	void startNewInterval();
 
 	// Returns the set of busiest tags as of the end of the last interval
-	std::vector<BusyTagInfo> const& getBusiestTags() const;
+	std::vector<BusyThrottlingIdInfo> const& getBusiestReaders() const&;
 };

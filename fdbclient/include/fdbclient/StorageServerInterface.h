@@ -26,6 +26,7 @@
 #include "fdbclient/FDBTypes.h"
 #include "fdbclient/StorageCheckpoint.h"
 #include "fdbclient/StorageServerShard.h"
+#include "fdbclient/ThrottlingId.h"
 #include "fdbrpc/Locality.h"
 #include "fdbrpc/QueueModel.h"
 #include "fdbrpc/fdbrpc.h"
@@ -35,7 +36,7 @@
 #include "fdbrpc/TenantInfo.h"
 #include "fdbrpc/TSSComparison.h"
 #include "fdbclient/CommitTransaction.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "fdbclient/Tenant.h"
 #include "fdbclient/Tracing.h"
 #include "flow/UnitTest.h"
@@ -301,7 +302,7 @@ struct GetValueRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	Key key;
 	Version version;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	ReplyPromise<GetValueReply> reply;
 	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -315,15 +316,15 @@ struct GetValueRequest : TimedRequest {
 	                const TenantInfo& tenantInfo,
 	                const Key& key,
 	                Version ver,
-	                Optional<TagSet> tags,
+	                Optional<TransactionTag> throttlingTag,
 	                Optional<ReadOptions> options,
 	                VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), version(ver), throttlingTag(throttlingTag),
+	    options(options), ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
+		serializer(ar, key, version, throttlingTag, reply, spanContext, tenantInfo, options, ssLatestCommitVersions);
 	}
 };
 
@@ -348,7 +349,7 @@ struct WatchValueRequest {
 	Key key;
 	Optional<Value> value;
 	Version version;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<UID> debugID;
 	ReplyPromise<WatchValueReply> reply;
 
@@ -359,16 +360,16 @@ struct WatchValueRequest {
 	                  const Key& key,
 	                  Optional<Value> value,
 	                  Version ver,
-	                  Optional<TagSet> tags,
+	                  Optional<TransactionTag> throttlingTag,
 	                  Optional<UID> debugID)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver), tags(tags),
-	    debugID(debugID) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), key(key), value(value), version(ver),
+	    throttlingTag(throttlingTag), debugID(debugID) {}
 
 	bool verify() const { return tenantInfo.isAuthorized(); }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, key, value, version, tags, debugID, reply, spanContext, tenantInfo);
+		serializer(ar, key, value, version, throttlingTag, debugID, reply, spanContext, tenantInfo);
 	}
 };
 
@@ -401,7 +402,7 @@ struct GetKeyValuesRequest : TimedRequest {
 	KeyRef mapper = KeyRef();
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -420,7 +421,7 @@ struct GetKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           tags,
+		           throttlingTag,
 		           reply,
 		           spanContext,
 		           tenantInfo,
@@ -460,7 +461,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 	Version version; // or latestVersion
 	int limit, limitBytes;
 	int matchIndex;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<ReadOptions> options;
 	ReplyPromise<GetMappedKeyValuesReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -480,7 +481,7 @@ struct GetMappedKeyValuesRequest : TimedRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           tags,
+		           throttlingTag,
 		           reply,
 		           spanContext,
 		           tenantInfo,
@@ -528,7 +529,7 @@ struct GetKeyValuesStreamRequest {
 	KeySelectorRef begin, end;
 	Version version; // or latestVersion
 	int limit, limitBytes;
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	Optional<ReadOptions> options;
 	ReplyPromiseStream<GetKeyValuesStreamReply> reply;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -547,7 +548,7 @@ struct GetKeyValuesStreamRequest {
 		           version,
 		           limit,
 		           limitBytes,
-		           tags,
+		           throttlingTag,
 		           reply,
 		           spanContext,
 		           tenantInfo,
@@ -580,7 +581,7 @@ struct GetKeyRequest : TimedRequest {
 	TenantInfo tenantInfo;
 	KeySelectorRef sel;
 	Version version; // or latestVersion
-	Optional<TagSet> tags;
+	Optional<TransactionTag> throttlingTag;
 	ReplyPromise<GetKeyReply> reply;
 	Optional<ReadOptions> options;
 	VersionVector ssLatestCommitVersions; // includes the latest commit versions, as known
@@ -595,15 +596,16 @@ struct GetKeyRequest : TimedRequest {
 	              TenantInfo tenantInfo,
 	              KeySelectorRef const& sel,
 	              Version version,
-	              Optional<TagSet> tags,
+	              Optional<TransactionTag> throttlingTag,
 	              Optional<ReadOptions> options,
 	              VersionVector latestCommitVersions)
-	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), tags(tags), options(options),
-	    ssLatestCommitVersions(latestCommitVersions) {}
+	  : spanContext(spanContext), tenantInfo(tenantInfo), sel(sel), version(version), throttlingTag(throttlingTag),
+	    options(options), ssLatestCommitVersions(latestCommitVersions) {}
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, sel, version, tags, reply, spanContext, tenantInfo, options, ssLatestCommitVersions, arena);
+		serializer(
+		    ar, sel, version, throttlingTag, reply, spanContext, tenantInfo, options, ssLatestCommitVersions, arena);
 	}
 };
 
@@ -1181,22 +1183,20 @@ struct GetStorageMetricsRequest {
 };
 
 // Tracks the busyness of tags on individual storage servers.
-struct BusyTagInfo {
+struct BusyThrottlingIdInfo {
 	constexpr static FileIdentifier file_identifier = 4528694;
-	TransactionTag tag;
+	ThrottlingId throttlingId;
 	double rate{ 0.0 };
-	double fractionalBusyness{ 0.0 };
 
-	BusyTagInfo() = default;
-	BusyTagInfo(TransactionTag const& tag, double rate, double fractionalBusyness)
-	  : tag(tag), rate(rate), fractionalBusyness(fractionalBusyness) {}
+	BusyThrottlingIdInfo() = default;
+	BusyThrottlingIdInfo(ThrottlingId const& throttlingId, double rate) : throttlingId(throttlingId), rate(rate) {}
 
-	bool operator<(BusyTagInfo const& rhs) const { return rate < rhs.rate; }
-	bool operator>(BusyTagInfo const& rhs) const { return rate > rhs.rate; }
+	bool operator<(BusyThrottlingIdInfo const& rhs) const { return rate < rhs.rate; }
+	bool operator>(BusyThrottlingIdInfo const& rhs) const { return rate > rhs.rate; }
 
 	template <class Ar>
 	void serialize(Ar& ar) {
-		serializer(ar, tag, rate, fractionalBusyness);
+		serializer(ar, throttlingId, rate);
 	}
 };
 
@@ -1211,7 +1211,7 @@ struct StorageQueuingMetricsReply {
 	double cpuUsage{ 0.0 };
 	double diskUsage{ 0.0 };
 	double localRateLimit;
-	std::vector<BusyTagInfo> busiestTags;
+	std::vector<BusyThrottlingIdInfo> busiestReaders;
 
 	template <class Ar>
 	void serialize(Ar& ar) {
@@ -1226,7 +1226,7 @@ struct StorageQueuingMetricsReply {
 		           cpuUsage,
 		           diskUsage,
 		           localRateLimit,
-		           busiestTags);
+		           busiestReaders);
 	}
 };
 

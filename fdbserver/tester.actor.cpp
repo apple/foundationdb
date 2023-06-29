@@ -874,6 +874,24 @@ ACTOR Future<Void> testerServerCore(TesterInterface interf,
 	}
 }
 
+ACTOR Future<Void> clearTenantData(Database db, Reference<Tenant> tenant) {
+	state Transaction tr(db, tenant);
+	loop {
+		try {
+			tr.debugTransaction(debugRandom()->randomUniqueID());
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.clear(normalKeys);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			TraceEvent(SevWarn, "TesterClearingTenantDataError", tr.trState->readOptions.get().debugID.get())
+			    .error(e)
+			    .detail("Tenant", tenant);
+			wait(tr.onError(e));
+		}
+	}
+}
+
 ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 	state Transaction tr(cx);
 
@@ -898,44 +916,62 @@ ACTOR Future<Void> clearData(Database cx, Optional<TenantName> defaultTenant) {
 		}
 	}
 
-	tr = Transaction(cx);
 	loop {
-		try {
-			tr.debugTransaction(debugRandom()->randomUniqueID());
-			ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
-			TraceEvent("TesterClearingTenantsStart", tr.trState->readOptions.get().debugID.get());
-			state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
-			    wait(TenantMetadata::tenantMap().getRange(&tr, {}, {}, 1000));
+		tr = Transaction(cx);
+		TraceEvent("TesterClearingTenantsStart");
+		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenants =
+		    wait(TenantMetadata::tenantMap().getRange(cx.getReference(), {}, {}, 1000));
 
-			TraceEvent("TesterClearingTenantsDeletingBatch", tr.trState->readOptions.get().debugID.get())
-			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
-			    .detail("BatchSize", tenants.results.size());
+		TraceEvent("TesterClearingTenantsDeletingBatchData")
+		    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+		    .detail("BatchSize", tenants.results.size());
 
-			std::vector<Future<Void>> deleteFutures;
-			for (auto const& [id, entry] : tenants.results) {
-				if (entry.tenantName != defaultTenant) {
-					deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
+		std::vector<Future<Void>> deleteDataFutures;
+		for (auto const& [id, entry] : tenants.results) {
+			if (entry.tenantName != defaultTenant) {
+				deleteDataFutures.push_back(clearTenantData(cx, makeReference<Tenant>(id)));
+			}
+		}
+
+		wait(waitForAll(deleteDataFutures));
+
+		loop {
+			try {
+				tr.setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				tr.debugTransaction(debugRandom()->randomUniqueID());
+				ASSERT(tr.trState->readOptions.present() && tr.trState->readOptions.get().debugID.present());
+
+				TraceEvent("TesterClearingTenantsDeletingBatch", tr.trState->readOptions.get().debugID.get())
+				    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+				    .detail("BatchSize", tenants.results.size());
+
+				std::vector<Future<Void>> deleteFutures;
+				for (auto const& [id, entry] : tenants.results) {
+					if (entry.tenantName != defaultTenant) {
+						deleteFutures.push_back(TenantAPI::deleteTenantTransaction(&tr, id));
+					}
 				}
-			}
 
-			CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
+				CODE_PROBE(deleteFutures.size() > 0, "Clearing tenants after test");
 
-			wait(waitForAll(deleteFutures));
-			wait(tr.commit());
+				wait(waitForAll(deleteFutures));
+				wait(tr.commit());
 
-			TraceEvent("TesterClearingTenantsDeletedBatch", tr.trState->readOptions.get().debugID.get())
-			    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
-			    .detail("BatchSize", tenants.results.size());
+				TraceEvent("TesterClearingTenantsDeletedBatch", tr.trState->readOptions.get().debugID.get())
+				    .detail("FirstTenant", tenants.results.empty() ? "<none>"_sr : tenants.results[0].second.tenantName)
+				    .detail("BatchSize", tenants.results.size());
 
-			if (!tenants.more) {
-				TraceEvent("TesterClearingTenantsComplete", tr.trState->readOptions.get().debugID.get())
-				    .detail("AtVersion", tr.getCommittedVersion());
 				break;
+			} catch (Error& e) {
+				TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
+				wait(tr.onError(e));
 			}
-			tr.reset();
-		} catch (Error& e) {
-			TraceEvent(SevWarn, "TesterClearingTenantsError", tr.trState->readOptions.get().debugID.get()).error(e);
-			wait(tr.onError(e));
+		}
+
+		if (!tenants.more) {
+			TraceEvent("TesterClearingTenantsComplete", tr.trState->readOptions.get().debugID.get())
+			    .detail("AtVersion", tr.getCommittedVersion());
+			break;
 		}
 	}
 
@@ -1037,6 +1073,31 @@ void throwIfError(const std::vector<Future<ErrorOr<T>>>& futures, std::string er
 			throw future.get().getError();
 		}
 	}
+}
+
+struct TesterConsistencyScanState {
+	bool enabled = false;
+	bool enableAfter = false;
+	bool waitForComplete = false;
+};
+
+ACTOR Future<Void> checkConsistencyScanAfterTest(Database cx, TesterConsistencyScanState* csState) {
+	if (!csState->enabled) {
+		return Void();
+	}
+
+	// mark it as done so later so this does not repeat
+	csState->enabled = false;
+
+	if (csState->enableAfter || csState->waitForComplete) {
+		printf("Enabling consistency scan after test ...\n");
+		wait(enableConsistencyScanInSim(cx));
+		printf("Enabled consistency scan after test.\n");
+	}
+
+	wait(disableConsistencyScanInSim(cx, csState->waitForComplete));
+
+	return Void();
 }
 
 ACTOR Future<DistributedTestResults> runWorkload(Database cx,
@@ -1274,7 +1335,8 @@ ACTOR Future<bool> runTest(Database cx,
                            std::vector<TesterInterface> testers,
                            TestSpec spec,
                            Reference<AsyncVar<ServerDBInfo>> dbInfo,
-                           Optional<TenantName> defaultTenant) {
+                           Optional<TenantName> defaultTenant,
+                           TesterConsistencyScanState* consistencyScanState) {
 	state DistributedTestResults testResults;
 	state double savedDisableDuration = 0;
 
@@ -1321,6 +1383,10 @@ ACTOR Future<bool> runTest(Database cx,
 
 			wait(delay(1.0));
 		}
+
+		// Disable consistency scan before checkConsistency because otherwise it will prevent quiet database from
+		// quiescing
+		wait(checkConsistencyScanAfterTest(cx, consistencyScanState));
 
 		// Run the consistency check workload
 		if (spec.runConsistencyCheck) {
@@ -1904,6 +1970,20 @@ ACTOR Future<Void> disableConnectionFailuresAfter(double seconds, std::string co
 	return Void();
 }
 
+ACTOR Future<Void> writeTenantKey(Database db, Reference<Tenant> tenant) {
+	state ReadYourWritesTransaction tr(db, tenant);
+	loop {
+		try {
+			tr.setOption(FDBTransactionOptions::LOCK_AWARE);
+			tr.set("sampleKey"_sr, "sampleValue"_sr);
+			wait(tr.commit());
+			return Void();
+		} catch (Error& e) {
+			wait(tr.onError(e));
+		}
+	}
+}
+
 /**
  * \brief Test orchestrator: sends test specification to testers in the right order and collects the results.
  *
@@ -1929,7 +2009,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             StringRef startingConfiguration,
                             LocalityData locality,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            Standalone<VectorRef<TenantNameRef>> extraTenants,
                             bool restartingTest) {
 	state Database cx;
 	state Reference<AsyncVar<ServerDBInfo>> dbInfo(new AsyncVar<ServerDBInfo>);
@@ -1945,6 +2025,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	state ISimulator::BackupAgentType simBackupAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state ISimulator::BackupAgentType simDrAgents = ISimulator::BackupAgentType::NoBackupAgents;
 	state bool enableDD = false;
+	state TesterConsistencyScanState consistencyScanState;
 	if (tests.empty())
 		useDB = true;
 	for (auto iter = tests.begin(); iter != tests.end(); ++iter) {
@@ -1980,6 +2061,11 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		cx = openDBOnServer(dbInfo);
 		cx->defaultTenant = defaultTenant;
 	}
+
+	consistencyScanState.enabled = g_network->isSimulated() && deterministicRandom()->coinflip();
+	consistencyScanState.waitForComplete =
+	    consistencyScanState.enabled && waitForQuiescenceEnd && deterministicRandom()->coinflip();
+	consistencyScanState.enableAfter = consistencyScanState.waitForComplete && deterministicRandom()->random01() < 0.1;
 
 	disableConnectionFailures("Tester");
 
@@ -2066,17 +2152,55 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	}
 
 	if (useDB) {
-		std::vector<Future<Void>> tenantFutures;
-		for (auto tenant : tenantsToCreate) {
+		if (defaultTenant.present() && !restartingTest) {
 			TenantMapEntry entry;
 			if (deterministicRandom()->coinflip()) {
 				entry.tenantGroup = "TestTenantGroup"_sr;
 			}
-			TraceEvent("CreatingTenant").detail("Tenant", tenant).detail("TenantGroup", entry.tenantGroup);
+
+			TraceEvent("CreatingDefaultTenant")
+			    .detail("Tenant", defaultTenant)
+			    .detail("TenantGroup", entry.tenantGroup);
+
+			wait(success(TenantAPI::createTenant(cx.getReference(), defaultTenant.get(), entry)));
+		}
+
+		std::vector<Future<Void>> tenantFutures;
+		for (auto tenant : extraTenants) {
+			TenantMapEntry entry;
+			if (deterministicRandom()->coinflip()) {
+				entry.tenantGroup = "TestTenantGroup"_sr;
+			}
+			if (deterministicRandom()->coinflip()) {
+				entry.tenantLockState = deterministicRandom()->coinflip() ? TenantAPI::TenantLockState::READ_ONLY
+				                                                          : TenantAPI::TenantLockState::LOCKED;
+				entry.tenantLockId = deterministicRandom()->randomUniqueID();
+			}
+
+			TraceEvent("CreatingExtraTenant")
+			    .detail("Tenant", tenant)
+			    .detail("TenantGroup", entry.tenantGroup)
+			    .detail("LockState", TenantAPI::tenantLockStateToString(entry.tenantLockState));
+
 			tenantFutures.push_back(success(TenantAPI::createTenant(cx.getReference(), tenant, entry)));
 		}
 
 		wait(waitForAll(tenantFutures));
+
+		// Only write keys to extra tenants if we have a default tenant. Otherwise, the extra keys could interfere with
+		// the existing workload.
+		if (defaultTenant.present()) {
+			std::vector<Future<Void>> tenantWriteFutures;
+			for (auto tenant : extraTenants) {
+				if (deterministicRandom()->coinflip()) {
+					TraceEvent("WritingKeyToExtraTenant").detail("Tenant", tenant);
+					tenantWriteFutures.push_back(writeTenantKey(cx, makeReference<Tenant>(cx, tenant)));
+				}
+			}
+
+			wait(waitForAll(tenantWriteFutures));
+		}
+
 		if (g_network->isSimulated()) {
 			wait(initializeSimConfig(cx));
 		}
@@ -2086,6 +2210,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 		TraceEvent("TesterStartingPreTestChecks")
 		    .detail("DatabasePingDelay", databasePingDelay)
 		    .detail("StartDelay", startDelay);
+
 		try {
 			wait(quietDatabase(cx, dbInfo, "Start") ||
 			     (databasePingDelay == 0.0
@@ -2101,6 +2226,13 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 			Version cVer = wait(setPerpetualStorageWiggle(cx, true, LockAware::True));
 			(void)cVer;
 			printf("Set perpetual_storage_wiggle=1 Done.\n");
+		}
+
+		// TODO: Move this to a BehaviorInjection workload once that concept exists.
+		if (consistencyScanState.enabled && !consistencyScanState.enableAfter) {
+			printf("Enabling consistency scan ...\n");
+			wait(enableConsistencyScanInSim(cx));
+			printf("Enabled consistency scan.\n");
 		}
 	}
 
@@ -2118,7 +2250,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (; idx < tests.size(); idx++) {
 		printf("Run test:%s start\n", tests[idx].title.toString().c_str());
 		knobProtectiveGroup = std::make_unique<KnobProtectiveGroup>(tests[idx].overrideKnobs);
-		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant)));
+		wait(success(runTest(cx, testers, tests[idx], dbInfo, defaultTenant, &consistencyScanState)));
 		knobProtectiveGroup.reset(nullptr);
 		printf("Run test:%s Done.\n", tests[idx].title.toString().c_str());
 		// do we handle a failure here?
@@ -2130,10 +2262,16 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	if (tests.empty() || useDB) {
 		if (waitForQuiescenceEnd) {
 			printf("Waiting for DD to end...\n");
+			TraceEvent("QuietDatabaseEndStart");
 			try {
-				wait(quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
-				     (databasePingDelay == 0.0 ? Never()
-				                               : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd")));
+				TraceEvent("QuietDatabaseEndWait");
+				Future<Void> waitConsistencyScanEnd = checkConsistencyScanAfterTest(cx, &consistencyScanState);
+				Future<Void> waitQuietDatabaseEnd =
+				    quietDatabase(cx, dbInfo, "End", 0, 2e6, 2e6) ||
+				    (databasePingDelay == 0.0 ? Never()
+				                              : testDatabaseLiveness(cx, databasePingDelay, "QuietDatabaseEnd"));
+
+				wait(waitConsistencyScanEnd && waitQuietDatabaseEnd);
 			} catch (Error& e) {
 				TraceEvent("QuietDatabaseEndExternalError").error(e);
 				throw;
@@ -2173,7 +2311,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
                             StringRef startingConfiguration,
                             LocalityData locality,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            Standalone<VectorRef<TenantNameRef>> extraTenants,
                             bool restartingTest) {
 	state int flags = (at == TEST_ON_SERVERS ? 0 : GetWorkersRequest::TESTER_CLASS_ONLY) |
 	                  GetWorkersRequest::NON_EXCLUDED_PROCESSES_ONLY;
@@ -2205,7 +2343,7 @@ ACTOR Future<Void> runTests(Reference<AsyncVar<Optional<struct ClusterController
 	for (int i = 0; i < workers.size(); i++)
 		ts.push_back(workers[i].interf.testerInterface);
 
-	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, tenantsToCreate, restartingTest));
+	wait(runTests(cc, ci, ts, tests, startingConfiguration, locality, defaultTenant, extraTenants, restartingTest));
 	return Void();
 }
 
@@ -2244,7 +2382,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
                             LocalityData locality,
                             UnitTestParameters testOptions,
                             Optional<TenantName> defaultTenant,
-                            Standalone<VectorRef<TenantNameRef>> tenantsToCreate,
+                            Standalone<VectorRef<TenantNameRef>> extraTenants,
                             bool restartingTest) {
 	state TestSet testSet;
 	state std::unique_ptr<KnobProtectiveGroup> knobProtectiveGroup(nullptr);
@@ -2331,7 +2469,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                 startingConfiguration,
 		                 locality,
 		                 defaultTenant,
-		                 tenantsToCreate,
+		                 extraTenants,
 		                 restartingTest);
 	} else {
 		tests = reportErrors(runTests(cc,
@@ -2342,7 +2480,7 @@ ACTOR Future<Void> runTests(Reference<IClusterConnectionRecord> connRecord,
 		                              startingConfiguration,
 		                              locality,
 		                              defaultTenant,
-		                              tenantsToCreate,
+		                              extraTenants,
 		                              restartingTest),
 		                     "RunTests");
 	}

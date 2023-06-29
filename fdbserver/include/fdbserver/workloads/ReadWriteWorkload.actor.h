@@ -65,7 +65,7 @@ struct ReadWriteCommon : KVWorkload {
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
 	std::string valueString;
-	double alpha; // probability for run TransactionA type
+	double alpha; // probability for running TransactionB type
 	// transaction setting
 	bool useRYW;
 

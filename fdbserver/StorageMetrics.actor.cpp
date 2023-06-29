@@ -26,9 +26,9 @@ CommonStorageCounters::CommonStorageCounters(const std::string& name,
                                              const std::string& id,
                                              const StorageServerMetrics* metrics)
   : cc(name, id), finishedQueries("FinishedQueries", cc), bytesQueried("BytesQueried", cc),
-    bytesFetched("BytesFetched", cc), mutationBytes("MutationBytes", cc), kvFetched("KVFetched", cc),
-    mutations("Mutations", cc), setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc),
-    waitMetrics("WaitMetrics", cc) {
+    bytesInput("BytesInput", cc), mutationBytes("MutationBytes", cc), mutations("Mutations", cc),
+    setMutations("SetMutations", cc), clearRangeMutations("ClearRangeMutations", cc), bytesFetched("BytesFetched", cc),
+    kvFetched("KVFetched", cc), waitMetrics("WaitMetrics", cc) {
 	if (metrics) {
 		specialCounter(cc, "BytesStored", [metrics]() { return metrics->byteSample.getEstimate(allKeys); });
 		specialCounter(cc, "BytesReadSampleCount", [metrics]() { return metrics->bytesReadSample.queue.size(); });
@@ -184,7 +184,9 @@ void StorageServerMetrics::notifyBytes(
 
 	StorageMetrics notifyMetrics;
 	notifyMetrics.bytes = bytes;
-	for (int i = 0; i < shard.value().size(); i++) {
+	auto size = shard->cvalue().size();
+	for (int i = 0; i < size; i++) {
+		// fmt::print("NotifyBytes {} {}\n", shard->value().size(), shard->range().toString());
 		CODE_PROBE(true, "notifyBytes");
 		shard.value()[i].send(notifyMetrics);
 	}

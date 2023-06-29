@@ -21,7 +21,7 @@
 #include "fdbcli/fdbcli.actor.h"
 #include "fdbclient/ManagementAPI.actor.h"
 #include "fdbclient/SystemData.h"
-#include "fdbclient/TagThrottle.actor.h"
+#include "fdbclient/TagThrottle.h"
 #include "flow/actorcompiler.h" // This must be the last include
 
 namespace {
@@ -71,8 +71,8 @@ ACTOR Future<Void> getQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 			} else {
 				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
-				Optional<ThrottleApi::TagQuotaValue> quota =
-				    v.map([](Value val) { return ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(val)); });
+				Optional<ThrottleApi::ThroughputQuotaValue> quota =
+				    v.map([](Value val) { return ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(val)); });
 
 				if (!quota.present()) {
 					fmt::print("<empty>\n");
@@ -99,9 +99,9 @@ ACTOR Future<Void> setQuota(Reference<IDatabase> db, TransactionTag tag, QuotaTy
 			} else {
 				state ThreadFuture<ValueReadResult> resultFuture = tr->get(ThrottleApi::getTagQuotaKey(tag));
 				ValueReadResult v = wait(safeThreadFutureToFuture(resultFuture));
-				ThrottleApi::TagQuotaValue quota;
+				ThrottleApi::ThroughputQuotaValue quota;
 				if (v.present()) {
-					quota = ThrottleApi::TagQuotaValue::unpack(Tuple::unpack(v.get()));
+					quota = ThrottleApi::ThroughputQuotaValue::unpack(Tuple::unpack(v.get()));
 				}
 				// Internally, costs are stored in terms of pages, but in the API,
 				// costs are specified in terms of bytes

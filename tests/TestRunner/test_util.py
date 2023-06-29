@@ -1,3 +1,4 @@
+import logging
 import random
 import string
 import time
@@ -25,3 +26,32 @@ class ScopedTraceChecker:
         self.cluster.add_trace_check_from_to(
             self.checker_func, self.begin, time.time(), self.filename_substr
         )
+
+
+_logger = None
+
+
+def get_logger():
+    global _logger
+    if _logger is None:
+        logging.basicConfig(
+            level=logging.INFO,
+            datefmt="%Y-%m-%dT%H:%M:%S",
+            format="[%(levelname)s] %(asctime)s.%(msecs)03d %(message)s",
+            handlers=[logging.StreamHandler()],
+        )
+        _logger = logging.getLogger("fdb.test")
+    return _logger
+
+
+def initialize_logger_level(logging_level):
+    assert logging_level in ["DEBUG", "INFO", "WARNING", "ERROR"]
+    logger = get_logger()
+    if logging_level == "DEBUG":
+        logger.setLevel(logging.DEBUG)
+    elif logging_level == "INFO":
+        logger.setLevel(logging.INFO)
+    elif logging_level == "WARNING":
+        logger.setLevel(logging.WARNING)
+    elif logging_level == "ERROR":
+        logger.setLevel(logging.ERROR)

@@ -67,7 +67,7 @@ static inline void dprint(fmt::format_string<T...> fmt, T&&... args) {
 
 // BlobMigrator offers APIs to migrate data from blob storage to storage server. It implements a minimal set of
 // StorageServerInterface APIs which are needed for DataDistributor to start data migration.
-class BlobMigrator : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
+class BlobMigrator final : public NonCopyable, public ReferenceCounted<BlobMigrator>, public IStorageMetricsService {
 public:
 	BlobMigrator(BlobMigratorInterface interf, Reference<AsyncVar<ServerDBInfo> const> dbInfo)
 	  : interf_(interf), actors_(false), dbInfo_(dbInfo) {
@@ -486,7 +486,7 @@ private:
 
 		// Update applyMutationsKeyVersionMap
 		state int i;
-		state int stepSize = CLIENT_KNOBS->RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
+		state int stepSize = SERVER_KNOBS->BLOB_RESTORE_LOAD_KEY_VERSION_MAP_STEP_SIZE;
 		for (i = 0; i < self->mlogRestoreRanges_.size(); i += stepSize) {
 			int end = std::min(i + stepSize, self->mlogRestoreRanges_.size());
 			wait(preloadApplyMutationsKeyVersionMap(

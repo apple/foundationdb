@@ -51,7 +51,8 @@ static void bench_encrypt(benchmark::State& state) {
 	auto data = getKey(bytes);
 	for (auto _ : state) {
 		for (int chunk = 0; chunk < chunks; ++chunk) {
-			benchmark::DoNotOptimize(encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize));
+			auto result = encrypt(key, iv, data.begin() + chunk * chunkSize, chunkSize);
+			benchmark::DoNotOptimize(result);
 		}
 	}
 	state.SetBytesProcessed(bytes * static_cast<long>(state.iterations()));
@@ -70,8 +71,8 @@ static void bench_decrypt(benchmark::State& state) {
 		Arena arena;
 		DecryptionStreamCipher decryptor(key, iv);
 		for (int chunk = 0; chunk < chunks; ++chunk) {
-			benchmark::DoNotOptimize(
-			    Standalone<StringRef>(decryptor.decrypt(encrypted.begin() + chunk * chunkSize, chunkSize, arena)));
+			Standalone<StringRef> result(decryptor.decrypt(encrypted.begin() + chunk * chunkSize, chunkSize, arena));
+			benchmark::DoNotOptimize(result);
 		}
 	}
 	state.SetBytesProcessed(bytes * static_cast<long>(state.iterations()));
@@ -155,13 +156,13 @@ static void blob_cipher_encrypt(benchmark::State& state) {
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
 	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
-	Arena arena;
 	uint8_t iv[AES_256_IV_LENGTH];
 	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 	uint8_t orgData[pageLen];
 	deterministicRandom()->randomBytes(&orgData[0], pageLen);
 
 	for (auto _ : state) {
+		Arena arena;
 		// create a new encryptor for each encrypt operation to simulate AESEncryptionEncoder.encode()
 		EncryptBlobCipherAes265Ctr encryptor(cipherKey,
 		                                     headerCipherKey,
@@ -190,7 +191,6 @@ static void blob_cipher_decrypt(benchmark::State& state) {
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
 	Reference<BlobCipherKey> cipherKey = cipherKeyCache->getLatestCipherKey(minDomainId);
 	Reference<BlobCipherKey> headerCipherKey = cipherKeyCache->getLatestCipherKey(ENCRYPT_HEADER_DOMAIN_ID);
-	Arena arena;
 	uint8_t iv[AES_256_IV_LENGTH];
 	deterministicRandom()->randomBytes(&iv[0], AES_256_IV_LENGTH);
 	uint8_t orgData[pageLen];
@@ -212,6 +212,7 @@ static void blob_cipher_decrypt(benchmark::State& state) {
 	                                                                      noAuth.v1.cipherTextDetails.salt);
 
 	for (auto _ : state) {
+		Arena arena;
 		// create decryptor for every decrypt operation to simulate AESEncryptionEncoder.decode()
 		DecryptBlobCipherAes256Ctr decryptor(
 		    tCipherKeyKey, Reference<BlobCipherKey>(), &noAuth.v1.iv[0], BlobCipherMetrics::TEST);
@@ -233,5 +234,5 @@ static void blob_cipher_args(benchmark::internal::Benchmark* b) {
 	b->ArgNames({ "pageLen", "isInplace" });
 }
 
-BENCHMARK(blob_cipher_encrypt)->Apply(blob_cipher_args);
-BENCHMARK(blob_cipher_decrypt)->Apply(blob_cipher_args);
+BENCHMARK(blob_cipher_encrypt)->Apply(blob_cipher_args)->Iterations(1000000);
+BENCHMARK(blob_cipher_decrypt)->Apply(blob_cipher_args)->Iterations(1000000);
