@@ -243,12 +243,6 @@ struct StartTenantMovementImpl {
 		return Void();
 	}
 
-	void storeVersionToManagement(Reference<typename DB::TransactionT> tr) {
-		// Our own record should be updated from the source cluster already
-		// Update the management metadata to reflect this
-		metadata::management::emergency_movement::emergencyMovements().set(tr, tenantGroup, moveRecord);
-	}
-
 	ACTOR static Future<Standalone<VectorRef<KeyRef>>> getTenantSplitPointsFromSource(StartTenantMovementImpl* self,
 	                                                                                  TenantName tenantName) {
 		state Reference<ITenant> srcTenant = self->srcCtx.dataClusterDb->openTenant(tenantName);
