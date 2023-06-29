@@ -470,8 +470,8 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 
 		for (int i = 0; i < out_count; ++i) {
 			auto kv = *out_kv++;
-			std::string key(kv.key().begin(), kv.key().end());
-			std::string value(kv.value().begin(), kv.value().end());
+			auto key = fdb::toCharsRef(kv.key());
+		      	auto value = fdb::toCharsRef(kv.value());	
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -542,7 +542,7 @@ TEST_CASE("fdb_transaction read_your_writes") {
 
 		auto val = f1.get();
 		CHECK(val.has_value());
-		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		CHECK(fdb::toCharsRef(val).compare("bar") == 0);
 		break;
 	}
 }
@@ -590,7 +590,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
 
 		auto val = f1.get();
 		CHECK(val.has_value());
-		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		CHECK(fdb::toCharsRef(val).compare("bar") == 0);
 		break;
 	}
 }
@@ -626,7 +626,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 
 		val = f2.get();
 		CHECK(val.has_value());
-		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
+		CHECK(fdb::toCharsRef(val).compare("bar") == 0);
 		break;
 	}
 }
@@ -1116,8 +1116,8 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 		auto it = data.rbegin();
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
-			std::string key(kv.key().begin(), kv.key().end());
-			std::string value(kv.value().begin(), kv.value().end());
+			auto key = fdb::toCharsRef(kv.key());
+		      	auto value = fdb::toCharsRef(kv.value());	
 
 			CHECK(key.compare(it->first) == 0);
 			CHECK(value.compare(it->second) == 0);
@@ -1161,8 +1161,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
-			std::string key(kv.key().begin(), kv.key().end());
-			std::string value(kv.value().begin(), kv.value().end());
+			auto key = fdb::toCharsRef(kv.key());
+		      	auto value = fdb::toCharsRef(kv.value());	
 
 			CHECK(data[key].compare(value) == 0);
 		}
@@ -1202,8 +1202,8 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
-			std::string key(kv.key().begin(), kv.key().end());
-			std::string value(kv.value().begin(), kv.value().end());
+			auto key = fdb::toCharsRef(kv.key());
+		      	auto value = fdb::toCharsRef(kv.value());	
 
 			CHECK(data[key].compare(value) == 0);
 		}
@@ -2858,13 +2858,13 @@ int main(int argc, char** argv) {
 		          << std::endl;
 		return 1;
 	}
-	fdbCheck(fdb::selectApiVersionNothrow(FDB_API_VERSION));
+	fdb::selectApiVersion(FDB_API_VERSION);
 	if (argc >= 4) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {
-			fdbCheck(fdb::network::setOptionNothrow(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT, ""));
-			fdbCheck(fdb::network::setOptionNothrow(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
-			                                        externalClientLibrary));
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
+			                                        externalClientLibrary);
 		}
 	}
 
@@ -2874,7 +2874,7 @@ int main(int argc, char** argv) {
 	doctest::Context context;
 	context.applyCommandLine(argc, argv);
 
-	fdbCheck(fdb::network::setupNothrow());
+	fdb::network::setup();
 	std::thread network_thread{ [] { fdbCheck(fdb::network::run()); } };
 
 	db = fdb::Database(argv[1]);
