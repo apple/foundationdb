@@ -851,6 +851,8 @@ void Ratekeeper::updateRate(RatekeeperLimits* limits) {
 		ssReasons[ss.id] = ssLimitReason;
 	}
 
+	tagThrottler->updateThrottling(storageQueueInfo);
+
 	std::set<Optional<Standalone<StringRef>>> ignoredMachines;
 	for (auto ss = storageTpsLimitReverseIndex.begin();
 	     ss != storageTpsLimitReverseIndex.end() && ss->first < limits->tpsLimit;
