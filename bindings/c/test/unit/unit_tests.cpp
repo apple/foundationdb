@@ -52,6 +52,11 @@
 
 using namespace std::string_view_literals;
 
+// Trivially construct a BytesRef out of a string literal
+inline fdb::BytesRef operator""_br(const char* str, size_t len) {
+    return fdb::BytesRef(reinterpret_cast<const uint8_t*>(str), len);
+}
+
 void fdbCheck(const fdb::Error& err) {
 	if (err) {
 		std::cerr << err.what() << std::endl;
@@ -262,7 +267,7 @@ private:
 TEST_CASE("fdb_future_set_callback") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
 		struct Context {
 			FdbEvent event;
@@ -286,7 +291,7 @@ TEST_CASE("fdb_future_set_callback") {
 TEST_CASE("fdb_future_cancel after future completion") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+		auto f1 = tr.get("foo"_br, false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -307,7 +312,7 @@ TEST_CASE("fdb_future_cancel after future completion") {
 TEST_CASE("fdb_future_is_ready") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+		auto f1 = tr.get("foo"_br, false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -324,7 +329,7 @@ TEST_CASE("fdb_future_is_ready") {
 TEST_CASE("fdb_future_release_memory") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), false);
+		auto f1 = tr.get("foo"_br, false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -484,7 +489,7 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 
 TEST_CASE("cannot read system key") {
 	auto tr = db.createTransaction();
-	auto f1 = tr.get(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false);
+	auto f1 = tr.get("\xff/coordinators"_br, /* snapshot */ false);
 
 	auto err = waitFuture(f1);
 	CHECK(err.code() == 2004); // key_outside_legal_range
@@ -492,14 +497,14 @@ TEST_CASE("cannot read system key") {
 
 TEST_CASE("read system key") {
 	auto value =
-	    getValue(fdb::toBytesRef("\xff/coordinators"sv), /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
+	    getValue("\xff/coordinators"_br, /* snapshot */ false, { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	REQUIRE(value.has_value());
 }
 
 TEST_CASE("cannot write system key") {
 	auto tr = db.createTransaction();
 
-	tr.set(fdb::toBytesRef("\xff\x02"sv), fdb::toBytesRef("bar"sv));
+	tr.set("\xff\x02"_br, "bar"_br);
 
 	auto f1 = tr.commit();
 	auto err = waitFuture(f1);
@@ -508,11 +513,11 @@ TEST_CASE("cannot write system key") {
 
 TEST_CASE("write system key") {
 	auto tr = db.createTransaction();
-	auto syskey(fdb::toBytesRef("\xff\x02"sv));
+	auto syskey = "\xff\x02"_br;
 
 	while (1) {
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_ACCESS_SYSTEM_KEYS));
-		tr.set(syskey, fdb::toBytesRef("bar"sv));
+		tr.set(syskey, "bar"_br);
 		auto f1 = tr.commit();
 
 		auto err = waitFuture(f1);
@@ -534,8 +539,8 @@ TEST_CASE("fdb_transaction read_your_writes") {
 	clear_data(db);
 
 	while (1) {
-		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		tr.set("foo"_br, "bar"_br);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 
 		// Read before committing, should read the initial write.
 		auto err = waitFuture(f1);
@@ -560,8 +565,8 @@ TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
 	auto tr = db.createTransaction();
 	while (1) {
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
-		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		tr.set("foo"_br, "bar"_br);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 
 		// Read before committing, shouldn't read the initial write because
 		// read_your_writes is disabled.
@@ -586,8 +591,8 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
 	while (1) {
 		// Enable read your writes for snapshot reads.
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE));
-		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+		tr.set("foo"_br, "bar"_br);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -611,9 +616,9 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 	while (1) {
 		// Disable read your writes for snapshot reads.
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE));
-		tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
-		auto f2 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		tr.set("foo"_br, "bar"_br);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
+		auto f2 = tr.get("foo"_br, /*snapshot*/ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -649,7 +654,7 @@ TEST_CASE("fdb_transaction_set_option timeout") {
 
 	fdb::Error err;
 	while (!err) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+		auto f1 = tr.get("foo"_br, /* snapshot */ false);
 		err = waitFuture(f1);
 		if (err) {
 			auto f2 = tr.onError(err);
@@ -667,7 +672,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
 	auto tr = db.createTransaction();
 	fdb::Error err;
 	while (!err) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+		auto f1 = tr.get("foo"_br, /* snapshot */ false);
 		err = waitFuture(f1);
 		if (err) {
 			auto f2 = tr.onError(err);
@@ -687,7 +692,7 @@ TEST_CASE("fdb_transaction_set_option size_limit too small") {
 	// Size limit must be at least 32 to be valid, so test a smaller size.
 	int64_t size_limit = 31;
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
-	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+	tr.set("foo"_br, "bar"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
 }
@@ -698,7 +703,7 @@ TEST_CASE("fdb_transaction_set_option size_limit too large") {
 	// Size limit must be less than or equal to 10,000,000.
 	int64_t size_limit = 10000001;
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
-	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("bar"sv));
+	tr.set("foo"_br, "bar"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
 }
@@ -708,7 +713,7 @@ TEST_CASE("fdb_transaction_set_option size_limit") {
 
 	int64_t size_limit = 32;
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
-	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("foundation database is amazing"sv));
+	tr.set("foo"_br, "foundation database is amazing"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2101);
 }
@@ -760,7 +765,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
 	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
 
 	auto tr = db.createTransaction();
-	tr.set(fdb::toBytesRef("foo"sv), fdb::toBytesRef("foundation database is amazing"sv));
+	tr.set("foo"_br, "foundation database is amazing"_br);
 	auto f1 = tr.commit();
 
 	CHECK(waitFuture(f1).code() == 2101); // transaction_too_large
@@ -774,7 +779,7 @@ TEST_CASE("fdb_transaction_set_read_version old_version") {
 	auto tr = db.createTransaction();
 
 	tr.setReadVersion(1);
-	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+	auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
 	auto err = waitFuture(f1);
 	CHECK(err.code() == 1007); // transaction_too_old
@@ -784,7 +789,7 @@ TEST_CASE("fdb_transaction_set_read_version future_version") {
 	auto tr = db.createTransaction();
 
 	tr.setReadVersion(1UL << 62);
-	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+	auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
 	auto err = waitFuture(f1);
 	CHECK(err.code() == 1009); // future_version
@@ -1313,11 +1318,11 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_AND") {
 	auto tr = db.createTransaction();
 	char param[] = { 'a', 'd' };
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_AND);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_BIT_AND);
 		tr.atomicOp(fdb::toBytesRef(key("bar")),
 		            fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
 		            FDB_MUTATION_TYPE_BIT_AND);
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("e"sv), FDB_MUTATION_TYPE_BIT_AND);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "e"_br, FDB_MUTATION_TYPE_BIT_AND);
 
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
@@ -1382,11 +1387,11 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_OR") {
 	auto tr = db.createTransaction();
 	char param[] = { 'a', 'd' };
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_OR);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_BIT_OR);
 		tr.atomicOp(fdb::toBytesRef(key("bar")),
 		            fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
 		            FDB_MUTATION_TYPE_BIT_OR);
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("d"sv), FDB_MUTATION_TYPE_BIT_OR);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "d"_br, FDB_MUTATION_TYPE_BIT_OR);
 
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
@@ -1450,11 +1455,11 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
 	char param[] = { 'a', 'd' };
 	int potentialCommitCount = 0;
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BIT_XOR);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_BIT_XOR);
 		tr.atomicOp(fdb::toBytesRef(key("bar")),
 		            fdb::BytesRef(reinterpret_cast<const uint8_t*>(param), 2),
 		            FDB_MUTATION_TYPE_BIT_XOR);
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("d"sv), FDB_MUTATION_TYPE_BIT_XOR);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "d"_br, FDB_MUTATION_TYPE_BIT_XOR);
 
 		++potentialCommitCount;
 
@@ -1500,7 +1505,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_COMPARE_AND_CLEAR") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv), FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "bar"_br, FDB_MUTATION_TYPE_COMPARE_AND_CLEAR);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1527,8 +1532,8 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
 	auto tr = db.createTransaction();
 	int potentialCommitCount = 0;
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("db"sv), FDB_MUTATION_TYPE_APPEND_IF_FITS);
-		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("foundation"sv), FDB_MUTATION_TYPE_APPEND_IF_FITS);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "db"_br, FDB_MUTATION_TYPE_APPEND_IF_FITS);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), "foundation"_br, FDB_MUTATION_TYPE_APPEND_IF_FITS);
 		++potentialCommitCount;
 
 		auto f1 = tr.commit();
@@ -1563,11 +1568,11 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MAX") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_MAX);
 		// Value in database will be extended with zeros to match length of param.
-		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), "aa"_br, FDB_MUTATION_TYPE_MAX);
 		// Value in database will be truncated to match length of param.
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "b"_br, FDB_MUTATION_TYPE_MAX);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1596,11 +1601,11 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_MIN") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_MIN);
 		// Value in database will be extended with zeros to match length of param.
-		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), "aa"_br, FDB_MUTATION_TYPE_MIN);
 		// Value in database will be truncated to match length of param.
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "b"_br, FDB_MUTATION_TYPE_MIN);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1633,9 +1638,9 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MAX") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MAX);
-		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("cc"sv), FDB_MUTATION_TYPE_BYTE_MAX);
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_BYTE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), "cc"_br, FDB_MUTATION_TYPE_BYTE_MAX);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "b"_br, FDB_MUTATION_TYPE_BYTE_MAX);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1666,9 +1671,9 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BYTE_MIN") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key("foo")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MIN);
-		tr.atomicOp(fdb::toBytesRef(key("bar")), fdb::toBytesRef("aa"sv), FDB_MUTATION_TYPE_BYTE_MIN);
-		tr.atomicOp(fdb::toBytesRef(key("baz")), fdb::toBytesRef("b"sv), FDB_MUTATION_TYPE_BYTE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("foo")), "b"_br, FDB_MUTATION_TYPE_BYTE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("bar")), "aa"_br, FDB_MUTATION_TYPE_BYTE_MIN);
+		tr.atomicOp(fdb::toBytesRef(key("baz")), "b"_br, FDB_MUTATION_TYPE_BYTE_MIN);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1703,7 +1708,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") 
 
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.atomicOp(fdb::toBytesRef(key), fdb::toBytesRef("bar"sv), FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
+		tr.atomicOp(fdb::toBytesRef(key), "bar"_br, FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
 		auto f1 = tr.getVersionstamp();
 		auto f2 = tr.commit();
 
@@ -1769,7 +1774,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY in
 	auto tr = db.createTransaction();
 	while (1) {
 		tr.atomicOp(fdb::BytesRef(reinterpret_cast<const uint8_t*>(keybuf), 17),
-		            fdb::toBytesRef("bar"sv),
+		            "bar"_br,
 		            FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY);
 		auto f1 = tr.commit();
 		CHECK(waitFuture(f1).code() != 0); // type of error not specified
@@ -1781,7 +1786,7 @@ TEST_CASE("fdb_transaction_get_committed_version read_only") {
 	// Read-only transaction should have a committed version of -1.
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1800,7 +1805,7 @@ TEST_CASE("fdb_transaction_get_committed_version read_only") {
 TEST_CASE("fdb_transaction_get_committed_version") {
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		tr.set(fdb::toBytesRef(key("foo")), "bar"_br);
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -1819,7 +1824,7 @@ TEST_CASE("fdb_transaction_get_committed_version") {
 TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 		auto err = waitFuture(f1);
 		if (err) {
 			auto fOnError = tr.onError(err);
@@ -1843,7 +1848,7 @@ TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
 TEST_CASE("fdb_transaction_get_total_cost") {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ false);
+		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 		auto err = waitFuture(f1);
 		if (err) {
 			auto fOnError = tr.onError(err);
@@ -1867,7 +1872,7 @@ TEST_CASE("fdb_transaction_get_total_cost") {
 TEST_CASE("fdb_transaction_get_approximate_size") {
 	auto tr = db.createTransaction();
 	while (1) {
-		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		tr.set(fdb::toBytesRef(key("foo")), "bar"_br);
 		auto f1 = tr.getApproximateSize();
 		auto err = waitFuture(f1);
 		if (err) {
@@ -2023,12 +2028,12 @@ TEST_CASE("fdb_transaction_cancel") {
 	// Cannot use transaction after cancelling it...
 	auto tr = db.createTransaction();
 	tr.cancel();
-	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+	auto f1 = tr.get("foo"_br, /* snapshot */ false);
 	CHECK(waitFuture(f1).code() == 1025); // transaction_cancelled
 
 	// ... until the transaction has been reset.
 	tr.reset();
-	auto f2 = tr.get(fdb::toBytesRef("foo"sv), /* snapshot */ false);
+	auto f2 = tr.get("foo"_br, /* snapshot */ false);
 	CHECK(waitFuture(f1).code() != 1024); // transaction_cancelled
 }
 
@@ -2111,7 +2116,7 @@ TEST_CASE("trace parent") {
 
 	tr.setOption(FDB_TR_OPTION_TRACE_PARENT, traceParent);
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
+		auto f1 = tr.get("\xff\xff/tracing/transaction_id"_br, /* snapshot */ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -2129,7 +2134,7 @@ TEST_CASE("trace parent") {
 }
 
 TEST_CASE("special-key-space valid transaction ID") {
-	auto value = getValue(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false, {});
+	auto value = getValue("\xff\xff/tracing/transaction_id"_br, /* snapshot */ false, {});
 	REQUIRE(value.has_value());
 	UID transactionID = UID::fromString(value.value());
 	CHECK(transactionID.first() > 0);
@@ -2141,8 +2146,8 @@ TEST_CASE("special-key-space custom transaction ID") {
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
 	while (1) {
 		UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
-		tr.set(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), fdb::toBytesRef(randomTransactionID.toString()));
-		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
+		tr.set("\xff\xff/tracing/transaction_id"_br, fdb::toBytesRef(randomTransactionID.toString()));
+		auto f1 = tr.get("\xff\xff/tracing/transaction_id"_br, /* snapshot */ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -2165,8 +2170,8 @@ TEST_CASE("special-key-space set transaction ID after write") {
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
 	while (1) {
 		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef(key("bar")));
-		tr.set(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), fdb::toBytesRef("0"sv));
-		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/transaction_id"sv), /* snapshot */ false);
+		tr.set("\xff\xff/tracing/transaction_id"_br, "0"_br);
+		auto f1 = tr.get("\xff\xff/tracing/transaction_id"_br, /* snapshot */ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -2190,8 +2195,8 @@ TEST_CASE("special-key-space disable tracing") {
 	auto tr = db.createTransaction();
 	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
 	while (1) {
-		tr.set(fdb::toBytesRef("\xff\xff/tracing/token"sv), fdb::toBytesRef("false"sv));
-		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/tracing/token"sv), /* snapshot */ false);
+		tr.set("\xff\xff/tracing/token"_br, "false"_br);
+		auto f1 = tr.get("\xff\xff/tracing/token"_br, /* snapshot */ false);
 
 		auto err = waitFuture(f1);
 		if (err) {
@@ -2254,7 +2259,7 @@ TEST_CASE("special-key-space tracing get range") {
 std::string get_valid_status_json() {
 	auto tr = db.createTransaction();
 	while (1) {
-		auto f1 = tr.get(fdb::toBytesRef("\xff\xff/status/json"sv), false);
+		auto f1 = tr.get("\xff\xff/status/json"_br, false);
 		auto err = waitFuture(f1);
 		if (err) {
 			auto f2 = tr.onError(err);
@@ -2410,7 +2415,7 @@ TEST_CASE("fdb_error_predicate") {
 
 TEST_CASE("block_from_callback") {
 	auto tr = db.createTransaction();
-	auto f1 = tr.get(fdb::toBytesRef("foo"sv), /*snapshot*/ true);
+	auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 	struct Context {
 		FdbEvent event;
 		fdb::Transaction* tr;
@@ -2418,7 +2423,7 @@ TEST_CASE("block_from_callback") {
 	Context context;
 	context.tr = &tr;
 	f1.then([&context](fdb::Future f) {
-		auto f2 = context.tr->get(fdb::toBytesRef("bar"sv), /*snapshot*/ true);
+		auto f2 = context.tr->get("bar"_br, /*snapshot*/ true);
 		auto err = f2.blockUntilReady();
 		if (err) {
 			CHECK(err.code() == /*blocked_from_network_thread*/ 2026);
@@ -2476,7 +2481,7 @@ TEST_CASE("commit_does_not_reset") {
 		int64_t tr2StartVersion;
 		fdbCheck(tr2GrvFuture.getNothrow(tr2StartVersion));
 
-		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		tr.set(fdb::toBytesRef(key("foo")), "bar"_br);
 		auto tr1CommitFuture = tr.commit();
 		err = waitFuture(tr1CommitFuture);
 		if (err) {
@@ -2487,7 +2492,7 @@ TEST_CASE("commit_does_not_reset") {
 
 		tr2.addConflictRange(
 		    fdb::toBytesRef(key("foo")), fdb::toBytesRef(strinc_str(key("foo"))), FDB_CONFLICT_RANGE_TYPE_READ);
-		tr2.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef("bar"sv));
+		tr2.set(fdb::toBytesRef(key("foo")), "bar"_br);
 		auto tr2CommitFuture = tr2.commit();
 		err = waitFuture(tr2CommitFuture);
 		CHECK(err.code() == 1020); // not_committed
@@ -2542,7 +2547,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	auto tr = db.createTransaction();
 	while (1) {
 		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
-		tr.set(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName), fdb::toBytesRef(""sv));
+		tr.set(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName), ""_br);
 		auto commitFuture = tr.commit();
 		auto err = waitFuture(commitFuture);
 		if (err) {
@@ -2677,8 +2682,7 @@ void granule_free_load_fail(int64_t loadId, void* userContext) {
 }
 
 TEST_CASE("Blob Granule Functions") {
-	auto confValue = getValue(fdb::toBytesRef("\xff/conf/blob_granules_enabled"sv),
-	                           /* snapshot */ false,
+	auto confValue = getValue("\xff/conf/blob_granules_enabled"_br, /* snapshot */ false,
 	                           { FDB_TR_OPTION_READ_SYSTEM_KEYS });
 	if (!confValue.has_value() || confValue.value() != "1") {
 		// std::cout << "skipping blob granule test" << std::endl;
