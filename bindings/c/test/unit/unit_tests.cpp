@@ -157,8 +157,7 @@ std::optional<std::string> getValue(fdb::KeyRef key, bool snapshot, std::vector<
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> value;
-		fdbCheck(f1.getNothrow(value));
+		auto value = f1.get();
 		return value.has_value() ? std::make_optional(std::string(value->begin(), value->end())) : std::nullopt;
 	}
 }
@@ -207,12 +206,7 @@ GetMappedRangeResult getMappedRange(fdb::Transaction& tr,
 		return GetMappedRangeResult{ {}, false, err };
 	}
 
-	fdb::future_var::MappedKeyValueRefArray::Type output;
-	fdbCheck(f1.getNothrow(output));
-
-	auto outMkv = std::get<0>(output);
-	auto outCount = std::get<1>(output);
-	auto outMore = std::get<2>(output);
+	auto [outMkv, outCount, outMore] = f1.get();
 
 	GetMappedRangeResult result;
 	result.more = (outMore != 0);
@@ -367,8 +361,7 @@ TEST_CASE("fdb_future_get_int64") {
 			continue;
 		}
 
-		int64_t rv;
-		fdbCheck(f1.getNothrow(rv));
+		int64_t rv = f1.get();
 		CHECK(rv > 0);
 		break;
 	}
@@ -388,8 +381,7 @@ TEST_CASE("fdb_future_get_key") {
 			continue;
 		}
 
-		fdb::KeyRef dbKey;
-		fdbCheck(f1.getNothrow(dbKey));
+		auto dbKey = f1.get();
 		CHECK(std::string(dbKey.begin(), dbKey.end()) == prefix + "bar");
 		break;
 	}
@@ -408,8 +400,7 @@ TEST_CASE("fdb_future_get_value") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> dbValue;
-		fdbCheck(f1.getNothrow(dbValue));
+		auto dbValue = f1.get();
 		CHECK(std::string(dbValue->begin(), dbValue->end()) == "bar");
 		break;
 	}
@@ -549,9 +540,7 @@ TEST_CASE("fdb_transaction read_your_writes") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> val;
-		fdbCheck(f1.getNothrow(val));
-
+		auto val = f1.get();
 		CHECK(val.has_value());
 		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
 		break;
@@ -576,8 +565,7 @@ TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> val;
-		fdbCheck(f1.getNothrow(val));
+		auto val = f1.get();
 		CHECK(!val.has_value());
 		break;
 	}
@@ -600,8 +588,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> val;
-		fdbCheck(f1.getNothrow(val));
+		auto val = f1.get();
 		CHECK(val.has_value());
 		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
 		break;
@@ -626,8 +613,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> val;
-		fdbCheck(f1.getNothrow(val));
+		auto val = f1.get();
 		CHECK(!val.has_value());
 
 		//// Non-snapshot reads should still read writes in the transaction.
@@ -638,7 +624,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 			continue;
 		}
 
-		fdbCheck(f2.getNothrow(val));
+		val = f2.get();
 		CHECK(val.has_value());
 		CHECK(std::string(val->begin(), val->end()).compare("bar") == 0);
 		break;
@@ -1719,8 +1705,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_KEY") 
 		}
 
 		fdbCheck(waitFuture(f1));
-		fdb::KeyRef key;
-		fdbCheck(f1.getNothrow(key));
+		auto key = f1.get();
 		versionstamp = std::string(key.begin(), key.end());
 		break;
 	}
@@ -1753,8 +1738,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_SET_VERSIONSTAMPED_VALUE"
 		}
 
 		fdbCheck(waitFuture(f1));
-		fdb::KeyRef key;
-		fdbCheck(f1.getNothrow(key));
+		auto key = f1.get();
 		versionstamp = std::string(key.begin(), key.end());
 		break;
 	}
@@ -1837,8 +1821,7 @@ TEST_CASE("fdb_transaction_get_tag_throttled_duration") {
 			fdbCheck(waitFuture(fOnError));
 			continue;
 		}
-		double tagThrottledDuration;
-		fdbCheck(f2.getNothrow(tagThrottledDuration));
+		double tagThrottledDuration = f2.get();
 		CHECK(tagThrottledDuration >= 0.0);
 		break;
 	}
@@ -1861,8 +1844,7 @@ TEST_CASE("fdb_transaction_get_total_cost") {
 			fdbCheck(waitFuture(fOnError));
 			continue;
 		}
-		int64_t cost;
-		fdbCheck(f2.getNothrow(cost));
+		int64_t cost = f2.get();
 		CHECK(cost > 0);
 		break;
 	}
@@ -1880,8 +1862,7 @@ TEST_CASE("fdb_transaction_get_approximate_size") {
 			continue;
 		}
 
-		int64_t size;
-		fdbCheck(f1.getNothrow(size));
+		int64_t size = f1.get();
 		CHECK(size >= 3);
 		break;
 	}
@@ -1891,9 +1872,7 @@ TEST_CASE("fdb_database_get_server_protocol") {
 	// We don't really have any expectations other than "don't crash" here
 	auto protocolFuture = db.getServerProtocol(0);
 	fdbCheck(waitFuture(protocolFuture));
-	uint64_t out;
-
-	fdbCheck(protocolFuture.getNothrow(out));
+	uint64_t out = protocolFuture.get();
 
 	// Passing in an expected version that's different than the cluster version
 	protocolFuture = db.getServerProtocol(0x0FDB00A200090000LL);
@@ -2155,8 +2134,7 @@ TEST_CASE("special-key-space custom transaction ID") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> value;
-		fdbCheck(f1.getNothrow(value));
+		auto value = f1.get();
 		REQUIRE(value.has_value());
 		UID transactionID = UID::fromString(std::string(value->begin(), value->end()));
 		CHECK(transactionID == randomTransactionID);
@@ -2179,9 +2157,7 @@ TEST_CASE("special-key-space set transaction ID after write") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> value;
-		fdbCheck(f1.getNothrow(value));
-
+		auto value = f1.get();
 		REQUIRE(value.has_value());
 		UID transactionID = UID::fromString(std::string(value->begin(), value->end()));
 		CHECK(transactionID.first() > 0);
@@ -2204,9 +2180,7 @@ TEST_CASE("special-key-space disable tracing") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> value;
-		fdbCheck(f1.getNothrow(value));
-
+		auto value = f1.get();
 		REQUIRE(value.has_value());
 		uint64_t token = std::stoul(std::string(value->begin(), value->end()));
 		CHECK(token == 0);
@@ -2266,9 +2240,7 @@ std::string get_valid_status_json() {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> value;
-		fdbCheck(f1.getNothrow(value));
-
+		auto value = f1.get();
 		assert(value.has_value());
 		std::string statusJsonStr(value->begin(), value->end());
 		rapidjson::Document statusJson;
@@ -2304,8 +2276,7 @@ TEST_CASE("fdb_database_reboot_worker") {
 	while (1) {
 		auto f = db.rebootWorker(fdb::toBytesRef(networkAddress), false, 0);
 		fdbCheck(waitFuture(f));
-		int64_t successful;
-		fdbCheck(f.getNothrow(successful));
+		int64_t successful = f.get();
 		if (successful)
 			break; // retry rebooting until success
 	}
@@ -2466,8 +2437,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		int64_t tr1StartVersion;
-		fdbCheck(tr1GrvFuture.getNothrow(tr1StartVersion));
+		int64_t tr1StartVersion = tr1GrvFuture.get();
 
 		auto tr2GrvFuture = tr2.getReadVersion();
 		err = waitFuture(tr2GrvFuture);
@@ -2477,8 +2447,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		int64_t tr2StartVersion;
-		fdbCheck(tr2GrvFuture.getNothrow(tr2StartVersion));
+		int64_t tr2StartVersion = tr2GrvFuture.get();
 
 		tr.set(fdb::toBytesRef(key("foo")), "bar"_br);
 		auto tr1CommitFuture = tr.commit();
@@ -2504,8 +2473,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		int64_t tr1EndVersion;
-		fdbCheck(tr1GrvFuture2.getNothrow(tr1EndVersion));
+		int64_t tr1EndVersion = tr1GrvFuture2.get();
 
 		auto tr2GrvFuture2 = tr2.getReadVersion();
 		err = waitFuture(tr2GrvFuture2);
@@ -2515,8 +2483,7 @@ TEST_CASE("commit_does_not_reset") {
 			continue;
 		}
 
-		int64_t tr2EndVersion;
-		fdbCheck(tr2GrvFuture2.getNothrow(tr2EndVersion));
+		int64_t tr2EndVersion = tr2GrvFuture2.get();
 
 		// If we reset the transaction, then the read version will change
 		CHECK(tr1StartVersion == tr1EndVersion);
@@ -2615,8 +2582,7 @@ TEST_CASE("Tenant create, access, and delete") {
 			continue;
 		}
 
-		std::optional<fdb::ValueRef> val;
-		fdbCheck(f1.getNothrow(val));
+		auto val = f1.get();
 		CHECK(val.has_value());
 		CHECK(testValue == std::string(val->begin(), val->end()));
 
@@ -2813,8 +2779,7 @@ TEST_CASE("Blob Granule Functions") {
 	    db.purgeBlobGranules(fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), originalReadVersion, false);
 	fdbCheck(waitFuture(purgeKeyFuture));
 
-	fdb::KeyRef purgeKey;
-	fdbCheck(purgeKeyFuture.getNothrow(purgeKey));
+	fdb::KeyRef purgeKey = purgeKeyFuture.get();
 
 	auto waitPurgeFuture = db.waitPurgeGranulesComplete(purgeKey);
 	fdbCheck(waitFuture(waitPurgeFuture));
