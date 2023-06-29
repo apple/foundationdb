@@ -2033,7 +2033,7 @@ TEST_CASE("fdb_transaction_cancel") {
 	// ... until the transaction has been reset.
 	tr.reset();
 	auto f2 = tr.get("foo"_br, /* snapshot */ false);
-	CHECK(waitFuture(f1).code() != 1024); // transaction_cancelled
+	CHECK(waitFuture(f2).code() != 1025); // transaction_cancelled
 }
 
 TEST_CASE("fdb_transaction_add_conflict_range") {
