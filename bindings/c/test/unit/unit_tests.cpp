@@ -382,7 +382,7 @@ TEST_CASE("fdb_future_get_key") {
 		}
 
 		auto dbKey = f1.get();
-		CHECK(std::string(dbKey.begin(), dbKey.end()) == prefix + "bar");
+		CHECK(fdb::toCharsRef(dbKey) == prefix + "bar");
 		break;
 	}
 }
@@ -401,7 +401,7 @@ TEST_CASE("fdb_future_get_value") {
 		}
 
 		auto dbValue = f1.get();
-		CHECK(std::string(dbValue->begin(), dbValue->end()) == "bar");
+		CHECK(fdb::toCharsRef(dbValue) == "bar");
 		break;
 	}
 }
@@ -2214,7 +2214,7 @@ TEST_CASE("special-key-space tracing get range") {
 		CHECK(!out_more);
 		CHECK(out_count == 2);
 
-		auto tracingBeginTidKey = std::string(out_kv[1].key().begin(), out_kv[1].key().end());
+		auto tracingBeginTidKey = fdb::toCharsRef(out_kv[1].key());
 		CHECK(tracingBeginTidKey == tracingBegin + "transaction_id");
 		auto tracingBeginTidVal = std::string(out_kv[1].value().begin(), out_kv[1].value().end());
 		UID transactionID = UID::fromString(tracingBeginTidVal);
@@ -2746,20 +2746,18 @@ TEST_CASE("Blob Granule Functions") {
 		auto outKr = std::get<0>(output);
 		auto outCount = std::get<1>(output);
 
-		CHECK(std::string(outKr[0].beginKey().begin(), outKr[0].beginKey().end()) <= key("bg"));
-		CHECK(std::string(outKr[outCount - 1].endKey().begin(), outKr[outCount - 1].endKey().end()) >= key("bh"));
+		CHECK(fdb::toCharsRef(outKr[0].beginKey()) <= key("bg"));
+		CHECK(fdb::toCharsRef(outKr[outCount - 1].endKey()) >= key("bh"));
 
 		CHECK(outCount >= 1);
 		// check key ranges are in order
 		for (int i = 0; i < outCount; i++) {
 			// key range start < end
-			CHECK(std::string(outKr[i].beginKey().begin(), outKr[i].beginKey().end()) <
-			      std::string(outKr[i].endKey().begin(), outKr[i].endKey().end()));
+			CHECK(fdb::toCharsRef(outKr[i].beginKey()) < fdb::toCharsRef(outKr[i].endKey()));
 		}
 		// Ranges themselves are sorted and contiguous
 		for (int i = 0; i < outCount - 1; i++) {
-			CHECK(std::string(outKr[i].endKey().begin(), outKr[i].endKey().end()) ==
-			      std::string(outKr[i + 1].beginKey().begin(), outKr[i + 1].beginKey().end()));
+			CHECK(fdb::toCharsRef(outKr[i].endKey()) == fdb::toCharsRef(outKr[i + 1].beginKey()));
 		}
 
 		tr.reset();
@@ -2814,15 +2812,13 @@ TEST_CASE("Blob Granule Functions") {
 		CHECK(out_count <= 100);
 
 		// check that ranges cover requested range
-		CHECK(std::string(out_summaries[0].beginKey().begin(), out_summaries[0].beginKey().end()) <= key("bg"));
-		CHECK(std::string(out_summaries[out_count - 1].endKey().begin(),
-		                  out_summaries[out_count - 1].endKey().begin()) >= key("bh"));
+		CHECK(fdb::toCharsRef(out_summaries[0].beginKey()) <= key("bg"));
+		CHECK(fdb::toCharsRef(out_summaries[out_count - 1].endKey()) >= key("bh"));
 
 		// check key ranges are in order
 		for (int i = 0; i < out_count; i++) {
 			// key range start < end
-			CHECK(std::string(out_summaries[i].beginKey().begin(), out_summaries[i].beginKey().end()) <
-			      std::string(out_summaries[i].endKey().begin(), out_summaries[i].endKey().end()));
+			CHECK(fdb::toCharsRef(out_summaries[i].beginKey()) < fdb::toCharsRef(out_summaries[i].endKey()));
 			//// sanity check versions and sizes
 			CHECK(out_summaries[i].snapshot_version <= originalReadVersion);
 			CHECK(out_summaries[i].delta_version <= originalReadVersion);
@@ -2833,8 +2829,7 @@ TEST_CASE("Blob Granule Functions") {
 
 		// Ranges themselves are sorted and contiguous
 		for (int i = 0; i < out_count - 1; i++) {
-			CHECK(std::string(out_summaries[i].endKey().begin(), out_summaries[i].endKey().end()) ==
-			      std::string(out_summaries[i + 1].beginKey().begin(), out_summaries[i + 1].beginKey().end()));
+			CHECK(fdb::toCharsRef(out_summaries[i].endKey()) == fdb::toCharsRef(out_summaries[i + 1].beginKey()));
 		}
 
 		tr.reset();
