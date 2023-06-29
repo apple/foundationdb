@@ -1260,7 +1260,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_ADD") {
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
-			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+			if (err.retryableNotCommitted()) {
 				--potentialCommitCount;
 			}
 			auto f2 = tr.onError(err);
@@ -1461,7 +1461,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_BIT_XOR") {
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
-			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+			if (err.retryableNotCommitted()) {
 				--potentialCommitCount;
 			}
 			auto f2 = tr.onError(err);
@@ -1534,7 +1534,7 @@ TEST_CASE("fdb_transaction_atomic_op FDB_MUTATION_TYPE_APPEND_IF_FITS") {
 		auto f1 = tr.commit();
 		auto err = waitFuture(f1);
 		if (err) {
-			if (err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)) {
+			if (err.retryableNotCommitted()) {
 				--potentialCommitCount;
 			}
 			auto f2 = tr.onError(err);
@@ -2389,23 +2389,23 @@ TEST_CASE("fdb_error_predicate") {
 	CHECK(!fdb::Error(4000).retryable()); // unknown_error
 	CHECK(!fdb::Error(4001).retryable()); // internal_error
 
-	CHECK(fdb::Error(1021).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // commit_unknown_result
+	CHECK(fdb::Error(1021).maybeCommitted()); // commit_unknown_result
 
-	CHECK(!fdb::Error(1000).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // operation_failed
-	CHECK(!fdb::Error(1004).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // timed_out
-	CHECK(!fdb::Error(1025).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // transaction_cancelled
-	CHECK(!fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // database_locked
-	CHECK(!fdb::Error(1101).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // operation_cancelled
-	CHECK(!fdb::Error(2002).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // commit_read_incomplete
+	CHECK(!fdb::Error(1000).maybeCommitted()); // operation_failed
+	CHECK(!fdb::Error(1004).maybeCommitted()); // timed_out
+	CHECK(!fdb::Error(1025).maybeCommitted()); // transaction_cancelled
+	CHECK(!fdb::Error(1038).maybeCommitted()); // database_locked
+	CHECK(!fdb::Error(1101).maybeCommitted()); // operation_cancelled
+	CHECK(!fdb::Error(2002).maybeCommitted()); // commit_read_incomplete
 
-	CHECK(fdb::Error(1007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_too_old
-	CHECK(fdb::Error(1020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // not_committed
-	CHECK(fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // database_locked
+	CHECK(fdb::Error(1007).retryableNotCommitted()); // transaction_too_old
+	CHECK(fdb::Error(1020).retryableNotCommitted()); // not_committed
+	CHECK(fdb::Error(1038).retryableNotCommitted()); // database_locked
 
-	CHECK(!fdb::Error(1021).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // commit_unknown_result
-	CHECK(!fdb::Error(1025).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_cancelled
-	CHECK(!fdb::Error(1031).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // transaction_timed_out
-	CHECK(!fdb::Error(1040).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED)); // proxy_memory_limit_exceeded
+	CHECK(!fdb::Error(1021).retryableNotCommitted()); // commit_unknown_result
+	CHECK(!fdb::Error(1025).retryableNotCommitted()); // transaction_cancelled
+	CHECK(!fdb::Error(1031).retryableNotCommitted()); // transaction_timed_out
+	CHECK(!fdb::Error(1040).retryableNotCommitted()); // proxy_memory_limit_exceeded
 }
 
 TEST_CASE("block_from_callback") {

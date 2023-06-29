@@ -250,9 +250,15 @@ public:
 
 	bool retryable() const noexcept { return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE, err) != 0; }
 
-	static Error success() { return Error(); }
+	bool maybeCommitted() const noexcept {
+		return native::fdb_error_predicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED, err) != 0;
+	}
 
-	bool hasPredicate(int predicateTest) { return native::fdb_error_predicate(predicateTest, err) != 0; }
+	bool retryableNotCommitted() const noexcept {
+		return native::fdb_error_predicate(FDB_ERROR_PREDICATE_RETRYABLE_NOT_COMMITTED, err) != 0;
+	}
+
+	static Error success() { return Error(); }
 
 private:
 	CodeType err;
