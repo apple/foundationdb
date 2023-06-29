@@ -55,6 +55,9 @@ void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) 
 	std::unordered_set<UID> seenStorageServerIds;
 	for (auto it = sqInfos.begin(); it != sqInfos.end(); ++it) {
 		auto const& ss = it->value;
+		if (!ss.valid) {
+			continue;
+		}
 		seenStorageServerIds.insert(ss.id);
 		std::unordered_set<ThrottlingId> seenReadThrottlingIds, seenWriteThrottlingIds;
 		auto& throttlingIdToThroughputCounters = throughput[ss.id];
