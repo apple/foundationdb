@@ -353,9 +353,9 @@ ACTOR Future<bool> tenantDeleteIdCommand(Reference<IDatabase> db, std::vector<St
 constexpr char moveTenantUsageMessage[] =
     "Usage: tenant move <start|switch|finish|abort> <TENANT_GROUP> <SOURCE_CLUSTER> <DESTINATION_CLUSTER> \n\n"
     "Helps orchestrate the move of a tenant group across 2 data clusters in a metacluster.\n"
-    "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement"
+    "TENANT_GROUP must be assigned to SOURCE_CLUSTER at the beginning of the movement\n"
     "SOURCE_CLUSTER and DESTINATION_CLUSTER must be distinct from each other.\n"
-    "The abort command will fail if there are any unlocked tenants in the group.";
+    "The abort command will fail if there are any unlocked tenants in the group.\n";
 
 ACTOR Future<bool> tenantMoveStartCommand(Reference<IDatabase> db, std::vector<StringRef> tokens) {
 	if (tokens.size() > 6) {

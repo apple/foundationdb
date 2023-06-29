@@ -649,7 +649,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                                          Reference<ITransaction> tr,
 	                                                          TenantGroupName tenantGroup) {
 		state UID runId = self->moveRecord.runId;
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
 		Optional<std::pair<TenantName, Key>> optionalQueueHead =
 		    wait(metacluster::metadata::management::emergency_movement::movementQueue().get(
@@ -720,7 +720,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			wait(runTransactionVoid(
 			    self->managementDb,
 			    [runId = runId, tenantGroup = tenantGroup, block = block](Reference<ITransaction> tr) {
-				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 				    metacluster::metadata::management::emergency_movement::splitPointsMap().erase(
 				        tr, Tuple::makeTuple(tenantGroup, runId.toString(), block.get().tenant, block.get().begin));
 				    return Future<Void>(Void());
@@ -730,7 +730,7 @@ struct MetaclusterMoveWorkload : TestWorkload {
 
 	Future<metacluster::metadata::management::MovementRecord> getMoveRecord(TenantGroupName tenantGroup) {
 		return runTransaction(managementDb, [tenantGroup](Reference<ITransaction> tr) {
-			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+			tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 			return map(metacluster::metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup),
 			           [](Optional<metacluster::metadata::management::MovementRecord> record) {
 				           ASSERT(record.present());
