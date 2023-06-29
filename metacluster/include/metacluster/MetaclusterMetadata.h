@@ -102,14 +102,7 @@ struct ConnectionStringCodec {
 // This enum class can be used to track the state of the data movement
 // The state written to the cluster will be the last attempted
 // step of the movement
-enum class MovementState {
-	START_METADATA = 0,
-	START_LOCK = 1,
-	START_CREATE = 2,
-	SWITCH_HYBRID = 3,
-	SWITCH_METADATA = 4,
-	FINISH_UNLOCK = 5
-};
+enum class MovementState { START_LOCK, START_CREATE, SWITCH_HYBRID, SWITCH_METADATA, FINISH_UNLOCK };
 
 struct MovementRecord {
 	UID runId;
