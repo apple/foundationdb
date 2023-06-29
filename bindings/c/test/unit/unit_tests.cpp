@@ -1942,7 +1942,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 		// nondeterministic, so each future is checked.
 		f1.then([&event](fdb::Future f) {
 			auto err = waitFuture(f);
-			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
 			auto param = new std::shared_ptr<FdbEvent>(event);
@@ -1953,7 +1953,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 
 		f2.then([&event](fdb::Future f) {
 			auto err = waitFuture(f);
-			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
 			auto param = new std::shared_ptr<FdbEvent>(event);
@@ -1963,7 +1963,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 		});
 		f3.then([&event](fdb::Future f) {
 			auto err = waitFuture(f);
-			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
 			auto param = new std::shared_ptr<FdbEvent>(event);
@@ -1973,7 +1973,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 		});
 		f4.then([&event](fdb::Future f) {
 			auto err = waitFuture(f);
-			if (err.code() != /*operation_cancelled*/ 1101 && !err.hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)) {
+			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
 			auto param = new std::shared_ptr<FdbEvent>(event);
@@ -2367,27 +2367,27 @@ TEST_CASE("fdb_database_create_snapshot") {
 }
 
 TEST_CASE("fdb_error_predicate") {
-	CHECK(fdb::Error(1007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_too_old
-	CHECK(fdb::Error(1020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // not_committed
-	CHECK(fdb::Error(1038).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // database_locked
+	CHECK(fdb::Error(1007).retryable()); // transaction_too_old
+	CHECK(fdb::Error(1020).retryable()); // not_committed
+	CHECK(fdb::Error(1038).retryable()); // database_locked
 
-	CHECK(!fdb::Error(1036).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // accessed_unreadable
-	CHECK(!fdb::Error(2000).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // client_invalid_operation
-	CHECK(!fdb::Error(2004).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // key_outside_legal_range
-	CHECK(!fdb::Error(2005).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // inverted_range
-	CHECK(!fdb::Error(2006).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // invalid_option_value
-	CHECK(!fdb::Error(2007).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // invalid_option
-	CHECK(!fdb::Error(2011).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // version_invalid
-	CHECK(!fdb::Error(2020).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_invalid_version
-	CHECK(!fdb::Error(2023).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_read_only
-	CHECK(!fdb::Error(2100).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // incompatible_protocol_version
-	CHECK(!fdb::Error(2101).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // transaction_too_large
-	CHECK(!fdb::Error(2102).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // key_too_large
-	CHECK(!fdb::Error(2103).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // value_too_large
-	CHECK(!fdb::Error(2108).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // unsupported_operation
-	CHECK(!fdb::Error(2200).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // api_version_unset
-	CHECK(!fdb::Error(4000).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // unknown_error
-	CHECK(!fdb::Error(4001).hasPredicate(FDB_ERROR_PREDICATE_RETRYABLE)); // internal_error
+	CHECK(!fdb::Error(1036).retryable()); // accessed_unreadable
+	CHECK(!fdb::Error(2000).retryable()); // client_invalid_operation
+	CHECK(!fdb::Error(2004).retryable()); // key_outside_legal_range
+	CHECK(!fdb::Error(2005).retryable()); // inverted_range
+	CHECK(!fdb::Error(2006).retryable()); // invalid_option_value
+	CHECK(!fdb::Error(2007).retryable()); // invalid_option
+	CHECK(!fdb::Error(2011).retryable()); // version_invalid
+	CHECK(!fdb::Error(2020).retryable()); // transaction_invalid_version
+	CHECK(!fdb::Error(2023).retryable()); // transaction_read_only
+	CHECK(!fdb::Error(2100).retryable()); // incompatible_protocol_version
+	CHECK(!fdb::Error(2101).retryable()); // transaction_too_large
+	CHECK(!fdb::Error(2102).retryable()); // key_too_large
+	CHECK(!fdb::Error(2103).retryable()); // value_too_large
+	CHECK(!fdb::Error(2108).retryable()); // unsupported_operation
+	CHECK(!fdb::Error(2200).retryable()); // api_version_unset
+	CHECK(!fdb::Error(4000).retryable()); // unknown_error
+	CHECK(!fdb::Error(4001).retryable()); // internal_error
 
 	CHECK(fdb::Error(1021).hasPredicate(FDB_ERROR_PREDICATE_MAYBE_COMMITTED)); // commit_unknown_result
 
