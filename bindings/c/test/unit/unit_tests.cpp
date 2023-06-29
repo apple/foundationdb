@@ -470,8 +470,8 @@ TEST_CASE("fdb_future_get_keyvalue_array") {
 
 		for (int i = 0; i < out_count; ++i) {
 			auto kv = *out_kv++;
-			auto key = fdb::toCharsRef(kv.key());
-		      	auto value = fdb::toCharsRef(kv.value());	
+			auto key = std::string(kv.key().begin(), kv.key().end());
+			auto value = std::string(kv.value().begin(), kv.value().end());
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -1117,7 +1117,7 @@ TEST_CASE("fdb_transaction_get_range reverse") {
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
 			auto key = fdb::toCharsRef(kv.key());
-		      	auto value = fdb::toCharsRef(kv.value());	
+			auto value = fdb::toCharsRef(kv.value());
 
 			CHECK(key.compare(it->first) == 0);
 			CHECK(value.compare(it->second) == 0);
@@ -1161,9 +1161,8 @@ TEST_CASE("fdb_transaction_get_range limit") {
 
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
-			auto key = fdb::toCharsRef(kv.key());
-		      	auto value = fdb::toCharsRef(kv.value());	
-
+			auto key = std::string(kv.key().begin(), kv.key().end());
+			auto value = std::string(kv.value().begin(), kv.value().end());
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -1202,9 +1201,8 @@ TEST_CASE("fdb_transaction_get_range FDB_STREAMING_MODE_EXACT") {
 
 		for (int i = 0; i < out_count; i++) {
 			auto kv = *out_kv++;
-			auto key = fdb::toCharsRef(kv.key());
-		      	auto value = fdb::toCharsRef(kv.value());	
-
+			auto key = std::string(kv.key().begin(), kv.key().end());
+			auto value = std::string(kv.value().begin(), kv.value().end());
 			CHECK(data[key].compare(value) == 0);
 		}
 		break;
@@ -2863,8 +2861,7 @@ int main(int argc, char** argv) {
 		std::string externalClientLibrary = argv[3];
 		if (externalClientLibrary.substr(0, 2) != "--") {
 			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_DISABLE_LOCAL_CLIENT);
-			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY,
-			                                        externalClientLibrary);
+			fdb::network::setOption(FDBNetworkOption::FDB_NET_OPTION_EXTERNAL_CLIENT_LIBRARY, externalClientLibrary);
 		}
 	}
 
