@@ -1035,12 +1035,11 @@ void assertNotTuple(std::string str) {
 	UNREACHABLE();
 }
 
-TEST_CASE("fdb_transaction_getMappedRange_fail_on_mapper_not_tuple") {
+TEST_CASE("fdb_transaction_get_mapped_range_fail_on_mapper_not_tuple") {
 	// A string that cannot be parsed as tuple.
 	//
-	///"\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
+	// "\x15:\x152\x15E\x15\x09\x15\x02\x02MySimpleRecord$repeater-version\x00\x15\x013\x00\x00\x00\x00\x1aU\x90\xba\x00\x00\x00\x02\x15\x04"
 	// should fail at \x35
-	//
 	std::string mapper = {
 		'\x15', ':',    '\x15', '2', '\x15', 'E',    '\x15', '\t',   '\x15', '\x02', '\x02', 'M',
 		'y',    'S',    'i',    'm', 'p',    'l',    'e',    'R',    'e',    'c',    'o',    'r',
@@ -2463,8 +2462,8 @@ TEST_CASE("Fast alloc thread cleanup") {
 
 TEST_CASE("Tenant create, access, and delete") {
 	std::string tenantName = "tenant";
-	std::string testKey = "foo";
-	std::string testValue = "bar";
+	auto testKey = "foo"_br;
+	auto testValue = "bar"_br;
 
 	auto tr = db.createTransaction();
 	while (1) {
@@ -2517,7 +2516,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	auto tr2 = tenant.createTransaction();
 
 	while (1) {
-		tr2.set(fdb::toBytesRef(testKey), fdb::toBytesRef(testValue));
+		tr2.set(testKey, testValue);
 		auto commitFuture = tr2.commit();
 		auto err = waitFuture(commitFuture);
 		if (err) {
@@ -2530,7 +2529,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		auto f1 = tr2.get(fdb::toBytesRef(testKey), false);
+		auto f1 = tr2.get(testKey, false);
 		auto err = waitFuture(f1);
 		if (err) {
 			auto f2 = tr2.onError(err);
@@ -2540,9 +2539,9 @@ TEST_CASE("Tenant create, access, and delete") {
 
 		auto val = f1.get();
 		CHECK(val.has_value());
-		CHECK(testValue == std::string(val->begin(), val->end()));
+		CHECK(testValue == val.value());
 
-		tr2.clear(fdb::toBytesRef(testKey));
+		tr2.clear(testKey);
 		auto commitFuture = tr2.commit();
 		err = waitFuture(commitFuture);
 		if (err) {
@@ -2569,7 +2568,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		auto f1 = tr2.get(fdb::toBytesRef(testKey), false);
+		auto f1 = tr2.get(testKey, false);
 		auto err = waitFuture(f1);
 		if (err.code() == error_code_tenant_not_found) {
 			tr2.reset();
