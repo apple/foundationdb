@@ -627,7 +627,7 @@ void initHelp() {
 	    CommandHelp("usemanagementcluster",
 	                "connect to the management cluster in the metacluster",
 	                "This command switches the connection to the management cluster and resets tenant to default."
-	                "User must first connect to a management cluster in order to use this command. ");
+	                "User must first connect to a management cluster in order to use this command.");
 }
 
 void printVersion() {
