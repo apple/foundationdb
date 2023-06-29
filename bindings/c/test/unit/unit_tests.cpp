@@ -30,6 +30,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <semaphore>
 #include <stdexcept>
 #include <string_view>
 #include <thread>
@@ -256,14 +257,11 @@ TEST_CASE("fdb_future_set_callback") {
 	while (1) {
 		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
-		struct Context {
-			FdbEvent event;
-		};
-		Context context;
-		f1.then([&context](fdb::Future f) { context.event.set(); });
+		std::binary_semaphore sem(0);
+		f1.then([&sem](fdb::Future f) { sem.release(); });
 
 		auto err = waitFuture(f1);
-		context.event.wait(); // Wait until callback is called
+		sem.acquire(); // Wait until callback is called
 
 		if (err) {
 			auto f2 = tr.onError(err);
@@ -1890,8 +1888,6 @@ TEST_CASE("fdb_transaction_watch max watches") {
 	int64_t max_watches = 3;
 	db.setOption(FDB_DB_OPTION_MAX_WATCHES, max_watches);
 
-	auto event = std::make_shared<FdbEvent>();
-
 	auto tr = db.createTransaction();
 	while (1) {
 		auto f1 = tr.watch(fdb::toBytesRef(key("a")));
@@ -1907,52 +1903,46 @@ TEST_CASE("fdb_transaction_watch max watches") {
 			continue;
 		}
 
+		std::binary_semaphore sem(0);
 		// Callbacks will be triggered with operation_cancelled errors once the
 		// too_many_watches error fires, as the other futures will go out of scope
 		// and be cleaned up. The future which too_many_watches occurs on is
 		// nondeterministic, so each future is checked.
-		f1.then([&event](fdb::Future f) {
+		f1.then([&sem](fdb::Future f) {
 			auto err = waitFuture(f);
 			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
-			auto param = new std::shared_ptr<FdbEvent>(event);
-			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			(*e)->set();
-			delete e;
+			sem.release();
 		});
 
-		f2.then([&event](fdb::Future f) {
+		f2.then([&sem](fdb::Future f) {
 			auto err = waitFuture(f);
 			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
-			auto param = new std::shared_ptr<FdbEvent>(event);
-			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			(*e)->set();
-			delete e;
+			sem.release();
 		});
-		f3.then([&event](fdb::Future f) {
+		f3.then([&sem](fdb::Future f) {
 			auto err = waitFuture(f);
 			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
-			auto param = new std::shared_ptr<FdbEvent>(event);
-			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			(*e)->set();
-			delete e;
+			sem.release();
 		});
-		f4.then([&event](fdb::Future f) {
+		f4.then([&sem](fdb::Future f) {
 			auto err = waitFuture(f);
 			if (err.code() != /*operation_cancelled*/ 1101 && !err.retryable()) {
 				CHECK(err.code() == 1032); // too_many_watches
 			}
-			auto param = new std::shared_ptr<FdbEvent>(event);
-			auto* e = static_cast<std::shared_ptr<FdbEvent>*>(param);
-			(*e)->set();
-			delete e;
+			sem.release();
 		});
-		event->wait();
+
+		// We only expect 1 of the callbacks above to be fired because the max watches
+		// is set to 3 and there are four watches, leading to one of the future to fail
+		// and causing the callback to be called. The other three watches will wait
+		// because no changes have been made to any of the keys used in this test.  
+		sem.acquire();
 		break;
 	}
 
