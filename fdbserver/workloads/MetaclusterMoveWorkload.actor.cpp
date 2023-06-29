@@ -608,17 +608,20 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		    .detail("TenantName", tenantName)
 		    .detail("KeyRange", keyRange)
 		    .detail("SrcRangeSize", srcRange.size());
-		try {
-			dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
-			for (const auto& [k, v] : srcRange) {
-				dstTr->set(k, v);
+		loop {
+			try {
+				dstTr->setOption(FDBTransactionOptions::LOCK_AWARE);
+				for (const auto& [k, v] : srcRange) {
+					dstTr->set(k, v);
+				}
+				TraceEvent("BreakpointCopyCommit1").detail("TenantName", tenantName);
+				wait(dstTr->commit());
+				TraceEvent("BreakpointCopyCommit2").detail("TenantName", tenantName);
+				break;
+			} catch (Error& e) {
+				TraceEvent("BreakpointCopyError").error(e).detail("TenantName", tenantName);
+				wait(dstTr->onError(e));
 			}
-			TraceEvent("BreakpointCopyCommit1").detail("TenantName", tenantName);
-			wait(dstTr->commit());
-			TraceEvent("BreakpointCopyCommit2").detail("TenantName", tenantName);
-			;
-		} catch (Error& e) {
-			wait(dstTr->onError(e));
 		}
 		return Void();
 	}

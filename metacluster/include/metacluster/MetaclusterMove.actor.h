@@ -934,6 +934,13 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
+	ACTOR static Future<Void> finalizeMovement(FinishTenantMovementImpl* self,
+	                                           Reference<typename DB::TransactionT> tr) {
+		wait(updateCapacityMetadata(self, tr));
+		wait(clearMovementMetadata(self, tr));
+		return Void();
+	}
+
 	ACTOR static Future<Void> run(FinishTenantMovementImpl* self) {
 		wait(self->dstCtx.initializeContext());
 		wait(self->srcCtx.runManagementTransaction(
@@ -977,17 +984,15 @@ struct FinishTenantMovementImpl {
 		TraceEvent("Breakpoint8");
 		wait(deleteAllSourceData(self));
 
-		TraceEvent("Breakpoint8.1");
+		TraceEvent("Breakpoint9");
 		wait(self->srcCtx.runDataClusterTransaction(
 		    [self = self](Reference<ITransaction> tr) { return deleteSourceTenants(self, tr); }));
 
-		TraceEvent("Breakpoint9");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return updateCapacityMetadata(self, tr); }));
-
 		TraceEvent("Breakpoint10");
 		wait(self->srcCtx.runManagementTransaction(
-		    [self = self](Reference<typename DB::TransactionT> tr) { return clearMovementMetadata(self, tr); }));
+		    [self = self](Reference<typename DB::TransactionT> tr) { return finalizeMovement(self, tr); }));
+
+		TraceEvent("Breakpoint11");
 
 		return Void();
 	}
@@ -1185,13 +1190,6 @@ struct AbortTenantMovementImpl {
 	                                                 Reference<typename DB::TransactionT> tr) {
 		state ClusterName srcName = self->srcCtx.clusterName.get();
 		state ClusterName dstName = self->dstCtx.clusterName.get();
-		// clusterCapacityIndex() increase allocated capacity of source
-		DataClusterMetadata srcClusterMetadata = self->srcCtx.dataClusterMetadata.get();
-		DataClusterEntry srcUpdatedEntry = srcClusterMetadata.entry;
-		srcUpdatedEntry.allocated.numTenantGroups++;
-
-		metacluster::updateClusterMetadata(
-		    tr, srcName, srcClusterMetadata, Optional<ClusterConnectionString>(), srcUpdatedEntry);
 
 		// clusterCapacityIndex() decrease allocated capacity of destination
 		DataClusterMetadata dstClusterMetadata = self->dstCtx.dataClusterMetadata.get();

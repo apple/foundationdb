@@ -160,12 +160,6 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 	ASSERT(clusterType != ClusterType::METACLUSTER_MANAGEMENT);
 	ASSERT(tenantEntry.id >= 0);
 
-	TraceEvent("BreakpointCreateTenantTransaction")
-	    .detail("TenantId", tenantEntry.id)
-	    .detail("TenantName", tenantEntry.tenantName)
-	    .detail("TenantGroup", tenantEntry.tenantGroup)
-	    .detail("TenantLockID", tenantEntry.tenantLockId)
-	    .detail("TenantLockState", tenantEntry.tenantLockState);
 	if (tenantEntry.tenantName.startsWith("\xff"_sr)) {
 		CODE_PROBE(true, "Invalid tenant name");
 		throw invalid_tenant_name();
@@ -208,12 +202,6 @@ createTenantTransaction(Transaction tr, TenantMapEntry tenantEntry, ClusterType 
 		throw tenant_prefix_allocator_conflict();
 	}
 
-	TraceEvent("BreakpointInsertMapCreate")
-	    .detail("TenantId", tenantEntry.id)
-	    .detail("TenantName", tenantEntry.tenantName)
-	    .detail("TenantGroup", tenantEntry.tenantGroup)
-	    .detail("TenantLockID", tenantEntry.tenantLockId)
-	    .detail("TenantLockState", tenantEntry.tenantLockState);
 	TenantMetadata::tenantMap().set(tr, tenantEntry.id, tenantEntry);
 	TenantMetadata::tenantNameIndex().set(tr, tenantEntry.tenantName, tenantEntry.id);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
@@ -504,12 +492,6 @@ Future<Void> configureTenantTransaction(Transaction tr,
 
 	tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-	TraceEvent("BreakpointInsertMapConfigure")
-	    .detail("TenantId", updatedTenantEntry.id)
-	    .detail("TenantName", updatedTenantEntry.tenantName)
-	    .detail("TenantGroup", updatedTenantEntry.tenantGroup)
-	    .detail("TenantLockID", updatedTenantEntry.tenantLockId)
-	    .detail("TenantLockState", updatedTenantEntry.tenantLockState);
 	TenantMetadata::tenantMap().set(tr, updatedTenantEntry.id, updatedTenantEntry);
 	TenantMetadata::lastTenantModification().setVersionstamp(tr, Versionstamp(), 0);
 
@@ -731,12 +713,6 @@ Future<Void> renameTenantTransaction(Transaction tr,
 
 	entry.tenantName = newName;
 
-	TraceEvent("BreakpointInsertMapRename")
-	    .detail("TenantId", tenantId.get())
-	    .detail("TenantName", entry.tenantName)
-	    .detail("TenantGroup", entry.tenantGroup)
-	    .detail("TenantLockID", entry.tenantLockId)
-	    .detail("TenantLockState", entry.tenantLockState);
 	TenantMetadata::tenantMap().set(tr, tenantId.get(), entry);
 	TenantMetadata::tenantNameIndex().set(tr, newName, tenantId.get());
 	TenantMetadata::tenantNameIndex().erase(tr, oldName);
