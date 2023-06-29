@@ -235,23 +235,6 @@ void clear_data(fdb::Database db) {
 	insert_data(db, {});
 }
 
-struct FdbEvent {
-	void wait() {
-		std::unique_lock<std::mutex> l(mutex);
-		cv.wait(l, [this]() { return this->complete; });
-	}
-	void set() {
-		std::unique_lock<std::mutex> l(mutex);
-		complete = true;
-		cv.notify_all();
-	}
-
-private:
-	std::mutex mutex;
-	std::condition_variable cv;
-	bool complete = false;
-};
-
 TEST_CASE("fdb_future_set_callback") {
 	auto tr = db.createTransaction();
 	while (1) {
@@ -1954,11 +1937,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 TEST_CASE("fdb_transaction_watch") {
 	insert_data(db, create_data({ { "foo", "foo" } }));
 
-	struct Context {
-		FdbEvent event;
-	};
-	Context context;
-
+	std::binary_semaphore sem(0);
 	auto tr = db.createTransaction();
 	while (1) {
 		auto f1 = tr.watch(fdb::toBytesRef(key("foo")));
@@ -1971,11 +1950,11 @@ TEST_CASE("fdb_transaction_watch") {
 			continue;
 		}
 
-		f1.then([&context](fdb::Future f) { context.event.set(); });
+		f1.then([&sem](fdb::Future f) { sem.release(); });
 
 		// Update value for key "foo" to trigger the watch.
 		insert_data(db, create_data({ { "foo", "bar" } }));
-		context.event.wait();
+		sem.acquire();
 		break;
 	}
 }
@@ -2364,21 +2343,16 @@ TEST_CASE("fdb_error_predicate") {
 TEST_CASE("block_from_callback") {
 	auto tr = db.createTransaction();
 	auto f1 = tr.get("foo"_br, /*snapshot*/ true);
-	struct Context {
-		FdbEvent event;
-		fdb::Transaction* tr;
-	};
-	Context context;
-	context.tr = &tr;
-	f1.then([&context](fdb::Future f) {
-		auto f2 = context.tr->get("bar"_br, /*snapshot*/ true);
+	std::binary_semaphore sem(0);
+	f1.then([&sem, &tr](fdb::Future f) {
+		auto f2 = tr.get("bar"_br, /*snapshot*/ true);
 		auto err = f2.blockUntilReady();
 		if (err) {
 			CHECK(err.code() == /*blocked_from_network_thread*/ 2026);
 		}
-		context.event.set();
+		sem.release();
 	});
-	context.event.wait();
+	sem.acquire();
 }
 
 // monitors network busyness for 2 sec (40 readings)
