@@ -103,8 +103,7 @@ public:
 	};
 
 	virtual Future<Void> pollMoveKeysLock(const MoveKeysLock& lock,
-	                                      const DDEnabledState* ddEnabledState,
-	                                      bool checkWhenDDDisabled) const = 0;
+	                                      const DDEnabledState* ddEnabledState) const = 0;
 
 	// Remove the server from shardMapping and set serverKeysFalse to the server's serverKeys list.
 	// Changes to keyServer and serverKey must happen symmetrically in this function.
@@ -192,8 +191,7 @@ public:
 	Future<bool> isDataDistributionEnabled(const DDEnabledState* ddEnabledState) const override;
 
 	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock,
-	                              const DDEnabledState* ddEnabledState,
-	                              bool checkWhenDDDisabled) const override;
+	                              const DDEnabledState* ddEnabledState) const override;
 
 	Future<Void> removeKeysFromFailedServer(const UID& serverID,
 	                                        const std::vector<UID>& teamForDroppedRange,
@@ -310,8 +308,7 @@ public:
 	Future<std::vector<ProcessData>> getWorkers() const override;
 
 	Future<Void> pollMoveKeysLock(const MoveKeysLock& lock,
-	                              const DDEnabledState* ddEnabledState,
-	                              bool checkWhenDDDisabled) const override {
+	                              const DDEnabledState* ddEnabledState) const override {
 		return Never();
 	}
 

@@ -602,8 +602,6 @@ public:
 
 			if (!auditStorageInitialized) {
 				self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
-				// self->addActor.send(self->txnProcessor->pollMoveKeysLock(self->lock,
-				// self->context->ddEnabledState.get(), /*checkWhenDDDisabled*/true));
 				wait(self->resumeStorageAudits(self));
 				TraceEvent("DDAuditStorageResumed", self->ddId).log();
 				auditStorageInitialized = true;
@@ -890,7 +888,7 @@ public:
 	}
 
 	Future<Void> pollMoveKeysLock() const {
-		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get(), /*checkWhenDDDisabled=*/false);
+		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get());
 	}
 
 	Future<bool> isDataDistributionEnabled() const {
