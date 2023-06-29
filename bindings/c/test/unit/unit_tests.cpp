@@ -146,7 +146,7 @@ std::optional<std::string> getValue(fdb::KeyRef key, bool snapshot, std::vector<
 	auto tr = db.createTransaction();
 	while (1) {
 		for (auto& option : options) {
-			fdbCheck(tr.setOptionNothrow(option));
+			tr.setOption(option);
 		}
 		auto f1 = tr.get(key, snapshot);
 
@@ -515,7 +515,7 @@ TEST_CASE("write system key") {
 	auto syskey = "\xff\x02"_br;
 
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_ACCESS_SYSTEM_KEYS));
+		tr.setOption(FDB_TR_OPTION_ACCESS_SYSTEM_KEYS);
 		tr.set(syskey, "bar"_br);
 		auto f1 = tr.commit();
 
@@ -563,7 +563,7 @@ TEST_CASE("fdb_transaction_set_option read_your_writes_disable") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		tr.set("foo"_br, "bar"_br);
 		auto f1 = tr.get("foo"_br, /*snapshot*/ false);
 
@@ -589,7 +589,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_enable") {
 	auto tr = db.createTransaction();
 	while (1) {
 		// Enable read your writes for snapshot reads.
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE));
+		tr.setOption(FDB_TR_OPTION_SNAPSHOT_RYW_ENABLE);
 		tr.set("foo"_br, "bar"_br);
 		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 
@@ -614,7 +614,7 @@ TEST_CASE("fdb_transaction_set_option snapshot_read_your_writes_disable") {
 	auto tr = db.createTransaction();
 	while (1) {
 		// Disable read your writes for snapshot reads.
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE));
+		tr.setOption(FDB_TR_OPTION_SNAPSHOT_RYW_DISABLE);
 		tr.set("foo"_br, "bar"_br);
 		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
 		auto f2 = tr.get("foo"_br, /*snapshot*/ false);
@@ -649,7 +649,7 @@ TEST_CASE("fdb_transaction_set_option timeout") {
 	auto tr = db.createTransaction();
 	// Set smallest possible timeout, retry until a timeout occurs.
 	int64_t timeout = 1;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_TIMEOUT, timeout));
+	tr.setOption(FDB_TR_OPTION_TIMEOUT, timeout);
 
 	fdb::Error err;
 	while (!err) {
@@ -666,7 +666,7 @@ TEST_CASE("fdb_transaction_set_option timeout") {
 TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
 	// Set smallest possible timeout, retry until a timeout occurs.
 	int64_t timeout = 1;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+	db.setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout);
 
 	auto tr = db.createTransaction();
 	fdb::Error err;
@@ -682,7 +682,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_TIMEOUT") {
 
 	// Reset transaction timeout (disable timeout).
 	timeout = 0;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout));
+	db.setOption(FDB_DB_OPTION_TRANSACTION_TIMEOUT, timeout);
 }
 
 TEST_CASE("fdb_transaction_set_option size_limit too small") {
@@ -690,7 +690,7 @@ TEST_CASE("fdb_transaction_set_option size_limit too small") {
 
 	// Size limit must be at least 32 to be valid, so test a smaller size.
 	int64_t size_limit = 31;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.setOption(FDB_TR_OPTION_SIZE_LIMIT, size_limit);
 	tr.set("foo"_br, "bar"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
@@ -701,7 +701,7 @@ TEST_CASE("fdb_transaction_set_option size_limit too large") {
 
 	// Size limit must be less than or equal to 10,000,000.
 	int64_t size_limit = 10000001;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.setOption(FDB_TR_OPTION_SIZE_LIMIT, size_limit);
 	tr.set("foo"_br, "bar"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2006); // invalid_option_value
@@ -711,7 +711,7 @@ TEST_CASE("fdb_transaction_set_option size_limit") {
 	auto tr = db.createTransaction();
 
 	int64_t size_limit = 32;
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SIZE_LIMIT, size_limit));
+	tr.setOption(FDB_TR_OPTION_SIZE_LIMIT, size_limit);
 	tr.set("foo"_br, "foundation database is amazing"_br);
 	auto f1 = tr.commit();
 	CHECK(waitFuture(f1).code() == 2101);
@@ -761,7 +761,7 @@ TEST_CASE("fdb_transaction_set_option size_limit") {
 
 TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
 	int64_t size_limit = 32;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
+	db.setOption(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit);
 
 	auto tr = db.createTransaction();
 	tr.set("foo"_br, "foundation database is amazing"_br);
@@ -771,7 +771,7 @@ TEST_CASE("FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT") {
 
 	// Set size limit back to default.
 	size_limit = 10000000;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit));
+	db.setOption(FDB_DB_OPTION_TRANSACTION_SIZE_LIMIT, size_limit);
 }
 
 TEST_CASE("fdb_transaction_set_read_version old_version") {
@@ -1051,7 +1051,7 @@ TEST_CASE("fdb_transaction_getMappedRange_restricted_to_serializable") {
 TEST_CASE("fdb_transaction_getMappedRange_restricted_to_ryw_enable") {
 	std::string mapper = Tuple::makeTuple(prefix, RECORD, "{K[3]}"_sr).pack().toString();
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE)); // Not disable RYW
+	tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE); // Not disable RYW
 	auto result = getMappedRange(tr,
 	                             fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(indexEntryKey(0))),
 	                             fdb::key_select::firstGreaterThan(fdb::toBytesRef(indexEntryKey(1))),
@@ -1905,7 +1905,7 @@ TEST_CASE("fdb_transaction_watch read_your_writes_disable") {
 	// Watches created on a transaction with the option READ_YOUR_WRITES_DISABLE
 	// should return a watches_disabled error.
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+	tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 	auto f1 = tr.watch(fdb::toBytesRef(key("foo")));
 	CHECK(waitFuture(f1).code() == 1034); // watches_disabled
 }
@@ -1921,7 +1921,7 @@ TEST_CASE("fdb_transaction_watch reset") {
 
 TEST_CASE("fdb_transaction_watch max watches") {
 	int64_t max_watches = 3;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_MAX_WATCHES, max_watches));
+	db.setOption(FDB_DB_OPTION_MAX_WATCHES, max_watches);
 
 	auto event = std::make_shared<FdbEvent>();
 
@@ -1991,7 +1991,7 @@ TEST_CASE("fdb_transaction_watch max watches") {
 
 	// Reset available number of watches.
 	max_watches = 10000;
-	fdbCheck(db.setOptionNothrow(FDB_DB_OPTION_MAX_WATCHES, max_watches));
+	db.setOption(FDB_DB_OPTION_MAX_WATCHES, max_watches);
 }
 
 TEST_CASE("fdb_transaction_watch") {
@@ -2142,7 +2142,7 @@ TEST_CASE("special-key-space valid transaction ID") {
 
 TEST_CASE("special-key-space custom transaction ID") {
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	while (1) {
 		UID randomTransactionID = UID(deterministicRandom()->randomUInt64(), deterministicRandom()->randomUInt64());
 		tr.set("\xff\xff/tracing/transaction_id"_br, fdb::toBytesRef(randomTransactionID.toString()));
@@ -2166,7 +2166,7 @@ TEST_CASE("special-key-space custom transaction ID") {
 
 TEST_CASE("special-key-space set transaction ID after write") {
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	while (1) {
 		tr.set(fdb::toBytesRef(key("foo")), fdb::toBytesRef(key("bar")));
 		tr.set("\xff\xff/tracing/transaction_id"_br, "0"_br);
@@ -2192,7 +2192,7 @@ TEST_CASE("special-key-space set transaction ID after write") {
 
 TEST_CASE("special-key-space disable tracing") {
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	while (1) {
 		tr.set("\xff\xff/tracing/token"_br, "false"_br);
 		auto f1 = tr.get("\xff\xff/tracing/token"_br, /* snapshot */ false);
@@ -2219,7 +2219,7 @@ TEST_CASE("special-key-space tracing get range") {
 	std::string tracingEnd = "\xff\xff/tracing0";
 
 	auto tr = db.createTransaction();
-	fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+	tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 	while (1) {
 		auto f1 = tr.getRange(fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(tracingBegin)),
 		                      fdb::key_select::lastLessThan(fdb::toBytesRef(tracingEnd), 1),
@@ -2545,7 +2545,7 @@ TEST_CASE("Tenant create, access, and delete") {
 
 	auto tr = db.createTransaction();
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr.set(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName), ""_br);
 		auto commitFuture = tr.commit();
 		auto err = waitFuture(commitFuture);
@@ -2562,7 +2562,7 @@ TEST_CASE("Tenant create, access, and delete") {
 		std::string begin = "\xff\xff/management/tenant/map/";
 		std::string end = "\xff\xff/management/tenant/map0";
 
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		auto f = tr.getRange(fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(begin)),
 		                     fdb::key_select::firstGreaterOrEqual(fdb::toBytesRef(end)),
 		                     /* limit */ 0,
@@ -2633,7 +2633,7 @@ TEST_CASE("Tenant create, access, and delete") {
 	}
 
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES));
+		tr.setOption(FDB_TR_OPTION_SPECIAL_KEY_SPACE_ENABLE_WRITES);
 		tr.clear(fdb::toBytesRef("\xff\xff/management/tenant/map/" + tenantName));
 		auto commitFuture = tr.commit();
 		auto err = waitFuture(commitFuture);
@@ -2705,7 +2705,7 @@ TEST_CASE("Blob Granule Functions") {
 
 	// test no materialize gets error but completes, save read version
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		// -2 is latest version
 		auto r = tr.readBlobGranules(fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, -2, granuleContext);
 		fdb::future_var::KeyValueRefArray::Type out;
@@ -2731,7 +2731,7 @@ TEST_CASE("Blob Granule Functions") {
 
 	// test with begin version > 0
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		// -2 is latest version, read version should be >= originalReadVersion
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), originalReadVersion, -2, granuleContext);
@@ -2753,7 +2753,7 @@ TEST_CASE("Blob Granule Functions") {
 	// TODO: should we not do this?
 	std::this_thread::sleep_for(std::chrono::milliseconds(6000));
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, originalReadVersion, granuleContext);
 
@@ -2821,7 +2821,7 @@ TEST_CASE("Blob Granule Functions") {
 
 	// re-read again at the purge version to make sure it is still valid
 	while (1) {
-		fdbCheck(tr.setOptionNothrow(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE));
+		tr.setOption(FDB_TR_OPTION_READ_YOUR_WRITES_DISABLE);
 		auto r = tr.readBlobGranules(
 		    fdb::toBytesRef(key("bg")), fdb::toBytesRef(key("bh")), 0, originalReadVersion, granuleContext);
 		fdb::future_var::KeyValueRefArray::Type out;
