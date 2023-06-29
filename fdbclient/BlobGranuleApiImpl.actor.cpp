@@ -58,9 +58,11 @@ void nativeToApiBGFilePointer(FDBBGFilePointerV2* dest, const BlobFilePointerRef
 
 	// handle encryption
 	dest->encryption_ctx = nullptr;
+	dest->encryption_keys = nullptr;
 	if (source.cipherKeysCtx.present()) {
 		dest->encryption_ctx = new (ar) FDBBGEncryptionCtxV2();
 		nativeToApiBGEncryptionKeyCtx(dest->encryption_ctx, source.cipherKeysCtx.get(), ar);
+		dest->encryption_keys = new (ar) FDBBGEncryptionKeys();
 		nativeToApiBGEncryptionKeys(dest->encryption_keys, source.cipherKeysCtx.get(), ar);
 	}
 }
