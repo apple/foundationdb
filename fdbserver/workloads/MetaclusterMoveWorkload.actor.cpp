@@ -671,18 +671,28 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state UID runId = self->moveRecord.runId;
 		tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 
-		Optional<std::pair<TenantName, Key>> optionalQueueHead =
+		state Optional<std::pair<TenantName, Key>> optionalQueueHead =
 		    wait(metacluster::metadata::management::emergency_movement::movementQueue().get(
 		        tr, std::make_pair(tenantGroup, runId.toString())));
 
+		state Tuple endTuple = Tuple::makeTuple(tenantGroup, runId.toString(), TenantName("\xff"_sr));
+
 		if (!optionalQueueHead.present()) {
-			return {};
+			KeyBackedRangeResult<std::pair<Tuple, Key>> firstSplitPoint =
+			    wait(metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
+			        tr, Tuple::makeTuple(tenantGroup, runId.toString()), endTuple, 1));
+
+			if (firstSplitPoint.results.empty()) {
+				return {};
+			}
+
+			auto const& headTuple = firstSplitPoint.results[0].first;
+			optionalQueueHead = std::make_pair(headTuple.getString(2), headTuple.getString(3));
 		}
 
 		state std::pair<TenantName, Key> queueHead = optionalQueueHead.get();
 
 		state Tuple beginTuple = Tuple::makeTuple(tenantGroup, runId.toString(), queueHead.first, queueHead.second);
-		state Tuple endTuple = Tuple::makeTuple(tenantGroup, runId.toString(), TenantName("\xff"_sr));
 
 		state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints =
 		    wait(metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
