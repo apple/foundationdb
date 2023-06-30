@@ -310,18 +310,7 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr,
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	state UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
-	if (currentOwner == lock.myOwner) {
-		if (isWrite) {
-			// Touch the lock, preventing overlapping attempts to take it
-			BinaryWriter wrLastWrite(Unversioned());
-			wrLastWrite << deterministicRandom()->randomUniqueID();
-			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
-			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
-			tr->makeSelfConflicting();
-		}
-		return Void();
-
-	} else if (currentOwner == lock.prevOwner) {
+	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
@@ -353,6 +342,17 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr,
 		}
 
 		return Void();
+	} else if (currentOwner == lock.myOwner) {
+		if (isWrite) {
+			// Touch the lock, preventing overlapping attempts to take it
+			BinaryWriter wrLastWrite(Unversioned());
+			wrLastWrite << deterministicRandom()->randomUniqueID();
+			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
+			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
+			tr->makeSelfConflicting();
+		}
+		return Void();
+
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
 		TraceEvent("CheckPersistentMoveKeysLock2")
