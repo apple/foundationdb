@@ -50,18 +50,61 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 	double automaticPercentage;
 	constexpr static double slop = 2.0;
 	double pollingInterval;
+	bool disableAutomaticIdempotency = false;
 
 	bool ok = true;
 
-	AutomaticIdempotencyWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
+	struct SharedConfiguration {
+		bool disableAutomaticIdempotency = false;
+
+		Tuple pack() const { return Tuple::makeTuple(disableAutomaticIdempotency); }
+
+		static SharedConfiguration unpack(Tuple const& tuple) {
+			SharedConfiguration config;
+			config.disableAutomaticIdempotency = tuple.getBool(0);
+			return config;
+		}
+	};
+
+	KeyBackedProperty<SharedConfiguration, TupleCodec<SharedConfiguration>, false> sharedConfigProperty;
+	SharedConfiguration sharedConfig;
+
+	AutomaticIdempotencyWorkload(WorkloadContext const& wcx)
+	  : TestWorkload(wcx), sharedConfigProperty("/testConfig"_sr) {
 		numTransactions = getOption(options, "numTransactions"_sr, 500);
 		keyPrefix = KeyRef(getOption(options, "keyPrefix"_sr, "/autoIdempotency/"_sr));
 		minMinAgeSeconds = getOption(options, "minMinAgeSeconds"_sr, 15);
 		automaticPercentage = getOption(options, "automaticPercentage"_sr, 0.1);
 		pollingInterval = getOption(options, "pollingInterval"_sr, 5.0);
+
+		// Disable use of automatic idempotency most of the time so we do more extensive cleanup validation
+		if (clientId == 0 && deterministicRandom()->random01() < 0.9) {
+			sharedConfig.disableAutomaticIdempotency = true;
+		}
 	}
 
-	Future<Void> setup(Database const& cx) override { return Void(); }
+	ACTOR static Future<Void> _setup(AutomaticIdempotencyWorkload* self, Database cx) {
+		if (self->clientId == 0) {
+			wait(self->sharedConfigProperty.set(cx.getReference(), self->sharedConfig));
+		} else {
+			loop {
+				Optional<SharedConfiguration> sharedConfig = wait(self->sharedConfigProperty.get(cx.getReference()));
+				if (sharedConfig.present()) {
+					self->sharedConfig = sharedConfig.get();
+					break;
+				}
+				wait(delay(1.0));
+			}
+		}
+
+		if (self->sharedConfig.disableAutomaticIdempotency) {
+			self->automaticPercentage = 0;
+		}
+
+		return Void();
+	}
+
+	Future<Void> setup(Database const& cx) override { return _setup(this, cx); }
 
 	Future<Void> start(Database const& cx) override { return _start(this, cx); }
 
@@ -170,27 +213,33 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		return Void();
 	}
 
-	Key idempotencyKeyValueToTestKey(KeyValueRef kv, Version* commitVersion, int64_t* timestamp) {
+	std::vector<Key> idempotencyKeyValueToTestKeys(KeyValueRef kv, Version* commitVersion, int64_t* timestamp) {
 		uint8_t highOrderBatchIndex;
 		decodeIdempotencyKey(kv.key, *commitVersion, highOrderBatchIndex);
 
-		// Decode the first idempotency id in the value
 		BinaryReader valReader(kv.value.begin(), kv.value.size(), IncludeVersion());
 		valReader >> *timestamp;
-		uint8_t length;
-		valReader >> length;
-		StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
-		uint8_t lowOrderBatchIndex;
-		valReader >> lowOrderBatchIndex;
 
-		// Recover the key written in the transaction associated with this idempotency id
-		BinaryWriter keyWriter(Unversioned());
-		keyWriter.serializeBytes(keyPrefix);
-		keyWriter.serializeBinaryItem(bigEndian64(*commitVersion));
-		keyWriter.serializeBinaryItem(highOrderBatchIndex);
-		keyWriter.serializeBinaryItem(lowOrderBatchIndex);
+		std::vector<Key> keys;
+		while (!valReader.empty()) {
+			uint8_t length;
+			valReader >> length;
+			StringRef id{ reinterpret_cast<const uint8_t*>(valReader.readBytes(length)), length };
+			uint8_t lowOrderBatchIndex;
+			valReader >> lowOrderBatchIndex;
 
-		return keyWriter.toValue();
+			// Recover the key written in the transaction associated with this idempotency id
+			BinaryWriter keyWriter(Unversioned());
+			keyWriter.serializeBytes(keyPrefix);
+			keyWriter.serializeBinaryItem(bigEndian64(*commitVersion));
+			keyWriter.serializeBinaryItem(highOrderBatchIndex);
+			keyWriter.serializeBinaryItem(lowOrderBatchIndex);
+
+			keys.push_back(keyWriter.toValue());
+		}
+
+		ASSERT(!keys.empty());
+		return keys;
 	}
 
 	// Returns the largest gap between createdTime and the idempotency timestamp
@@ -210,9 +259,11 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		for (const auto& kv : result) {
 			Version commitVersion;
 			int64_t timestamp;
-			Key key = self->idempotencyKeyValueToTestKey(kv, &commitVersion, &timestamp);
-			timestamps.push_back(timestamp);
-			keys.push_back(key);
+			std::vector<Key> decodedKeys = self->idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
+			for (auto key : decodedKeys) {
+				timestamps.push_back(timestamp);
+				keys.push_back(key);
+			}
 		}
 
 		state ReadYourWritesTransaction tr(db);
@@ -234,8 +285,8 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 					maxCreatedTimeDelta = std::max(timestamps[i] - e.createdTime, maxCreatedTimeDelta);
 				}
 
-				if (futures.size() < numCreatedTimes) {
-					maxCreatedTimeDelta = std::max<int64_t>(maxCreatedTimeDelta, 10);
+				if (self->automaticPercentage == 0) {
+					ASSERT_EQ(futures.size(), numCreatedTimes);
 				}
 
 				return maxCreatedTimeDelta;
@@ -261,7 +312,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 		}
 
 		int64_t timestamp;
-		key = self->idempotencyKeyValueToTestKey(result[0], &commitVersion, &timestamp);
+		key = self->idempotencyKeyValueToTestKeys(result[0], &commitVersion, &timestamp)[0];
 
 		// We need to use a different transaction because we set READ_SYSTEM_KEYS on this one, and we might
 		// be using a tenant.
@@ -325,19 +376,18 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 				successes = 0;
 				// Cleaning should happen eventually
 			} else if (maxActualAge < minAgeSeconds / self->slop) {
-				TraceEvent(SevError, "AutomaticIdempotencyCleanedTooMuch")
+				bool ok = self->automaticPercentage == 0;
+				TraceEvent(ok ? SevInfo : SevError, "AutomaticIdempotencyCleanedTooMuch")
 				    .detail("MaxActualAge", maxActualAge)
 				    .detail("MinAgePolicy", minAgeSeconds)
 				    .detail("InitialOldestCreatedTime", initialOldestCreatedTime)
 				    .detail("OldestCreatedTime", oldestCreatedTime)
 				    .detail("MaxTimestampDelta", maxTimestampDelta);
-				self->ok = false;
-
-				// One possible reason this fails is because of our timestamps for creation are not an accurate
-				// reflection of the idempotency ID timestamps. Currently, we try to address this in
-				// getMaxTimestampDelta with a lower bound on the delta. If it continues failing for this reason, we
-				// could raise the lower bound or remove this assert.
-				ASSERT(false);
+				if (!ok) {
+					self->ok = false;
+				}
+				ASSERT(ok);
+				successes = 0;
 			} else {
 				++successes;
 				TraceEvent("AutomaticIdempotencyCleanerSuccess")
