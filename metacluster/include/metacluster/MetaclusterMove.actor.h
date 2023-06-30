@@ -943,29 +943,30 @@ struct FinishTenantMovementImpl {
 		if (initialMoveState == metadata::management::MovementState::SWITCH_METADATA) {
 			TraceEvent("Breakpoint1");
 
-		state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-		TraceEvent("Breakpoint2");
-		state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
-		    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
-		TraceEvent("Breakpoint3");
-		loop {
-			bool versionReady = wait(self->dstCtx.runDataClusterTransaction(
-			    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
-			if (versionReady) {
-				break;
+			state std::vector<TenantMapEntry> srcEntries = wait(self->srcCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+			TraceEvent("Breakpoint2");
+			state std::vector<TenantMapEntry> dstEntries = wait(self->dstCtx.runDataClusterTransaction(
+			    [self = self](Reference<ITransaction> tr) { return getTenantEntries(self->tenantsInGroup, tr); }));
+			TraceEvent("Breakpoint3");
+			loop {
+				bool versionReady = wait(self->dstCtx.runDataClusterTransaction(
+				    [self = self](Reference<ITransaction> tr) { return checkDestinationVersion(self, tr); }));
+				if (versionReady) {
+					break;
+				}
 			}
+			TraceEvent("Breakpoint4");
+			wait(self->srcCtx.runManagementTransaction([self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+			                                               Reference<typename DB::TransactionT> tr) {
+				return checkValidUnlock(self, tr, srcEntries, dstEntries);
+			}));
+			TraceEvent("Breakpoint5");
+			wait(self->srcCtx.runManagementTransaction([self = self, srcEntries = srcEntries, dstEntries = dstEntries](
+			                                               Reference<typename DB::TransactionT> tr) {
+				return checkValidDelete(self, tr, srcEntries, dstEntries);
+			}));
 		}
-		TraceEvent("Breakpoint4");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
-			    return checkValidUnlock(self, tr, srcEntries, dstEntries);
-		    }));
-		TraceEvent("Breakpoint5");
-		wait(self->srcCtx.runManagementTransaction(
-		    [self = self, srcEntries = srcEntries, dstEntries = dstEntries](Reference<typename DB::TransactionT> tr) {
-			    return checkValidDelete(self, tr, srcEntries, dstEntries);
-		    }));
 
 		TraceEvent("Breakpoint6");
 		wait(unlockDestinationTenants(self));
