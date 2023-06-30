@@ -211,21 +211,6 @@ public:
 		}
 	}
 
-	std::string getTransactionStatus() override {
-		std::unique_lock<std::mutex> lock(mutex);
-		const char* stateStr;
-		if (txState == TxState::DONE) {
-			stateStr = "done";
-		} else if (txState == TxState::ON_ERROR) {
-			stateStr = "onerror";
-		} else if (commitCalled) {
-			stateStr = "commit";
-		} else {
-			stateStr = "read";
-		}
-		return fmt::format("{}, retried on [{}]", stateStr, fmt::join(retriedErrorCodes(), ", "));
-	}
-
 protected:
 	virtual void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) = 0;
 
@@ -332,6 +317,20 @@ protected:
 			retriedErrorCodes.push_back(e.code());
 		}
 		return retriedErrorCodes;
+	}
+
+	std::string getStateLabel() {
+		const char* stateStr;
+		if (txState == TxState::DONE) {
+			stateStr = "done";
+		} else if (txState == TxState::ON_ERROR) {
+			stateStr = "onerror";
+		} else if (commitCalled) {
+			stateStr = "commit";
+		} else {
+			stateStr = "read";
+		}
+		return stateStr;
 	}
 
 	// Pointer to the transaction executor interface
@@ -445,6 +444,11 @@ public:
 	                           transactional,
 	                           restartOnTimeout) {}
 
+	std::string getTransactionStatus() override {
+		std::unique_lock<std::mutex> lock(mutex);
+		return fmt::format("{}, retried on [{}]", getStateLabel(), fmt::join(retriedErrorCodes(), ", "));
+	}
+
 protected:
 	void doContinueAfter(fdb::Future f, TTaskFct cont, bool retryOnError) override {
 		auto thisRef = std::static_pointer_cast<BlockingTransactionContext>(shared_from_this());
@@ -532,7 +536,6 @@ public:
 	                           restartOnTimeout) {}
 
 	std::string getTransactionStatus() override {
-		std::string baseStatus = TransactionContextBase::getTransactionStatus();
 		std::unique_lock<std::mutex> lock(mutex);
 		int numCancelled = 0;
 		for (auto& iter : callbackMap) {
@@ -540,7 +543,11 @@ public:
 				numCancelled++;
 			}
 		}
-		return fmt::format("{}, {} callbacks, {} cancelled", baseStatus, callbackMap.size(), numCancelled);
+		return fmt::format("{}, retried on [{}], {} callbacks, {} cancelled",
+		                   getStateLabel(),
+		                   fmt::join(retriedErrorCodes(), ", "),
+		                   callbackMap.size(),
+		                   numCancelled);
 	}
 
 protected:
