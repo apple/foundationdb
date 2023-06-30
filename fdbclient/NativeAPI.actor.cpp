@@ -3469,7 +3469,6 @@ TenantInfo TransactionState::getTenantInfo(AllowInvalidTenantID allowInvalidTena
 		throw management_cluster_invalid_access();
 	} else if (!cx->internal && cx->clientInfo->get().tenantMode == TenantMode::REQUIRED && !t.present()) {
 		CODE_PROBE(true, "Get tenant info tenant name required");
-		TraceEvent("NoTenantName1").backtrace();
 		throw tenant_name_required();
 	} else if (!t.present()) {
 		CODE_PROBE(true, "Get tenant info without tenant");

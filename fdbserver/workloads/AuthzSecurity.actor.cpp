@@ -213,7 +213,6 @@ struct AuthzSecurityWorkload : TestWorkload {
 		CODE_PROBE(crossTenantGetGranulesPositive.getValue(), "AuthzSecurity crossTenantGetGranulesPositive > 0");
 		CODE_PROBE(crossTenantGetGranulesNegative.getValue(), "AuthzSecurity crossTenantGetGranulesNegative > 0");
 
-
 		CODE_PROBE(blobbifyNegative.getValue(), "AuthzSecurity blobbifyNegative > 0");
 		CODE_PROBE(unblobbifyNegative.getValue(), "AuthzSecurity unblobbifyNegative > 0");
 		CODE_PROBE(listBlobNegative.getValue(), "AuthzSecurity listBlobNegative > 0");
