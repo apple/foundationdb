@@ -343,6 +343,8 @@ struct MoveInShard {
 	bool isDataTransferred() const { return meta->getPhase() >= MoveInPhase::ReadWritePending; }
 	bool isDataAndCFTransferred() const { throw not_implemented(); }
 	bool failed() const { return this->getPhase() == MoveInPhase::Cancel || this->getPhase() == MoveInPhase::Error; }
+	void setHighWatermark(const Version version) { this->meta->highWatermark = version; }
+	Version getHighWatermark() const { return this->meta->highWatermark; }
 
 	void addMutation(Version version,
 	                 bool fromFetch,
@@ -9485,9 +9487,12 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 			// FIXME: pass the deque back rather than copy the data
 			std::copy(updates.begin(), updates.end(), batch->changes.begin() + startSize);
 
+			moveInUpdates->lastAppliedVersion = version;
+			moveInShard->setHighWatermark(version);
+			auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
+
 			if (!moveInUpdates->hasNext()) {
 				moveInShard->setPhase(MoveInPhase::ReadWritePending);
-				auto& mLV = data->addVersionToMutationLog(data->data().getLatestVersion());
 				MoveInShardMetaData newMoveInShard(*moveInShard->meta);
 				newMoveInShard.setPhase(MoveInPhase::Complete);
 				data->addMutationToMutationLog(mLV,
@@ -9514,6 +9519,10 @@ ACTOR Future<Void> fetchShardApplyUpdates(StorageServer* data,
 				}
 				break;
 			} else {
+				data->addMutationToMutationLog(mLV,
+				                               MutationRef(MutationRef::SetValue,
+				                                           persistMoveInShardKey(moveInShard->id()),
+				                                           moveInShardValue(*moveInShard->meta)));
 				TraceEvent(moveInShard->logSev, "MultipleApplyUpdates").detail("MoveInShard", moveInShard->toString());
 			}
 		}
@@ -9715,7 +9724,7 @@ MoveInShard::MoveInShard(StorageServer* server, const UID& id, const UID& dataMo
 MoveInShard::MoveInShard(StorageServer* server, MoveInShardMetaData meta)
   : meta(std::make_shared<MoveInShardMetaData>(meta)), server(server),
     updates(std::make_shared<MoveInUpdates>(meta.id,
-                                            meta.createVersion,
+                                            meta.highWatermark,
                                             server,
                                             server->storage.getKeyValueStore(),
                                             MoveInUpdatesSpilled::True)),
@@ -10266,6 +10275,7 @@ void changeServerKeysWithPhysicalShards(StorageServer* data,
 	    .detail("NowAssigned", nowAssigned)
 	    .detail("Version", version)
 	    .detail("PhysicalShardMove", static_cast<bool>(enablePSM))
+	    .detail("IsTSS", data->isTss())
 	    .detail("Context", changeServerKeysContextName(context));
 
 	validate(data);
