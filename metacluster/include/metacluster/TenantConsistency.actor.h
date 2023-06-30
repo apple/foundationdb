@@ -188,13 +188,14 @@ private:
 			if (prevId >= 0) {
 				ASSERT(entry.prefix.compare(prevPrefix) > 0);
 			}
-			ASSERT(entry.prefix.compare(prevGapStart) > 0);
-			gaps.emplace_back(arena, KeyRangeRef(prevGapStart, entry.prefix));
-			prevGapStart = keyAfter(entry.prefix);
+			KeyRange range = prefixRange(entry.prefix);
+			ASSERT(range.begin.compare(prevGapStart) >= 0);
+			gaps.emplace_back(arena, KeyRangeRef(prevGapStart, range.begin));
+			prevGapStart = range.end;
 			prevId = id;
 			prevPrefix = TenantAPI::idToPrefix(prevId);
 		}
-		ASSERT(prevGapStart.compare("\xff"_sr) < 0);
+		ASSERT(prevGapStart.compare("\xff"_sr) <= 0);
 		gaps.emplace_back(arena, KeyRangeRef(prevGapStart, "\xff"_sr));
 		state std::vector<Future<RangeReadResult>> rangeReadFutures;
 		for (const auto& gap : gaps) {
@@ -211,17 +212,16 @@ private:
 			ASSERT(f.isReady());
 			RangeReadResult rangeReadResult = f.get();
 			if (!rangeReadResult.empty()) {
-				TraceEvent("Yanqin")
+				TraceEvent("DataOutsideTenants")
 				    .detail("Count", rangeReadFutures.size())
 				    .detail("ClusterType", self->tenantData.clusterType)
 				    .detail("Index", i)
 				    .detail("Begin", gaps[i].begin.toHexString())
 				    .detail("End", gaps[i].end.toHexString())
-				    .detail("CompareResult", gaps[i].begin.compare(gaps[i].end))
 				    .detail("RangeReadResult", rangeReadResult.toString())
 				    .detail("ReadThrough", rangeReadResult.getReadThrough().toHexString());
+				ASSERT(false);
 			}
-			ASSERT(rangeReadResult.empty());
 		}
 		return Void();
 	}
