@@ -66,6 +66,65 @@ double ServerThroughputTracker::ThroughputCounters::getThroughput() const {
 
 ServerThroughputTracker::~ServerThroughputTracker() = default;
 
+// Exponentially decay throughput statistics for tags that were not reported.
+// If reported throughput for a particular tag is too low, stop tracking this
+// tag.
+void ServerThroughputTracker::cleanupUnseenTags(TransactionTagMap<ThroughputCounters>& tagToThroughputCounters,
+                                                std::unordered_set<TransactionTag> const& seenReadTags,
+                                                std::unordered_set<TransactionTag> const& seenWriteTags) {
+	auto it = tagToThroughputCounters.begin();
+	while (it != tagToThroughputCounters.end()) {
+		auto& [tag, throughputCounters] = *it;
+		bool seen = false;
+		if (seenReadTags.count(tag)) {
+			seen = true;
+		} else {
+			throughputCounters.updateThroughput(0, OpType::READ);
+		}
+		if (seenWriteTags.count(tag)) {
+			seen = true;
+		} else {
+			throughputCounters.updateThroughput(0, OpType::WRITE);
+		}
+		if (!seen && throughputCounters.getThroughput() < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD) {
+			it = tagToThroughputCounters.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+// For unseen storage servers, exponentially decay throughput statistics for every tag.
+// If the reported throughput for a particular tag is too low, stop tracking this
+// tag. If no more tags are being tracked for a particular storage server,
+// stop tracking this storage server altogether.
+void ServerThroughputTracker::cleanupUnseenStorageServers(std::unordered_set<UID> const& seen) {
+	auto it1 = throughput.begin();
+	while (it1 != throughput.end()) {
+		auto& [ssId, tagToThroughputCounters] = *it1;
+		if (seen.count(ssId)) {
+			++it1;
+		} else {
+			auto it2 = tagToThroughputCounters.begin();
+			while (it2 != tagToThroughputCounters.end()) {
+				auto& throughputCounters = it2->second;
+				throughputCounters.updateThroughput(0, OpType::READ);
+				throughputCounters.updateThroughput(0, OpType::WRITE);
+				if (throughputCounters.getThroughput() < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD) {
+					it2 = tagToThroughputCounters.erase(it2);
+				} else {
+					++it2;
+				}
+			}
+			if (tagToThroughputCounters.empty()) {
+				it1 = throughput.erase(it1);
+			} else {
+				++it1;
+			}
+		}
+	}
+}
+
 void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) {
 	std::unordered_set<UID> seenStorageServerIds;
 	for (auto it = sqInfos.begin(); it != sqInfos.end(); ++it) {
@@ -85,23 +144,9 @@ void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) 
 			tagToThroughputCounters[busyWriter.tag].updateThroughput(busyWriter.rate, OpType::WRITE);
 		}
 
-		for (auto& [tag, throughputCounters] : tagToThroughputCounters) {
-			if (!seenReadTags.count(tag)) {
-				throughputCounters.updateThroughput(0, OpType::READ);
-			}
-			if (!seenWriteTags.count(tag)) {
-				throughputCounters.updateThroughput(0, OpType::WRITE);
-			}
-		}
+		cleanupUnseenTags(tagToThroughputCounters, seenReadTags, seenWriteTags);
 	}
-	for (auto& [ssId, tagToThroughputCounters] : throughput) {
-		if (!seenStorageServerIds.count(ssId)) {
-			for (auto& [_, throughputCounters] : tagToThroughputCounters) {
-				throughputCounters.updateThroughput(0, OpType::READ);
-				throughputCounters.updateThroughput(0, OpType::WRITE);
-			}
-		}
-	}
+	cleanupUnseenStorageServers(seenStorageServerIds);
 }
 
 Optional<double> ServerThroughputTracker::getThroughput(UID storageServerId, TransactionTag const& tag) const {

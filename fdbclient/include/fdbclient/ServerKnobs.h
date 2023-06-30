@@ -738,6 +738,9 @@ public:
 	// compute rates, but these rates won't be sent to GRV proxies for
 	// enforcement.
 	bool GLOBAL_TAG_THROTTLING_REPORT_ONLY;
+	// Below this throughput threshold (in bytes/second), ratekeeper will forget about the
+	// throughput of a particular tag on a particular storage server
+	int64_t GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD;
 
 	double GLOBAL_TAG_THROTTLING_TARGET_RATE_FOLDING_TIME;
 	double GLOBAL_TAG_THROTTLING_TRANSACTION_COUNT_FOLDING_TIME;

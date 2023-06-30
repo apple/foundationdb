@@ -44,6 +44,12 @@ class ServerThroughputTracker {
 
 	std::unordered_map<UID, TransactionTagMap<ThroughputCounters>> throughput;
 
+	void cleanupUnseenStorageServers(std::unordered_set<UID> const& seen);
+
+	static void cleanupUnseenTags(TransactionTagMap<ThroughputCounters>&,
+	                              std::unordered_set<TransactionTag> const& seenReadTags,
+	                              std::unordered_set<TransactionTag> const& seenWriteTags);
+
 public:
 	~ServerThroughputTracker();
 
