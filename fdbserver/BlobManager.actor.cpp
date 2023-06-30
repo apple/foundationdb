@@ -5594,10 +5594,13 @@ ACTOR Future<Void> updateLastFlushVersion(Database db, Version flushVersion) {
 // Try to flush blob granules. Return the flushed version if it's successful.
 ACTOR Future<Version> maybeFlushGranules(Reference<BlobManagerData> bmData) {
 	state BlobGranuleBackupConfig config;
-	int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+	state int64_t lastFlushTs = wait(config.lastFlushTs().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
 	bool shouldFlush = lastFlushTs == 0 || (now() - lastFlushTs) > SERVER_KNOBS->BLOB_RESTORE_MLOGS_RETENTION_SECS;
 	if (!shouldFlush) {
-		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs);
+		int64_t lastFlushVersion =
+		    wait(config.lastFlushVersion().getD(SystemDBWriteLockedNow(bmData->db.getReference())));
+		TraceEvent("SkipBlobGranulesFlush").detail("LastFlushTs", lastFlushTs).detail("LastFlushVer", lastFlushVersion);
+		bmData->stats.lastFlushVersion = lastFlushVersion;
 		return invalidVersion;
 	}
 
@@ -5703,6 +5706,7 @@ ACTOR Future<Void> backupManifestLoop(Reference<BlobManagerData> bmData) {
 				TraceEvent("BackupManifestLoopExit").log();
 				bmData->stats.lastFlushVersion = 0;
 				bmData->stats.lastManifestDumpTs = 0;
+				bmData->stats.manifestSizeInBytes = 0;
 				return Void();
 			}
 			wait(backupManifest(bmData));
