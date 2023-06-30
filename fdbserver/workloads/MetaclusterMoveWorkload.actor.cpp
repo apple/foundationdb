@@ -709,6 +709,10 @@ struct MetaclusterMoveWorkload : TestWorkload {
 			if (!block.present()) {
 				return Void();
 			}
+			TraceEvent("BreakpointMoveBlock")
+			    .detail("Tenant", block.get().tenant)
+			    .detail("Begin", block.get().begin)
+			    .detail("End", block.get().end);
 
 			wait(copyTenantData(self, tenantGroup, block.get(), srcDb, dstDb));
 			TraceEvent("BreakpointCopy")
