@@ -302,25 +302,17 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr,
-                                                      MoveKeysLock lock,
-                                                      bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
-	state UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
 	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 		if (lastWrite != lock.prevWrite) {
-			TraceEvent("CheckPersistentMoveKeysLock1")
-			    .detail("PrevOwner", lock.prevOwner.toString())
-			    .detail("PrevWrite", lock.prevWrite.toString())
-			    .detail("MyOwner", lock.myOwner.toString())
-			    .detail("CurrentWriter", lastWrite.toString())
-			    .detail("CurrentOwner", currentOwner.toString());
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
 			throw movekeys_conflict();
 		}
@@ -351,15 +343,10 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr,
 			// Make this transaction self-conflicting so the database will not execute it twice with the same write key
 			tr->makeSelfConflicting();
 		}
-		return Void();
 
+		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
-		TraceEvent("CheckPersistentMoveKeysLock2")
-		    .detail("PrevOwner", lock.prevOwner.toString())
-		    .detail("PrevWrite", lock.prevWrite.toString())
-		    .detail("MyOwner", lock.myOwner.toString())
-		    .detail("CurrentOwner", currentOwner.toString());
 		throw movekeys_conflict();
 	}
 }
