@@ -151,10 +151,8 @@ private:
 
 	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
 	    TenantConsistencyCheck<DB, StandardTenantTypes>* self) {
-		state Future<TenantMode> tenantModeFuture =
-		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
-			    return TenantAPI::getTenantModeAndCheckClusterType(tr);
-		    });
+		state Future<TenantMode> tenantModeFuture = runTransaction(
+		    self->tenantData.db, [](Reference<typename DB::TransactionT> tr) { return TenantAPI::getTenantMode(tr); });
 
 		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
 		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
@@ -180,23 +178,21 @@ private:
 		int64_t prevId = -1;
 		Key prevPrefix;
 		Key prevGapStart;
-		state Arena arena;
-		state std::vector<KeyRangeRef> gaps;
+		state Standalone<VectorRef<KeyRangeRef>> gaps;
 		for (const auto& [id, entry] : tenantMapEntries.results) {
 			ASSERT(id > prevId);
 			ASSERT_EQ(TenantAPI::idToPrefix(id), entry.prefix);
 			if (prevId >= 0) {
 				ASSERT_GT(entry.prefix, prevPrefix);
 			}
-			KeyRange range = prefixRange(entry.prefix);
-			ASSERT(range.begin.compare(prevGapStart) >= 0);
-			gaps.emplace_back(arena, KeyRangeRef(prevGapStart, range.begin));
-			prevGapStart = range.end;
+			ASSERT_GE(entry.prefix, prevGapStart);
+			gaps.push_back_deep(gaps.arena(), KeyRangeRef(prevGapStart, entry.prefix));
+			prevGapStart = strinc(entry.prefix);
 			prevId = id;
-			prevPrefix = TenantAPI::idToPrefix(prevId);
+			prevPrefix = entry.prefix;
 		}
 		ASSERT(prevGapStart.compare("\xff"_sr) <= 0);
-		gaps.emplace_back(arena, KeyRangeRef(prevGapStart, "\xff"_sr));
+		gaps.push_back_deep(gaps.arena(), KeyRangeRef(prevGapStart, "\xff"_sr));
 		state std::vector<Future<RangeReadResult>> rangeReadFutures;
 		for (const auto& gap : gaps) {
 			Future<RangeReadResult> f =
@@ -228,30 +224,6 @@ private:
 
 	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
 	    TenantConsistencyCheck<DB, MetaclusterTenantTypes>* self) {
-		Future<TenantMode> tenantModeFuture =
-		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
-			    return TenantAPI::getTenantModeAndCheckClusterType(tr);
-		    });
-		TenantMode tenantMode = wait(tenantModeFuture);
-		ASSERT(g_network->isSimulated() || tenantMode == TenantMode::DISABLED);
-		if (tenantMode != TenantMode::REQUIRED) {
-			return Void();
-		}
-		CODE_PROBE(true, "Management cluster with tenant_mode=required");
-		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
-				wait(
-				    store(tenantMapEntries,
-				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-				ASSERT_EQ(tenantMapEntries.results.size(), 0);
-				break;
-			} catch (Error& error) {
-				wait(safeThreadFutureToFuture(tr->onError(error)));
-			}
-		}
 		return Void();
 	}
 
