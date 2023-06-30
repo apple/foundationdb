@@ -519,7 +519,7 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( POLLING_FREQUENCY,                                     2.0 ); if( longLeaderElection ) POLLING_FREQUENCY = 8.0;
 	init( HEARTBEAT_FREQUENCY,                                   0.5 ); if( longLeaderElection ) HEARTBEAT_FREQUENCY = 1.0;
 
-	// Commit CommitProxy and GRV CommitProxy
+	// Commit Proxy and GRV Proxy
 	init( START_TRANSACTION_BATCH_INTERVAL_MIN,                 1e-6 );
 	init( START_TRANSACTION_BATCH_INTERVAL_MAX,                0.010 );
 	init( START_TRANSACTION_BATCH_INTERVAL_LATENCY_FRACTION,     0.5 );
@@ -528,7 +528,9 @@ void ServerKnobs::initialize(Randomize randomize, ClientKnobs* clientKnobs, IsSi
 	init( START_TRANSACTION_MAX_TRANSACTIONS_TO_START,        100000 );
 	init( START_TRANSACTION_MAX_REQUESTS_TO_START,             10000 );
 	init( START_TRANSACTION_RATE_WINDOW,                         2.0 );
+	init( TAG_THROTTLE_RATE_WINDOW,                              2.0 );
 	init( START_TRANSACTION_MAX_EMPTY_QUEUE_BUDGET,             10.0 );
+	init( TAG_THROTTLE_MAX_EMPTY_QUEUE_BUDGET,                1000.0 );
 	init( START_TRANSACTION_MAX_QUEUE_SIZE,                      1e6 );
 	init( KEY_LOCATION_MAX_QUEUE_SIZE,                           1e6 );
 	init( TENANT_ID_REQUEST_MAX_QUEUE_SIZE,                      1e6 );
