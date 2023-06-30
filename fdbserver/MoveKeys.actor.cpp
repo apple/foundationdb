@@ -302,39 +302,46 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock* lock, bool isWrite = true) {
+ACTOR Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
-	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
+	state UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
-	if (currentOwner == lock->prevOwner) {
+	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
 		UID lastWrite = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
-		if (lastWrite != lock->prevWrite) {
+		if (lastWrite != lock.prevWrite) {
 			CODE_PROBE(true, "checkMoveKeysLock: Conflict with previous owner");
+			TraceEvent(SevDebug, "CheckPersistentMoveKeysWritterConflict")
+			    .errorUnsuppressed(movekeys_conflict())
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
+			    .detail("CurrentOwner", currentOwner.toString())
+			    .detail("Writer", lastWrite.toString());
 			throw movekeys_conflict();
 		}
 
 		// Take the lock
 		if (isWrite) {
 			BinaryWriter wrMyOwner(Unversioned());
-			wrMyOwner << lock->myOwner;
+			wrMyOwner << lock.myOwner;
 			tr->set(moveKeysLockOwnerKey, wrMyOwner.toValue());
 			BinaryWriter wrLastWrite(Unversioned());
 			UID lastWriter = deterministicRandom()->randomUniqueID();
 			wrLastWrite << lastWriter;
 			tr->set(moveKeysLockWriteKey, wrLastWrite.toValue());
 			TraceEvent("CheckMoveKeysLock")
-			    .detail("PrevOwner", lock->prevOwner.toString())
-			    .detail("PrevWrite", lock->prevWrite.toString())
-			    .detail("MyOwner", lock->myOwner.toString())
+			    .detail("PrevOwner", lock.prevOwner.toString())
+			    .detail("PrevWrite", lock.prevWrite.toString())
+			    .detail("MyOwner", lock.myOwner.toString())
 			    .detail("Writer", lastWriter.toString());
 		}
 
 		return Void();
-	} else if (currentOwner == lock->myOwner) {
+	} else if (currentOwner == lock.myOwner) {
 		if (isWrite) {
 			// Touch the lock, preventing overlapping attempts to take it
 			BinaryWriter wrLastWrite(Unversioned());
@@ -347,13 +354,14 @@ ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysL
 		return Void();
 	} else {
 		CODE_PROBE(true, "checkMoveKeysLock: Conflict with new owner");
+		TraceEvent(SevDebug, "CheckPersistentMoveKeysLockOwnerConflict")
+		    .errorUnsuppressed(movekeys_conflict())
+		    .detail("PrevOwner", lock.prevOwner.toString())
+		    .detail("PrevWrite", lock.prevWrite.toString())
+		    .detail("MyOwner", lock.myOwner.toString())
+		    .detail("CurrentOwner", currentOwner.toString());
 		throw movekeys_conflict();
 	}
-}
-
-ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
-	wait(checkPersistentMoveKeysLock(tr, &lock, isWrite));
-	return Void();
 }
 
 Future<Void> checkMoveKeysLock(Transaction* tr,
@@ -367,23 +375,12 @@ Future<Void> checkMoveKeysLock(Transaction* tr,
 	return checkPersistentMoveKeysLock(tr, lock, isWrite);
 }
 
-Future<Void> checkMoveKeysLock(Transaction* tr,
-                               MoveKeysLock* lock,
-                               const DDEnabledState* ddEnabledState,
-                               bool isWrite = true) {
-	if (!ddEnabledState->isEnabled()) {
-		TraceEvent(SevDebug, "DDDisabledByInMemoryCheck").log();
-		throw movekeys_conflict();
-	}
-	return checkPersistentMoveKeysLock(tr, lock, isWrite);
-}
-
-Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock* lock, const DDEnabledState* ddEnabledState) {
-	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
-}
-
 Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock, const DDEnabledState* ddEnabledState) {
 	return checkMoveKeysLock(tr, lock, ddEnabledState, false);
+}
+
+Future<Void> checkMoveKeysLockReadOnly(Transaction* tr, MoveKeysLock lock) {
+	return checkPersistentMoveKeysLock(tr, lock, false);
 }
 
 namespace {

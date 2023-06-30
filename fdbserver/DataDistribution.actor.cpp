@@ -358,6 +358,7 @@ public:
 	Reference<EventCacheHolder> movingDataEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightEventHolder;
 	Reference<EventCacheHolder> totalDataInFlightRemoteEventHolder;
+	bool pollingMoveKeyLockForSecurityMode;
 
 	// Optional components that can be set after ::init(). They're optional when test, but required for DD being
 	// fully-functional.
@@ -391,7 +392,8 @@ public:
 	    totalDataInFlightEventHolder(makeReference<EventCacheHolder>("TotalDataInFlight")),
 	    totalDataInFlightRemoteEventHolder(makeReference<EventCacheHolder>("TotalDataInFlightRemote")),
 	    teamCollection(nullptr), auditStorageHaLaunchingLock(1), auditStorageReplicaLaunchingLock(1),
-	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1) {}
+	    auditStorageLocationMetadataLaunchingLock(1), auditStorageSsShardLaunchingLock(1),
+	    pollingMoveKeyLockForSecurityMode(false) {}
 
 	// bootstrap steps
 
@@ -429,11 +431,12 @@ public:
 		return txnProcessor->waitForDataDistributionEnabled(context->ddEnabledState.get());
 	}
 
-	ACTOR static Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> initAuditStorage(Reference<DataDistributor> self) {
 		if (self->auditInitialized.getFuture().isReady()) {
 			return Void();
 		}
 		// Load persist metadata
+		self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
 		state std::vector<AuditStorageState> auditStates;
 		state Transaction tr(self->txnProcessor->context());
 		loop {
@@ -592,7 +595,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> waitDataDistributorNormalEnabled(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> waitUntilDDExitSecurityMode(Reference<DataDistributor> self) {
 		state Transaction tr(self->txnProcessor->context());
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
@@ -607,12 +610,44 @@ public:
 				BinaryReader rd(mode.get(), Unversioned());
 				int m;
 				rd >> m;
-				if (m == 1) {
+				if (m != 2) {
 					return Void();
 				}
 				tr.reset();
 			} catch (Error& e) {
 				wait(tr.onError(e));
+			}
+		}
+	}
+
+	ACTOR static Future<Void> pollMoveKeysLockUntilDDExitSecurityMode(Reference<DataDistributor> self) {
+		loop {
+			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
+			state Transaction tr(self->txnProcessor->context());
+			loop {
+				tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+				tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+				tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+				try {
+					Optional<Value> ddModeValue = wait(tr.get(dataDistributionModeKey));
+					int ddMode = 1;
+					if (ddModeValue.present()) {
+						BinaryReader rd(ddModeValue.get(), Unversioned());
+						rd >> ddMode;
+					}
+					if (ddMode != 2) {
+						self->pollingMoveKeyLockForSecurityMode = false;
+						return Void();
+					}
+					if (!self->context->ddEnabledState->isEnabled()) {
+						ASSERT_WE_THINK(!self->context->ddEnabledState->isBlobRestorePreparing());
+						break; // we do not want to check lock when snapshot
+					}
+					wait(checkMoveKeysLockReadOnly(&tr, self->context->lock));
+					break;
+				} catch (Error& e) {
+					wait(tr.onError(e));
+				}
 			}
 		}
 	}
@@ -628,21 +663,19 @@ public:
 
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 			wait(self->takeMoveKeysLock());
-			if (!pollingMoveKeys) {
-				self->addActor.send(
-				    self->txnProcessor->pollMoveKeysLock(&(self->context->lock), self->context->ddEnabledState.get()));
-				pollingMoveKeys = false;
+			if (!self->pollingMoveKeyLockForSecurityMode) {
+				self->addActor.send(pollMoveKeysLockUntilDDExitSecurityMode(self));
+				self->pollingMoveKeyLockForSecurityMode = true;
 			}
 			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
 
-			self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
 			// AuditStorage does not rely on DatabaseConfiguration
 			// AuditStorage read neccessary info from system key space
-			wait(self->resumeStorageAudits(self));
-			TraceEvent("DDAuditStorageResumed", self->ddId).log();
+			wait(self->initAuditStorage(self));
+			TraceEvent("DDAuditStorageInitialized", self->ddId).log();
 
-			wait(waitDataDistributorNormalEnabled(self));
-			TraceEvent("DataDistributorNormalEnabled").log();
+			wait(waitUntilDDExitSecurityMode(self));
+			TraceEvent("DataDistributorNotInSecurityMode").log();
 
 			wait(self->loadDatabaseConfiguration());
 			self->initDcInfo();
@@ -678,7 +711,7 @@ public:
 				    .trackLatest(self->initialDDEventHolder->trackingKey);
 			}
 
-			if (self->initData->mode && self->context->isDDEnabled()) {
+			if (self->initData->mode == 1 && self->context->isDDEnabled()) {
 				// mode may be set true by system operator using fdbcli and isEnabled() set to true
 				break;
 			}
@@ -921,6 +954,10 @@ public:
 		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 
+	Future<Void> pollMoveKeysLock() const {
+		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get());
+	}
+
 	Future<bool> isDataDistributionEnabled() const {
 		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
 	}
@@ -1157,6 +1194,8 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
+
+			actors.push_back(self->pollMoveKeysLock());
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,
