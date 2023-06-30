@@ -116,8 +116,7 @@ add_subdirectory(test/unit/third_party)
 find_package(Threads REQUIRED)
 set(UNIT_TEST_SRCS
   test/unit/unit_tests.cpp
-  test/unit/fdb_api.cpp
-  test/unit/fdb_api.hpp)
+)
 
 set(UNIT_TEST_VERSION_510_SRCS test/unit/unit_tests_version_510.cpp)
 set(TRACE_PARTIAL_FILE_SUFFIX_TEST_SRCS test/unit/trace_partial_file_suffix_test.cpp)
