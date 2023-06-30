@@ -201,7 +201,7 @@ private:
 		for (const auto& gap : gaps) {
 			Future<RangeReadResult> f =
 			    runTransaction(self->tenantData.db, [gap](Reference<typename DB::TransactionT> tr) {
-				    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+				    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
 				    return safeThreadFutureToFuture(tr->getRange(gap, 1));
 			    });
 			rangeReadFutures.emplace_back(f);
