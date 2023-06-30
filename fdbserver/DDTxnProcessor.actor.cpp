@@ -517,7 +517,7 @@ class DDTxnProcessorImpl {
 					TraceEvent(SevDebug, "WaitForDDEnabled")
 					    .detail("Mode", m)
 					    .detail("IsDDEnabled", ddEnabledState->isEnabled());
-					if (m && ddEnabledState->isEnabled()) {
+					if (m != 0 && ddEnabledState->isEnabled()) {
 						TraceEvent("WaitForDDEnabledSucceeded").log();
 						return Void();
 					}

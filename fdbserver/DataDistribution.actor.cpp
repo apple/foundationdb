@@ -430,7 +430,9 @@ public:
 	}
 
 	ACTOR static Future<Void> resumeStorageAudits(Reference<DataDistributor> self) {
-		ASSERT(!self->auditInitialized.getFuture().isReady());
+		if (self->auditInitialized.getFuture().isReady()) {
+			return Void();
+		}
 		// Load persist metadata
 		state std::vector<AuditStorageState> auditStates;
 		state Transaction tr(self->txnProcessor->context());
@@ -590,25 +592,53 @@ public:
 		return Void();
 	}
 
+	ACTOR static Future<Void> waitDataDistributorNormalEnabled(Reference<DataDistributor> self) {
+		state Transaction tr(self->txnProcessor->context());
+		loop {
+			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
+			tr.setOption(FDBTransactionOptions::READ_LOCK_AWARE);
+			tr.setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
+			tr.setOption(FDBTransactionOptions::PRIORITY_SYSTEM_IMMEDIATE);
+			try {
+				Optional<Value> mode = wait(tr.get(dataDistributionModeKey));
+				if (!mode.present()) {
+					return Void();
+				}
+				BinaryReader rd(mode.get(), Unversioned());
+				int m;
+				rd >> m;
+				if (m == 1) {
+					return Void();
+				}
+				tr.reset();
+			} catch (Error& e) {
+				wait(tr.onError(e));
+			}
+		}
+	}
+
 	// Initialize the required internal states of DataDistributor from system metadata. It's necessary before
 	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
-		state bool auditStorageInitialized = false;
 		loop {
-			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
-			wait(self->takeMoveKeysLock());
-			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
-
-			if (!auditStorageInitialized) {
-				self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
-				wait(self->resumeStorageAudits(self));
-				TraceEvent("DDAuditStorageResumed", self->ddId).log();
-				auditStorageInitialized = true;
-			}
-
 			wait(self->waitDataDistributorEnabled());
 			TraceEvent("DataDistributionEnabled").log();
+
+			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
+			wait(self->takeMoveKeysLock());
+			self->addActor.send(
+			    self->txnProcessor->pollMoveKeysLock(self->context->lock, self->context->ddEnabledState.get()));
+			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
+
+			self->addActor.send(self->auditStorageCoreErrorListener.getFuture());
+			// AuditStorage does not rely on DatabaseConfiguration
+			// AuditStorage read neccessary info from system key space
+			wait(self->resumeStorageAudits(self));
+			TraceEvent("DDAuditStorageResumed", self->ddId).log();
+
+			wait(waitDataDistributorNormalEnabled(self));
+			TraceEvent("DataDistributorNormalEnabled").log();
 
 			wait(self->loadDatabaseConfiguration());
 			self->initDcInfo();
@@ -887,10 +917,6 @@ public:
 		return resumeFromDataMoves(Reference<DataDistributor>::addRef(this), shardsReady);
 	}
 
-	Future<Void> pollMoveKeysLock() const {
-		return txnProcessor->pollMoveKeysLock(lock, context->ddEnabledState.get());
-	}
-
 	Future<bool> isDataDistributionEnabled() const {
 		return txnProcessor->isDataDistributionEnabled(context->ddEnabledState.get());
 	}
@@ -1008,13 +1034,8 @@ ACTOR Future<Void> prepareDataMigration(PrepareBlobRestoreRequest req,
 		    .detail("Version", verAndTag.first)
 		    .detail("Tag", verAndTag.second);
 
-		wait(prepareBlobRestore(cx,
-		                        &(context->lock),
-		                        context->ddEnabledState.get(),
-		                        context->id(),
-		                        req.keys,
-		                        req.ssi.id(),
-		                        req.requesterID));
+		wait(prepareBlobRestore(
+		    cx, context->lock, context->ddEnabledState.get(), context->id(), req.keys, req.ssi.id(), req.requesterID));
 		req.reply.send(PrepareBlobRestoreReply(PrepareBlobRestoreReply::SUCCESS));
 	} catch (Error& e) {
 		if (e.code() == error_code_actor_cancelled)
@@ -1132,8 +1153,6 @@ ACTOR Future<Void> dataDistribution(Reference<DataDistributor> self,
 			} else {
 				anyZeroHealthyTeams = zeroHealthyTeams[0];
 			}
-
-			actors.push_back(self->pollMoveKeysLock());
 
 			self->context->tracker = makeReference<DataDistributionTracker>(
 			    DataDistributionTrackerInitParams{ .db = self->txnProcessor,

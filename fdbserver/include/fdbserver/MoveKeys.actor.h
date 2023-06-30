@@ -197,7 +197,7 @@ ACTOR Future<Void> removeKeysFromFailedServer(Database cx,
 // Prepare for data migration for given key range. Reassign key ranges to the storage server interface hold by blob
 // migrator
 ACTOR Future<Void> prepareBlobRestore(Database occ,
-                                      MoveKeysLock* lock,
+                                      MoveKeysLock lock,
                                       const DDEnabledState* ddEnabledState,
                                       UID traceId,
                                       KeyRangeRef keys,

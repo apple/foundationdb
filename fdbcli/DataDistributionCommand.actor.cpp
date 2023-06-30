@@ -42,6 +42,9 @@ ACTOR Future<Void> setDDMode(Reference<IDatabase> db, int mode) {
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
 				// hold the returned standalone object's memory
+				// set DDMode to 2 is a security mode which disables data moves but allows auditStorage part
+				// DDMode==2 aims to disable data moves while allows auditStorage
+				// DDMode=2 is set when shard location metadata inconsistency is detected
 				state ThreadFuture<RangeResult> resultFuture =
 				    tr->getRange(fdb_cli::maintenanceSpecialKeyRange, CLIENT_KNOBS->TOO_MANY);
 				RangeResult res = wait(safeThreadFutureToFuture(resultFuture));
