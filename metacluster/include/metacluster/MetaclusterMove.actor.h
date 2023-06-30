@@ -69,38 +69,55 @@ ACTOR static Future<Void> updateMoveRecordState(Reference<ITransaction> tr,
 	return Void();
 }
 
-ACTOR static Future<metadata::management::MovementRecord> getMovementRecord(Reference<ITransaction> tr,
-                                                                            TenantGroupName tenantGroup,
-                                                                            ClusterName src,
-                                                                            ClusterName dst,
-                                                                            bool aborting) {
+ACTOR template <class Transaction>
+static Future<Optional<metadata::management::MovementRecord>> tryGetMovementRecord(Reference<Transaction> tr,
+                                                                                   TenantGroupName tenantGroup,
+                                                                                   ClusterName src,
+                                                                                   ClusterName dst,
+                                                                                   bool aborting) {
 	Optional<metadata::management::MovementRecord> moveRecord =
 	    wait(metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
 
-	if (!moveRecord.present()) {
-		TraceEvent("TenantInitMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
-		throw invalid_tenant_move();
-	}
-	if (moveRecord->srcCluster != src || moveRecord->dstCluster != dst) {
-		TraceEvent("TenantInitMoveRecordSrcDstMismatch")
-		    .detail("TenantGroup", tenantGroup)
-		    .detail("ExpectedSrc", src)
-		    .detail("ExpectedDst", dst)
-		    .detail("RecordSrc", moveRecord->srcCluster)
-		    .detail("RecordDst", moveRecord->dstCluster);
-		throw invalid_tenant_move();
+	if (moveRecord.present()) {
+		if (moveRecord->srcCluster != src || moveRecord->dstCluster != dst) {
+			TraceEvent("TenantInitMoveRecordSrcDstMismatch")
+			    .detail("TenantGroup", tenantGroup)
+			    .detail("ExpectedSrc", src)
+			    .detail("ExpectedDst", dst)
+			    .detail("RecordSrc", moveRecord->srcCluster)
+			    .detail("RecordDst", moveRecord->dstCluster);
+			throw invalid_tenant_move();
+		}
+
+		if (moveRecord->aborting && !aborting) {
+			TraceEvent("TenantInitMoveRecordAborting").detail("TenantGroup", tenantGroup);
+			throw invalid_tenant_move();
+		}
 	}
 
-	if (moveRecord->aborting && !aborting) {
-		TraceEvent("TenantInitMoveRecordAborting").detail("TenantGroup", tenantGroup);
+	return moveRecord;
+}
+
+ACTOR template <class Transaction>
+static Future<metadata::management::MovementRecord> getMovementRecord(Reference<Transaction> tr,
+                                                                      TenantGroupName tenantGroup,
+                                                                      ClusterName src,
+                                                                      ClusterName dst,
+                                                                      bool aborting) {
+	Optional<metadata::management::MovementRecord> moveRecord =
+	    wait(tryGetMovementRecord(tr, tenantGroup, src, dst, aborting));
+
+	if (!moveRecord.present()) {
+		TraceEvent("TenantInitMoveRecordNotPresent").detail("TenantGroup", tenantGroup);
 		throw invalid_tenant_move();
 	}
 
 	return moveRecord.get();
 }
 
-ACTOR static Future<metadata::management::MovementRecord> initMoveParams(
-    Reference<ITransaction> tr,
+ACTOR template <class Transaction>
+static Future<metadata::management::MovementRecord> initMoveParams(
+    Reference<Transaction> tr,
     TenantGroupName tenantGroup,
     std::vector<std::pair<TenantName, int64_t>>* tenantsInGroup,
     ClusterName src,
@@ -890,40 +907,41 @@ struct FinishTenantMovementImpl {
 		return Void();
 	}
 
-	static Future<Void> updateCapacityMetadata(FinishTenantMovementImpl* self,
-	                                           Reference<typename DB::TransactionT> tr) {
-		// TODO: verify idempotency
-		ClusterName srcName = self->srcCtx.clusterName.get();
+	void updateCapacityMetadata(Reference<typename DB::TransactionT> tr) {
+		ClusterName srcName = srcCtx.clusterName.get();
 
 		// clusterCapacityIndex() reduce allocated capacity of source
-		DataClusterMetadata clusterMetadata = self->srcCtx.dataClusterMetadata.get();
+		DataClusterMetadata clusterMetadata = srcCtx.dataClusterMetadata.get();
 		DataClusterEntry updatedEntry = clusterMetadata.entry;
 		updatedEntry.allocated.numTenantGroups--;
 		metacluster::updateClusterMetadata(
 		    tr, srcName, clusterMetadata, Optional<ClusterConnectionString>(), updatedEntry);
 
 		// clusterTenantCount() reduce tenant count of source
-		int numTenants = self->tenantsInGroup.size();
+		int numTenants = tenantsInGroup.size();
 		metadata::management::clusterTenantCount().atomicOp(tr, srcName, -numTenants, MutationRef::AddValue);
-		return Void();
 	}
 
-	static Future<Void> clearMovementMetadata(FinishTenantMovementImpl* self, Reference<typename DB::TransactionT> tr) {
-		UID runId = self->moveRecord.runId;
-		metadata::management::emergency_movement::emergencyMovements().erase(tr, self->tenantGroup);
-		metadata::management::emergency_movement::movementQueue().erase(
-		    tr, std::make_pair(self->tenantGroup, runId.toString()));
-		Tuple beginTuple = Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName(""_sr), KeyRef(""_sr));
-		Tuple endTuple =
-		    Tuple::makeTuple(self->tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
+	void clearMovementMetadata(Reference<typename DB::TransactionT> tr) {
+		UID runId = moveRecord.runId;
+		metadata::management::emergency_movement::emergencyMovements().erase(tr, tenantGroup);
+		metadata::management::emergency_movement::movementQueue().erase(tr,
+		                                                                std::make_pair(tenantGroup, runId.toString()));
+		Tuple beginTuple = Tuple::makeTuple(tenantGroup, runId.toString(), TenantName(""_sr), KeyRef(""_sr));
+		Tuple endTuple = Tuple::makeTuple(tenantGroup, runId.toString(), TenantName("\xff"_sr), KeyRef("\xff"_sr));
 		metadata::management::emergency_movement::splitPointsMap().erase(tr, beginTuple, endTuple);
-		return Void();
 	}
 
 	ACTOR static Future<Void> finalizeMovement(FinishTenantMovementImpl* self,
 	                                           Reference<typename DB::TransactionT> tr) {
-		wait(updateCapacityMetadata(self, tr));
-		wait(clearMovementMetadata(self, tr));
+		Optional<metadata::management::MovementRecord> movementRecord = wait(
+		    tryGetMovementRecord(tr, self->tenantGroup, self->srcCtx.clusterName.get(), self->dstCtx.clusterName.get(), false));
+
+		if (movementRecord.present()) {
+			self->updateCapacityMetadata(tr);
+			self->clearMovementMetadata(tr);
+		}
+
 		return Void();
 	}
 
