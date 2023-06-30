@@ -186,7 +186,7 @@ private:
 			ASSERT(id > prevId);
 			ASSERT_EQ(TenantAPI::idToPrefix(id), entry.prefix);
 			if (prevId >= 0) {
-				ASSERT(entry.prefix.compare(prevPrefix) > 0);
+				ASSERT_GT(entry.prefix, prevPrefix);
 			}
 			KeyRange range = prefixRange(entry.prefix);
 			ASSERT(range.begin.compare(prevGapStart) >= 0);
