@@ -260,56 +260,76 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		state DataClusterData clusterData = self->dataDbs[expectedCluster];
 		state Reference<ReadYourWritesTransaction> tr = clusterData.db->createTransaction();
 
-		state std::vector<std::pair<TenantName, int64_t>> tenantData =
-		    wait(metacluster::listTenantGroupTenantsTransaction(
-		        tr, tenantGroup, TenantName(""_sr), TenantName("\xff"_sr), CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
-		for (const auto& [tName, tId] : tenantData) {
-			auto testData = self->createdTenants[tId];
-			if (testData.cluster != expectedCluster || !testData.tenantGroup.present() ||
-			    testData.tenantGroup.get() != tenantGroup) {
-				TraceEvent("MetaclusterMoveVerifyTenantLocationsFailed")
-				    .detail("ExpectedTenantGroup", tenantGroup)
-				    .detail("ActualTenantGroup", testData.tenantGroup)
-				    .detail("ExpectedCluster", expectedCluster)
-				    .detail("ActualCluster", testData.cluster);
-				return false;
+		loop {
+			try {
+				state std::vector<std::pair<TenantName, int64_t>> tenantData =
+				    wait(metacluster::listTenantGroupTenantsTransaction(tr,
+				                                                        tenantGroup,
+				                                                        TenantName(""_sr),
+				                                                        TenantName("\xff"_sr),
+				                                                        CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER));
+				for (const auto& [tName, tId] : tenantData) {
+					auto testData = self->createdTenants[tId];
+					if (testData.cluster != expectedCluster || !testData.tenantGroup.present() ||
+					    testData.tenantGroup.get() != tenantGroup) {
+						TraceEvent("MetaclusterMoveVerifyTenantLocationsFailed")
+						    .detail("ExpectedTenantGroup", tenantGroup)
+						    .detail("ActualTenantGroup", testData.tenantGroup)
+						    .detail("ExpectedCluster", expectedCluster)
+						    .detail("ActualCluster", testData.cluster);
+						return false;
+					}
+				}
+
+				return true;
+			} catch (Error& e) {
+				wait(tr->onError(e));
 			}
 		}
-		return true;
 	}
 
 	ACTOR static Future<bool> verifyMoveMetadataErased(MetaclusterMoveWorkload* self, TenantGroupName tenantGroup) {
 		state Reference<ITransaction> tr = self->managementDb->createTransaction();
-		tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-		state Optional<metacluster::metadata::management::MovementRecord> mr;
-		state KeyBackedRangeResult<std::pair<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>> mq;
-		state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints;
+		loop {
+			try {
+				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 
-		state Tuple beginTuple = Tuple::makeTuple(tenantGroup, "", TenantName(""_sr), KeyRef(""_sr));
-		state Tuple endTuple = Tuple::makeTuple(tenantGroup, "\xff", TenantName("\xff"_sr), KeyRef("\xff"_sr));
-		state std::pair<TenantGroupName, std::string> beginPair = std::make_pair(tenantGroup, "");
-		state std::pair<TenantGroupName, std::string> endPair = std::make_pair(tenantGroup, "\xff");
-		state int limit = 10;
+				state Optional<metacluster::metadata::management::MovementRecord> mr;
+				state
+				    KeyBackedRangeResult<std::pair<std::pair<TenantGroupName, std::string>, std::pair<TenantName, Key>>>
+				        mq;
+				state KeyBackedRangeResult<std::pair<Tuple, Key>> splitPoints;
 
-		state Future<Void> mrFuture =
-		    store(mr, metacluster::metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
-		state Future<Void> mqFuture =
-		    store(mq,
-		          metacluster::metadata::management::emergency_movement::movementQueue().getRange(
-		              tr, beginPair, endPair, limit));
-		state Future<Void> splitPointsFuture =
-		    store(splitPoints,
-		          metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
-		              tr, beginTuple, endTuple, limit));
+				state Tuple beginTuple = Tuple::makeTuple(tenantGroup, "", TenantName(""_sr), KeyRef(""_sr));
+				state Tuple endTuple = Tuple::makeTuple(tenantGroup, "\xff", TenantName("\xff"_sr), KeyRef("\xff"_sr));
+				state std::pair<TenantGroupName, std::string> beginPair = std::make_pair(tenantGroup, "");
+				state std::pair<TenantGroupName, std::string> endPair = std::make_pair(tenantGroup, "\xff");
+				state int limit = 10;
 
-		wait(mrFuture && mqFuture && splitPointsFuture);
+				state Future<Void> mrFuture = store(
+				    mr,
+				    metacluster::metadata::management::emergency_movement::emergencyMovements().get(tr, tenantGroup));
+				state Future<Void> mqFuture =
+				    store(mq,
+				          metacluster::metadata::management::emergency_movement::movementQueue().getRange(
+				              tr, beginPair, endPair, limit));
+				state Future<Void> splitPointsFuture =
+				    store(splitPoints,
+				          metacluster::metadata::management::emergency_movement::splitPointsMap().getRange(
+				              tr, beginTuple, endTuple, limit));
 
-		TraceEvent("MetaclusterMoveVerifyMetadataErased")
-		    .detail("MrPresent", mr.present())
-		    .detail("MqEmpty", mq.results.empty())
-		    .detail("SplitpointsEmpty", splitPoints.results.empty());
-		return (!mr.present() && mq.results.empty() && splitPoints.results.empty());
+				wait(mrFuture && mqFuture && splitPointsFuture);
+
+				TraceEvent("MetaclusterMoveVerifyMetadataErased")
+				    .detail("MrPresent", mr.present())
+				    .detail("MqEmpty", mq.results.empty())
+				    .detail("SplitpointsEmpty", splitPoints.results.empty());
+				return (!mr.present() && mq.results.empty() && splitPoints.results.empty());
+			} catch (Error& e) {
+				wait(safeThreadFutureToFuture(tr->onError(e)));
+			}
+		}
 	}
 
 	ACTOR static Future<bool> finishVerification(MetaclusterMoveWorkload* self,
