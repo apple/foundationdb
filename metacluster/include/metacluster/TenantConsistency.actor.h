@@ -154,21 +154,6 @@ private:
 		state Future<TenantMode> tenantModeFuture = runTransaction(
 		    self->tenantData.db, [](Reference<typename DB::TransactionT> tr) { return TenantAPI::getTenantMode(tr); });
 
-		state KeyBackedRangeResult<std::pair<int64_t, TenantMapEntry>> tenantMapEntries;
-		state Reference<typename DB::TransactionT> tr = self->tenantData.db->createTransaction();
-		loop {
-			try {
-				tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-				wait(
-				    store(tenantMapEntries,
-				          TenantMetadata::tenantMap().getRange(tr, {}, {}, CLIENT_KNOBS->MAX_TENANTS_PER_CLUSTER + 1)));
-				ASSERT_EQ(tenantMapEntries.results.size(), self->tenantData.tenantMap.size());
-				break;
-			} catch (Error& error) {
-				wait(safeThreadFutureToFuture(tr->onError(error)));
-			}
-		}
-
 		TenantMode tenantMode = wait(tenantModeFuture);
 		if (tenantMode != TenantMode::REQUIRED) {
 			return Void();
@@ -179,7 +164,7 @@ private:
 		Key prevPrefix;
 		Key prevGapStart;
 		state Standalone<VectorRef<KeyRangeRef>> gaps;
-		for (const auto& [id, entry] : tenantMapEntries.results) {
+		for (const auto& [id, entry] : self->tenantData.tenantMap) {
 			ASSERT(id > prevId);
 			ASSERT_EQ(TenantAPI::idToPrefix(id), entry.prefix);
 			if (prevId >= 0) {
