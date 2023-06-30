@@ -1065,6 +1065,8 @@ public:
 	}
 	Database() noexcept : db(nullptr) {}
 
+	bool valid() const noexcept { return db != nullptr; }
+
 	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
 
 	Database atomic_load() {
