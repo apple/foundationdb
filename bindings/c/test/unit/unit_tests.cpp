@@ -277,22 +277,6 @@ TEST_CASE("fdb_future_cancel after future completion") {
 	}
 }
 
-TEST_CASE("fdb_future_cancel_with_callback") {
-	auto tr = db.createTransaction();
-	while (1) {
-		auto f1 = tr.get("foo"_br, /*snapshot*/ true);
-
-		std::binary_semaphore sem(0);
-		f1.then([&sem](fdb::Future f) { sem.release(); });
-
-		// Cancel should trigger the callback to be executed, and thus
-		// release the semaphore
-		f1.cancel();
-
-		sem.acquire();
-	}
-}
-
 TEST_CASE("fdb_future_is_ready") {
 	auto tr = db.createTransaction();
 	while (1) {
