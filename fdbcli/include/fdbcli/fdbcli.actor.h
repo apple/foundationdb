@@ -51,6 +51,15 @@ constexpr char msgAllocatedKey[] = "allocated";
 constexpr char msgTenantIdPrefixKey[] = "tenant_id_prefix";
 constexpr char msgErrorKey[] = "error";
 
+struct DatabaseConnections {
+	Database localDb;
+	Reference<IDatabase> db;
+	Reference<IDatabase> configDb;
+	DatabaseConnections() = default;
+	DatabaseConnections(Database localDb, Reference<IDatabase> db, Reference<IDatabase> configDb)
+	  : localDb(localDb), db(db), configDb(configDb) {}
+};
+
 struct CommandHelp {
 	std::string usage;
 	std::string short_desc;

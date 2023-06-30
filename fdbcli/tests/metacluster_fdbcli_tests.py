@@ -132,7 +132,7 @@ def setup_metacluster(
         management_cluster_file, management_cluster_name, tenant_id_prefix
     )
     cluster_names_to_files[management_cluster_name] = management_cluster_file
-    for (cf, name, auto_assignment) in data_clusters:
+    for cf, name, auto_assignment in data_clusters:
         metacluster_register(
             management_cluster_file,
             cf,
@@ -153,6 +153,13 @@ def metacluster_status(cluster_file):
 def remove_data_cluster(management_cluster_file, data_cluster_name):
     rc, out, err = run_fdbcli_command(
         management_cluster_file, "metacluster remove", data_cluster_name
+    )
+    return rc, out, err
+
+
+def usecluster(cluster_file, cluster_name):
+    rc, out, err = run_fdbcli_command(
+        cluster_file, "usecluster {}".format(cluster_name)
     )
     return rc, out, err
 
@@ -453,12 +460,169 @@ number of data clusters: {}
 
     logger.debug("Metacluster setup correctly")
 
-    for (cf, name) in zip(cluster_files[1:], data_cluster_names):
+    for cf, name in zip(cluster_files[1:], data_cluster_names):
         output = metacluster_status(cf)
         expected = 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
             name, management_cluster_name
         )
         assert expected == output
+
+
+@enable_logging()
+def usecluster_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+
+    _, _, err = usecluster(cluster_files[0], "mgmt")
+    assert err == "ERROR: This cluster is not part of a metacluster"
+
+    logger.debug("Setting up a metacluster")
+    num_clusters = len(cluster_files)
+    max_tenant_groups_per_cluster = 1
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster,
+    )
+
+    _, output, err = usecluster(cluster_files[1], data_cluster_names[1])
+    assert err == "ERROR: Please first connect to a management cluster"
+
+    # test switch cluster and check status
+    subcmds = [
+        "usecluster {};".format(data_cluster_names[0]),
+        "metacluster status;",
+        "usecluster {};".format(data_cluster_names[1]),
+        "metacluster status;",
+        "usemanagementcluster;",
+        "metacluster status",
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    lines = output.split("\n")
+    assert lines[1] == "cluster changed to {}, tenant reset to default.".format(
+        data_cluster_names[0]
+    )
+    assert lines[
+        3
+    ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
+        data_cluster_names[0], management_cluster_name
+    )
+    assert lines[5] == "cluster changed to {}, tenant reset to default.".format(
+        data_cluster_names[1]
+    )
+    assert lines[
+        7
+    ] == 'This cluster "{}" is a data cluster within the metacluster named "{}"'.format(
+        data_cluster_names[1], management_cluster_name
+    )
+    assert lines[9] == "Using management cluster, tenant reset to default."
+    expected = """
+  number of data clusters: {}
+  tenant group capacity: {}
+  allocated tenant groups: 0
+"""
+    expected = expected.format(
+        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+    ).strip()
+    assert "\n".join([lines[11], lines[12], lines[13]]).strip() == expected
+
+    _, _, err = usecluster(cluster_files[0], "data_cluster_not_exist")
+    assert err == "ERROR: Data cluster does not exist (2163)"
+
+    # test combination of usecluster and usetenant
+    tenants = [
+        {"name": "tenant1", "assigned_cluster": "data1"},
+        {"name": "tenant2", "assigned_cluster": "data2"},
+    ]
+    setup_tenants(cluster_files[0], tenants)
+
+    subcmds = [
+        "usemanagementcluster;",
+        "usetenant {}".format("tenant1"),
+    ]
+    _, _, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert err == "ERROR: Tenant `tenant1' does not exist"
+
+    subcmds = [
+        "usecluster {};".format("data1"),
+        "usetenant {};".format("tenant1"),
+        "writemode on;" "set key1 value1;",
+        "get key1;",
+        "clear key1;",
+        "usecluster {};".format("data2"),
+        "usetenant {};".format("tenant2"),
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    lines = output.split("\n")
+    assert lines[3] == "Using tenant `tenant1'"
+    assert lines[8] == "`key1' is `value1'"
+    assert lines[14] == "Using tenant `tenant2'"
+
+    subcmds = ["usecluster {};".format("data1"), "usetenant {};".format("tenant2")]
+    _, _, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert err == "ERROR: Tenant `tenant2' does not exist"
+
+    subcmds = ["usecluster {};".format("data1"), "writemode on;", "set key2 value2"]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    assert (
+        err
+        == "ERROR: tenant name required. Use the `usetenant' command to select a tenant or\nenable the `RAW_ACCESS' option to read raw keys."
+    )
+
+    clear_all_tenants(cluster_files[0])
+    cleanup_after_test(cluster_files[0], data_cluster_names)
+
+
+@enable_logging()
+def usemanagementcluster_test(logger, cluster_files):
+    logger.debug("Verifying no cluster is part of a metacluster")
+    for cf in cluster_files:
+        output = metacluster_status(cf)
+        assert output == "This cluster is not part of a metacluster"
+
+    _, _, err = run_fdbcli_command(cluster_files[0], "usemanagementcluster")
+    assert err == "ERROR: This cluster is not part of a metacluster"
+
+    logger.debug("Setting up a metacluster")
+    num_clusters = len(cluster_files)
+    max_tenant_groups_per_cluster = 1
+    auto_assignment = ["enabled"] * (num_clusters - 1)
+    setup_metacluster(
+        [cluster_files[0], management_cluster_name],
+        list(zip(cluster_files[1:], data_cluster_names, auto_assignment)),
+        max_tenant_groups_per_cluster,
+    )
+
+    _, output, err = run_fdbcli_command(cluster_files[0], "usemanagementcluster")
+    assert output == "Using the current cluster, no changes made."
+
+    _, output, err = run_fdbcli_command(cluster_files[1], "usemanagementcluster")
+    assert err == "ERROR: No management cluster information"
+
+    subcmds = [
+        "usecluster {};".format(data_cluster_names[0]),
+        "metacluster status;",
+        "usemanagementcluster;",
+        "metacluster status",
+    ]
+    rc, output, err = run_fdbcli_command(cluster_files[0], *subcmds)
+    lines = output.split("\n")
+    logger.debug(output)
+    assert lines[5] == "Using management cluster, tenant reset to default."
+    expected = """
+  number of data clusters: {}
+  tenant group capacity: {}
+  allocated tenant groups: 0
+"""
+    expected = expected.format(
+        num_clusters - 1, (num_clusters - 1) * max_tenant_groups_per_cluster
+    ).strip()
+    assert "\n".join([lines[7], lines[8], lines[9]]).strip() == expected
+
+    cleanup_after_test(cluster_files[0], data_cluster_names)
 
 
 @enable_logging()
@@ -713,6 +877,11 @@ def configure_tenants_test_disableConfigureTenantState(logger, cluster_files):
 @enable_logging()
 def test_main(logger):
     logger.debug("Tests start")
+
+    usecluster_test(cluster_files)
+
+    usemanagementcluster_test(cluster_files)
+
     register_and_configure_data_clusters_test(cluster_files)
 
     create_tenants_test(cluster_files)
