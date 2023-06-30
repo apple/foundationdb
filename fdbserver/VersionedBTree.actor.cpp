@@ -2818,7 +2818,7 @@ public:
 	                                                           PhysicalPageID pageID,
 	                                                           int priority,
 	                                                           bool header,
-	                                                           Optional<PagerEventReasons> reason) {
+	                                                           PagerEventReasons reason) {
 		ASSERT(!self->memoryOnly);
 
 		state Reference<ArenaPage> page =
@@ -2857,7 +2857,7 @@ public:
 			}
 			double decryptTime = 0;
 			page->postReadPayload(pageID, &decryptTime);
-			if (reason.present() && isReadRequest(reason.get())) {
+			if (isReadRequest(reason)) {
 				g_redwoodMetrics.metric.readRequestDecryptTimeNS += int64_t(decryptTime * 1e9);
 			}
 			debug_printf("DWALPager(%s) op=readPhysicalVerified %s ptr=%p\n",
@@ -2974,7 +2974,7 @@ public:
 
 	Future<Reference<ArenaPage>> readHeaderPage(PhysicalPageID pageID) {
 		debug_printf("DWALPager(%s) readHeaderPage %s\n", filename.c_str(), toString(pageID).c_str());
-		return readPhysicalPage(this, pageID, ioMaxPriority, true, Optional<PagerEventReasons>());
+		return readPhysicalPage(this, pageID, ioMaxPriority, true, PagerEventReasons::MetaData);
 	}
 
 	static bool isReadRequest(PagerEventReasons reason) {
