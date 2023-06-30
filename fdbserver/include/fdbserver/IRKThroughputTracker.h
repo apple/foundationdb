@@ -37,6 +37,12 @@ class ServerThroughputTracker : public IRKThroughputTracker {
 
 	std::unordered_map<UID, ThrottlingIdMap<ThroughputCounters>> throughput;
 
+	void cleanupUnseenStorageServers(std::unordered_set<UID> const& seen);
+
+	static void cleanupUnseenThrottlingIds(ThrottlingIdMap<ThroughputCounters>&,
+	                                       std::unordered_set<ThrottlingId> const& seenReadThrottlingId,
+	                                       std::unordered_set<ThrottlingId> const& seenWriteThrottlingId);
+
 public:
 	~ServerThroughputTracker();
 

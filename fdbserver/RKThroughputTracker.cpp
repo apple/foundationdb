@@ -51,6 +51,66 @@ double ServerThroughputTracker::ThroughputCounters::getThroughput() const {
 
 ServerThroughputTracker::~ServerThroughputTracker() = default;
 
+// Exponentially decay throughput statistics for throttlingIds that were not reported.
+// If reported throughput for a particular throttlingId is too low, stop tracking this
+// throttlingId.
+void ServerThroughputTracker::cleanupUnseenThrottlingIds(
+    ThrottlingIdMap<ThroughputCounters>& throttlingIdToThroughputCounters,
+    std::unordered_set<ThrottlingId> const& seenReadThrottlingIds,
+    std::unordered_set<ThrottlingId> const& seenWriteThrottlingIds) {
+	auto it = throttlingIdToThroughputCounters.begin();
+	while (it != throttlingIdToThroughputCounters.end()) {
+		auto& [throttlingId, throughputCounters] = *it;
+		bool seen = false;
+		if (seenReadThrottlingIds.count(throttlingId)) {
+			seen = true;
+		} else {
+			throughputCounters.updateThroughput(0, OpType::READ);
+		}
+		if (seenWriteThrottlingIds.count(throttlingId)) {
+			seen = true;
+		} else {
+			throughputCounters.updateThroughput(0, OpType::WRITE);
+		}
+		if (!seen && throughputCounters.getThroughput() < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD) {
+			it = throttlingIdToThroughputCounters.erase(it);
+		} else {
+			++it;
+		}
+	}
+}
+
+// For unseen storage servers, exponentially decay throughput statistics for every throttlingId.
+// If the reported throughput for a particular throttlingId is too low, stop tracking this
+// throttlingId. If no more throttlingIds are being tracked for a particular storage server,
+// stop tracking this storage server altogether.
+void ServerThroughputTracker::cleanupUnseenStorageServers(std::unordered_set<UID> const& seen) {
+	auto it1 = throughput.begin();
+	while (it1 != throughput.end()) {
+		auto& [ssId, throttlingIdToThroughputCounters] = *it1;
+		if (seen.count(ssId)) {
+			++it1;
+		} else {
+			auto it2 = throttlingIdToThroughputCounters.begin();
+			while (it2 != throttlingIdToThroughputCounters.end()) {
+				auto& throughputCounters = it2->second;
+				throughputCounters.updateThroughput(0, OpType::READ);
+				throughputCounters.updateThroughput(0, OpType::WRITE);
+				if (throughputCounters.getThroughput() < SERVER_KNOBS->GLOBAL_TAG_THROTTLING_FORGET_SS_THRESHOLD) {
+					it2 = throttlingIdToThroughputCounters.erase(it2);
+				} else {
+					++it2;
+				}
+			}
+			if (throttlingIdToThroughputCounters.empty()) {
+				it1 = throughput.erase(it1);
+			} else {
+				++it1;
+			}
+		}
+	}
+}
+
 void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) {
 	std::unordered_set<UID> seenStorageServerIds;
 	for (auto it = sqInfos.begin(); it != sqInfos.end(); ++it) {
@@ -70,23 +130,9 @@ void ServerThroughputTracker::update(Map<UID, StorageQueueInfo> const& sqInfos) 
 			throttlingIdToThroughputCounters[busyWriter.throttlingId].updateThroughput(busyWriter.rate, OpType::WRITE);
 		}
 
-		for (auto& [throttlingId, throughputCounters] : throttlingIdToThroughputCounters) {
-			if (!seenReadThrottlingIds.count(throttlingId)) {
-				throughputCounters.updateThroughput(0, OpType::READ);
-			}
-			if (!seenWriteThrottlingIds.count(throttlingId)) {
-				throughputCounters.updateThroughput(0, OpType::WRITE);
-			}
-		}
+		cleanupUnseenThrottlingIds(throttlingIdToThroughputCounters, seenReadThrottlingIds, seenWriteThrottlingIds);
 	}
-	for (auto& [ssId, throttlingIdToThroughputCounters] : throughput) {
-		if (!seenStorageServerIds.count(ssId)) {
-			for (auto& [_, throughputCounters] : throttlingIdToThroughputCounters) {
-				throughputCounters.updateThroughput(0, OpType::READ);
-				throughputCounters.updateThroughput(0, OpType::WRITE);
-			}
-		}
-	}
+	cleanupUnseenStorageServers(seenStorageServerIds);
 }
 
 Optional<double> ServerThroughputTracker::getThroughput(UID storageServerId, ThrottlingId const& throttlingId) const {
