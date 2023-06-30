@@ -201,7 +201,13 @@ struct BlobRestoreWorkload : TestWorkload {
 				wait(verify(cx, self));
 
 				// Check if we can flush ranges after restore
-				wait(killBlobWorkers(self->extraDb_));
+				state ISimulator::KillType kt = ISimulator::KillType::RebootProcessAndSwitch;
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+				wait(delay(2));
+				g_simulator->killAll(kt, true);
+				g_simulator->toggleGlobalSwitchCluster();
+
 				wait(flushBlobRanges(self->extraDb_, self, {}));
 				return Void();
 			}

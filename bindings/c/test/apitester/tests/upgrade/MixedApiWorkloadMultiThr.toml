@@ -10,7 +10,7 @@ maxDatabases = 8
 minClientThreads = 2
 maxClientThreads = 8
 minClients = 2
-maxClients = 8
+maxClients = 4
 
     [[test.workload]]
     name = 'ApiCorrectness'

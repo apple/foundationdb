@@ -305,7 +305,7 @@ class ReadRangeResult : public Result<native::FDBReadRangeResult, ReadRangeResul
 public:
 	using KeyValueRefArray = std::tuple<KeyValueRef const*, int, bool>;
 
-	Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
+	[[nodiscard]] Error getKeyValueArrayNothrow(KeyValueRefArray& out) const noexcept {
 		auto out_more_native = native::fdb_bool_t{};
 		auto& [out_kv, out_count, out_more] = out;
 		auto err_raw = native::fdb_result_get_keyvalue_array(
@@ -324,7 +324,7 @@ public:
 
 class ReadBGMutationsResult : public Result<native::FDBReadBGMutationsResult, ReadBGMutationsResult> {
 public:
-	Error getGranuleMutationArrayNothrow(VectorRef<GranuleMutationRef>& out) const noexcept {
+	[[nodiscard]] Error getGranuleMutationArrayNothrow(VectorRef<GranuleMutationRef>& out) const noexcept {
 		const native::FDBBGMutation* out_mutations = nullptr;
 		int out_count = 0;
 		auto err_raw = native::fdb_result_get_bg_mutations_array(getPtr(), &out_mutations, &out_count);
@@ -468,20 +468,20 @@ inline int maxApiVersion() {
 
 namespace network {
 
-inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
+[[nodiscard]] inline Error setOptionNothrow(FDBNetworkOption option, BytesRef str) noexcept {
 	return Error(native::fdb_network_set_option(option, str.data(), intSize(str)));
 }
 
-inline Error setOptionNothrow(FDBNetworkOption option, CharsRef str) noexcept {
+[[nodiscard]] inline Error setOptionNothrow(FDBNetworkOption option, CharsRef str) noexcept {
 	return setOptionNothrow(option, toBytesRef(str));
 }
 
-inline Error setOptionNothrow(FDBNetworkOption option, int64_t value) noexcept {
+[[nodiscard]] inline Error setOptionNothrow(FDBNetworkOption option, int64_t value) noexcept {
 	return Error(native::fdb_network_set_option(
 	    option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 }
 
-inline Error setOptionNothrow(FDBNetworkOption option) noexcept {
+[[nodiscard]] inline Error setOptionNothrow(FDBNetworkOption option) noexcept {
 	return setOptionNothrow(option, "");
 }
 
@@ -510,7 +510,7 @@ inline void setOption(FDBNetworkOption option) {
 	setOption(option, "");
 }
 
-inline Error setupNothrow() noexcept {
+[[nodiscard]] inline Error setupNothrow() noexcept {
 	return Error(native::fdb_setup_network());
 }
 
@@ -610,7 +610,7 @@ public:
 	}
 
 	template <class VarTraits>
-	Error getNothrow(typename VarTraits::Type& var) const noexcept {
+	[[nodiscard]] Error getNothrow(typename VarTraits::Type& var) const noexcept {
 		assert(valid());
 		assert(!error());
 		auto out = typename VarTraits::Type{};
@@ -647,7 +647,7 @@ public:
 
 	ContainedType get() const { return get<VarTraits>(); }
 
-	Error getNothrow(ContainedType& out) const noexcept { return getNothrow<VarTraits>(out); }
+	[[nodiscard]] Error getNothrow(ContainedType& out) const noexcept { return getNothrow<VarTraits>(out); }
 
 	template <class UserFunc>
 	void then(UserFunc&& fn) {
@@ -709,20 +709,20 @@ public:
 
 	explicit operator bool() const noexcept { return valid(); }
 
-	Error setOptionNothrow(FDBTransactionOption option, int64_t value) noexcept {
+	[[nodiscard]] Error setOptionNothrow(FDBTransactionOption option, int64_t value) noexcept {
 		return Error(native::fdb_transaction_set_option(
 		    tr.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 	}
 
-	Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
+	[[nodiscard]] Error setOptionNothrow(FDBTransactionOption option, BytesRef str) noexcept {
 		return Error(native::fdb_transaction_set_option(tr.get(), option, str.data(), intSize(str)));
 	}
 
-	Error setOptionNothrow(FDBTransactionOption option, CharsRef str) noexcept {
+	[[nodiscard]] Error setOptionNothrow(FDBTransactionOption option, CharsRef str) noexcept {
 		return setOptionNothrow(option, toBytesRef(str));
 	}
 
-	Error setOptionNothrow(FDBTransactionOption option) noexcept { return setOptionNothrow(option, ""); }
+	[[nodiscard]] Error setOptionNothrow(FDBTransactionOption option) noexcept { return setOptionNothrow(option, ""); }
 
 	void setOption(FDBTransactionOption option, int64_t value) {
 		if (auto err = setOptionNothrow(option, value)) {
@@ -747,7 +747,7 @@ public:
 
 	TypedFuture<future_var::Int64> getReadVersion() { return native::fdb_transaction_get_read_version(tr.get()); }
 
-	Error getCommittedVersionNothrow(int64_t& out) {
+	[[nodiscard]] Error getCommittedVersionNothrow(int64_t& out) {
 		return Error(native::fdb_transaction_get_committed_version(tr.get(), &out));
 	}
 
@@ -1065,6 +1065,8 @@ public:
 	}
 	Database() noexcept : db(nullptr) {}
 
+	bool valid() const noexcept { return db != nullptr; }
+
 	void atomic_store(Database other) { std::atomic_store(&db, other.db); }
 
 	Database atomic_load() {
@@ -1073,12 +1075,12 @@ public:
 		return retVal;
 	}
 
-	Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
+	[[nodiscard]] Error setOptionNothrow(FDBDatabaseOption option, int64_t value) noexcept {
 		return Error(native::fdb_database_set_option(
 		    db.get(), option, reinterpret_cast<const uint8_t*>(&value), static_cast<int>(sizeof(value))));
 	}
 
-	Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
+	[[nodiscard]] Error setOptionNothrow(FDBDatabaseOption option, BytesRef str) noexcept {
 		return Error(native::fdb_database_set_option(db.get(), option, str.data(), intSize(str)));
 	}
 
@@ -1176,7 +1178,7 @@ public:
 	TypedFuture<future_var::KeyRef> getClientStatus() { return native::fdb_database_get_client_status(db.get()); }
 };
 
-inline Error selectApiVersionNothrow(int version) {
+[[nodiscard]] inline Error selectApiVersionNothrow(int version) {
 	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}
@@ -1189,7 +1191,7 @@ inline void selectApiVersion(int version) {
 	}
 }
 
-inline Error selectApiVersionCappedNothrow(int version) {
+[[nodiscard]] inline Error selectApiVersionCappedNothrow(int version) {
 	if (version < FDB_API_VERSION_TENANT_API_RELEASED) {
 		Tenant::tenantManagementMapPrefix = "\xff\xff/management/tenant_map/";
 	}

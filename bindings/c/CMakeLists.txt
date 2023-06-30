@@ -212,7 +212,7 @@ target_link_libraries(fdb_c_setup_tests PRIVATE fdb_c Threads::Threads doctest)
 target_link_libraries(fdb_c_unit_tests_impl PRIVATE fdb_c Threads::Threads fdbclient rapidjson doctest)
 target_link_libraries(fdb_c_unit_tests_version_510 PRIVATE fdb_c Threads::Threads doctest)
 target_link_libraries(trace_partial_file_suffix_test PRIVATE fdb_c Threads::Threads flow doctest)
-target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c Threads::Threads doctest)
+target_link_libraries(disconnected_timeout_unit_tests PRIVATE fdb_c fdb_cpp Threads::Threads doctest)
 target_link_libraries(fdb_c_client_config_tester PRIVATE SimpleOpt fdb_cpp fdb_c fdbclient Threads::Threads fmt::fmt)
 target_include_directories(fdb_c_client_config_tester PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/foundationdb/)
 

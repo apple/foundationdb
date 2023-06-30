@@ -376,7 +376,7 @@ public:
 	int64_t throttleCount() const { return lastBusyThrottlingIdCount; }
 	int64_t manualThrottleCount() const { return 0; }
 
-	void updateThrottling(StorageQueueInfo const& ss) { serverThroughputTracker.update(ss); }
+	void updateThrottling(Map<UID, StorageQueueInfo> const& sqInfos) { serverThroughputTracker.update(sqInfos); }
 
 	void removeExpiredThrottlingIds() {
 		for (auto it = throttlingStatistics.begin(); it != throttlingStatistics.end();) {
@@ -421,8 +421,8 @@ ThrottlingIdMap<double> QuotaThrottler::getProxyRates(int numProxies) {
 int64_t QuotaThrottler::throttleCount() const {
 	return impl->throttleCount();
 }
-void QuotaThrottler::updateThrottling(StorageQueueInfo const& ss) {
-	return impl->updateThrottling(ss);
+void QuotaThrottler::updateThrottling(Map<UID, StorageQueueInfo> const& sqInfos) {
+	return impl->updateThrottling(sqInfos);
 }
 
 void QuotaThrottler::updateThroughput(ThrottlingIdMap<uint64_t> const& newThroughput) {
@@ -494,6 +494,7 @@ public:
 		result.lastReply.bytesInput = ((totalReadCost.smoothRate() + totalWriteCost.smoothRate()) /
 		                               (capacity * CLIENT_KNOBS->TAG_THROTTLING_PAGE_SIZE)) *
 		                              SERVER_KNOBS->AUTO_TAG_THROTTLE_STORAGE_QUEUE_BYTES;
+		result.valid = true;
 		return result;
 	}
 };
@@ -541,11 +542,11 @@ public:
 
 	void setCapacity(int index, double value) { storageServers[index].setCapacity(value); }
 
-	std::vector<StorageQueueInfo> getStorageQueueInfos() const {
-		std::vector<StorageQueueInfo> result;
-		result.reserve(storageServers.size());
+	Map<UID, StorageQueueInfo> getStorageQueueInfos() const {
+		Map<UID, StorageQueueInfo> result;
 		for (const auto& storageServer : storageServers) {
-			result.push_back(storageServer.getStorageQueueInfo());
+			auto const sqInfo = storageServer.getStorageQueueInfo();
+			result.insert(mapPair(sqInfo.id, sqInfo));
 		}
 		return result;
 	}
@@ -630,9 +631,9 @@ ACTOR Future<Void> updateQuotaThrottler(MockRKMetricsTracker* metricsTracker,
 	loop {
 		wait(delay(1.0));
 		auto const storageQueueInfos = storageServers->getStorageQueueInfos();
-		for (const auto& ss : storageQueueInfos) {
-			quotaThrottler->updateThrottling(ss);
-			metricsTracker->updateStorageQueueInfo(ss);
+		quotaThrottler->updateThrottling(storageQueueInfos);
+		for (auto it = storageQueueInfos.begin(); it != storageQueueInfos.end(); ++it) {
+			metricsTracker->updateStorageQueueInfo(it->value);
 		}
 	}
 }
