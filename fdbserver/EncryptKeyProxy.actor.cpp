@@ -22,14 +22,19 @@
 #include "fdbclient/EncryptKeyProxyInterface.h"
 
 #include "fdbrpc/Locality.h"
+#include "fdbrpc/simulator.h"
+
 #include "fdbserver/KmsConnector.h"
 #include "fdbserver/KmsConnectorInterface.h"
 #include "fdbserver/Knobs.h"
 #include "fdbserver/RESTKmsConnector.h"
+#include "fdbserver/RESTSimKmsVault.h"
+#include "fdbserver/ServerDBInfo.h"
 #include "fdbserver/ServerDBInfo.actor.h"
 #include "fdbserver/SimKmsConnector.h"
+#include "fdbserver/WaitFailure.h"
 #include "fdbserver/WorkerInterface.actor.h"
-#include "fdbserver/ServerDBInfo.h"
+
 #include "flow/Arena.h"
 #include "flow/CodeProbe.h"
 #include "flow/EncryptUtils.h"
@@ -992,12 +997,18 @@ void refreshBlobMetadata(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnect
 	Future<Void> ignored = refreshBlobMetadataCore(ekpProxyData, kmsConnectorInf);
 }
 
-void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnectorInterface kmsConnectorInf) {
-	if (g_network->isSimulated()) {
+ACTOR Future<Void> activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData,
+                                        KmsConnectorInterface kmsConnectorInf) {
+	if (g_network->isSimulated() && !SERVER_KNOBS->USE_REST_SIM_KMS_VAULT) {
+		// support restart tests
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>(FDB_SIM_KMS_CONNECTOR_TYPE_STR);
 	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(FDB_PREF_KMS_CONNECTOR_TYPE_STR) == 0) {
 		ekpProxyData->kmsConnector = std::make_unique<SimKmsConnector>(FDB_PREF_KMS_CONNECTOR_TYPE_STR);
 	} else if (SERVER_KNOBS->KMS_CONNECTOR_TYPE.compare(REST_KMS_CONNECTOR_TYPE_STR) == 0) {
+		if (g_network->isSimulated()) {
+			// advertise KMS discovery files in simulated environment
+			wait(RestSimKms::initConfigFiles());
+		}
 		ekpProxyData->kmsConnector = std::make_unique<RESTKmsConnector>(REST_KMS_CONNECTOR_TYPE_STR);
 	} else {
 		throw not_implemented();
@@ -1008,6 +1019,7 @@ void activateKmsConnector(Reference<EncryptKeyProxyData> ekpProxyData, KmsConnec
 	    .detail("InfId", kmsConnectorInf.id());
 
 	ekpProxyData->addActor.send(ekpProxyData->kmsConnector->connectorCore(kmsConnectorInf));
+	return Void();
 }
 
 ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
@@ -1015,14 +1027,14 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
                                          EncryptionAtRestMode encryptMode) {
 	state Reference<EncryptKeyProxyData> self = makeReference<EncryptKeyProxyData>(ekpInterface.id());
 	state Future<Void> collection = actorCollection(self->addActor.getFuture());
+	state KmsConnectorInterface kmsConnectorInf;
+
+	kmsConnectorInf.initEndpoints();
+	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
+	self->addActor.send(waitFailureServer(ekpInterface.waitFailure.getFuture()));
 	self->addActor.send(traceRole(Role::ENCRYPT_KEY_PROXY, ekpInterface.id()));
 
-	state KmsConnectorInterface kmsConnectorInf;
-	kmsConnectorInf.initEndpoints();
-
-	TraceEvent("EKPStart", self->myId).detail("KmsConnectorInf", kmsConnectorInf.id());
-
-	activateKmsConnector(self, kmsConnectorInf);
+	wait(activateKmsConnector(self, kmsConnectorInf));
 
 	// Register a recurring task to refresh the cached Encryption keys and blob metadata.
 	// Approach avoids external RPCs due to EncryptionKey refreshes for the inline write encryption codepath such as:
@@ -1081,8 +1093,10 @@ ACTOR Future<Void> encryptKeyProxyServer(EncryptKeyProxyInterface ekpInterface,
 		}
 	} catch (Error& e) {
 		TraceEvent("EKPTerminated", self->myId).errorUnsuppressed(e);
+		throw;
 	}
 
+	TraceEvent("EKPStopped", self->myId);
 	return Void();
 }
 

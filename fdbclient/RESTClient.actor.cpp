@@ -138,6 +138,7 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 		state bool connectionEstablished = false;
 
 		state Reference<HTTP::IncomingResponse> r;
+		state RESTConnectionPool::ReusableConnection rconn;
 
 		try {
 			// Start connecting
@@ -145,8 +146,8 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			    client->conectionPool->connect(connectPoolKey, url.connType.secure, client->knobs.max_connection_life);
 
 			// Finish connecting, do request
-			state RESTConnectionPool::ReusableConnection rconn =
-			    wait(timeoutError(frconn, client->knobs.connect_timeout));
+			RESTConnectionPool::ReusableConnection _rconn = wait(timeoutError(frconn, client->knobs.connect_timeout));
+			rconn = _rconn;
 			connectionEstablished = true;
 
 			remoteAddress = rconn.conn->getPeerAddress();
@@ -158,14 +159,34 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 			// received the "Connection: close" header.
 			if (r->data.headers["Connection"] != "close") {
 				client->conectionPool->returnConnection(connectPoolKey, rconn, client->knobs.connection_pool_size);
+			} else {
+				// connection not returned to the connection-pool
+				if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::DEBUG) {
+					TraceEvent("RESTConnClosePeerClosed").detail("Host", url.host).detail("Service", url.service);
+				}
+				rconn.conn->close();
 			}
 			rconn.conn.clear();
 		} catch (Error& e) {
+			if (rconn.conn.isValid()) {
+				if (FLOW_KNOBS->REST_LOG_LEVEL >= RESTLogSeverity::INFO) {
+					TraceEvent("RESTConnCloseError")
+					    .detail("Host", url.host)
+					    .detail("Service", url.service)
+					    .detail("SeqNum", rconn.seqNum)
+					    .detail("ErrCode", e.code());
+				}
+				rconn.conn->close();
+				rconn.conn.clear();
+			}
+
 			if (e.code() == error_code_actor_cancelled) {
 				throw;
 			}
 			err = e;
 		}
+
+		ASSERT(!rconn.conn.isValid());
 
 		// If err is not present then r is valid.
 		// If r->code is in successCodes then record the successful request and return r.
@@ -203,10 +224,12 @@ ACTOR Future<Reference<HTTP::IncomingResponse>> doRequest_impl(Reference<RESTCli
 
 		event.detail("ConnectionEstablished", connectionEstablished);
 
-		if (remoteAddress.present())
-			event.detail("RemoteEndpoint", remoteAddress.get());
-		else
-			event.detail("RemoteHost", url.host);
+		if (remoteAddress.present()) {
+			event.detail("RemoteAddress", remoteAddress.get());
+		} else {
+			std::string remoteAddress = url.host + ":" + url.service;
+			event.detail("RemoteAddress", remoteAddress);
+		}
 
 		event.detail("Verb", verb).detail("Resource", url.resource).detail("ThisTry", thisTry);
 
