@@ -62,7 +62,7 @@ Logger& Logger::get() {
 }
 
 void Logger::logMessage(log::Level lvl, std::string_view msg) {
-	if (lvl < level) {
+	if (lvl > level) {
 		return;
 	}
 	const char* lvlLabel = "";
