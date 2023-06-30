@@ -1,0 +1,21 @@
+[configuration]
+buggify = false
+tenantModes = ['disabled']
+
+[[test]]
+testTitle='ExpectStableThroughput'
+
+  [[test.workload]]
+  testName='ThroughputQuota'
+  transactionTag='testTag'
+  totalQuotaInPages=1000
+
+  [[test.workload]]
+  testName='ExpectStableThroughput'
+  throttlingTag='testTag'
+  expectedThroughputPagesRate=1000
+  # TODO: Reduce this error tolerance
+  errorTolerance=0.3
+  numActors=100
+  attemptedTransactionRatePerActor=4
+  opsPerTransaction=5
