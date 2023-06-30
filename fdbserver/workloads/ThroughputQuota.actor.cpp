@@ -60,9 +60,7 @@ public:
 		totalQuotaInPages = getOption(options, "totalQuotaInPages"_sr, 0);
 	}
 
-	Future<Void> setup(Database const& cx) override {
-		return clientId ? Void() : setup(this, cx);
-	}
+	Future<Void> setup(Database const& cx) override { return clientId ? Void() : setup(this, cx); }
 	Future<Void> start(Database const& cx) override { return Void(); }
 	Future<bool> check(Database const& cx) override { return true; }
 	void getMetrics(std::vector<PerfMetric>& m) override {}
