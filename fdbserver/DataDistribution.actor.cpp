@@ -427,7 +427,7 @@ public:
 		}
 	}
 
-	Future<Void> waitDataDistributorEnabled() const {
+	Future<Void> waitDataDistributorEnabledOrSecurityMode() const {
 		return txnProcessor->waitForDataDistributionEnabled(context->ddEnabledState.get());
 	}
 
@@ -595,7 +595,7 @@ public:
 		return Void();
 	}
 
-	ACTOR static Future<Void> waitUntilDDExitSecurityMode(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> waitUntilDataDistributorExitSecurityMode(Reference<DataDistributor> self) {
 		state Transaction tr(self->txnProcessor->context());
 		loop {
 			wait(delay(SERVER_KNOBS->DD_ENABLED_CHECK_DELAY, TaskPriority::DataDistribution));
@@ -620,7 +620,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> pollMoveKeysLockUntilDDExitSecurityMode(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> pollMoveKeysLockUntilDDIsFullyEnabled(Reference<DataDistributor> self) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(self->txnProcessor->context());
@@ -657,24 +657,30 @@ public:
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
-			wait(self->waitDataDistributorEnabled());
+			wait(self->waitDataDistributorEnabledOrSecurityMode()); // Trap DDMode == 0
 			TraceEvent("DataDistributionEnabled").log();
 
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 			wait(self->takeMoveKeysLock());
 			if (!self->pollingMoveKeyLockForSecurityMode) {
-				self->addActor.send(pollMoveKeysLockUntilDDExitSecurityMode(self));
+				self->addActor.send(pollMoveKeysLockUntilDDIsFullyEnabled(self));
 				self->pollingMoveKeyLockForSecurityMode = true;
 			}
 			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
 
 			// AuditStorage does not rely on DatabaseConfiguration
-			// AuditStorage read neccessary info from system key space
+			// AuditStorage read neccessary info purely from system key space
 			wait(self->initAuditStorage(self));
 			TraceEvent("DDAuditStorageInitialized", self->ddId).log();
 
-			wait(waitUntilDDExitSecurityMode(self));
-			TraceEvent("DataDistributorNotInSecurityMode").log();
+			wait(waitUntilDataDistributorExitSecurityMode(self)); // Trap DDMode == 2
+			// It is possible DDMode begins with 2 and passes
+			// waitDataDistributorEnabledOrSecurityMode and then set to 0 before
+			// waitUntilDataDistributorExitSecurityMode. For this case,
+			// after waitUntilDataDistributorExitSecurityMode, DDMode is 0.
+			// The init loop does not break and the loop will stuct at
+			// waitDataDistributorEnabledOrSecurityMode in the next iteration.
+			TraceEvent("DataDistributorFullyEnabled").log();
 
 			wait(self->loadDatabaseConfiguration());
 			self->initDcInfo();
