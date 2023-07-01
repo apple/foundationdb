@@ -149,10 +149,40 @@ private:
 		}
 	}
 
+	ACTOR static Future<Void> validateNoDataInRanges(Reference<DB> db, Standalone<VectorRef<KeyRangeRef>> ranges) {
+		state std::vector<Future<RangeReadResult>> rangeReadFutures;
+		for (const auto& range : ranges) {
+			Future<RangeReadResult> f = runTransaction(db, [range](Reference<typename DB::TransactionT> tr) {
+				tr->setOption(FDBTransactionOptions::RAW_ACCESS);
+				return safeThreadFutureToFuture(tr->getRange(range, 1));
+			});
+			rangeReadFutures.emplace_back(f);
+		}
+		wait(waitForAll(rangeReadFutures));
+		for (size_t i = 0; i < ranges.size(); ++i) {
+			auto f = rangeReadFutures[i];
+			ASSERT(f.isReady());
+			RangeReadResult rangeReadResult = f.get();
+			if (!rangeReadResult.empty()) {
+				TraceEvent("DataOutsideTenants")
+				    .detail("Count", rangeReadFutures.size())
+				    .detail("Index", i)
+				    .detail("Begin", ranges[i].begin.toHexString())
+				    .detail("End", ranges[i].end.toHexString())
+				    .detail("RangeReadResult", rangeReadResult.toString())
+				    .detail("ReadThrough", rangeReadResult.getReadThrough().toHexString());
+				ASSERT(false);
+			}
+		}
+		return Void();
+	}
+
 	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
 	    TenantConsistencyCheck<DB, StandardTenantTypes>* self) {
-		state Future<TenantMode> tenantModeFuture = runTransaction(
-		    self->tenantData.db, [](Reference<typename DB::TransactionT> tr) { return TenantAPI::getTenantMode(tr); });
+		state Future<TenantMode> tenantModeFuture =
+		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
+			    return TenantAPI::getEffectiveTenantMode(tr);
+		    });
 
 		TenantMode tenantMode = wait(tenantModeFuture);
 		if (tenantMode != TenantMode::REQUIRED) {
@@ -163,7 +193,7 @@ private:
 		int64_t prevId = -1;
 		Key prevPrefix;
 		Key prevGapStart;
-		state Standalone<VectorRef<KeyRangeRef>> gaps;
+		Standalone<VectorRef<KeyRangeRef>> gaps;
 		for (const auto& [id, entry] : self->tenantData.tenantMap) {
 			ASSERT(id > prevId);
 			ASSERT_EQ(TenantAPI::idToPrefix(id), entry.prefix);
@@ -178,37 +208,18 @@ private:
 		}
 		ASSERT(prevGapStart.compare("\xff"_sr) <= 0);
 		gaps.push_back_deep(gaps.arena(), KeyRangeRef(prevGapStart, "\xff"_sr));
-		state std::vector<Future<RangeReadResult>> rangeReadFutures;
-		for (const auto& gap : gaps) {
-			Future<RangeReadResult> f =
-			    runTransaction(self->tenantData.db, [gap](Reference<typename DB::TransactionT> tr) {
-				    tr->setOption(FDBTransactionOptions::RAW_ACCESS);
-				    return safeThreadFutureToFuture(tr->getRange(gap, 1));
-			    });
-			rangeReadFutures.emplace_back(f);
-		}
-		wait(waitForAll(rangeReadFutures));
-		for (size_t i = 0; i < gaps.size(); ++i) {
-			auto f = rangeReadFutures[i];
-			ASSERT(f.isReady());
-			RangeReadResult rangeReadResult = f.get();
-			if (!rangeReadResult.empty()) {
-				TraceEvent("DataOutsideTenants")
-				    .detail("Count", rangeReadFutures.size())
-				    .detail("ClusterType", self->tenantData.clusterType)
-				    .detail("Index", i)
-				    .detail("Begin", gaps[i].begin.toHexString())
-				    .detail("End", gaps[i].end.toHexString())
-				    .detail("RangeReadResult", rangeReadResult.toString())
-				    .detail("ReadThrough", rangeReadResult.getReadThrough().toHexString());
-				ASSERT(false);
-			}
-		}
+		wait(validateNoDataInRanges(self->tenantData.db, gaps));
 		return Void();
 	}
 
 	ACTOR static Future<Void> checkNoDataOutsideTenantsInRequiredMode(
 	    TenantConsistencyCheck<DB, MetaclusterTenantTypes>* self) {
+		// Check that no data exists outside of the metacluster metadata subspace
+		state Standalone<VectorRef<KeyRangeRef>> gaps;
+		gaps.push_back_deep(gaps.arena(), KeyRangeRef(""_sr, "metacluster/"_sr));
+		gaps.push_back_deep(gaps.arena(), KeyRangeRef("metacluster0"_sr, "tenant/"_sr));
+		gaps.push_back_deep(gaps.arena(), KeyRangeRef("tenant0"_sr, "\xff"_sr));
+		wait(validateNoDataInRanges(self->tenantData.db, gaps));
 		return Void();
 	}
 

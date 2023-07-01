@@ -106,16 +106,6 @@ Future<ClusterType> getClusterType(Transaction tr) {
 }
 
 ACTOR template <class Transaction>
-Future<TenantMode> getTenantMode(Transaction tr) {
-	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
-	typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
-	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
-	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
-	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
-	return tenantMode;
-}
-
-ACTOR template <class Transaction>
 Future<Void> checkTenantMode(Transaction tr, ClusterType expectedClusterType) {
 	state typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
 	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
@@ -142,6 +132,17 @@ bool tenantMapChanging(MutationRef const& mutation, KeyRangeRef const& tenantMap
 int64_t computeNextTenantId(int64_t tenantId, int64_t delta);
 int64_t getMaxAllowableTenantId(int64_t curTenantId);
 int64_t getTenantIdPrefix(int64_t tenantId);
+
+ACTOR template <class Transaction>
+Future<TenantMode> getEffectiveTenantMode(Transaction tr) {
+	tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
+	state ClusterType clusterType = wait(getClusterType(tr));
+	typename transaction_future_type<Transaction, ValueReadResult>::type tenantModeFuture =
+	    tr->get(configKeysPrefix.withSuffix("tenant_mode"_sr));
+	ValueReadResult tenantModeValue = wait(safeThreadFutureToFuture(tenantModeFuture));
+	TenantMode tenantMode = TenantMode::fromValue(tenantModeValue.castTo<ValueRef>());
+	return tenantModeForClusterType(clusterType, tenantMode);
+}
 
 // Returns true if the specified ID has already been deleted and false if not. If the ID is old enough
 // that we no longer keep tombstones for it, an error is thrown.
