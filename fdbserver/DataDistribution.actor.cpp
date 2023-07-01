@@ -658,7 +658,7 @@ public:
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
 		loop {
 			wait(self->waitDataDistributorEnabledOrSecurityMode()); // Trap DDMode == 0
-			TraceEvent("DataDistributionEnabled").log();
+			TraceEvent("DataDistributionEnabledOrSecurityMode").log();
 
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 			wait(self->takeMoveKeysLock());
@@ -680,7 +680,7 @@ public:
 			// after waitUntilDataDistributorExitSecurityMode, DDMode is 0.
 			// The init loop does not break and the loop will stuct at
 			// waitDataDistributorEnabledOrSecurityMode in the next iteration.
-			TraceEvent("DataDistributorFullyEnabled").log();
+			TraceEvent("DataDistributorExitSecurityMode").log();
 
 			wait(self->loadDatabaseConfiguration());
 			self->initDcInfo();

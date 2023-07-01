@@ -313,10 +313,6 @@ ACTOR static Future<Void> checkMoveKeysLock(Transaction* tr,
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));
 	UID currentOwner = readVal.present() ? BinaryReader::fromStringRef<UID>(readVal.get(), Unversioned()) : UID();
 
-	if (currentOwner == dataDistributionModeLock) {
-		return Void(); // ignore if client.setDDMode() takes the DDLock
-	}
-
 	if (currentOwner == lock.prevOwner) {
 		// Check that the previous owner hasn't touched the lock since we took it
 		Optional<Value> readVal = wait(tr->get(moveKeysLockWriteKey));
