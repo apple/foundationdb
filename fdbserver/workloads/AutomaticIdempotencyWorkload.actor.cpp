@@ -260,7 +260,7 @@ struct AutomaticIdempotencyWorkload : TestWorkload {
 			Version commitVersion;
 			int64_t timestamp;
 			std::vector<Key> decodedKeys = self->idempotencyKeyValueToTestKeys(kv, &commitVersion, &timestamp);
-			for (auto key : decodedKeys) {
+			for (auto const& key : decodedKeys) {
 				timestamps.push_back(timestamp);
 				keys.push_back(key);
 			}
