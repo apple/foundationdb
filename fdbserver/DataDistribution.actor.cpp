@@ -620,7 +620,7 @@ public:
 		}
 	}
 
-	ACTOR static Future<Void> pollMoveKeysLockUntilDDIsFullyEnabled(Reference<DataDistributor> self) {
+	ACTOR static Future<Void> pollMoveKeysLockInSecurityMode(Reference<DataDistributor> self) {
 		loop {
 			wait(delay(SERVER_KNOBS->MOVEKEYS_LOCK_POLLING_DELAY));
 			state Transaction tr(self->txnProcessor->context());
