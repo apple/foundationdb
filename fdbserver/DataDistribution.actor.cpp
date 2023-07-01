@@ -663,7 +663,7 @@ public:
 			TraceEvent("DDInitTakingMoveKeysLock", self->ddId).log();
 			wait(self->takeMoveKeysLock());
 			if (!self->pollingMoveKeyLockForSecurityMode) {
-				self->addActor.send(pollMoveKeysLockUntilDDIsFullyEnabled(self));
+				self->addActor.send(pollMoveKeysLockInSecurityMode(self));
 				self->pollingMoveKeyLockForSecurityMode = true;
 			}
 			TraceEvent("DDInitTookMoveKeysLock", self->ddId).log();
