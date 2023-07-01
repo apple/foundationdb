@@ -2235,7 +2235,6 @@ ACTOR Future<int> setDDMode(Database cx, int mode) {
 			if (mode) {
 				// set DDMode to 1 will enable all disabled parts, for instance the SS failure monitors.
 				// set DDMode to 2 is a security mode which disables data moves but allows auditStorage part
-				// DDMode==2 aims to disable data moves while allows auditStorage
 				// DDMode=2 is set when shard location metadata inconsistency is detected
 				Optional<Value> currentHealthyZoneValue = wait(tr.get(healthyZoneKey));
 				if (currentHealthyZoneValue.present() &&
