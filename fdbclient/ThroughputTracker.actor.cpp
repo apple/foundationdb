@@ -12,10 +12,14 @@ public:
 	ACTOR static Future<Void> run(ThroughputTracker* self, DatabaseContext* cx) {
 		state Future<Void> timer = Never();
 		loop {
+			timer = delayJittered(CLIENT_KNOBS->CLIENT_THROUGHPUT_REPORT_INTERVAL);
+			if (self->throughput.empty()) {
+				wait(timer);
+				continue;
+			}
 			try {
 				ReportThroughputRequest req(std::move(self->throughput));
 				self->throughput.clear();
-				timer = delayJittered(CLIENT_KNOBS->CLIENT_THROUGHPUT_REPORT_INTERVAL);
 				wait(basicLoadBalance(cx->getGrvProxies(UseProvisionalProxies::False),
 				                      &GrvProxyInterface::reportThroughput,
 				                      std::move(req),
