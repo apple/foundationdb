@@ -99,6 +99,7 @@ struct ThreadData : ReferenceCounted<ThreadData>, NonCopyable {
 
 	Future<Void> summaryClient;
 	Future<Void> forceFlushingClient;
+	Future<Void> reqWayInFuture;
 	Promise<Void> triggerSummaryComplete;
 
 	// stats
@@ -1187,6 +1188,9 @@ struct BlobGranuleCorrectnessWorkload : TestWorkload {
 				    validateForceFlushing(cx, it->directoryRange, testDuration, it->triggerSummaryComplete);
 			} else {
 				it->forceFlushingClient = Future<Void>(Void());
+			}
+			if (it->directoryID == 0 && deterministicRandom()->random01() < 0.1) {
+				it->reqWayInFuture = requestWayInTheFuture(cx, normalKeys, it->tenant);
 			}
 			clients.push_back(timeout(writeWorker(this, start, cx, it), testDuration, Void()));
 			clients.push_back(timeout(readWorker(this, start, cx, it), testDuration, Void()));
