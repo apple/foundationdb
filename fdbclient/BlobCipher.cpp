@@ -61,8 +61,6 @@
 
 namespace {
 void validateEncryptHeaderFlagVersion(const int flagsVersion) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	if (flagsVersion > CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION) {
 		TraceEvent("EncryptHeaderUnsupportedFlagVersion")
 		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION)
@@ -75,8 +73,6 @@ void validateEncryptHeaderAlgoHeaderVersion(const EncryptCipherMode cipherMode,
                                             const EncryptAuthTokenMode authMode,
                                             const EncryptAuthTokenAlgo authAlgo,
                                             const int version) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	if (cipherMode != ENCRYPT_CIPHER_MODE_AES_256_CTR) {
 		TraceEvent("EncryptHeaderUnsupportedEncryptCipherMode")
 		    .detail("MaxSupportedVersion", CLIENT_KNOBS->ENCRYPT_HEADER_FLAGS_VERSION)
@@ -147,8 +143,6 @@ uint32_t BlobCipherEncryptHeaderRef::getHeaderSize(const int flagVersion,
 }
 
 const uint8_t* BlobCipherEncryptHeaderRef::getIV() const {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	validateEncryptHeaderFlagVersion(flagsVersion());
 	ASSERT_EQ(flagsVersion(), 1);
 
@@ -167,8 +161,6 @@ template <class>
 inline constexpr bool always_false_v = false;
 
 const EncryptHeaderCipherDetails BlobCipherEncryptHeaderRef::getCipherDetails() const {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	validateEncryptHeaderFlagVersion(flagsVersion());
 	ASSERT_EQ(flagsVersion(), 1);
 
@@ -214,8 +206,6 @@ EncryptCipherDomainId BlobCipherEncryptHeaderRef::getDomainId() const {
 }
 
 EncryptHeaderCipherKCVs BlobCipherEncryptHeaderRef::getKCVs() const {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	validateEncryptHeaderFlagVersion(flagsVersion());
 	ASSERT_EQ(flagsVersion(), 1);
 
@@ -246,8 +236,6 @@ void BlobCipherEncryptHeaderRef::validateEncryptionHeaderDetails(const BlobCiphe
                                                                  const BlobCipherDetails& headerCipherDetails,
                                                                  const EncryptHeaderCipherKCVs& kcvs,
                                                                  const StringRef& ivRef) const {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	validateEncryptHeaderFlagVersion(flagsVersion());
 	ASSERT_EQ(flagsVersion(), 1);
 
@@ -2321,8 +2309,6 @@ void testNoAuthMode(const int minDomainId) {
 }
 
 void testConfigurableEncryptionBlobCipherHeaderFlagsV1Ser() {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	Arena arena;
 
 	// Version-1
@@ -2333,8 +2319,6 @@ void testConfigurableEncryptionBlobCipherHeaderFlagsV1Ser() {
 }
 
 void testConfigurableEncryptionAesCtrNoAuthV1Ser(const int minDomainId) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	Arena arena;
 	BlobCipherEncryptHeaderRef headerRef;
 	uint32_t size = 0;
@@ -2366,8 +2350,6 @@ void testConfigurableEncryptionAesCtrNoAuthV1Ser(const int minDomainId) {
 template <class Params>
 void testConfigurableEncryptionAesCtrWithAuthSer(const int minDomainId) {
 	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmacParams>;
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	Arena arena;
 	BlobCipherEncryptHeaderRef headerRef;
 	uint32_t size = 0;
@@ -2402,8 +2384,6 @@ void testConfigurableEncryptionAesCtrWithAuthSer(const int minDomainId) {
 }
 
 void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	TraceEvent("TestConfigurableEncryptionHeader").detail("Mode", "No-Auth");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
@@ -2461,8 +2441,6 @@ void testConfigurableEncryptionHeaderNoAuthMode(const int minDomainId) {
 }
 
 void testConfigurableEncryptionNoAuthMode(const int minDomainId) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	TraceEvent("TestConfigurableEncryptionNoAuthModeStart");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
@@ -2720,8 +2698,6 @@ void testSingleAuthMode(const int minDomainId) {
 template <class Params>
 void testConfigurableEncryptionHeaderSingleAuthMode(int minDomainId) {
 	constexpr bool isHmac = std::is_same_v<Params, AesCtrWithHmac>;
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	TraceEvent("TestEncryptionHeaderStart").detail("Mode", isHmac ? "HMAC_SHA" : "AES-CMAC");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
@@ -2793,8 +2769,6 @@ void testConfigurableEncryptionSingleAuthMode(const int minDomainId) {
 	                                             : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
 	const int algoHeaderVersion = isHmac ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
 	                                     : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
-
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
 	TraceEvent("TestConfigurableEncryptionSingleAuthStart").detail("Mode", authAlgoStr);
 
@@ -3045,8 +3019,6 @@ void testEncryptInplaceSingleAuthMode(const int minDomainId) {
 }
 
 void testConfigurableEncryptionInvalidEncryptionKeyNoAuth(const int minDomainId) {
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
-
 	TraceEvent("TestConfigurableEncryptionInvalidEncryptKeyNoAuthStart");
 
 	Reference<BlobCipherKeyCache> cipherKeyCache = BlobCipherKeyCache::getInstance();
@@ -3107,8 +3079,6 @@ void testConfigurableEncryptionInvalidEncryptKeySingleAuthMode(const int minDoma
 	                                             : EncryptAuthTokenAlgo::ENCRYPT_HEADER_AUTH_TOKEN_ALGO_AES_CMAC;
 	const int algoHeaderVersion = isHmac ? CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_HMAC_SHA_AUTH_VERSION
 	                                     : CLIENT_KNOBS->ENCRYPT_HEADER_AES_CTR_AES_CMAC_AUTH_VERSION;
-
-	ASSERT(CLIENT_KNOBS->ENABLE_CONFIGURABLE_ENCRYPTION);
 
 	TraceEvent("TestConfigurableEncryptionSingleAuthStart").detail("Mode", authAlgoStr);
 
@@ -3183,9 +3153,6 @@ void testConfigurableEncryptionInvalidEncryptKeySingleAuthMode(const int minDoma
 
 TEST_CASE("/blobCipher") {
 	DomainKeyMap domainKeyMap;
-	auto& g_knobs = IKnobCollection::getMutableGlobalKnobCollection();
-	g_knobs.setKnob("enable_configurable_encryption", KnobValueRef::create(bool{ true }));
-
 	const EncryptCipherDomainId minDomainId = 1;
 	const EncryptCipherDomainId maxDomainId = deterministicRandom()->randomInt(minDomainId, minDomainId + 10) + 5;
 	const EncryptCipherBaseKeyId minBaseCipherKeyId = 100;
