@@ -53,8 +53,8 @@ public:
 	};
 
 	// Maximum number of connections cached in the connection-pool.
-	uint64_t seqNum;
 	int maxConnPerConnectKey;
+	uint64_t seqNum;
 	std::unordered_map<RESTConnectionPoolKey, std::queue<ReusableConnection>, boost::hash<RESTConnectionPoolKey>>
 	    connectionPoolMap;
 

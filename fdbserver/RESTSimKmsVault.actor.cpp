@@ -550,6 +550,13 @@ void initConfig(const std::string& baseFolder) {
 	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE)));
 	g_knobs.setKnob("rest_kms_connector_get_blob_metadata_endpoint",
 	                KnobValueRef::create(std::string(REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE)));
+
+	// FIXME: Increase the storage io-timeout to handle scenario where aggressive attrition of HTTSimServer trigger
+	// storage-commit timeouts. Fix is maintaing KMS 'connected' semantics based on in-progress calls, if EKP calls are
+	// blocked for long, allow storage-commit to wait. Approach handles KMS transient outage, but, at the same time
+	// ensures disk io-timeout errors to be handled appropriately
+
+	g_knobs.setKnob("max_storage_commit_time", KnobValueRef::create(double(1000)));
 }
 
 ACTOR [[flow_allow_discard]] void registerHTTPServerImpl() {

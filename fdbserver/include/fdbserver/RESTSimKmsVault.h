@@ -39,7 +39,7 @@ const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_KEY_IDS_RESOURCE = "
 const std::string REST_SIM_KMS_VAULT_GET_ENCRYPTION_KEYS_BY_DOMAIN_IDS_RESOURCE = "get-encryption-keys-by-domain-ids";
 const std::string REST_SIM_KMS_VAULT_GET_BLOB_METADATA_RESOURCE = "get-blob-metadata";
 
-struct VaultRequestHandler : HTTP::IRequestHandler, ReferenceCounted<VaultRequestHandler> {
+struct VaultRequestHandler final : HTTP::IRequestHandler, ReferenceCounted<VaultRequestHandler> {
 	Future<Void> handleRequest(Reference<HTTP::IncomingRequest> req,
 	                           Reference<HTTP::OutgoingResponse> response) override;
 	Reference<HTTP::IRequestHandler> clone() override { return makeReference<VaultRequestHandler>(); }
