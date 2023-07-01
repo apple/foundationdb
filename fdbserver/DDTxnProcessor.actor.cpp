@@ -712,7 +712,7 @@ Future<bool> DDTxnProcessor::isDataDistributionEnabled(const DDEnabledState* ddE
 	return DDTxnProcessorImpl::isDataDistributionEnabled(cx, ddEnabledState);
 }
 
-Future<Void> DDTxnProcessor::pollMoveKeysLock(MoveKeysLock lock, const DDEnabledState* ddEnabledState) const {
+Future<Void> DDTxnProcessor::pollMoveKeysLock(const MoveKeysLock& lock, const DDEnabledState* ddEnabledState) const {
 	return DDTxnProcessorImpl::pollMoveKeysLock(cx, lock, ddEnabledState);
 }
 

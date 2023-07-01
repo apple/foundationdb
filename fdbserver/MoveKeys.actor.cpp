@@ -302,7 +302,7 @@ ACTOR Future<MoveKeysLock> takeMoveKeysLock(Database cx, UID ddId) {
 	}
 }
 
-ACTOR Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
+ACTOR static Future<Void> checkPersistentMoveKeysLock(Transaction* tr, MoveKeysLock lock, bool isWrite = true) {
 	tr->setOption(FDBTransactionOptions::READ_SYSTEM_KEYS);
 
 	Optional<Value> readVal = wait(tr->get(moveKeysLockOwnerKey));

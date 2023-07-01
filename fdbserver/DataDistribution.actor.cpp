@@ -656,7 +656,6 @@ public:
 	// DataDistributor start working. Doesn't include initialization of optional components, like TenantCache, DDQueue,
 	// Tracker, TeamCollection. The components should call its own ::init methods.
 	ACTOR static Future<Void> init(Reference<DataDistributor> self) {
-		state bool pollingMoveKeys = false;
 		loop {
 			wait(self->waitDataDistributorEnabled());
 			TraceEvent("DataDistributionEnabled").log();
