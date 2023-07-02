@@ -164,7 +164,7 @@ private:
 			ASSERT(f.isReady());
 			RangeReadResult rangeReadResult = f.get();
 			if (!rangeReadResult.empty()) {
-				TraceEvent("DataOutsideTenants")
+				TraceEvent(SevError, "DataOutsideTenants")
 				    .detail("Count", rangeReadFutures.size())
 				    .detail("Index", i)
 				    .detail("Begin", ranges[i].begin.toHexString())
