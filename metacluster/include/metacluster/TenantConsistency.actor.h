@@ -206,7 +206,7 @@ private:
 			prevId = id;
 			prevPrefix = entry.prefix;
 		}
-		ASSERT(prevGapStart.compare("\xff"_sr) <= 0);
+		ASSERT_LE(prevGapStart, "\xff"_sr);
 		gaps.push_back_deep(gaps.arena(), KeyRangeRef(prevGapStart, "\xff"_sr));
 		wait(validateNoDataInRanges(self->tenantData.db, gaps));
 		return Void();
