@@ -181,6 +181,7 @@ private:
 	    TenantConsistencyCheck<DB, StandardTenantTypes>* self) {
 		state Future<TenantMode> tenantModeFuture =
 		    runTransaction(self->tenantData.db, [](Reference<typename DB::TransactionT> tr) {
+			    tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
 			    return TenantAPI::getEffectiveTenantMode(tr);
 		    });
 
