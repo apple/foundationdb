@@ -91,7 +91,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	int maxTenants;
 	int maxTenantGroups;
 	int tenantGroupCapacity;
-	int retryLimit;
 	metacluster::metadata::management::MovementRecord moveRecord;
 
 	MetaclusterMoveWorkload(WorkloadContext const& wcx) : TestWorkload(wcx) {
@@ -105,7 +104,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 		    1, std::min<int>(2 * maxTenants, getOption(options, "maxTenantGroups"_sr, 20)) + 1);
 		tenantGroupCapacity =
 		    std::max<int>(1, (initialTenants / 2 + maxTenantGroups - 1) / g_simulator->extraDatabases.size());
-		retryLimit = getOption(options, "retryLimit"_sr, 5);
 	}
 
 	ClusterName chooseClusterName() { return dataDbIndex[deterministicRandom()->randomInt(0, dataDbIndex.size())]; }
@@ -345,7 +343,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    TenantGroupName tenantGroup,
 	                                    ClusterName srcCluster,
 	                                    ClusterName dstCluster) {
-		state int tries = 0;
 		loop {
 			try {
 				Future<Void> abortFuture =
@@ -360,14 +357,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 						updateTestData(self, tenantGroup, srcCluster, dstCluster);
 					}
 					break;
-				}
-				if (++tries >= self->retryLimit) {
-					TraceEvent("MetaclusterMoveAbortRetryLimitReached")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("Attempts", tries);
-					return false;
 				}
 			} catch (Error& e) {
 				TraceEvent("MetaclusterMoveAbortFailed")
@@ -389,7 +378,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                    TenantGroupName tenantGroup,
 	                                    ClusterName srcCluster,
 	                                    ClusterName dstCluster) {
-		state int tries = 0;
 		loop {
 			try {
 				Future<Void> startFuture =
@@ -401,14 +389,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster);
 					break;
-				}
-				if (++tries >= self->retryLimit) {
-					TraceEvent("MetaclusterMoveStartRetryLimitReached")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("Attempts", tries);
-					throw operation_failed();
 				}
 				if (deterministicRandom()->random01() < 0.2) {
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
@@ -440,7 +420,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                     ClusterName srcCluster,
 	                                     ClusterName dstCluster) {
 		state std::vector<std::string> messages;
-		state int tries = 0;
 		loop {
 			try {
 				Future<Void> switchFuture = metacluster::switchTenantMovement(
@@ -455,14 +434,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 						updateTestData(self, tenantGroup, dstCluster, srcCluster);
 					}
 					break;
-				}
-				if (++tries >= self->retryLimit) {
-					TraceEvent("MetaclusterMoveSwitchRetryLimitReached")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("Attempts", tries);
-					throw operation_failed();
 				}
 				if (deterministicRandom()->random01() < 0.2) {
 					bool aborted = wait(abortMove(self, tenantGroup, srcCluster, dstCluster));
@@ -495,7 +466,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 	                                     ClusterName dstCluster) {
 		// finish tenant move will fail to abort if movement record has been updated
 		// expect this case and keep trying to finish
-		state int tries = 0;
 		loop {
 			try {
 				Future<Void> finishFuture =
@@ -507,14 +477,6 @@ struct MetaclusterMoveWorkload : TestWorkload {
 					    .detail("SourceCluster", srcCluster)
 					    .detail("DestinationCluster", dstCluster);
 					break;
-				}
-				if (++tries >= self->retryLimit) {
-					TraceEvent("MetaclusterMoveFinishRetryLimitReached")
-					    .detail("TenantGroup", tenantGroup)
-					    .detail("SourceCluster", srcCluster)
-					    .detail("DestinationCluster", dstCluster)
-					    .detail("Attempts", tries);
-					throw operation_failed();
 				}
 				if (deterministicRandom()->random01() < 0.2) {
 					// Keep track of move record before calling abort
